@@ -1682,15 +1682,26 @@ export interface MejoraROI {
   origen?: 'ia' | 'manual';
 }
 
+export interface KitPublicacion {
+  titulo?: string;
+  descripcion?: string;
+  puntosFuertes?: string[];
+  entorno?: string[];
+  extras?: string[]; // p. ej. "Ascensor (verificar en la visita)"
+  motor?: 'ia' | 'heuristico';
+  fechaGeneracion?: string;
+}
+
 export interface ComercializacionExpediente {
   inmobiliariasContactadasIds: string[];
   enlaceAnuncioManualGenerado?: boolean;
-  kitPublicacion?: {
-    titulo?: string;
-    descripcion?: string;
-    fechaGeneracion?: string;
-  };
+  kitPublicacion?: KitPublicacion;
   fechaPublicacion?: string; // ISO
+  // FASE 3.6 — cierre del ciclo
+  fechaInicioComercializacion?: string; // ISO
+  fechaCierre?: string; // ISO
+  resultadoCierre?: 'REARRENDADO' | 'VENDIDO';
+  nuevoContratoId?: string; // enlace al contrato que reabre el ciclo (mismo inmuebleId)
 }
 
 export interface ExpedienteRecomercializacion {

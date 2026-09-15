@@ -9,13 +9,18 @@ import {
   Camera,
   Wrench,
   ArrowRight,
+  Megaphone,
+  Building2,
 } from 'lucide-react';
 import type {
   ContratoFormalizacion,
   EstadoRecomercializacion,
   ExpedienteRecomercializacion,
+  InmobiliariaDirectorio,
   Inmueble,
+  LeadInmobiliario,
   Profesional,
+  PropuestaInmobiliaria,
   UsuarioApp,
 } from '../../types';
 import { formatDate } from '../../utils/formatters';
@@ -33,11 +38,23 @@ interface Props {
   contratos: ContratoFormalizacion[];
   profesionales?: Profesional[];
   currentUser?: UsuarioApp | null;
+  // FASE 3.6
+  inmobiliarias?: InmobiliariaDirectorio[];
+  propuestas?: PropuestaInmobiliaria[];
+  leads?: LeadInmobiliario[];
   contextoNuevo?: ContextoNuevoExpediente | null;
   onConsumirContexto?: () => void;
   onCreate: (expediente: ExpedienteRecomercializacion) => Promise<void> | void;
   onGuardar: (expediente: ExpedienteRecomercializacion) => Promise<void> | void;
   onEliminar: (id: string) => Promise<void> | void;
+  onGuardarInmobiliaria?: (a: InmobiliariaDirectorio) => Promise<void> | void;
+  onEliminarInmobiliaria?: (id: string) => Promise<void> | void;
+  onGuardarPropuesta?: (p: PropuestaInmobiliaria) => Promise<void> | void;
+  onGuardarLead?: (l: LeadInmobiliario) => Promise<void> | void;
+  onCerrarCiclo?: (
+    expediente: ExpedienteRecomercializacion,
+    resultado: 'REARRENDADO' | 'VENDIDO'
+  ) => Promise<void> | void;
 }
 
 export const RecomercializacionSection: React.FC<Props> = ({
@@ -46,11 +63,19 @@ export const RecomercializacionSection: React.FC<Props> = ({
   contratos,
   profesionales,
   currentUser,
+  inmobiliarias,
+  propuestas,
+  leads,
   contextoNuevo,
   onConsumirContexto,
   onCreate,
   onGuardar,
   onEliminar,
+  onGuardarInmobiliaria,
+  onEliminarInmobiliaria,
+  onGuardarPropuesta,
+  onGuardarLead,
+  onCerrarCiclo,
 }) => {
   const [showAlta, setShowAlta] = useState(false);
   const [contextoAlta, setContextoAlta] = useState<ContextoNuevoExpediente | null>(null);
@@ -274,6 +299,18 @@ export const RecomercializacionSection: React.FC<Props> = ({
                       {e.mejorasPropuestas!.length} mejora(s)
                     </span>
                   )}
+                  {e.comercializacion?.kitPublicacion?.titulo && (
+                    <span className="inline-flex items-center gap-1 text-violet-600">
+                      <Megaphone className="w-3.5 h-3.5" />
+                      {e.comercializacion.fechaPublicacion ? 'Anuncio publicado' : 'Kit en borrador'}
+                    </span>
+                  )}
+                  {(e.comercializacion?.inmobiliariasContactadasIds?.length ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-1 text-indigo-600">
+                      <Building2 className="w-3.5 h-3.5" />
+                      {e.comercializacion!.inmobiliariasContactadasIds!.length} agencia(s)
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end mt-3 text-indigo-600 text-xs font-semibold opacity-0 group-hover:opacity-100 transition">
@@ -303,8 +340,17 @@ export const RecomercializacionSection: React.FC<Props> = ({
           inmueble={inmuebleMap.get(seleccionado.inmuebleId)}
           profesionales={profesionales}
           rentaAnterior={rentaAnteriorDe(seleccionado)}
+          inmobiliarias={inmobiliarias}
+          propuestas={propuestas}
+          leads={leads}
+          currentUser={currentUser}
           onGuardar={onGuardar}
           onEliminar={onEliminar}
+          onGuardarInmobiliaria={onGuardarInmobiliaria}
+          onEliminarInmobiliaria={onEliminarInmobiliaria}
+          onGuardarPropuesta={onGuardarPropuesta}
+          onGuardarLead={onGuardarLead}
+          onCerrarCiclo={onCerrarCiclo}
           onClose={() => setSeleccionado(null)}
         />
       )}

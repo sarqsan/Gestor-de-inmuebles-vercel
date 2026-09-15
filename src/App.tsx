@@ -20,6 +20,9 @@ import {
   GastoRecurrente,
   Prestamo,
   ExpedienteRecomercializacion,
+  InmobiliariaDirectorio,
+  PropuestaInmobiliaria,
+  LeadInmobiliario,
   DocumentoAnalizado,
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
@@ -77,6 +80,9 @@ import {
   subscribeGastosRecurrentes,
   subscribePrestamos,
   subscribeExpedientesRecomercializacion,
+  subscribeInmobiliarias,
+  subscribePropuestasInmobiliaria,
+  subscribeLeadsInmobiliarios,
   subscribeAseguradoras,
   subscribeSolicitudesSeguro,
   subscribeGmailConfig,
@@ -112,6 +118,10 @@ import {
   deletePrestamoFirestore,
   saveExpedienteRecomercializacionFirestore,
   deleteExpedienteRecomercializacionFirestore,
+  saveInmobiliariaFirestore,
+  deleteInmobiliariaFirestore,
+  savePropuestaInmobiliariaFirestore,
+  saveLeadInmobiliarioFirestore,
   deleteFotoInspeccionStorage,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
@@ -256,6 +266,10 @@ export default function App() {
   const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
   // FASE 3.0/3.1: expedientes de recomercialización y contexto de alta.
   const [expedientesRecomerc, setExpedientesRecomerc] = useState<ExpedienteRecomercializacion[]>([]);
+  // FASE 3.6: bolsa de inmobiliarias, RFPs (propuestas) y leads.
+  const [inmobiliariasDirectorio, setInmobiliariasDirectorio] = useState<InmobiliariaDirectorio[]>([]);
+  const [propuestasInmobiliaria, setPropuestasInmobiliaria] = useState<PropuestaInmobiliaria[]>([]);
+  const [leadsInmobiliarios, setLeadsInmobiliarios] = useState<LeadInmobiliario[]>([]);
   const [nuevoExpedienteCtx, setNuevoExpedienteCtx] = useState<ContextoNuevoExpediente | null>(null);
   const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
@@ -783,6 +797,17 @@ export default function App() {
       setExpedientesRecomerc(Array.isArray(data) ? data : []);
     }, dataScope);
 
+    // FASE 3.6: directorio de inmobiliarias (bolsa común) con RFPs y leads acotados por propietario.
+    const unsubscribeInmobiliarias = subscribeInmobiliarias((data) => {
+      setInmobiliariasDirectorio(Array.isArray(data) ? data : []);
+    }, dataScope);
+    const unsubscribePropuestas = subscribePropuestasInmobiliaria((data) => {
+      setPropuestasInmobiliaria(Array.isArray(data) ? data : []);
+    }, dataScope);
+    const unsubscribeLeads = subscribeLeadsInmobiliarios((data) => {
+      setLeadsInmobiliarios(Array.isArray(data) ? data : []);
+    }, dataScope);
+
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
     });
@@ -838,6 +863,9 @@ export default function App() {
       unsubscribeRecurrentes();
       unsubscribePrestamos();
       unsubscribeExpedientes();
+      unsubscribeInmobiliarias();
+      unsubscribePropuestas();
+      unsubscribeLeads();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
@@ -2232,6 +2260,67 @@ export default function App() {
     setActiveSection('recomercializacion');
   };
 
+  // FASE 3.6 — directorio de inmobiliarias, propuestas (RFP) y leads.
+  const handleSaveInmobiliaria = async (agencia: InmobiliariaDirectorio) => {
+    setInmobiliariasDirectorio((prev) => {
+      const exists = prev.some((a) => a.id === agencia.id);
+      return exists ? prev.map((a) => (a.id === agencia.id ? agencia : a)) : [agencia, ...prev];
+    });
+    await saveInmobiliariaFirestore(agencia);
+  };
+  const handleDeleteInmobiliaria = async (id: string) => {
+    setInmobiliariasDirectorio((prev) => prev.filter((a) => a.id !== id));
+    await deleteInmobiliariaFirestore(id);
+  };
+  const handleSavePropuestaInmobiliaria = async (propuesta: PropuestaInmobiliaria) => {
+    setPropuestasInmobiliaria((prev) => {
+      const exists = prev.some((p) => p.id === propuesta.id);
+      return exists ? prev.map((p) => (p.id === propuesta.id ? propuesta : p)) : [propuesta, ...prev];
+    });
+    await savePropuestaInmobiliariaFirestore(propuesta);
+  };
+  const handleSaveLeadInmobiliario = async (lead: LeadInmobiliario) => {
+    setLeadsInmobiliarios((prev) => {
+      const exists = prev.some((l) => l.id === lead.id);
+      return exists ? prev.map((l) => (l.id === lead.id ? lead : l)) : [lead, ...prev];
+    });
+    await saveLeadInmobiliarioFirestore(lead);
+  };
+
+  // FASE 3.6 — cierre del ciclo: garantiza que el contrato anterior queda
+  // FINALIZADO y el inmueble liberado (disponible) para un nuevo anuncio o
+  // contrato, SIEMPRE sobre la misma ficha (mismo inmuebleId).
+  const handleCerrarExpedienteRecomerc = async (
+    expediente: ExpedienteRecomercializacion,
+    _resultado: 'REARRENDADO' | 'VENDIDO'
+  ) => {
+    await handleSaveExpedienteRecomerc(expediente);
+
+    const contratoVinculado =
+      (expediente.contratoAnteriorId && contratos.find((c) => c.id === expediente.contratoAnteriorId)) ||
+      contratos
+        .filter((c) => c.inmuebleId === expediente.inmuebleId && c.estado !== 'FINALIZADO')
+        .sort((a, b) => (b.fechaInicioContrato || '').localeCompare(a.fechaInicioContrato || ''))[0];
+
+    if (contratoVinculado && contratoVinculado.estado !== 'FINALIZADO') {
+      // Reutiliza el flujo oficial: finaliza el contrato y libera el inmueble.
+      await handleFinalizarContrato(contratoVinculado.id);
+    } else {
+      const inm = inmuebles.find((i) => i.id === expediente.inmuebleId);
+      if (inm && (inm.estado !== 'disponible' || inm.contratoActivoId || inm.inquilinoActualId)) {
+        const libre: Inmueble = {
+          ...inm,
+          estado: 'disponible',
+          inquilinoActualId: undefined,
+          inquilinoActualNombre: undefined,
+          contratoActivoId: undefined,
+        };
+        setInmuebles((prev) => prev.map((i) => (i.id === libre.id ? libre : i)));
+        await saveInmuebleFirestore(libre);
+      }
+    }
+  };
+
   // Handlers for Propietarios y Cuentas Bancarias
   const handleSavePropietario = async (propietario: Propietario) => {
     setPropietarios((prev) => {
@@ -2938,11 +3027,19 @@ export default function App() {
               contratos={scopedContratos}
               profesionales={scopedProfesionales}
               currentUser={currentUser}
+              inmobiliarias={inmobiliariasDirectorio}
+              propuestas={propuestasInmobiliaria}
+              leads={leadsInmobiliarios}
               contextoNuevo={nuevoExpedienteCtx}
               onConsumirContexto={() => setNuevoExpedienteCtx(null)}
               onCreate={handleSaveExpedienteRecomerc}
               onGuardar={handleSaveExpedienteRecomerc}
               onEliminar={handleDeleteExpedienteRecomerc}
+              onGuardarInmobiliaria={handleSaveInmobiliaria}
+              onEliminarInmobiliaria={handleDeleteInmobiliaria}
+              onGuardarPropuesta={handleSavePropuestaInmobiliaria}
+              onGuardarLead={handleSaveLeadInmobiliario}
+              onCerrarCiclo={handleCerrarExpedienteRecomerc}
             />
           )}
 

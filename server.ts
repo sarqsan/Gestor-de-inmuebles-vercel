@@ -1801,6 +1801,138 @@ Responde SOLO con JSON válido:
 });
 
 // ============================================================
+// FASE 3.6 — KIT DE PUBLICACIÓN (titular, descripción, puntos
+// fuertes y entorno). El modelo redacta SÓLO con los hechos
+// aportados; no puede inventar ascensor, terraza, parking,
+// piscina, transporte o colegios. Sin clave se usa una plantilla
+// heurística basada estrictamente en los datos del inmueble.
+// ============================================================
+
+const TIPO_INMUEBLE_LABEL: Record<string, string> = {
+  piso: 'Piso',
+  casa: 'Casa',
+  chalet: 'Chalet',
+  estudio: 'Estudio',
+  atico: 'Ático',
+  duplex: 'Dúplex',
+  habitacion: 'Habitación',
+  local: 'Local',
+};
+
+function kitHeuristico(b: any) {
+  const tipo = TIPO_INMUEBLE_LABEL[b.tipoInmueble] || 'Vivienda';
+  const zona = [b.ciudad, b.codigoPostal ? `(${b.codigoPostal})` : ''].filter(Boolean).join(' ').trim();
+  const partes: string[] = [];
+  if (Number(b.superficie) > 0) partes.push(`${b.superficie} m²`);
+  if (Number(b.habitaciones) > 0) partes.push(`${b.habitaciones} habitaciones`);
+  if (Number(b.banos) > 0) partes.push(`${b.banos} baño${Number(b.banos) > 1 ? 's' : ''}`);
+  const esVenta = b.destino === 'Venta';
+  const precioTxt = esVenta
+    ? Number(b.precioVenta) > 0
+      ? `Precio orientativo de referencia: ${Math.round(b.precioVenta).toLocaleString('es-ES')} € (sujeto a negociación).`
+      : ''
+    : Number(b.precioRecomendado) > 0
+      ? `Renta orientativa: ${Math.round(b.precioRecomendado).toLocaleString('es-ES')} €/mes (escenario recomendado; consúltese disponibilidad y condiciones).`
+      : '';
+  const mejoras = Array.isArray(b.mejoras) ? b.mejoras.map(String).filter(Boolean) : [];
+  const descripcion = [
+    `${tipo}${zona ? ` en ${zona}` : ''}${partes.length ? ` de ${partes.join(', ')}` : ''}, disponible para ${esVenta ? 'venta' : 'alquiler'}.`,
+    precioTxt,
+    mejoras.length
+      ? `Recientemente se han realizado actuaciones de puesta a punto: ${mejoras.slice(0, 5).join(', ').toLowerCase()}.`
+      : '',
+    'Las características definitivas y la disponibilidad pueden contrastarse en una visita. La información se facilita a título orientativo y sin perjuicio de la que resulte de la documentación oficial.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const titulo =
+    `${tipo} en ${b.ciudad || 'la zona'}` +
+    (Number(b.habitaciones) > 0 ? ` · ${b.habitaciones} hab.` : '') +
+    (Number(b.superficie) > 0 ? ` · ${b.superficie} m²` : '') +
+    (esVenta ? ' · en venta' : ' · en alquiler');
+  const puntosFuertes: string[] = [];
+  if (partes.length) puntosFuertes.push(partes.join(' · '));
+  if (mejoras.length) puntosFuertes.push(`Puesta a punto reciente: ${mejoras.slice(0, 3).join(', ').toLowerCase()}`);
+  if (b.codigoPostal) puntosFuertes.push(`Zona ${b.ciudad || ''} ${b.codigoPostal}, fácil de localizar para visitas`.trim());
+  if (precioTxt) puntosFuertes.push('Precio orientado al estudio de mercado del expediente');
+  return {
+    titulo,
+    descripcion,
+    puntosFuertes,
+    entorno: [] as string[],
+    extras: [] as string[],
+    motor: 'heuristico',
+  };
+}
+
+app.post('/api/generar-kit-publicacion', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const ai = getGeminiClient();
+    const heuristico = kitHeuristico(b);
+
+    if (!ai) {
+      console.log('No GEMINI_API_KEY: kit de publicación heurístico.');
+      return res.json(heuristico);
+    }
+
+    const mejorasTxt = Array.isArray(b.mejoras) && b.mejoras.length ? b.mejoras.map((m: string, i: number) => `${i + 1}. ${m}`).join('\n') : 'No se indican reformas confirmadas.';
+    const esVenta = b.destino === 'Venta';
+    const prompt = `Eres redactor/a de anuncios inmobiliarios en España, prudente y veraz. Redacta un KIT DE PUBLICACIÓN para esta vivienda usando SOLO los hechos que se listan. Si un dato no aparece, NO lo inventes: nada de ascensor, terraza, balcón, parking, piscina, zonas comunes, metro, colegios, supermercados ni vistas. En "entorno" y "extras" incluye únicamente elementos que el propietario haya indicado expresamente (lista "hechos adicionales"); si no hay, devuelve arrays vacíos.
+
+INMUEBLE:
+- Tipo: ${b.tipoInmueble || 'no indicado'} · ${[b.ciudad, b.codigoPostal].filter(Boolean).join(' ') || 'zona no indicada'}
+- ${b.superficie ? `${b.superficie} m²` : ''} ${b.habitaciones !== undefined ? `· ${b.habitaciones} hab.` : ''} ${b.banos !== undefined ? `· ${b.banos} baños` : ''}
+- Destino: ${b.destino || 'alquiler tradicional'}
+- Precio ${esVenta ? `de venta orientativo ${b.precioVenta ?? ''} €` : `de alquiler orientativo ${b.precioRecomendado ?? ''} €/mes`} (no lo presentes como garantizado; usa "desde", "orientativo" o similar)
+- Reformas/puesta a punto confirmadas:\n${mejorasTxt}
+- Antigüedad catastral: ${b.anioConstruccion ? `${new Date().getFullYear() - b.anioConstruccion} años (año ${b.anioConstruccion})` : 'no indicada'}
+- Hechos adicionales que SÍ pueden mencionarse (sólo estos): ${Array.isArray(b.hechosAdicionales) && b.hechosAdicionales.length ? b.hechosAdicionales.join('; ') : 'ninguno'}
+
+REQUISITOS:
+- Titular atractivo pero veraz (< 70 caracteres), sin MAYÚSCULAS innecesarias ni tono agresivo.
+- Descripción de 80-140 palabras, con lenguaje prudente ("podría", "se estima", "a convenir"), sin afirmar rentabilidades ni calidades no aportadas; termina invitando a solicitar visita.
+- puntosFuertes: 3-5 frases cortas basadas en hechos.
+- entorno: elementos del listado de hechos o []; extras: equipamiento del listado de hechos o [].
+- No incluyas símbolos markdown, solo texto plano.
+Responde SOLO con JSON válido:
+{ "titulo": "", "descripcion": "", "puntosFuertes": [""], "entorno": [""], "extras": [""] }`;
+
+    try {
+      const response = await generateGeminiWithRetry(ai, {
+        model: 'gemini-3.7-flash',
+        contents: { parts: [{ text: prompt }] },
+        config: { responseMimeType: 'application/json' },
+      });
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse((response?.text || '').trim());
+      } catch {
+        parsed = {};
+      }
+      const arrStr = (v: any): string[] =>
+        Array.isArray(v) ? v.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 8) : [];
+      const kit = {
+        titulo: typeof parsed.titulo === 'string' && parsed.titulo.trim() ? parsed.titulo.trim() : heuristico.titulo,
+        descripcion:
+          typeof parsed.descripcion === 'string' && parsed.descripcion.trim() ? parsed.descripcion.trim() : heuristico.descripcion,
+        puntosFuertes: arrStr(parsed.puntosFuertes).length ? arrStr(parsed.puntosFuertes) : heuristico.puntosFuertes,
+        entorno: arrStr(parsed.entorno),
+        extras: arrStr(parsed.extras),
+        motor: 'ia',
+      };
+      return res.json(kit);
+    } catch (err: any) {
+      console.warn('Error en /api/generar-kit-publicacion (heurístico):', String(err?.message || err));
+      return res.json(heuristico);
+    }
+  } catch (error: any) {
+    console.error('Error en /api/generar-kit-publicacion:', error);
+    return res.status(500).json({ error: 'No se pudo generar el kit de publicación.' });
+  }
+});
+
+// ============================================================
 // FASE 3.5.1 — CONSULTA ABIERTA AL CATASTRO (OVC)
 // Datos abiertos sin convenio: la referencia devuelve el domicilio
 // normalizado y las coordenadas de la parcela. La superficie

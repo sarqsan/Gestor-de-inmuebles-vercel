@@ -44,6 +44,7 @@ import {
   INITIAL_GMAIL_CONFIG,
 } from './data/mockData';
 import { generarInformeInteligente } from './utils/reportGenerator';
+import { obtenerTodosCobros } from './utils/cobrosEngine';
 import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
@@ -129,6 +130,7 @@ import { ConfiguracionSection } from './components/sections/ConfiguracionSection
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
+import { CobrosSection } from './components/sections/CobrosSection';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
@@ -333,7 +335,7 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'configuracion'];
+      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'cobros', 'configuracion'];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
@@ -390,6 +392,23 @@ export default function App() {
     }
     return [];
   }, [currentUser, contratos, scopedInmuebles]);
+
+  // Cobros derivados de los contratos visibles para el usuario (con su histórico por inmuebleId).
+  // El motor genera los periodos al vuelo cuando un contrato aún no los tiene persistidos.
+  const scopedCobros = useMemo(() => obtenerTodosCobros(scopedContratos), [scopedContratos]);
+
+  // Número de mensualidades que requieren atención: ya vencidas y no cobradas o en incidencia.
+  const cobrosPendientesCount = useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(23, 59, 59, 999);
+    return scopedCobros.filter((c) => {
+      if (c.estado === 'RETRASADO' || c.estado === 'INCIDENCIA') return true;
+      if (c.estado === 'PENDIENTE' && c.fechaVencimiento) {
+        return new Date(`${c.fechaVencimiento}T23:59:59`) <= hoy;
+      }
+      return false;
+    }).length;
+  }, [scopedCobros]);
 
   const scopedCandidatos = useMemo(() => {
     if (!currentUser) return [];
@@ -2322,6 +2341,7 @@ export default function App() {
         preseleccionadosCount={preselectedCount}
         contratosCount={scopedContratos.length}
         solicitudesSeguroCount={solicitudesSeguro.length}
+        cobrosPendientesCount={cobrosPendientesCount}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
@@ -2340,6 +2360,7 @@ export default function App() {
           preseleccionadosCount={preselectedCount}
           contratosCount={scopedContratos.length}
           solicitudesSeguroCount={solicitudesSeguro.length}
+          cobrosPendientesCount={cobrosPendientesCount}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -2442,6 +2463,17 @@ export default function App() {
               userProfile={userProfile}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onDeleteContrato={handleDeleteContrato}
+            />
+          )}
+
+          {activeSection === 'cobros' && (
+            <CobrosSection
+              contratos={scopedContratos}
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+              onSaveContrato={handleSaveContrato}
+              onNavigateToInmueble={() => setActiveSection('inmuebles')}
             />
           )}
 

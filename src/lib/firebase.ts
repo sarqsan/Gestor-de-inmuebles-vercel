@@ -957,6 +957,96 @@ export async function uploadInmuebleImageToStorage(
 }
 
 /**
+ * Sube el justificante mensual de un cobro (transferencia / ingreso) a Firebase Storage.
+ * Regla arquitectónica: Firestore guarda SOLO metadatos y la URL; el PDF/imagen va a Storage.
+ * Nunca se codifica el documento en base64 dentro del documento económico.
+ *
+ * Estrategia resilente:
+ *  1) Firebase Storage (almacenamiento duradero).
+ *  2) Si Storage falla o tarda demasiado, se intenta mediante el endpoint del servidor.
+ *  3) Si ambos fallan, se lanza un error para no guardar una referencia efímera/rota.
+ */
+export async function uploadJustificanteCobro(
+  cobroPeriodoId: string,
+  file: File | Blob,
+  fileName: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `cobros_justificantes/${cobroPeriodoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  // 1) Firebase Storage
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+    console.warn('Timeout subiendo justificante a Firebase Storage; se intenta por servidor.');
+  } catch (err) {
+    console.warn('Firebase Storage no disponible para el justificante; se intenta por servidor:', err);
+  }
+
+  // 2) Respaldo mediante el endpoint del servidor (almacén de proceso)
+  try {
+    const dataURL = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+      reader.readAsDataURL(file);
+    });
+
+    const res = await fetch('/api/upload-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileBase64: dataURL,
+        filename: fileName,
+        mimeType: mime,
+        itemId: cobroPeriodoId,
+      }),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      if (json.url) {
+        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Fallo también la subida del justificante por servidor:', serverErr);
+  }
+
+  throw new Error(
+    'No se ha podido almacenar el justificante. Revisa la conexión o Firebase Storage e inténtalo de nuevo.'
+  );
+}
+
+/**
+ * Elimina un justificante de Firebase Storage. Las referencias del almacén temporal
+ * del servidor (server_*) no se eliminan de Storage.
+ */
+export async function deleteJustificanteCobro(storagePath?: string): Promise<void> {
+  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar el justificante de Storage:', err);
+  }
+}
+
+/**
  * Deletes an image file from Firebase Storage.
  */
 export async function deleteInmuebleImageFromStorage(storagePath: string): Promise<void> {

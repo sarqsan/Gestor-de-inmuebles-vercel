@@ -90,6 +90,16 @@ service cloud.firestore {
              ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
     }
 
+    // FASE 2.0 — GASTOS (datos económicos): mismo aislamiento que los contratos,
+    // por propietarioId. La cuota hipotecaria también es un dato sensible.
+    function gastoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+    function gastoVisible(d) {
+      return gastoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+
     // Validación del espejo de identidad contra el perfil autoritativo.
     function indexMatchesProfile(profileId) {
       return get(/databases/$(database)/documents/usuarios/$(profileId)).data;
@@ -210,6 +220,33 @@ service cloud.firestore {
       );
 
       // No puede mover un contrato a otro propietario ni tocar contratos ajenos.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2B. GASTOS (FASE 2.0 — explotación vs financiación hipotecaria)
+    // Datos económicos privados: mismo aislamiento por propietarioId que los
+    // contratos. Los profesionales no tienen ninguna regla permitida (deny).
+    // =========================================================================
+    match /gastos/{gastoId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing()));
+      // list OBLIGA a where('propietarioId','==', mi propietarioId).
+      allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
       allow update: if isMasterAdmin() || (
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()

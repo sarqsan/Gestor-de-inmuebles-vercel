@@ -32,6 +32,7 @@ import {
   VisitSlot,
   SolicitudDocumentacion,
   ContratoFormalizacion,
+  Gasto,
   ConfiguracionAseguradora,
   SolicitudSeguroImpago,
   GmailIntegracionConfig,
@@ -76,6 +77,7 @@ const INVITACIONES_COL = collection(db, 'invitaciones');
 const SLOTS_VISITA_COL = collection(db, 'slots_visita');
 const SOLICITUDES_DOC_COL = collection(db, 'solicitudes_documentacion');
 const CONTRATOS_COL = collection(db, 'contratos_formalizacion');
+const GASTOS_COL = collection(db, 'gastos');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
 
@@ -743,6 +745,80 @@ export async function deleteContratoFirestore(contratoId: string) {
     await deleteDoc(doc(db, 'contratos_formalizacion', contratoId));
   } catch (err) {
     console.error('Error deleting contrato formalizacion from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.0 — GASTOS (explotación vs financiación)
+// ============================================================
+
+/**
+ * Listener de gastos con el mismo aislamiento que los contratos:
+ * - PROFESIONAL: cero acceso (son datos económicos).
+ * - PROPIETARIO: consulta demostrable where('propietarioId','==', pid).
+ * - ADMINISTRADOR / sin ámbito: colección completa.
+ */
+export function subscribeGastos(
+  callback: (gastos: Gasto[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      GASTOS_COL,
+      (snapshot) => {
+        const items: Gasto[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Gasto);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore gastos snapshot error:', err);
+      }
+    );
+  }
+
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+
+  const scopedQuery = query(GASTOS_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: Gasto[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as Gasto);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore gastos (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function saveGastoFirestore(gasto: Gasto) {
+  try {
+    const cleanGasto = sanitizeObjectForFirestore(gasto);
+    await setDoc(doc(db, 'gastos', gasto.id), cleanGasto, { merge: true });
+  } catch (err) {
+    console.error('Error saving gasto to Firestore:', err);
+  }
+}
+
+export async function deleteGastoFirestore(gastoId: string) {
+  try {
+    await deleteDoc(doc(db, 'gastos', gastoId));
+  } catch (err) {
+    console.error('Error deleting gasto from Firestore:', err);
   }
 }
 

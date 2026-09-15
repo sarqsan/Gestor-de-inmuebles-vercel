@@ -16,6 +16,7 @@ import {
   ItemDocumentoSolicitado,
   SolicitudDocPublicData,
   ContratoFormalizacion,
+  Gasto,
   DocumentoAnalizado,
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
@@ -59,6 +60,7 @@ import {
   subscribeVisitSlots,
   subscribeSolicitudesDoc,
   subscribeContratos,
+  subscribeGastos,
   subscribeAseguradoras,
   subscribeSolicitudesSeguro,
   subscribeGmailConfig,
@@ -86,6 +88,8 @@ import {
   deleteSolicitudDocFirestore,
   saveContratoFirestore,
   deleteContratoFirestore,
+  saveGastoFirestore,
+  deleteGastoFirestore,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
   saveSolicitudSeguroFirestore,
@@ -135,6 +139,7 @@ import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
+import { GastosSection } from './components/sections/GastosSection';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
@@ -218,6 +223,8 @@ export default function App() {
     } catch (e) {}
     return INITIAL_CONTRATOS;
   });
+  // FASE 2.0: gastos (explotación vs financiación). Colección nueva, sin caché local.
+  const [gastos, setGastos] = useState<Gasto[]>([]);
   const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
     try {
@@ -340,7 +347,7 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'cobros', 'configuracion'];
+      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'cobros', 'gastos', 'configuracion'];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
@@ -397,6 +404,22 @@ export default function App() {
     }
     return [];
   }, [currentUser, contratos, scopedInmuebles]);
+
+  // FASE 2.0: gastos visibles. La suscripción ya viene acotada para el propietario;
+  // aquí se refuerza el filtro (defensa en profundidad) y se entrega todo al admin.
+  const scopedGastos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return gastos;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return gastos.filter(
+        (g) =>
+          (currentUser.propietarioId && g.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(g.inmuebleId)
+      );
+    }
+    return []; // Los profesionales no acceden a datos económicos.
+  }, [currentUser, gastos, scopedInmuebles]);
 
   // Cobros derivados de los contratos visibles para el usuario (con su histórico por inmuebleId).
   // El motor genera los periodos al vuelo cuando un contrato aún no los tiene persistidos.
@@ -662,6 +685,11 @@ export default function App() {
       }
     }, dataScope);
 
+    // FASE 2.0: gastos acotados por propietario (profesionales no reciben nada).
+    const unsubscribeGastos = subscribeGastos((data) => {
+      setGastos(Array.isArray(data) ? data : []);
+    }, dataScope);
+
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
     });
@@ -713,6 +741,7 @@ export default function App() {
       unsubscribeProp();
       unsubscribeSol();
       unsubscribeContratos();
+      unsubscribeGastos();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
@@ -1864,6 +1893,34 @@ export default function App() {
     await deleteContratoFirestore(contratoId);
   };
 
+  // FASE 2.0 — Handlers de gastos. Se garantiza SIEMPRE propietarioId (clave de
+  // aislamiento), resolviéndolo desde el inmueble o el propietario autenticado.
+  const handleSaveGasto = async (gasto: Gasto) => {
+    let propietarioId = gasto.propietarioId;
+    if (!propietarioId) {
+      const inm = inmuebles.find((i) => i.id === gasto.inmuebleId);
+      propietarioId =
+        inm?.propietarioId ||
+        inm?.propietarioPrincipalId ||
+        (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId || '' : '') ||
+        '';
+    }
+    const finalGasto: Gasto = { ...gasto, propietarioId };
+
+    setGastos((prev) => {
+      const exists = prev.some((g) => g.id === finalGasto.id);
+      return exists
+        ? prev.map((g) => (g.id === finalGasto.id ? finalGasto : g))
+        : [finalGasto, ...prev];
+    });
+    await saveGastoFirestore(finalGasto);
+  };
+
+  const handleDeleteGasto = async (gastoId: string) => {
+    setGastos((prev) => prev.filter((g) => g.id !== gastoId));
+    await deleteGastoFirestore(gastoId);
+  };
+
   // Handlers for Propietarios y Cuentas Bancarias
   const handleSavePropietario = async (propietario: Propietario) => {
     setPropietarios((prev) => {
@@ -2542,6 +2599,16 @@ export default function App() {
               currentUser={currentUser}
               onSaveContrato={handleSaveContrato}
               onNavigateToInmueble={() => setActiveSection('inmuebles')}
+            />
+          )}
+
+          {activeSection === 'gastos' && (
+            <GastosSection
+              gastos={scopedGastos}
+              inmuebles={scopedInmuebles}
+              currentUser={currentUser}
+              onSaveGasto={handleSaveGasto}
+              onDeleteGasto={handleDeleteGasto}
             />
           )}
 

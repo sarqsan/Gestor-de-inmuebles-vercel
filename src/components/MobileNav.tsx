@@ -21,6 +21,7 @@ import {
   Wrench,
   ArrowLeftRight,
   Receipt,
+  TrendingDown,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -73,6 +74,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
+          { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : perfil === 'PROFESIONAL'
@@ -86,6 +88,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
+          { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },

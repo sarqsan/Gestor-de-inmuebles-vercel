@@ -3,6 +3,7 @@ export type SectionType =
   | 'inmuebles'
   | 'propietarios'
   | 'cobros'
+  | 'gastos'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'
@@ -922,6 +923,80 @@ export interface CobroPeriodo {
   fechaRegistro?: string;
   ultimaModificacion?: string;
   historialCambios: HistorialCobroItem[];
+}
+
+// ==========================================
+// FASE 2: GASTOS — EXPLOTACIÓN vs FINANCIACIÓN
+// ==========================================
+
+/**
+ * Naturaleza contable del gasto (clave de la Fase 2):
+ * - EXPLOTACION: costes de mantener y alquilar la vivienda (comunidad, IBI,
+ *   seguros, reparaciones, comisiones...). Computan al RESULTADO OPERATIVO del
+ *   alquiler y, en su mayoría, son fiscalmente deducibles.
+ * - FINANCIACION: cuotas de financiación ajena (hipoteca). Son una SALIDA DE
+ *   CAJA del propietario, pero NO un gasto operativo del inmueble: la parte de
+ *   capital es amortización de deuda (no es gasto); sólo los intereses serían
+ *   gasto financiero. Por eso se registran aparte y nunca se mezclan con los
+ *   gastos de explotación en los cuadres de rentabilidad.
+ */
+export type TipoGasto = 'EXPLOTACION' | 'FINANCIACION';
+
+export type CategoriaGasto =
+  // --- Explotación ---
+  | 'COMUNIDAD'
+  | 'IBI'
+  | 'SEGURO_HOGAR'
+  | 'SUMINISTROS'
+  | 'MANTENIMIENTO'
+  | 'REPARACION'
+  | 'ADMINISTRACION'
+  | 'LIMPIEZA'
+  | 'OTRO_EXPLOTACION'
+  // --- Financiación ---
+  | 'CUOTA_HIPOTECARIA'
+  | 'INTERESES_PRESTAMO'
+  | 'OTRO_FINANCIACION';
+
+export type EstadoGasto = 'PENDIENTE' | 'PAGADO' | 'ANULADO';
+
+export interface Gasto {
+  id: string; // "gas_{inmuebleId}_{timestamp}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario (igual que contratos)
+  contratoId?: string; // Opcional: vinculación a un contrato/período
+
+  tipo: TipoGasto;
+  categoria: CategoriaGasto;
+  concepto: string;
+  proveedor?: string;
+
+  importe: number; // Importe total del gasto (EUR)
+  estado: EstadoGasto;
+
+  // Fechas y período (para agrupación mensual/anual)
+  fechaDevengo?: string; // YYYY-MM-DD (fecha de la factura / período)
+  fechaPago?: string; // YYYY-MM-DD (cuando se abona)
+  periodoMesAnio?: string; // YYYY-MM
+
+  // ¿Quién soporta económicamente el coste según el contrato?
+  aCargoDe: 'arrendador' | 'arrendatario';
+  deducible?: boolean; // Deducible en IRPF del alquiler (gastos de explotación)
+
+  // Desglose financiero (solo FINANCIACION / hipoteca)
+  capitalAmortizado?: number; // Parte de la cuota que amortiza deuda (no es gasto)
+  intereses?: number; // Parte de intereses (gasto financiero)
+
+  metodoPago?: 'transferencia' | 'domiciliacion' | 'bizum' | 'efectivo' | 'otro';
+  justificanteUrl?: string;
+  justificantePath?: string;
+  notas?: string;
+
+  // Trazabilidad
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ==========================================

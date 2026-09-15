@@ -1389,6 +1389,268 @@ La "prioridad" refleja, de forma ORIENTATIVA, cuánto conviene revisar/mejorar e
   }
 });
 
+// ============================================================
+// FASE 3.4 — PROPUESTA DE REFORMAS Y OPTIMIZACIÓN (ROI)
+// A partir del diagnóstico de las fotos (texto, no imágenes),
+// propone mejoras accionables con rangos orientativos de coste,
+// posible subida de renta y de valor patrimonial. Estimaciones,
+// no presupuestos: el lenguaje sigue siendo prudente.
+// ============================================================
+
+const CATEGORIAS_MEJORA_VALIDAS = [
+  'PINTURA', 'ILUMINACION', 'COCINA', 'BANO', 'SUELOS',
+  'MOBILIARIO', 'LIMPIEZA_PUESTA_A_PUNTO', 'EFICIENCIA_ENERGETICA', 'REPARACION', 'OTRA',
+];
+
+// Catálogo heurístico de mejoras frecuentes en viviendas de alquiler en
+// España (rangos orientativos). Se usa cuando no hay modelo disponible.
+const CATALOGO_MEJORAS_HEURISTICO = [
+  {
+    claves: ['pintura general', 'pintado integral', 'pintar toda', 'pintura integral', 'paredes de toda', 'repintado general'],
+    mejora: {
+      actuacion: 'Pintado integral en tonos neutros (blanco/crema) de toda la vivienda',
+      categoria: 'PINTURA',
+      costeEstimadoMin: 700, costeEstimadoMax: 1800,
+      incrementoRentaMensual: 50, incrementoValoracion: 3000, impacto: 'alto',
+    },
+  },
+  {
+    claves: ['pintur', 'pared', 'deslucid', 'mancha', 'color oscuro', 'repasar pintura'],
+    mejora: {
+      actuacion: 'Repaso de pintura de las estancias más deslucidas en tonos claros',
+      categoria: 'PINTURA',
+      costeEstimadoMin: 120, costeEstimadoMax: 450,
+      incrementoRentaMensual: 20, incrementoValoracion: 900, impacto: 'medio',
+    },
+  },
+  {
+    claves: ['iluminaci', 'luz', 'lámpara', 'lampara', 'oscur', 'led'],
+    mejora: {
+      actuacion: 'Mejora de iluminación: luminarias de luz cálida y bombillas LED en estancias clave',
+      categoria: 'ILUMINACION',
+      costeEstimadoMin: 80, costeEstimadoMax: 350,
+      incrementoRentaMensual: 15, incrementoValoracion: 600, impacto: 'medio',
+    },
+  },
+  {
+    claves: ['limpieza', 'limpieza profunda', 'desorden', 'orden', 'despersonaliz'],
+    mejora: {
+      actuacion: 'Limpieza profunda, vaciado de enseres y puesta a punto para fotos y visitas',
+      categoria: 'LIMPIEZA_PUESTA_A_PUNTO',
+      costeEstimadoMin: 120, costeEstimadoMax: 400,
+      incrementoRentaMensual: 25, incrementoValoracion: 400, impacto: 'medio',
+    },
+  },
+  {
+    claves: ['tirador', 'encimera', 'muebles de cocina', 'grifería de cocina', 'griferia de la cocina'],
+    mejora: {
+      actuacion: 'Actualización económica de cocina: tiradores, grifería y encimera',
+      categoria: 'COCINA',
+      costeEstimadoMin: 250, costeEstimadoMax: 900,
+      incrementoRentaMensual: 35, incrementoValoracion: 2000, impacto: 'medio',
+    },
+  },
+  {
+    claves: ['cocina'],
+    mejora: {
+      actuacion: 'Pintura de muebles de cocina y renovación de detalles (puños, tapones)',
+      categoria: 'COCINA',
+      costeEstimadoMin: 180, costeEstimadoMax: 700,
+      incrementoRentaMensual: 25, incrementoValoracion: 1500, impacto: 'medio',
+    },
+  },
+  {
+    claves: ['grifería del baño', 'griferia del bano', 'inodoro', 'sanitario', 'azulejo', 'plat[o] de ducha', 'baño'],
+    mejora: {
+      actuacion: 'Actualización de baño: grifería, accesorios y pintado de azulejos/plato de ducha',
+      categoria: 'BANO',
+      costeEstimadoMin: 200, costeEstimadoMax: 1200,
+      incrementoRentaMensual: 40, incrementoValoracion: 2500, impacto: 'alto',
+    },
+  },
+  {
+    claves: ['suelo', 'parquet', 'tarima', 'rodapié', 'rodapie', 'vinílico', 'vinilico', 'baldosa'],
+    mejora: {
+      actuacion: 'Renovación de suelos muy desgastados (vinílico click o lijado/ barnizado)',
+      categoria: 'SUELOS',
+      costeEstimadoMin: 600, costeEstimadoMax: 2600,
+      incrementoRentaMensual: 60, incrementoValoracion: 4000, impacto: 'alto',
+    },
+  },
+  {
+    claves: ['mobiliario', 'mueble', 'decoraci', 'cortina', 'home staging', 'despersonaliz'],
+    mejora: {
+      actuacion: 'Home staging económico: despersonalización, textiles y detalles de presentación',
+      categoria: 'MOBILIARIO',
+      costeEstimadoMin: 150, costeEstimadoMax: 700,
+      incrementoRentaMensual: 30, incrementoValoracion: 1000, impacto: 'medio',
+    },
+  },
+  {
+    claves: ['caldera', 'termo', 'calefacci', 'ventana', 'cerramiento', 'eficiencia', 'aislamiento', 'burlete'],
+    mejora: {
+      actuacion: 'Mejora de eficiencia: revisión de caldera/termo, burletes y bajo consumo',
+      categoria: 'EFICIENCIA_ENERGETICA',
+      costeEstimadoMin: 100, costeEstimadoMax: 700,
+      incrementoRentaMensual: 15, incrementoValoracion: 900, impacto: 'medio',
+    },
+  },
+  {
+    claves: ['desperfecto', 'reparaci', 'enchufe', 'persiana', 'grieta superficial', 'puerta', 'pequeños arreglo', 'pequenos arreglo'],
+    mejora: {
+      actuacion: 'Reparación de pequeños desperfectos (persianas, enchufes, puertas, rozas superficiales)',
+      categoria: 'REPARACION',
+      costeEstimadoMin: 80, costeEstimadoMax: 400,
+      incrementoRentaMensual: 15, incrementoValoracion: 500, impacto: 'bajo',
+    },
+  },
+];
+
+function generarMejorasHeuristicas(textoSugerencias: string) {
+  const texto = (textoSugerencias || '').toLowerCase();
+  const elegidas: any[] = [];
+  const categoriasVistas = new Set<string>();
+  for (const regla of CATALOGO_MEJORAS_HEURISTICO) {
+    if (elegidas.length >= 6) break;
+    if (regla.claves.some((c) => texto.includes(c))) {
+      // Evita duplicar dos propuestas de la misma categoría (se queda con la
+      // primera, que suele ser la más específica).
+      if (categoriasVistas.has(regla.mejora.categoria)) continue;
+      categoriasVistas.add(regla.mejora.categoria);
+      elegidas.push(regla.mejora);
+    }
+  }
+  // Si no se reconoce nada, ofrecer como mínimo la puesta a punto neutra.
+  if (elegidas.length === 0) {
+    elegidas.push({
+      actuacion: 'Puesta a punto general: limpieza profunda, repaso de pintura neutra y pequeños arreglos',
+      categoria: 'LIMPIEZA_PUESTA_A_PUNTO',
+      costeEstimadoMin: 250, costeEstimadoMax: 900,
+      incrementoRentaMensual: 30, incrementoValoracion: 1200, impacto: 'medio',
+    });
+  }
+  return elegidas;
+}
+
+function normalizarMejoraIA(m: any) {
+  const num = (v: any) => {
+    const n = Number(typeof v === 'string' ? v.replace(',', '.') : v);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : undefined;
+  };
+  const categoria = CATEGORIAS_MEJORA_VALIDAS.includes(m?.categoria) ? m.categoria : 'OTRA';
+  const impacto = ['bajo', 'medio', 'alto'].includes(m?.impacto) ? m.impacto : 'medio';
+  const actuacion = typeof m?.actuacion === 'string' ? m.actuacion.trim() : '';
+  if (!actuacion) return null;
+  return {
+    actuacion: actuacion.slice(0, 220),
+    categoria,
+    costeEstimadoMin: num(m.costeEstimadoMin),
+    costeEstimadoMax: num(m.costeEstimadoMax),
+    incrementoRentaMensual: num(m.incrementoRentaMensual),
+    incrementoValoracion: num(m.incrementoValoracion),
+    impacto,
+  };
+}
+
+app.post('/api/proponer-mejoras', async (req, res) => {
+  try {
+    const { rentaAnterior, destino, ciudad, codigoPostal, fotos, sugerencias } = req.body || {};
+
+    const fotosArr: any[] = Array.isArray(fotos) ? fotos : [];
+    const lineasFotos = fotosArr
+      .map((f) => {
+        const est = ESTANCIA_NOMBRE[f?.estancia] || f?.estancia || 'Estancia';
+        const obs = Array.isArray(f?.observaciones) ? f.observaciones.join('; ') : '';
+        const sug = Array.isArray(f?.sugerenciasMejora) ? f.sugerenciasMejora.join('; ') : '';
+        return `- ${est}. Indicios: ${obs}. Sugerencias: ${sug}`;
+      })
+      .filter((l) => !l.endsWith('. Indicios: . Sugerencias: '))
+      .join('\n');
+    const extraSug = Array.isArray(sugerencias) ? sugerencias.join('\n') : String(sugerencias || '');
+    const textoContexto = `${lineasFotos}\n${extraSug}`;
+    // Para el emparejado heurístico NO se usan los nombres de estancia (la
+    // etiqueta «Cocina»/«Baño» dispararía mejoras por categoría sin que el
+    // diagnóstico las pida): solo el contenido de observaciones y sugerencias.
+    const textoHeuristico = [
+      ...fotosArr.flatMap((f) => [
+        Array.isArray(f?.observaciones) ? f.observaciones.join('; ') : '',
+        Array.isArray(f?.sugerenciasMejora) ? f.sugerenciasMejora.join('; ') : '',
+      ]),
+      extraSug,
+    ].join('\n');
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      console.log('No GEMINI_API_KEY: catálogo heurístico de mejoras.');
+      return res.json({ mejoras: generarMejorasHeuristicas(textoHeuristico), motorGlobal: 'heuristico' });
+    }
+
+    const prompt = `Eres un asesor inmobiliario prudente especializado en puesta a punto de viviendas en alquiler en España.
+A partir del DIAGNÓSTICO VISUAL (redactado por otra IA con lenguaje de indicios), propón entre 3 y 7 reformas o mejoras ACCIONABLES y realistas para mejorar la presentación y, si procede, la renta y el valor del inmueble.
+
+Datos:
+- Renta mensual anterior orientativa: ${rentaAnterior ? `${rentaAnterior} €/mes` : 'no indicada'}
+- Destino previsto: ${destino || 'alquiler tradicional'}
+- Zona: ${[ciudad, codigoPostal].filter(Boolean).join(', ') || 'no indicada'}
+
+Diagnóstico:
+${textoContexto || '(sin diagnóstico detallado; propón únicamente una puesta a punto general neutra)'}
+
+REGLAS:
+- NO inventes daños; parte solo de los indicios del diagnóstico.
+- Las cifras son RANGOS ORIENTATIVOS de mercado español, no un presupuesto. No prometas rentabilidades garantizadas.
+- Incluye siempre alguna mejora económica de rápida amortización (limpieza, pintura, iluminación, pequeños arreglos) y solo reformas de fondo si el diagnóstico las justifica.
+- En "incrementoRentaMensual" indica la posible subida MENSUAL en euros (no un porcentaje), de forma conservadora.
+- En "incrementoValoracion" indica la posible revalorización orientativa del inmueble en euros.
+- "impacto" es "bajo", "medio" o "alto" según efecto esperado en presentación/venta o alquiler.
+- "categoria" debe ser exactamente una de: ${CATEGORIAS_MEJORA_VALIDAS.join(', ')}.
+- Si el destino es VENTA, prioriza mejoras de valor patrimonial; si es ALQUILER, prioriza rápida absorción y subida de renta.
+
+Responde SOLO con JSON válido:
+{
+  "mejoras": [
+    {
+      "actuacion": "Descripción breve y concreta de la actuación",
+      "categoria": "PINTURA",
+      "costeEstimadoMin": 150,
+      "costeEstimadoMax": 450,
+      "incrementoRentaMensual": 20,
+      "incrementoValoracion": 800,
+      "impacto": "medio"
+    }
+  ]
+}`;
+
+    try {
+      const response = await generateGeminiWithRetry(ai, {
+        model: 'gemini-3.7-flash',
+        contents: { parts: [{ text: prompt }] },
+        config: { responseMimeType: 'application/json' },
+      });
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse((response?.text || '').trim());
+      } catch {
+        parsed = {};
+      }
+      const mejoras = (Array.isArray(parsed.mejoras) ? parsed.mejoras : [])
+        .map(normalizarMejoraIA)
+        .filter(Boolean)
+        .slice(0, 8);
+      if (mejoras.length === 0) {
+        return res.json({ mejoras: generarMejorasHeuristicas(textoHeuristico), motorGlobal: 'heuristico' });
+      }
+      return res.json({ mejoras, motorGlobal: 'gemini' });
+    } catch (err: any) {
+      console.warn('Error en /api/proponer-mejoras (respaldo heurístico):', String(err?.message || err));
+      return res.json({ mejoras: generarMejorasHeuristicas(textoHeuristico), motorGlobal: 'heuristico' });
+    }
+  } catch (error: any) {
+    console.error('Error en /api/proponer-mejoras:', error);
+    return res.status(500).json({ error: 'No se pudieron generar las propuestas de mejora.', mejoras: [] });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY });

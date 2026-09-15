@@ -1604,16 +1604,33 @@ export interface PricingRecomercializacion {
   fechaCalculo?: string; // ISO
 }
 
+export type CategoriaMejora =
+  | 'PINTURA'
+  | 'ILUMINACION'
+  | 'COCINA'
+  | 'BANO'
+  | 'SUELOS'
+  | 'MOBILIARIO'
+  | 'LIMPIEZA_PUESTA_A_PUNTO'
+  | 'EFICIENCIA_ENERGETICA'
+  | 'REPARACION'
+  | 'OTRA';
+
 export interface MejoraROI {
   id: string;
   actuacion: string;
+  categoria?: CategoriaMejora;
   costeEstimadoMin?: number;
   costeEstimadoMax?: number;
   incrementoRentaMensual?: number;
   incrementoValoracion?: number;
   paybackMeses?: number;
+  // Impacto orientativo en la presentación del anuncio (no una certeza de daño)
+  impacto?: 'bajo' | 'medio' | 'alto';
   confirmadaPorPropietario?: boolean;
   profesionalIdSolicitado?: string;
+  presupuestoSolicitadoFecha?: string; // ISO
+  origen?: 'ia' | 'manual';
 }
 
 export interface ComercializacionExpediente {

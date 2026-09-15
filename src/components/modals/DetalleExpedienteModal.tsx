@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { X, RefreshCw, Check, Ban, Trash2, KeyRound, BellRing, Camera, Sparkles } from 'lucide-react';
+import { X, RefreshCw, Check, Ban, Trash2, KeyRound, BellRing, Camera, Sparkles, Wrench, TrendingUp } from 'lucide-react';
 import type {
   EstadoRecomercializacion,
   ExpedienteRecomercializacion,
   Inmueble,
+  Profesional,
 } from '../../types';
 import {
   DESTINO_INMUEBLE_LABEL,
   esEstadoCierre,
+  escenariosROI,
   ESTADOS_RECOMERCIALIZACION,
   ESTANCIAS_ORDEN,
   ESTANCIA_LABEL,
@@ -16,10 +18,13 @@ import {
 } from '../../utils/recomercializacionEngine';
 import { formatDate } from '../../utils/formatters';
 import { InspeccionFotograficaModal } from './InspeccionFotograficaModal';
+import { MejorasROIModal } from './MejorasROIModal';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
   inmueble?: Inmueble;
+  profesionales?: Profesional[];
+  rentaAnterior?: number;
   onGuardar: (expediente: ExpedienteRecomercializacion) => Promise<void> | void;
   onEliminar: (id: string) => Promise<void> | void;
   onClose: () => void;
@@ -39,6 +44,8 @@ const ESTADOS_HABILITADOS_UI: EstadoRecomercializacion[] = [
 export const DetalleExpedienteModal: React.FC<Props> = ({
   expediente,
   inmueble,
+  profesionales,
+  rentaAnterior,
   onGuardar,
   onEliminar,
   onClose,
@@ -62,6 +69,7 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
   );
   const [guardando, setGuardando] = useState(false);
   const [showInspeccion, setShowInspeccion] = useState(false);
+  const [showMejoras, setShowMejoras] = useState(false);
 
   const estado = expediente.estado;
   const metaEstado = ESTADOS_RECOMERCIALIZACION[estado];
@@ -321,6 +329,74 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
               );
             })()}
 
+          {/* Reformas y optimización ROI (FASE 3.4) */}
+          {!esEstadoCierre(estado) &&
+            ESTADOS_RECOMERCIALIZACION[estado].orden >=
+              ESTADOS_RECOMERCIALIZACION.FOTOS_ACTUALIZADAS.orden &&
+            (() => {
+              const mejoras = expediente.mejorasPropuestas ?? [];
+              const escenarios = escenariosROI(mejoras);
+              const parcial = escenarios.find((e) => e.id === 'parcial')!;
+              const completa = escenarios.find((e) => e.id === 'completa')!;
+              return (
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Wrench className="w-4 h-4 text-teal-600" /> Reformas y optimización (ROI)
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      {mejoras.length} propuesta(s) · {mejoras.filter((m) => m.confirmadaPorPropietario).length} confirmada(s)
+                    </span>
+                  </div>
+
+                  {mejoras.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="rounded-lg border border-teal-200 bg-teal-50/50 p-2.5">
+                        <p className="font-semibold text-teal-800 flex items-center gap-1">
+                          <Check className="w-3 h-3" /> Parcial (confirmadas · {parcial.numeroMejoras})
+                        </p>
+                        <p className="text-slate-600 mt-1">
+                          Inversión ~{parcial.inversionMedia.toLocaleString('es-ES')} € · +{parcial.rentaExtraMensual} €/mes
+                        </p>
+                        <p className="text-slate-500">
+                          Payback {parcial.paybackMeses !== undefined ? `${parcial.paybackMeses} meses` : '—'} · +valor {parcial.plusvaliaEstimada.toLocaleString('es-ES')} €
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5">
+                        <p className="font-semibold text-indigo-800 flex items-center gap-1">
+                          <TrendingUp className="w-3 h-3" /> Completa ({completa.numeroMejoras})
+                        </p>
+                        <p className="text-slate-600 mt-1">
+                          Inversión ~{completa.inversionMedia.toLocaleString('es-ES')} € · +{completa.rentaExtraMensual} €/mes
+                        </p>
+                        <p className="text-slate-500">
+                          Payback {completa.paybackMeses !== undefined ? `${completa.paybackMeses} meses` : '—'} · +valor {completa.plusvaliaEstimada.toLocaleString('es-ES')} €
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {mejoras.length === 0 && (
+                    <p className="text-[11px] text-slate-400">
+                      Aún no hay mejoras propuestas. Puedes generarlas con IA a partir del diagnóstico
+                      de las fotos o añadirlas manualmente, y estimar coste, subida de renta, plusvalía
+                      y plazo de retorno.
+                    </p>
+                  )}
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => setShowMejoras(true)}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-lg flex items-center gap-1.5"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      {mejoras.length > 0 ? 'Ver / editar mejoras y ROI' : 'Planificar mejoras y ROI'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
           {/* Resumen si está cerrado/cancelado */}
           {esEstadoCierre(estado) && expediente.datosSalida && (
             <div className="rounded-xl border border-slate-200 p-4 text-xs text-slate-600 space-y-1">
@@ -390,6 +466,17 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
           inmueble={inmueble}
           onGuardar={onGuardar}
           onClose={() => setShowInspeccion(false)}
+        />
+      )}
+
+      {showMejoras && (
+        <MejorasROIModal
+          expediente={expediente}
+          inmueble={inmueble}
+          rentaAnterior={rentaAnterior}
+          profesionales={profesionales ?? []}
+          onGuardar={onGuardar}
+          onClose={() => setShowMejoras(false)}
         />
       )}
     </div>

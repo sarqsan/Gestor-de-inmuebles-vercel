@@ -6,6 +6,7 @@
 // ============================================================
 
 import type {
+  CategoriaMejora,
   DestinoInmueble,
   EstadoRecomercializacion,
   EstanciaFoto,
@@ -13,6 +14,7 @@ import type {
   FotoInspeccion,
   InmobiliariaDirectorio,
   LeadInmobiliario,
+  MejoraROI,
   ModalidadComercializacion,
   PropuestaInmobiliaria,
 } from '../types';
@@ -181,6 +183,171 @@ export function aplicarAnalisisFotos(
     },
     updatedAt: ahora,
   };
+}
+
+// ============================================================
+// FASE 3.4 — REFORMAS Y OPTIMIZACIÓN (SIMULADOR DE ROI)
+// ============================================================
+
+export const CATEGORIA_MEJORA_LABEL: Record<CategoriaMejora, string> = {
+  PINTURA: 'Pintura y acabados',
+  ILUMINACION: 'Iluminación',
+  COCINA: 'Cocina',
+  BANO: 'Baños',
+  SUELOS: 'Suelos',
+  MOBILIARIO: 'Mobiliario y decoración',
+  LIMPIEZA_PUESTA_A_PUNTO: 'Limpieza y puesta a punto',
+  EFICIENCIA_ENERGETICA: 'Eficiencia energética',
+  REPARACION: 'Reparaciones',
+  OTRA: 'Otras mejoras',
+};
+
+export function nuevoMejoraId(): string {
+  return `mej_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+}
+
+const ahoraISO = () => new Date().toISOString();
+
+/** Coste medio estimado de una mejora (punto medio del rango, redondeado). */
+export function costeMedioMejora(m: MejoraROI): number {
+  const min = Number(m.costeEstimadoMin) || 0;
+  const max = Number(m.costeEstimadoMax) || 0;
+  if (min > 0 && max > 0) return Math.round((min + max) / 2);
+  return Math.round(max || min || 0);
+}
+
+/** Payback orientativo en meses: inversión media / incremento de renta mensual. */
+export function paybackMejora(m: MejoraROI): number | undefined {
+  const renta = Number(m.incrementoRentaMensual) || 0;
+  const coste = costeMedioMejora(m);
+  if (renta <= 0 || coste <= 0) return undefined;
+  return Math.round((coste / renta) * 10) / 10;
+}
+
+/**
+ * Completa los campos derivados (payback) de una mejora. Inmutable.
+ */
+export function normalizarMejora(m: MejoraROI): MejoraROI {
+  const payback = paybackMejora(m);
+  return { ...m, paybackMeses: payback };
+}
+
+export function agregarMejora(
+  expediente: ExpedienteRecomercializacion,
+  mejora: MejoraROI
+): ExpedienteRecomercializacion {
+  const actuales = expediente.mejorasPropuestas ?? [];
+  return {
+    ...expediente,
+    mejorasPropuestas: [...actuales, normalizarMejora(mejora)],
+    updatedAt: ahoraISO(),
+  };
+}
+
+export function actualizarMejora(
+  expediente: ExpedienteRecomercializacion,
+  mejora: MejoraROI
+): ExpedienteRecomercializacion {
+  const actuales = expediente.mejorasPropuestas ?? [];
+  const normalizada = normalizarMejora(mejora);
+  return {
+    ...expediente,
+    mejorasPropuestas: actuales.map((m) => (m.id === normalizada.id ? normalizada : m)),
+    updatedAt: ahoraISO(),
+  };
+}
+
+export function quitarMejora(
+  expediente: ExpedienteRecomercializacion,
+  mejoraId: string
+): ExpedienteRecomercializacion {
+  const actuales = expediente.mejorasPropuestas ?? [];
+  return {
+    ...expediente,
+    mejorasPropuestas: actuales.filter((m) => m.id !== mejoraId),
+    updatedAt: ahoraISO(),
+  };
+}
+
+export interface EscenarioROI {
+  id: 'sin_reforma' | 'parcial' | 'completa';
+  label: string;
+  descripcion: string;
+  numeroMejoras: number;
+  inversionMin: number;
+  inversionMax: number;
+  inversionMedia: number;
+  rentaExtraMensual: number;
+  rentaExtraAnual: number;
+  plusvaliaEstimada: number;
+  paybackMeses: number | undefined;
+  roiAnualPct: number | undefined;
+}
+
+function sumarEscenario(id: EscenarioROI['id'], label: string, descripcion: string, mejoras: MejoraROI[]): EscenarioROI {
+  const inversionMin = mejoras.reduce((acc, m) => acc + (Number(m.costeEstimadoMin) || 0), 0);
+  const inversionMax = mejoras.reduce((acc, m) => acc + (Number(m.costeEstimadoMax) || 0), 0);
+  const inversionMedia = mejoras.reduce((acc, m) => acc + costeMedioMejora(m), 0);
+  const rentaExtraMensual = mejoras.reduce((acc, m) => acc + (Number(m.incrementoRentaMensual) || 0), 0);
+  const plusvaliaEstimada = mejoras.reduce((acc, m) => acc + (Number(m.incrementoValoracion) || 0), 0);
+  const rentaExtraAnual = Math.round(rentaExtraMensual * 12 * 100) / 100;
+  return {
+    id,
+    label,
+    descripcion,
+    numeroMejoras: mejoras.length,
+    inversionMin: Math.round(inversionMin),
+    inversionMax: Math.round(inversionMax),
+    inversionMedia: Math.round(inversionMedia),
+    rentaExtraMensual: Math.round(rentaExtraMensual * 100) / 100,
+    rentaExtraAnual,
+    plusvaliaEstimada: Math.round(plusvaliaEstimada),
+    paybackMeses:
+      rentaExtraMensual > 0 && inversionMedia > 0
+        ? Math.round((inversionMedia / rentaExtraMensual) * 10) / 10
+        : undefined,
+    roiAnualPct:
+      inversionMedia > 0 ? Math.round((rentaExtraAnual / inversionMedia) * 1000) / 10 : undefined,
+  };
+}
+
+/**
+ * FASE 3.4 — Los tres escenarios de la especificación:
+ *  - sin_reforma: no se actúa.
+ *  - parcial: solo las mejoras confirmadas por el propietario (puesta a punto).
+ *  - completa: todas las mejoras propuestas.
+ */
+export function escenariosROI(mejoras: MejoraROI[]): EscenarioROI[] {
+  const confirmadas = mejoras.filter((m) => m.confirmadaPorPropietario);
+  return [
+    sumarEscenario('sin_reforma', 'Sin reformar', 'Se publica la vivienda en su estado actual.', []),
+    sumarEscenario(
+      'parcial',
+      'Reforma parcial / puesta a punto',
+      'Actuaciones confirmadas: pintura, limpieza, pequeños arreglos y mejoras de bajo coste.',
+      confirmadas
+    ),
+    sumarEscenario(
+      'completa',
+      'Reforma completa',
+      'Todas las mejoras propuestas, incluidas cocina, baños y actualizaciones de fondo.',
+      mejoras
+    ),
+  ];
+}
+
+/**
+ * Agrupa las sugerencias del diagnóstico de fotos que aún no tienen mejora
+ * asociada (texto libre orientativo para alimentar al generador de IA).
+ */
+export function sugerenciasDesdeFotos(expediente: ExpedienteRecomercializacion): string[] {
+  const fotos = expediente.revisionFotografica?.fotografias ?? [];
+  const lista: { estancia: string; textos: string[] }[] = [];
+  fotos.forEach((f) => {
+    const textos = f.analisisIa?.sugerenciasMejora ?? [];
+    if (textos.length) lista.push({ estancia: ESTANCIA_LABEL[f.estancia] || 'Estancia', textos });
+  });
+  return lista.flatMap((l) => l.textos.map((t) => `${l.estancia}: ${t}`));
 }
 
 /** Crea un expediente nuevo en BORRADOR/SALIDA según se informe la salida. */

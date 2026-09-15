@@ -2936,6 +2936,7 @@ export default function App() {
               expedientes={scopedExpedientesRecomerc}
               inmuebles={scopedInmuebles}
               contratos={scopedContratos}
+              profesionales={scopedProfesionales}
               currentUser={currentUser}
               contextoNuevo={nuevoExpedienteCtx}
               onConsumirContexto={() => setNuevoExpedienteCtx(null)}

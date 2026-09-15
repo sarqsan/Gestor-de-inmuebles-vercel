@@ -7,6 +7,7 @@ import {
   CalendarClock,
   KeyRound,
   Camera,
+  Wrench,
   ArrowRight,
 } from 'lucide-react';
 import type {
@@ -14,6 +15,7 @@ import type {
   EstadoRecomercializacion,
   ExpedienteRecomercializacion,
   Inmueble,
+  Profesional,
   UsuarioApp,
 } from '../../types';
 import { formatDate } from '../../utils/formatters';
@@ -29,6 +31,7 @@ interface Props {
   expedientes: ExpedienteRecomercializacion[];
   inmuebles: Inmueble[];
   contratos: ContratoFormalizacion[];
+  profesionales?: Profesional[];
   currentUser?: UsuarioApp | null;
   contextoNuevo?: ContextoNuevoExpediente | null;
   onConsumirContexto?: () => void;
@@ -41,6 +44,7 @@ export const RecomercializacionSection: React.FC<Props> = ({
   expedientes,
   inmuebles,
   contratos,
+  profesionales,
   currentUser,
   contextoNuevo,
   onConsumirContexto,
@@ -64,6 +68,19 @@ export const RecomercializacionSection: React.FC<Props> = ({
   }, [contextoNuevo, onConsumirContexto]);
 
   const inmuebleMap = useMemo(() => new Map(inmuebles.map((i) => [i.id, i])), [inmuebles]);
+
+  // FASE 3.4: renta del contrato anterior (base para las estimaciones de ROI/pricing).
+  const rentaAnteriorDe = (exp: ExpedienteRecomercializacion): number | undefined => {
+    const porId = exp.contratoAnteriorId
+      ? contratos.find((c) => c.id === exp.contratoAnteriorId)
+      : undefined;
+    const candidato =
+      porId ||
+      contratos
+        .filter((c) => c.inmuebleId === exp.inmuebleId)
+        .sort((a, b) => (b.fechaInicioContrato || '').localeCompare(a.fechaInicioContrato || ''))[0];
+    return candidato?.rentaMensual;
+  };
   const etiquetaInmueble = (id: string) => {
     const i = inmuebleMap.get(id);
     return i ? `${i.direccion}${i.ciudad ? `, ${i.ciudad}` : ''}` : 'Inmueble eliminado';
@@ -251,6 +268,12 @@ export const RecomercializacionSection: React.FC<Props> = ({
                       {e.revisionFotografica!.fotografias.length === 1 ? '' : 's'}
                     </span>
                   )}
+                  {(e.mejorasPropuestas?.length ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-1 text-teal-600">
+                      <Wrench className="w-3.5 h-3.5" />
+                      {e.mejorasPropuestas!.length} mejora(s)
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end mt-3 text-indigo-600 text-xs font-semibold opacity-0 group-hover:opacity-100 transition">
@@ -278,6 +301,8 @@ export const RecomercializacionSection: React.FC<Props> = ({
         <DetalleExpedienteModal
           expediente={expedientes.find((x) => x.id === seleccionado.id) || seleccionado}
           inmueble={inmuebleMap.get(seleccionado.inmuebleId)}
+          profesionales={profesionales}
+          rentaAnterior={rentaAnteriorDe(seleccionado)}
           onGuardar={onGuardar}
           onEliminar={onEliminar}
           onClose={() => setSeleccionado(null)}

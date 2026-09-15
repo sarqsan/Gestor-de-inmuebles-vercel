@@ -10,6 +10,7 @@
 
 import type {
   ComparableMercado,
+  DatosCatastrales,
   ExpedienteRecomercializacion,
   MejoraROI,
   PricingRecomercializacion,
@@ -22,9 +23,54 @@ export interface EntradaPricing {
   mejoras?: MejoraROI[];
   comparables?: ComparableMercado[];
   superficieM2?: number;
+  habitaciones?: number;
+  banos?: number;
+  tipoInmueble?: string;
+  catastro?: DatosCatastrales;
   esVenta?: boolean;
   valorVentaReferencia?: number; // valoración manual/histórica si no hay comparables
   precioM2VentaManual?: number;
+}
+
+/**
+ * FASE 3.5.1 — selecciona los testigos de características homogéneas
+ * (m² ±15%, habitaciones/baños parecidos). Los testigos sin datos
+ * suficientes para descartarlos se mantienen; si existe al menos uno
+ * con superficie válida, el grupo homogéneo pasa a ser la referencia.
+ */
+export function comparablesHomogeneos(
+  comparables: ComparableMercado[],
+  activo: { superficieM2?: number; habitaciones?: number; banos?: number }
+): { seleccion: ComparableMercado[]; excluidos: ComparableMercado[] } {
+  const conMetros = comparables.filter((c) => Number(c.metros) > 0);
+  if (Number(activo.superficieM2) <= 0 || conMetros.length === 0) {
+    return { seleccion: comparables, excluidos: [] };
+  }
+  const m2Activo = Number(activo.superficieM2);
+  const esHomogeneo = (c: ComparableMercado): boolean => {
+    if (Number(c.metros) > 0) {
+      const dif = Math.abs((Number(c.metros) - m2Activo) / m2Activo);
+      if (dif > 0.15) return false;
+    }
+    if (c.habitaciones !== undefined && activo.habitaciones !== undefined) {
+      if (Math.abs(c.habitaciones - activo.habitaciones) > 1) return false;
+    }
+    if (c.banos !== undefined && activo.banos !== undefined) {
+      if (Math.abs(c.banos - activo.banos) > 1) return false;
+    }
+    return true;
+  };
+  const seleccion = conMetros.filter(esHomogeneo);
+  if (seleccion.length === 0) {
+    // Ningún testigo con superficie encaja: no descartamos a ciegas.
+    return { seleccion: comparables, excluidos: [] };
+  }
+  // Se conservan también los que no tienen superficie (no se pueden descartar).
+  const sinMetros = comparables.filter((c) => !(Number(c.metros) > 0));
+  const excluidos = comparables.filter(
+    (c) => Number(c.metros) > 0 && !seleccion.includes(c)
+  );
+  return { seleccion: [...seleccion, ...sinMetros], excluidos };
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -76,6 +122,8 @@ export interface ResultadoPricing {
     m2VentaComparables?: number;
     numeroComparablesAlquiler: number;
     numeroComparablesVenta: number;
+    numeroComparablesTotal: number;
+    numeroExcluidosNoHomogeneos: number;
   };
   notas: string[];
 }
@@ -85,10 +133,41 @@ export function calcularPricing(input: EntradaPricing): ResultadoPricing {
   const rentaAnterior = Math.max(Number(input.rentaAnterior) || 0, 0);
   const ipcPct = Number(input.ipcAcumuladoPct) || 0;
   const ajustePct = Number(input.ajusteMercadoPct) || 0;
-  const superficie = Math.max(Number(input.superficieM2) || 0, 0);
-  const comparables = input.comparables ?? [];
+  const catastro = input.catastro;
+  const superficieCat = Math.max(Number(catastro?.superficieCatastralConstruida) || 0, 0);
+  // La superficie útil/declarada manda (la catastral, construida con comunes,
+  // sólo se usa como respaldo si no hay superficie declarada).
+  const superficie = Math.max(Number(input.superficieM2) || 0, 0) || superficieCat;
+  const comparablesTodos = input.comparables ?? [];
+  const { seleccion: comparables, excluidos: excluidosNoHomogeneos } = comparablesHomogeneos(
+    comparablesTodos,
+    { superficieM2: superficie, habitaciones: input.habitaciones, banos: input.banos }
+  );
 
   const { rentaExtraMensual, plusvalia, confirmadas } = resumenMejorasConfirmadas(input.mejoras);
+
+  // --- Notas de perfil catastral (FASE 3.5.1) ---
+  if (catastro?.referenciaCatastral) {
+    const partes: string[] = [];
+    if (catastro.anioConstruccion && catastro.anioConstruccion > 1800) {
+      const edad = new Date().getFullYear() - catastro.anioConstruccion;
+      partes.push(`año de construcción ${catastro.anioConstruccion} (≈ ${edad} años)`);
+    }
+    if (superficieCat > 0) partes.push(`${superficieCat} m² construidos catastrales`);
+    if (catastro.valorCatastral) {
+      partes.push(`valor catastral ${catastro.valorCatastral.toLocaleString('es-ES')} € (referencia administrativa, no de mercado)`);
+    }
+    if (partes.length) notas.push(`Catastro (ref. ${catastro.referenciaCatastral}): ${partes.join('; ')}.`);
+    const supDeclarada = Math.max(Number(input.superficieM2) || 0, 0);
+    if (supDeclarada > 0 && superficieCat > 0) {
+      const dif = Math.abs(superficieCat - supDeclarada) / supDeclarada;
+      if (dif > 0.1) {
+        notas.push(
+          `La superficie catastral (${superficieCat} m²) y la declarada (${supDeclarada} m²) difieren más de un 10%; conviene revisar si se comparan m² útiles o construidos antes de publicar.`
+        );
+      }
+    }
+  }
 
   // --- 1) Base actualizada por IPC desde el contrato anterior ---
   const baseActualizadaIPC = rentaAnterior > 0 ? rentaAnterior * (1 + ipcPct / 100) : 0;
@@ -118,9 +197,15 @@ export function calcularPricing(input: EntradaPricing): ResultadoPricing {
         ? 0.65 * medianaAlquiler + 0.35 * baseActualizadaIPC
         : medianaAlquiler;
     notas.push(
-      `Comparables de alquiler: ${alquileres.length} testigo(s); mediana ${redondearRenta(medianaAlquiler)} €/mes` +
+      `Comparables homogéneos de alquiler: ${alquileres.length} testigo(s); mediana ${redondearRenta(medianaAlquiler)} €/mes` +
         (m2AlquilerComparables > 0 ? ` (≈ ${round2(m2AlquilerComparables)} €/m²·mes).` : '.')
     );
+    if (excluidosNoHomogeneos.length > 0) {
+      const alqEx = excluidosNoHomogeneos.filter((c) => Number(c.precioAlquilerMensual) > 0).length;
+      notas.push(
+        `${excluidosNoHomogeneos.length} testigo(s) con características distintas (${alqEx} en alquiler) no se usan como referencia directa de precio; conviene buscar anuncios del mismo tipo, m², habitaciones y zona.`
+      );
+    }
   } else if (baseActualizadaIPC > 0) {
     mercadoAlquiler = baseActualizadaIPC * (1 + ajustePct / 100);
     notas.push(
@@ -216,6 +301,8 @@ export function calcularPricing(input: EntradaPricing): ResultadoPricing {
       m2VentaComparables: m2VentaComparables || undefined,
       numeroComparablesAlquiler: alquileres.length,
       numeroComparablesVenta: Math.max(ratiosVentaM2.length, preciosVenta.length),
+      numeroComparablesTotal: comparablesTodos.length,
+      numeroExcluidosNoHomogeneos: excluidosNoHomogeneos.length,
     },
     notas,
   };

@@ -472,6 +472,8 @@ export interface Inmueble {
   fianzaMeses: number;
   referenciaCatastral?: string;
   codigoPostal?: string;
+  // FASE 3.5.1 — detalle catastral para afinar la valoración
+  datosCatastrales?: DatosCatastrales;
   // Vinculación con Propietarios y Cuentas Bancarias
   propietarioId?: string; // ID permanente del Propietario titular vinculado
   propietarioPrincipalId?: string;
@@ -1590,6 +1592,28 @@ export interface DatosSalidaInquilino {
   contratoEstado?: 'ACTIVO' | 'EN_PROCESO_RESOLUCION' | 'FINALIZADO_LIQUIDADO';
 }
 
+/**
+ * Datos catastrales del activo (FASE 3.5.1). El propietario puede
+ * transcribirlos desde el IBI / la Sede Electrónica del Catastro; la
+ * plataforma puede completar dirección y coordenadas con el servicio
+ * público OVC (sólo datos abiertos; superficie construida, año y valor
+ * catastral NO los sirve ese servicio sin convenio).
+ */
+export interface DatosCatastrales {
+  referenciaCatastral: string;
+  superficieCatastralConstruida?: number; // m² construidos catastrales
+  anioConstruccion?: number;
+  valorCatastral?: number;
+  usoCatastral?: string; // p. ej. "V: Vivienda"
+  planta?: string;
+  direccionCatastral?: string; // Domicilio normalizado (ldt) por la OVC
+  latitud?: number;
+  longitud?: number;
+  fuente?: 'manual' | 'catastro_ovc';
+  fechaConsulta?: string; // ISO
+  notas?: string;
+}
+
 /** Testigo/manual de mercado de la misma zona y tipología (FASE 3.5). */
 export interface ComparableMercado {
   id: string;
@@ -1598,6 +1622,13 @@ export interface ComparableMercado {
   metros?: number;
   precioAlquilerMensual?: number;
   precioVenta?: number;
+  // FASE 3.5.1 — características para comparar perfiles homogéneos
+  habitaciones?: number;
+  banos?: number;
+  tipoInmueble?: string;
+  planta?: string;
+  estadoConservacion?: 'nuevo' | 'bueno' | 'reformado' | 'a_reformar' | 'desconocido';
+  distanciaKm?: number; // distancia aproximada al activo
 }
 
 export interface PricingRecomercializacion {

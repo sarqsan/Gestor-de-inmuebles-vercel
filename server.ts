@@ -1682,29 +1682,59 @@ app.post('/api/estimar-pricing', async (req, res) => {
             const m2 = Number(c?.metros) > 0 ? `${c.metros} m²` : 'superficie no indicada';
             const alq = Number(c?.precioAlquilerMensual) > 0 ? `alquiler ${c.precioAlquilerMensual} €/mes` : '';
             const ven = Number(c?.precioVenta) > 0 ? `venta ${c.precioVenta} €` : '';
-            return `${i + 1}. ${m2}, ${[alq, ven, c?.fuente || ''].filter(Boolean).join(', ')}.`;
+            const carac = [
+              c?.tipoInmueble,
+              Number(c?.habitaciones) > 0 ? `${c.habitaciones} hab.` : '',
+              Number(c?.banos) > 0 ? `${c.banos} baños` : '',
+              c?.planta ? `planta ${c.planta}` : '',
+              c?.estadoConservacion && c.estadoConservacion !== 'desconocido' ? `estado ${String(c.estadoConservacion).replace('_', ' ')}` : '',
+              Number(c?.distanciaKm) >= 0 ? `a ${c.distanciaKm} km` : '',
+              c?.fuente || '',
+            ]
+              .filter(Boolean)
+              .join(', ');
+            return `${i + 1}. ${m2}, ${[alq, ven].filter(Boolean).join(', ') || 'sin precio'} (${carac}).`;
           })
           .join('\n')
       : 'No se han aportado comparables.';
 
+    const cat = b.catastro || {};
+    const anioCat = Number(cat.anioConstruccion);
+    const antiguedad = anioCat > 1800 && anioCat <= new Date().getFullYear() ? new Date().getFullYear() - anioCat : undefined;
+    const catastroTxt = cat.referenciaCatastral
+      ? [
+          `Referencia catastral ${cat.referenciaCatastral}`,
+          Number(cat.superficieCatastralConstruida) > 0 ? `${cat.superficieCatastralConstruida} m² construidos catastrales` : '',
+          anioCat > 1800 ? `año de construcción ${anioCat} (≈ ${antiguedad} años)` : '',
+          Number(cat.valorCatastral) > 0 ? `valor catastral ${cat.valorCatastral} € (dato administrativo, NO de mercado)` : '',
+          cat.planta ? `planta ${cat.planta}` : '',
+          cat.usoCatastral ? `uso ${cat.usoCatastral}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : 'Sin datos catastrales cargados.';
+
     const prompt = `Eres un tasador y asesor inmobiliario prudente en España. Debes revisar una ESTIMACIÓN DE PRECIO para volver a comercializar una vivienda, apoyándote SOLO en los datos que se aportan. Si falta información de mercado, NO inventes testigos ni portales: mantén la base calculada y marca confianza baja.
 
 DATOS APORTADOS:
-- Zona: ${[b.ciudad, b.codigoPostal].filter(Boolean).join(', ') || 'no indicada'} · ${b.superficie ? `${b.superficie} m²` : 'superficie no indicada'} · ${b.habitaciones ? `${b.habitaciones} hab.` : ''}
+- Zona: ${[b.ciudad, b.codigoPostal].filter(Boolean).join(', ') || 'no indicada'} · ${b.superficie ? `${b.superficie} m²` : 'superficie no indicada'} · ${b.habitaciones ? `${b.habitaciones} hab.` : ''} · ${b.banos ? `${b.banos} baños` : ''} · ${b.tipoInmueble || 'tipología no indicada'}
+- CATASTRO: ${catastroTxt}
 - Destino previsto: ${b.destino || 'alquiler tradicional'}
 - Renta del contrato anterior: ${b.rentaAnterior ? `${b.rentaAnterior} €/mes` : 'no indicada'} · IPC/acuerdo acumulado: ${b.ipcAcumuladoPct ?? 0}% · ajuste de mercado manual: ${b.ajusteMercadoPct ?? 0}%
 - Mejoras confirmadas (estimadas): +${b.mejoraRenta || 0} €/mes
-COMPARABLES:
+COMPARABLES (testigos que el propietario ha localizado en la zona):
 ${comparablesTxt}
 BASE CALCULADA (puedes ajustarla con moderación, máximo ±6% en alquiler y ±8% en venta y solo si los comparables lo justifican):
 - Alquiler conservador ${base.escenarioConservador ?? 0} €/mes, recomendado ${base.escenarioRecomendado ?? 0} €/mes, máximo razonable ${base.escenarioMaximo ?? 0} €/mes, ${base.precioM2Alquiler ?? 0} €/m²·mes.
 - Venta estimada ${base.valoracionVentaEstimada ?? 0} € (horquilla ${base.horquillaVentaMin ?? 0}-${base.horquillaVentaMax ?? 0}, salida ${base.precioSalidaRecomendado ?? 0}, ${base.precioM2Venta ?? 0} €/m²), plazo medio ${base.plazoMedioComercializacionDias ?? 90} días.
 
 REGLAS:
+- COMPARACIÓN HOMOGÉNEA: para inferir el mercado utiliza únicamente testigos con la misma tipología, superficie dentro de ±15%, número de habitaciones/baños similar, antigüedad y estado parecidos, y mismo código postal o barrios colindantes. Ignora como referencia de precio los testigos no homogéneos (aun así puedes mencionar que existen) y señala si la muestra es pequeña o dispersa. No inventes testigos: sólo existen los listados.
+- Los datos catastrales sirven para caracterizar el activo: el año de construcción orienta sobre antigüedad y la superficie catastral contrasta la declarada (si difieren en más de un 10%, menciónalo con prudencia y sin afirmar cuál es la correcta). El VALOR CATASTRAL es administrativo y NUNCA debe usarse como valor de mercado.
 - Los tres escenarios de alquiler son: CONSERVADOR (rápida absorción, mínimo riesgo de vacancia), RECOMENDADO (equilibrio rentabilidad-plazo) y MÁXIMO RAZONABLE (tope para perfiles de alta solvencia).
 - El máximo debe ser >= recomendado >= conservador. Precios de alquiler redondeados a múltiplos de 5 €; venta a centenas.
 - Lenguaje no asertivo en las notas: indicios, horquillos probables, "podría", "conviene contrastar". Nada de certezas ni rentabilidades garantizadas.
-- "confianza" es "alta" solo con 3+ comparables coherentes de la zona; "media" con 1-2; "baja" sin comparables.
+- "confianza" es "alta" solo con 3+ comparables HOMOGÉNEOS y coherentes de la zona; "media" con 1-2 homogéneos; "baja" sin comparables homogéneos (aunque haya otros no comparables).
 - En venta sin datos suficientes, devuelve los importes de la base y confianza baja.
 
 Responde SOLO con JSON válido:
@@ -1767,6 +1797,81 @@ Responde SOLO con JSON válido:
   } catch (error: any) {
     console.error('Error en /api/estimar-pricing:', error);
     return res.status(500).json({ error: 'No se pudo estimar el pricing.' });
+  }
+});
+
+// ============================================================
+// FASE 3.5.1 — CONSULTA ABIERTA AL CATASTRO (OVC)
+// Datos abiertos sin convenio: la referencia devuelve el domicilio
+// normalizado y las coordenadas de la parcela. La superficie
+// construida, el año y el valor catastral NO los publica este
+// servicio (requieren acceso con credenciales), por lo que los
+// transcribe el propietario desde el IBI / la Sede Electrónica.
+// ============================================================
+
+const unwrapOvc = (v: any): any => (Array.isArray(v) ? v[0] : v);
+
+app.post('/api/catastro/consultar', async (req, res) => {
+  try {
+    const ref = String(req.body?.referenciaCatastral || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    if (ref.length < 14) {
+      return res.status(400).json({ ok: false, error: 'Introduce una referencia catastral válida (14-20 caracteres).' });
+    }
+    const url =
+      'https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCallejero.svc/json/Consulta_CPMRC' +
+      `?Provincia=&Municipio=&SRS=EPSG:4326&RefCat=${encodeURIComponent(ref)}`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+    let payload: any;
+    try {
+      const resp = await fetch(url, {
+        headers: { Accept: 'application/json', 'User-Agent': 'GestorPatrimonial/1.0 (validacion catastral)' },
+        signal: controller.signal,
+      });
+      payload = await resp.json();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const result = unwrapOvc(payload?.Consulta_CPMRCResult ?? payload?.consulta_cpmrcResult);
+    const control = unwrapOvc(result?.control);
+    const coord = unwrapOvc(result?.coordenada);
+    const geo = unwrapOvc(coord?.geo);
+    const pc = unwrapOvc(coord?.pc);
+    const ldt = Array.isArray(coord?.ldt) ? coord.ldt[0] : coord?.ldt;
+    const errorTxt = Array.isArray(control?.error) ? control.error[0] : control?.error;
+
+    if (control?.cuerr === '1' || errorTxt || !geo) {
+      return res.json({
+        ok: false,
+        error: errorTxt
+          ? String(errorTxt)
+          : 'La referencia no se ha podido localizar en el Catastro; verifícala o completa los datos manualmente.',
+      });
+    }
+
+    const latitud = Number(geo?.ycen);
+    const longitud = Number(geo?.xcen);
+    return res.json({
+      ok: true,
+      referenciaCatastral: [pc?.pc1, pc?.pc2].filter(Boolean).join('') || ref,
+      direccionCatastral: typeof ldt === 'string' ? ldt : undefined,
+      latitud: Number.isFinite(latitud) ? latitud : undefined,
+      longitud: Number.isFinite(longitud) ? longitud : undefined,
+      fuente: 'catastro_ovc',
+      fechaConsulta: new Date().toISOString(),
+      aviso:
+        'Localización obtenida del servicio público del Catastro. La superficie construida, ' +
+        'el año de construcción y el valor catastral deben transcribirse del IBI o la Sede Electrónica.',
+    });
+  } catch (error: any) {
+    console.warn('Consulta catastral no disponible:', String(error?.message || error));
+    // Nunca bloquear el flujo de valoración: se pueden cargar los datos a mano.
+    return res.json({
+      ok: false,
+      error: 'No se pudo contactar con el Catastro (red o servicio no disponible). Puedes completar los datos manualmente.',
+    });
   }
 });
 

@@ -11,6 +11,7 @@ import {
   AlertCircle,
   TrendingUp,
   Building,
+  Landmark,
 } from 'lucide-react';
 import type {
   ComparableMercado,
@@ -80,6 +81,10 @@ export const PricingModal: React.FC<Props> = ({
         mejoras: expediente.mejorasPropuestas,
         comparables,
         superficieM2: superficie || undefined,
+        habitaciones: inmueble?.habitaciones,
+        banos: inmueble?.banos,
+        tipoInmueble: inmueble?.tipoInmueble,
+        catastro: inmueble?.datosCatastrales,
         esVenta,
         valorVentaReferencia: inmueble?.valoracionEstimada ?? inmueble?.valorAdquisicion,
         precioM2VentaManual: precioM2Venta === '' ? undefined : Number(precioM2Venta),
@@ -218,6 +223,50 @@ export const PricingModal: React.FC<Props> = ({
             </div>
           )}
 
+          {/* Perfil físico y catastral (FASE 3.5.1) */}
+          <div className="rounded-xl border border-slate-200 p-4">
+            <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+              <Landmark className="w-4 h-4 text-indigo-600" /> Perfil físico y catastral
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5">
+                <p className="text-[9px] font-semibold text-slate-400">Tipología</p>
+                <p className="font-semibold text-slate-700 capitalize">{inmueble?.tipoInmueble || '—'}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5">
+                <p className="text-[9px] font-semibold text-slate-400">Hab. / Baños</p>
+                <p className="font-semibold text-slate-700">{inmueble?.habitaciones ?? '—'} / {inmueble?.banos ?? '—'}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5">
+                <p className="text-[9px] font-semibold text-slate-400">Año construcción</p>
+                <p className="font-semibold text-slate-700">
+                  {inmueble?.datosCatastrales?.anioConstruccion
+                    ? `${inmueble.datosCatastrales.anioConstruccion} (${new Date().getFullYear() - inmueble.datosCatastrales.anioConstruccion} años)`
+                    : '—'}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5">
+                <p className="text-[9px] font-semibold text-slate-400">m² catastrales</p>
+                <p className="font-semibold text-slate-700">{inmueble?.datosCatastrales?.superficieCatastralConstruida ?? '—'}</p>
+              </div>
+            </div>
+            {inmueble?.datosCatastrales?.referenciaCatastral ? (
+              <p className="text-[10px] text-slate-400 mt-2">
+                Ref. catastral <span className="font-mono">{inmueble.datosCatastrales.referenciaCatastral}</span>
+                {inmueble.datosCatastrales.valorCatastral
+                  ? ` · valor catastral ${inmueble.datosCatastrales.valorCatastral.toLocaleString('es-ES')} € (no es valor de mercado)`
+                  : ''}
+                {' '}· la IA compara solo con testigos de tipología, m², habitaciones y zona similares.
+              </p>
+            ) : (
+              <p className="text-[10px] text-amber-700 mt-2">
+                Sin datos catastrales. Cárgalos en el inmueble (Apartado fiscal: año de construcción,
+                superficie catastral y, si quieres, valida la referencia con el Catastro) para que la
+                valoración considere la antigüedad y la comparación homogénea por zona.
+              </p>
+            )}
+          </div>
+
           {/* Hipótesis */}
           <div className="rounded-xl border border-slate-200 p-4">
             <h4 className="text-xs font-bold text-slate-700 mb-3">Hipótesis de partida</h4>
@@ -294,22 +343,25 @@ export const PricingModal: React.FC<Props> = ({
             ) : (
               <div className="space-y-2">
                 <div className="grid grid-cols-12 gap-2 text-[9px] font-bold text-slate-400 px-1">
-                  <span className="col-span-4">Fuente / enlace / nota</span>
+                  <span className="col-span-3">Fuente / enlace / nota</span>
                   <span className="col-span-2">m²</span>
+                  <span className="col-span-1">Hab.</span>
                   <span className="col-span-3">Alquiler €/mes</span>
                   <span className="col-span-2">Venta €</span>
                   <span className="col-span-1"></span>
                 </div>
                 {comparables.map((c) => (
                   <div key={c.id} className="grid grid-cols-12 gap-2 items-center">
-                    <input className={`${inputCls} col-span-4`} value={c.fuente || ''} placeholder="Portal / inmobiliaria"
-                      onChange={(e) => editarComparable(c.id, { fuente: e.target.value })} />
+                    <input className={`${inputCls} col-span-3`} value={c.fuente || ''} placeholder="Portal / inmobiliaria"
+                      onChange={(e) => { editarComparable(c.id, { fuente: e.target.value }); }} />
                     <input type="number" className={`${inputCls} col-span-2`} value={c.metros ?? ''}
-                      onChange={(e) => editarComparable(c.id, { metros: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                      onChange={(e) => { editarComparable(c.id, { metros: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
+                    <input type="number" className={`${inputCls} col-span-1`} value={c.habitaciones ?? ''} placeholder="—"
+                      onChange={(e) => { editarComparable(c.id, { habitaciones: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
                     <input type="number" className={`${inputCls} col-span-3`} value={c.precioAlquilerMensual ?? ''}
-                      onChange={(e) => editarComparable(c.id, { precioAlquilerMensual: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                      onChange={(e) => { editarComparable(c.id, { precioAlquilerMensual: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
                     <input type="number" className={`${inputCls} col-span-2`} value={c.precioVenta ?? ''}
-                      onChange={(e) => editarComparable(c.id, { precioVenta: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                      onChange={(e) => { editarComparable(c.id, { precioVenta: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
                     <button type="button" onClick={() => borrarComparable(c.id)} className="col-span-1 p-1 text-slate-400 hover:text-rose-600">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -376,7 +428,8 @@ export const PricingModal: React.FC<Props> = ({
         {/* Pie */}
         <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 flex-wrap">
           <span className="text-[11px] text-slate-400">
-            {calculo.metricas.numeroComparablesAlquiler} testigo(s) de alquiler · {calculo.metricas.numeroComparablesVenta} de venta
+            {calculo.metricas.numeroComparablesAlquiler} testigo(s) homogéneo(s) de alquiler · {calculo.metricas.numeroComparablesVenta} de venta
+            {calculo.metricas.numeroExcluidosNoHomogeneos ? ` · ${calculo.metricas.numeroExcluidosNoHomogeneos} excluido(s) por características` : ''}
           </span>
           <div className="flex items-center gap-2">
             <button

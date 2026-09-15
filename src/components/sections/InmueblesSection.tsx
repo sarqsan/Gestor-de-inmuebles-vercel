@@ -4,6 +4,7 @@ import {
   Candidato,
   VisitSlot,
   InvitacionVisita,
+  DatosCatastrales,
   DatosFiscalesInmueble,
   PropietarioFiscal,
   Propietario,
@@ -197,6 +198,10 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [editSelectedCuentaId, setEditSelectedCuentaId] = useState<string>('');
   const [editSelectedProp2Id, setEditSelectedProp2Id] = useState<string>('');
   const [editReferenciaCatastral, setEditReferenciaCatastral] = useState('');
+  // FASE 3.5.1 — detalle catastral
+  const [editCatastro, setEditCatastro] = useState<Partial<DatosCatastrales>>({});
+  const [catastroConsultando, setCatastroConsultando] = useState(false);
+  const [catastroAviso, setCatastroAviso] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
   const [editCodigoPostal, setEditCodigoPostal] = useState('');
   const [editIbanCobro, setEditIbanCobro] = useState('');
   const [editCertificadoEnergetico, setEditCertificadoEnergetico] = useState('');
@@ -606,6 +611,12 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
     const df = inm.datosFiscales;
     setEditReferenciaCatastral(inm.referenciaCatastral || df?.referenciaCatastral || '');
+    setEditCatastro(
+      inm.datosCatastrales
+        ? { ...inm.datosCatastrales }
+        : { referenciaCatastral: inm.referenciaCatastral || df?.referenciaCatastral || undefined }
+    );
+    setCatastroAviso(null);
     setEditCodigoPostal(inm.codigoPostal || df?.codigoPostal || '');
     const currentIban = df?.ibanCobro || inm.ibanCobro || '';
     setEditIbanCobro(currentIban);
@@ -652,6 +663,40 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setEditProp2EsPersonaJuridica(df?.segundoPropietario?.esPersonaJuridica || false);
   };
 
+  // FASE 3.5.1 — valida/localiza la referencia en el Catastro (servicio público OVC)
+  const handleConsultarCatastro = async () => {
+    const ref = editReferenciaCatastral.trim();
+    if (ref.replace(/[^a-zA-Z0-9]/g, '').length < 14) {
+      setCatastroAviso({ tipo: 'err', texto: 'Introduce una referencia catastral válida (14-20 caracteres).' });
+      return;
+    }
+    setCatastroConsultando(true);
+    setCatastroAviso(null);
+    try {
+      const resp = await fetch('/api/catastro/consultar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenciaCatastral: ref }),
+      });
+      const j = await resp.json();
+      if (j.ok) {
+        const refNormalizada = j.referenciaCatastral || ref;
+        setEditCatastro((prev) => ({ ...prev, ...j, referenciaCatastral: refNormalizada }));
+        setEditReferenciaCatastral(refNormalizada);
+        setCatastroAviso({
+          tipo: 'ok',
+          texto: `Referencia localizada${j.direccionCatastral ? `: ${j.direccionCatastral}` : ''}. El año de construcción, la superficie y el valor catastral se completan desde el IBI o la Sede Electrónica.`,
+        });
+      } else {
+        setCatastroAviso({ tipo: 'err', texto: j.error || 'No se pudo localizar la referencia; puedes completar los datos manualmente.' });
+      }
+    } catch {
+      setCatastroAviso({ tipo: 'err', texto: 'Servicio del Catastro no disponible ahora; puedes completar los datos manualmente.' });
+    } finally {
+      setCatastroConsultando(false);
+    }
+  };
+
   const handleSaveEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inmuebleToEdit || !onUpdateInmueble) return;
@@ -690,6 +735,22 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       segundoPropietario: segundoProp,
     };
 
+    const refCatEdit = editReferenciaCatastral.trim();
+    const numPos = (v: unknown): number | undefined => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+    const datosCatastrales: DatosCatastrales | undefined = refCatEdit
+      ? {
+          ...(editCatastro as DatosCatastrales),
+          referenciaCatastral: refCatEdit,
+          superficieCatastralConstruida: numPos(editCatastro.superficieCatastralConstruida),
+          anioConstruccion: numPos(editCatastro.anioConstruccion),
+          valorCatastral: numPos(editCatastro.valorCatastral),
+          planta: editCatastro.planta ? String(editCatastro.planta).trim() || undefined : undefined,
+        }
+      : undefined;
+
     const updated: Inmueble = {
       ...inmuebleToEdit,
       direccion: editDireccion,
@@ -704,6 +765,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       descripcion: editDescripcion.trim() || undefined,
       imagenUrl: editImagenUrl.trim() || inmuebleToEdit.imagenUrl,
       referenciaCatastral: editReferenciaCatastral.trim() || undefined,
+      datosCatastrales,
       codigoPostal: editCodigoPostal.trim() || undefined,
       propietarioId: editSelectedPropId || undefined,
       propietarioPrincipalId: editSelectedPropId || undefined,
@@ -994,6 +1056,27 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         {selectedInmueble.codigoPostal || df?.codigoPostal || '—'} {selectedInmueble.ciudad}
                       </span>
                     </div>
+
+                    {selectedInmueble.datosCatastrales && (
+                      <div className="p-3 bg-white rounded-xl border border-indigo-200">
+                        <span className="text-[10px] uppercase font-bold text-indigo-400 block mb-0.5 flex items-center gap-1">
+                          <Landmark className="w-3 h-3" /> Datos catastrales
+                        </span>
+                        <span className="font-semibold text-slate-900 text-[11px] block">
+                          {selectedInmueble.datosCatastrales.anioConstruccion
+                            ? `Año ${selectedInmueble.datosCatastrales.anioConstruccion} (${new Date().getFullYear() - selectedInmueble.datosCatastrales.anioConstruccion} años)`
+                            : 'Año sin indicar'}
+                          {selectedInmueble.datosCatastrales.superficieCatastralConstruida
+                            ? ` · ${selectedInmueble.datosCatastrales.superficieCatastralConstruida} m² cat.`
+                            : ''}
+                        </span>
+                        {selectedInmueble.datosCatastrales.valorCatastral ? (
+                          <span className="text-[10px] text-slate-500 block">
+                            Valor catastral {selectedInmueble.datosCatastrales.valorCatastral.toLocaleString('es-ES')} € (no es valor de mercado)
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
 
                     <div className="p-3 bg-white rounded-xl border border-slate-200">
                       <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">IBAN Cobro de Renta</span>
@@ -2181,6 +2264,83 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs text-slate-900"
                       />
                     </div>
+                  </div>
+
+                  {/* FASE 3.5.1 — Detalle catastral para la valoración */}
+                  <div className="p-3.5 bg-indigo-50/40 border border-indigo-200 rounded-xl space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="block font-semibold text-indigo-900 text-xs flex items-center gap-1.5">
+                        <Landmark className="w-4 h-4 text-indigo-600" />
+                        <span>Datos catastrales (la IA de precio los usa para comparar viviendas de las mismas características y zona)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleConsultarCatastro}
+                        disabled={catastroConsultando}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 bg-white border border-indigo-300 rounded-lg hover:bg-indigo-50 disabled:opacity-60"
+                      >
+                        {catastroConsultando ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                        Validar con Catastro
+                      </button>
+                    </div>
+                    {catastroAviso && (
+                      <p className={`text-[11px] rounded-lg px-2 py-1 ${catastroAviso.tipo === 'ok' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                        {catastroAviso.texto}
+                      </p>
+                    )}
+                    {editCatastro.direccionCatastral && (
+                      <p className="text-[11px] text-indigo-900/80">
+                        Domicilio Catastro: <b>{editCatastro.direccionCatastral}</b>
+                        {editCatastro.latitud && editCatastro.longitud ? ` (${editCatastro.latitud.toFixed(5)}, ${editCatastro.longitud.toFixed(5)})` : ''}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Año construcción</label>
+                        <input
+                          type="number"
+                          placeholder="Ej. 1985"
+                          value={editCatastro.anioConstruccion ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, anioConstruccion: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">m² catastrales</label>
+                        <input
+                          type="number"
+                          placeholder="Ej. 92"
+                          value={editCatastro.superficieCatastralConstruida ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, superficieCatastralConstruida: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Valor catastral (€)</label>
+                        <input
+                          type="number"
+                          placeholder="Del IBI"
+                          value={editCatastro.valorCatastral ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, valorCatastral: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Planta</label>
+                        <input
+                          type="text"
+                          placeholder="Ej. 3º"
+                          value={editCatastro.planta ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, planta: e.target.value }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                      El Catastro no publica por servicio abierto la superficie, el año ni el valor catastral (sólo localiza la
+                      referencia); transcríbelos del IBI o la Sede Electrónica. El valor catastral es administrativo y nunca
+                      se usa como valor de mercado.
+                    </p>
                   </div>
 
                   {/* IBAN Selection / Input */}

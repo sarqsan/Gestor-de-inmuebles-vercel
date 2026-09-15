@@ -258,3 +258,193 @@ export function aniosConDatos(
   });
   return Array.from(setAnos).sort((a, b) => b - a);
 }
+
+// ============================================================
+// Detalle por inmueble (FASE 2.1 — trazabilidad del cuadre)
+// ============================================================
+
+export interface MesCuadre {
+  mes: number; // 1-12
+  ingresos: number;
+  explotacion: number;
+  hipoteca: number;
+  resultadoOperativo: number;
+  cashFlow: number;
+}
+
+export interface DetalleInmueble {
+  fila: CuadreInmueble;
+  /** Vacía cuando el filtro es "Todos los años" (la cuadrícula mensual requiere un año). */
+  meses: MesCuadre[];
+  cobros: CobroPeriodo[];
+  gastos: Gasto[];
+}
+
+function mesDeGasto(g: Gasto): number | null {
+  const ref = g.periodoMesAnio || g.fechaDevengo?.slice(0, 7);
+  if (!ref) return null;
+  const m = parseInt(ref.slice(5, 7), 10);
+  return m >= 1 && m <= 12 ? m : null;
+}
+
+/**
+ * Detalle trazable de un inmueble para un año: cuadre anual, cuadrícula mensual
+ * y los movimientos (cobros y gastos no anulados) que lo componen.
+ */
+export function detalleRentabilidad(
+  args: { cobros: CobroPeriodo[]; gastos: Gasto[]; inmuebles: Inmueble[] },
+  inmuebleId: string,
+  anio: FiltroAnio
+): DetalleInmueble {
+  const filas = cuadreRentabilidad(args, anio);
+  const fila =
+    filas.find((f) => f.inmuebleId === inmuebleId) ||
+    cuadreVacio({
+      id: inmuebleId,
+      direccion: 'Inmueble',
+      ciudad: '',
+      precio: 0,
+      estado: 'disponible',
+      habitaciones: 0,
+      banos: 0,
+      superficie: 0,
+      candidatosCount: 0,
+      fianzaMeses: 0,
+    } as Inmueble);
+
+  const cobros = args.cobros
+    .filter((c) => c.inmuebleId === inmuebleId && cobroEnAnio(c, anio))
+    .sort((a, b) => {
+      const pa = a.periodoMesAnio || '';
+      const pb = b.periodoMesAnio || '';
+      return pa.localeCompare(pb);
+    });
+
+  const gastos = args.gastos
+    .filter(
+      (g) =>
+        g.inmuebleId === inmuebleId &&
+        g.estado !== 'ANULADO' &&
+        gastoEnAnio(g, anio)
+    )
+    .sort((a, b) => {
+      const fa = a.fechaDevengo || a.periodoMesAnio || '';
+      const fb = b.fechaDevengo || b.periodoMesAnio || '';
+      return fb.localeCompare(fa);
+    });
+
+  let meses: MesCuadre[] = [];
+  if (anio !== 'TODOS') {
+    meses = Array.from({ length: 12 }, (_, idx) => {
+      const mes = idx + 1;
+      const ingresos = round2(
+        cobros
+          .filter((c) => c.mes === mes)
+          .reduce((acc, c) => acc + num(c.importeRecibido), 0)
+      );
+      let explotacion = 0;
+      let hipoteca = 0;
+      gastos
+        .filter((g) => g.estado === 'PAGADO' && mesDeGasto(g) === mes)
+        .forEach((g) => {
+          const importe = num(g.importe);
+          if (g.tipo === 'FINANCIACION') hipoteca += importe;
+          else if (g.aCargoDe === 'arrendador') explotacion += importe;
+        });
+      explotacion = round2(explotacion);
+      hipoteca = round2(hipoteca);
+      const resultadoOperativo = round2(ingresos - explotacion);
+      return {
+        mes,
+        ingresos,
+        explotacion,
+        hipoteca,
+        resultadoOperativo,
+        cashFlow: round2(resultadoOperativo - hipoteca),
+      };
+    });
+  }
+
+  return { fila, meses, cobros, gastos };
+}
+
+// ============================================================
+// Exportación CSV del cuadre (FASE 2.1)
+// ============================================================
+
+const csvEscape = (valor: string | number): string => {
+  const s = String(valor);
+  return /[;"]|\r|\n/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+/** Genera el cuadre en CSV (separador `;` y BOM, listo para Excel en es-ES). */
+export function cuadreToCSV(
+  filas: CuadreInmueble[],
+  glob: CuadreGlobal,
+  anio: FiltroAnio
+): string {
+  const sep = ';';
+  const n = (v: number) => v.toFixed(2).replace('.', ',');
+  const cabeceras = [
+    'Inmueble',
+    'Ciudad',
+    'Estado',
+    'Ingresos previstos',
+    'Ingresos cobrados',
+    'Cobros pendientes',
+    'Gastos explotacion',
+    'Gastos deducibles',
+    'Resultado operativo',
+    'Margen %',
+    'Cuota hipotecaria',
+    'Intereses',
+    'Capital amortizado',
+    'Cash-flow neto',
+    'Base fiscal deducible',
+    'Rentabilidad neta %',
+  ];
+  const linea = (f: CuadreInmueble) =>
+    [
+      f.direccion,
+      f.ciudad,
+      f.alquilado ? 'alquilado' : 'disponible',
+      n(f.ingresosPrevisto),
+      n(f.ingresosCobrado),
+      n(f.cobrosPendientes),
+      n(f.gastosExplotacion),
+      n(f.gastosDeducibles),
+      n(f.resultadoOperativo),
+      f.margenOperativoPct != null ? n(f.margenOperativoPct) : '',
+      n(f.cuotaHipotecaria),
+      n(f.interesesHipotecarios),
+      n(f.capitalAmortizado),
+      n(f.cashFlowNeto),
+      n(f.baseFiscalDeducible),
+      f.rentabilidadNetaPct != null ? n(f.rentabilidadNetaPct) : '',
+    ]
+      .map(csvEscape)
+      .join(sep);
+
+  const total = [
+    `TOTAL ${anio === 'TODOS' ? 'todos los años' : anio}`,
+    '',
+    '',
+    n(glob.ingresosPrevisto),
+    n(glob.ingresosCobrado),
+    n(glob.cobrosPendientes),
+    n(glob.gastosExplotacion),
+    n(glob.gastosDeducibles),
+    n(glob.resultadoOperativo),
+    glob.margenOperativoPct != null ? n(glob.margenOperativoPct) : '',
+    n(glob.cuotaHipotecaria),
+    n(glob.interesesHipotecarios),
+    n(glob.capitalAmortizado),
+    n(glob.cashFlowNeto),
+    n(glob.baseFiscalDeducible),
+    '',
+  ]
+    .map(csvEscape)
+    .join(sep);
+
+  return `\uFEFF${[cabeceras.join(sep), ...filas.map(linea), total].join('\r\n')}`;
+}

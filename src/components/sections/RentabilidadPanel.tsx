@@ -8,15 +8,21 @@ import {
   PiggyBank,
   Calculator,
   Building2,
+  Download,
+  ChevronRight,
 } from 'lucide-react';
 import type { CobroPeriodo, Gasto, Inmueble } from '../../types';
 import {
   aniosConDatos,
   cuadreRentabilidad,
+  cuadreToCSV,
+  detalleRentabilidad,
   resumenGlobal,
   type CuadreInmueble,
+  type DetalleInmueble,
   type FiltroAnio,
 } from '../../utils/rentabilidadEngine';
+import { DetalleRentabilidadModal } from '../modals/DetalleRentabilidadModal';
 
 interface RentabilidadPanelProps {
   cobros: CobroPeriodo[];
@@ -43,6 +49,7 @@ export const RentabilidadPanel: React.FC<RentabilidadPanelProps> = ({
 }) => {
   const anios = useMemo(() => aniosConDatos(cobros, gastos), [cobros, gastos]);
   const [anio, setAnio] = useState<FiltroAnio>(anios[0] ?? new Date().getFullYear());
+  const [inmuebleSeleccionado, setInmuebleSeleccionado] = useState<string | null>(null);
 
   // Los cuadres usan todos los datos; el filtro de inmueble/propietario ya
   // viene aplicado por el ámbito (scopedCobros / scopedGastos).
@@ -51,6 +58,28 @@ export const RentabilidadPanel: React.FC<RentabilidadPanelProps> = ({
     [cobros, gastos, inmuebles, anio]
   );
   const global = useMemo(() => resumenGlobal(filas), [filas]);
+
+  // Detalle trazable del inmueble seleccionado (mensual + movimientos).
+  const detalle: DetalleInmueble | null = useMemo(
+    () =>
+      inmuebleSeleccionado
+        ? detalleRentabilidad({ cobros, gastos, inmuebles }, inmuebleSeleccionado, anio)
+        : null,
+    [inmuebleSeleccionado, cobros, gastos, inmuebles, anio]
+  );
+
+  const descargarCSV = () => {
+    const csv = cuadreToCSV(filas, global, anio);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cuadre_rentabilidad_${anio === 'TODOS' ? 'todos' : anio}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // Pendientes de pago (gastos) en el año, para la nota de caja.
   const pendienteGastos = useMemo(
@@ -136,14 +165,27 @@ export const RentabilidadPanel: React.FC<RentabilidadPanelProps> = ({
             Ingresos de alquiler frente a explotación y financiación por inmueble.
           </p>
         </div>
-        <select className={inputCls} value={String(anio)} onChange={(e) => setAnio(e.target.value === 'TODOS' ? 'TODOS' : Number(e.target.value))}>
-          {anios.map((a) => (
-            <option key={a} value={String(a)}>
-              {a}
-            </option>
-          ))}
-          <option value="TODOS">Todos los años</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            className={inputCls}
+            value={String(anio)}
+            onChange={(e) => setAnio(e.target.value === 'TODOS' ? 'TODOS' : Number(e.target.value))}
+          >
+            {anios.map((a) => (
+              <option key={a} value={String(a)}>
+                {a}
+              </option>
+            ))}
+            <option value="TODOS">Todos los años</option>
+          </select>
+          <button
+            onClick={descargarCSV}
+            title="Descargar el cuadre en CSV (Excel)"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition"
+          >
+            <Download className="w-4 h-4" /> CSV
+          </button>
+        </div>
       </div>
 
       {/* Aviso conceptual */}
@@ -181,7 +223,7 @@ export const RentabilidadPanel: React.FC<RentabilidadPanelProps> = ({
           <Building2 className="w-4 h-4 text-slate-500" />
           <h4 className="text-sm font-bold text-slate-800">Desglose por inmueble</h4>
           <span className="ml-auto text-[11px] text-slate-400">
-            {global.numInmueblesConMovimiento} con movimiento
+            {global.numInmueblesConMovimiento} con movimiento · pulsa una fila para ver el detalle
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -202,10 +244,18 @@ export const RentabilidadPanel: React.FC<RentabilidadPanelProps> = ({
               {filas.map((f: CuadreInmueble) => {
                 const sinMov = f.numCobros === 0 && f.gastosExplotacion === 0 && f.cuotaHipotecaria === 0;
                 return (
-                  <tr key={f.inmuebleId} className={sinMov ? 'opacity-50' : 'hover:bg-slate-50/70'}>
+                  <tr
+                    key={f.inmuebleId}
+                    onClick={() => setInmuebleSeleccionado(f.inmuebleId)}
+                    className={`cursor-pointer ${sinMov ? 'opacity-50' : 'hover:bg-emerald-50/40'}`}
+                    title="Ver detalle mensual y movimientos"
+                  >
                     <td className="px-4 py-2.5 max-w-[200px]">
-                      <div className="font-medium text-slate-800 line-clamp-1">{f.direccion}</div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                      <div className="flex items-center gap-1">
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                        <span className="font-medium text-slate-800 line-clamp-1">{f.direccion}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 pl-4">
                         <span className="capitalize">{f.ciudad}</span>
                         {f.alquilado && (
                           <span className="px-1.5 py-px rounded bg-emerald-100 text-emerald-700 font-semibold">
@@ -263,6 +313,14 @@ export const RentabilidadPanel: React.FC<RentabilidadPanelProps> = ({
           * Rentabilidad neta = resultado operativo anual ÷ valor de adquisición (solo si está informado en la ficha del inmueble y se selecciona un año concreto).
         </p>
       </div>
+
+      {detalle && (
+        <DetalleRentabilidadModal
+          detalle={detalle}
+          anio={anio}
+          onClose={() => setInmuebleSeleccionado(null)}
+        />
+      )}
     </div>
   );
 };

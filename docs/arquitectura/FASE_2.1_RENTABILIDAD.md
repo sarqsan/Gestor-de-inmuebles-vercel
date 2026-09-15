@@ -45,6 +45,21 @@ Base fiscal orientativa   = explotación deducible + intereses hipotecarios
   (`scopedGastos`) e `inmuebles` (`scopedInmuebles`), todos ya aislados por
   propietario (los profesionales no llegan a esta sección).
 
+### Trazabilidad por inmueble y exportación
+
+- `detalleRentabilidad(...)` en el motor devuelve, para un inmueble y año: el
+  cuadre anual, una **cuadrícula mensual** (ingresos / explotación / hipoteca /
+  resultado operativo / cash-flow por mes, con barra proporcional) y los
+  **movimientos reales** que lo sustentan (cobros y gastos no anulados). Los
+  gastos pendientes o a cargo del inquilino se muestran marcados como "no
+  computa", de modo que el total es plenamente trazable.
+- `DetalleRentabilidadModal` se abre al **pulsar una fila** de la tabla de
+  inmuebles.
+- `cuadreToCSV(filas, global, anio)` exporta el cuadre completo (columnas de
+  ingresos, explotación, deducibles, resultado, margen, hipoteca, intereses,
+  capital, cash-flow, base fiscal y rentabilidad neta) con separador `;`, coma
+  decimal y BOM, listo para Excel; botón **CSV** en la cabecera del panel.
+
 ## 3. Fórmulas y columnas
 
 | Columna | Cálculo |
@@ -67,7 +82,8 @@ cargo del inquilino (800 €) y una reparación pendiente (300 €) quedan fuera
 
 - **2.2** Recurrentes (comunidad/hipoteca mensual) y subida de facturas a
   Storage; cuotas del préstamo calculadas (capital/intereses automáticos).
-- Desglose mensual por inmueble y exportación (CSV/Excel/parte fiscal).
+- Ya incluidos en esta fase: desglose mensual por inmueble (modal de detalle) y
+  exportación CSV. Queda pendiente exportación Excel/formato fiscal oficial.
 - Vista específica de caja con gastos PENDIENTES y cobros en retraso unificada.
 - Esto es un cuadre de gestión en base a caja/devengo simple; no sustituye un
   cierre fiscal oficial (las deducciones dependen de normativa aplicable).

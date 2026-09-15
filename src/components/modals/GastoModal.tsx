@@ -6,6 +6,10 @@ import {
   Landmark,
   Save,
   AlertCircle,
+  Paperclip,
+  Trash2,
+  ExternalLink,
+  Loader2,
 } from 'lucide-react';
 import type {
   CategoriaGasto,
@@ -22,13 +26,14 @@ import {
   normalizarGasto,
   tipoDeCategoria,
 } from '../../utils/gastosEngine';
+import { uploadFacturaGasto, deleteFacturaGastoStorage } from '../../lib/firebase';
 
 interface GastoModalProps {
   gastoParaEditar?: Gasto | null;
   inmuebles: Inmueble[];
   inmuebleIdInicial?: string;
   currentUser?: UsuarioApp | null;
-  onSave: (gasto: Gasto) => Promise<void> | void;
+  onSave: (gasto: Gasto) => Promise<Gasto | void> | Gasto | void;
   onClose: () => void;
 }
 
@@ -80,6 +85,13 @@ export const GastoModal: React.FC<GastoModalProps> = ({
   const [notas, setNotas] = useState<string>(gastoParaEditar?.notas || '');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [guardando, setGuardando] = useState<boolean>(false);
+
+  // FASE 2.2: factura / justificante documental en Storage.
+  const [facturaFile, setFacturaFile] = useState<File | null>(null);
+  const [facturaUrl, setFacturaUrl] = useState<string>(gastoParaEditar?.justificanteUrl || '');
+  const [facturaPath, setFacturaPath] = useState<string>(gastoParaEditar?.justificantePath || '');
+  const [eliminarFactura, setEliminarFactura] = useState<boolean>(false);
+  const [subiendo, setSubiendo] = useState<boolean>(false);
 
   const tipo: TipoGasto = tipoDeCategoria(categoria);
   const esFinanciacion = tipo === 'FINANCIACION';
@@ -152,11 +164,42 @@ export const GastoModal: React.FC<GastoModalProps> = ({
         : undefined,
       metodoPago,
       notas: notas.trim() || undefined,
+      justificanteUrl: eliminarFactura ? undefined : facturaUrl || undefined,
+      justificantePath: eliminarFactura ? undefined : facturaPath || undefined,
     };
 
     setGuardando(true);
     try {
-      await onSave(normalizarGasto(gasto));
+      // 1) Guardar el gasto (el handler de App asegura el propietarioId y
+      //    devuelve el documento final, necesario para segmentar la factura).
+      const guardado = (await onSave(normalizarGasto(gasto))) as Gasto | undefined;
+      const referencia: Gasto = guardado || { ...normalizarGasto(gasto) };
+
+      // 2) Sustituir/eliminar la factura anterior si se pidió.
+      if (eliminarFactura && gastoParaEditar?.justificantePath) {
+        await deleteFacturaGastoStorage(gastoParaEditar.justificantePath);
+      }
+
+      // 3) Subir la nueva factura a Storage y guardar la URL resultante.
+      if (facturaFile) {
+        if (gastoParaEditar?.justificantePath && gastoParaEditar.justificantePath !== facturaPath) {
+          await deleteFacturaGastoStorage(gastoParaEditar.justificantePath);
+        }
+        setSubiendo(true);
+        try {
+          const { url, storagePath } = await uploadFacturaGasto(
+            referencia.id,
+            facturaFile,
+            facturaFile.name,
+            referencia.propietarioId
+          );
+          await onSave(
+            normalizarGasto({ ...referencia, justificanteUrl: url, justificantePath: storagePath })
+          );
+        } finally {
+          setSubiendo(false);
+        }
+      }
       onClose();
     } finally {
       setGuardando(false);
@@ -453,6 +496,55 @@ export const GastoModal: React.FC<GastoModalProps> = ({
               Deducible fiscalmente en el IRPF del alquiler
             </label>
           )}
+
+          {/* Factura / justificante en Storage */}
+          <div>
+            <label className={labelCls}>Factura / justificante (PDF o imagen, máx. 12 MB)</label>
+            <div className="flex flex-wrap items-center gap-2">
+              {facturaUrl && !eliminarFactura ? (
+                <>
+                  <a
+                    href={facturaUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200 rounded-xl hover:bg-sky-100 transition"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Ver factura actual
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEliminarFactura(true);
+                      setFacturaFile(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Quitar
+                  </button>
+                </>
+              ) : (
+                <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 cursor-pointer transition">
+                  <Paperclip className="w-3.5 h-3.5" />
+                  {facturaFile ? facturaFile.name : 'Adjuntar factura'}
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      setFacturaFile(f);
+                      setEliminarFactura(false);
+                    }}
+                  />
+                </label>
+              )}
+              {subiendo && (
+                <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Subiendo…
+                </span>
+              )}
+            </div>
+          </div>
 
           {/* Notas */}
           <div>

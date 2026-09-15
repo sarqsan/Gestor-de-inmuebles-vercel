@@ -999,6 +999,47 @@ export interface Gasto {
   updatedAt: string;
 }
 
+/**
+ * Frecuencia de un gasto recurrente (plantilla que genera apuntes `Gasto`).
+ */
+export type FrecuenciaRecurrente = 'MENSUAL' | 'TRIMESTRAL' | 'ANUAL';
+
+/**
+ * Plantilla de gasto periódico (comunidad mensual, IBI anual, cuota hipotecaria
+ * mensual…). No es un gasto en sí: el sistema materializa documentos `Gasto`
+ * en estado PENDIENTE a partir de ella. Los apuntes ya generados nunca se
+ * borran al desactivar/eliminar la plantilla (se conserva el histórico).
+ */
+export interface GastoRecurrente {
+  id: string; // "rec_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario
+
+  tipo: TipoGasto;
+  categoria: CategoriaGasto;
+  concepto: string;
+  proveedor?: string;
+  importe: number;
+
+  frecuencia: FrecuenciaRecurrente;
+  diaVencimiento: number; // Día del mes (1-28) de devengo de cada apunte
+  fechaInicio: string; // YYYY-MM (primer período)
+  fechaFin?: string; // YYYY-MM opcional (último período)
+
+  aCargoDe: 'arrendador' | 'arrendatario';
+  deducible?: boolean;
+  metodoPago?: Gasto['metodoPago'];
+  notas?: string;
+
+  activo: boolean;
+  ultimoPeriodoGenerado?: string; // YYYY-MM (cursór de materialización)
+
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ==========================================
 // FASE 4: ASEGURADORA DE IMPAGO & EXPEDIENTES
 // ==========================================

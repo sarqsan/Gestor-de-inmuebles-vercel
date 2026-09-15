@@ -13,12 +13,16 @@ import {
   User,
   LayoutList,
   Calculator,
+  Repeat,
+  Paperclip,
+  Power,
 } from 'lucide-react';
 import type {
   CategoriaGasto,
   CobroPeriodo,
   EstadoGasto,
   Gasto,
+  GastoRecurrente,
   Inmueble,
   TipoGasto,
   UsuarioApp,
@@ -29,18 +33,24 @@ import {
   categoriaDef,
   ESTADO_GASTO_LABEL,
   etiquetaMesAnio,
+  FRECUENCIA_LABEL,
+  proximoPeriodoRecurrente,
   resumenGastos,
 } from '../../utils/gastosEngine';
 import { GastoModal } from '../modals/GastoModal';
+import { GastoRecurrenteModal } from '../modals/GastoRecurrenteModal';
 import { RentabilidadPanel } from './RentabilidadPanel';
 
 interface GastosSectionProps {
   gastos: Gasto[];
   cobros: CobroPeriodo[];
+  recurrentes: GastoRecurrente[];
   inmuebles: Inmueble[];
   currentUser?: UsuarioApp | null;
-  onSaveGasto: (gasto: Gasto) => Promise<void> | void;
+  onSaveGasto: (gasto: Gasto) => Promise<Gasto | void> | Gasto | void;
   onDeleteGasto: (gastoId: string) => Promise<void> | void;
+  onSaveRecurrente: (plantilla: GastoRecurrente) => Promise<void> | void;
+  onDeleteRecurrente: (plantillaId: string) => Promise<void> | void;
 }
 
 const euro = (n: number): string =>
@@ -64,13 +74,19 @@ const estadoBadge = (estado: EstadoGasto): string => {
 export const GastosSection: React.FC<GastosSectionProps> = ({
   gastos,
   cobros,
+  recurrentes,
   inmuebles,
   currentUser,
   onSaveGasto,
   onDeleteGasto,
+  onSaveRecurrente,
+  onDeleteRecurrente,
 }) => {
-  // FASE 2.1: conmutador entre el listado de apuntes y el cuadre de rentabilidad.
-  const [vista, setVista] = useState<'gastos' | 'rentabilidad'>('gastos');
+  // FASE 2.1/2.2: listado de apuntes, cuadre de rentabilidad y recurrentes.
+  const [vista, setVista] = useState<'gastos' | 'recurrentes' | 'rentabilidad'>('gastos');
+  const [showRecurrenteModal, setShowRecurrenteModal] = useState<boolean>(false);
+  const [recurrenteParaEditar, setRecurrenteParaEditar] = useState<GastoRecurrente | null>(null);
+  const [recurrenteInmuebleInicial, setRecurrenteInmuebleInicial] = useState<string>('');
 
   const [filtroInmueble, setFiltroInmueble] = useState<string>('TODOS');
   const [filtroTipo, setFiltroTipo] = useState<string>('TODOS');
@@ -163,6 +179,30 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
     }
   };
 
+  // FASE 2.2: altas de plantillas recurrentes.
+  const abrirAltaRecurrente = () => {
+    setRecurrenteParaEditar(null);
+    setRecurrenteInmuebleInicial(filtroInmueble !== 'TODOS' ? filtroInmueble : inmuebles[0]?.id || '');
+    setShowRecurrenteModal(true);
+  };
+  const abrirEdicionRecurrente = (r: GastoRecurrente) => {
+    setRecurrenteParaEditar(r);
+    setRecurrenteInmuebleInicial(r.inmuebleId);
+    setShowRecurrenteModal(true);
+  };
+  const handleBorrarRecurrente = (r: GastoRecurrente) => {
+    if (
+      window.confirm(
+        `¿Eliminar la plantilla «${r.concepto}»? No se generarán más apuntes; los ya creados se conservan.`
+      )
+    ) {
+      onDeleteRecurrente(r.id);
+    }
+  };
+  const handleToggleActivo = async (r: GastoRecurrente) => {
+    await onSaveRecurrente({ ...r, activo: !r.activo, updatedAt: new Date().toISOString() });
+  };
+
   const inputCls =
     'px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 outline-none transition bg-white';
 
@@ -224,6 +264,14 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               <LayoutList className="w-3.5 h-3.5" /> Gastos
             </button>
             <button
+              onClick={() => setVista('recurrentes')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                vista === 'recurrentes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Repeat className="w-3.5 h-3.5" /> Recurrentes
+            </button>
+            <button
               onClick={() => setVista('rentabilidad')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 vista === 'rentabilidad' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -232,18 +280,157 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               <Calculator className="w-3.5 h-3.5" /> Rentabilidad
             </button>
           </div>
-          <button
-            onClick={abrirAlta}
-            disabled={inmuebles.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
-          >
-            <Plus className="w-4 h-4" /> Nuevo gasto
-          </button>
+          {vista === 'recurrentes' ? (
+            <button
+              onClick={abrirAltaRecurrente}
+              disabled={inmuebles.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" /> Nuevo recurrente
+            </button>
+          ) : vista === 'gastos' ? (
+            <button
+              onClick={abrirAlta}
+              disabled={inmuebles.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" /> Nuevo gasto
+            </button>
+          ) : null}
         </div>
       </div>
 
       {vista === 'rentabilidad' && (
         <RentabilidadPanel cobros={cobros} gastos={gastos} inmuebles={inmuebles} />
+      )}
+
+      {vista === 'recurrentes' && (
+        <div className="space-y-4">
+          <div className="flex gap-3 p-4 rounded-2xl bg-blue-50/70 border border-blue-200 text-blue-900">
+            <Repeat className="w-5 h-5 shrink-0 text-blue-600 mt-0.5" />
+            <p className="text-xs leading-relaxed">
+              Estas plantillas <b>generan automáticamente</b> los recibos pendientes
+              (comunidad, IBI, seguro, cuota hipotecaria…) hasta el mes en curso. Al
+              pagar cada apunte puedes registrar su factura. Desactivar o eliminar una
+              plantilla <b>no borra</b> los gastos ya generados.
+            </p>
+          </div>
+
+          {recurrentes.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto">
+                <Repeat className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-semibold text-slate-700">No hay gastos recurrentes</p>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                Crea una plantilla para que la comunidad o la cuota hipotecaria se
+                registren solas cada mes.
+              </p>
+              <button
+                onClick={abrirAltaRecurrente}
+                disabled={inmuebles.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition"
+              >
+                <Plus className="w-4 h-4" /> Nuevo recurrente
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {recurrentes
+                .slice()
+                .sort((a, b) => `${a.inmuebleId}${a.concepto}`.localeCompare(`${b.inmuebleId}${b.concepto}`))
+                .map((r) => {
+                  const def = categoriaDef(r.categoria as CategoriaGasto);
+                  const esFin = r.tipo === 'FINANCIACION';
+                  const proximo = etiquetaMesAnio(proximoPeriodoRecurrente(r));
+                  const inmueble = inmuebles.find((i) => i.id === r.inmuebleId);
+                  return (
+                    <div
+                      key={r.id}
+                      className={`bg-white rounded-2xl border shadow-sm p-4 ${
+                        r.activo ? 'border-slate-200' : 'border-slate-200 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${
+                            esFin
+                              ? 'bg-violet-50 border-violet-200 text-violet-700'
+                              : 'bg-amber-50 border-amber-200 text-amber-700'
+                          }`}
+                        >
+                          {esFin ? <Landmark className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-900 truncate">{r.concepto}</p>
+                          <p className="text-[11px] text-slate-400 truncate">
+                            {inmueble ? `${inmueble.direccion}${inmueble.ciudad ? `, ${inmueble.ciudad}` : ''}` : 'Inmueble'}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <span className={`inline-flex px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${tipoBadge(r.tipo as TipoGasto)}`}>
+                              {def.label}
+                            </span>
+                            <span className="inline-flex px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                              {FRECUENCIA_LABEL[r.frecuencia]} · día {r.diaVencimiento}
+                            </span>
+                            {r.aCargoDe === 'arrendatario' && (
+                              <span className="inline-flex px-2 py-0.5 rounded-lg bg-sky-100 text-sky-700 text-[10px] font-semibold">
+                                a cargo del inquilino
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1.5">
+                            {r.activo ? (
+                              <>
+                                Próxima generación: <b>{proximo}</b>
+                                {r.ultimoPeriodoGenerado ? ` · última hasta ${etiquetaMesAnio(r.ultimoPeriodoGenerado)}` : ''}
+                              </>
+                            ) : (
+                              <span className="text-slate-400">Plantilla desactivada</span>
+                            )}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-sm font-bold ${esFin ? 'text-violet-700' : 'text-slate-900'}`}>
+                            {euro(r.importe)}
+                          </p>
+                          <p className="text-[10px] text-slate-400">por recibo</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t border-slate-100">
+                        <button
+                          onClick={() => handleToggleActivo(r)}
+                          title={r.activo ? 'Desactivar' : 'Activar'}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg transition ${
+                            r.activo
+                              ? 'text-slate-600 hover:bg-slate-100'
+                              : 'text-emerald-700 hover:bg-emerald-50'
+                          }`}
+                        >
+                          <Power className="w-3.5 h-3.5" />
+                          {r.activo ? 'Desactivar' : 'Activar'}
+                        </button>
+                        <button
+                          onClick={() => abrirEdicionRecurrente(r)}
+                          className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                          title="Editar"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleBorrarRecurrente(r)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                          title="Eliminar plantilla"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
       )}
 
       {vista === 'gastos' && (
@@ -414,6 +601,18 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
                           {g.proveedor && (
                             <span className="text-[11px] text-slate-400">{g.proveedor}</span>
                           )}
+                          {g.justificanteUrl && (
+                            <a
+                              href={g.justificanteUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title="Ver factura / justificante"
+                              className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-700 hover:text-sky-900"
+                            >
+                              <Paperclip className="w-3 h-3" /> Factura
+                            </a>
+                          )}
                           {esFin && typeof g.intereses === 'number' && (
                             <span className="text-[10px] text-violet-600">
                               intereses {euro(g.intereses || 0)} · capital{' '}
@@ -485,6 +684,17 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
           currentUser={currentUser}
           onSave={onSaveGasto}
           onClose={() => setShowModal(false)}
+        />
+      )}
+
+      {showRecurrenteModal && (
+        <GastoRecurrenteModal
+          plantillaParaEditar={recurrenteParaEditar}
+          inmuebles={inmuebles}
+          inmuebleIdInicial={recurrenteInmuebleInicial}
+          currentUser={currentUser}
+          onSave={onSaveRecurrente}
+          onClose={() => setShowRecurrenteModal(false)}
         />
       )}
     </div>

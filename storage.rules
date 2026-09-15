@@ -58,6 +58,20 @@ service firebase.storage {
     }
 
     // -------------------------------------------------------------------------
+    // FACTURAS / JUSTIFICANTES DE GASTOS (FASE 2.2 — datos económicos)
+    // Ruta por propietario: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
+    // Cuenta interna; PDF o imagen; máximo 12 MB. Mismo residual de aislamiento
+    // fino que los justificantes de cobro (pendiente de custom claims).
+    // -------------------------------------------------------------------------
+    match /gastos_facturas/{propietarioId}/{gastoId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 12 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
     // DOCUMENTOS APORTADOS POR LOS CANDIDATOS (portal público por token)
     // La SUBIDA (create) la realiza el candidato sin iniciar sesión (funnel de
     // captación), por lo que se permite anónimo con límite de tipo y tamaño;

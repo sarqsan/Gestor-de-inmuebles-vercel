@@ -17,6 +17,7 @@ import {
   SolicitudDocPublicData,
   ContratoFormalizacion,
   Gasto,
+  GastoRecurrente,
   DocumentoAnalizado,
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
@@ -50,6 +51,7 @@ import {
   generarPeriodosParaContrato,
   actualizarEstadosVencimiento,
 } from './utils/cobrosEngine';
+import { generarGastosRecurrentes } from './utils/gastosEngine';
 import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
@@ -61,6 +63,7 @@ import {
   subscribeSolicitudesDoc,
   subscribeContratos,
   subscribeGastos,
+  subscribeGastosRecurrentes,
   subscribeAseguradoras,
   subscribeSolicitudesSeguro,
   subscribeGmailConfig,
@@ -90,6 +93,8 @@ import {
   deleteContratoFirestore,
   saveGastoFirestore,
   deleteGastoFirestore,
+  saveGastoRecurrenteFirestore,
+  deleteGastoRecurrenteFirestore,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
   saveSolicitudSeguroFirestore,
@@ -225,6 +230,8 @@ export default function App() {
   });
   // FASE 2.0: gastos (explotación vs financiación). Colección nueva, sin caché local.
   const [gastos, setGastos] = useState<Gasto[]>([]);
+  // FASE 2.2: plantillas de gastos recurrentes.
+  const [gastosRecurrentes, setGastosRecurrentes] = useState<GastoRecurrente[]>([]);
   const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
     try {
@@ -420,6 +427,21 @@ export default function App() {
     }
     return []; // Los profesionales no acceden a datos económicos.
   }, [currentUser, gastos, scopedInmuebles]);
+
+  // FASE 2.2: plantillas recurrentes visibles (la suscripción ya viene acotada).
+  const scopedRecurrentes = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return gastosRecurrentes;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return gastosRecurrentes.filter(
+        (r) =>
+          (currentUser.propietarioId && r.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(r.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, gastosRecurrentes, scopedInmuebles]);
 
   // Cobros derivados de los contratos visibles para el usuario (con su histórico por inmuebleId).
   // El motor genera los periodos al vuelo cuando un contrato aún no los tiene persistidos.
@@ -690,6 +712,11 @@ export default function App() {
       setGastos(Array.isArray(data) ? data : []);
     }, dataScope);
 
+    // FASE 2.2: plantillas recurrentes con el mismo ámbito.
+    const unsubscribeRecurrentes = subscribeGastosRecurrentes((data) => {
+      setGastosRecurrentes(Array.isArray(data) ? data : []);
+    }, dataScope);
+
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
     });
@@ -742,6 +769,7 @@ export default function App() {
       unsubscribeSol();
       unsubscribeContratos();
       unsubscribeGastos();
+      unsubscribeRecurrentes();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
@@ -783,6 +811,40 @@ export default function App() {
       }
     });
   }, [currentUser, scopedContratos]);
+
+  // FASE 2.2 — Materializa automáticamente los apuntes pendientes de las
+  // plantillas recurrentes (hasta el mes en curso). Es idempotente: los IDs son
+  // deterministas y nunca se pisan pagos/ediciones de apuntes ya existentes.
+  const recurrentesGenRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || scopedRecurrentes.length === 0) return;
+    const firma = scopedRecurrentes
+      .map((r) => `${r.id}:${r.activo ? 1 : 0}:${r.ultimoPeriodoGenerado || ''}`)
+      .sort()
+      .join('|');
+    if (recurrentesGenRef.current.has(firma)) return;
+
+    const { gastos: nuevos, plantillasActualizadas } = generarGastosRecurrentes(
+      scopedRecurrentes,
+      scopedGastos
+    );
+    if (nuevos.length === 0) {
+      recurrentesGenRef.current.add(firma);
+      return;
+    }
+    recurrentesGenRef.current.add(firma);
+
+    (async () => {
+      for (const g of nuevos) {
+        setGastos((prev) => (prev.some((x) => x.id === g.id) ? prev : [g, ...prev]));
+        await saveGastoFirestore(g);
+      }
+      for (const r of plantillasActualizadas) {
+        setGastosRecurrentes((prev) => prev.map((x) => (x.id === r.id ? r : x)));
+        await saveGastoRecurrenteFirestore(r);
+      }
+    })();
+  }, [currentUser, scopedRecurrentes, scopedGastos]);
 
   // Auto-analyze any candidate questionnaire that is completed but missing AI analysis
   useEffect(() => {
@@ -1895,17 +1957,23 @@ export default function App() {
 
   // FASE 2.0 — Handlers de gastos. Se garantiza SIEMPRE propietarioId (clave de
   // aislamiento), resolviéndolo desde el inmueble o el propietario autenticado.
-  const handleSaveGasto = async (gasto: Gasto) => {
-    let propietarioId = gasto.propietarioId;
-    if (!propietarioId) {
-      const inm = inmuebles.find((i) => i.id === gasto.inmuebleId);
-      propietarioId =
-        inm?.propietarioId ||
-        inm?.propietarioPrincipalId ||
-        (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId || '' : '') ||
-        '';
-    }
-    const finalGasto: Gasto = { ...gasto, propietarioId };
+  // Devuelve el documento final (lo necesita la subida de factura del modal).
+  const resolvePropietarioId = (inmuebleId: string, previo?: string): string => {
+    if (previo) return previo;
+    const inm = inmuebles.find((i) => i.id === inmuebleId);
+    return (
+      inm?.propietarioId ||
+      inm?.propietarioPrincipalId ||
+      (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId || '' : '') ||
+      ''
+    );
+  };
+
+  const handleSaveGasto = async (gasto: Gasto): Promise<Gasto> => {
+    const finalGasto: Gasto = {
+      ...gasto,
+      propietarioId: resolvePropietarioId(gasto.inmuebleId, gasto.propietarioId),
+    };
 
     setGastos((prev) => {
       const exists = prev.some((g) => g.id === finalGasto.id);
@@ -1914,11 +1982,33 @@ export default function App() {
         : [finalGasto, ...prev];
     });
     await saveGastoFirestore(finalGasto);
+    return finalGasto;
   };
 
   const handleDeleteGasto = async (gastoId: string) => {
     setGastos((prev) => prev.filter((g) => g.id !== gastoId));
     await deleteGastoFirestore(gastoId);
+  };
+
+  // FASE 2.2 — Plantillas de gastos recurrentes.
+  const handleSaveRecurrente = async (plantilla: GastoRecurrente): Promise<void> => {
+    const finalPlantilla: GastoRecurrente = {
+      ...plantilla,
+      propietarioId: resolvePropietarioId(plantilla.inmuebleId, plantilla.propietarioId),
+    };
+    setGastosRecurrentes((prev) => {
+      const exists = prev.some((r) => r.id === finalPlantilla.id);
+      return exists
+        ? prev.map((r) => (r.id === finalPlantilla.id ? finalPlantilla : r))
+        : [finalPlantilla, ...prev];
+    });
+    await saveGastoRecurrenteFirestore(finalPlantilla);
+  };
+
+  const handleDeleteRecurrente = async (plantillaId: string) => {
+    // Los apuntes ya materializados se conservan (histórico).
+    setGastosRecurrentes((prev) => prev.filter((r) => r.id !== plantillaId));
+    await deleteGastoRecurrenteFirestore(plantillaId);
   };
 
   // Handlers for Propietarios y Cuentas Bancarias
@@ -2606,10 +2696,13 @@ export default function App() {
             <GastosSection
               gastos={scopedGastos}
               cobros={scopedCobros}
+              recurrentes={scopedRecurrentes}
               inmuebles={scopedInmuebles}
               currentUser={currentUser}
               onSaveGasto={handleSaveGasto}
               onDeleteGasto={handleDeleteGasto}
+              onSaveRecurrente={handleSaveRecurrente}
+              onDeleteRecurrente={handleDeleteRecurrente}
             />
           )}
 

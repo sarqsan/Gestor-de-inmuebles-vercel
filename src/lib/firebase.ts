@@ -33,6 +33,7 @@ import {
   SolicitudDocumentacion,
   ContratoFormalizacion,
   Gasto,
+  GastoRecurrente,
   ConfiguracionAseguradora,
   SolicitudSeguroImpago,
   GmailIntegracionConfig,
@@ -78,6 +79,7 @@ const SLOTS_VISITA_COL = collection(db, 'slots_visita');
 const SOLICITUDES_DOC_COL = collection(db, 'solicitudes_documentacion');
 const CONTRATOS_COL = collection(db, 'contratos_formalizacion');
 const GASTOS_COL = collection(db, 'gastos');
+const GASTOS_RECURRENTES_COL = collection(db, 'gastos_recurrentes');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
 
@@ -819,6 +821,144 @@ export async function deleteGastoFirestore(gastoId: string) {
     await deleteDoc(doc(db, 'gastos', gastoId));
   } catch (err) {
     console.error('Error deleting gasto from Firestore:', err);
+  }
+}
+
+/**
+ * Listener de plantillas de gastos recurrentes con el mismo aislamiento que los
+ * gastos: profesionales sin datos, propietario por where('propietarioId','=='),
+ * administrador con la colección completa.
+ */
+export function subscribeGastosRecurrentes(
+  callback: (plantillas: GastoRecurrente[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      GASTOS_RECURRENTES_COL,
+      (snapshot) => {
+        const items: GastoRecurrente[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as GastoRecurrente);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore gastos_recurrentes snapshot error:', err);
+      }
+    );
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  const scopedQuery = query(GASTOS_RECURRENTES_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: GastoRecurrente[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as GastoRecurrente);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore gastos_recurrentes (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function saveGastoRecurrenteFirestore(plantilla: GastoRecurrente) {
+  try {
+    const clean = sanitizeObjectForFirestore(plantilla);
+    await setDoc(doc(db, 'gastos_recurrentes', plantilla.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving gasto recurrente to Firestore:', err);
+  }
+}
+
+export async function deleteGastoRecurrenteFirestore(plantillaId: string) {
+  try {
+    // No se eliminan los apuntes ya materializados: se conserva el histórico.
+    await deleteDoc(doc(db, 'gastos_recurrentes', plantillaId));
+  } catch (err) {
+    console.error('Error deleting gasto recurrente from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.2 — FACTURAS / JUSTIFICANTES DE GASTOS en Storage
+// Ruta: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
+// ============================================================
+
+export async function uploadFacturaGasto(
+  gastoId: string,
+  file: File | Blob,
+  fileName: string,
+  propietarioId?: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `gastos_facturas/${ownerSeg}/${gastoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+    console.warn('Timeout subiendo la factura del gasto a Firebase Storage.');
+  } catch (err) {
+    console.warn('Firebase Storage no disponible para la factura del gasto:', err);
+  }
+
+  // Respaldo por el endpoint del servidor (igual que los justificantes de cobro).
+  try {
+    const dataURL = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch('/api/upload-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileBase64: dataURL, filename: fileName, mimeType: mime, itemId: gastoId }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.url) {
+        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Falló también la subida de la factura por servidor:', serverErr);
+  }
+
+  throw new Error('No se ha podido almacenar la factura. Revisa la conexión e inténtalo de nuevo.');
+}
+
+export async function deleteFacturaGastoStorage(storagePath?: string): Promise<void> {
+  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar la factura de Storage:', err);
   }
 }
 

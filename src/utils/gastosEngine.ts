@@ -12,7 +12,9 @@
 import type {
   CategoriaGasto,
   EstadoGasto,
+  FrecuenciaRecurrente,
   Gasto,
+  GastoRecurrente,
   TipoGasto,
 } from '../types';
 
@@ -331,4 +333,227 @@ export function resumenPorInmueble(
   return Array.from(mapa.entries())
     .map(([inmuebleId, lista]) => ({ inmuebleId, resumen: resumenGastos(lista) }))
     .sort((a, b) => b.resumen.salidaCajaPagada - a.resumen.salidaCajaPagada);
+}
+
+// ============================================================
+// FASE 2.2 — GASTOS RECURRENTES (plantillas)
+// ============================================================
+
+export const FRECUENCIA_LABEL: Record<FrecuenciaRecurrente, string> = {
+  MENSUAL: 'Mensual',
+  TRIMESTRAL: 'Trimestral',
+  ANUAL: 'Anual',
+};
+
+export const FRECUENCIA_PASO_MESES: Record<FrecuenciaRecurrente, number> = {
+  MENSUAL: 1,
+  TRIMESTRAL: 3,
+  ANUAL: 12,
+};
+
+/**
+ * Backfill automático de plantillas antiguas limitado a 12 meses: evita crear
+ * cientos de apuntes pendientes si el alta se hace con fecha de inicio pasada.
+ */
+export const MAX_MESES_BACKFILL = 12;
+
+export function periodoActual(ref: Date = new Date()): string {
+  return `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function sumarMeses(periodo: string, meses: number): string {
+  const [anio, mes] = periodo.split('-').map((n) => parseInt(n, 10));
+  const fecha = new Date(anio, mes - 1 + meses, 1);
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function nuevoRecurrenteId(inmuebleId: string): string {
+  const seg = (inmuebleId || 'inm').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `rec_${seg}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+}
+
+/** ID determinista del apunte generado por una plantilla en un período. */
+export function recurrenteGastoId(recId: string, anio: number, mes: number): string {
+  const seg = recId.replace(/[^a-zA-Z0-9_]/g, '_');
+  return `grec_${seg}_${anio}_${String(mes).padStart(2, '0')}`;
+}
+
+export function crearGastoRecurrente(input: {
+  inmuebleId: string;
+  propietarioId: string;
+  categoria: CategoriaGasto;
+  concepto?: string;
+  importe?: number;
+  frecuencia?: FrecuenciaRecurrente;
+  diaVencimiento?: number;
+  fechaInicio?: string;
+  fechaFin?: string;
+  aCargoDe?: 'arrendador' | 'arrendatario';
+  deducible?: boolean;
+  metodoPago?: Gasto['metodoPago'];
+  notas?: string;
+  creadoPor?: string;
+  creadoPorId?: string;
+}): GastoRecurrente {
+  const def = categoriaDef(input.categoria);
+  const now = new Date().toISOString();
+  return {
+    id: nuevoRecurrenteId(input.inmuebleId),
+    inmuebleId: input.inmuebleId,
+    propietarioId: input.propietarioId,
+    tipo: def.tipo,
+    categoria: input.categoria,
+    concepto: input.concepto?.trim() || def.label,
+    proveedor: undefined,
+    importe: typeof input.importe === 'number' ? input.importe : 0,
+    frecuencia: input.frecuencia || 'MENSUAL',
+    diaVencimiento: input.diaVencimiento || 1,
+    fechaInicio: input.fechaInicio || periodoActual(),
+    fechaFin: input.fechaFin || undefined,
+    aCargoDe: input.aCargoDe || def.aCargoDePorDefecto,
+    deducible: input.deducible ?? def.deduciblePorDefecto,
+    metodoPago: input.metodoPago || 'domiciliacion',
+    notas: input.notas?.trim() || undefined,
+    activo: true,
+    ultimoPeriodoGenerado: undefined,
+    creadoPor: input.creadoPor,
+    creadoPorId: input.creadoPorId,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function normalizarRecurrente(r: GastoRecurrente): GastoRecurrente {
+  const def = categoriaDef(r.categoria);
+  const dia = Math.min(Math.max(Number(r.diaVencimiento) || 1, 1), 28);
+  const normalizado: GastoRecurrente = {
+    ...r,
+    tipo: def.tipo,
+    concepto: r.concepto?.trim() || def.label,
+    importe: Number(r.importe) || 0,
+    diaVencimiento: dia,
+    aCargoDe: r.aCargoDe || def.aCargoDePorDefecto,
+    deducible: def.tipo === 'FINANCIACION' ? false : r.deducible ?? def.deduciblePorDefecto,
+    updatedAt: new Date().toISOString(),
+  };
+  return normalizado;
+}
+
+/** Períodos debidos de una plantilla hasta `hasta` (inclusive), sin materializar. */
+export function periodosDebidos(
+  r: GastoRecurrente,
+  hasta: string = periodoActual()
+): string[] {
+  const resultado: string[] = [];
+  // Ventana inclusiva de MAX_MESES_BACKFILL meses contando el mes en curso.
+  const limiteInferior = sumarMeses(hasta, -(MAX_MESES_BACKFILL - 1));
+  const paso = FRECUENCIA_PASO_MESES[r.frecuencia] || 1;
+  let periodo = r.fechaInicio;
+  // Seguridad anti-bucle: como mucho 600 iteraciones (50 años mensuales).
+  let guard = 0;
+  while (periodo <= hasta && guard < 600) {
+    guard += 1;
+    if (periodo >= limiteInferior && (!r.fechaFin || periodo <= r.fechaFin)) {
+      if (!r.ultimoPeriodoGenerado || periodo > r.ultimoPeriodoGenerado) {
+        resultado.push(periodo);
+      }
+    }
+    periodo = sumarMeses(periodo, paso);
+  }
+  return resultado;
+}
+
+/** Materializa el apunte PENDIENTE de una plantilla para un período concreto. */
+export function materializarGastoRecurrente(
+  r: GastoRecurrente,
+  periodo: string
+): Gasto {
+  const [anio, mes] = periodo.split('-').map((n) => parseInt(n, 10));
+  const dia = String(Math.min(r.diaVencimiento || 1, 28)).padStart(2, '0');
+  const def = categoriaDef(r.categoria);
+  const now = new Date().toISOString();
+  return {
+    id: recurrenteGastoId(r.id, anio, mes),
+    inmuebleId: r.inmuebleId,
+    propietarioId: r.propietarioId,
+    tipo: def.tipo,
+    categoria: r.categoria,
+    concepto: `${r.concepto} · ${etiquetaMesAnio(periodo)}`,
+    proveedor: r.proveedor,
+    importe: Number(r.importe) || 0,
+    estado: 'PENDIENTE',
+    fechaDevengo: `${periodo}-${dia}`,
+    fechaPago: undefined,
+    periodoMesAnio: periodo,
+    aCargoDe: r.aCargoDe,
+    deducible: def.tipo === 'FINANCIACION' ? false : r.deducible ?? def.deduciblePorDefecto,
+    metodoPago: r.metodoPago,
+    notas: r.notas,
+    creadoPor: r.creadoPor || 'Sistema',
+    creadoPorId: r.id,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export interface ResultadoGeneracionRecurrentes {
+  gastos: Gasto[];
+  plantillasActualizadas: GastoRecurrente[];
+}
+
+/**
+ * Genera los apuntes pendientes de todas las plantillas activas hasta el mes en
+ * curso. Es idempotente: los IDs son deterministas y se ignoran los apuntes ya
+ * existentes. Devuelve los gastos nuevos y las plantillas con el cursor
+ * `ultimoPeriodoGenerado` avanzado.
+ */
+export function generarGastosRecurrentes(
+  plantillas: GastoRecurrente[],
+  gastosExistentes: Gasto[],
+  ref: Date = new Date()
+): ResultadoGeneracionRecurrentes {
+  const hasta = periodoActual(ref);
+  const idsExistentes = new Set(gastosExistentes.map((g) => g.id));
+  const gastos: Gasto[] = [];
+  const plantillasActualizadas: GastoRecurrente[] = [];
+
+  plantillas
+    .filter((r) => r.activo !== false)
+    .forEach((r) => {
+      const pendientes = periodosDebidos(r, hasta).filter((p) => {
+        const [anio, mes] = p.split('-').map((n) => parseInt(n, 10));
+        return !idsExistentes.has(recurrenteGastoId(r.id, anio, mes));
+      });
+      if (pendientes.length === 0) return;
+      pendientes.forEach((p) => {
+        const gasto = materializarGastoRecurrente(r, p);
+        gastos.push(gasto);
+        idsExistentes.add(gasto.id);
+      });
+      plantillasActualizadas.push({
+        ...r,
+        ultimoPeriodoGenerado: pendientes[pendientes.length - 1],
+        updatedAt: new Date().toISOString(),
+      });
+    });
+
+  return { gastos, plantillasActualizadas };
+}
+
+/** Etiqueta del próximo vencimiento de una plantilla (para el listado). */
+export function proximoPeriodoRecurrente(r: GastoRecurrente, ref: Date = new Date()): string {
+  const actual = periodoActual(ref);
+  const periodos = periodosDebidos(r, actual);
+  if (periodos.length > 0) return periodos[0];
+  // No debe nada: el siguiente es la primera ocurrencia estrictamente futura.
+  const paso = FRECUENCIA_PASO_MESES[r.frecuencia] || 1;
+  let candidato = r.ultimoPeriodoGenerado
+    ? sumarMeses(r.ultimoPeriodoGenerado, paso)
+    : r.fechaInicio;
+  let guard = 0;
+  while (candidato <= actual && guard < 600) {
+    candidato = sumarMeses(candidato, paso);
+    guard += 1;
+  }
+  return candidato;
 }

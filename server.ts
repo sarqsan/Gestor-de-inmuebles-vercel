@@ -1651,6 +1651,125 @@ Responde SOLO con JSON válido:
   }
 });
 
+// ============================================================
+// FASE 3.5 — PRICING Y ESCENARIOS DE PRECIO
+// El cliente calcula una base determinista (IPC, mejoras y
+// comparables introducidos). Este endpoint la REVISA con el
+// modelo, que solo puede apoyarse en los datos aportados: no
+// debe inventar testigos de mercado. Sin clave se respeta la
+// base calculada y se marca como estimación de calculadora.
+// ============================================================
+
+const num = (v: any) => {
+  const n = Number(typeof v === 'string' ? v.replace(',', '.') : v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
+};
+
+app.post('/api/estimar-pricing', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const base = b.base || {};
+    const ai = getGeminiClient();
+
+    if (!ai) {
+      console.log('No GEMINI_API_KEY: pricing = base de calculadora.');
+      return res.json({ ...base, motor: 'calculadora' });
+    }
+
+    const comparablesTxt = Array.isArray(b.comparables) && b.comparables.length
+      ? b.comparables
+          .map((c: any, i: number) => {
+            const m2 = Number(c?.metros) > 0 ? `${c.metros} m²` : 'superficie no indicada';
+            const alq = Number(c?.precioAlquilerMensual) > 0 ? `alquiler ${c.precioAlquilerMensual} €/mes` : '';
+            const ven = Number(c?.precioVenta) > 0 ? `venta ${c.precioVenta} €` : '';
+            return `${i + 1}. ${m2}, ${[alq, ven, c?.fuente || ''].filter(Boolean).join(', ')}.`;
+          })
+          .join('\n')
+      : 'No se han aportado comparables.';
+
+    const prompt = `Eres un tasador y asesor inmobiliario prudente en España. Debes revisar una ESTIMACIÓN DE PRECIO para volver a comercializar una vivienda, apoyándote SOLO en los datos que se aportan. Si falta información de mercado, NO inventes testigos ni portales: mantén la base calculada y marca confianza baja.
+
+DATOS APORTADOS:
+- Zona: ${[b.ciudad, b.codigoPostal].filter(Boolean).join(', ') || 'no indicada'} · ${b.superficie ? `${b.superficie} m²` : 'superficie no indicada'} · ${b.habitaciones ? `${b.habitaciones} hab.` : ''}
+- Destino previsto: ${b.destino || 'alquiler tradicional'}
+- Renta del contrato anterior: ${b.rentaAnterior ? `${b.rentaAnterior} €/mes` : 'no indicada'} · IPC/acuerdo acumulado: ${b.ipcAcumuladoPct ?? 0}% · ajuste de mercado manual: ${b.ajusteMercadoPct ?? 0}%
+- Mejoras confirmadas (estimadas): +${b.mejoraRenta || 0} €/mes
+COMPARABLES:
+${comparablesTxt}
+BASE CALCULADA (puedes ajustarla con moderación, máximo ±6% en alquiler y ±8% en venta y solo si los comparables lo justifican):
+- Alquiler conservador ${base.escenarioConservador ?? 0} €/mes, recomendado ${base.escenarioRecomendado ?? 0} €/mes, máximo razonable ${base.escenarioMaximo ?? 0} €/mes, ${base.precioM2Alquiler ?? 0} €/m²·mes.
+- Venta estimada ${base.valoracionVentaEstimada ?? 0} € (horquilla ${base.horquillaVentaMin ?? 0}-${base.horquillaVentaMax ?? 0}, salida ${base.precioSalidaRecomendado ?? 0}, ${base.precioM2Venta ?? 0} €/m²), plazo medio ${base.plazoMedioComercializacionDias ?? 90} días.
+
+REGLAS:
+- Los tres escenarios de alquiler son: CONSERVADOR (rápida absorción, mínimo riesgo de vacancia), RECOMENDADO (equilibrio rentabilidad-plazo) y MÁXIMO RAZONABLE (tope para perfiles de alta solvencia).
+- El máximo debe ser >= recomendado >= conservador. Precios de alquiler redondeados a múltiplos de 5 €; venta a centenas.
+- Lenguaje no asertivo en las notas: indicios, horquillos probables, "podría", "conviene contrastar". Nada de certezas ni rentabilidades garantizadas.
+- "confianza" es "alta" solo con 3+ comparables coherentes de la zona; "media" con 1-2; "baja" sin comparables.
+- En venta sin datos suficientes, devuelve los importes de la base y confianza baja.
+
+Responde SOLO con JSON válido:
+{
+  "alquiler": { "conservador": 0, "recomendado": 0, "maximo": 0, "precioM2": 0, "plazoDias": 90 },
+  "venta": { "valor": 0, "horquillaMin": 0, "horquillaMax": 0, "precioSalida": 0, "precioM2": 0 },
+  "confianza": "baja",
+  "notas": ["2 a 5 frases prudentes que justifiquen la estimación y qué contrastar"]
+}`;
+
+    try {
+      const response = await generateGeminiWithRetry(ai, {
+        model: 'gemini-3.7-flash',
+        contents: { parts: [{ text: prompt }] },
+        config: { responseMimeType: 'application/json' },
+      });
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse((response?.text || '').trim());
+      } catch {
+        parsed = {};
+      }
+      const a = parsed.alquiler || {};
+      const v = parsed.venta || {};
+      // Si el modelo no devuelve números utilizables, se respeta la base.
+      const recomendado = num(a.recomendado) ?? base.escenarioRecomendado;
+      const conservador = num(a.conservador) ?? base.escenarioConservador;
+      const maximo = num(a.maximo) ?? base.escenarioMaximo;
+      const valor = num(v.valor) ?? base.valoracionVentaEstimada;
+      const notaIa = Array.isArray(parsed.notas) ? parsed.notas.map(String).join('\n') : '';
+
+      return res.json({
+        escenarioConservador: conservador,
+        escenarioRecomendado: recomendado,
+        escenarioMaximo: maximo,
+        precioM2Alquiler:
+          num(a.precioM2) ??
+          (recomendado && b.superficie ? Math.round((recomendado / b.superficie) * 100) / 100 : base.precioM2Alquiler),
+        valoracionVentaEstimada: valor,
+        horquillaVentaMin: num(v.horquillaMin) ?? base.horquillaVentaMin,
+        horquillaVentaMax: num(v.horquillaMax) ?? base.horquillaVentaMax,
+        precioSalidaRecomendado: num(v.precioSalida) ?? base.precioSalidaRecomendado,
+        precioM2Venta: num(v.precioM2) ?? base.precioM2Venta,
+        plazoMedioComercializacionDias: num(a.plazoDias) ?? base.plazoMedioComercializacionDias,
+        confianza: ['alta', 'media', 'baja'].includes(parsed.confianza) ? parsed.confianza : 'baja',
+        notasCalculo: [base.notasCalculo, notaIa && `Revisión IA (confianza ${parsed.confianza || 'baja'}):\n${notaIa}`]
+          .filter(Boolean)
+          .join('\n\n'),
+        comparables: b.comparables || [],
+        rentaAnterior: b.rentaAnterior,
+        ipcAcumuladoPct: b.ipcAcumuladoPct,
+        ajusteMercadoPct: b.ajusteMercadoPct,
+        mejoraRentaConfirmada: b.mejoraRenta,
+        motor: 'ia',
+      });
+    } catch (err: any) {
+      console.warn('Error en /api/estimar-pricing (se respeta la base):', String(err?.message || err));
+      return res.json({ ...base, motor: 'calculadora' });
+    }
+  } catch (error: any) {
+    console.error('Error en /api/estimar-pricing:', error);
+    return res.status(500).json({ error: 'No se pudo estimar el pricing.' });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY });

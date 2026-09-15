@@ -1590,6 +1590,16 @@ export interface DatosSalidaInquilino {
   contratoEstado?: 'ACTIVO' | 'EN_PROCESO_RESOLUCION' | 'FINALIZADO_LIQUIDADO';
 }
 
+/** Testigo/manual de mercado de la misma zona y tipología (FASE 3.5). */
+export interface ComparableMercado {
+  id: string;
+  fuente?: string; // Portal, inmobiliaria, enlace…
+  descripcion?: string;
+  metros?: number;
+  precioAlquilerMensual?: number;
+  precioVenta?: number;
+}
+
 export interface PricingRecomercializacion {
   rentaAnterior?: number;
   escenarioConservador?: number;
@@ -1602,6 +1612,14 @@ export interface PricingRecomercializacion {
   plazoMedioComercializacionDias?: number;
   notasCalculo?: string;
   fechaCalculo?: string; // ISO
+  // FASE 3.5 — hipótesis y datos de cálculo (trazabilidad del precio)
+  ipcAcumuladoPct?: number; // Variación por IPC desde el contrato anterior (%)
+  ajusteMercadoPct?: number; // Ajuste manual de mercado/zona (%) sin comparables
+  mejoraRentaConfirmada?: number; // Suma de incrementos de renta de mejoras confirmadas (€/mes)
+  precioM2Alquiler?: number; // €/m² al mes resultante del escenario recomendado
+  precioM2Venta?: number; // €/m² de venta estimado
+  comparables?: ComparableMercado[];
+  motor?: 'ia' | 'calculadora'; // Quién produjo la última estimación
 }
 
 export type CategoriaMejora =

@@ -100,6 +100,27 @@ service cloud.firestore {
              ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
     }
 
+    // FASE 3 — Helpers genéricos de aislamiento por propietarioId, reutilizables
+    // por cualquier recurso económico del propietario (expedientes, propuestas,
+    // leads…). Mismas garantías que en contratos/gastos.
+    function aisladoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+    function aisladoVisible(d) {
+      return aisladoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+    function aisladoCreateOk() {
+      return isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string;
+    }
+    function aisladoUpdateOk() {
+      return isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();
+    }
+
     // Validación del espejo de identidad contra el perfil autoritativo.
     function indexMatchesProfile(profileId) {
       return get(/databases/$(database)/documents/usuarios/$(profileId)).data;
@@ -306,6 +327,53 @@ service cloud.firestore {
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
       );
+    }
+
+    // =========================================================================
+    // 2E. RECOMERCIALIZACIÓN (FASE 3.0)
+    // Expedientes, propuestas (RFP) y leads: datos del propietario aislados por
+    // propietarioId (patrón de contratos/gastos). Profesionales sin acceso.
+    // =========================================================================
+    match /expedientes_recomercializacion/{expedienteId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /propuestas_inmobiliaria/{propuestaId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /leads_inmobiliario/{leadId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // Directorio de inmobiliarias: lo consultan administrador y propietarios
+    // (bolsa para delegar/comparar). La escritura (alta/verificación de una
+    // agencia) queda reservada al administrador; profesionales sin acceso.
+    // Cuando exista el rol de agencia se ampliará para que editen su ficha.
+    match /inmobiliarias_directorio/{inmobiliariaId} {
+      allow get, list: if isMasterAdmin() || isPropietarioRole();
+      allow write: if isMasterAdmin();
     }
 
     // =========================================================================

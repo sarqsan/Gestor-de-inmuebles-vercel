@@ -14,6 +14,7 @@ import {
   query,
   where,
   type Unsubscribe,
+  type QuerySnapshot,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -35,6 +36,10 @@ import {
   Gasto,
   GastoRecurrente,
   Prestamo,
+  ExpedienteRecomercializacion,
+  InmobiliariaDirectorio,
+  PropuestaInmobiliaria,
+  LeadInmobiliario,
   ConfiguracionAseguradora,
   SolicitudSeguroImpago,
   GmailIntegracionConfig,
@@ -82,6 +87,11 @@ const CONTRATOS_COL = collection(db, 'contratos_formalizacion');
 const GASTOS_COL = collection(db, 'gastos');
 const GASTOS_RECURRENTES_COL = collection(db, 'gastos_recurrentes');
 const PRESTAMOS_COL = collection(db, 'prestamos');
+// FASE 3 — Recomercialización inteligente
+const EXPEDIENTES_RECOMERCIALIZACION_COL = collection(db, 'expedientes_recomercializacion');
+const INMOBILIARIAS_DIRECTORIO_COL = collection(db, 'inmobiliarias_directorio');
+const PROPUESTAS_INMOBILIARIA_COL = collection(db, 'propuestas_inmobiliaria');
+const LEADS_INMOBILIARIOS_COL = collection(db, 'leads_inmobiliario');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
 
@@ -955,6 +965,167 @@ export async function deletePrestamoFirestore(prestamoId: string) {
     await deleteDoc(doc(db, 'prestamos', prestamoId));
   } catch (err) {
     console.error('Error deleting prestamo from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 3.0 — RECOMERCIALIZACIÓN INTELIGENTE
+// Suscripción genérica aislada por propietario (patrón de
+// contratos/gastos): profesionales sin datos, propietario con
+// where('propietarioId','==', pid), administrador con todo.
+// ============================================================
+function subscribeColeccionPropietario<T extends { id: string }>(
+  col: ReturnType<typeof collection>,
+  callback: (items: T[]) => void,
+  scope: DataAccessScope | undefined,
+  etiqueta: string
+): Unsubscribe {
+  const mapear = (snap: QuerySnapshot) => {
+    const items: T[] = [];
+    snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as unknown as T));
+    callback(items);
+  };
+  const onError = (err: unknown) => console.error(`Firestore ${etiqueta} snapshot error:`, err);
+
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(col, mapear, onError);
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(query(col, where('propietarioId', '==', pid)), mapear, onError);
+}
+
+// ---- Expedientes de recomercialización ----
+export function subscribeExpedientesRecomercializacion(
+  callback: (items: ExpedienteRecomercializacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<ExpedienteRecomercializacion>(
+    EXPEDIENTES_RECOMERCIALIZACION_COL,
+    callback,
+    scope,
+    'expedientes_recomercializacion'
+  );
+}
+export async function saveExpedienteRecomercializacionFirestore(item: ExpedienteRecomercializacion) {
+  try {
+    await setDoc(
+      doc(db, 'expedientes_recomercializacion', item.id),
+      sanitizeObjectForFirestore(item),
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error saving expediente recomercializacion:', err);
+  }
+}
+export async function deleteExpedienteRecomercializacionFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'expedientes_recomercializacion', id));
+  } catch (err) {
+    console.error('Error deleting expediente recomercializacion:', err);
+  }
+}
+
+// ---- Directorio de inmobiliarias (lectura propietario+admin; escritura admin) ----
+export function subscribeInmobiliarias(
+  callback: (items: InmobiliariaDirectorio[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // El directorio lo consultan administrador y propietario (bolsa para delegar);
+  // los profesionales no participan en la comercialización.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    INMOBILIARIAS_DIRECTORIO_COL,
+    (snap) => {
+      const items: InmobiliariaDirectorio[] = [];
+      snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as InmobiliariaDirectorio));
+      callback(items);
+    },
+    (err) => console.error('Firestore inmobiliarias_directorio snapshot error:', err)
+  );
+}
+export async function saveInmobiliariaFirestore(item: InmobiliariaDirectorio) {
+  try {
+    await setDoc(doc(db, 'inmobiliarias_directorio', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving inmobiliaria:', err);
+  }
+}
+export async function deleteInmobiliariaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'inmobiliarias_directorio', id));
+  } catch (err) {
+    console.error('Error deleting inmobiliaria:', err);
+  }
+}
+
+// ---- Propuestas de inmobiliarias (RFP) ----
+export function subscribePropuestasInmobiliaria(
+  callback: (items: PropuestaInmobiliaria[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<PropuestaInmobiliaria>(
+    PROPUESTAS_INMOBILIARIA_COL,
+    callback,
+    scope,
+    'propuestas_inmobiliaria'
+  );
+}
+export async function savePropuestaInmobiliariaFirestore(item: PropuestaInmobiliaria) {
+  try {
+    await setDoc(doc(db, 'propuestas_inmobiliaria', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving propuesta inmobiliaria:', err);
+  }
+}
+export async function deletePropuestaInmobiliariaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'propuestas_inmobiliaria', id));
+  } catch (err) {
+    console.error('Error deleting propuesta inmobiliaria:', err);
+  }
+}
+
+// ---- Leads de intermediación ----
+export function subscribeLeadsInmobiliarios(
+  callback: (items: LeadInmobiliario[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<LeadInmobiliario>(
+    LEADS_INMOBILIARIOS_COL,
+    callback,
+    scope,
+    'leads_inmobiliario'
+  );
+}
+export async function saveLeadInmobiliarioFirestore(item: LeadInmobiliario) {
+  try {
+    await setDoc(doc(db, 'leads_inmobiliario', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving lead inmobiliario:', err);
+  }
+}
+export async function deleteLeadInmobiliarioFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'leads_inmobiliario', id));
+  } catch (err) {
+    console.error('Error deleting lead inmobiliario:', err);
   }
 }
 

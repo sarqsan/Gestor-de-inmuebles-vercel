@@ -1525,3 +1525,198 @@ export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   incidencias: false,
 };
 
+
+// ==========================================================
+// FASE 3 — RECOMERCIALIZACIÓN INTELIGENTE DEL INMUEBLE
+// Ciclo: salida del inquilino → inspección/IA → reformas/ROI →
+// pricing → estrategia de comercialización → nuevo contrato/venta.
+// INVARIANTE: se reutiliza siempre el mismo inmuebleId (histórico).
+// ==========================================================
+
+export type EstadoRecomercializacion =
+  | 'BORRADOR'
+  | 'SALIDA_NOTIFICADA'
+  | 'REVISION_PENDIENTE'
+  | 'FOTOS_ACTUALIZADAS'
+  | 'VALORACION_COMPLETADA'
+  | 'DECISION_ESTRATEGIA'
+  | 'EN_COMERCIALIZACION'
+  | 'CERRADO_REARRENDADO'
+  | 'CERRADO_VENDIDO'
+  | 'CANCELADO';
+
+export type DestinoInmueble =
+  | 'ALQUILER_TRADICIONAL'
+  | 'ALQUILER_HABITACIONES'
+  | 'ALQUILER_TEMPORAL'
+  | 'VENTA'
+  | 'INDECISO';
+
+export type ModalidadComercializacion = 'GESTION_PROPIA' | 'INMOBILIARIA' | 'AMBAS';
+
+export type EstanciaFoto =
+  | 'salon'
+  | 'cocina'
+  | 'bano'
+  | 'dormitorio'
+  | 'terraza'
+  | 'exterior'
+  | 'otro';
+
+export interface FotoInspeccion {
+  id: string;
+  estancia: EstanciaFoto;
+  url: string;
+  storagePath?: string;
+  fecha: string; // ISO
+  analisisIa?: {
+    observaciones: string[]; // Redacción no asertiva / prudente
+    sugerenciasMejora: string[];
+    analizFecha?: string;
+  };
+}
+
+export interface DatosSalidaInquilino {
+  fechaComunicacion?: string; // ISO: notificación del desistimiento/fin
+  fechaPrevistaSalida?: string; // ISO: desalojo pactado
+  fechaEntregaLlaves?: string; // ISO: inspección y recepción de llaves
+  observaciones?: string;
+  depositoFianzaADevolver?: number;
+  contratoEstado?: 'ACTIVO' | 'EN_PROCESO_RESOLUCION' | 'FINALIZADO_LIQUIDADO';
+}
+
+export interface PricingRecomercializacion {
+  rentaAnterior?: number;
+  escenarioConservador?: number;
+  escenarioRecomendado?: number;
+  escenarioMaximo?: number;
+  valoracionVentaEstimada?: number;
+  horquillaVentaMin?: number;
+  horquillaVentaMax?: number;
+  precioSalidaRecomendado?: number;
+  plazoMedioComercializacionDias?: number;
+  notasCalculo?: string;
+  fechaCalculo?: string; // ISO
+}
+
+export interface MejoraROI {
+  id: string;
+  actuacion: string;
+  costeEstimadoMin?: number;
+  costeEstimadoMax?: number;
+  incrementoRentaMensual?: number;
+  incrementoValoracion?: number;
+  paybackMeses?: number;
+  confirmadaPorPropietario?: boolean;
+  profesionalIdSolicitado?: string;
+}
+
+export interface ComercializacionExpediente {
+  inmobiliariasContactadasIds: string[];
+  enlaceAnuncioManualGenerado?: boolean;
+  kitPublicacion?: {
+    titulo?: string;
+    descripcion?: string;
+    fechaGeneracion?: string;
+  };
+  fechaPublicacion?: string; // ISO
+}
+
+export interface ExpedienteRecomercializacion {
+  id: string;
+  inmuebleId: string; // INVARIANTE: mismo inmuebleId, se conserva el histórico
+  propietarioId: string; // Clave de aislamiento por propietario
+  contratoAnteriorId?: string;
+  fechaInicio: string; // ISO
+  estado: EstadoRecomercializacion;
+  destinoPrevisto: DestinoInmueble;
+  modalidadElegida?: ModalidadComercializacion;
+
+  datosSalida?: DatosSalidaInquilino;
+  revisionFotografica?: {
+    fechaCarga?: string;
+    fotografias: FotoInspeccion[];
+  };
+  mejorasPropuestas?: MejoraROI[];
+  pricing?: PricingRecomercializacion;
+  comercializacion?: ComercializacionExpediente;
+
+  notasInternas?: string;
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Directorio de inmobiliarias (bolsa para delegar/comparar la comercialización)
+export interface InmobiliariaDirectorio {
+  id: string;
+  nombreComercial: string;
+  razonSocial?: string;
+  cifNif?: string;
+  logoUrl?: string;
+  telefono: string;
+  email: string;
+  web?: string;
+
+  // Cobertura geográfica
+  localidad: string;
+  provincia: string;
+  codigosPostales: string[];
+
+  // Servicios y especialidades
+  operaVenta: boolean;
+  operaAlquiler: boolean;
+  operaHabitaciones: boolean;
+  especialidades: string[];
+  comisionMediaVenta?: string;
+  comisionMediaAlquiler?: string;
+
+  // Estado y verificación
+  origen: 'REGISTRADA_EN_PLATAFORMA' | 'LOCALIZADA_EXTERNA';
+  verificada: boolean;
+  esPatrocinada: boolean;
+  activo: boolean;
+
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Propuestas (RFP) emitidas por inmobiliarias para un expediente
+export type EstadoPropuestaInmobiliaria = 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'EXPIRADA';
+
+export interface PropuestaInmobiliaria {
+  id: string;
+  expedienteId: string;
+  inmuebleId: string;
+  propietarioId: string; // Aislamiento
+  inmobiliariaId: string;
+  fechaPropuesta: string; // ISO
+  honorariosPropuestos: string;
+  plazoEstimadoDias: number;
+  serviciosIncluidos: string[];
+  estrategiaResumen: string;
+  estado: EstadoPropuestaInmobiliaria;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Lead/contacto de intermediación con una inmobiliaria
+export type EstadoLeadInmobiliario =
+  | 'SOLICITADO'
+  | 'CONTACTADO'
+  | 'ACUERDO_FIRMADO'
+  | 'DESCARTADO';
+
+export interface LeadInmobiliario {
+  id: string;
+  inmuebleId: string;
+  propietarioId: string; // Aislamiento
+  inmobiliariaId: string;
+  fechaSolicitud: string; // ISO
+  tipoOperacion: 'ALQUILER' | 'VENTA' | 'HABITACIONES';
+  estado: EstadoLeadInmobiliario;
+  notas?: string;
+  createdAt: string;
+  updatedAt?: string;
+}

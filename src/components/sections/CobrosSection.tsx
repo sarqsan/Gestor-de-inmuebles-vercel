@@ -9,8 +9,10 @@ import {
   UsuarioApp,
 } from '../../types';
 import {
+  actualizarEstadosVencimiento,
+  AvisoCobro,
+  calcularAvisosCobros,
   calcularResumenCobros,
-  generarPeriodosParaContrato,
   generarResumenFiscalInmueble,
   MESES_NOMBRES,
   obtenerTodosCobros,
@@ -22,6 +24,7 @@ import { uploadJustificanteCobro } from '../../lib/firebase';
 import {
   AlertCircle,
   Banknote,
+  Bell,
   Building2,
   Calendar,
   CheckCircle2,
@@ -99,10 +102,44 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
   const [cobroParaIncidencia, setCobroParaIncidencia] = useState<CobroPeriodo | null>(null);
   const [motivoIncidencia, setMotivoIncidencia] = useState<string>('');
 
-  // 1. Recopilar todos los cobros vigentes e históricos de los contratos scoped
+  // 1. Recopilar todos los cobros vigentes e históricos de los contratos scoped.
+  // Se aplica en memoria la sincronización de vencimientos para que la UI muestre
+  // RETRASADO al instante, aunque la persistencia a Firestore aún esté en curso.
   const allCobros = useMemo(() => {
-    return obtenerTodosCobros(contratos);
+    const contratosAlDia = contratos.map((c) => actualizarEstadosVencimiento(c).contratoActualizado);
+    return obtenerTodosCobros(contratosAlDia);
   }, [contratos]);
+
+  // Avisos de seguimiento (vence pronto / plazo de cortesía / vencida / incidencia).
+  // Respeta el filtro de inmueble pero no el de año/mes para no ocultar urgencias.
+  const avisos: AvisoCobro[] = useMemo(() => {
+    const base =
+      selectedInmuebleId !== 'TODOS'
+        ? allCobros.filter((c) => c.inmuebleId === selectedInmuebleId)
+        : allCobros;
+    return calcularAvisosCobros(base);
+  }, [allCobros, selectedInmuebleId]);
+
+  const countVencePronto = avisos.filter(
+    (a) => a.tipo === 'vence_pronto' || a.tipo === 'en_plazo_gracia'
+  ).length;
+  const countVencidas = avisos.filter((a) => a.tipo === 'vencida').length;
+  const countIncidenciasAviso = avisos.filter((a) => a.tipo === 'incidencia').length;
+
+  const handleGestionarAviso = (aviso: AvisoCobro) => {
+    if (aviso.tipo === 'incidencia') {
+      setCobroParaIncidencia(aviso.cobro);
+      setMotivoIncidencia(aviso.cobro.motivoIncidencia || '');
+    } else {
+      handleOpenEditPago(aviso.cobro);
+    }
+  };
+
+  const aplicarFiltroAviso = (estado: EstadoCobroAlquiler) => {
+    setSelectedYear(0);
+    setSelectedMonth('TODOS');
+    setSelectedEstado(estado);
+  };
 
   // 2. Cobros filtrados
   const filteredCobros = useMemo(() => {
@@ -337,6 +374,100 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Panel de Avisos y Seguimiento Automático (Fase 1.3) */}
+      {avisos.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-blue-600" />
+              <h3 className="font-bold text-sm text-slate-900">Avisos de seguimiento de cobros</h3>
+              <span className="text-xs text-slate-500">({avisos.length})</span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-bold flex-wrap">
+              <button
+                type="button"
+                onClick={() => aplicarFiltroAviso('INCIDENCIA')}
+                className={`px-2.5 py-1 rounded-full border transition-colors ${
+                  countIncidenciasAviso > 0
+                    ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-400'
+                }`}
+              >
+                Incidencias: {countIncidenciasAviso}
+              </button>
+              <button
+                type="button"
+                onClick={() => aplicarFiltroAviso('RETRASADO')}
+                className={`px-2.5 py-1 rounded-full border transition-colors ${
+                  countVencidas > 0
+                    ? 'bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-400'
+                }`}
+              >
+                Vencidas: {countVencidas}
+              </button>
+              <button
+                type="button"
+                onClick={() => aplicarFiltroAviso('PENDIENTE')}
+                className={`px-2.5 py-1 rounded-full border transition-colors ${
+                  countVencePronto > 0
+                    ? 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-400'
+                }`}
+              >
+                Vencen pronto: {countVencePronto}
+              </button>
+            </div>
+          </div>
+
+          <ul className="divide-y divide-slate-100">
+            {avisos.slice(0, 6).map((aviso) => {
+              const estilos =
+                aviso.nivel === 'critico'
+                  ? 'border-l-4 border-l-rose-400 bg-rose-50/40'
+                  : aviso.nivel === 'advertencia'
+                  ? 'border-l-4 border-l-amber-400 bg-amber-50/40'
+                  : 'border-l-4 border-l-blue-400 bg-blue-50/30';
+              const Icono = aviso.tipo === 'incidencia'
+                ? AlertCircle
+                : aviso.nivel === 'critico'
+                ? Clock
+                : Calendar;
+              const colorIcono =
+                aviso.nivel === 'critico'
+                  ? 'text-rose-500'
+                  : aviso.nivel === 'advertencia'
+                  ? 'text-amber-500'
+                  : 'text-blue-500';
+              return (
+                <li key={aviso.id} className={`px-4 py-2.5 flex items-center gap-3 ${estilos}`}>
+                  <Icono className={`w-4 h-4 shrink-0 ${colorIcono}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-900">{aviso.titulo}</p>
+                    <p className="text-[11px] text-slate-600 truncate" title={aviso.detalle}>
+                      {aviso.detalle}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleGestionarAviso(aviso)}
+                    className="shrink-0 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-700 text-white rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1"
+                  >
+                    <Banknote className="w-3.5 h-3.5" />
+                    {aviso.tipo === 'incidencia' ? 'Gestionar' : 'Cobrar'}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {avisos.length > 6 && (
+            <div className="px-4 py-2 bg-slate-50 text-[11px] text-slate-500 text-center border-t border-slate-100">
+              Mostrando los 6 avisos más urgentes. Usa los filtros para ver el resto ({avisos.length - 6} más).
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tarjetas de Métricas de Cobros */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

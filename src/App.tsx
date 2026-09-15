@@ -44,7 +44,11 @@ import {
   INITIAL_GMAIL_CONFIG,
 } from './data/mockData';
 import { generarInformeInteligente } from './utils/reportGenerator';
-import { obtenerTodosCobros, generarPeriodosParaContrato } from './utils/cobrosEngine';
+import {
+  obtenerTodosCobros,
+  generarPeriodosParaContrato,
+  actualizarEstadosVencimiento,
+} from './utils/cobrosEngine';
 import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
@@ -712,32 +716,31 @@ export default function App() {
   const autoAnalyzingSetRef = React.useRef<Set<string>>(new Set());
 
   // Ref para evitar reescrituras innecesarias al materializar el calendario de cobros.
-  // Clave: contrato.id -> firma (nº periodos + primer/último periodo ya persistido).
+  // Clave: contrato.id -> firma (día actual + nº periodos + nº retrasados + último periodo).
   const cobrosEnsureRef = React.useRef<Map<string, string>>(new Map());
 
-  // Fase 1.1 — Persistencia proactiva de periodos de cobro.
-  // Para cada contrato visible que aún no tenga su registroCobros materializado (o le falten
-  // periodos ya vencidos/futuros según la ventana del motor), se generan y guardan en Firestore.
-  // IMPORTANTE: generarPeriodosParaContrato conserva intactos los periodos ya existentes
-  // (pagos, justificantes, historial), por lo que esto nunca sobrescribe datos.
+  // Fases 1.1 y 1.3 — Materializa el calendario de cobros y sincroniza estados por fecha.
+  // Para cada contrato visible: se generan los periodos que falten y se pasa a RETRASADO
+  // de forma automática (con trazabilidad) toda mensualidad PENDIENTE vencida más el margen
+  // de cortesía. No se tocan RECIBIDO/VERIFICADO/INCIDENCIA ni los datos ya registrados.
   useEffect(() => {
     if (!currentUser) return;
+    const hoy = new Date();
 
     scopedContratos.forEach((contrato) => {
-      const periodos = generarPeriodosParaContrato(contrato);
-      if (periodos.length === 0) return;
+      const sincro = actualizarEstadosVencimiento(contrato, hoy);
+      if (sincro.periodos.length === 0) return;
 
-      const firma = `${periodos.length}|${periodos[0].periodoMesAnio}|${periodos[periodos.length - 1].periodoMesAnio}`;
-      const almacenados = contrato.registroCobros || [];
-      const faltanPeriodos = almacenados.length !== periodos.length;
-
+      const retrasados = sincro.periodos.filter((p) => p.estado === 'RETRASADO').length;
+      const firma = `${hoy.toISOString().slice(0, 10)}|${sincro.periodos.length}|${retrasados}|${sincro.periodos[sincro.periodos.length - 1].periodoMesAnio}`;
       if (cobrosEnsureRef.current.get(contrato.id) === firma) return;
       cobrosEnsureRef.current.set(contrato.id, firma);
 
-      if (faltanPeriodos) {
-        const asegurado: ContratoFormalizacion = { ...contrato, registroCobros: periodos };
-        saveContratoFirestore(asegurado);
-        setContratos((prev) => prev.map((c) => (c.id === asegurado.id ? asegurado : c)));
+      if (sincro.necesitaGuardado) {
+        saveContratoFirestore(sincro.contratoActualizado);
+        setContratos((prev) =>
+          prev.map((c) => (c.id === sincro.contratoActualizado.id ? sincro.contratoActualizado : c))
+        );
       }
     });
   }, [currentUser, scopedContratos]);

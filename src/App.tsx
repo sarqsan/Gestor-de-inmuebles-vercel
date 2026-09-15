@@ -57,7 +57,11 @@ import {
   generarGastosRecurrentes,
   normalizarRecurrente,
 } from './utils/gastosEngine';
-import { calcularCuotaConstante, cuotaDelPeriodo } from './utils/prestamosEngine';
+import {
+  calcularCuotaConstante,
+  cuotaDelPeriodo,
+  generarTablaAmortizacion,
+} from './utils/prestamosEngine';
 import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
@@ -900,7 +904,14 @@ export default function App() {
           const split = cuotaDelPeriodo(p, g.periodoMesAnio);
           if (split) {
             prestamosSplitRef.current.add(g.id);
-            pendientes.push({ ...g, capitalAmortizado: split.capital, intereses: split.intereses });
+            // El importe del recibo se ajusta al cuadro (carencia: sólo intereses;
+            // mes con amortización anticipada: incluye esa salida de caja).
+            pendientes.push({
+              ...g,
+              importe: split.cuota,
+              capitalAmortizado: split.capital,
+              intereses: split.intereses,
+            });
           }
         }
       });
@@ -2082,11 +2093,17 @@ export default function App() {
   const handleSavePrestamo = async (prestamo: Prestamo): Promise<void> => {
     const propietarioId = resolvePropietarioId(prestamo.inmuebleId, prestamo.propietarioId);
     const inm = inmuebles.find((i) => i.id === prestamo.inmuebleId);
-    const cuota = calcularCuotaConstante(
-      prestamo.capitalInicial,
-      prestamo.tasaInteresAnual,
-      prestamo.plazoMeses
-    );
+
+    // FASE 2.4: con carencia/tipo variable, la primera cuota debida y el mes de
+    // inicio de la plantilla se derivan del cuadro; en el caso simple coinciden
+    // con la cuota constante francesa y el mes de inicio del préstamo.
+    const tabla = generarTablaAmortizacion(prestamo);
+    const primeraConCuota = tabla.find((f) => f.cuota > 0);
+    const cuotaNominal =
+      primeraConCuota?.cuota ||
+      calcularCuotaConstante(prestamo.capitalInicial, prestamo.tasaInteresAnual, prestamo.plazoMeses);
+    const inicioPlantilla = primeraConCuota?.periodo || prestamo.fechaInicio;
+
     const concepto = `Cuota ${prestamo.tipo === 'HIPOTECARIO' ? 'hipotecaria' : 'de préstamo'}${
       inm ? ` · ${inm.direccion}` : ''
     }`;
@@ -2101,10 +2118,10 @@ export default function App() {
       propietarioId,
       categoria: 'CUOTA_HIPOTECARIA',
       concepto,
-      importe: cuota,
+      importe: cuotaNominal,
       frecuencia: 'MENSUAL',
       diaVencimiento: prestamo.diaVencimiento,
-      fechaInicio: prestamo.fechaInicio,
+      fechaInicio: inicioPlantilla,
       creadoPor: currentUser?.nombre,
       creadoPorId: currentUser?.id,
     });
@@ -2113,7 +2130,7 @@ export default function App() {
       ...(recurrenteId ? { id: recurrenteId } : {}),
       proveedor: prestamo.entidad?.trim() || undefined,
       concepto,
-      importe: cuota,
+      importe: cuotaNominal,
       aCargoDe: 'arrendador',
       deducible: false,
       metodoPago: 'domiciliacion',

@@ -4,6 +4,7 @@ import type { Prestamo } from '../../types';
 import {
   generarTablaAmortizacion,
   resumenPrestamo,
+  tasaEnPeriodo,
 } from '../../utils/prestamosEngine';
 
 interface Props {
@@ -28,6 +29,7 @@ const mesLargo = (periodo: string): string => {
 export const TablaAmortizacionModal: React.FC<Props> = ({ prestamo, direccionInmueble, onClose }) => {
   const tabla = useMemo(() => generarTablaAmortizacion(prestamo), [prestamo]);
   const r = useMemo(() => resumenPrestamo(prestamo), [prestamo]);
+  const tasaFila = (periodo: string): number => tasaEnPeriodo(prestamo, periodo);
   const periodoActual = (() => {
     const h = new Date();
     return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, '0')}`;
@@ -36,12 +38,28 @@ export const TablaAmortizacionModal: React.FC<Props> = ({ prestamo, direccionInm
   const descargarCSV = () => {
     const sep = ';';
     const n = (v: number) => v.toFixed(2).replace('.', ',');
-    const filas = tabla.map(
-      (f) => [f.numero, f.fecha, n(f.cuota), n(f.intereses), n(f.capital), n(f.saldoFinal)].join(sep)
+    const filas = tabla.map((f) =>
+      [
+        f.numero,
+        f.fecha,
+        f.enCarencia ? 'CARENCIA' : '',
+        n(f.cuota),
+        n(f.intereses),
+        n(f.capital),
+        n(f.amortizacionAdicional),
+        n(f.saldoFinal),
+      ].join(sep)
     );
-    const csv = `\uFEFF${['Nº', 'Fecha', 'Cuota', 'Intereses', 'Capital', 'Saldo pendiente'].join(
-      sep
-    )}\r\n${filas.join('\r\n')}`;
+    const csv = `\uFEFF${[
+      'Nº',
+      'Fecha',
+      'Carencia',
+      'Cuota',
+      'Intereses',
+      'Capital',
+      'Amort. extra',
+      'Saldo pendiente',
+    ].join(sep)}\r\n${filas.join('\r\n')}`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -121,28 +139,49 @@ export const TablaAmortizacionModal: React.FC<Props> = ({ prestamo, direccionInm
                   <th className="px-3 py-2 text-right font-semibold">Cuota</th>
                   <th className="px-3 py-2 text-right font-semibold">Intereses</th>
                   <th className="px-3 py-2 text-right font-semibold">Capital</th>
+                  <th className="px-3 py-2 text-right font-semibold">Amort. extra</th>
                   <th className="px-3 py-2 text-right font-semibold">Saldo vivo</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {tabla.map((f) => {
+                {tabla.map((f, idx) => {
                   const esMesActual = f.periodo === periodoActual;
                   const yaVencida = f.periodo < periodoActual;
+                  const tasaPrevia = idx > 0 ? tasaFila(tabla[idx - 1].periodo) : null;
+                  const cambioTipo = tasaPrevia !== null && tasaPrevia !== tasaFila(f.periodo);
                   return (
                     <tr
                       key={f.numero}
-                      className={esMesActual ? 'bg-violet-50/70' : yaVencida ? 'text-slate-500' : ''}
+                      className={
+                        (esMesActual
+                          ? 'bg-violet-50/70'
+                          : f.enCarencia
+                          ? 'bg-amber-50/60'
+                          : yaVencida
+                          ? 'text-slate-500'
+                          : '') + (cambioTipo ? ' border-t-2 border-t-violet-300' : '')
+                      }
                     >
                       <td className="px-3 py-1.5 font-medium">{f.numero}</td>
-                      <td className="px-3 py-1.5 capitalize whitespace-nowrap">{mesLargo(f.periodo)}</td>
+                      <td className="px-3 py-1.5 capitalize whitespace-nowrap">
+                        {mesLargo(f.periodo)}
+                        {f.enCarencia && (
+                          <span className="ml-1 px-1.5 py-px rounded bg-amber-100 text-amber-800 text-[9px] font-semibold">
+                            carencia
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-1.5 text-right font-semibold whitespace-nowrap">
-                        {euro(f.cuota)}
+                        {f.cuota > 0 ? euro(f.cuota) : '—'}
                       </td>
                       <td className="px-3 py-1.5 text-right text-violet-700 whitespace-nowrap">
-                        {euro(f.intereses)}
+                        {f.intereses > 0 ? euro(f.intereses) : '—'}
                       </td>
                       <td className="px-3 py-1.5 text-right text-slate-700 whitespace-nowrap">
-                        {euro(f.capital)}
+                        {f.capital > 0 ? euro(f.capital) : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-emerald-700 whitespace-nowrap">
+                        {f.amortizacionAdicional > 0 ? euro(f.amortizacionAdicional) : '—'}
                       </td>
                       <td className="px-3 py-1.5 text-right text-slate-500 whitespace-nowrap">
                         {euro(f.saldoFinal)}
@@ -154,9 +193,9 @@ export const TablaAmortizacionModal: React.FC<Props> = ({ prestamo, direccionInm
             </table>
           </div>
           <p className="text-[10px] text-slate-400">
-            El saldo vivo es teórico según el calendario (cuota constante, sistema francés); los
-            recibos reales pueden diferir si hay amortizaciones anticipadas o cambios de tipo. La
-            fila violeta marca el mes en curso.
+            Saldo teórico según calendario (sistema francés): las filas ámbar indican carencia, el
+            borde violeta marca un cambio de tipo y «Amort. extra», las amortizaciones anticipadas.
+            La fila violeta destaca el mes en curso.
           </p>
         </div>
       </div>

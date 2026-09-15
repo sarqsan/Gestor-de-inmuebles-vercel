@@ -1049,6 +1049,40 @@ export interface GastoRecurrente {
  */
 export type TipoPrestamo = 'HIPOTECARIO' | 'PERSONAL';
 
+/**
+ * FASE 2.4 — Modalidad de la amortización anticipada:
+ * - REDUCE_CUOTA: se mantiene el plazo y baja el importe mensual.
+ * - REDUCE_PLAZO: se mantiene la cuota y el préstamo vence antes.
+ */
+export type ModalidadAmortizacion = 'REDUCE_CUOTA' | 'REDUCE_PLAZO';
+
+/** Amortización anticipada (cancelación parcial de principal) en un mes dado. */
+export interface AmortizacionAnticipada {
+  id: string;
+  periodo: string; // YYYY-MM en el que se aplica (al inicio del recibo)
+  importe: number;
+  modalidad: ModalidadAmortizacion;
+}
+
+/**
+ * Tramo de tipo de interés variable (p. ej. revisión anual del Euribor): a
+ * partir de `fechaInicio` pasa a aplicarse `tasaInteresAnual`. El primer tipo
+ * es el `tasaInteresAnual` del propio préstamo.
+ */
+export interface TramoTipoInteres {
+  id: string;
+  fechaInicio: string; // YYYY-MM desde el que rige este TIN
+  tasaInteresAnual: number;
+}
+
+/**
+ * FASE 2.4 — Tipo de carencia inicial:
+ * - TOTAL: no se paga nada durante la carencia; los intereses se capitalizan
+ *   (se añaden al saldo vivo).
+ * - PARCIAL: sólo se pagan intereses; no se amortiza capital.
+ */
+export type TipoCarencia = 'TOTAL' | 'PARCIAL';
+
 export interface Prestamo {
   id: string; // "prest_{inmuebleId}_{ts}"
   inmuebleId: string;
@@ -1059,10 +1093,16 @@ export interface Prestamo {
   entidad?: string; // Banco / acreedor
 
   capitalInicial: number; // Principal prestado (EUR)
-  tasaInteresAnual: number; // TIN en porcentaje (p.ej. 3,25 para el 3,25%)
+  tasaInteresAnual: number; // TIN inicial en porcentaje (p.ej. 3,25 para el 3,25%)
   plazoMeses: number;
   fechaInicio: string; // YYYY-MM (primera cuota)
   diaVencimiento: number; // Día de cargo (1-28)
+
+  // FASE 2.4 — flexibilidad financiera
+  carenciaMeses?: number; // Meses iniciales de carencia (0 por defecto)
+  tipoCarencia?: TipoCarencia; // 'TOTAL' | 'PARCIAL'
+  tramosTipo?: TramoTipoInteres[]; // Revisiones de tipo (variable)
+  amortizaciones?: AmortizacionAnticipada[]; // Amortizaciones anticipadas
 
   gastoRecurrenteId?: string; // Plantilla vinculada que genera los recibos
   activo: boolean;

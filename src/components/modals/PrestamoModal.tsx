@@ -1,9 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { X, Landmark, Save, AlertCircle, Calculator } from 'lucide-react';
-import type { Inmueble, Prestamo, TipoPrestamo, UsuarioApp } from '../../types';
-import { periodoActual } from '../../utils/gastosEngine';
+import { X, Landmark, Save, AlertCircle, Calculator, Plus, Trash2 } from 'lucide-react';
+import type {
+  AmortizacionAnticipada,
+  Inmueble,
+  ModalidadAmortizacion,
+  Prestamo,
+  TipoCarencia,
+  TipoPrestamo,
+  TramoTipoInteres,
+  UsuarioApp,
+} from '../../types';
+import { periodoActual, sumarMeses } from '../../utils/gastosEngine';
 import {
-  calcularCuotaConstante,
   generarTablaAmortizacion,
   nuevoPrestamoId,
   resumenPrestamo,
@@ -63,12 +71,64 @@ export const PrestamoModal: React.FC<Props> = ({
   );
   const [activo, setActivo] = useState<boolean>(prestamoParaEditar?.activo ?? true);
   const [notas, setNotas] = useState<string>(prestamoParaEditar?.notas || '');
+  // FASE 2.4 — carencia, tipo variable y amortizaciones anticipadas.
+  const [carenciaMeses, setCarenciaMeses] = useState<string>(
+    String(prestamoParaEditar?.carenciaMeses ?? 0)
+  );
+  const [tipoCarencia, setTipoCarencia] = useState<TipoCarencia>(
+    prestamoParaEditar?.tipoCarencia || 'TOTAL'
+  );
+  const [tramos, setTramos] = useState<Array<{ id: string; fechaInicio: string; tasa: string }>>(
+    (prestamoParaEditar?.tramosTipo || []).map((t) => ({
+      id: t.id,
+      fechaInicio: t.fechaInicio,
+      tasa: String(t.tasaInteresAnual),
+    }))
+  );
+  const [amortizaciones, setAmortizaciones] = useState<
+    Array<{ id: string; periodo: string; importe: string; modalidad: ModalidadAmortizacion }>
+  >(
+    (prestamoParaEditar?.amortizaciones || []).map((a) => ({
+      id: a.id,
+      periodo: a.periodo,
+      importe: String(a.importe),
+      modalidad: a.modalidad,
+    }))
+  );
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [guardando, setGuardando] = useState<boolean>(false);
 
   const capitalNum = parseFloat(capital.replace(',', '.')) || 0;
   const tinNum = parseFloat(tin.replace(',', '.')) || 0;
   const plazoNum = parseInt(plazoMeses, 10) || 0;
+
+  const carenciaNum = Math.min(Math.max(parseInt(carenciaMeses, 10) || 0, 0), plazoNum ? plazoNum - 1 : 0);
+
+  const tramosLimpios: TramoTipoInteres[] = useMemo(
+    () =>
+      tramos
+        .filter((t) => t.fechaInicio && t.tasa !== '')
+        .map((t) => ({
+          id: t.id,
+          fechaInicio: t.fechaInicio,
+          tasaInteresAnual: parseFloat(t.tasa.replace(',', '.')) || 0,
+        }))
+        .sort((a, b) => a.fechaInicio.localeCompare(b.fechaInicio)),
+    [tramos]
+  );
+
+  const amortizacionesLimpias: AmortizacionAnticipada[] = useMemo(
+    () =>
+      amortizaciones
+        .filter((a) => a.periodo && parseFloat(a.importe.replace(',', '.')) > 0)
+        .map((a) => ({
+          id: a.id,
+          periodo: a.periodo,
+          importe: parseFloat(a.importe.replace(',', '.')) || 0,
+          modalidad: a.modalidad,
+        })),
+    [amortizaciones]
+  );
 
   const borrador = useMemo<Prestamo>(
     () => ({
@@ -81,23 +141,41 @@ export const PrestamoModal: React.FC<Props> = ({
       plazoMeses: plazoNum,
       fechaInicio,
       diaVencimiento: Math.min(Math.max(parseInt(diaVencimiento, 10) || 1, 1), 28),
+      carenciaMeses: carenciaNum || undefined,
+      tipoCarencia: carenciaNum > 0 ? tipoCarencia : undefined,
+      tramosTipo: tramosLimpios.length > 0 ? tramosLimpios : undefined,
+      amortizaciones: amortizacionesLimpias.length > 0 ? amortizacionesLimpias : undefined,
       activo,
       createdAt: prestamoParaEditar?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }),
-    [prestamoParaEditar, inmuebleId, tipo, capitalNum, tinNum, plazoNum, fechaInicio, diaVencimiento, activo]
+    [
+      prestamoParaEditar,
+      inmuebleId,
+      tipo,
+      capitalNum,
+      tinNum,
+      plazoNum,
+      fechaInicio,
+      diaVencimiento,
+      carenciaNum,
+      tipoCarencia,
+      tramosLimpios,
+      amortizacionesLimpias,
+      activo,
+    ]
   );
 
-  const cuota = useMemo(
-    () => calcularCuotaConstante(capitalNum, tinNum, plazoNum),
-    [capitalNum, tinNum, plazoNum]
-  );
+  // La previsualización se calcula siempre desde el cuadro (soporta carencia,
+  // tipo variable y prepagos), no con la fórmula cerrada de cuota constante.
+  const tablaPreview = useMemo(() => generarTablaAmortizacion(borrador), [borrador]);
+  const primeraCuotaNormal = tablaPreview.find((f) => f.capital > 0 && !f.enCarencia);
+  const cuotaInicial = primeraCuotaNormal?.cuota || tablaPreview[0]?.cuota || 0;
   const resumen = useMemo(() => {
-    if (!cuota) return null;
-    const tabla = generarTablaAmortizacion(borrador);
+    if (tablaPreview.length === 0) return null;
     const r = resumenPrestamo(borrador, '9999-12'); // cuadro completo para la previsualización
-    return { r, filas: tabla.length };
-  }, [borrador, cuota]);
+    return { r, filas: tablaPreview.length };
+  }, [borrador, tablaPreview]);
 
   const handleSubmit = async () => {
     setErrorMsg('');
@@ -106,6 +184,19 @@ export const PrestamoModal: React.FC<Props> = ({
     if (tinNum < 0 || tinNum > 30) return setErrorMsg('Revisa el TIN (porcentaje anual, p. ej. 3,5).');
     if (plazoNum <= 0 || plazoNum > 600) return setErrorMsg('Introduce un plazo en meses válido (1-600).');
     if (!fechaInicio) return setErrorMsg('Indica el mes de la primera cuota.');
+    const ultimoPeriodo = sumarMeses(fechaInicio, plazoNum - 1);
+    const tramoInvalido = tramosLimpios.find((t) => t.fechaInicio <= fechaInicio);
+    if (tramoInvalido)
+      return setErrorMsg('Las revisiones de tipo deben empezar DESPUÉS del mes de la primera cuota (el TIN inicial ya cubre esa fecha).');
+    const tramoFuera = tramosLimpios.find((t) => t.fechaInicio > ultimoPeriodo);
+    if (tramoFuera) return setErrorMsg('Hay una revisión de tipo con fecha posterior al fin del préstamo.');
+    const prepagoFuera = amortizacionesLimpias.find(
+      (a) => a.periodo < fechaInicio || a.periodo > ultimoPeriodo
+    );
+    if (prepagoFuera) return setErrorMsg('Una amortización anticipada cae fuera del plazo del préstamo.');
+    const sumaPrepagos = amortizacionesLimpias.reduce((acc, a) => acc + a.importe, 0);
+    if (sumaPrepagos > capitalNum)
+      return setErrorMsg('La suma de amortizaciones anticipadas supera el capital pendiente inicial.');
 
     const prestamo: Prestamo = {
       ...borrador,
@@ -173,13 +264,20 @@ export const PrestamoModal: React.FC<Props> = ({
           <div className="p-4 rounded-2xl bg-violet-50/60 border border-violet-200">
             <div className="flex items-center gap-2 text-violet-800 text-xs font-bold mb-2">
               <Calculator className="w-4 h-4" /> Cuota resultante (sistema francés)
+              {tramosLimpios.length > 0 && (
+                <span className="ml-auto px-2 py-0.5 rounded bg-violet-100 text-violet-800 text-[10px] font-semibold">
+                  Tipo variable · {tramosLimpios.length + 1} tramos
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
                 <p className="text-lg font-bold text-violet-900 leading-tight">
-                  {cuota ? euro(cuota) : '—'}
+                  {cuotaInicial ? euro(cuotaInicial) : '—'}
                 </p>
-                <p className="text-[10px] text-violet-600">cuota mensual</p>
+                <p className="text-[10px] text-violet-600">
+                  {carenciaNum > 0 ? 'primera cuota tras carencia' : 'cuota mensual'}
+                </p>
               </div>
               <div>
                 <p className="text-sm font-bold text-slate-800">
@@ -194,10 +292,22 @@ export const PrestamoModal: React.FC<Props> = ({
                 <p className="text-[10px] text-slate-500">capital + intereses</p>
               </div>
               <div>
-                <p className="text-sm font-bold text-slate-800">{plazoAnios} años</p>
-                <p className="text-[10px] text-slate-500">{plazoNum || 0} cuotas</p>
+                <p className="text-sm font-bold text-slate-800">
+                  {resumen ? `${resumen.filas} recibos` : `${plazoNum || 0} cuotas`}
+                </p>
+                <p className="text-[10px] text-slate-500">{plazoAnios} años</p>
               </div>
             </div>
+            {(carenciaNum > 0 || amortizacionesLimpias.length > 0) && (
+              <p className="mt-2 text-[10px] text-violet-700">
+                {carenciaNum > 0 &&
+                  `Carencia inicial de ${carenciaNum} meses (${
+                    tipoCarencia === 'TOTAL' ? 'total: no se paga, intereses al capital' : 'parcial: sólo intereses'
+                  }). `}
+                {amortizacionesLimpias.length > 0 &&
+                  `${amortizacionesLimpias.length} amortización(es) anticipada(s) registradas.`}
+              </p>
+            )}
           </div>
 
           <div>
@@ -261,6 +371,177 @@ export const PrestamoModal: React.FC<Props> = ({
                 Vigente
               </label>
             </div>
+          </div>
+
+          {/* Carencia inicial */}
+          <div className="grid grid-cols-3 gap-4 items-end">
+            <div>
+              <label className={labelCls}>Carencia inicial (meses)</label>
+              <input
+                type="number"
+                min="0"
+                max={Math.max(plazoNum - 1, 0)}
+                className={inputCls}
+                value={carenciaMeses}
+                onChange={(e) => setCarenciaMeses(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Tipo de carencia</label>
+              <select
+                className={inputCls}
+                value={tipoCarencia}
+                onChange={(e) => setTipoCarencia(e.target.value as TipoCarencia)}
+                disabled={carenciaNum === 0}
+              >
+                <option value="TOTAL">Total (no se paga)</option>
+                <option value="PARCIAL">Parcial (sólo intereses)</option>
+              </select>
+            </div>
+            <p className="text-[10px] text-slate-400 leading-snug pb-2">
+              En la carencia total los intereses se añaden al capital.
+            </p>
+          </div>
+
+          {/* Tramos de tipo variable */}
+          <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className={labelCls + ' !mb-0'}>
+                Revisiones de tipo (interés variable)
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setTramos((prev) => [
+                    ...prev,
+                    {
+                      id: `tr_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+                      fechaInicio: sumarMeses(fechaInicio || periodoActual(), 12),
+                      tasa: tin,
+                    },
+                  ])
+                }
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 px-2 py-1 rounded-lg"
+              >
+                <Plus className="w-3.5 h-3.5" /> Añadir revisión
+              </button>
+            </div>
+            {tramos.length === 0 ? (
+              <p className="text-[11px] text-slate-400">
+                Sin tramos: se aplica el TIN inicial del {tinNum} % durante toda la vida.
+              </p>
+            ) : (
+              tramos.map((t, idx) => (
+                <div key={t.id} className="grid grid-cols-12 gap-2 items-center">
+                  <span className="col-span-2 text-[11px] text-slate-500">Desde</span>
+                  <input
+                    type="month"
+                    className={inputCls + ' col-span-4'}
+                    value={t.fechaInicio}
+                    onChange={(e) =>
+                      setTramos((prev) =>
+                        prev.map((x) => (x.id === t.id ? { ...x, fechaInicio: e.target.value } : x))
+                      )
+                    }
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    className={inputCls + ' col-span-3'}
+                    placeholder="nuevo TIN %"
+                    value={t.tasa}
+                    onChange={(e) =>
+                      setTramos((prev) =>
+                        prev.map((x) => (x.id === t.id ? { ...x, tasa: e.target.value } : x))
+                      )
+                    }
+                  />
+                  <span className="col-span-2 text-[11px] text-slate-400">% TIN</span>
+                  <button
+                    type="button"
+                    onClick={() => setTramos((prev) => prev.filter((x) => x.id !== t.id))}
+                    className="col-span-1 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg justify-self-end"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Amortizaciones anticipadas */}
+          <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className={labelCls + ' !mb-0'}>Amortizaciones anticipadas</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setAmortizaciones((prev) => [
+                    ...prev,
+                    {
+                      id: `am_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+                      periodo: sumarMeses(fechaInicio || periodoActual(), 12),
+                      importe: '',
+                      modalidad: 'REDUCE_PLAZO' as ModalidadAmortizacion,
+                    },
+                  ])
+                }
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 px-2 py-1 rounded-lg"
+              >
+                <Plus className="w-3.5 h-3.5" /> Añadir amortización
+              </button>
+            </div>
+            {amortizaciones.length === 0 ? (
+              <p className="text-[11px] text-slate-400">Sin amortizaciones anticipadas.</p>
+            ) : (
+              amortizaciones.map((a) => (
+                <div key={a.id} className="grid grid-cols-12 gap-2 items-center">
+                  <input
+                    type="month"
+                    className={inputCls + ' col-span-4'}
+                    value={a.periodo}
+                    onChange={(e) =>
+                      setAmortizaciones((prev) =>
+                        prev.map((x) => (x.id === a.id ? { ...x, periodo: e.target.value } : x))
+                      )
+                    }
+                  />
+                  <input
+                    type="number"
+                    step="100"
+                    className={inputCls + ' col-span-3'}
+                    placeholder="importe €"
+                    value={a.importe}
+                    onChange={(e) =>
+                      setAmortizaciones((prev) =>
+                        prev.map((x) => (x.id === a.id ? { ...x, importe: e.target.value } : x))
+                      )
+                    }
+                  />
+                  <select
+                    className={inputCls + ' col-span-4'}
+                    value={a.modalidad}
+                    onChange={(e) =>
+                      setAmortizaciones((prev) =>
+                        prev.map((x) =>
+                          x.id === a.id ? { ...x, modalidad: e.target.value as ModalidadAmortizacion } : x
+                        )
+                      )
+                    }
+                  >
+                    <option value="REDUCE_PLAZO">Reduce plazo</option>
+                    <option value="REDUCE_CUOTA">Reduce cuota</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setAmortizaciones((prev) => prev.filter((x) => x.id !== a.id))}
+                    className="col-span-1 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg justify-self-end"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
 
           <div>

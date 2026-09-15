@@ -21,9 +21,11 @@ export interface CuotaAmortizacion {
   numero: number; // 1..n
   periodo: string; // YYYY-MM
   fecha: string; // YYYY-MM-DD
-  cuota: number; // Capital + intereses del recibo
-  capital: number; // Amortización de deuda del recibo
+  cuota: number; // Capital + intereses del recibo (sin contar la amortización anticipada)
+  capital: number; // Amortización ordinaria de deuda del recibo
   intereses: number; // Intereses del recibo
+  amortizacionAdicional: number; // Amortización anticipada aplicada en ese mes
+  enCarencia: boolean;
   saldoInicial: number;
   saldoFinal: number;
 }
@@ -71,47 +73,137 @@ function fechaDelPeriodo(periodo: string, dia: number): string {
   return `${periodo}-${String(d).padStart(2, '0')}`;
 }
 
+/** TIN anual (%) vigente en un período dado (tramos variables) (FASE 2.4). */
+export function tasaEnPeriodo(prestamo: Prestamo, periodo: string): number {
+  const tramos = (prestamo.tramosTipo || [])
+    .slice()
+    .sort((a, b) => a.fechaInicio.localeCompare(b.fechaInicio));
+  let tasa = Number(prestamo.tasaInteresAnual) || 0;
+  tramos.forEach((t) => {
+    if (t.fechaInicio <= periodo) tasa = Number(t.tasaInteresAnual) || 0;
+  });
+  return tasa;
+}
+
+function prepagosDelPeriodo(
+  prestamo: Prestamo,
+  periodo: string
+): { importe: number; reduceCuota: boolean } {
+  const lista = (prestamo.amortizaciones || []).filter((a) => a.periodo === periodo);
+  return {
+    importe: round2(lista.reduce((acc, a) => acc + (Number(a.importe) || 0), 0)),
+    reduceCuota: lista.some((a) => a.modalidad === 'REDUCE_CUOTA'),
+  };
+}
+
 /**
- * Tabla de amortización completa. La última cuota se ajusta para que el saldo
-* final sea exactamente cero (redondeo de céntimos).
+ * Tabla de amortización completa (simulación mes a mes). Soporta:
+ *  - carencia inicial TOTAL (no se paga; intereses capitalizados) o PARCIAL
+ *    (sólo se pagan intereses);
+ *  - tipo variable por tramos (la cuota se recalcula en cada cambio de TIN,
+ *    manteniendo el plazo restante, como una revisión de hipoteca);
+ *  - amortizaciones anticipadas que reducen cuota (recálculo) o plazo (se
+ *    mantiene la cuota y el préstamo vence antes).
+ * La última cuota se ajusta para dejar el saldo exactamente a cero.
  */
 export function generarTablaAmortizacion(prestamo: Prestamo): CuotaAmortizacion[] {
   const capitalInicial = Number(prestamo.capitalInicial) || 0;
   const n = Math.round(Number(prestamo.plazoMeses) || 0);
   if (capitalInicial <= 0 || n <= 0) return [];
 
-  const i = tasaMensual(prestamo.tasaInteresAnual);
-  const cuota = calcularCuotaConstante(capitalInicial, prestamo.tasaInteresAnual, n);
+  const carencia = Math.min(Math.max(Number(prestamo.carenciaMeses) || 0, 0), n - 1);
+  const carenciaTotal = (prestamo.tipoCarencia || 'TOTAL') === 'TOTAL';
   const filas: CuotaAmortizacion[] = [];
   let saldo = capitalInicial;
+  let cuotaActual = 0;
+  let tasaPrevia = NaN;
 
-  for (let k = 1; k <= n; k += 1) {
-    const periodo = sumarMeses(prestamo.fechaInicio, k - 1);
-    const intereses = round2(saldo * i);
-    let capital: number;
-    let pago: number;
-    if (k === n) {
-      // Última cuota: se ajusta para dejar saldo cero.
-      capital = round2(saldo);
-      pago = round2(capital + intereses);
-    } else {
-      capital = round2(cuota - intereses);
-      pago = cuota;
-    }
+  for (let m = 0; m < n; m += 1) {
+    const periodo = sumarMeses(prestamo.fechaInicio, m);
+    const tasaAnual = tasaEnPeriodo(prestamo, periodo);
+    const i = tasaMensual(tasaAnual);
+    const enCarencia = m < carencia;
     const saldoInicial = round2(saldo);
-    saldo = round2(saldo - capital);
-    if (saldo < 0.005 && k === n) saldo = 0;
+
+    // 1) Amortización anticipada del mes (reduce el principal antes de intereses).
+    const prepago = prepagosDelPeriodo(prestamo, periodo);
+    if (prepago.importe > 0) {
+      saldo = round2(Math.max(saldo - prepago.importe, 0));
+    }
+
+    // 2) Intereses del mes sobre el saldo vivo.
+    const intereses = round2(saldo * i);
+    let capital = 0;
+    let cuota = 0;
+
+    if (saldo <= 0.005) {
+      // Prepago que cancela toda la deuda: fila final sin nada que pagar.
+      filas.push({
+        numero: m + 1,
+        periodo,
+        fecha: fechaDelPeriodo(periodo, prestamo.diaVencimiento),
+        cuota: 0,
+        capital: 0,
+        intereses: 0,
+        amortizacionAdicional: prepago.importe,
+        enCarencia,
+        saldoInicial,
+        saldoFinal: 0,
+      });
+      break;
+    }
+
+    if (enCarencia && carenciaTotal) {
+      // Carencia total: no hay pago; los intereses se capitalizan.
+      cuota = 0;
+      capital = 0;
+      saldo = round2(saldo + intereses);
+    } else if (enCarencia) {
+      // Carencia parcial: se pagan sólo los intereses.
+      cuota = intereses;
+      capital = 0;
+    } else {
+      // 3) ¿Hay que (re)calcular la cuota constante?
+      const primerPeriodoNormal = m === carencia;
+      const cambioDeTipo = !Number.isNaN(tasaPrevia) && tasaAnual !== tasaPrevia;
+      if (cuotaActual === 0 || primerPeriodoNormal || cambioDeTipo || prepago.reduceCuota) {
+        const cuotasRestantes = n - m;
+        cuotaActual = calcularCuotaConstante(saldo, tasaAnual, cuotasRestantes);
+      }
+      tasaPrevia = tasaAnual;
+
+      // Cierre: cuando la cuota ya cubre el saldo (o es el último mes del
+      // calendario), se ajusta el recibo para dejar el saldo exactamente a cero
+      // (absorbe errores de céntimos por cambios de tipo o carencia).
+      if (m === n - 1 || cuotaActual - intereses >= saldo - 0.005) {
+        capital = round2(saldo);
+        cuota = round2(capital + intereses);
+        saldo = 0;
+      } else {
+        capital = round2(cuotaActual - intereses);
+        cuota = cuotaActual;
+        saldo = round2(saldo - capital);
+      }
+    }
+
+    if (!enCarencia) tasaPrevia = tasaAnual;
+
     filas.push({
-      numero: k,
+      numero: m + 1,
       periodo,
       fecha: fechaDelPeriodo(periodo, prestamo.diaVencimiento),
-      cuota: pago,
+      cuota,
       capital,
       intereses,
+      amortizacionAdicional: prepago.importe,
+      enCarencia,
       saldoInicial,
       saldoFinal: saldo,
     });
+
+    if (!enCarencia && saldo <= 0.005) break; // REDUCE_PLAZO: vence antes.
   }
+
   return filas;
 }
 
@@ -119,15 +211,24 @@ export function generarTablaAmortizacion(prestamo: Prestamo): CuotaAmortizacion[
 export function cuotaDelPeriodo(
   prestamo: Prestamo,
   periodo: string
-): { capital: number; intereses: number; cuota: number; numero: number; saldoFinal: number } | null {
+): {
+  capital: number;
+  intereses: number;
+  cuota: number;
+  numero: number;
+  saldoFinal: number;
+  amortizacionAdicional: number;
+} | null {
   const fila = generarTablaAmortizacion(prestamo).find((f) => f.periodo === periodo);
   if (!fila) return null;
   return {
-    capital: fila.capital,
+    capital: round2(fila.capital + fila.amortizacionAdicional),
     intereses: fila.intereses,
-    cuota: fila.cuota,
+    // El recibo del mes incluye también la amortización anticipada (salida de caja).
+    cuota: round2(fila.cuota + fila.amortizacionAdicional),
     numero: fila.numero,
     saldoFinal: fila.saldoFinal,
+    amortizacionAdicional: fila.amortizacionAdicional,
   };
 }
 
@@ -147,17 +248,27 @@ export function resumenPrestamo(
       return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, '0')}`;
     })();
 
-  const totalCapital = round2(tabla.reduce((a, f) => a + f.capital, 0));
+  const totalCapital = round2(
+    tabla.reduce((a, f) => a + f.capital + f.amortizacionAdicional, 0)
+  );
   const totalIntereses = round2(tabla.reduce((a, f) => a + f.intereses, 0));
   const vencidas = tabla.filter((f) => f.periodo <= corte);
-  const capitalAmortizado = round2(vencidas.reduce((a, f) => a + f.capital, 0));
+  const capitalAmortizado = round2(
+    vencidas.reduce((a, f) => a + f.capital + f.amortizacionAdicional, 0)
+  );
   const interesesPagados = round2(vencidas.reduce((a, f) => a + f.intereses, 0));
 
   const capitalInicial = Number(prestamo.capitalInicial) || 0;
   const finalizado = tabla.length > 0 && corte >= tabla[tabla.length - 1].periodo;
 
+  // Con carencia, la primera cuota ordinaria (no la de carencia) es la referencia.
+  const cuotaReferencia =
+    tabla.find((f) => !f.enCarencia && f.capital > 0)?.cuota ||
+    tabla.find((f) => f.cuota > 0)?.cuota ||
+    (tabla.length ? tabla[0].cuota : 0);
+
   return {
-    cuotaConstante: tabla.length ? tabla[0].cuota : 0,
+    cuotaConstante: cuotaReferencia,
     numeroCuotas: tabla.length,
     totalPagado: round2(totalCapital + totalIntereses),
     totalIntereses,

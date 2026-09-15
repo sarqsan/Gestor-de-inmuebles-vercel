@@ -284,6 +284,31 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 2D. PRÉSTAMOS / HIPOTECAS (FASE 2.3 — condiciones financieras)
+    // Mismo aislamiento por propietarioId que gastos/contratos.
+    // =========================================================================
+    match /prestamos/{prestamoId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
     // 3. CANDIDATOS (expedientes y cuestionarios)
     // El listado y la gestión requieren cuenta interna. Se conserva el enlace
     // público de cuestionario (autoservicio del candidato por token), que sólo

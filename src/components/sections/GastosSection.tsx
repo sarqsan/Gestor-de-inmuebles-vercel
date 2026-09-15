@@ -16,6 +16,7 @@ import {
   Repeat,
   Paperclip,
   Power,
+  Eye,
 } from 'lucide-react';
 import type {
   CategoriaGasto,
@@ -24,6 +25,7 @@ import type {
   Gasto,
   GastoRecurrente,
   Inmueble,
+  Prestamo,
   TipoGasto,
   UsuarioApp,
 } from '../../types';
@@ -37,20 +39,26 @@ import {
   proximoPeriodoRecurrente,
   resumenGastos,
 } from '../../utils/gastosEngine';
+import { resumenPrestamo } from '../../utils/prestamosEngine';
 import { GastoModal } from '../modals/GastoModal';
 import { GastoRecurrenteModal } from '../modals/GastoRecurrenteModal';
+import { PrestamoModal } from '../modals/PrestamoModal';
+import { TablaAmortizacionModal } from '../modals/TablaAmortizacionModal';
 import { RentabilidadPanel } from './RentabilidadPanel';
 
 interface GastosSectionProps {
   gastos: Gasto[];
   cobros: CobroPeriodo[];
   recurrentes: GastoRecurrente[];
+  prestamos: Prestamo[];
   inmuebles: Inmueble[];
   currentUser?: UsuarioApp | null;
   onSaveGasto: (gasto: Gasto) => Promise<Gasto | void> | Gasto | void;
   onDeleteGasto: (gastoId: string) => Promise<void> | void;
   onSaveRecurrente: (plantilla: GastoRecurrente) => Promise<void> | void;
   onDeleteRecurrente: (plantillaId: string) => Promise<void> | void;
+  onSavePrestamo: (prestamo: Prestamo) => Promise<void> | void;
+  onDeletePrestamo: (prestamoId: string) => Promise<void> | void;
 }
 
 const euro = (n: number): string =>
@@ -75,18 +83,27 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
   gastos,
   cobros,
   recurrentes,
+  prestamos,
   inmuebles,
   currentUser,
   onSaveGasto,
   onDeleteGasto,
   onSaveRecurrente,
   onDeleteRecurrente,
+  onSavePrestamo,
+  onDeletePrestamo,
 }) => {
-  // FASE 2.1/2.2: listado de apuntes, cuadre de rentabilidad y recurrentes.
-  const [vista, setVista] = useState<'gastos' | 'recurrentes' | 'rentabilidad'>('gastos');
+  // FASE 2.1/2.2/2.3: apuntes, recurrentes, préstamos y cuadre de rentabilidad.
+  const [vista, setVista] = useState<'gastos' | 'recurrentes' | 'prestamos' | 'rentabilidad'>(
+    'gastos'
+  );
   const [showRecurrenteModal, setShowRecurrenteModal] = useState<boolean>(false);
   const [recurrenteParaEditar, setRecurrenteParaEditar] = useState<GastoRecurrente | null>(null);
   const [recurrenteInmuebleInicial, setRecurrenteInmuebleInicial] = useState<string>('');
+  const [showPrestamoModal, setShowPrestamoModal] = useState<boolean>(false);
+  const [prestamoParaEditar, setPrestamoParaEditar] = useState<Prestamo | null>(null);
+  const [prestamoInmuebleInicial, setPrestamoInmuebleInicial] = useState<string>('');
+  const [prestamoParaTabla, setPrestamoParaTabla] = useState<Prestamo | null>(null);
 
   const [filtroInmueble, setFiltroInmueble] = useState<string>('TODOS');
   const [filtroTipo, setFiltroTipo] = useState<string>('TODOS');
@@ -203,6 +220,27 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
     await onSaveRecurrente({ ...r, activo: !r.activo, updatedAt: new Date().toISOString() });
   };
 
+  // FASE 2.3: préstamos.
+  const abrirAltaPrestamo = () => {
+    setPrestamoParaEditar(null);
+    setPrestamoInmuebleInicial(filtroInmueble !== 'TODOS' ? filtroInmueble : inmuebles[0]?.id || '');
+    setShowPrestamoModal(true);
+  };
+  const abrirEdicionPrestamo = (p: Prestamo) => {
+    setPrestamoParaEditar(p);
+    setPrestamoInmuebleInicial(p.inmuebleId);
+    setShowPrestamoModal(true);
+  };
+  const handleBorrarPrestamo = (p: Prestamo) => {
+    if (
+      window.confirm(
+        `¿Eliminar el préstamo «${p.descripcion || p.tipo}»? Se desactivará su cuota recurrente; los recibos ya generados se conservan.`
+      )
+    ) {
+      onDeletePrestamo(p.id);
+    }
+  };
+
   const inputCls =
     'px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 outline-none transition bg-white';
 
@@ -272,6 +310,14 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               <Repeat className="w-3.5 h-3.5" /> Recurrentes
             </button>
             <button
+              onClick={() => setVista('prestamos')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                vista === 'prestamos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Landmark className="w-3.5 h-3.5" /> Préstamos
+            </button>
+            <button
               onClick={() => setVista('rentabilidad')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 vista === 'rentabilidad' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -287,6 +333,14 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
             >
               <Plus className="w-4 h-4" /> Nuevo recurrente
+            </button>
+          ) : vista === 'prestamos' ? (
+            <button
+              onClick={abrirAltaPrestamo}
+              disabled={inmuebles.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" /> Nuevo préstamo
             </button>
           ) : vista === 'gastos' ? (
             <button
@@ -421,6 +475,125 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
                           onClick={() => handleBorrarRecurrente(r)}
                           className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
                           title="Eliminar plantilla"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {vista === 'prestamos' && (
+        <div className="space-y-4">
+          <div className="flex gap-3 p-4 rounded-2xl bg-violet-50/70 border border-violet-200 text-violet-900">
+            <Landmark className="w-5 h-5 shrink-0 text-violet-600 mt-0.5" />
+            <p className="text-xs leading-relaxed">
+              Define las condiciones de cada <b>hipoteca o préstamo</b>; el sistema calcula la
+              cuota mensual (sistema francés) y genera los recibos desglosando{' '}
+              <b>intereses</b> (gasto financiero) y <b>capital</b> (amortiza deuda, no es gasto).
+            </p>
+          </div>
+
+          {prestamos.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-violet-50 text-violet-700 flex items-center justify-center mx-auto">
+                <Landmark className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-semibold text-slate-700">No hay préstamos registrados</p>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                Añade la hipoteca de una vivienda para que sus cuotas se registren solas y el
+                cash-flow y la base fiscal sean exactos.
+              </p>
+              <button
+                onClick={abrirAltaPrestamo}
+                disabled={inmuebles.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition"
+              >
+                <Plus className="w-4 h-4" /> Nuevo préstamo
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {prestamos
+                .slice()
+                .sort((a, b) => `${a.inmuebleId}${a.descripcion}`.localeCompare(`${b.inmuebleId}${b.descripcion}`))
+                .map((p) => {
+                  const r = resumenPrestamo(p);
+                  const inmueble = inmuebles.find((i) => i.id === p.inmuebleId);
+                  const progreso = Math.min(r.porcentajeAmortizado, 100);
+                  return (
+                    <div
+                      key={p.id}
+                      className={`bg-white rounded-2xl border border-slate-200 shadow-sm p-4 ${
+                        p.activo ? '' : 'opacity-60'
+                      } ${r.finalizado ? 'border-emerald-200' : ''}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="w-9 h-9 rounded-xl bg-violet-50 border border-violet-200 text-violet-700 flex items-center justify-center shrink-0">
+                          <Landmark className="w-4 h-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-900 truncate">
+                            {p.descripcion || (p.tipo === 'HIPOTECARIO' ? 'Hipoteca' : 'Préstamo personal')}
+                          </p>
+                          <p className="text-[11px] text-slate-400 truncate">
+                            {inmueble ? inmueble.direccion : 'Inmueble'}
+                            {p.entidad ? ` · ${p.entidad}` : ''} · TIN {p.tasaInteresAnual}% · {p.plazoMeses} meses
+                          </p>
+                        </div>
+                        {r.finalizado && (
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 text-[10px] font-semibold shrink-0">
+                            Finalizado
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 mt-3">
+                        <div className="rounded-xl bg-slate-50 p-2.5">
+                          <p className="text-sm font-bold text-violet-800">{euro(r.cuotaConstante)}</p>
+                          <p className="text-[10px] text-slate-400">cuota mensual</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-2.5">
+                          <p className="text-sm font-bold text-slate-800">{euro(r.saldoPendiente)}</p>
+                          <p className="text-[10px] text-slate-400">saldo vivo teórico</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-2.5">
+                          <p className="text-sm font-bold text-slate-800">{euro(r.totalIntereses)}</p>
+                          <p className="text-[10px] text-slate-400">intereses totales</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-violet-500 rounded-full" style={{ width: `${progreso}%` }} />
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {progreso.toFixed(1)} % amortizado · {r.cuotasVencidas}/{r.numeroCuotas} cuotas
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t border-slate-100">
+                        <button
+                          onClick={() => setPrestamoParaTabla(p)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 rounded-lg transition"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Cuadro
+                        </button>
+                        <button
+                          onClick={() => abrirEdicionPrestamo(p)}
+                          className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition"
+                          title="Editar"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleBorrarPrestamo(p)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                          title="Eliminar préstamo"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -695,6 +868,25 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
           currentUser={currentUser}
           onSave={onSaveRecurrente}
           onClose={() => setShowRecurrenteModal(false)}
+        />
+      )}
+
+      {showPrestamoModal && (
+        <PrestamoModal
+          prestamoParaEditar={prestamoParaEditar}
+          inmuebles={inmuebles}
+          inmuebleIdInicial={prestamoInmuebleInicial}
+          currentUser={currentUser}
+          onSave={onSavePrestamo}
+          onClose={() => setShowPrestamoModal(false)}
+        />
+      )}
+
+      {prestamoParaTabla && (
+        <TablaAmortizacionModal
+          prestamo={prestamoParaTabla}
+          direccionInmueble={inmuebles.find((i) => i.id === prestamoParaTabla.inmuebleId)?.direccion}
+          onClose={() => setPrestamoParaTabla(null)}
         />
       )}
     </div>

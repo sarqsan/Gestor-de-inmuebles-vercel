@@ -34,6 +34,7 @@ import {
   ContratoFormalizacion,
   Gasto,
   GastoRecurrente,
+  Prestamo,
   ConfiguracionAseguradora,
   SolicitudSeguroImpago,
   GmailIntegracionConfig,
@@ -80,6 +81,7 @@ const SOLICITUDES_DOC_COL = collection(db, 'solicitudes_documentacion');
 const CONTRATOS_COL = collection(db, 'contratos_formalizacion');
 const GASTOS_COL = collection(db, 'gastos');
 const GASTOS_RECURRENTES_COL = collection(db, 'gastos_recurrentes');
+const PRESTAMOS_COL = collection(db, 'prestamos');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
 
@@ -888,6 +890,71 @@ export async function deleteGastoRecurrenteFirestore(plantillaId: string) {
     await deleteDoc(doc(db, 'gastos_recurrentes', plantillaId));
   } catch (err) {
     console.error('Error deleting gasto recurrente from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.3 — PRÉSTAMOS / HIPOTECAS (condiciones financieras)
+// ============================================================
+
+export function subscribePrestamos(
+  callback: (prestamos: Prestamo[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      PRESTAMOS_COL,
+      (snapshot) => {
+        const items: Prestamo[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Prestamo);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore prestamos snapshot error:', err);
+      }
+    );
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  const scopedQuery = query(PRESTAMOS_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: Prestamo[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as Prestamo);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore prestamos (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function savePrestamoFirestore(prestamo: Prestamo) {
+  try {
+    const clean = sanitizeObjectForFirestore(prestamo);
+    await setDoc(doc(db, 'prestamos', prestamo.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving prestamo to Firestore:', err);
+  }
+}
+
+export async function deletePrestamoFirestore(prestamoId: string) {
+  try {
+    await deleteDoc(doc(db, 'prestamos', prestamoId));
+  } catch (err) {
+    console.error('Error deleting prestamo from Firestore:', err);
   }
 }
 

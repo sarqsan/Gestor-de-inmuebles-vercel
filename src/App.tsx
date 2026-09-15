@@ -18,6 +18,7 @@ import {
   ContratoFormalizacion,
   Gasto,
   GastoRecurrente,
+  Prestamo,
   DocumentoAnalizado,
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
@@ -51,7 +52,12 @@ import {
   generarPeriodosParaContrato,
   actualizarEstadosVencimiento,
 } from './utils/cobrosEngine';
-import { generarGastosRecurrentes } from './utils/gastosEngine';
+import {
+  crearGastoRecurrente,
+  generarGastosRecurrentes,
+  normalizarRecurrente,
+} from './utils/gastosEngine';
+import { calcularCuotaConstante, cuotaDelPeriodo } from './utils/prestamosEngine';
 import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
@@ -64,6 +70,7 @@ import {
   subscribeContratos,
   subscribeGastos,
   subscribeGastosRecurrentes,
+  subscribePrestamos,
   subscribeAseguradoras,
   subscribeSolicitudesSeguro,
   subscribeGmailConfig,
@@ -95,6 +102,8 @@ import {
   deleteGastoFirestore,
   saveGastoRecurrenteFirestore,
   deleteGastoRecurrenteFirestore,
+  savePrestamoFirestore,
+  deletePrestamoFirestore,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
   saveSolicitudSeguroFirestore,
@@ -232,6 +241,8 @@ export default function App() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   // FASE 2.2: plantillas de gastos recurrentes.
   const [gastosRecurrentes, setGastosRecurrentes] = useState<GastoRecurrente[]>([]);
+  // FASE 2.3: préstamos / hipotecas.
+  const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
   const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
     try {
@@ -442,6 +453,21 @@ export default function App() {
     }
     return [];
   }, [currentUser, gastosRecurrentes, scopedInmuebles]);
+
+  // FASE 2.3: préstamos visibles (la suscripción ya viene acotada por propietario).
+  const scopedPrestamos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return prestamos;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return prestamos.filter(
+        (p) =>
+          (currentUser.propietarioId && p.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(p.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, prestamos, scopedInmuebles]);
 
   // Cobros derivados de los contratos visibles para el usuario (con su histórico por inmuebleId).
   // El motor genera los periodos al vuelo cuando un contrato aún no los tiene persistidos.
@@ -717,6 +743,11 @@ export default function App() {
       setGastosRecurrentes(Array.isArray(data) ? data : []);
     }, dataScope);
 
+    // FASE 2.3: préstamos/hipotecas con el mismo ámbito.
+    const unsubscribePrestamos = subscribePrestamos((data) => {
+      setPrestamos(Array.isArray(data) ? data : []);
+    }, dataScope);
+
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
     });
@@ -770,6 +801,7 @@ export default function App() {
       unsubscribeContratos();
       unsubscribeGastos();
       unsubscribeRecurrentes();
+      unsubscribePrestamos();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
@@ -845,6 +877,39 @@ export default function App() {
       }
     })();
   }, [currentUser, scopedRecurrentes, scopedGastos]);
+
+  // FASE 2.3 — Cuando un recibo de CUOTA_HIPOTECARIA procede de la plantilla
+  // vinculada a un préstamo, desglosa automáticamente capital e intereses según
+  // su cuadro de amortización. Solo rellena recibos sin desglose (no pisa
+  // ediciones manuales).
+  const prestamosSplitRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || scopedPrestamos.length === 0) return;
+    const pendientes: Gasto[] = [];
+    scopedPrestamos.forEach((p) => {
+      if (!p.gastoRecurrenteId || !p.activo) return;
+      scopedGastos.forEach((g) => {
+        if (
+          g.creadoPorId === p.gastoRecurrenteId &&
+          g.tipo === 'FINANCIACION' &&
+          g.periodoMesAnio &&
+          g.intereses === undefined &&
+          g.capitalAmortizado === undefined &&
+          !prestamosSplitRef.current.has(g.id)
+        ) {
+          const split = cuotaDelPeriodo(p, g.periodoMesAnio);
+          if (split) {
+            prestamosSplitRef.current.add(g.id);
+            pendientes.push({ ...g, capitalAmortizado: split.capital, intereses: split.intereses });
+          }
+        }
+      });
+    });
+    pendientes.forEach((g) => {
+      setGastos((prev) => prev.map((x) => (x.id === g.id ? g : x)));
+      saveGastoFirestore(g);
+    });
+  }, [currentUser, scopedPrestamos, scopedGastos]);
 
   // Auto-analyze any candidate questionnaire that is completed but missing AI analysis
   useEffect(() => {
@@ -2011,6 +2076,87 @@ export default function App() {
     await deleteGastoRecurrenteFirestore(plantillaId);
   };
 
+  // FASE 2.3 — Préstamos. Al guardar se crea/actualiza la plantilla recurrente
+  // de la cuota (importe = cuota constante francesa); al eliminar se desactiva
+  // esa plantilla, conservando los recibos ya generados.
+  const handleSavePrestamo = async (prestamo: Prestamo): Promise<void> => {
+    const propietarioId = resolvePropietarioId(prestamo.inmuebleId, prestamo.propietarioId);
+    const inm = inmuebles.find((i) => i.id === prestamo.inmuebleId);
+    const cuota = calcularCuotaConstante(
+      prestamo.capitalInicial,
+      prestamo.tasaInteresAnual,
+      prestamo.plazoMeses
+    );
+    const concepto = `Cuota ${prestamo.tipo === 'HIPOTECARIO' ? 'hipotecaria' : 'de préstamo'}${
+      inm ? ` · ${inm.direccion}` : ''
+    }`;
+
+    const recurrenteId = prestamo.gastoRecurrenteId;
+    const existente = recurrenteId
+      ? gastosRecurrentes.find((r) => r.id === recurrenteId)
+      : undefined;
+
+    const base = crearGastoRecurrente({
+      inmuebleId: prestamo.inmuebleId,
+      propietarioId,
+      categoria: 'CUOTA_HIPOTECARIA',
+      concepto,
+      importe: cuota,
+      frecuencia: 'MENSUAL',
+      diaVencimiento: prestamo.diaVencimiento,
+      fechaInicio: prestamo.fechaInicio,
+      creadoPor: currentUser?.nombre,
+      creadoPorId: currentUser?.id,
+    });
+    const plantilla: GastoRecurrente = normalizarRecurrente({
+      ...base,
+      ...(recurrenteId ? { id: recurrenteId } : {}),
+      proveedor: prestamo.entidad?.trim() || undefined,
+      concepto,
+      importe: cuota,
+      aCargoDe: 'arrendador',
+      deducible: false,
+      metodoPago: 'domiciliacion',
+      notas: prestamo.descripcion?.trim() || undefined,
+      activo: prestamo.activo,
+      ...(existente
+        ? { ultimoPeriodoGenerado: existente.ultimoPeriodoGenerado, createdAt: existente.createdAt }
+        : {}),
+    });
+    await handleSaveRecurrente(plantilla);
+
+    const finalPrestamo: Prestamo = {
+      ...prestamo,
+      propietarioId,
+      gastoRecurrenteId: plantilla.id,
+      updatedAt: new Date().toISOString(),
+    };
+    setPrestamos((prev) => {
+      const exists = prev.some((p) => p.id === finalPrestamo.id);
+      return exists
+        ? prev.map((p) => (p.id === finalPrestamo.id ? finalPrestamo : p))
+        : [finalPrestamo, ...prev];
+    });
+    await savePrestamoFirestore(finalPrestamo);
+  };
+
+  const handleDeletePrestamo = async (prestamoId: string) => {
+    const prestamo = prestamos.find((p) => p.id === prestamoId);
+    if (prestamo?.gastoRecurrenteId) {
+      const plantilla = gastosRecurrentes.find((r) => r.id === prestamo.gastoRecurrenteId);
+      // Se desactiva la plantilla vinculada; los recibos históricos se conservan.
+      if (plantilla && plantilla.activo) {
+        await handleSaveRecurrente({
+          ...plantilla,
+          activo: false,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+    setPrestamos((prev) => prev.filter((p) => p.id !== prestamoId));
+    await deletePrestamoFirestore(prestamoId);
+  };
+
   // Handlers for Propietarios y Cuentas Bancarias
   const handleSavePropietario = async (propietario: Propietario) => {
     setPropietarios((prev) => {
@@ -2697,12 +2843,15 @@ export default function App() {
               gastos={scopedGastos}
               cobros={scopedCobros}
               recurrentes={scopedRecurrentes}
+              prestamos={scopedPrestamos}
               inmuebles={scopedInmuebles}
               currentUser={currentUser}
               onSaveGasto={handleSaveGasto}
               onDeleteGasto={handleDeleteGasto}
               onSaveRecurrente={handleSaveRecurrente}
               onDeleteRecurrente={handleDeleteRecurrente}
+              onSavePrestamo={handleSavePrestamo}
+              onDeletePrestamo={handleDeletePrestamo}
             />
           )}
 

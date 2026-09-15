@@ -1040,6 +1040,40 @@ export interface GastoRecurrente {
   updatedAt: string;
 }
 
+/**
+ * FASE 2.3 — Préstamo / financiación ajena (normalmente hipoteca). Describe las
+ * condiciones para calcular el cuadro de amortización (sistema francés de cuota
+ * constante) y así separar automáticamente capital e intereses en cada cuota.
+ * Al crearse se enlaza con una plantilla `GastoRecurrente` que materializa los
+ * recibos; este documento sólo guarda las condiciones financieras.
+ */
+export type TipoPrestamo = 'HIPOTECARIO' | 'PERSONAL';
+
+export interface Prestamo {
+  id: string; // "prest_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario
+
+  tipo: TipoPrestamo;
+  descripcion?: string;
+  entidad?: string; // Banco / acreedor
+
+  capitalInicial: number; // Principal prestado (EUR)
+  tasaInteresAnual: number; // TIN en porcentaje (p.ej. 3,25 para el 3,25%)
+  plazoMeses: number;
+  fechaInicio: string; // YYYY-MM (primera cuota)
+  diaVencimiento: number; // Día de cargo (1-28)
+
+  gastoRecurrenteId?: string; // Plantilla vinculada que genera los recibos
+  activo: boolean;
+  notas?: string;
+
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ==========================================
 // FASE 4: ASEGURADORA DE IMPAGO & EXPEDIENTES
 // ==========================================

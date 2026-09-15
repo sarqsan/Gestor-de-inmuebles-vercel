@@ -2605,6 +2605,7 @@ export default function App() {
           {activeSection === 'gastos' && (
             <GastosSection
               gastos={scopedGastos}
+              cobros={scopedCobros}
               inmuebles={scopedInmuebles}
               currentUser={currentUser}
               onSaveGasto={handleSaveGasto}

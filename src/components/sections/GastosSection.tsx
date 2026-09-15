@@ -11,9 +11,12 @@ import {
   Search,
   Info,
   User,
+  LayoutList,
+  Calculator,
 } from 'lucide-react';
 import type {
   CategoriaGasto,
+  CobroPeriodo,
   EstadoGasto,
   Gasto,
   Inmueble,
@@ -29,9 +32,11 @@ import {
   resumenGastos,
 } from '../../utils/gastosEngine';
 import { GastoModal } from '../modals/GastoModal';
+import { RentabilidadPanel } from './RentabilidadPanel';
 
 interface GastosSectionProps {
   gastos: Gasto[];
+  cobros: CobroPeriodo[];
   inmuebles: Inmueble[];
   currentUser?: UsuarioApp | null;
   onSaveGasto: (gasto: Gasto) => Promise<void> | void;
@@ -58,11 +63,15 @@ const estadoBadge = (estado: EstadoGasto): string => {
 
 export const GastosSection: React.FC<GastosSectionProps> = ({
   gastos,
+  cobros,
   inmuebles,
   currentUser,
   onSaveGasto,
   onDeleteGasto,
 }) => {
+  // FASE 2.1: conmutador entre el listado de apuntes y el cuadre de rentabilidad.
+  const [vista, setVista] = useState<'gastos' | 'rentabilidad'>('gastos');
+
   const [filtroInmueble, setFiltroInmueble] = useState<string>('TODOS');
   const [filtroTipo, setFiltroTipo] = useState<string>('TODOS');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('TODOS');
@@ -204,15 +213,41 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
             contablemente.
           </p>
         </div>
-        <button
-          onClick={abrirAlta}
-          disabled={inmuebles.length === 0}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
-        >
-          <Plus className="w-4 h-4" /> Nuevo gasto
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/70 p-1">
+            <button
+              onClick={() => setVista('gastos')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                vista === 'gastos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <LayoutList className="w-3.5 h-3.5" /> Gastos
+            </button>
+            <button
+              onClick={() => setVista('rentabilidad')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                vista === 'rentabilidad' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Calculator className="w-3.5 h-3.5" /> Rentabilidad
+            </button>
+          </div>
+          <button
+            onClick={abrirAlta}
+            disabled={inmuebles.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" /> Nuevo gasto
+          </button>
+        </div>
       </div>
 
+      {vista === 'rentabilidad' && (
+        <RentabilidadPanel cobros={cobros} gastos={gastos} inmuebles={inmuebles} />
+      )}
+
+      {vista === 'gastos' && (
+      <>
       {/* Aviso didáctico */}
       <div className="flex gap-3 p-4 rounded-2xl bg-blue-50/70 border border-blue-200 text-blue-900">
         <Info className="w-5 h-5 shrink-0 text-blue-600 mt-0.5" />
@@ -439,6 +474,8 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
 
       {showModal && (
         <GastoModal

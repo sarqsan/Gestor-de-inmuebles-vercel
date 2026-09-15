@@ -1209,6 +1209,186 @@ function generateFallbackLegalClause(
   };
 }
 
+// ============================================================
+// FASE 3.3 — DIAGNÓSTICO ASISTIDO POR IA DE LA INSPECCIÓN VISUAL
+// Analiza por visión las fotografías de las estancias y devuelve
+// observaciones y sugerencias de mejora con LENGUAJE NO ASERTIVO
+// (indicios, posibilidades, recomendaciones de revisión), nunca
+// certezas de daño. Procesa un lote pequeño (cada foto, una llamada).
+// ============================================================
+
+const ESTANCIA_NOMBRE: Record<string, string> = {
+  salon: 'Salón / Comedor',
+  cocina: 'Cocina (mobiliario, electrodomésticos, encimera)',
+  bano: 'Baño (sanitarios, grifería, azulejos)',
+  dormitorio: 'Dormitorio',
+  terraza: 'Terraza / Balcón',
+  exterior: 'Zonas comunes / Exterior',
+  otro: 'Otras zonas (trastero, garaje, etc.)',
+};
+
+const MAX_FOTOS_POR_LOTE_INSPECCION = 8;
+
+// Lista de comprobación honesta cuando NO hay modelo de visión. No finge
+// haber analizado la imagen: deja claro que es una guía de revisión manual.
+function inspeccionFallbackPorEstancia(estancia: string) {
+  const nombre = ESTANCIA_NOMBRE[estancia] || ESTANCIA_NOMBRE.otro;
+  return {
+    observaciones: [
+      `Sin modelo de visión disponible: no se ha podido analizar automáticamente la fotografía de ${nombre.toLowerCase()}. Revisa manualmente la imagen.`,
+      'Como guía orientativa, comprueba pintura y acabados, iluminación, limpieza y posibles elementos faltantes o desgastados visibles.',
+    ],
+    sugerenciasMejora: [
+      'Verifica con fotografías bien iluminadas y encuadres generales antes de publicar.',
+      'Si aprecias algún desperfecto en la revisión presencial, registra una foto de detalle adicional.',
+    ],
+    prioridad: 'baja' as const,
+    motor: 'heuristico' as const,
+  };
+}
+
+async function resolverImagenFoto(item: any): Promise<{ data: string; mimeType: string } | null> {
+  // 1) Base64 directo (con o sin prefijo data URL)
+  if (item?.imageBase64 && typeof item.imageBase64 === 'string') {
+    let b64 = item.imageBase64;
+    if (b64.includes(';base64,')) b64 = b64.split(';base64,')[1];
+    if (b64) return { data: b64, mimeType: item.mimeType || 'image/jpeg' };
+  }
+  // 2) Documento servido por esta misma función (almacén en memoria)
+  const url: string = item?.imageUrl || '';
+  if (url.startsWith('/api/documents/')) {
+    const stored = documentsStore.get(url.replace('/api/documents/', ''));
+    if (stored) return { data: stored.buffer.toString('base64'), mimeType: stored.mimeType };
+    return null;
+  }
+  // 3) URL remota (p. ej. downloadURL firmada de Firebase Storage). El
+  //    servidor no tiene restricciones CORS, así que puede descargarla.
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const arrayBuf = await resp.arrayBuffer();
+      const data = Buffer.from(arrayBuf).toString('base64');
+      const mimeType = resp.headers.get('content-type') || item?.mimeType || 'image/jpeg';
+      return { data, mimeType: mimeType.split(';')[0] };
+    } catch (e) {
+      console.warn('No se pudo descargar la imagen de inspección desde la URL:', String(e));
+      return null;
+    }
+  }
+  return null;
+}
+
+app.post('/api/analizar-inspeccion', async (req, res) => {
+  try {
+    const fotos: any[] = Array.isArray(req.body?.fotos) ? req.body.fotos : [];
+    const contexto = req.body?.contexto || {};
+    if (fotos.length === 0) {
+      return res.status(400).json({ error: 'No se proporcionaron fotografías para analizar.' });
+    }
+    const lote = fotos.slice(0, MAX_FOTOS_POR_LOTE_INSPECCION);
+    const ai = getGeminiClient();
+
+    const promptBase = (estancia: string) => {
+      const nombre = ESTANCIA_NOMBRE[estancia] || ESTANCIA_NOMBRE.otro;
+      return `Eres un asesor inmobiliario prudente que ayuda a un propietario a preparar una vivienda para volver a alquilarla o venderla. Analiza ÚNICAMENTE lo que se ve en esta fotografía de la estancia: ${nombre}.${
+        contexto?.direccion ? ` Inmueble: ${contexto.direccion}.` : ''
+      }${contexto?.destino ? ` Objetivo previsto: ${contexto.destino}.` : ''}
+
+Evalúa, solo cuando sea visible en la imagen, estas categorías:
+- Pintura y acabados superficiales (paredes, techos, suelos).
+- Nivel de iluminación natural/artificial y luminosidad aparente.
+- Estado aparente de electrodomésticos, encimera y grifería (si aplica).
+- Modernidad y estado aparente del mobiliario o decoración (si se ve).
+- Limpieza, orden y presentación visual para fotografía de anuncio.
+- Desperfectos, elementos faltantes u objetos retirados visibles.
+
+REGLAS OBLIGATORIAS DE LENGUAJE (lenguaje no asertivo):
+- Habla siempre de INDICIOS o APRECIACIONES VISUALES: "Se aprecian indicios de…", "Podría ser conveniente revisar…", "En la imagen parece observarse…".
+- NO afirmes diagnósticos con certeza. Prohibido decir que hay humedad, grietas estructurales, plagas, averías eléctricas o de fontanería como un hecho; como mucho: "podrían apreciarse señales que conviene revisar presencialmente".
+- No inventes nada que no se vea. Si la foto está oscura, borrosa, recargada o no permite evaluar una categoría, dilo explícitamente en lugar de suponer.
+- No recomiendes manipulaciones peligrosas (instalaciones eléctricas, gas, calderas, fontanería principal); indica que debe hacerlo un profesional cualificado.
+- Las sugerencias deben ser acciones prácticas y económicas de puesta a punto para el anuncio (limpieza, pintura neutra, orden, iluminación, retirada de objetos, retoque de tiradores, pequeños arreglos).
+- Redacta en español, de forma breve y accionable.
+
+Responde SOLO con JSON válido con este esquema exacto:
+{
+  "observaciones": ["2 a 5 frases que describan con prudencia lo que se aprecia en la imagen"],
+  "sugerenciasMejora": ["1 a 4 acciones concretas de puesta a punto, en tono recomendado, no obligatorio"],
+  "prioridad": "baja" | "media" | "alta"
+}
+La "prioridad" refleja, de forma ORIENTATIVA, cuánto conviene revisar/mejorar esa estancia antes de publicar: alta si se aprecian varios indicios de desgaste o mala presentación, baja si se ve ordenada y cuidada. No es una valoración pericial.`;
+    };
+
+    const resultados: any[] = [];
+    let motorGlobal: 'gemini' | 'heuristico' = ai ? 'gemini' : 'heuristico';
+
+    for (const item of lote) {
+      const id: string = String(item?.id || '');
+      const estancia: string = String(item?.estancia || 'otro');
+
+      const imagen = ai ? await resolverImagenFoto(item) : null;
+
+      if (!ai || !imagen) {
+        if (ai && !imagen) {
+          console.warn(`Foto ${id}: no se pudo resolver la imagen; se devuelve guía de respaldo.`);
+        } else if (!ai) {
+          console.log('No GEMINI_API_KEY: guía de inspección de respaldo para', id);
+        }
+        resultados.push({ id, ok: false, ...inspeccionFallbackPorEstancia(estancia), motor: 'heuristico' });
+        continue;
+      }
+
+      try {
+        const response = await generateGeminiWithRetry(ai, {
+          model: 'gemini-3.7-flash',
+          contents: {
+            parts: [
+              { inlineData: { mimeType: imagen.mimeType, data: imagen.data } },
+              { text: promptBase(estancia) },
+            ],
+          },
+          config: { responseMimeType: 'application/json' },
+        });
+        let parsed: any = {};
+        try {
+          parsed = JSON.parse((response?.text || '').trim());
+        } catch {
+          parsed = {};
+        }
+        const observaciones = Array.isArray(parsed.observaciones)
+          ? parsed.observaciones.map(String).filter(Boolean).slice(0, 6)
+          : [];
+        const sugerenciasMejora = Array.isArray(parsed.sugerenciasMejora)
+          ? parsed.sugerenciasMejora.map(String).filter(Boolean).slice(0, 5)
+          : [];
+        const prioridad = ['baja', 'media', 'alta'].includes(parsed.prioridad) ? parsed.prioridad : 'media';
+
+        if (observaciones.length === 0 && sugerenciasMejora.length === 0) {
+          resultados.push({ id, ok: false, ...inspeccionFallbackPorEstancia(estancia) });
+        } else {
+          resultados.push({
+            id,
+            ok: true,
+            observaciones: observaciones.length ? observaciones : ['No se han podido extraer observaciones fiables de esta imagen; revísala manualmente.'],
+            sugerenciasMejora,
+            prioridad,
+            motor: 'gemini',
+          });
+        }
+      } catch (err: any) {
+        console.warn('Error analizando foto de inspección', id, String(err?.message || err));
+        resultados.push({ id, ok: false, ...inspeccionFallbackPorEstancia(estancia) });
+      }
+    }
+
+    return res.json({ resultados, motorGlobal });
+  } catch (error: any) {
+    console.error('Error en /api/analizar-inspeccion:', error);
+    return res.status(500).json({ error: 'No se pudo realizar el análisis de inspección.', resultados: [] });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY });

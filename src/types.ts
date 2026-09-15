@@ -1573,6 +1573,10 @@ export interface FotoInspeccion {
   analisisIa?: {
     observaciones: string[]; // Redacción no asertiva / prudente
     sugerenciasMejora: string[];
+    // FASE 3.3: prioridad orientativa de revisión (no una certeza de daño)
+    prioridad?: 'baja' | 'media' | 'alta';
+    // 'gemini' = análisis multimodal real; 'heuristico' = respaldo sin API key
+    motor?: 'gemini' | 'heuristico';
     analizFecha?: string;
   };
 }

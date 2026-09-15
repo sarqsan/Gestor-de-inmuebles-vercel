@@ -9,6 +9,8 @@ import {
   ZoomIn,
   Sparkles,
   AlertCircle,
+  Wand2,
+  Info,
 } from 'lucide-react';
 import type {
   EstanciaFoto,
@@ -18,6 +20,8 @@ import type {
 } from '../../types';
 import {
   agregarFotoInspeccion,
+  aplicarAnalisisFotos,
+  DESTINO_INMUEBLE_LABEL,
   ESTANCIAS_ORDEN,
   ESTANCIA_LABEL,
   ESTADOS_RECOMERCIALIZACION,
@@ -30,6 +34,7 @@ import {
   uploadFotoInspeccionStorage,
 } from '../../lib/firebase';
 import { compressImageForUpload } from '../../utils/fileCompressor';
+import { analizarFotosInspeccion } from '../../utils/inspeccionIa';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -58,10 +63,28 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [fotoZoom, setFotoZoom] = useState<FotoInspeccion | null>(null);
+  // FASE 3.3: diagnóstico por IA (texto de progreso, null cuando está inactivo)
+  const [progresoIa, setProgresoIa] = useState<string | null>(null);
+  const [colapsarHallazgos, setColapsarHallazgos] = useState<Set<EstanciaFoto>>(new Set());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const estado = expediente.estado;
   const esEditable = estado === 'REVISION_PENDIENTE' || estado === 'FOTOS_ACTUALIZADAS';
+
+  const fotosAnalizadas = useMemo(() => fotos.filter((f) => !!f.analisisIa), [fotos]);
+  const fotosPendientesAnalisis = useMemo(() => fotos.filter((f) => !f.analisisIa), [fotos]);
+  const hayMotorHeuristico = fotosAnalizadas.some((f) => f.analisisIa?.motor === 'heuristico');
+
+  const prioridadColor: Record<string, string> = {
+    alta: 'bg-rose-100 text-rose-700 border-rose-200',
+    media: 'bg-amber-100 text-amber-800 border-amber-200',
+    baja: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  };
+  const prioridadLabel: Record<string, string> = {
+    alta: 'Revisión prioritaria',
+    media: 'Revisar',
+    baja: 'Aparentemente cuidada',
+  };
 
   const fotosPorEstancia = useMemo(() => {
     const mapa = new Map<EstanciaFoto, FotoInspeccion[]>();
@@ -155,6 +178,70 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
     }
   };
 
+  const handleAnalizar = async (reanalizarTodo: boolean) => {
+    const objetivo = reanalizarTodo ? fotos : fotosPendientesAnalisis;
+    if (objetivo.length === 0) return;
+    setErrorMsg('');
+    setProgresoIa(`Preparando el análisis de ${objetivo.length} fotografía(s)…`);
+
+    const aplicarYGuardar = async (mapa: Map<string, FotoInspeccion['analisisIa']>) => {
+      if (mapa.size === 0) return;
+      const base: ExpedienteRecomercializacion = {
+        ...expediente,
+        revisionFotografica: {
+          fechaCarga: expediente.revisionFotografica?.fechaCarga || new Date().toISOString(),
+          fotografias: fotos,
+        },
+      };
+      const siguiente = aplicarAnalisisFotos(base, mapa);
+      setFotos(siguiente.revisionFotografica?.fotografias ?? []);
+      await onGuardar(siguiente);
+    };
+
+    try {
+      const mapa = await analizarFotosInspeccion(
+        objetivo,
+        {
+          direccion: inmueble?.direccion,
+          destino: DESTINO_INMUEBLE_LABEL[expediente.destinoPrevisto],
+        },
+        (texto) => setProgresoIa(texto || null),
+        // Autoguardado por lote para no perder el trabajo si se corta.
+        async (mapaParcial) => {
+          try {
+            await aplicarYGuardar(mapaParcial);
+          } catch {
+            /* se reintenta al finalizar */
+          }
+        }
+      );
+      if (mapa.size === 0) {
+        setErrorMsg(
+          'No se pudo analizar ninguna fotografía. Revisa la conexión y que el servidor de IA esté disponible, y reinténtalo.'
+        );
+      } else if (mapa.size < objetivo.length) {
+        setErrorMsg(
+          `Se analizaron ${mapa.size} de ${objetivo.length} fotografías; el resto puede reanalizarse.`
+        );
+      }
+      await aplicarYGuardar(mapa);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al contactar con el servicio de análisis.';
+      setErrorMsg(`Diagnóstico IA no disponible: ${msg}`);
+    } finally {
+      setProgresoIa(null);
+    }
+  };
+
+  const toggleColapsar = (est: EstanciaFoto) => {
+    setColapsarHallazgos((prev) => {
+      const next = new Set(prev);
+      if (next.has(est)) next.delete(est);
+      else next.add(est);
+      return next;
+    });
+  };
+
   const marcarFotosActualizadas = async () => {
     if (fotos.length === 0) {
       setErrorMsg('Sube al menos una fotografía antes de completar la inspección.');
@@ -228,10 +315,19 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
             <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-sky-600" />
             <span>
               Recorre la vivienda por estancias y sube fotografías actualizadas (varias por zona, con
-              buena luz y encuadrando lo relevante). El <b>diagnóstico asistido por IA</b> sobre estas
-              imágenes llegará en la siguiente fase; aquí solo se catalogan y almacenan de forma segura.
+              buena luz y encuadrando lo relevante). Después pulsa <b>«Diagnóstico IA»</b>: la visión
+              artificial revisa pintura, iluminación, electrodomésticos/grifería, mobiliario,
+              presentación y posibles desperfectos, siempre en tono de <b>indicios y sugerencias</b>,
+              nunca como una certeza.
             </span>
           </div>
+
+          {progresoIa && (
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 flex items-center gap-3 text-xs text-violet-900">
+              <Loader2 className="w-4 h-4 animate-spin text-violet-600 shrink-0" />
+              <span className="truncate">{progresoIa}</span>
+            </div>
+          )}
 
           <input
             ref={fileInputRef}
@@ -270,7 +366,7 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => abrirSelector(estancia)}
-                        disabled={!!progreso || guardando}
+                        disabled={!!progreso || !!progresoIa || guardando}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-sky-700 bg-white border border-sky-200 rounded-lg hover:bg-sky-50 disabled:opacity-50"
                       >
                         <Camera className="w-3.5 h-3.5" /> Añadir
@@ -282,12 +378,13 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => esEditable && abrirSelector(estancia)}
-                        disabled={!esEditable || !!progreso || guardando}
+                        disabled={!esEditable || !!progreso || !!progresoIa || guardando}
                         className="w-full py-6 border-2 border-dashed border-slate-200 rounded-lg text-[11px] text-slate-400 hover:border-sky-300 hover:text-sky-600 transition disabled:cursor-default disabled:hover:border-slate-200 disabled:hover:text-slate-400"
                       >
                         Sin fotografías de {ESTANCIA_LABEL[estancia].toLowerCase()}
                       </button>
                     ) : (
+                      <>
                       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
                         {fotosEstancia.map((foto) => (
                           <div
@@ -301,8 +398,18 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
                               loading="lazy"
                             />
                             {foto.analisisIa && (
-                              <span className="absolute top-1 left-1 px-1 py-0.5 rounded bg-violet-600/90 text-white text-[8px] font-bold flex items-center gap-0.5">
-                                <Sparkles className="w-2.5 h-2.5" /> IA
+                              <span
+                                className={`absolute top-1 left-1 px-1 py-0.5 rounded border text-[8px] font-bold flex items-center gap-0.5 ${
+                                  prioridadColor[foto.analisisIa.prioridad || 'media']
+                                }`}
+                                title={prioridadLabel[foto.analisisIa.prioridad || 'media']}
+                              >
+                                <Sparkles className="w-2.5 h-2.5" />
+                                {foto.analisisIa.prioridad === 'alta'
+                                  ? 'IA · alta'
+                                  : foto.analisisIa.prioridad === 'baja'
+                                  ? 'IA · ok'
+                                  : 'IA'}
                               </span>
                             )}
                             {esEditable && (
@@ -328,12 +435,81 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
                           </div>
                         ))}
                       </div>
+                      {(() => {
+                        const analizadas = fotosEstancia.filter((f) => f.analisisIa);
+                        if (analizadas.length === 0) return null;
+                        const observaciones = analizadas.flatMap(
+                          (f) => f.analisisIa?.observaciones || []
+                        );
+                        const sugerencias = analizadas.flatMap(
+                          (f) => f.analisisIa?.sugerenciasMejora || []
+                        );
+                        const colapsado = colapsarHallazgos.has(estancia);
+                        const prior = analizadas.some((f) => f.analisisIa?.prioridad === 'alta')
+                          ? 'alta'
+                          : analizadas.some((f) => f.analisisIa?.prioridad === 'media')
+                          ? 'media'
+                          : 'baja';
+                        return (
+                          <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/40 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => toggleColapsar(estancia)}
+                              className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-bold text-violet-900"
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                <Sparkles className="w-3.5 h-3.5" /> Diagnóstico IA · {analizadas.length} foto(s)
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded border text-[9px] ${prioridadColor[prior]}`}>
+                                {prioridadLabel[prior]}
+                              </span>
+                            </button>
+                            {!colapsado && (
+                              <div className="px-3 pb-3 grid sm:grid-cols-2 gap-3 text-[11px]">
+                                <div>
+                                  <p className="font-semibold text-slate-600 mb-1">Se aprecia en las imágenes</p>
+                                  <ul className="space-y-1 text-slate-600 list-disc pl-4">
+                                    {observaciones.map((o, idx) => (
+                                      <li key={idx}>{o}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-slate-600 mb-1">Sugerencias de puesta a punto</p>
+                                  <ul className="space-y-1 text-slate-600 list-disc pl-4">
+                                    {sugerencias.map((s, idx) => (
+                                      <li key={idx}>{s}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      </>
                     )}
                   </div>
                 </div>
               );
             })}
           </div>
+
+          {/* Aviso legal del diagnóstico */}
+          {fotosAnalizadas.length > 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-500 flex items-start gap-2">
+              <Info className="w-4 h-4 shrink-0 mt-0.5 text-slate-400" />
+              <span>
+                El diagnóstico es una <b>ayuda orientativa generada por visión artificial</b>: describe
+                indicios a partir de las fotografías y puede no reflejar la realidad. No constituye una
+                valoración pericial ni detecta defectos ocultos; las intervenciones en instalaciones
+                (luz, gas, fontanería) deben hacerlas profesionales cualificados.
+                {hayMotorHeuristico && (
+                  <> <b>Sin modelo de visión configurado, algunas fotos muestran solo una guía de revisión manual.</b></>
+                )}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Pie */}
@@ -345,11 +521,37 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
               ? 'Inspección fotográfica completada.'
               : 'Puedes completar la inspección cuando hayas cubierto las estancias necesarias.'}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {fotos.length > 0 && (
+              <>
+                <button
+                  onClick={() => handleAnalizar(false)}
+                  disabled={guardando || !!progreso || !!progresoIa || fotosPendientesAnalisis.length === 0}
+                  title={fotosPendientesAnalisis.length === 0 ? 'Todas las fotografías ya están analizadas' : `Analizar ${fotosPendientesAnalisis.length} fotografía(s) pendientes`}
+                  className="px-3 py-2 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {progresoIa ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  {fotosAnalizadas.length === 0
+                    ? 'Diagnóstico IA'
+                    : fotosPendientesAnalisis.length > 0
+                    ? `Analizar pendientes (${fotosPendientesAnalisis.length})`
+                    : 'Diagnóstico completo'}
+                </button>
+                {fotosAnalizadas.length > 0 && (
+                  <button
+                    onClick={() => handleAnalizar(true)}
+                    disabled={guardando || !!progreso || !!progresoIa}
+                    className="px-3 py-2 text-xs font-semibold text-violet-700 bg-white border border-violet-300 hover:bg-violet-50 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Reanalizar
+                  </button>
+                )}
+              </>
+            )}
             {estado === 'FOTOS_ACTUALIZADAS' && puedeTransicionar('FOTOS_ACTUALIZADAS', 'REVISION_PENDIENTE') && (
               <button
                 onClick={volverARevision}
-                disabled={guardando || !!progreso}
+                disabled={guardando || !!progreso || !!progresoIa}
                 className="px-3 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> Volver a revisión
@@ -358,7 +560,7 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
             {estado === 'REVISION_PENDIENTE' && (
               <button
                 onClick={marcarFotosActualizadas}
-                disabled={guardando || !!progreso || fotos.length === 0}
+                disabled={guardando || !!progreso || !!progresoIa || fotos.length === 0}
                 className="px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
               >
                 {guardando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -374,18 +576,82 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Visor en grande */}
+      {/* Visor en grande con diagnóstico */}
       {fotoZoom && (
         <div
-          className="fixed inset-0 z-[60] bg-slate-900/85 flex items-center justify-center p-6"
+          className="fixed inset-0 z-[60] bg-slate-900/85 flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
           onClick={() => setFotoZoom(null)}
         >
-          <button className="absolute top-5 right-5 p-2 text-white/80 hover:text-white">
+          <button
+            onClick={() => setFotoZoom(null)}
+            className="absolute top-5 right-5 p-2 text-white/80 hover:text-white z-10"
+          >
             <X className="w-6 h-6" />
           </button>
-          <div className="max-w-4xl max-h-full">
-            <img src={fotoZoom.url} alt={ESTANCIA_LABEL[fotoZoom.estancia]} className="max-h-[85vh] w-auto rounded-xl shadow-2xl" />
-            <p className="text-center text-white/80 text-xs mt-3">{ESTANCIA_LABEL[fotoZoom.estancia]}</p>
+          <div
+            className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-4xl grid md:grid-cols-[1.4fr_1fr] max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-slate-900 flex items-center justify-center min-h-[240px]">
+              <img
+                src={fotoZoom.url}
+                alt={ESTANCIA_LABEL[fotoZoom.estancia]}
+                className="max-h-[50vh] md:max-h-[90vh] w-full object-contain"
+              />
+            </div>
+            <div className="p-5 overflow-y-auto">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-bold text-slate-900">{ESTANCIA_LABEL[fotoZoom.estancia]}</h4>
+                {fotoZoom.analisisIa && (
+                  <span
+                    className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold ${
+                      prioridadColor[fotoZoom.analisisIa.prioridad || 'media']
+                    }`}
+                  >
+                    {prioridadLabel[fotoZoom.analisisIa.prioridad || 'media']}
+                  </span>
+                )}
+              </div>
+              {fotoZoom.analisisIa ? (
+                <div className="space-y-4 text-xs">
+                  <div>
+                    <p className="font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-violet-600" /> Se aprecia en la imagen
+                    </p>
+                    <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                      {fotoZoom.analisisIa.observaciones.map((o, i) => (
+                        <li key={i}>{o}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-700 mb-1">Sugerencias de puesta a punto</p>
+                    <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                      {fotoZoom.analisisIa.sugerenciasMejora.map((s, i) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug border-t border-slate-100 pt-2">
+                    Ayuda orientativa de IA (no es una valoración pericial; describe indicios, no
+                    certezas).{fotoZoom.analisisIa.motor === 'heuristico' && ' Sin visión configurada: es una guía de revisión manual.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400 space-y-2">
+                  <p>Esta fotografía todavía no tiene diagnóstico IA.</p>
+                  {esEditable && (
+                    <button
+                      type="button"
+                      onClick={() => setFotoZoom(null)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white bg-violet-600 hover:bg-violet-700 rounded-lg font-semibold"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" /> Cerrar y analizar
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

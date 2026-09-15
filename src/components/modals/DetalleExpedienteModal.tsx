@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, RefreshCw, Check, Ban, Trash2, KeyRound, BellRing, Camera } from 'lucide-react';
+import { X, RefreshCw, Check, Ban, Trash2, KeyRound, BellRing, Camera, Sparkles } from 'lucide-react';
 import type {
   EstadoRecomercializacion,
   ExpedienteRecomercializacion,
@@ -272,6 +272,12 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
                     </h4>
                     <span className="text-[11px] text-slate-400">
                       {fotos.length} foto{fotos.length === 1 ? '' : 's'} · {cubiertas.size}/{ESTANCIAS_ORDEN.length} zonas
+                      {fotos.filter((f) => f.analisisIa).length > 0 && (
+                        <span className="ml-1.5 inline-flex items-center gap-0.5 text-violet-600 font-semibold">
+                          <Sparkles className="w-3 h-3" />
+                          {fotos.filter((f) => f.analisisIa).length} analizadas
+                        </span>
+                      )}
                     </span>
                   </div>
 
@@ -326,9 +332,9 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
 
           {estado === 'REVISION_PENDIENTE' && (
             <div className="rounded-xl border border-dashed border-sky-200 bg-sky-50/50 p-4 text-xs text-sky-800">
-              Tras recibir las llaves, haz la <b>inspección visual por estancias</b> y sube las
-              fotografías actualizadas. El diagnóstico asistido por IA llega en la fase 3.3; el
-              pricing y la comercialización, en la 3.5-3.6.
+              Tras recibir las llaves, haz la <b>inspección visual por estancias</b>, sube las
+              fotografías y lanza el <b>diagnóstico asistido por IA</b> (indicios y sugerencias de
+              puesta a punto, nunca certezas). El pricing y la comercialización llegan en la 3.5-3.6.
             </div>
           )}
         </div>

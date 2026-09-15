@@ -159,6 +159,30 @@ export function quitarFotoInspeccion(
   };
 }
 
+/**
+ * FASE 3.3 — Aplica los resultados del diagnóstico de IA a las fotos del
+ * expediente (mapa id de foto -> análisis). Inmutable; no toca las fotos que
+ * no estén en el mapa.
+ */
+export function aplicarAnalisisFotos(
+  expediente: ExpedienteRecomercializacion,
+  analisis: Map<string, FotoInspeccion['analisisIa']>
+): ExpedienteRecomercializacion {
+  const actuales = expediente.revisionFotografica?.fotografias ?? [];
+  const ahora = new Date().toISOString();
+  const fotografias = actuales.map((f) =>
+    analisis.has(f.id) ? { ...f, analisisIa: analisis.get(f.id) } : f
+  );
+  return {
+    ...expediente,
+    revisionFotografica: {
+      fechaCarga: expediente.revisionFotografica?.fechaCarga || ahora,
+      fotografias,
+    },
+    updatedAt: ahora,
+  };
+}
+
 /** Crea un expediente nuevo en BORRADOR/SALIDA según se informe la salida. */
 export function crearExpediente(input: {
   inmuebleId: string;

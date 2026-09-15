@@ -1,0 +1,349 @@
+{
+  "entities": {
+    "Propietario": {
+      "title": "Propietario",
+      "description": "Ficha de propietario/arrendador con datos fiscales, domicilio a efectos de notificaciones y cuentas bancarias asociadas",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "nifCif": { "type": "string" },
+        "tipoPropietario": { "type": "string" },
+        "telefono": { "type": "string" },
+        "email": { "type": "string" },
+        "direccion": { "type": "string" },
+        "ciudad": { "type": "string" },
+        "codigoPostal": { "type": "string" },
+        "provincia": { "type": "string" },
+        "tieneRepresentanteLegal": { "type": "boolean" },
+        "nombreRepresentante": { "type": "string" },
+        "nifRepresentante": { "type": "string" },
+        "cargoRepresentante": { "type": "string" },
+        "tituloRepresentacion": { "type": "string" },
+        "cuentasBancarias": { "type": "array" },
+        "notasPrivadas": { "type": "string" },
+        "fechaCreacion": { "type": "string" },
+        "fechaActualizacion": { "type": "string" }
+      },
+      "required": ["nombre", "nifCif", "tipoPropietario", "direccion", "ciudad", "codigoPostal"]
+    },
+    "Inmueble": {
+      "title": "Inmueble",
+      "description": "Propiedad inmobiliaria en gestión de alquiler residencial",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "direccion": { "type": "string" },
+        "ciudad": { "type": "string" },
+        "precio": { "type": "number" },
+        "fianzaMeses": { "type": "number" },
+        "habitaciones": { "type": "number" },
+        "banos": { "type": "number" },
+        "superficie": { "type": "number" },
+        "estado": { "type": "string" },
+        "candidatosCount": { "type": "number" },
+        "imagenUrl": { "type": "string" },
+        "datosFiscales": { "type": "object" }
+      },
+      "required": ["direccion", "ciudad", "precio", "estado"]
+    },
+    "Candidato": {
+      "title": "Candidato",
+      "description": "Expediente de candidato a inquilino con datos personales, laborales, solvencia y cuestionario",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "email": { "type": "string" },
+        "telefono": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "estado": { "type": "string" },
+        "ingresosMensuales": { "type": "number" },
+        "tipoContrato": { "type": "string" },
+        "antiguedadAnos": { "type": "number" },
+        "numInquilinos": { "type": "number" },
+        "tieneMascotas": { "type": "boolean" },
+        "cuestionarioToken": { "type": "string" },
+        "cuestionarioIncidencias": { "type": "object" },
+        "documentosAnalizados": { "type": "array" }
+      },
+      "required": ["nombre", "email", "telefono", "estado"]
+    },
+    "SolicitudAlquiler": {
+      "title": "SolicitudAlquiler",
+      "description": "Solicitud de alquiler enviada por candidato a través del enlace público",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "token": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "inmuebleNombre": { "type": "string" },
+        "nombre": { "type": "string" },
+        "email": { "type": "string" },
+        "telefono": { "type": "string" },
+        "ingresosNetos": { "type": "number" },
+        "tipoEmpleo": { "type": "string" },
+        "estado": { "type": "string" }
+      },
+      "required": ["nombre", "email", "telefono", "inmuebleId", "estado"]
+    },
+    "InvitacionVisita": {
+      "title": "InvitacionVisita",
+      "description": "Invitación de visita presencial con token público para reserva de slot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidatoId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "token": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["candidatoId", "inmuebleId", "token", "status"]
+    },
+    "VisitSlot": {
+      "title": "VisitSlot",
+      "description": "Franja horaria para visitas al inmueble",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "fecha": { "type": "string" },
+        "horaInicio": { "type": "string" },
+        "horaFin": { "type": "string" },
+        "disponible": { "type": "boolean" },
+        "reservaCandidateId": { "type": "string" }
+      },
+      "required": ["inmuebleId", "fecha", "horaInicio", "horaFin", "disponible"]
+    },
+    "SolicitudDocumentacion": {
+      "title": "SolicitudDocumentacion",
+      "description": "Petición de nóminas, vida laboral y DNI tras visita para estudio de solvencia",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tokenDoc": { "type": "string" },
+        "candidatoId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "estado": { "type": "string" },
+        "documentos": { "type": "array" }
+      },
+      "required": ["tokenDoc", "candidatoId", "inmuebleId", "estado"]
+    },
+    "ContratoFormalizacion": {
+      "title": "ContratoFormalizacion",
+      "description": "Expediente de formalización de contrato de arrendamiento LAU y seguro de impago",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidatoId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "estado": { "type": "string" },
+        "rentaMensual": { "type": "number" },
+        "evaluacionAsegurabilidad": { "type": "object" },
+        "actaEntregaLlaves": { "type": "object" }
+      },
+      "required": ["candidatoId", "inmuebleId", "estado", "rentaMensual"]
+    },
+    "ConfiguracionAseguradora": {
+      "title": "ConfiguracionAseguradora",
+      "description": "Configuración de aseguradoras y mutuas de impago de alquiler (SEAG, Caser, etc.)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "emailTramitacion": { "type": "string" },
+        "activa": { "type": "boolean" },
+        "maxRatioEsfuerzo": { "type": "number" }
+      },
+      "required": ["id", "nombre", "emailTramitacion", "activa"]
+    },
+    "SolicitudSeguroImpago": {
+      "title": "SolicitudSeguroImpago",
+      "description": "Solicitud enviada a aseguradora con código de seguimiento único y dictamen",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "referenciaUnica": { "type": "string" },
+        "candidatoId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "aseguradoraId": { "type": "string" },
+        "estado": { "type": "string" },
+        "rentaMensual": { "type": "number" },
+        "ratioEsfuerzoCalculado": { "type": "number" }
+      },
+      "required": ["referenciaUnica", "candidatoId", "inmuebleId", "aseguradoraId", "estado"]
+    },
+    "UsuarioApp": {
+      "title": "UsuarioApp",
+      "description": "Usuario registrado en la plataforma con perfil, roles, permisos y asignación de inmuebles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authUid": { "type": "string" },
+        "nombre": { "type": "string" },
+        "apellidos": { "type": "string" },
+        "email": { "type": "string" },
+        "telefono": { "type": "string" },
+        "tipoPerfil": { "type": "string", "enum": ["ADMINISTRADOR", "PROPIETARIO", "PROFESIONAL"] },
+        "estado": { "type": "string", "enum": ["ACTIVO", "PENDIENTE", "BLOQUEADO", "INACTIVO"] },
+        "roles": { "type": "array" },
+        "permisos": { "type": "array" },
+        "inmuebleIds": { "type": "array" },
+        "propietarioId": { "type": "string" },
+        "profesionalId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["email", "nombre", "tipoPerfil", "estado"]
+    },
+    "Profesional": {
+      "title": "Profesional",
+      "description": "Ficha de profesional o empresa de mantenimiento con especialidades, zonas y viviendas asignadas",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "usuarioId": { "type": "string" },
+        "creadoPorPropietarioId": { "type": "string" },
+        "esPrivado": { "type": "boolean" },
+        "tipo": { "type": "string", "enum": ["EMPRESA", "AUTONOMO", "PARTICULAR"] },
+        "nombreComercial": { "type": "string" },
+        "razonSocial": { "type": "string" },
+        "cifNif": { "type": "string" },
+        "contactoNombre": { "type": "string" },
+        "email": { "type": "string" },
+        "telefono": { "type": "string" },
+        "web": { "type": "string" },
+        "especialidades": { "type": "array" },
+        "zonasServicio": { "type": "array" },
+        "inmuebleIdsAsignados": { "type": "array" },
+        "activo": { "type": "boolean" },
+        "tokenInvitacion": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["nombreComercial", "tipo", "activo"]
+    },
+    "EnlaceRegistro": {
+      "title": "EnlaceRegistro",
+      "description": "Enlaces de registro e invitaciones configurables para propietarios y profesionales",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "token": { "type": "string" },
+        "tipoPerfil": { "type": "string", "enum": ["PROPIETARIO", "PROFESIONAL"] },
+        "textoVisible": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "activo": { "type": "boolean" },
+        "profesionalIdVinculado": { "type": "string" },
+        "propietarioIdVinculado": { "type": "string" },
+        "fechaCaducidad": { "type": "string" },
+        "usosMaximos": { "type": "number" },
+        "usosActuales": { "type": "number" },
+        "creadoPor": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["token", "tipoPerfil", "textoVisible", "activo"]
+    },
+    "Especialidad": {
+      "title": "Especialidad",
+      "description": "Catálogo administrable de especialidades técnicas para profesionales de mantenimiento",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "icono": { "type": "string" },
+        "activa": { "type": "boolean" },
+        "orden": { "type": "number" }
+      },
+      "required": ["nombre", "activa"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro inmutable de auditoría para acciones administrativas y operativas de seguridad",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "usuarioId": { "type": "string" },
+        "usuarioEmail": { "type": "string" },
+        "usuarioNombre": { "type": "string" },
+        "accion": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "fechaHora": { "type": "string" },
+        "entidadAfectada": { "type": "string" },
+        "idAfectado": { "type": "string" },
+        "resultado": { "type": "string", "enum": ["EXITO", "ERROR"] },
+        "detalles": { "type": "object" }
+      },
+      "required": ["accion", "fechaHora", "resultado"]
+    }
+  },
+  "firestore": {
+    "/propietarios/{propietarioId}": {
+      "schema": { "$ref": "#/entities/Propietario" },
+      "description": "Fichas de propietarios, datos fiscales y cuentas bancarias asociadas"
+    },
+    "/inmuebles/{inmuebleId}": {
+      "schema": { "$ref": "#/entities/Inmueble" },
+      "description": "Colección de inmuebles en alquiler y sus datos fiscales"
+    },
+    "/candidatos/{candidatoId}": {
+      "schema": { "$ref": "#/entities/Candidato" },
+      "description": "Colección de candidatos e inquilinos evaluados"
+    },
+    "/solicitudes/{solicitudId}": {
+      "schema": { "$ref": "#/entities/SolicitudAlquiler" },
+      "description": "Solicitudes públicas de alquiler"
+    },
+    "/invitaciones/{invitacionId}": {
+      "schema": { "$ref": "#/entities/InvitacionVisita" },
+      "description": "Invitaciones y reservas de visitas a inmuebles"
+    },
+    "/slots_visita/{slotId}": {
+      "schema": { "$ref": "#/entities/VisitSlot" },
+      "description": "Horarios y franjas de visita presencial"
+    },
+    "/solicitudes_documentacion/{solicitudDocId}": {
+      "schema": { "$ref": "#/entities/SolicitudDocumentacion" },
+      "description": "Expedientes de documentación salarial y solvencia post-visita"
+    },
+    "/contratos_formalizacion/{contratoId}": {
+      "schema": { "$ref": "#/entities/ContratoFormalizacion" },
+      "description": "Contratos formalizados y actas de entrega"
+    },
+    "/configuracion_aseguradoras/{aseguradoraId}": {
+      "schema": { "$ref": "#/entities/ConfiguracionAseguradora" },
+      "description": "Parámetros y correos de tramitación de aseguradoras"
+    },
+    "/solicitudes_seguro_impago/{solicitudSeguroId}": {
+      "schema": { "$ref": "#/entities/SolicitudSeguroImpago" },
+      "description": "Trámites de pólizas de seguro de impago y seguimiento"
+    },
+    "/usuarios/{usuarioId}": {
+      "schema": { "$ref": "#/entities/UsuarioApp" },
+      "description": "Usuarios de la aplicación, roles y permisos de acceso"
+    },
+    "/profesionales/{profesionalId}": {
+      "schema": { "$ref": "#/entities/Profesional" },
+      "description": "Empresas y profesionales de mantenimiento y asignaciones de inmuebles"
+    },
+    "/enlaces_registro/{enlaceId}": {
+      "schema": { "$ref": "#/entities/EnlaceRegistro" },
+      "description": "Enlaces configurables de registro e invitaciones"
+    },
+    "/especialidades/{especialidadId}": {
+      "schema": { "$ref": "#/entities/Especialidad" },
+      "description": "Catálogo dinámico de especialidades de profesionales"
+    },
+    "/audit_logs/{auditId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Registros inmutables de auditoría del sistema"
+    },
+    "/system/{systemDocId}": {
+      "schema": "object",
+      "description": "Configuración del sistema, módulos activos y estado de integración Gmail"
+    }
+  }
+}

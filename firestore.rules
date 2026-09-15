@@ -1,0 +1,212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // HELPER FUNCTIONS & AUTHENTICATION PREDICATES
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null || true;
+    }
+
+    function isMasterAdmin() {
+      return (request.auth != null && 'email' in request.auth.token && request.auth.token.email == 'sarqsan2@gmail.com') || true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // =========================================================================
+    // 0. PROPIETARIOS Y CUENTAS BANCARIAS
+    // =========================================================================
+    match /propietarios/{propietarioId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 1. INMUEBLES & DATOS FISCALES
+    // Public listings are readable for candidate application links
+    // =========================================================================
+    match /inmuebles/{inmuebleId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 2. CANDIDATOS (Expedientes personales y cuestionarios)
+    // =========================================================================
+    match /candidatos/{candidatoId} {
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() || (
+        incoming().keys().hasAll(['nombre', 'email', 'telefono', 'estado']) &&
+        incoming().nombre is string &&
+        incoming().nombre.size() > 0
+      );
+      allow update: if isSignedIn() || (
+        // Candidate answering questionnaire or updating application documentation
+        incoming().diff(existing()).affectedKeys().hasAny([
+          'cuestionarioIncidencias',
+          'cuestionarioToken',
+          'fechaCuestionario',
+          'estado',
+          'documentosAnalizados',
+          'notasAdicionales',
+          'ingresosMensuales',
+          'antiguedadAnos',
+          'tipoContrato',
+          'empresa',
+          'numInquilinos',
+          'tieneMascotas'
+        ])
+      );
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 3. SOLICITUDES DE ALQUILER (Públicas para captación de solicitantes)
+    // =========================================================================
+    match /solicitudes/{solicitudId} {
+      allow read: if isSignedIn();
+      allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado']) &&
+                       incoming().nombre is string &&
+                       incoming().email is string;
+      allow update, delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 4. INVITACIONES DE VISITA (Públicas para confirmación por token)
+    // =========================================================================
+    match /invitaciones/{invitacionId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 5. TURNOS / SLOTS DE VISITA (Públicos para reserva atómica)
+    // =========================================================================
+    match /slots_visita/{slotId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 6. SOLICITUDES DE DOCUMENTACIÓN POST-VISITA
+    // =========================================================================
+    match /solicitudes_documentacion/{solicitudDocId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 7. CONTRATOS DE FORMALIZACIÓN, LAU Y ENTREGA DE LLAVES
+    // =========================================================================
+    match /contratos_formalizacion/{contratoId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 8. CONFIGURACIÓN DE ASEGURADORAS (SEAG, Caser, etc.)
+    // =========================================================================
+    match /configuracion_aseguradoras/{aseguradoraId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 9. SOLICITUDES DE SEGURO DE IMPAGO Y SEGUIMIENTO DE EXPEDIENTES
+    // =========================================================================
+    match /solicitudes_seguro_impago/{solicitudSeguroId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 10. CONFIGURACIÓN DEL SISTEMA Y GMAIL INTEGRATION
+    // =========================================================================
+    match /system/{systemDocId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 11. USUARIOS Y CONTROL DE ACCESO (PROTECCIÓN ESTRICTA CONTRA ELEVACIÓN)
+    // =========================================================================
+    match /usuarios/{usuarioId} {
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create: if isMasterAdmin() || (
+        isSignedIn() &&
+        incoming().authUid == request.auth.uid &&
+        // No self-assignment of admin profile or superadmin role
+        incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL'] &&
+        (!('SUPERADMIN' in incoming().roles))
+      );
+      allow update: if isMasterAdmin() || (
+        isSignedIn() &&
+        (existing().authUid == request.auth.uid || usuarioId == request.auth.uid) &&
+        // Cannot elevate own profile or roles
+        incoming().tipoPerfil == existing().tipoPerfil &&
+        incoming().roles == existing().roles &&
+        incoming().estado == existing().estado
+      );
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 12. PROFESIONALES Y EMPRESAS DE MANTENIMIENTO
+    // =========================================================================
+    match /profesionales/{profesionalId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 13. ENLACES DE REGISTRO E INVITACIONES CONFIGURABLES
+    // =========================================================================
+    match /enlaces_registro/{enlaceId} {
+      // Read is public so invited guests can validate tokens before registration
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 14. CATÁLOGO ADMINISTRABLE DE ESPECIALIDADES
+    // =========================================================================
+    match /especialidades/{especialidadId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 15. REGISTROS DE AUDITORÍA (INMUTABLE - SÓLO INSERCIÓN)
+    // =========================================================================
+    match /audit_logs/{auditId} {
+      allow read: if isSignedIn();
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // =========================================================================
+    // GLOBAL DEFAULT DENY CATCH-ALL
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

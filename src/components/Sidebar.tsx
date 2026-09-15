@@ -20,6 +20,7 @@ import {
   LogOut,
   Receipt,
   TrendingDown,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -73,6 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
+      { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
   } else if (perfil === 'PROFESIONAL') {
@@ -92,6 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },
+      { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw },
       { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length },
       { id: 'analisis', label: 'Análisis IA', icon: Sparkles },
       { id: 'configuracion', label: 'Configuración', icon: Settings },

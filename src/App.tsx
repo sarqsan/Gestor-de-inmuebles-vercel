@@ -19,6 +19,7 @@ import {
   Gasto,
   GastoRecurrente,
   Prestamo,
+  ExpedienteRecomercializacion,
   DocumentoAnalizado,
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
@@ -75,6 +76,7 @@ import {
   subscribeGastos,
   subscribeGastosRecurrentes,
   subscribePrestamos,
+  subscribeExpedientesRecomercializacion,
   subscribeAseguradoras,
   subscribeSolicitudesSeguro,
   subscribeGmailConfig,
@@ -108,6 +110,8 @@ import {
   deleteGastoRecurrenteFirestore,
   savePrestamoFirestore,
   deletePrestamoFirestore,
+  saveExpedienteRecomercializacionFirestore,
+  deleteExpedienteRecomercializacionFirestore,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
   saveSolicitudSeguroFirestore,
@@ -158,6 +162,8 @@ import { PreseleccionadosSection } from './components/sections/PreseleccionadosS
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
 import { GastosSection } from './components/sections/GastosSection';
+import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
+import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
@@ -247,6 +253,9 @@ export default function App() {
   const [gastosRecurrentes, setGastosRecurrentes] = useState<GastoRecurrente[]>([]);
   // FASE 2.3: préstamos / hipotecas.
   const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
+  // FASE 3.0/3.1: expedientes de recomercialización y contexto de alta.
+  const [expedientesRecomerc, setExpedientesRecomerc] = useState<ExpedienteRecomercializacion[]>([]);
+  const [nuevoExpedienteCtx, setNuevoExpedienteCtx] = useState<ContextoNuevoExpediente | null>(null);
   const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
     try {
@@ -369,7 +378,7 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'cobros', 'gastos', 'configuracion'];
+      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'cobros', 'gastos', 'recomercializacion', 'configuracion'];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
@@ -472,6 +481,22 @@ export default function App() {
     }
     return [];
   }, [currentUser, prestamos, scopedInmuebles]);
+
+  // FASE 3.0: expedientes de recomercialización visibles (la suscripción ya
+  // viene acotada por propietarioId; aquí se refuerza por inmueble asignado).
+  const scopedExpedientesRecomerc = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return expedientesRecomerc;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return expedientesRecomerc.filter(
+        (e) =>
+          (currentUser.propietarioId && e.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(e.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, expedientesRecomerc, scopedInmuebles]);
 
   // Cobros derivados de los contratos visibles para el usuario (con su histórico por inmuebleId).
   // El motor genera los periodos al vuelo cuando un contrato aún no los tiene persistidos.
@@ -752,6 +777,11 @@ export default function App() {
       setPrestamos(Array.isArray(data) ? data : []);
     }, dataScope);
 
+    // FASE 3.0: expedientes de recomercialización con el mismo ámbito.
+    const unsubscribeExpedientes = subscribeExpedientesRecomercializacion((data) => {
+      setExpedientesRecomerc(Array.isArray(data) ? data : []);
+    }, dataScope);
+
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
     });
@@ -806,6 +836,7 @@ export default function App() {
       unsubscribeGastos();
       unsubscribeRecurrentes();
       unsubscribePrestamos();
+      unsubscribeExpedientes();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
@@ -2174,6 +2205,28 @@ export default function App() {
     await deletePrestamoFirestore(prestamoId);
   };
 
+  // FASE 3.1 — Expedientes de recomercialización.
+  const handleSaveExpedienteRecomerc = async (expediente: ExpedienteRecomercializacion) => {
+    const propietarioId = resolvePropietarioId(expediente.inmuebleId, expediente.propietarioId);
+    const finalExp: ExpedienteRecomercializacion = { ...expediente, propietarioId };
+    setExpedientesRecomerc((prev) => {
+      const exists = prev.some((e) => e.id === finalExp.id);
+      return exists
+        ? prev.map((e) => (e.id === finalExp.id ? finalExp : e))
+        : [finalExp, ...prev];
+    });
+    await saveExpedienteRecomercializacionFirestore(finalExp);
+  };
+  const handleDeleteExpedienteRecomerc = async (id: string) => {
+    setExpedientesRecomerc((prev) => prev.filter((e) => e.id !== id));
+    await deleteExpedienteRecomercializacionFirestore(id);
+  };
+  // Puntos de entrada desde la ficha del inmueble / el contrato.
+  const handleRecomercializarInmueble = (inmuebleId: string, contratoAnteriorId?: string) => {
+    setNuevoExpedienteCtx({ inmuebleId, contratoAnteriorId });
+    setActiveSection('recomercializacion');
+  };
+
   // Handlers for Propietarios y Cuentas Bancarias
   const handleSavePropietario = async (propietario: Propietario) => {
     setPropietarios((prev) => {
@@ -2841,6 +2894,7 @@ export default function App() {
               userProfile={userProfile}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onDeleteContrato={handleDeleteContrato}
+              onRecomercializarContrato={(c) => handleRecomercializarInmueble(c.inmuebleId, c.id)}
             />
           )}
 
@@ -2872,6 +2926,20 @@ export default function App() {
             />
           )}
 
+          {activeSection === 'recomercializacion' && (
+            <RecomercializacionSection
+              expedientes={scopedExpedientesRecomerc}
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              currentUser={currentUser}
+              contextoNuevo={nuevoExpedienteCtx}
+              onConsumirContexto={() => setNuevoExpedienteCtx(null)}
+              onCreate={handleSaveExpedienteRecomerc}
+              onGuardar={handleSaveExpedienteRecomerc}
+              onEliminar={handleDeleteExpedienteRecomerc}
+            />
+          )}
+
           {activeSection === 'inmuebles' && (
             <InmueblesSection
               inmuebles={scopedInmuebles}
@@ -2895,6 +2963,9 @@ export default function App() {
               contratos={scopedContratos}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onFinalizarContrato={handleFinalizarContrato}
+              onRecomercializarInmueble={(inmuebleId, contratoAnteriorId) =>
+                handleRecomercializarInmueble(inmuebleId, contratoAnteriorId)
+              }
             />
           )}
 

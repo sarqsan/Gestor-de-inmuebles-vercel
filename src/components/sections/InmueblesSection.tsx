@@ -74,6 +74,7 @@ import {
   History,
   Calendar,
   Archive,
+  RefreshCw,
   UserCheck,
   Receipt,
   Banknote,
@@ -102,6 +103,8 @@ interface InmueblesSectionProps {
   onOpenFormalizarModal?: (candidato: Candidato, inmueble?: Inmueble, existingContrato?: ContratoFormalizacion) => void;
   onFinalizarContrato?: (contratoId: string) => Promise<void>;
   onSaveContrato?: (contrato: ContratoFormalizacion) => Promise<void> | void;
+  // FASE 3.1: abrir expediente de recomercialización desde el inmueble.
+  onRecomercializarInmueble?: (inmuebleId: string, contratoAnteriorId?: string) => void;
 }
 
 export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
@@ -125,6 +128,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   onOpenFormalizarModal,
   onFinalizarContrato,
   onSaveContrato,
+  onRecomercializarInmueble,
 }) => {
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string | null>(null);
   const [filterState, setFilterState] = useState<'todos' | 'disponible' | 'alquilado'>('todos');
@@ -1182,6 +1186,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     >
                       <Edit className="w-3.5 h-3.5" />
                       <span>Ver / Editar Contrato</span>
+                    </button>
+                  )}
+
+                  {onRecomercializarInmueble && selectedInmueble && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onRecomercializarInmueble(selectedInmueble.id, activeContract?.id)
+                      }
+                      className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+                      title="El inquilino se va: abre un expediente de salida, inspección y nueva comercialización"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Recomercializar</span>
                     </button>
                   )}
 

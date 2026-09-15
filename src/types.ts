@@ -7,6 +7,7 @@ export type SectionType =
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'
+  | 'recomercializacion'
   | 'solicitudes'
   | 'candidatos'
   | 'nuevo_candidato'

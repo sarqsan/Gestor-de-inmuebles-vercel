@@ -22,6 +22,7 @@ import {
   ArrowLeftRight,
   Receipt,
   TrendingDown,
+  RefreshCw,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -75,6 +76,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
           { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
+          { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : perfil === 'PROFESIONAL'
@@ -92,6 +94,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },
+          { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw, description: 'Salida, inspección y nueva comercialización' },
           { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length, description: 'Listado completo' },
           { id: 'analisis', label: 'Análisis IA', icon: Sparkles, description: 'Puntuación e informes' },
           { id: 'configuracion', label: 'Configuración', icon: Settings, description: 'Ajustes del sistema' },

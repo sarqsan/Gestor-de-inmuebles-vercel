@@ -8,7 +8,9 @@
 import type {
   DestinoInmueble,
   EstadoRecomercializacion,
+  EstanciaFoto,
   ExpedienteRecomercializacion,
+  FotoInspeccion,
   InmobiliariaDirectorio,
   LeadInmobiliario,
   ModalidadComercializacion,
@@ -86,7 +88,7 @@ export const MODALIDAD_COMERCIALIZACION_LABEL: Record<ModalidadComercializacion,
   AMBAS: 'Híbrida / ambas',
 };
 
-export const ESTANCIA_LABEL: Record<string, string> = {
+export const ESTANCIA_LABEL: Record<EstanciaFoto, string> = {
   salon: 'Salón / Comedor',
   cocina: 'Cocina',
   bano: 'Baños',
@@ -96,9 +98,65 @@ export const ESTANCIA_LABEL: Record<string, string> = {
   otro: 'Otras zonas',
 };
 
+// Orden de recorrido sugerido en la inspección visual (FASE 3.2).
+export const ESTANCIAS_ORDEN: EstanciaFoto[] = [
+  'salon',
+  'cocina',
+  'bano',
+  'dormitorio',
+  'terraza',
+  'exterior',
+  'otro',
+];
+
 export function nuevoExpedienteId(inmuebleId: string): string {
   const seg = (inmuebleId || 'inm').replace(/[^a-zA-Z0-9_-]/g, '_');
   return `exp_${seg}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+}
+
+export function nuevoFotoInspeccionId(estancia: EstanciaFoto | string): string {
+  const seg = (estancia || 'otro').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `foto_${seg}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+}
+
+/**
+ * FASE 3.2 — Devuelve una copia del expediente con una foto de inspección
+ * añadida a la revisión fotográfica (la inicializa si aún no existe).
+ * Inmutable: no modifica el expediente de entrada.
+ */
+export function agregarFotoInspeccion(
+  expediente: ExpedienteRecomercializacion,
+  foto: FotoInspeccion
+): ExpedienteRecomercializacion {
+  const actuales = expediente.revisionFotografica?.fotografias ?? [];
+  const ahora = new Date().toISOString();
+  return {
+    ...expediente,
+    revisionFotografica: {
+      fechaCarga: expediente.revisionFotografica?.fechaCarga || ahora,
+      fotografias: [...actuales, foto],
+    },
+    updatedAt: ahora,
+  };
+}
+
+/** Devuelve una copia del expediente sin la foto indicada (y borra el objeto de Storage aparte). */
+export function quitarFotoInspeccion(
+  expediente: ExpedienteRecomercializacion,
+  fotoId: string
+): ExpedienteRecomercializacion {
+  const actuales = expediente.revisionFotografica?.fotografias ?? [];
+  const fotografias = actuales.filter((f) => f.id !== fotoId);
+  const ahora = new Date().toISOString();
+  return {
+    ...expediente,
+    revisionFotografica: {
+      // La revisión sigue considerándose cargada mientras quede alguna foto.
+      fechaCarga: expediente.revisionFotografica?.fechaCarga || ahora,
+      fotografias,
+    },
+    updatedAt: ahora,
+  };
 }
 
 /** Crea un expediente nuevo en BORRADOR/SALIDA según se informe la salida. */

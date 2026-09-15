@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, RefreshCw, Check, Ban, Trash2, KeyRound, BellRing } from 'lucide-react';
+import { X, RefreshCw, Check, Ban, Trash2, KeyRound, BellRing, Camera } from 'lucide-react';
 import type {
   EstadoRecomercializacion,
   ExpedienteRecomercializacion,
@@ -9,10 +9,13 @@ import {
   DESTINO_INMUEBLE_LABEL,
   esEstadoCierre,
   ESTADOS_RECOMERCIALIZACION,
+  ESTANCIAS_ORDEN,
+  ESTANCIA_LABEL,
   MODALIDAD_COMERCIALIZACION_LABEL,
   puedeTransicionar,
 } from '../../utils/recomercializacionEngine';
 import { formatDate } from '../../utils/formatters';
+import { InspeccionFotograficaModal } from './InspeccionFotograficaModal';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -29,6 +32,7 @@ const ESTADOS_HABILITADOS_UI: EstadoRecomercializacion[] = [
   'BORRADOR',
   'SALIDA_NOTIFICADA',
   'REVISION_PENDIENTE',
+  'FOTOS_ACTUALIZADAS',
   'CANCELADO',
 ];
 
@@ -57,6 +61,7 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
     expediente.datosSalida?.observaciones || ''
   );
   const [guardando, setGuardando] = useState(false);
+  const [showInspeccion, setShowInspeccion] = useState(false);
 
   const estado = expediente.estado;
   const metaEstado = ESTADOS_RECOMERCIALIZACION[estado];
@@ -190,7 +195,7 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
                         ? 'bg-slate-50 text-slate-500 border-slate-200'
                         : 'bg-slate-50/50 text-slate-300 border-slate-200 border-dashed'
                     }`}
-                    title={habilitado ? '' : 'Se habilita en las siguientes fases (3.2-3.6)'}
+                    title={habilitado ? '' : 'Se habilita en las siguientes fases (3.3-3.6)'}
                   >
                     {ESTADOS_RECOMERCIALIZACION[e].label}
                   </span>
@@ -252,6 +257,64 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
             </div>
           )}
 
+          {/* Inspección fotográfica (FASE 3.2) */}
+          {!esEstadoCierre(estado) &&
+            ESTADOS_RECOMERCIALIZACION[estado].orden >=
+              ESTADOS_RECOMERCIALIZACION.REVISION_PENDIENTE.orden &&
+            (() => {
+              const fotos = expediente.revisionFotografica?.fotografias ?? [];
+              const cubiertas = new Set(fotos.map((f) => f.estancia));
+              return (
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Camera className="w-4 h-4 text-sky-600" /> Inspección visual por estancias
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      {fotos.length} foto{fotos.length === 1 ? '' : 's'} · {cubiertas.size}/{ESTANCIAS_ORDEN.length} zonas
+                    </span>
+                  </div>
+
+                  {fotos.length > 0 ? (
+                    <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                      {ESTANCIAS_ORDEN.map((est) => {
+                        const n = fotos.filter((f) => f.estancia === est).length;
+                        return (
+                          <div
+                            key={est}
+                            title={ESTANCIA_LABEL[est]}
+                            className={`aspect-square rounded-lg flex flex-col items-center justify-center text-[9px] font-semibold border ${
+                              n > 0
+                                ? 'bg-sky-50 border-sky-200 text-sky-700'
+                                : 'bg-slate-50 border-dashed border-slate-200 text-slate-300'
+                            }`}
+                          >
+                            <Camera className="w-3.5 h-3.5 mb-0.5" />
+                            {n > 0 ? n : '·'}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">
+                      Aún no hay fotografías. Haz el recorrido por salón, cocina, baños, dormitorios y
+                      el resto de estancias para documentar el estado antes de publicar.
+                    </p>
+                  )}
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => setShowInspeccion(true)}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg flex items-center gap-1.5"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      {fotos.length > 0 ? 'Ver / editar fotografías' : 'Hacer inspección fotográfica'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
           {/* Resumen si está cerrado/cancelado */}
           {esEstadoCierre(estado) && expediente.datosSalida && (
             <div className="rounded-xl border border-slate-200 p-4 text-xs text-slate-600 space-y-1">
@@ -262,9 +325,10 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
           )}
 
           {estado === 'REVISION_PENDIENTE' && (
-            <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/50 p-4 text-xs text-indigo-800">
-              La inspección visual con fotos por estancias y el diagnóstico asistido por IA llegan
-              en la siguiente fase (3.2-3.3); el pricing y la comercialización, en la 3.5-3.6.
+            <div className="rounded-xl border border-dashed border-sky-200 bg-sky-50/50 p-4 text-xs text-sky-800">
+              Tras recibir las llaves, haz la <b>inspección visual por estancias</b> y sube las
+              fotografías actualizadas. El diagnóstico asistido por IA llega en la fase 3.3; el
+              pricing y la comercialización, en la 3.5-3.6.
             </div>
           )}
         </div>
@@ -298,13 +362,30 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
               </button>
             )}
             {estado === 'REVISION_PENDIENTE' && (
-              <span className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-slate-400">
-                <Check className="w-4 h-4" /> Salida completada
+              <button
+                onClick={() => setShowInspeccion(true)}
+                className="px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl flex items-center gap-1.5"
+              >
+                <Camera className="w-4 h-4" /> Inspección fotográfica
+              </button>
+            )}
+            {estado === 'FOTOS_ACTUALIZADAS' && (
+              <span className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <Check className="w-4 h-4" /> Fotos actualizadas
               </span>
             )}
           </div>
         </div>
       </div>
+
+      {showInspeccion && (
+        <InspeccionFotograficaModal
+          expediente={expediente}
+          inmueble={inmueble}
+          onGuardar={onGuardar}
+          onClose={() => setShowInspeccion(false)}
+        />
+      )}
     </div>
   );
 };

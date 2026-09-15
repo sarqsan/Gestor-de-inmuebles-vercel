@@ -112,6 +112,7 @@ import {
   deletePrestamoFirestore,
   saveExpedienteRecomercializacionFirestore,
   deleteExpedienteRecomercializacionFirestore,
+  deleteFotoInspeccionStorage,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
   saveSolicitudSeguroFirestore,
@@ -2218,6 +2219,10 @@ export default function App() {
     await saveExpedienteRecomercializacionFirestore(finalExp);
   };
   const handleDeleteExpedienteRecomerc = async (id: string) => {
+    // FASE 3.2: limpia también las fotos de inspección de Storage (best-effort).
+    const expediente = expedientesRecomerc.find((e) => e.id === id);
+    const fotos = expediente?.revisionFotografica?.fotografias ?? [];
+    await Promise.all(fotos.map((f) => deleteFotoInspeccionStorage(f.storagePath)));
     setExpedientesRecomerc((prev) => prev.filter((e) => e.id !== id));
     await deleteExpedienteRecomercializacionFirestore(id);
   };

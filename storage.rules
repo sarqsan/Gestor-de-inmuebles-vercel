@@ -96,6 +96,24 @@ service firebase.storage {
     }
 
     // -------------------------------------------------------------------------
+    // FOTOGRAFÍAS DE INSPECCIÓN DE RECOMERCIALIZACIÓN (FASE 3.2)
+    // Ruta PRIVADA por propietario y expediente:
+    //   recomercializacion_fotos/{propietarioId}/{expedienteId}/{archivo}
+    // Son documentos internos de trabajo (estado aparente / desperfectos previos
+    // a la nueva comercialización), por lo que NO son públicas como las del
+    // catálogo. Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
+    // RESIDUAL: sin custom claims, el aislamiento fino por propietario queda
+    // pendiente de emitir claims (igual que justificantes y facturas).
+    // -------------------------------------------------------------------------
+    match /recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage();
+      allow update, delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
     // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
     // -------------------------------------------------------------------------
     match /{allPaths=**} {

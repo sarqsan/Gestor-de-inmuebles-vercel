@@ -6,6 +6,7 @@ import {
   MapPin,
   CalendarClock,
   KeyRound,
+  Camera,
   ArrowRight,
 } from 'lucide-react';
 import type {
@@ -96,7 +97,7 @@ export const RecomercializacionSection: React.FC<Props> = ({
       cls: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     },
     {
-      label: 'En salida del inquilino',
+      label: 'En salida / inspección',
       valor: expedientes.filter((e) =>
         ['SALIDA_NOTIFICADA', 'REVISION_PENDIENTE', 'FOTOS_ACTUALIZADAS'].includes(e.estado)
       ).length,
@@ -243,6 +244,13 @@ export const RecomercializacionSection: React.FC<Props> = ({
                       ? `Llaves ${formatDate(e.datosSalida.fechaEntregaLlaves)}`
                       : 'Llaves pendientes'}
                   </span>
+                  {(e.revisionFotografica?.fotografias?.length ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-1 text-sky-600">
+                      <Camera className="w-3.5 h-3.5" />
+                      {e.revisionFotografica!.fotografias.length} foto
+                      {e.revisionFotografica!.fotografias.length === 1 ? '' : 's'}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end mt-3 text-indigo-600 text-xs font-semibold opacity-0 group-hover:opacity-100 transition">

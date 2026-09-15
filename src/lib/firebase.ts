@@ -1494,6 +1494,65 @@ export async function uploadInmuebleImageToStorage(
   }
 }
 
+// ============================================================
+// FASE 3.2 — FOTOGRAFÍAS DE INSPECCIÓN (recomercialización)
+// Ruta privada por propietario y expediente:
+//   recomercializacion_fotos/{propietarioId}/{expedienteId}/{archivo}
+// A diferencia de las imágenes de catálogo, estas fotos son documentos de
+// trabajo internos (estado/deterioro) y NO se leen públicamente. Tampoco se
+// usa fallback base64: un expediente acumula muchas fotos y un data URL
+// inflaría el documento de Firestore por encima de su límite de 1 MB. Si
+// Storage falla, se lanza el error y la UI ofrece reintentar.
+// ============================================================
+
+export async function uploadFotoInspeccionStorage(
+  propietarioId: string,
+  expedienteId: string,
+  estancia: string,
+  blob: Blob,
+  fileName: string
+): Promise<{ url: string; storagePath: string }> {
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const expSeg = (expedienteId || 'exp').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const estSeg = (estancia || 'otro').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = (fileName || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const rand = Math.random().toString(36).substring(2, 6);
+  const storagePath = `recomercializacion_fotos/${ownerSeg}/${expSeg}/${estSeg}_${Date.now()}_${rand}_${safeName}`;
+
+  const fileRef = ref(storage, storagePath);
+  const uploadWork = (async () => {
+    await uploadBytes(fileRef, blob, { contentType: blob.type || 'image/jpeg' });
+    return getDownloadURL(fileRef);
+  })();
+
+  // 20 s: las inspecciones pueden incluir varias fotos con conexión lenta.
+  const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000));
+  const url = await Promise.race([uploadWork, timeoutGuard]);
+  if (!url || typeof url !== 'string') {
+    throw new Error('La subida de la fotografía ha tardado demasiado. Revisa la conexión e inténtalo de nuevo.');
+  }
+  return { url, storagePath };
+}
+
+export async function deleteFotoInspeccionStorage(storagePath?: string): Promise<void> {
+  if (!storagePath) return;
+  // Nunca borrar referencias locales/efímeras ni URLs http directas.
+  if (
+    storagePath.startsWith('local_') ||
+    storagePath.startsWith('server_') ||
+    storagePath.startsWith('data:') ||
+    storagePath.startsWith('http')
+  ) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    // El objeto puede ya no existir; no debe bloquear la baja del metadato.
+    console.warn('No se pudo eliminar la foto de inspección de Storage:', err);
+  }
+}
+
 /**
  * Sube el justificante mensual de un cobro (transferencia / ingreso) a Firebase Storage.
  * Regla arquitectónica: Firestore guarda SOLO metadatos y la URL; el PDF/imagen va a Storage.

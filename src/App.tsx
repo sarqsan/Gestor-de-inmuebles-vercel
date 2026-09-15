@@ -44,7 +44,7 @@ import {
   INITIAL_GMAIL_CONFIG,
 } from './data/mockData';
 import { generarInformeInteligente } from './utils/reportGenerator';
-import { obtenerTodosCobros } from './utils/cobrosEngine';
+import { obtenerTodosCobros, generarPeriodosParaContrato } from './utils/cobrosEngine';
 import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
@@ -710,6 +710,37 @@ export default function App() {
 
   // Ref to track candidate questionnaires currently being auto-analyzed
   const autoAnalyzingSetRef = React.useRef<Set<string>>(new Set());
+
+  // Ref para evitar reescrituras innecesarias al materializar el calendario de cobros.
+  // Clave: contrato.id -> firma (nº periodos + primer/último periodo ya persistido).
+  const cobrosEnsureRef = React.useRef<Map<string, string>>(new Map());
+
+  // Fase 1.1 — Persistencia proactiva de periodos de cobro.
+  // Para cada contrato visible que aún no tenga su registroCobros materializado (o le falten
+  // periodos ya vencidos/futuros según la ventana del motor), se generan y guardan en Firestore.
+  // IMPORTANTE: generarPeriodosParaContrato conserva intactos los periodos ya existentes
+  // (pagos, justificantes, historial), por lo que esto nunca sobrescribe datos.
+  useEffect(() => {
+    if (!currentUser) return;
+
+    scopedContratos.forEach((contrato) => {
+      const periodos = generarPeriodosParaContrato(contrato);
+      if (periodos.length === 0) return;
+
+      const firma = `${periodos.length}|${periodos[0].periodoMesAnio}|${periodos[periodos.length - 1].periodoMesAnio}`;
+      const almacenados = contrato.registroCobros || [];
+      const faltanPeriodos = almacenados.length !== periodos.length;
+
+      if (cobrosEnsureRef.current.get(contrato.id) === firma) return;
+      cobrosEnsureRef.current.set(contrato.id, firma);
+
+      if (faltanPeriodos) {
+        const asegurado: ContratoFormalizacion = { ...contrato, registroCobros: periodos };
+        saveContratoFirestore(asegurado);
+        setContratos((prev) => prev.map((c) => (c.id === asegurado.id ? asegurado : c)));
+      }
+    });
+  }, [currentUser, scopedContratos]);
 
   // Auto-analyze any candidate questionnaire that is completed but missing AI analysis
   useEffect(() => {
@@ -1721,14 +1752,21 @@ export default function App() {
     savedContrato: ContratoFormalizacion,
     marcarInmuebleAlquilado?: boolean
   ) => {
+    // Garantiza que el contrato nazca ya con su calendario de cobros materializado,
+    // conservando cualquier periodo ya existente (pagos/justificantes no se tocan).
+    const contratoConCobros: ContratoFormalizacion =
+      savedContrato.registroCobros && savedContrato.registroCobros.length > 0
+        ? savedContrato
+        : { ...savedContrato, registroCobros: generarPeriodosParaContrato(savedContrato) };
+
     setContratos((prev) => {
-      const exists = prev.some((c) => c.id === savedContrato.id);
+      const exists = prev.some((c) => c.id === contratoConCobros.id);
       if (exists) {
-        return prev.map((c) => (c.id === savedContrato.id ? savedContrato : c));
+        return prev.map((c) => (c.id === contratoConCobros.id ? contratoConCobros : c));
       }
-      return [savedContrato, ...prev];
+      return [contratoConCobros, ...prev];
     });
-    await saveContratoFirestore(savedContrato);
+    await saveContratoFirestore(contratoConCobros);
 
     if (marcarInmuebleAlquilado && savedContrato.inmuebleId) {
       setInmuebles((prev) =>

@@ -1,0 +1,91 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // =========================================================================
+    // FASE 1.4 — SEGURIDAD DE FICHEROS
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Administrador principal por email verificado por Firebase.
+    function isMasterAdmin() {
+      return isSignedIn()
+        && 'email' in request.auth.token
+        && request.auth.token.email == 'sarqsan2@gmail.com';
+    }
+
+    function internalUser() {
+      return isMasterAdmin() || isSignedIn();
+    }
+
+    function isPdfOrImage() {
+      return request.resource.contentType.matches('application/pdf')
+        || request.resource.contentType.matches('application/octet-stream')
+        || request.resource.contentType.matches('image/.*');
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    // -------------------------------------------------------------------------
+    // JUSTIFICANTES DE COBRO (datos económicos)
+    // Ruta por propietario: cobros_justificantes/{propietarioId}/{cobroId}/{archivo}
+    // Exige cuenta interna. Las URL de descarga con token que genera el SDK
+    // funcionan como enlace de capacidad para el destinatario (quien lo recibe
+    // puede abrirlo aunque no tenga sesión).
+    // RESIDUAL: sin custom claims, Storage no puede leer Firestore para comparar
+    // el segmento propietarioId con el usuario; se exige cuenta interna y el
+    // aislamiento fino por propietario queda para cuando se emitan claims.
+    // -------------------------------------------------------------------------
+    match /cobros_justificantes/{propietarioId}/{cobroPeriodoId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 12 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    // Ruta heredada anterior (sin carpeta de propietario): sólo lectura interna;
+    // ya no se permiten nuevas subidas a este esquema.
+    match /cobros_justificantes/{cobroPeriodoId}/{fileName} {
+      allow read: if internalUser();
+      allow create, update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // DOCUMENTOS APORTADOS POR LOS CANDIDATOS (portal público por token)
+    // La SUBIDA (create) la realiza el candidato sin iniciar sesión (funnel de
+    // captación), por lo que se permite anónimo con límite de tipo y tamaño;
+    // lectura/modificación/borrado quedan reservados a usuarios internos.
+    // -------------------------------------------------------------------------
+    match /documentos_solicitados/{solicitudDocId}/{allFiles=**} {
+      allow read: if internalUser();
+      allow create: if request.resource.size < 15 * 1024 * 1024 && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // IMÁGENES DE INMUEBLES (catálogo / listado público)
+    // Lectura pública (los listados son públicos); escritura interna.
+    // -------------------------------------------------------------------------
+    match /inmuebles/{inmuebleId}/{allFiles=**} {
+      allow read: if true;
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage();
+      allow update, delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
+    // -------------------------------------------------------------------------
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

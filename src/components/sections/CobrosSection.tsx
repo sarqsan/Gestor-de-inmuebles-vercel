@@ -218,7 +218,8 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
           const subido = await uploadJustificanteCobro(
             cobroToEdit.id,
             justificanteFile,
-            justificanteFile.name
+            justificanteFile.name,
+            cobroToEdit.propietarioId || contrato.propietarioId || currentUser?.propietarioId
           );
           justificanteData = {
             id: `just_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,

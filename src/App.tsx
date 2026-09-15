@@ -153,6 +153,7 @@ import {
   canAccessInmueble,
   canAccessContrato,
   canAccessCandidato,
+  syncAuthIndex,
 } from './lib/authService';
 import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
@@ -616,6 +617,15 @@ export default function App() {
       seedInitialDataIfEmpty();
     }
 
+    // FASE 1.4: ámbito de datos para que las escuchas nunca soliciten la
+    // colección completa a un propietario (defensa en profundidad; la UI ya
+    // filtraba, pero ahora la propia consulta queda acotada en origen).
+    const dataScope = {
+      tipoPerfil: currentUser.tipoPerfil,
+      propietarioId: currentUser.propietarioId,
+      inmuebleIds: currentUser.inmuebleIds || [],
+    };
+
     const unsubscribeCand = subscribeCandidatos((data) => {
       if (data && data.length > 0) {
         setCandidatos(data);
@@ -636,7 +646,7 @@ export default function App() {
         setPropietarios(data);
         try { localStorage.setItem('rentselect_propietarios', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }, dataScope);
 
     const unsubscribeSol = subscribeSolicitudes((data) => {
       if (data && data.length > 0) {
@@ -650,7 +660,7 @@ export default function App() {
         setContratos(data);
         try { localStorage.setItem('rentselect_contratos', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }, dataScope);
 
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
@@ -1755,12 +1765,24 @@ export default function App() {
     savedContrato: ContratoFormalizacion,
     marcarInmuebleAlquilado?: boolean
   ) => {
+    // FASE 1.4: si quien formaliza es un propietario, el contrato debe llevar
+    // SIEMPRE su propietarioId (clave de aislamiento y de las reglas de acceso),
+    // aunque el inmueble aún no lo tuviera informado.
+    let contratoAsegurado = savedContrato;
+    if (
+      currentUser?.tipoPerfil === 'PROPIETARIO' &&
+      currentUser.propietarioId &&
+      !savedContrato.propietarioId
+    ) {
+      contratoAsegurado = { ...savedContrato, propietarioId: currentUser.propietarioId };
+    }
+
     // Garantiza que el contrato nazca ya con su calendario de cobros materializado,
     // conservando cualquier periodo ya existente (pagos/justificantes no se tocan).
     const contratoConCobros: ContratoFormalizacion =
-      savedContrato.registroCobros && savedContrato.registroCobros.length > 0
-        ? savedContrato
-        : { ...savedContrato, registroCobros: generarPeriodosParaContrato(savedContrato) };
+      contratoAsegurado.registroCobros && contratoAsegurado.registroCobros.length > 0
+        ? contratoAsegurado
+        : { ...contratoAsegurado, registroCobros: generarPeriodosParaContrato(contratoAsegurado) };
 
     setContratos((prev) => {
       const exists = prev.some((c) => c.id === contratoConCobros.id);
@@ -2114,6 +2136,11 @@ export default function App() {
   ) => {
     await saveUsuarioFirestore(nuevoUsuario);
     setUsuarios((prev) => [nuevoUsuario, ...prev]);
+
+    // FASE 1.4: crear el espejo de identidad usuarios_auth/{uid} ANTES de la
+    // ficha de propietario/profesional, porque las reglas de escritura de esas
+    // colecciones resuelven el rol/propietarioId a través de ese documento.
+    await syncAuthIndex(nuevoUsuario);
 
     if (propietarioData && nuevoUsuario.propietarioId) {
       const nuevoProp: Propietario = {

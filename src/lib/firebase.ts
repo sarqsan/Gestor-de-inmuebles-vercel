@@ -11,6 +11,9 @@ import {
   onSnapshot,
   writeBatch,
   runTransaction,
+  query,
+  where,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -120,9 +123,48 @@ export async function seedInitialDataIfEmpty() {
 }
 
 /**
- * Real-time listener for Propietarios
+ * Ámbito de acceso a datos (FASE 1.4).
+ * - ADMINISTRADOR / sin ámbito: colección completa.
+ * - PROPIETARIO: únicamente sus propios recursos.
+ * - PROFESIONAL: sin acceso a datos económicos/fiscales.
  */
-export function subscribePropietarios(callback: (propietarios: Propietario[]) => void) {
+export interface DataAccessScope {
+  tipoPerfil?: string;
+  propietarioId?: string;
+  inmuebleIds?: string[];
+}
+
+/**
+ * Real-time listener for Propietarios.
+ * Con ámbito de propietario escucha únicamente SU ficha (datos fiscales/cuentas);
+ * los profesionales no reciben nada y el administrador, la colección completa.
+ */
+export function subscribePropietarios(
+  callback: (propietarios: Propietario[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    const pid = scope.propietarioId;
+    if (!pid) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      doc(db, 'propietarios', pid),
+      (docSnap) => {
+        callback(docSnap.exists() ? [{ id: docSnap.id, ...docSnap.data() } as Propietario] : []);
+      },
+      (err) => {
+        console.error('Firestore propietario (scoped) snapshot error:', err);
+      }
+    );
+  }
+
   return onSnapshot(
     PROPIETARIOS_COL,
     (snapshot) => {
@@ -621,20 +663,62 @@ export async function deleteSolicitudDocFirestore(solicitudDocId: string) {
 }
 
 /**
- * Real-time listener for Contratos de Formalización (Fase 3)
+ * Real-time listener for Contratos de Formalización (Fase 3).
+ * FASE 1.4: con ámbito de PROPIETARIO lanza una consulta acotada por
+ * propietarioId (nunca la colección completa). Es exactamente el filtro que las
+ * Security Rules exigen para conceder el listado. Los profesionales no reciben
+ * contratos. El administrador mantiene la escucha global.
  */
-export function subscribeContratos(callback: (contratos: ContratoFormalizacion[]) => void) {
+export function subscribeContratos(
+  callback: (contratos: ContratoFormalizacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // Profesionales: cero acceso a contratos/cobros.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  // Administrador o sin ámbito: colección completa.
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      CONTRATOS_COL,
+      (snapshot) => {
+        const items: ContratoFormalizacion[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore contratos_formalizacion snapshot error:', err);
+      }
+    );
+  }
+
+  // --- PROPIETARIO ---
+  // La regla de Firestore EXIGE el filtro de igualdad por propietarioId (las
+  // reglas no filtran); por eso se consulta únicamente por ese campo. Un
+  // inmueble compartido pero titularidad de otro propietario no pertenece
+  // económicamente a este usuario y, por tanto, no se incluye aquí.
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+
+  const scopedQuery = query(CONTRATOS_COL, where('propietarioId', '==', pid));
   return onSnapshot(
-    CONTRATOS_COL,
-    (snapshot) => {
+    scopedQuery,
+    (snap) => {
       const items: ContratoFormalizacion[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion);
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as ContratoFormalizacion);
       });
       callback(items);
     },
     (err) => {
-      console.error('Firestore contratos_formalizacion snapshot error:', err);
+      console.error('Firestore contratos (scoped) snapshot error:', err);
     }
   );
 }
@@ -969,10 +1053,15 @@ export async function uploadInmuebleImageToStorage(
 export async function uploadJustificanteCobro(
   cobroPeriodoId: string,
   file: File | Blob,
-  fileName: string
+  fileName: string,
+  propietarioId?: string
 ): Promise<{ url: string; storagePath: string }> {
   const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `cobros_justificantes/${cobroPeriodoId}/${Date.now()}_${safeName}`;
+  // FASE 1.4: se segmenta por propietario para que Storage Rules pueda aislar
+  // los justificantes (datos económicos). Si no hay propietarioId se usa la
+  // carpeta genérica "sin_asignar".
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `cobros_justificantes/${ownerSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
   const mime =
     (file as File).type ||
     (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
@@ -1448,4 +1537,6 @@ export {
   deleteDoc,
   onSnapshot,
   writeBatch,
+  query,
+  where,
 };

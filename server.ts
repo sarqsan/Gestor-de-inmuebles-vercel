@@ -1,8 +1,9 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+// Nota: Vite se importa de forma dinámica dentro de startServer() (solo modo desarrollo)
+// para que el bundle de la función serverless de Vercel no incluya Vite.
 
 dotenv.config();
 
@@ -1227,6 +1228,7 @@ app.get(['/solicitud/:token', '/visita/:token'], (req, res, next) => {
 // Vite middleware in development or static serve in production
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -1245,4 +1247,11 @@ async function startServer() {
   });
 }
 
-startServer();
+// En Vercel el runtime serverless invoca la app Express exportada desde api/index.ts,
+// por lo que NO debe llamarse a app.listen(). Para ejecución tradicional (desarrollo
+// local con tsx, o `node dist/server.cjs`) se arranca el servidor como siempre.
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;

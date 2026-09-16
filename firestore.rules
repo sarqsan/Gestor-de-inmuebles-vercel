@@ -203,6 +203,60 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 16. BLOQUE 4: INCIDENCIAS, MANTENIMIENTO Y TRABAJOS PROFESIONALES
+    // =========================================================================
+    match /incidencias/{incidenciaId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 17. BLOQUE 4: PÓLIZAS DE SEGURO (HOGAR, ARRENDADOR, COMUNIDAD, RC)
+    // =========================================================================
+    match /polizas_seguros/{polizaId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 18. BLOQUE 4: SINIESTROS VINCULADOS A INCIDENCIAS
+    // =========================================================================
+    match /siniestros/{siniestroId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 19. BLOQUE 5: TRABAJOS PROFESIONALES (REPARACIONES, REFORMAS, MANTENIMIENTO)
+    // =========================================================================
+    match /trabajos_profesionales/{trabajoId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 20. BLOQUE 5: PRESUPUESTOS DE PROFESIONALES
+    // =========================================================================
+    match /presupuestos_profesionales/{presupuestoId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 21. BLOQUE 5: VALORACIONES Y EVALUACIONES DE PROFESIONALES
+    // =========================================================================
+    match /valoraciones_profesionales/{valoracionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // GLOBAL DEFAULT DENY CATCH-ALL
     // =========================================================================
     match /{document=**} {

@@ -63,6 +63,8 @@ import {
   subscribeEspecialidades,
   subscribeAuditLogs,
   subscribeModulosConfig,
+  subscribeIncidencias,
+  subscribeTrabajosProfesionales,
   saveInmuebleFirestore,
   deleteInmuebleFirestore,
   saveCandidatoFirestore,
@@ -129,6 +131,9 @@ import { ConfiguracionSection } from './components/sections/ConfiguracionSection
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
+import { CobrosSection } from './components/sections/CobrosSection';
+import { IncidenciasSection } from './components/sections/IncidenciasSection';
+import { ProfesionalesSection } from './components/sections/ProfesionalesSection';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
@@ -155,6 +160,8 @@ import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistr
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
+  const [incidenciasCount, setIncidenciasCount] = useState<number>(0);
+  const [trabajosActivosCount, setTrabajosActivosCount] = useState<number>(0);
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -640,6 +647,20 @@ export default function App() {
       }
     });
 
+    const unsubscribeIncidenciasHook = subscribeIncidencias((data) => {
+      if (data) {
+        const abiertas = data.filter((i) => i.estado !== 'RESUELTA' && i.estado !== 'CANCELADA').length;
+        setIncidenciasCount(abiertas);
+      }
+    });
+
+    const unsubscribeTrabajosHook = subscribeTrabajosProfesionales((data) => {
+      if (data) {
+        const activos = data.filter((t) => t.estado !== 'FINALIZADO' && t.estado !== 'CANCELADO').length;
+        setTrabajosActivosCount(activos);
+      }
+    });
+
     let unsubscribeAseguradoras: (() => void) | undefined;
     let unsubscribeGmail: (() => void) | undefined;
     let unsubscribeUsuariosHook: (() => void) | undefined;
@@ -682,6 +703,8 @@ export default function App() {
       unsubscribeContratos();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
+      unsubscribeIncidenciasHook();
+      unsubscribeTrabajosHook();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
       if (unsubscribeGmail) unsubscribeGmail();
       if (unsubscribeUsuariosHook) unsubscribeUsuariosHook();
@@ -2309,6 +2332,18 @@ export default function App() {
     );
   }
 
+  const cobrosPendientesCount = useMemo(() => {
+    let count = 0;
+    scopedContratos.forEach((c) => {
+      c.registroCobros?.forEach((cobro) => {
+        if (cobro.estado === 'PENDIENTE' || cobro.estado === 'RETRASADO' || cobro.estado === 'INCIDENCIA') {
+          count++;
+        }
+      });
+    });
+    return count;
+  }, [scopedContratos]);
+
   return (
     <div className="min-h-screen bg-slate-100/70 font-sans text-slate-800 flex flex-col md:flex-row pb-16 md:pb-0 antialiased">
       {/* Desktop Sidebar Navigation */}
@@ -2322,6 +2357,9 @@ export default function App() {
         preseleccionadosCount={preselectedCount}
         contratosCount={scopedContratos.length}
         solicitudesSeguroCount={solicitudesSeguro.length}
+        cobrosPendientesCount={cobrosPendientesCount}
+        incidenciasCount={incidenciasCount}
+        trabajosActivosCount={trabajosActivosCount}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
@@ -2340,6 +2378,9 @@ export default function App() {
           preseleccionadosCount={preselectedCount}
           contratosCount={scopedContratos.length}
           solicitudesSeguroCount={solicitudesSeguro.length}
+          cobrosPendientesCount={cobrosPendientesCount}
+          incidenciasCount={incidenciasCount}
+          trabajosActivosCount={trabajosActivosCount}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -2445,6 +2486,39 @@ export default function App() {
             />
           )}
 
+          {activeSection === 'cobros' && (
+            <CobrosSection
+              contratos={scopedContratos}
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+              onSaveContrato={handleSaveContrato}
+              onNavigateToInmueble={(inmId) => {
+                setActiveSection('inmuebles');
+              }}
+            />
+          )}
+
+          {activeSection === 'incidencias' && (
+            <IncidenciasSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              contratos={scopedContratos}
+              profesionales={scopedProfesionales}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'profesionales' && (
+            <ProfesionalesSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+              especialidadesDisponibles={especialidades}
+              onNavigateToIncidencias={() => setActiveSection('incidencias')}
+            />
+          )}
+
           {activeSection === 'inmuebles' && (
             <InmueblesSection
               inmuebles={scopedInmuebles}
@@ -2466,8 +2540,10 @@ export default function App() {
               onUpdateSlot={handleUpdateSlot}
               onNavigateToPropietarios={() => setActiveSection('propietarios')}
               contratos={scopedContratos}
+              currentUser={currentUser}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onFinalizarContrato={handleFinalizarContrato}
+              onSaveContrato={handleSaveContrato}
             />
           )}
 

@@ -3,6 +3,8 @@ export type SectionType =
   | 'inmuebles'
   | 'propietarios'
   | 'cobros'
+  | 'incidencias'
+  | 'profesionales'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'
@@ -1132,7 +1134,43 @@ export interface UsuarioApp {
   creadoPor?: string;
 }
 
-export type TipoProfesional = 'EMPRESA' | 'AUTONOMO' | 'PARTICULAR';
+export type TipoProfesional =
+  | 'AUTONOMO'
+  | 'EMPRESA'
+  | 'PROFESIONAL_INDIVIDUAL'
+  | 'PARTICULAR'
+  | 'OTRO';
+
+export type EstadoProfesional =
+  | 'ACTIVO'
+  | 'INACTIVO'
+  | 'PENDIENTE_VALIDACION'
+  | 'BLOQUEADO';
+
+export interface ServicioProfesional {
+  id?: string;
+  especialidad: string;
+  nombre: string;
+  descripcion?: string;
+  precioEstimado?: number;
+}
+
+export interface DocumentoProfesional {
+  id: string;
+  nombre: string;
+  tipo:
+    | 'SEGURO_RC'
+    | 'ALTA_IAE'
+    | 'PREVENCION_RIESGOS'
+    | 'CERTIFICADO_CONTRATISTA'
+    | 'TITULO_OFICIAL'
+    | 'OTRO';
+  tamano?: number;
+  storagePath: string;
+  downloadUrl: string;
+  fechaSubida: string;
+  subidoPor: string;
+}
 
 export interface ZonaServicio {
   id: string;
@@ -1140,26 +1178,40 @@ export interface ZonaServicio {
   municipio?: string;
   localidad?: string;
   codigosPostales?: string[];
+  radioKm?: number;
 }
 
 export interface Profesional {
   id: string;
-  usuarioId?: string; // Vinculado a UsuarioApp cuando se registre
-  creadoPorPropietarioId?: string; // Si fue creado manualmente por un propietario (profesional privado)
-  esPrivado?: boolean; // Privado de un propietario hasta que se registre o comparta
   tipo: TipoProfesional;
+  nombre?: string;
   nombreComercial: string;
   razonSocial?: string;
+  empresa?: string;
   cifNif?: string;
   contactoNombre?: string;
   email?: string;
   telefono?: string;
   web?: string;
+  descripcion?: string;
   especialidades: string[]; // Nombres o IDs de especialidades
+  servicios?: ServicioProfesional[];
+  estado?: EstadoProfesional;
+  activo: boolean; // compatibilidad
   zonasServicio: ZonaServicio[];
   inmuebleIdsAsignados?: string[]; // Viviendas asignadas donde presta servicio
-  activo: boolean;
+  documentos?: DocumentoProfesional[];
+  observaciones?: string;
+  creadoPor?: string;
+  actualizadoPor?: string;
+  usuarioId?: string; // Vinculado a UsuarioApp cuando se registre
+  creadoPorPropietarioId?: string; // Si fue creado manualmente por un propietario (profesional privado)
+  esPrivado?: boolean; // Privado de un propietario hasta que se registre o comparta
   tokenInvitacion?: string; // Token para invitarlo a registrarse
+  valoracionMedia?: number;
+  totalValoraciones?: number;
+  fechaAlta?: string;
+  fechaActualizacion?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1332,6 +1384,466 @@ export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   cobros: false,
   hipotecas: false,
   patrimonio: false,
-  incidencias: false,
+  incidencias: true,
 };
+
+// =========================================================================
+// BLOQUE 4: GESTIÓN DE INCIDENCIAS, MANTENIMIENTO, SEGUROS Y SINIESTROS
+// =========================================================================
+
+export type CategoriaIncidencia =
+  | 'AGUA'
+  | 'ELECTRICIDAD'
+  | 'FONTANERIA'
+  | 'CLIMATIZACION'
+  | 'ELECTRODOMESTICO'
+  | 'CERRAJERIA'
+  | 'HUMEDADES'
+  | 'ESTRUCTURAL'
+  | 'COMUNIDAD'
+  | 'PLAGAS'
+  | 'OTRO';
+
+export type PrioridadIncidencia =
+  | 'URGENTE'
+  | 'ALTA'
+  | 'NORMAL'
+  | 'BAJA';
+
+export type EstadoIncidencia =
+  | 'ABIERTA'
+  | 'EN_ANALISIS'
+  | 'PENDIENTE_INFORMACION'
+  | 'PENDIENTE_SEGURO'
+  | 'PENDIENTE_PROFESIONAL'
+  | 'EN_REPARACION'
+  | 'PENDIENTE_RESOLUCION'
+  | 'RESUELTA'
+  | 'CERRADA'
+  | 'CANCELADA';
+
+export type OrigenIncidencia =
+  | 'INQUILINO'
+  | 'PROPIETARIO'
+  | 'ADMINISTRADOR'
+  | 'INSPECCION'
+  | 'COMUNIDAD'
+  | 'OTRO';
+
+export type ResponsabilidadIncidencia =
+  | 'POSIBLE_PROPIETARIO'
+  | 'POSIBLE_INQUILINO'
+  | 'POSIBLE_COMUNIDAD'
+  | 'POSIBLE_TERCERO'
+  | 'INDETERMINADA'
+  | 'PENDIENTE_COMPROBACION';
+
+export type EstadoSeguroIncidencia =
+  | 'POSIBLEMENTE_CUBIERTA'
+  | 'NO_CUBIERTA_SEGUN_DATOS'
+  | 'COBERTURA_DUDOSA'
+  | 'SIN_SEGURO_APLICABLE'
+  | 'PENDIENTE_COMPROBACION';
+
+export type SeguroEstadoIncidencia = EstadoSeguroIncidencia;
+
+export type ViaActuacionIncidencia =
+  | 'REPARACION_DIRECTA'
+  | 'SOLICITAR_INFORMACION'
+  | 'PROFESIONAL'
+  | 'SEGURO'
+  | 'COMUNIDAD'
+  | 'TERCERO';
+
+export interface AdjuntoIncidencia {
+  id: string;
+  incidenciaId: string;
+  inmuebleId: string;
+  propietarioId?: string;
+  nombre: string;
+  tipo: 'imagen' | 'video' | 'documento';
+  mimeType?: string;
+  url: string;
+  storagePath: string;
+  tamanoBytes?: number;
+  fechaSubida: string;
+  subidoPor?: string;
+  observaciones?: string;
+}
+
+export interface CausaIncidenciaIA {
+  causa: string;
+  probabilidad?: string;
+  detalles?: string;
+}
+
+export interface AnalisisIaIncidencia {
+  urgenciaEstimada: PrioridadIncidencia;
+  posiblesCausas: (string | CausaIncidenciaIA)[];
+  informacionFaltante: string[];
+  posiblesActuaciones: string[];
+  posibleResponsabilidad: ResponsabilidadIncidencia;
+  justificacionResponsabilidad: string;
+  necesidadProfesional: boolean;
+  especialidadRequerida?: string;
+  relacionSeguros?: {
+    posibleCobertura: EstadoSeguroIncidencia;
+    explicacion: string;
+    ramoRecomendado?: string;
+  };
+  advertenciaLegal: string;
+  fechaAnalisis: string;
+  modeloUtilizado?: string;
+
+  // Propiedades opcionales de compatibilidad
+  evaluacionUrgencia?: string;
+  recomendacionResponsabilidad?: string;
+  fundamentoResponsabilidad?: string;
+  estimacionCoberturaSeguro?: string;
+  fundamentoSeguro?: string;
+  resumenDiagnostico?: string;
+  pasosRecomendados?: string[];
+}
+
+export type AnalisisIncidenciaIA = AnalisisIaIncidencia;
+
+export interface HistorialIncidenciaItem {
+  id: string;
+  fecha: string;
+  usuario: string;
+  accion: string;
+  valorAnterior?: string;
+  valorNuevo?: string;
+  observacion?: string;
+}
+
+export interface TrabajoProfesionalIncidencia {
+  profesionalId: string;
+  profesionalNombre: string;
+  profesionalTelefono?: string;
+  profesionalEmail?: string;
+  especialidad?: string;
+  servicio: string;
+  fechaAsignacion: string;
+  presupuestoEstimado?: number;
+  presupuestoAceptado?: boolean;
+  fechaInicio?: string;
+  fechaFinalizacion?: string;
+  costeReal?: number;
+  facturaNumero?: string;
+  facturaUrl?: string;
+  facturaStoragePath?: string;
+  estadoTrabajo: 'ASIGNADO' | 'PRESUPUESTADO' | 'ACEPTADO' | 'EN_CURSO' | 'FINALIZADO' | 'CANCELADO';
+  observaciones?: string;
+}
+
+export interface Incidencia {
+  id: string;
+  propietarioId: string;
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  inmuebleCiudad?: string;
+  contratoId?: string;
+  inquilinoId?: string;
+  inquilinoNombre?: string;
+  inquilinoTelefono?: string;
+  titulo: string;
+  descripcion: string;
+  categoria: CategoriaIncidencia;
+  prioridad: PrioridadIncidencia;
+  estado: EstadoIncidencia;
+  origen: OrigenIncidencia;
+  fechaCreacion: string;
+  fechaActualizacion: string;
+  fechaCierre?: string;
+  responsabilidad: ResponsabilidadIncidencia;
+  responsabilidadNotas?: string;
+  seguroEstado: EstadoSeguroIncidencia;
+  seguroComprobacionNotas?: string;
+  viaActuacion?: ViaActuacionIncidencia;
+  polizaId?: string;
+  siniestroId?: string;
+  profesionalId?: string;
+  presupuestoId?: string;
+  resolucion?: string;
+  observaciones?: string;
+  creadoPor: string;
+  actualizadoPor: string;
+  fotografias: AdjuntoIncidencia[];
+  documentos: AdjuntoIncidencia[];
+  analisisIa?: AnalisisIaIncidencia;
+  historial: HistorialIncidenciaItem[];
+  trabajoProfesional?: TrabajoProfesionalIncidencia;
+}
+
+// -------------------------------------------------------------------------
+// PÓLIZAS DE SEGURO (Hogar, Arrendador, RC, Comunidad, etc.)
+// -------------------------------------------------------------------------
+export type TipoPolizaSeguro =
+  | 'HOGAR'
+  | 'ARRENDADOR'
+  | 'IMPAGO_ALQUILER'
+  | 'RESPONSABILIDAD_CIVIL'
+  | 'COMUNIDAD'
+  | 'OTRO';
+
+export type EstadoPolizaSeguro =
+  | 'VIGENTE'
+  | 'VENCIDA'
+  | 'CANCELADA'
+  | 'EN_TRAMITE';
+
+export interface DocumentoPoliza {
+  id: string;
+  nombre: string;
+  url: string;
+  storagePath?: string;
+  tipo?: string;
+  fechaSubida: string;
+}
+
+export interface PolizaSeguro {
+  id: string;
+  aseguradora: string;
+  numeroPoliza: string;
+  tipo: TipoPolizaSeguro;
+  propietarioId: string;
+  inmuebleId?: string; // Opcional si es cobertura multirriesgo o global
+  inmuebleDireccion?: string;
+  fechaInicio: string; // YYYY-MM-DD
+  fechaVencimiento: string; // YYYY-MM-DD
+  estado: EstadoPolizaSeguro;
+  coberturas: string[]; // Ej: 'Daños por agua', 'Cerrajería urgente', 'Rotura cristales', etc.
+  franquicia?: number;
+  primaAnual?: number;
+  contacto?: {
+    telefono?: string;
+    email?: string;
+    asistencia24h?: string;
+  };
+  documentos?: DocumentoPoliza[];
+  observaciones?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// -------------------------------------------------------------------------
+// SINIESTROS VINCULADOS A INCIDENCIAS
+// -------------------------------------------------------------------------
+export type EstadoSiniestro =
+  | 'PENDIENTE_COMUNICAR'
+  | 'COMUNICADO'
+  | 'EN_ESTUDIO'
+  | 'PENDIENTE_DOCUMENTACION'
+  | 'ACEPTADO'
+  | 'RECHAZADO'
+  | 'INDEMNIZADO'
+  | 'CERRADO';
+
+export interface ComunicacionSiniestro {
+  id: string;
+  fecha: string;
+  remitente: string; // Ej: 'Aseguradora', 'Perito', 'Gestor', 'Propietario'
+  mensaje: string;
+  canal?: 'email' | 'telefono' | 'portal' | 'presencial';
+}
+
+export interface Siniestro {
+  id: string;
+  incidenciaId: string;
+  polizaId: string;
+  aseguradora: string;
+  numeroExpediente?: string;
+  numeroSiniestro?: string;
+  fechaComunicacion: string;
+  estado: EstadoSiniestro;
+  fechaResolucion?: string;
+  indemnizacion?: number;
+  franquicia?: number;
+  resolucion?: string;
+  documentos?: DocumentoPoliza[];
+  comunicaciones?: ComunicacionSiniestro[];
+  observaciones?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// =========================================================================
+// BLOQUE 5: PROFESIONALES, SERVICIOS Y GESTIÓN DE TRABAJOS
+// =========================================================================
+
+export type EspecialidadCodigo =
+  | 'FONTANERIA'
+  | 'ELECTRICIDAD'
+  | 'CLIMATIZACION'
+  | 'CERRAJERIA'
+  | 'ALBANILERIA'
+  | 'PINTURA'
+  | 'CARPINTERIA'
+  | 'CRISTALERIA'
+  | 'ELECTRODOMESTICOS'
+  | 'CALEFACCION'
+  | 'TELECOMUNICACIONES'
+  | 'PLAGAS'
+  | 'LIMPIEZA'
+  | 'JARDINERIA'
+  | 'REFORMAS'
+  | 'TECNICO'
+  | 'ARQUITECTURA'
+  | 'APAREJADOR'
+  | 'INGENIERIA'
+  | 'SEGUROS'
+  | 'OTRO';
+
+export type TipoTrabajoProfesional =
+  | 'REPARACION_INCIDENCIA'
+  | 'MANTENIMIENTO_PREVENTIVO'
+  | 'REFORMA'
+  | 'INSPECCION'
+  | 'MEJORA'
+  | 'OTRO';
+
+export type EstadoTrabajoProfesional =
+  | 'PENDIENTE'
+  | 'BUSCANDO_PROFESIONAL'
+  | 'PROFESIONAL_PROPUESTO'
+  | 'PRESUPUESTO_SOLICITADO'
+  | 'PRESUPUESTO_RECIBIDO'
+  | 'PENDIENTE_ACEPTACION'
+  | 'ACEPTADO'
+  | 'PROGRAMADO'
+  | 'EN_EJECUCION'
+  | 'PENDIENTE_MATERIAL'
+  | 'PENDIENTE_PROPIETARIO'
+  | 'FINALIZADO'
+  | 'CANCELADO';
+
+export interface HistorialTrabajoItem {
+  id: string;
+  fecha: string;
+  usuario: string;
+  accion:
+    | 'TRABAJO_CREADO'
+    | 'PROFESIONAL_ASIGNADO'
+    | 'PRESUPUESTO_SOLICITADO'
+    | 'PRESUPUESTO_RECIBIDO'
+    | 'PRESUPUESTO_ACEPTADO'
+    | 'PRESUPUESTO_RECHAZADO'
+    | 'TRABAJO_PROGRAMADO'
+    | 'TRABAJO_INICIADO'
+    | 'TRABAJO_FINALIZADO'
+    | 'TRABAJO_CANCELADO'
+    | 'VALORACION_REGISTRADA'
+    | 'ESTADO_MODIFICADO'
+    | 'NOTA_ANADIDA';
+  estadoAnterior?: EstadoTrabajoProfesional;
+  estadoNuevo?: EstadoTrabajoProfesional;
+  observacion?: string;
+}
+
+export interface ValoracionProfesionalTrabajo {
+  id?: string;
+  puntuacion: number; // 1 a 5
+  calidad: number; // 1 a 5
+  puntualidad: number; // 1 a 5
+  precio: number; // 1 a 5
+  comunicacion: number; // 1 a 5
+  resultado: 'SATISFACTORIO' | 'ACEPTABLE' | 'DEFICIENTE';
+  comentario?: string;
+  fecha: string;
+  usuarioId: string;
+  usuarioNombre?: string;
+  trabajoId: string;
+  profesionalId: string;
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+}
+
+export interface TrabajoProfesional {
+  id: string;
+  propietarioId: string;
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  incidenciaId?: string; // Opcional (puede no proceder de una incidencia)
+  profesionalId?: string;
+  profesionalNombre?: string;
+  profesionalTelefono?: string;
+  profesionalEmail?: string;
+  titulo: string;
+  descripcion: string;
+  categoria: string; // Especialidad o tipo de servicio
+  tipoTrabajo?: TipoTrabajoProfesional;
+  prioridad: PrioridadIncidencia;
+  estado: EstadoTrabajoProfesional;
+  fechaSolicitud: string;
+  fechaAsignacion?: string;
+  fechaInicio?: string;
+  fechaFinalizacion?: string;
+  presupuestoId?: string;
+  importeEstimado?: number;
+  importeFinal?: number;
+  observaciones?: string;
+  creadoPor: string;
+  actualizadoPor: string;
+  documentos?: AdjuntoIncidencia[];
+  historial: HistorialTrabajoItem[];
+  valoracion?: ValoracionProfesionalTrabajo;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EstadoPresupuestoProfesional =
+  | 'BORRADOR'
+  | 'RECIBIDO'
+  | 'EN_REVISION'
+  | 'ACEPTADO'
+  | 'RECHAZADO'
+  | 'CADUCADO';
+
+export interface PartidaPresupuesto {
+  id: string;
+  concepto: string;
+  cantidad: number;
+  precioUnitario: number;
+  importe: number;
+}
+
+export interface HistorialDecisionPresupuesto {
+  fecha: string;
+  usuario: string;
+  estadoAnterior: EstadoPresupuestoProfesional;
+  estadoNuevo: EstadoPresupuestoProfesional;
+  observaciones?: string;
+}
+
+export interface PresupuestoProfesional {
+  id: string;
+  numeroPresupuesto?: string;
+  trabajoId: string;
+  profesionalId: string;
+  profesionalNombre?: string;
+  propietarioId: string;
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  incidenciaId?: string;
+  fecha: string;
+  importeBase: number;
+  iva: number; // importe de IVA calculado
+  porcentajeIva?: number; // Ej: 21
+  importeTotal: number;
+  validez: string; // Ej: "30 días" o fecha límite
+  descripcion: string;
+  partidas: PartidaPresupuesto[];
+  estado: EstadoPresupuestoProfesional;
+  observaciones?: string;
+  documentoUrl?: string;
+  documentoStoragePath?: string;
+  historialDecision?: HistorialDecisionPresupuesto[];
+  creadoPor: string;
+  actualizadoPor: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+
 

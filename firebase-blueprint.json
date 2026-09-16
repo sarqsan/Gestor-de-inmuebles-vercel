@@ -278,6 +278,119 @@
         "detalles": { "type": "object" }
       },
       "required": ["accion", "fechaHora", "resultado"]
+    },
+    "Incidencia": {
+      "title": "Incidencia",
+      "description": "Expediente de incidencia o avería en vivienda con análisis IA, cobertura de seguro, peritaje y orden de trabajo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "propietarioId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "titulo": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "categoria": { "type": "string" },
+        "prioridad": { "type": "string" },
+        "estado": { "type": "string" },
+        "responsabilidad": { "type": "string" },
+        "seguroEstado": { "type": "string" },
+        "fotografias": { "type": "array" },
+        "documentos": { "type": "array" },
+        "analisisIa": { "type": "object" },
+        "historial": { "type": "array" },
+        "trabajoProfesional": { "type": "object" }
+      },
+      "required": ["propietarioId", "inmuebleId", "titulo", "categoria", "prioridad", "estado"]
+    },
+    "PolizaSeguro": {
+      "title": "PolizaSeguro",
+      "description": "Póliza de seguro multirriesgo hogar, arrendador, RC o comunidad asociada a inmueble",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "aseguradora": { "type": "string" },
+        "numeroPoliza": { "type": "string" },
+        "tipo": { "type": "string" },
+        "propietarioId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "estado": { "type": "string" },
+        "coberturas": { "type": "array" },
+        "franquicia": { "type": "number" },
+        "primaAnual": { "type": "number" }
+      },
+      "required": ["aseguradora", "numeroPoliza", "tipo", "propietarioId", "estado"]
+    },
+    "Siniestro": {
+      "title": "Siniestro",
+      "description": "Expediente de siniestro formalizado con la aseguradora derivado de una incidencia",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "incidenciaId": { "type": "string" },
+        "polizaId": { "type": "string" },
+        "aseguradora": { "type": "string" },
+        "numeroExpediente": { "type": "string" },
+        "fechaComunicacion": { "type": "string" },
+        "estado": { "type": "string" },
+        "indemnizacion": { "type": "number" }
+      },
+      "required": ["incidenciaId", "polizaId", "aseguradora", "fechaComunicacion", "estado"]
+    },
+    "TrabajoProfesional": {
+      "title": "TrabajoProfesional",
+      "description": "Orden de trabajo profesional de reparación, mantenimiento o reforma asignable a un inmueble",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "propietarioId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "incidenciaId": { "type": "string" },
+        "profesionalId": { "type": "string" },
+        "titulo": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "categoria": { "type": "string" },
+        "prioridad": { "type": "string" },
+        "estado": { "type": "string" },
+        "fechaSolicitud": { "type": "string" },
+        "presupuestoId": { "type": "string" }
+      },
+      "required": ["propietarioId", "inmuebleId", "titulo", "categoria", "prioridad", "estado", "fechaSolicitud"]
+    },
+    "PresupuestoProfesional": {
+      "title": "PresupuestoProfesional",
+      "description": "Presupuesto emitido por un profesional o empresa para una orden de trabajo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "trabajoId": { "type": "string" },
+        "profesionalId": { "type": "string" },
+        "propietarioId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "fecha": { "type": "string" },
+        "importeBase": { "type": "number" },
+        "iva": { "type": "number" },
+        "importeTotal": { "type": "number" },
+        "estado": { "type": "string" }
+      },
+      "required": ["trabajoId", "profesionalId", "propietarioId", "inmuebleId", "fecha", "importeTotal", "estado"]
+    },
+    "ValoracionProfesional": {
+      "title": "ValoracionProfesional",
+      "description": "Evaluación pericial y de satisfacción post-intervención de un trabajo profesional",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "trabajoId": { "type": "string" },
+        "profesionalId": { "type": "string" },
+        "inmuebleId": { "type": "string" },
+        "puntuacion": { "type": "number" },
+        "calidad": { "type": "number" },
+        "puntualidad": { "type": "number" },
+        "precio": { "type": "number" },
+        "resultado": { "type": "string" },
+        "fecha": { "type": "string" }
+      },
+      "required": ["trabajoId", "profesionalId", "inmuebleId", "puntuacion", "resultado", "fecha"]
     }
   },
   "firestore": {
@@ -340,6 +453,30 @@
     "/audit_logs/{auditId}": {
       "schema": { "$ref": "#/entities/AuditLog" },
       "description": "Registros inmutables de auditoría del sistema"
+    },
+    "/incidencias/{incidenciaId}": {
+      "schema": { "$ref": "#/entities/Incidencia" },
+      "description": "Incidencias, averías, análisis pericial IA y gestión de reparaciones"
+    },
+    "/polizas_seguros/{polizaId}": {
+      "schema": { "$ref": "#/entities/PolizaSeguro" },
+      "description": "Pólizas de seguro multirriesgo hogar, arrendador, comunidad y RC"
+    },
+    "/siniestros/{siniestroId}": {
+      "schema": { "$ref": "#/entities/Siniestro" },
+      "description": "Siniestros tramitados con aseguradoras para indemnización y peritaje"
+    },
+    "/trabajos_profesionales/{trabajoId}": {
+      "schema": { "$ref": "#/entities/TrabajoProfesional" },
+      "description": "Órdenes de trabajo profesional independientes o vinculadas a incidencias"
+    },
+    "/presupuestos_profesionales/{presupuestoId}": {
+      "schema": { "$ref": "#/entities/PresupuestoProfesional" },
+      "description": "Presupuestos desglosados y comparativas de empresas y profesionales"
+    },
+    "/valoraciones_profesionales/{valoracionId}": {
+      "schema": { "$ref": "#/entities/ValoracionProfesional" },
+      "description": "Valoraciones y métricas periciales post-intervención de profesionales"
     },
     "/system/{systemDocId}": {
       "schema": "object",

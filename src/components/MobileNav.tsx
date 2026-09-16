@@ -23,6 +23,7 @@ import {
   Receipt,
   TrendingDown,
   RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -36,6 +37,8 @@ interface MobileNavProps {
   contratosCount?: number;
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
+  incidenciasCount?: number;
+  trabajosActivosCount?: number;
   currentUser?: UsuarioApp;
   onOpenAddCandidateModal?: () => void;
   onOpenAuthModal?: () => void;
@@ -52,6 +55,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   contratosCount = 0,
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
+  incidenciasCount = 0,
+  trabajosActivosCount = 0,
   currentUser,
   onOpenAddCandidateModal,
   onOpenAuthModal,
@@ -73,16 +78,19 @@ export const MobileNav: React.FC<MobileNavProps> = ({
       ? [
           { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck, description: 'Servicios y profesionales' },
           { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
+          { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
           { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
           { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
+          { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías y mantenimiento' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : perfil === 'PROFESIONAL'
       ? [
           { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
           { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
+          { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount, description: 'Reparaciones asignadas' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : [
@@ -91,6 +99,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
           { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
+          { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
+          { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías, peritajes IA y siniestros' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },

@@ -21,6 +21,7 @@ import {
   Receipt,
   TrendingDown,
   RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -34,6 +35,8 @@ interface SidebarProps {
   contratosCount?: number;
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
+  incidenciasCount?: number;
+  trabajosActivosCount?: number;
   currentUser?: UsuarioApp;
   onOpenAuthModal?: () => void;
   onLogout?: () => void;
@@ -50,6 +53,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   contratosCount = 0,
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
+  incidenciasCount = 0,
+  trabajosActivosCount = 0,
   currentUser,
   onOpenAuthModal,
   onLogout,
@@ -75,12 +80,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
       { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
+      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
+      { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
   } else if (perfil === 'PROFESIONAL') {
     navItems = [
       { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
       { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
+      { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
   } else {
@@ -91,10 +99,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
+      { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw },
+      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
+      { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },
-      { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw },
       { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length },
       { id: 'analisis', label: 'Análisis IA', icon: Sparkles },
       { id: 'configuracion', label: 'Configuración', icon: Settings },

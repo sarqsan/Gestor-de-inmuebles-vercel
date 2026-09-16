@@ -114,6 +114,70 @@ service firebase.storage {
     }
 
     // -------------------------------------------------------------------------
+    // BLOQUE 4/5 — MANTENIMIENTO, INCIDENCIAS, SEGUROS Y TRABAJOS PROFESIONALES
+    // Todas las rutas son PRIVADAS (documentación de trabajo del inmueble):
+    //   incidencias/{propietarioId}/{incidenciaId}/{archivo}
+    //   trabajos/{propietarioId}/{trabajoId}/{archivo}
+    //   presupuestos/{propietarioId}/{presupuestoId}/{archivo}
+    //   profesionales/{profesionalId}/{archivo}
+    //   polizas/{propietarioId}/{polizaId}/{archivo}
+    //   siniestros/{propietarioId}/{siniestroId}/{archivo}
+    // Exigen cuenta interna, tipo (PDF/imagen/octet-stream) y tamaño máximo.
+    // RESIDUAL (idéntico al de justificantes, facturas y fotos de inspección):
+    // sin custom claims, Storage no puede comparar el segmento propietarioId
+    // con el usuario; el aislamiento fino por propietario/profesional lo imponen
+    // las Security Rules de Firestore y queda reforzado por claim cuando se
+    // emitan. Las URL de descarga con token funcionan como enlace de capacidad.
+    // -------------------------------------------------------------------------
+    match /incidencias/{propietarioId}/{incidenciaId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    match /trabajos/{propietarioId}/{trabajoId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    match /presupuestos/{propietarioId}/{presupuestoId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    match /profesionales/{profesionalId}/{allFiles=**} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    match /polizas/{propietarioId}/{polizaId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    match /siniestros/{propietarioId}/{siniestroId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
     // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
     // -------------------------------------------------------------------------
     match /{allPaths=**} {

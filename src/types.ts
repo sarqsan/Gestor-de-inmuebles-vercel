@@ -495,6 +495,111 @@ export interface Inmueble {
   rentabilidadEstimada?: number;
   fechaAdquisicion?: string;
   notasInternas?: string;
+
+  // Ficha técnica (campos opcionales: inmuebles antiguos siguen válidos)
+  provincia?: string;
+  planta?: string;
+  ascensor?: boolean;
+  terraza?: boolean;
+  balcon?: boolean;
+  interiorExterior?: 'exterior' | 'interior' | 'mixto';
+  orientacion?: string;
+  anioConstruccion?: number;
+  estadoConservacion?: 'nuevo' | 'muy_bueno' | 'bueno' | 'a_reformar' | 'en_obras';
+  aireAcondicionado?: boolean;
+  calefaccion?: boolean;
+  cocinaEquipada?: boolean;
+  electrodomesticosIncluidos?: boolean;
+  armariosEmpotrados?: boolean;
+  tipoVentanas?: string;
+  tipoPersianas?: string;
+  fechaActualizacionFicha?: string;
+  actualizadoPorFicha?: string;
+}
+
+export type CategoriaInventario =
+  | 'COCINA'
+  | 'SALON'
+  | 'DORMITORIO'
+  | 'BANO'
+  | 'TERRAZA'
+  | 'EXTERIOR'
+  | 'ELECTRODOMESTICOS'
+  | 'MOBILIARIO'
+  | 'ILUMINACION'
+  | 'CLIMATIZACION'
+  | 'OTROS';
+
+export type EstadoInventario =
+  | 'NUEVO'
+  | 'BUEN_ESTADO'
+  | 'USADO'
+  | 'DETERIORADO'
+  | 'REPARAR'
+  | 'BAJA';
+
+export interface DocumentoInventario {
+  id: string;
+  inventarioId: string;
+  inmuebleId: string;
+  nombre: string;
+  mimeType?: string;
+  url: string;
+  storagePath: string;
+  tamanoBytes?: number;
+  fechaSubida: string;
+  subidoPor?: string;
+}
+
+export interface HistorialInventarioItem {
+  id: string;
+  fecha: string;
+  usuarioId?: string;
+  usuarioNombre: string;
+  accion: string;
+  elementoAfectado: string;
+  cambios?: string;
+  estadoAnterior?: EstadoInventario;
+  estadoNuevo?: EstadoInventario;
+}
+
+export interface ElementoInventario {
+  id: string;
+  inmuebleId: string;
+  nombre: string;
+  categoria: CategoriaInventario;
+  descripcion?: string;
+  cantidad: number;
+  estado: EstadoInventario;
+  ubicacion?: string;
+  observaciones?: string;
+  fechaAlta: string;
+  fechaModificacion: string;
+  creadoPor: string;
+  actualizadoPor: string;
+  activo: boolean;
+  documentos?: DocumentoInventario[];
+  historial: HistorialInventarioItem[];
+  /** Relación futura inventario ↔ habitación; no se exige ni se gestiona en este bloque. */
+  habitacionId?: string;
+}
+
+export type EstadoHabitacion = 'DISPONIBLE' | 'RESERVADA' | 'ALQUILADA' | 'BLOQUEADA';
+
+export interface HabitacionInmueble {
+  id: string;
+  inmuebleId: string;
+  nombre: string;
+  descripcion?: string;
+  estado: EstadoHabitacion;
+  superficie?: number;
+  precioObjetivo?: number;
+  caracteristicas?: string;
+  activo: boolean;
+  fechaAlta: string;
+  fechaModificacion: string;
+  creadoPor: string;
+  actualizadoPor: string;
 }
 
 export interface UserProfile {

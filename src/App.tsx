@@ -2541,6 +2541,9 @@ export default function App() {
               onNavigateToPropietarios={() => setActiveSection('propietarios')}
               contratos={scopedContratos}
               currentUser={currentUser}
+              profesionalAsignado={
+                profesionales.find((p) => p.id === currentUser.profesionalId || p.usuarioId === currentUser.id) || null
+              }
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onFinalizarContrato={handleFinalizarContrato}
               onSaveContrato={handleSaveContrato}

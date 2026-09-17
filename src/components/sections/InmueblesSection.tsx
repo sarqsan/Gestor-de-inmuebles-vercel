@@ -12,9 +12,12 @@ import {
   CobroPeriodo,
   EstadoCobroAlquiler,
   UsuarioApp,
+  Profesional,
 } from '../../types';
 import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
+import { FichaTecnicaInventarioPanel } from '../FichaTecnicaInventarioPanel';
+import { HabitacionesInmueblePanel } from '../HabitacionesInmueblePanel';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
 import { getInmuebleCoverUrl } from '../../utils/imageUtils';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
@@ -89,6 +92,7 @@ interface InmueblesSectionProps {
   invitaciones?: InvitacionVisita[];
   contratos?: ContratoFormalizacion[];
   currentUser?: UsuarioApp | null;
+  profesionalAsignado?: Profesional | null;
   onSelectCandidate: (candidato: Candidato) => void;
   onDeleteInmueble?: (inmuebleId: string) => void;
   onAddInmueble?: (inmueble: Inmueble) => void;
@@ -112,6 +116,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   invitaciones = [],
   contratos = [],
   currentUser,
+  profesionalAsignado,
   onSelectCandidate,
   onDeleteInmueble,
   onAddInmueble,
@@ -1107,6 +1112,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             )}
           </div>
         </div>
+
+        <FichaTecnicaInventarioPanel
+          inmueble={selectedInmueble}
+          currentUser={currentUser}
+          profesional={profesionalAsignado}
+          onUpdateInmueble={onUpdateInmueble}
+        />
+
+        <HabitacionesInmueblePanel
+          inmueble={selectedInmueble}
+          currentUser={currentUser}
+          profesional={profesionalAsignado}
+          onUpdateInmueble={onUpdateInmueble}
+        />
 
         {/* HISTORIAL DE CONTRATOS E INQUILINOS PERMANENTE DEL INMUEBLE */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">

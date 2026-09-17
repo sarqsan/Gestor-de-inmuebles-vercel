@@ -16,6 +16,7 @@ import type {
   Gasto,
   GastoRecurrente,
   TipoGasto,
+  TrabajoProfesional,
 } from '../types';
 
 export interface CategoriaGastoDef {
@@ -557,3 +558,170 @@ export function proximoPeriodoRecurrente(r: GastoRecurrente, ref: Date = new Dat
   }
   return candidato;
 }
+
+// =========================================================================
+// PUENTE: ORDEN DE TRABAJO (FINALIZADA) → COSTE REAL → GASTO DE REPARACIÓN
+// =========================================================================
+
+/**
+ * Valida si una Orden de Trabajo cumple todas las condiciones necesarias
+ * para generar un apunte de gasto de reparación en la contabilidad del inmueble:
+ * 1. Debe estar en estado finalizado (FINALIZADO, FINALIZADA o COMPLETADO).
+ * 2. Debe tener un coste real liquidado válido (importeFinal > 0).
+ * 3. Debe tener asignado un inmuebleId y propietarioId válidos.
+ */
+export function puedeGenerarGastoDesdeTrabajo(
+  trabajo?: Partial<TrabajoProfesional> | null
+): { valido: boolean; motivo?: string } {
+  if (!trabajo) {
+    return { valido: false, motivo: 'No se ha proporcionado la orden de trabajo' };
+  }
+  const estado = trabajo.estado;
+  const esFinalizado =
+    estado === 'FINALIZADO' ||
+    estado === 'FINALIZADA' ||
+    (estado as string) === 'COMPLETADO';
+  if (!esFinalizado) {
+    return {
+      valido: false,
+      motivo: `La orden de trabajo no está finalizada (estado actual: ${estado || 'SIN_ESTADO'})`,
+    };
+  }
+  if (typeof trabajo.importeFinal !== 'number' || isNaN(trabajo.importeFinal) || trabajo.importeFinal <= 0) {
+    return {
+      valido: false,
+      motivo: 'El coste real liquidado debe ser un importe mayor que cero (0 €)',
+    };
+  }
+  if (!trabajo.inmuebleId) {
+    return { valido: false, motivo: 'La orden de trabajo no tiene un inmueble asociado' };
+  }
+  if (!trabajo.propietarioId) {
+    return { valido: false, motivo: 'La orden de trabajo no tiene un propietario asociado' };
+  }
+  return { valido: true };
+}
+
+/**
+ * Busca si ya existe un gasto contable asociado a una Orden de Trabajo dada
+ * para garantizar idempotencia y evitar duplicidades.
+ */
+export function buscarGastoDeTrabajo(
+  trabajoId?: string,
+  gastos: Gasto[] = []
+): Gasto | undefined {
+  if (!trabajoId || !Array.isArray(gastos)) return undefined;
+  return gastos.find(
+    (g) =>
+      g.trabajoId === trabajoId ||
+      g.ordenTrabajoId === trabajoId ||
+      g.origenId === trabajoId ||
+      (g.origen === 'ORDEN_TRABAJO' && g.id.includes(trabajoId))
+  );
+}
+
+/**
+ * Genera un documento Gasto a partir de una Orden de Trabajo finalizada con coste real.
+ * Comprueba idempotencia contra la lista de gastos existentes.
+ */
+export function generarGastoDesdeTrabajo(params: {
+  trabajo: TrabajoProfesional;
+  gastosExistentes?: Gasto[];
+  usuarioNombre?: string;
+  usuarioId?: string;
+  estadoGasto?: EstadoGasto;
+}): { gasto?: Gasto; yaExiste: boolean; error?: string } {
+  const { trabajo, gastosExistentes = [], usuarioNombre, usuarioId, estadoGasto = 'PAGADO' } = params;
+
+  // 1. Comprobar condiciones de elegibilidad
+  const check = puedeGenerarGastoDesdeTrabajo(trabajo);
+  if (!check.valido) {
+    return { yaExiste: false, error: check.motivo };
+  }
+
+  // 2. Comprobación de idempotencia: si ya existe gasto para este trabajoId, retornar el existente
+  const existente = buscarGastoDeTrabajo(trabajo.id, gastosExistentes);
+  if (existente) {
+    return { gasto: existente, yaExiste: true };
+  }
+
+  // 3. Determinar categoría contable (REPARACION o MANTENIMIENTO)
+  const categoriaGasto: CategoriaGasto =
+    trabajo.tipoTrabajo === 'MANTENIMIENTO_PREVENTIVO' || trabajo.categoria === 'MANTENIMIENTO'
+      ? 'MANTENIMIENTO'
+      : 'REPARACION';
+
+  const fechaDevengo = trabajo.fechaFinalizacion
+    ? trabajo.fechaFinalizacion.split('T')[0]
+    : new Date().toISOString().split('T')[0];
+
+  const now = new Date().toISOString();
+  const concepto = `Reparación: ${trabajo.titulo}${trabajo.profesionalNombre ? ` - ${trabajo.profesionalNombre}` : ''}`;
+
+  const nuevoGasto: Gasto = {
+    id: nuevoGastoId(trabajo.inmuebleId),
+    inmuebleId: trabajo.inmuebleId,
+    propietarioId: trabajo.propietarioId,
+    tipo: 'EXPLOTACION',
+    categoria: categoriaGasto,
+    concepto,
+    proveedor: trabajo.profesionalNombre || undefined,
+    importe: Number(trabajo.importeFinal) || 0,
+    estado: estadoGasto,
+    fechaDevengo,
+    fechaPago: estadoGasto === 'PAGADO' ? fechaDevengo : undefined,
+    periodoMesAnio: periodoDesdeFecha(fechaDevengo),
+    aCargoDe: 'arrendador',
+    deducible: true,
+    origen: 'ORDEN_TRABAJO',
+    origenId: trabajo.id,
+    trabajoId: trabajo.id,
+    ordenTrabajoId: trabajo.id,
+    incidenciaId: trabajo.incidenciaId || undefined,
+    profesionalId: trabajo.profesionalId || undefined,
+    presupuestoId: trabajo.presupuestoId || undefined,
+    metodoPago: 'transferencia',
+    notas: `Gasto de reparación generado desde la Orden de Trabajo "${trabajo.titulo}" (ID: ${trabajo.id})`,
+    creadoPor: usuarioNombre || trabajo.actualizadoPor || trabajo.creadoPor,
+    creadoPorId: usuarioId,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return { gasto: nuevoGasto, yaExiste: false };
+}
+
+/**
+ * Sincroniza o actualiza el importe de un Gasto existente si el coste real
+ * de la OT finalizada fue modificado posteriormente.
+ */
+export function sincronizarGastoDesdeTrabajo(params: {
+  trabajo: TrabajoProfesional;
+  gastoExistente: Gasto;
+  usuarioNombre?: string;
+}): Gasto {
+  const { trabajo, gastoExistente } = params;
+  const nuevoImporte = typeof trabajo.importeFinal === 'number' && trabajo.importeFinal > 0
+    ? trabajo.importeFinal
+    : gastoExistente.importe;
+
+  const fechaDevengo = trabajo.fechaFinalizacion
+    ? trabajo.fechaFinalizacion.split('T')[0]
+    : gastoExistente.fechaDevengo;
+
+  return {
+    ...gastoExistente,
+    importe: nuevoImporte,
+    proveedor: trabajo.profesionalNombre || gastoExistente.proveedor,
+    concepto: `Reparación: ${trabajo.titulo}${trabajo.profesionalNombre ? ` - ${trabajo.profesionalNombre}` : ''}`,
+    fechaDevengo,
+    periodoMesAnio: periodoDesdeFecha(fechaDevengo) || gastoExistente.periodoMesAnio,
+    trabajoId: trabajo.id,
+    ordenTrabajoId: trabajo.id,
+    incidenciaId: trabajo.incidenciaId || gastoExistente.incidenciaId,
+    profesionalId: trabajo.profesionalId || gastoExistente.profesionalId,
+    presupuestoId: trabajo.presupuestoId || gastoExistente.presupuestoId,
+    updatedAt: new Date().toISOString(),
+  };
+}
+

@@ -17,6 +17,7 @@ import {
   Paperclip,
   Power,
   Eye,
+  Wrench,
 } from 'lucide-react';
 import type {
   CategoriaGasto,
@@ -756,14 +757,24 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
-                          <span
-                            className={`inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${tipoBadge(
-                              g.tipo as TipoGasto
-                            )}`}
-                          >
-                            {esFin ? <Landmark className="w-3 h-3" /> : <Home className="w-3 h-3" />}
-                            {def.label}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span
+                              className={`inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${tipoBadge(
+                                g.tipo as TipoGasto
+                              )}`}
+                            >
+                              {esFin ? <Landmark className="w-3 h-3" /> : <Home className="w-3 h-3" />}
+                              {def.label}
+                            </span>
+                            {(g.trabajoId || g.ordenTrabajoId || g.origen === 'ORDEN_TRABAJO') && (
+                              <span
+                                title={g.trabajoId ? `Orden de trabajo: ${g.trabajoId}` : 'Procedente de orden de trabajo'}
+                                className="inline-flex items-center gap-1 w-fit px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold"
+                              >
+                                <Wrench className="w-2.5 h-2.5" /> OT Vinculada
+                              </span>
+                            )}
+                          </div>
                           <span
                             className={`font-medium text-slate-800 ${
                               g.estado === 'ANULADO' ? 'line-through text-slate-400' : ''

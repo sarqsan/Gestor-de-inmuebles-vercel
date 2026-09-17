@@ -996,6 +996,15 @@ export interface Gasto {
   justificantePath?: string;
   notas?: string;
 
+  // Trazabilidad de origen (reparaciones / OT / incidencias / seguros)
+  origen?: 'MANUAL' | 'RECURRENTE' | 'REPARACION' | 'ORDEN_TRABAJO' | 'INCIDENCIA' | 'SEGURO' | 'OTRO' | string;
+  origenId?: string; // ID del registro origen (ej: trabajoId)
+  trabajoId?: string; // ID de la Orden de Trabajo vinculada
+  ordenTrabajoId?: string; // Alias de compatibilidad con trabajoId
+  incidenciaId?: string; // ID de la Incidencia vinculada
+  profesionalId?: string; // ID del Profesional que ejecutó el trabajo
+  presupuestoId?: string; // ID del Presupuesto previo asociado si existió
+
   // Trazabilidad
   creadoPor?: string;
   creadoPorId?: string;
@@ -2004,6 +2013,7 @@ export interface TrabajoProfesionalIncidencia {
   facturaNumero?: string;
   facturaUrl?: string;
   facturaStoragePath?: string;
+  gastoId?: string; // ID del Gasto contable generado
   estadoTrabajo: 'ASIGNADO' | 'PRESUPUESTADO' | 'ACEPTADO' | 'EN_CURSO' | 'FINALIZADO' | 'CANCELADO';
   observaciones?: string;
 }
@@ -2318,6 +2328,7 @@ export interface TrabajoProfesional {
   presupuestoId?: string;
   importeEstimado?: number;
   importeFinal?: number;
+  gastoId?: string; // ID del Gasto contable generado a partir de este trabajo
   observaciones?: string;
   creadoPor: string;
   actualizadoPor: string;

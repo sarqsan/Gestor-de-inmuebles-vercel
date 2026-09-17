@@ -40,6 +40,13 @@ import {
   InmobiliariaDirectorio,
   PropuestaInmobiliaria,
   LeadInmobiliario,
+  Incidencia,
+  TareaMantenimiento,
+  TrabajoProfesional,
+  PresupuestoProfesional,
+  ValoracionProfesionalTrabajo,
+  PolizaSeguro,
+  Siniestro,
   ConfiguracionAseguradora,
   SolicitudSeguroImpago,
   GmailIntegracionConfig,
@@ -51,14 +58,6 @@ import {
   ModulosConfig,
   DEFAULT_MODULOS_CONFIG,
   PERMISOS_SISTEMA,
-  Incidencia,
-  PolizaSeguro,
-  Siniestro,
-  AdjuntoIncidencia,
-  TrabajoProfesional,
-  PresupuestoProfesional,
-  ValoracionProfesionalTrabajo,
-  DocumentoProfesional,
 } from '../types';
 import {
   INITIAL_CANDIDATOS,
@@ -100,8 +99,15 @@ const EXPEDIENTES_RECOMERCIALIZACION_COL = collection(db, 'expedientes_recomerci
 const INMOBILIARIAS_DIRECTORIO_COL = collection(db, 'inmobiliarias_directorio');
 const PROPUESTAS_INMOBILIARIA_COL = collection(db, 'propuestas_inmobiliaria');
 const LEADS_INMOBILIARIOS_COL = collection(db, 'leads_inmobiliario');
+const INCIDENCIAS_COL = collection(db, 'incidencias');
+const TAREAS_MANTENIMIENTO_COL = collection(db, 'tareas_mantenimiento');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
+export const POLIZAS_SEGUROS_COL = collection(db, 'polizas_seguros');
+export const SINIESTROS_COL = collection(db, 'siniestros');
+export const TRABAJOS_PROFESIONALES_COL = collection(db, 'trabajos_profesionales');
+export const PRESUPUESTOS_PROFESIONALES_COL = collection(db, 'presupuestos_profesionales');
+export const VALORACIONES_PROFESIONALES_COL = collection(db, 'valoraciones_profesionales');
 
 // Colecciones estructurales de usuarios, perfiles, permisos y profesionales
 export const USUARIOS_COL = collection(db, 'usuarios');
@@ -110,16 +116,6 @@ export const ENLACES_REGISTRO_COL = collection(db, 'enlaces_registro');
 export const ESPECIALIDADES_COL = collection(db, 'especialidades');
 export const AUDIT_LOGS_COL = collection(db, 'audit_logs');
 export const MODULOS_CONFIG_REF = doc(db, 'system', 'modulos_config');
-
-// Colecciones Bloque 4: Incidencias, Mantenimiento, Seguros y Siniestros
-export const INCIDENCIAS_COL = collection(db, 'incidencias');
-export const POLIZAS_COL = collection(db, 'polizas_seguros');
-export const SINIESTROS_COL = collection(db, 'siniestros');
-
-// Colecciones Bloque 5: Profesionales, Trabajos, Presupuestos y Valoraciones
-export const TRABAJOS_PROFESIONALES_COL = collection(db, 'trabajos_profesionales');
-export const PRESUPUESTOS_PROFESIONALES_COL = collection(db, 'presupuestos_profesionales');
-export const VALORACIONES_PROFESIONALES_COL = collection(db, 'valoraciones_profesionales');
 
 /**
  * Seeds initial mock data into Firestore if database has never been initialized,
@@ -165,37 +161,7 @@ export async function seedInitialDataIfEmpty() {
 export interface DataAccessScope {
   tipoPerfil?: string;
   propietarioId?: string;
-  profesionalId?: string;
-  usuarioId?: string;
   inmuebleIds?: string[];
-}
-
-/**
- * Resuelve el ámbito de datos a partir del usuario autenticado.
- * - ADMINISTRADOR: sin ámbito (colección completa).
- * - PROPIETARIO: sólo sus recursos (propietarioId).
- * - PROFESIONAL: sólo su ámbito (profesionalId) y sin datos económicos.
- *
- * Es una ayuda de construcción de consultas; la autorización REAL la imponen
- * las Security Rules de Firestore (el cliente nunca es la fuente de verdad).
- */
-export function scopeFromUsuario(
-  usuario?: {
-    tipoPerfil?: string;
-    propietarioId?: string;
-    profesionalId?: string;
-    id?: string;
-    inmuebleIds?: string[];
-  } | null
-): DataAccessScope | undefined {
-  if (!usuario || usuario.tipoPerfil === 'ADMINISTRADOR') return undefined;
-  return {
-    tipoPerfil: usuario.tipoPerfil,
-    propietarioId: usuario.propietarioId,
-    profesionalId: usuario.profesionalId,
-    usuarioId: usuario.id,
-    inmuebleIds: usuario.inmuebleIds || [],
-  };
 }
 
 /**
@@ -1178,6 +1144,66 @@ export async function deleteLeadInmobiliarioFirestore(id: string) {
 }
 
 // ============================================================
+// BLOQUE 4 — INCIDENCIAS Y MANTENIMIENTO
+// Aislamiento por propietarioId (patrón de contratos/gastos). Los
+// profesionales también necesitan ver sus órdenes ASIGNADAS: se
+// resuelve en la regla con where('profesionalAsignadoId','==', id).
+// ============================================================
+export function subscribeIncidencias(
+  callback: (items: Incidencia[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<Incidencia>(
+    INCIDENCIAS_COL,
+    callback,
+    scope,
+    'incidencias'
+  );
+}
+export async function saveIncidenciaFirestore(item: Incidencia) {
+  try {
+    await setDoc(doc(db, 'incidencias', item.id), sanitizeObjectForFirestore(item), { merge: true });
+  } catch (err) {
+    console.error('Error saving incidencia:', err);
+  }
+}
+export async function deleteIncidenciaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'incidencias', id));
+  } catch (err) {
+    console.error('Error deleting incidencia:', err);
+  }
+}
+
+export function subscribeTareasMantenimiento(
+  callback: (items: TareaMantenimiento[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<TareaMantenimiento>(
+    TAREAS_MANTENIMIENTO_COL,
+    callback,
+    scope,
+    'tareas_mantenimiento'
+  );
+}
+export async function saveTareaMantenimientoFirestore(item: TareaMantenimiento) {
+  try {
+    await setDoc(doc(db, 'tareas_mantenimiento', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving tarea mantenimiento:', err);
+  }
+}
+export async function deleteTareaMantenimientoFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'tareas_mantenimiento', id));
+  } catch (err) {
+    console.error('Error deleting tarea mantenimiento:', err);
+  }
+}
+
+// ============================================================
 // FASE 2.2 — FACTURAS / JUSTIFICANTES DE GASTOS en Storage
 // Ruta: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
 // ============================================================
@@ -1598,6 +1624,53 @@ export async function deleteFotoInspeccionStorage(storagePath?: string): Promise
   } catch (err) {
     // El objeto puede ya no existir; no debe bloquear la baja del metadato.
     console.warn('No se pudo eliminar la foto de inspección de Storage:', err);
+  }
+}
+
+// ============================================================
+// BLOQUE 4 — FOTOGRAFÍAS DE INCIDENCIAS
+// Ruta privada: incidencias_fotos/{propietarioId}/{incidenciaId}/{archivo}
+// Documentos internos de trabajo (desperfectos), nunca públicos.
+// ============================================================
+export async function uploadFotoIncidenciaStorage(
+  propietarioId: string,
+  incidenciaId: string,
+  blob: Blob,
+  fileName: string
+): Promise<{ url: string; storagePath: string }> {
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const incSeg = (incidenciaId || 'inc').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = (fileName || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const rand = Math.random().toString(36).substring(2, 6);
+  const storagePath = `incidencias_fotos/${ownerSeg}/${incSeg}/${Date.now()}_${rand}_${safeName}`;
+
+  const fileRef = ref(storage, storagePath);
+  const uploadWork = (async () => {
+    await uploadBytes(fileRef, blob, { contentType: blob.type || 'image/jpeg' });
+    return getDownloadURL(fileRef);
+  })();
+  const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000));
+  const url = await Promise.race([uploadWork, timeoutGuard]);
+  if (!url || typeof url !== 'string') {
+    throw new Error('La subida de la fotografía ha tardado demasiado. Revisa la conexión e inténtalo de nuevo.');
+  }
+  return { url, storagePath };
+}
+
+export async function deleteFotoIncidenciaStorage(storagePath?: string): Promise<void> {
+  if (!storagePath) return;
+  if (
+    storagePath.startsWith('local_') ||
+    storagePath.startsWith('server_') ||
+    storagePath.startsWith('data:') ||
+    storagePath.startsWith('http')
+  ) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar la foto de incidencia de Storage:', err);
   }
 }
 
@@ -2085,288 +2158,35 @@ export async function seedAuthAndRolesIfEmpty() {
         resultado: 'EXITO',
       });
     }
-
-    // 6. Seed sample Polizas and Incidencia if collections are empty
-    const polizasSnap = await getDocs(POLIZAS_COL);
-    if (polizasSnap.empty) {
-      const pBatch = writeBatch(db);
-      const samplePoliza1: PolizaSeguro = {
-        id: 'pol_hogar_001',
-        aseguradora: 'Mapfre Seguros',
-        numeroPoliza: 'MAP-8492048-H',
-        tipo: 'HOGAR',
-        propietarioId: 'prop_carlos',
-        inmuebleId: '1',
-        inmuebleDireccion: 'C/ Gran Vía 45, 3ºB, Madrid',
-        fechaInicio: '2025-01-01',
-        fechaVencimiento: '2026-01-01',
-        estado: 'VIGENTE',
-        coberturas: [
-          'Daños por agua',
-          'Rotura de tuberías e instalaciones',
-          'Filtraciones',
-          'Responsabilidad Civil inmobiliaria (300.000€)',
-          'Cerrajería urgente 24h',
-          'Daños eléctricos y sobretensión',
-          'Rotura de cristales y sanitarios',
-          'Defensa jurídica',
-        ],
-        franquicia: 0,
-        primaAnual: 245.5,
-        contacto: {
-          telefono: '918 365 365',
-          email: 'siniestros.hogar@mapfre.com',
-          asistencia24h: '900 101 010',
-        },
-        observaciones: 'Póliza Multirriesgo Hogar con asistencia 24h contratada.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      const samplePoliza2: PolizaSeguro = {
-        id: 'pol_arrendador_002',
-        aseguradora: 'Caser Seguros',
-        numeroPoliza: 'CAS-9923812-P',
-        tipo: 'ARRENDADOR',
-        propietarioId: 'prop_laura',
-        inmuebleId: '2',
-        inmuebleDireccion: 'Paseo de la Castellana 120, 5ºA, Madrid',
-        fechaInicio: '2025-02-01',
-        fechaVencimiento: '2026-02-01',
-        estado: 'VIGENTE',
-        coberturas: [
-          'Daños por agua',
-          'Responsabilidad Civil arrendador',
-          'Actos vandálicos del inquilino',
-          'Asistencia urgente 24h',
-          'Defensa jurídica y desahucio',
-        ],
-        franquicia: 150,
-        primaAnual: 210,
-        contacto: {
-          telefono: '915 955 000',
-          email: 'partes.arrendador@caser.es',
-          asistencia24h: '900 365 240',
-        },
-        observaciones: 'Protección integral arrendador con cobertura de vandalismo.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      pBatch.set(doc(db, 'polizas_seguros', samplePoliza1.id), sanitizeObjectForFirestore(samplePoliza1));
-      pBatch.set(doc(db, 'polizas_seguros', samplePoliza2.id), sanitizeObjectForFirestore(samplePoliza2));
-      await pBatch.commit();
-    }
-
-    const incidenciasSnap = await getDocs(INCIDENCIAS_COL);
-    if (incidenciasSnap.empty) {
-      const sampleInc: Incidencia = {
-        id: 'inc_sample_001',
-        propietarioId: 'prop_carlos',
-        inmuebleId: '1',
-        inmuebleDireccion: 'C/ Gran Vía 45, 3ºB, Madrid',
-        inmuebleCiudad: 'Madrid',
-        contratoId: 'contrato_1',
-        inquilinoId: 'cand_1',
-        inquilinoNombre: 'Ana Gómez Fernández',
-        inquilinoTelefono: '612 345 678',
-        titulo: 'Fuga de agua en latiguillo del fregadero de la cocina',
-        descripcion: 'El inquilino reporta goteo continuo bajo el fregadero tras usar el grifo monomando. Se ha colocado un cubo provisionalmente pero empieza a humedecer el mueble bajo encimera.',
-        categoria: 'AGUA',
-        prioridad: 'ALTA',
-        estado: 'ABIERTA',
-        origen: 'INQUILINO',
-        fechaCreacion: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-        fechaActualizacion: new Date().toISOString(),
-        responsabilidad: 'POSIBLE_PROPIETARIO',
-        responsabilidadNotas: 'Instalación de fontanería fija vinculada al inmueble (Art. 21.1 LAU). Se verificará si es desgaste natural o aflojamiento.',
-        seguroEstado: 'POSIBLEMENTE_CUBIERTA',
-        seguroComprobacionNotas: 'Póliza Mapfre Nº MAP-8492048-H cubre Daños por agua y fontanería de urgencia.',
-        viaActuacion: 'PROFESIONAL',
-        polizaId: 'pol_hogar_001',
-        creadoPor: 'Ana Gómez Fernández (Inquilino)',
-        actualizadoPor: 'Administrador Principal',
-        fotografias: [
-          {
-            id: 'adj_001',
-            incidenciaId: 'inc_sample_001',
-            inmuebleId: '1',
-            propietarioId: 'prop_carlos',
-            nombre: 'fuga_fregadero.jpg',
-            tipo: 'imagen',
-            mimeType: 'image/jpeg',
-            url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
-            storagePath: 'incidencias/inc_sample_001/fuga_fregadero.jpg',
-            fechaSubida: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-            subidoPor: 'Inquilino',
-          },
-        ],
-        documentos: [],
-        historial: [
-          {
-            id: 'hist_001',
-            fecha: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-            usuario: 'Ana Gómez Fernández',
-            accion: 'INCIDENCIA_CREADA',
-            valorNuevo: 'ABIERTA',
-            observacion: 'Reportada vía portal del inquilino.',
-          },
-        ],
-      };
-      await setDoc(doc(db, 'incidencias', sampleInc.id), sanitizeObjectForFirestore(sampleInc));
-    }
   } catch (err) {
     console.error('Error seeding auth and roles:', err);
   }
 }
 
 // =========================================================================
-// REAL-TIME LISTENERS & CRUD PARA INCIDENCIAS, PÓLIZAS Y SINIESTROS
+// PÓLIZAS DE SEGUROS Y SINIESTROS
 // =========================================================================
 
-/**
- * Escucha en tiempo real de Incidencias
- */
-export function subscribeIncidencias(
-  callback: (incidencias: Incidencia[]) => void,
-  scope?: DataAccessScope
-) {
-  // Aislamiento (FASE 1.4 + Bloque 4): el propietario sólo consulta SUS
-  // incidencias y el profesional únicamente las que tiene asignadas. La
-  // consulta queda acotada en origen (no se descarga la colección para
-  // filtrarla después) y las Security Rules reproducen el mismo criterio.
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
-    const profId = scope.profesionalId;
-    if (!profId) {
-      callback([]);
-      return () => {};
-    }
-    return onSnapshot(
-      query(INCIDENCIAS_COL, where('profesionalId', '==', profId)),
-      (snapshot) => {
-        const items: Incidencia[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as Incidencia);
-        });
-        items.sort((a, b) => new Date(b.fechaCreacion).getTime() - new Date(a.fechaCreacion).getTime());
-        callback(items);
-      },
-      (err) => {
-        console.error('Firestore incidencias (scoped profesional) snapshot error:', err);
-        callback([]);
-      }
-    );
-  }
-
-  if (scope?.tipoPerfil === 'PROPIETARIO') {
-    const pid = scope.propietarioId;
-    if (!pid) {
-      callback([]);
-      return () => {};
-    }
-    return onSnapshot(
-      query(INCIDENCIAS_COL, where('propietarioId', '==', pid)),
-      (snapshot) => {
-        const items: Incidencia[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as Incidencia);
-        });
-        items.sort((a, b) => new Date(b.fechaCreacion).getTime() - new Date(a.fechaCreacion).getTime());
-        callback(items);
-      },
-      (err) => {
-        console.error('Firestore incidencias (scoped propietario) snapshot error:', err);
-        callback([]);
-      }
-    );
-  }
-
+export function subscribePolizas(callback: (items: PolizaSeguro[]) => void): Unsubscribe {
   return onSnapshot(
-    INCIDENCIAS_COL,
-    (snapshot) => {
-      const items: Incidencia[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as Incidencia);
-      });
-      // Ordenar por fechaCreacion descendente
-      items.sort((a, b) => new Date(b.fechaCreacion).getTime() - new Date(a.fechaCreacion).getTime());
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore incidencias snapshot error:', err);
-    }
-  );
-}
-
-/**
- * Guarda o actualiza una Incidencia en Firestore
- */
-export async function saveIncidenciaFirestore(incidencia: Incidencia) {
-  try {
-    const propietarioId = exigirPropietarioId(incidencia.propietarioId, 'incidencia');
-    const cleanInc = sanitizeObjectForFirestore({ ...incidencia, propietarioId });
-    await setDoc(doc(db, 'incidencias', incidencia.id), cleanInc, { merge: true });
-  } catch (err) {
-    console.error('Error saving incidencia to Firestore:', err);
-    throw err;
-  }
-}
-
-/**
- * Elimina una Incidencia de Firestore
- */
-export async function deleteIncidenciaFirestore(incidenciaId: string) {
-  try {
-    await deleteDoc(doc(db, 'incidencias', incidenciaId));
-  } catch (err) {
-    console.error('Error deleting incidencia from Firestore:', err);
-    throw err;
-  }
-}
-
-/**
- * Escucha en tiempo real de Pólizas de Seguro
- */
-export function subscribePolizas(
-  callback: (polizas: PolizaSeguro[]) => void,
-  scope?: DataAccessScope
-) {
-  // Las pólizas son documentación económica privada: el propietario sólo
-  // accede a las suyas y el profesional no tiene acceso alguno.
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
-    callback([]);
-    return () => {};
-  }
-
-  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
-  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
-    callback([]);
-    return () => {};
-  }
-
-  return onSnapshot(
-    pid ? query(POLIZAS_COL, where('propietarioId', '==', pid)) : POLIZAS_COL,
+    POLIZAS_SEGUROS_COL,
     (snapshot) => {
       const items: PolizaSeguro[] = [];
       snapshot.forEach((docSnap) => {
         items.push({ id: docSnap.id, ...docSnap.data() } as PolizaSeguro);
       });
-      items.sort((a, b) => (a.inmuebleDireccion || '').localeCompare(b.inmuebleDireccion || ''));
+      items.sort((a, b) => new Date(b.createdAt || b.fechaInicio).getTime() - new Date(a.createdAt || a.fechaInicio).getTime());
       callback(items);
     },
     (err) => {
-      console.error('Firestore polizas snapshot error:', err);
+      console.error('Firestore polizas_seguros snapshot error:', err);
     }
   );
 }
 
-/**
- * Guarda o actualiza una Póliza en Firestore
- */
-export async function savePolizaFirestore(poliza: PolizaSeguro) {
+export async function savePolizaFirestore(poliza: PolizaSeguro): Promise<void> {
   try {
-    const propietarioId = exigirPropietarioId(poliza.propietarioId, 'póliza de seguro');
-    const cleanPol = sanitizeObjectForFirestore({ ...poliza, propietarioId });
+    const cleanPol = sanitizeObjectForFirestore({ ...poliza, updatedAt: new Date().toISOString() });
     await setDoc(doc(db, 'polizas_seguros', poliza.id), cleanPol, { merge: true });
   } catch (err) {
     console.error('Error saving poliza to Firestore:', err);
@@ -2374,10 +2194,7 @@ export async function savePolizaFirestore(poliza: PolizaSeguro) {
   }
 }
 
-/**
- * Elimina una Póliza de Firestore
- */
-export async function deletePolizaFirestore(polizaId: string) {
+export async function deletePolizaFirestore(polizaId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'polizas_seguros', polizaId));
   } catch (err) {
@@ -2386,29 +2203,9 @@ export async function deletePolizaFirestore(polizaId: string) {
   }
 }
 
-/**
- * Escucha en tiempo real de Siniestros
- */
-export function subscribeSiniestros(
-  callback: (siniestros: Siniestro[]) => void,
-  scope?: DataAccessScope
-) {
-  // El siniestro hereda el ámbito de la incidencia/póliza de origen
-  // (propietarioId denormalizado). El profesional no accede a expedientes
-  // de seguro: sólo a la orden de trabajo asignada.
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
-    callback([]);
-    return () => {};
-  }
-
-  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
-  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
-    callback([]);
-    return () => {};
-  }
-
+export function subscribeSiniestros(callback: (items: Siniestro[]) => void): Unsubscribe {
   return onSnapshot(
-    pid ? query(SINIESTROS_COL, where('propietarioId', '==', pid)) : SINIESTROS_COL,
+    SINIESTROS_COL,
     (snapshot) => {
       const items: Siniestro[] = [];
       snapshot.forEach((docSnap) => {
@@ -2423,34 +2220,9 @@ export function subscribeSiniestros(
   );
 }
 
-/**
- * Guarda o actualiza un Siniestro en Firestore
- */
-/**
- * Bloque 4/5 — Guardia de ámbito en la ESCRITURA.
- *
- * Todo documento de incidencias, seguros, siniestros, trabajos, presupuestos y
- * valoraciones DEBE llevar un `propietarioId` real: es la clave con la que las
- * Security Rules aíslan a cada propietario. Antes se usaban valores
- * provisionales ("prop_general" / "prop_default") que dejaban el documento
- * fuera del ámbito de cualquier propietario; ahora la escritura falla en lugar
- * de persistir un documento inacotado.
- */
-function exigirPropietarioId(propietarioId: string | undefined, contexto: string): string {
-  const pid = (propietarioId || '').trim();
-  if (!pid) {
-    throw new Error(
-      `No se pudo determinar el propietario del documento (${contexto}). ` +
-      'Selecciona un inmueble con titular asignado antes de guardar.'
-    );
-  }
-  return pid;
-}
-
-export async function saveSiniestroFirestore(siniestro: Siniestro) {
+export async function saveSiniestroFirestore(siniestro: Siniestro): Promise<void> {
   try {
-    const propietarioId = exigirPropietarioId(siniestro.propietarioId, 'siniestro');
-    const cleanSin = sanitizeObjectForFirestore({ ...siniestro, propietarioId });
+    const cleanSin = sanitizeObjectForFirestore({ ...siniestro, updatedAt: new Date().toISOString() });
     await setDoc(doc(db, 'siniestros', siniestro.id), cleanSin, { merge: true });
   } catch (err) {
     console.error('Error saving siniestro to Firestore:', err);
@@ -2458,10 +2230,7 @@ export async function saveSiniestroFirestore(siniestro: Siniestro) {
   }
 }
 
-/**
- * Elimina un Siniestro de Firestore
- */
-export async function deleteSiniestroFirestore(siniestroId: string) {
+export async function deleteSiniestroFirestore(siniestroId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'siniestros', siniestroId));
   } catch (err) {
@@ -2470,94 +2239,38 @@ export async function deleteSiniestroFirestore(siniestroId: string) {
   }
 }
 
-/**
- * Sube una fotografía o documento de incidencia a Firebase Storage
- * Con timeout guard y fallback seguro para máxima fiabilidad.
- */
 export async function uploadIncidenciaAdjuntoStorage(
-  propietarioId: string,
   incidenciaId: string,
   file: File | Blob,
   nombreArchivo: string,
-  tipo: 'imagen' | 'video' | 'documento'
-): Promise<{ downloadUrl: string; storagePath: string }> {
+  tipo?: 'imagen' | 'video' | 'documento'
+): Promise<string> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  // Ruta privada acotada por propietario (ver storage.rules):
-  //   incidencias/{propietarioId}/{incidenciaId}/{archivo}
-  const pid = exigirPropietarioId(propietarioId, 'adjunto de incidencia');
-  const storagePath = `incidencias/${pid}/${incidenciaId}/${Date.now()}_${sanitizedName}`;
+  const storagePath = `incidencias/${incidenciaId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
 
   try {
-    const uploadPromise = async () => {
-      const mimeType = file.type || (tipo === 'imagen' ? 'image/jpeg' : 'application/pdf');
-      await uploadBytes(fileRef, file, { contentType: mimeType });
-      return await getDownloadURL(fileRef);
-    };
-
-    const timeoutGuard = new Promise<string>((_, reject) =>
-      setTimeout(() => reject(new Error('Storage upload timeout')), 12000)
-    );
-
-    const downloadUrl = await Promise.race([uploadPromise(), timeoutGuard]);
-    return { downloadUrl, storagePath };
+    const mimeType = file.type || (tipo === 'imagen' ? 'image/jpeg' : 'application/pdf');
+    await uploadBytes(fileRef, file, { contentType: mimeType });
+    return await getDownloadURL(fileRef);
   } catch (err) {
-    console.warn('Firebase Storage upload failed/timed out, attempting data fallback:', err);
-    // Para imágenes, generar una URL rápida segura (modo degradado sin Storage).
-    const downloadUrl = await new Promise<string>((resolve) => {
+    console.warn('Firebase Storage upload failed for incidencia adjunto, fallback to data url:', err);
+    return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80');
+      reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
     });
-    return { downloadUrl, storagePath };
   }
 }
 
 // =========================================================================
-// BLOQUE 5: SERVICIOS, TRABAJOS PROFESIONALES, PRESUPUESTOS Y VALORACIONES
+// TRABAJOS PROFESIONALES, PRESUPUESTOS Y VALORACIONES
 // =========================================================================
 
-/**
- * Escucha en tiempo real de Trabajos Profesionales
- */
-export function subscribeTrabajosProfesionales(
-  callback: (trabajos: TrabajoProfesional[]) => void,
-  scope?: DataAccessScope
-) {
-  // Órdenes de trabajo: el propietario ve las de sus inmuebles y el
-  // profesional únicamente las que tiene asignadas.
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
-    const profId = scope.profesionalId;
-    if (!profId) {
-      callback([]);
-      return () => {};
-    }
-    return onSnapshot(
-      query(TRABAJOS_PROFESIONALES_COL, where('profesionalId', '==', profId)),
-      (snapshot) => {
-        const items: TrabajoProfesional[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as TrabajoProfesional);
-        });
-        items.sort((a, b) => new Date(b.createdAt || b.fechaSolicitud).getTime() - new Date(a.createdAt || a.fechaSolicitud).getTime());
-        callback(items);
-      },
-      (err) => {
-        console.error('Firestore trabajos_profesionales (scoped profesional) snapshot error:', err);
-        callback([]);
-      }
-    );
-  }
-
-  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
-  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
-    callback([]);
-    return () => {};
-  }
-
+export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfesional[]) => void): Unsubscribe {
   return onSnapshot(
-    pid ? query(TRABAJOS_PROFESIONALES_COL, where('propietarioId', '==', pid)) : TRABAJOS_PROFESIONALES_COL,
+    TRABAJOS_PROFESIONALES_COL,
     (snapshot) => {
       const items: TrabajoProfesional[] = [];
       snapshot.forEach((docSnap) => {
@@ -2572,15 +2285,10 @@ export function subscribeTrabajosProfesionales(
   );
 }
 
-/**
- * Guarda o actualiza un Trabajo Profesional en Firestore
- */
 export async function saveTrabajoProfesionalFirestore(trabajo: TrabajoProfesional): Promise<void> {
   try {
-    const propietarioId = exigirPropietarioId(trabajo.propietarioId, 'orden de trabajo');
     const cleanTrabajo = sanitizeObjectForFirestore({
       ...trabajo,
-      propietarioId,
       updatedAt: new Date().toISOString(),
     });
     await setDoc(doc(db, 'trabajos_profesionales', trabajo.id), cleanTrabajo, { merge: true });
@@ -2590,9 +2298,6 @@ export async function saveTrabajoProfesionalFirestore(trabajo: TrabajoProfesiona
   }
 }
 
-/**
- * Elimina un Trabajo Profesional de Firestore
- */
 export async function deleteTrabajoProfesionalFirestore(trabajoId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'trabajos_profesionales', trabajoId));
@@ -2602,46 +2307,9 @@ export async function deleteTrabajoProfesionalFirestore(trabajoId: string): Prom
   }
 }
 
-/**
- * Escucha en tiempo real de Presupuestos de Profesionales
- */
-export function subscribePresupuestosProfesionales(
-  callback: (presupuestos: PresupuestoProfesional[]) => void,
-  scope?: DataAccessScope
-) {
-  // Presupuestos: el propietario ve los de sus inmuebles; el profesional los
-  // que él mismo ha emitido (documento económico propio).
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
-    const profId = scope.profesionalId;
-    if (!profId) {
-      callback([]);
-      return () => {};
-    }
-    return onSnapshot(
-      query(PRESUPUESTOS_PROFESIONALES_COL, where('profesionalId', '==', profId)),
-      (snapshot) => {
-        const items: PresupuestoProfesional[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as PresupuestoProfesional);
-        });
-        items.sort((a, b) => new Date(b.createdAt || b.fecha).getTime() - new Date(a.createdAt || a.fecha).getTime());
-        callback(items);
-      },
-      (err) => {
-        console.error('Firestore presupuestos_profesionales (scoped profesional) snapshot error:', err);
-        callback([]);
-      }
-    );
-  }
-
-  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
-  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
-    callback([]);
-    return () => {};
-  }
-
+export function subscribePresupuestosProfesionales(callback: (presupuestos: PresupuestoProfesional[]) => void): Unsubscribe {
   return onSnapshot(
-    pid ? query(PRESUPUESTOS_PROFESIONALES_COL, where('propietarioId', '==', pid)) : PRESUPUESTOS_PROFESIONALES_COL,
+    PRESUPUESTOS_PROFESIONALES_COL,
     (snapshot) => {
       const items: PresupuestoProfesional[] = [];
       snapshot.forEach((docSnap) => {
@@ -2656,15 +2324,10 @@ export function subscribePresupuestosProfesionales(
   );
 }
 
-/**
- * Guarda o actualiza un Presupuesto de Profesional en Firestore
- */
 export async function savePresupuestoProfesionalFirestore(presupuesto: PresupuestoProfesional): Promise<void> {
   try {
-    const propietarioId = exigirPropietarioId(presupuesto.propietarioId, 'presupuesto profesional');
     const cleanPresupuesto = sanitizeObjectForFirestore({
       ...presupuesto,
-      propietarioId,
       updatedAt: new Date().toISOString(),
     });
     await setDoc(doc(db, 'presupuestos_profesionales', presupuesto.id), cleanPresupuesto, { merge: true });
@@ -2674,9 +2337,6 @@ export async function savePresupuestoProfesionalFirestore(presupuesto: Presupues
   }
 }
 
-/**
- * Elimina un Presupuesto de Profesional de Firestore
- */
 export async function deletePresupuestoProfesionalFirestore(presupuestoId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'presupuestos_profesionales', presupuestoId));
@@ -2686,46 +2346,9 @@ export async function deletePresupuestoProfesionalFirestore(presupuestoId: strin
   }
 }
 
-/**
- * Escucha en tiempo real de Valoraciones de Profesionales
- */
-export function subscribeValoracionesProfesionales(
-  callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void,
-  scope?: DataAccessScope
-) {
-  // Valoraciones: el propietario ve las de sus trabajos; el profesional,
-  // únicamente las recibidas por él.
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
-    const profId = scope.profesionalId;
-    if (!profId) {
-      callback([]);
-      return () => {};
-    }
-    return onSnapshot(
-      query(VALORACIONES_PROFESIONALES_COL, where('profesionalId', '==', profId)),
-      (snapshot) => {
-        const items: ValoracionProfesionalTrabajo[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as ValoracionProfesionalTrabajo);
-        });
-        items.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-        callback(items);
-      },
-      (err) => {
-        console.error('Firestore valoraciones_profesionales (scoped profesional) snapshot error:', err);
-        callback([]);
-      }
-    );
-  }
-
-  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
-  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
-    callback([]);
-    return () => {};
-  }
-
+export function subscribeValoracionesProfesionales(callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void): Unsubscribe {
   return onSnapshot(
-    pid ? query(VALORACIONES_PROFESIONALES_COL, where('propietarioId', '==', pid)) : VALORACIONES_PROFESIONALES_COL,
+    VALORACIONES_PROFESIONALES_COL,
     (snapshot) => {
       const items: ValoracionProfesionalTrabajo[] = [];
       snapshot.forEach((docSnap) => {
@@ -2740,17 +2363,12 @@ export function subscribeValoracionesProfesionales(
   );
 }
 
-/**
- * Guarda una Valoración de Profesional y recalcula la media del profesional en Firestore
- */
 export async function saveValoracionProfesionalFirestore(valoracion: ValoracionProfesionalTrabajo): Promise<void> {
   try {
     const valId = valoracion.id || `val_${valoracion.trabajoId}_${Date.now()}`;
-    const propietarioId = exigirPropietarioId(valoracion.propietarioId, 'valoración profesional');
-    const cleanVal = sanitizeObjectForFirestore({ ...valoracion, id: valId, propietarioId });
+    const cleanVal = sanitizeObjectForFirestore({ ...valoracion, id: valId });
     await setDoc(doc(db, 'valoraciones_profesionales', valId), cleanVal, { merge: true });
 
-    // También actualizar la valoración en el trabajo correspondiente si existe
     if (valoracion.trabajoId) {
       await setDoc(
         doc(db, 'trabajos_profesionales', valoracion.trabajoId),
@@ -2764,18 +2382,13 @@ export async function saveValoracionProfesionalFirestore(valoracion: ValoracionP
   }
 }
 
-/**
- * Sube un documento acreditativo o póliza de un profesional a Firebase Storage
- */
 export async function uploadProfesionalDocumentoStorage(
   profesionalId: string,
   file: File | Blob,
   nombreArchivo: string,
-  tipoDoc: string
+  _tipoDoc?: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  // Documentación del profesional (RC, IAE, PRL...). Ruta privada:
-  //   profesionales/{profesionalId}/documentos/{archivo}
   const storagePath = `profesionales/${profesionalId}/documentos/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
 
@@ -2796,20 +2409,13 @@ export async function uploadProfesionalDocumentoStorage(
   }
 }
 
-/**
- * Sube un archivo de presupuesto (PDF / factura proforma) a Firebase Storage
- */
 export async function uploadPresupuestoDocumentoStorage(
-  propietarioId: string,
   presupuestoId: string,
   file: File | Blob,
   nombreArchivo: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  // Ruta privada acotada por propietario:
-  //   presupuestos/{propietarioId}/{presupuestoId}/{archivo}
-  const pid = exigirPropietarioId(propietarioId, 'documento de presupuesto');
-  const storagePath = `presupuestos/${pid}/${presupuestoId}/${Date.now()}_${sanitizedName}`;
+  const storagePath = `presupuestos/${presupuestoId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
 
   try {
@@ -2829,36 +2435,27 @@ export async function uploadPresupuestoDocumentoStorage(
   }
 }
 
-/**
- * Sube un adjunto fotográfico o informe a un Trabajo Profesional en Firebase Storage
- */
 export async function uploadTrabajoAdjuntoStorage(
-  propietarioId: string,
   trabajoId: string,
   file: File | Blob,
   nombreArchivo: string
-): Promise<{ downloadUrl: string; storagePath: string }> {
+): Promise<string> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  // Ruta privada acotada por propietario:
-  //   trabajos/{propietarioId}/{trabajoId}/{archivo}
-  const pid = exigirPropietarioId(propietarioId, 'adjunto de trabajo');
-  const storagePath = `trabajos/${pid}/${trabajoId}/${Date.now()}_${sanitizedName}`;
+  const storagePath = `trabajos/${trabajoId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
 
   try {
     const mimeType = file.type || 'image/jpeg';
     await uploadBytes(fileRef, file, { contentType: mimeType });
-    const downloadUrl = await getDownloadURL(fileRef);
-    return { downloadUrl, storagePath };
+    return await getDownloadURL(fileRef);
   } catch (err) {
-    console.warn('Firebase Storage upload failed for trabajo adjunto, using data fallback:', err);
-    const downloadUrl = await new Promise<string>((resolve) => {
+    console.warn('Firebase Storage upload failed for trabajo adjunto, using fallback:', err);
+    return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80');
+      reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
     });
-    return { downloadUrl, storagePath };
   }
 }
 

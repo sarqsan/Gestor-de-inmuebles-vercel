@@ -21,8 +21,13 @@ import {
   Inmueble,
   UsuarioApp,
   EstadoPresupuestoProfesional,
+  HistorialDecisionPresupuesto,
 } from '../../types';
-import { ESTADO_PRESUPUESTO_LABELS, calcularTotalesPresupuesto } from '../../utils/profesionalesEngine';
+import {
+  ESTADO_PRESUPUESTO_LABELS,
+  calcularTotalesPresupuesto,
+  crearItemHistorialTrabajo,
+} from '../../utils/profesionalesEngine';
 import {
   savePresupuestoProfesionalFirestore,
   uploadPresupuestoDocumentoStorage,
@@ -191,6 +196,21 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
       const presId =
         presupuestoParaEditar?.id || `pres_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
+      const usuarioNombre = currentUser?.nombre
+        ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+        : 'Usuario';
+
+      const historialDecision = presupuestoParaEditar?.historialDecision ? [...presupuestoParaEditar.historialDecision] : [];
+      if (estado === 'ACEPTADO' && (!presupuestoParaEditar || presupuestoParaEditar.estado !== 'ACEPTADO')) {
+        historialDecision.push({
+          fecha: new Date().toISOString(),
+          usuario: usuarioNombre,
+          estadoAnterior: presupuestoParaEditar?.estado || 'BORRADOR',
+          estadoNuevo: 'ACEPTADO',
+          observaciones: 'Presupuesto aprobado y adjudicado',
+        });
+      }
+
       const presupuestoFinal: PresupuestoProfesional = {
         id: presId,
         trabajoId,
@@ -199,6 +219,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
         propietarioId: trabajoActual?.propietarioId || currentUser?.propietarioId || 'prop_default',
         inmuebleId: trabajoActual?.inmuebleId || '',
         inmuebleDireccion: trabajoActual?.inmuebleDireccion || inmuebleSeleccionado?.direccion,
+        incidenciaId: trabajoActual?.incidenciaId || undefined,
         numeroPresupuesto: numeroPresupuesto.trim(),
         fecha: new Date(fecha).toISOString(),
         validez: validez.trim(),
@@ -206,29 +227,47 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
         partidas,
         importeBase,
         iva,
+        porcentajeIva,
         importeTotal,
         documentoUrl: documentoUrl || undefined,
         estado,
+        historialDecision: historialDecision.length > 0 ? historialDecision : undefined,
+        creadoPor: presupuestoParaEditar?.creadoPor || usuarioNombre,
+        actualizadoPor: usuarioNombre,
         createdAt: presupuestoParaEditar?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       await savePresupuestoProfesionalFirestore(presupuestoFinal);
 
-      // If budget is accepted, update work order status to ACEPTADO and set budget ID
+      // If budget is registered, sync work order status and budget ID
       if (trabajoActual) {
-        let trabajoActualizado: TrabajoProfesional = {
+        let nuevoEstadoTrabajo = trabajoActual.estado;
+        if (estado === 'ACEPTADO' && trabajoActual.estado !== 'ACEPTADO' && trabajoActual.estado !== 'PROGRAMADO' && trabajoActual.estado !== 'EN_EJECUCION' && trabajoActual.estado !== 'FINALIZADO') {
+          nuevoEstadoTrabajo = 'ACEPTADO';
+        } else if (trabajoActual.estado === 'PENDIENTE' || trabajoActual.estado === 'BUSCANDO_PROFESIONAL' || trabajoActual.estado === 'PRESUPUESTO_SOLICITADO') {
+          nuevoEstadoTrabajo = 'PRESUPUESTO_RECIBIDO';
+        }
+
+        const nuevoHistorial = [
+          ...(trabajoActual.historial || []),
+          crearItemHistorialTrabajo(
+            'PRESUPUESTO_RECIBIDO',
+            usuarioNombre,
+            trabajoActual.estado,
+            nuevoEstadoTrabajo,
+            `Presupuesto ${presupuestoFinal.numeroPresupuesto || presId} registrado por ${importeTotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}`
+          ),
+        ];
+
+        const trabajoActualizado: TrabajoProfesional = {
           ...trabajoActual,
+          estado: nuevoEstadoTrabajo,
           presupuestoId: presId,
           importeEstimado: importeTotal,
+          historial: nuevoHistorial,
           updatedAt: new Date().toISOString(),
         };
-
-        if (estado === 'ACEPTADO' && trabajoActual.estado !== 'ACEPTADO' && trabajoActual.estado !== 'PROGRAMADO' && trabajoActual.estado !== 'EN_EJECUCION' && trabajoActual.estado !== 'FINALIZADO') {
-          trabajoActualizado.estado = 'ACEPTADO';
-        } else if (trabajoActual.estado === 'PENDIENTE' || trabajoActual.estado === 'BUSCANDO_PROFESIONAL' || trabajoActual.estado === 'PRESUPUESTO_SOLICITADO') {
-          trabajoActualizado.estado = 'PRESUPUESTO_RECIBIDO';
-        }
 
         await saveTrabajoProfesionalFirestore(trabajoActualizado);
       }

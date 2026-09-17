@@ -1431,6 +1431,15 @@ export type OrigenIncidencia =
   | 'OTRO';
 
 export type ResponsabilidadIncidencia =
+  | 'PENDIENTE_DE_DETERMINAR'
+  | 'PROPIETARIO'
+  | 'INQUILINO'
+  | 'GARANTIA'
+  | 'SEGURO'
+  | 'PROFESIONAL'
+  | 'COMUNIDAD'
+  | 'TERCERO'
+  // Compatibilidad con registros existentes
   | 'POSIBLE_PROPIETARIO'
   | 'POSIBLE_INQUILINO'
   | 'POSIBLE_COMUNIDAD'
@@ -1457,15 +1466,16 @@ export type ViaActuacionIncidencia =
 
 export interface AdjuntoIncidencia {
   id: string;
-  incidenciaId: string;
-  inmuebleId: string;
+  incidenciaId?: string;
+  inmuebleId?: string;
   propietarioId?: string;
   nombre: string;
   tipo: 'imagen' | 'video' | 'documento';
   mimeType?: string;
   url: string;
-  storagePath: string;
+  storagePath?: string;
   tamanoBytes?: number;
+  tamano?: number;
   fechaSubida: string;
   subidoPor?: string;
   observaciones?: string;
@@ -1558,6 +1568,10 @@ export interface Incidencia {
   fechaCierre?: string;
   responsabilidad: ResponsabilidadIncidencia;
   responsabilidadNotas?: string;
+  responsabilidadMotivo?: string;
+  responsabilidadFechaDecision?: string;
+  responsabilidadDecididoPor?: string;
+  responsabilidadGarantiaRef?: string;
   seguroEstado: EstadoSeguroIncidencia;
   seguroComprobacionNotas?: string;
   viaActuacion?: ViaActuacionIncidencia;
@@ -1707,16 +1721,21 @@ export type EstadoTrabajoProfesional =
   | 'PENDIENTE'
   | 'BUSCANDO_PROFESIONAL'
   | 'PROFESIONAL_PROPUESTO'
+  | 'ASIGNADO'
+  | 'ASIGNADA'
   | 'PRESUPUESTO_SOLICITADO'
   | 'PRESUPUESTO_RECIBIDO'
   | 'PENDIENTE_ACEPTACION'
   | 'ACEPTADO'
   | 'PROGRAMADO'
   | 'EN_EJECUCION'
+  | 'EN_CURSO'
   | 'PENDIENTE_MATERIAL'
   | 'PENDIENTE_PROPIETARIO'
   | 'FINALIZADO'
-  | 'CANCELADO';
+  | 'FINALIZADA'
+  | 'CANCELADO'
+  | 'CANCELADA';
 
 export interface HistorialTrabajoItem {
   id: string;
@@ -1751,12 +1770,14 @@ export interface ValoracionProfesionalTrabajo {
   resultado: 'SATISFACTORIO' | 'ACEPTABLE' | 'DEFICIENTE';
   comentario?: string;
   fecha: string;
-  usuarioId: string;
+  usuarioId?: string;
   usuarioNombre?: string;
+  evaluador?: string;
   trabajoId: string;
   profesionalId: string;
   inmuebleId: string;
   inmuebleDireccion?: string;
+  createdAt?: string;
 }
 
 export interface TrabajoProfesional {
@@ -1798,7 +1819,8 @@ export type EstadoPresupuestoProfesional =
   | 'EN_REVISION'
   | 'ACEPTADO'
   | 'RECHAZADO'
-  | 'CADUCADO';
+  | 'CADUCADO'
+  | 'EN_NEGOCIACION';
 
 export interface PartidaPresupuesto {
   id: string;
@@ -1838,9 +1860,12 @@ export interface PresupuestoProfesional {
   observaciones?: string;
   documentoUrl?: string;
   documentoStoragePath?: string;
+  motivoRechazo?: string;
+  fechaDecision?: string;
+  decididoPor?: string;
   historialDecision?: HistorialDecisionPresupuesto[];
-  creadoPor: string;
-  actualizadoPor: string;
+  creadoPor?: string;
+  actualizadoPor?: string;
   createdAt: string;
   updatedAt: string;
 }

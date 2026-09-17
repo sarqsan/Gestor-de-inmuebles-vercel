@@ -21,8 +21,9 @@ import {
   Inmueble,
   UsuarioApp,
   EstadoPresupuestoProfesional,
+  HistorialDecisionPresupuesto,
 } from '../../types';
-import { ESTADO_PRESUPUESTO_LABELS, ESTADO_TRABAJO_LABELS } from '../../utils/profesionalesEngine';
+import { ESTADO_PRESUPUESTO_LABELS, ESTADO_TRABAJO_LABELS, crearItemHistorialTrabajo } from '../../utils/profesionalesEngine';
 import { savePresupuestoProfesionalFirestore, saveTrabajoProfesionalFirestore } from '../../lib/firebase';
 
 interface DetallePresupuestoProfesionalModalProps {
@@ -66,12 +67,27 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
         ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
         : 'Administrador';
 
+      const decisionItem: HistorialDecisionPresupuesto = {
+        fecha: new Date().toISOString(),
+        usuario: usuarioNombre,
+        estadoAnterior: presupuesto.estado,
+        estadoNuevo: nuevoEstado,
+        observaciones:
+          motivo ||
+          (nuevoEstado === 'ACEPTADO'
+            ? 'Presupuesto aprobado y adjudicado'
+            : nuevoEstado === 'RECHAZADO'
+            ? 'Presupuesto rechazado'
+            : `Estado modificado a ${nuevoEstado}`),
+      };
+
       const presActualizado: PresupuestoProfesional = {
         ...presupuesto,
         estado: nuevoEstado,
-        motivoRechazo: motivo || presupuesto.motivoRechazo,
+        motivoRechazo: motivo || (nuevoEstado === 'RECHAZADO' ? presupuesto.motivoRechazo : undefined),
         fechaDecision: new Date().toISOString(),
         decididoPor: usuarioNombre,
+        historialDecision: [...(presupuesto.historialDecision || []), decisionItem],
         updatedAt: new Date().toISOString(),
       };
 
@@ -80,19 +96,43 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
       // Sync linked work order
       if (trabajo) {
         if (nuevoEstado === 'ACEPTADO') {
+          const nuevoHistorial = [
+            ...(trabajo.historial || []),
+            crearItemHistorialTrabajo(
+              'ESTADO_MODIFICADO',
+              usuarioNombre,
+              trabajo.estado,
+              'ACEPTADO',
+              `Presupuesto ${presupuesto.numeroPresupuesto || presupuesto.id} aprobado (${presupuesto.importeTotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})`
+            ),
+          ];
+
           const trabajoActualizado: TrabajoProfesional = {
             ...trabajo,
             estado: 'ACEPTADO',
             presupuestoId: presupuesto.id,
             importeEstimado: presupuesto.importeTotal,
+            historial: nuevoHistorial,
             updatedAt: new Date().toISOString(),
           };
           await saveTrabajoProfesionalFirestore(trabajoActualizado);
         } else if (nuevoEstado === 'RECHAZADO' && trabajo.presupuestoId === presupuesto.id) {
+          const nuevoHistorial = [
+            ...(trabajo.historial || []),
+            crearItemHistorialTrabajo(
+              'ESTADO_MODIFICADO',
+              usuarioNombre,
+              trabajo.estado,
+              'BUSCANDO_PROFESIONAL',
+              `Presupuesto ${presupuesto.numeroPresupuesto || presupuesto.id} rechazado${motivo ? `: ${motivo}` : ''}`
+            ),
+          ];
+
           const trabajoActualizado: TrabajoProfesional = {
             ...trabajo,
             estado: 'BUSCANDO_PROFESIONAL',
             presupuestoId: undefined,
+            historial: nuevoHistorial,
             updatedAt: new Date().toISOString(),
           };
           await saveTrabajoProfesionalFirestore(trabajoActualizado);
@@ -228,6 +268,47 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 bg-white space-y-6">
+          {/* Decision Status Banner */}
+          {presupuesto.estado === 'ACEPTADO' && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-900">
+              <div className="flex items-center space-x-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <div>
+                  <h4 className="font-bold text-sm text-emerald-800">Presupuesto Aprobado y Adjudicado</h4>
+                  <p className="text-emerald-700 mt-0.5">
+                    {presupuesto.decididoPor ? `Aprobado por ${presupuesto.decididoPor}` : 'Presupuesto aceptado formalmente'}
+                    {presupuesto.fechaDecision ? ` el ${new Date(presupuesto.fechaDecision).toLocaleDateString('es-ES')}` : ''}.
+                  </p>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold">
+                Adjudicación en firme
+              </span>
+            </div>
+          )}
+
+          {presupuesto.estado === 'RECHAZADO' && (
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-1">
+              <div className="flex items-center space-x-2">
+                <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <h4 className="font-bold text-sm text-rose-800">Presupuesto Rechazado</h4>
+                {presupuesto.fechaDecision && (
+                  <span className="text-rose-600">
+                    ({new Date(presupuesto.fechaDecision).toLocaleDateString('es-ES')})
+                  </span>
+                )}
+              </div>
+              {presupuesto.motivoRechazo && (
+                <p className="text-rose-700 pl-6">
+                  <strong>Motivo:</strong> {presupuesto.motivoRechazo}
+                </p>
+              )}
+              {presupuesto.decididoPor && (
+                <p className="text-rose-500 pl-6 text-[11px]">Decidido por: {presupuesto.decididoPor}</p>
+              )}
+            </div>
+          )}
+
           {/* Linked Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
@@ -336,6 +417,35 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
               </div>
             </div>
           </div>
+
+          {/* Historial de Decisiones */}
+          {presupuesto.historialDecision && presupuesto.historialDecision.length > 0 && (
+            <div className="pt-4 border-t border-slate-200 space-y-3">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center space-x-1.5">
+                <Clock className="w-3.5 h-3.5 text-slate-500" />
+                <span>Historial de Decisiones y Cambios de Estado</span>
+              </h4>
+              <div className="space-y-2">
+                {presupuesto.historialDecision.map((dec, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs flex items-center justify-between flex-wrap gap-2"
+                  >
+                    <div>
+                      <span className="font-semibold text-slate-800">
+                        {dec.estadoAnterior} → {dec.estadoNuevo}
+                      </span>
+                      {dec.observaciones && <p className="text-slate-600 mt-0.5">{dec.observaciones}</p>}
+                    </div>
+                    <div className="text-right text-[11px] text-slate-400">
+                      <span>{new Date(dec.fecha).toLocaleString('es-ES')}</span>
+                      <span className="block">Por: {dec.usuario}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

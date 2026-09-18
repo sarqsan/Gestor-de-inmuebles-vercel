@@ -391,9 +391,36 @@ export async function saveCandidatoFirestore(candidato: Candidato) {
         return d;
       });
     }
-    await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
+
+    const docRef = doc(db, 'candidatos', candidato.id);
+    await runTransaction(db, async (transaction) => {
+      const existingSnap = await transaction.get(docRef);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data() as Candidato;
+        // Preservación estricta de historial inmutable
+        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
+        const incomingHist = Array.isArray(cleanCand.historial) ? cleanCand.historial : [];
+        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
+
+        // Impedir que un candidato en estado rechazado_final sea revertido sin autorización de propietario
+        if (existingData.estado === 'rechazado_final' && cleanCand.estado !== 'rechazado_final' && !cleanCand.decisionFinalAutor) {
+          cleanCand.estado = 'rechazado_final';
+          cleanCand.decisionFinal = 'RECHAZAR';
+        }
+
+        transaction.set(docRef, { ...cleanCand, historial: mergedHist }, { merge: true });
+      } else {
+        transaction.set(docRef, cleanCand);
+      }
+    });
   } catch (err) {
     console.error('Error saving candidato to Firestore:', err);
+    try {
+      const cleanCand = deepCleanForFirestore(candidato);
+      await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
+    } catch (fallbackErr) {
+      console.error('Fallback setDoc also failed:', fallbackErr);
+    }
   }
 }
 
@@ -621,9 +648,67 @@ export function subscribeSolicitudesDoc(callback: (solicitudesDoc: SolicitudDocu
 export async function saveSolicitudDocFirestore(solicitudDoc: SolicitudDocumentacion) {
   try {
     const cleanDoc = sanitizeDocForFirestore(solicitudDoc);
-    await setDoc(doc(db, 'solicitudes_documentacion', solicitudDoc.id), cleanDoc, { merge: true });
+    const docRef = doc(db, 'solicitudes_documentacion', solicitudDoc.id);
+
+    await runTransaction(db, async (transaction) => {
+      const existingSnap = await transaction.get(docRef);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data() as SolicitudDocumentacion;
+        // Merge without losing previously uploaded files if incoming is partial
+        const incomingItems = cleanDoc.documentos || [];
+        const existingItems = existingData.documentos || [];
+
+        const mergedItems = incomingItems.map((inc) => {
+          const prev = existingItems.find((p) => p.id === inc.id);
+          if (prev && Array.isArray(prev.archivos) && prev.archivos.length > 0) {
+            const incArchivos = Array.isArray(inc.archivos) ? inc.archivos : [];
+            if (incArchivos.length < prev.archivos.length) {
+              return {
+                ...inc,
+                archivos: prev.archivos,
+                estado: prev.estado || inc.estado,
+                fechaSubida: prev.fechaSubida || inc.fechaSubida,
+              };
+            }
+          }
+          return inc;
+        });
+
+        // Ensure immutable history items preservation
+        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
+        const incomingHist = Array.isArray(cleanDoc.historial) ? cleanDoc.historial : [];
+        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
+
+        transaction.set(docRef, { ...cleanDoc, documentos: mergedItems, historial: mergedHist }, { merge: true });
+      } else {
+        transaction.set(docRef, cleanDoc);
+      }
+    });
+    // Sincronización proactiva con backend para portal público con validación segura de token
+    try {
+      if (typeof window !== 'undefined' && window.fetch) {
+        fetch('/api/solicitudes-documentacion/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cleanDoc),
+        }).catch(() => {});
+      }
+    } catch (e) {}
   } catch (err) {
-    console.error('Error saving solicitud documentacion to Firestore:', err);
+    console.error('Error saving solicitud documentacion with transaction:', err);
+    try {
+      const cleanDoc = sanitizeDocForFirestore(solicitudDoc);
+      await setDoc(doc(db, 'solicitudes_documentacion', solicitudDoc.id), cleanDoc, { merge: true });
+      if (typeof window !== 'undefined' && window.fetch) {
+        fetch('/api/solicitudes-documentacion/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cleanDoc),
+        }).catch(() => {});
+      }
+    } catch (fallbackErr) {
+      console.error('Fallback setDoc also failed:', fallbackErr);
+    }
   }
 }
 
@@ -766,9 +851,38 @@ export function subscribeSolicitudesSeguro(callback: (solicitudes: SolicitudSegu
 export async function saveSolicitudSeguroFirestore(solicitud: SolicitudSeguroImpago) {
   try {
     const cleanSol = sanitizeObjectForFirestore(solicitud);
-    await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
+    const docRef = doc(db, 'solicitudes_seguro_impago', solicitud.id);
+
+    await runTransaction(db, async (transaction) => {
+      const existingSnap = await transaction.get(docRef);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data() as SolicitudSeguroImpago;
+        // Keep immutable reference code and existing history if concurrent save occurs
+        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
+        const incomingHist = Array.isArray(cleanSol.historial) ? cleanSol.historial : [];
+        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
+
+        transaction.set(
+          docRef,
+          {
+            ...cleanSol,
+            referenciaUnica: existingData.referenciaUnica || cleanSol.referenciaUnica,
+            historial: mergedHist,
+          },
+          { merge: true }
+        );
+      } else {
+        transaction.set(docRef, cleanSol);
+      }
+    });
   } catch (err) {
-    console.error('Error saving solicitud seguro impago to Firestore:', err);
+    console.error('Error saving solicitud seguro impago with transaction:', err);
+    try {
+      const cleanSol = sanitizeObjectForFirestore(solicitud);
+      await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
+    } catch (fallbackErr) {
+      console.error('Fallback setDoc also failed:', fallbackErr);
+    }
   }
 }
 

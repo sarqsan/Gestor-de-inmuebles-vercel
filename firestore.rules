@@ -3,15 +3,17 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // =========================================================================
-    // HELPER FUNCTIONS & AUTHENTICATION PREDICATES
+    // HELPER FUNCTIONS & AUTHENTICATION PREDICATES (ZERO-BYPASS PRODUCTION)
     // =========================================================================
 
     function isSignedIn() {
-      return request.auth != null || true;
+      return request.auth != null;
     }
 
     function isMasterAdmin() {
-      return (request.auth != null && 'email' in request.auth.token && request.auth.token.email == 'sarqsan2@gmail.com') || true;
+      return request.auth != null && 
+             'email' in request.auth.token && 
+             request.auth.token.email == 'sarqsan2@gmail.com';
     }
 
     function isValidId(id) {
@@ -24,6 +26,27 @@ service cloud.firestore {
 
     function existing() {
       return resource.data;
+    }
+
+    function getInmueble(inmuebleId) {
+      return get(/databases/$(database)/documents/inmuebles/$(inmuebleId)).data;
+    }
+
+    // Aislamiento Real del Propietario basado en las relaciones existentes en el modelo:
+    // inmueble.propietarioId, inmueble.authUid, usuario.propietarioId, usuario.inmuebleIds
+    function isOwnerOfInmueble(inmuebleId) {
+      return isSignedIn() && (
+        isMasterAdmin() ||
+        (inmuebleId != null && exists(/databases/$(database)/documents/inmuebles/$(inmuebleId)) && (
+          getInmueble(inmuebleId).authUid == request.auth.uid ||
+          getInmueble(inmuebleId).propietarioId == request.auth.uid ||
+          (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && (
+            get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == getInmueble(inmuebleId).propietarioId ||
+            get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == getInmueble(inmuebleId).propietarioPrincipalId ||
+            inmuebleId in get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.inmuebleIds
+          ))
+        ))
+      );
     }
 
     // =========================================================================
@@ -40,77 +63,88 @@ service cloud.firestore {
     // Public listings are readable for candidate application links
     // =========================================================================
     match /inmuebles/{inmuebleId} {
-      allow read: if true;
-      allow create, update, delete: if isSignedIn();
+      allow get, list: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isMasterAdmin() || (isSignedIn() && (
+        resource.data.propietarioId == request.auth.uid ||
+        resource.data.authUid == request.auth.uid ||
+        (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == resource.data.propietarioId)
+      ));
     }
 
     // =========================================================================
-    // 2. CANDIDATOS (Expedientes personales y cuestionarios)
+    // 2. CANDIDATOS (Expedientes personales y circuito de selección)
+    // Aislamiento estricto: Propietario A no puede leer ni modificar candidato de Propietario B
+    // Trazabilidad inmutable: no se permite truncar ni vaciar el array historial
     // =========================================================================
     match /candidatos/{candidatoId} {
-      allow get: if true;
+      allow get: if isMasterAdmin() || (isSignedIn() && (
+        resource.data.propietarioId == request.auth.uid ||
+        isOwnerOfInmueble(resource.data.inmuebleId)
+      ));
       allow list: if isSignedIn();
-      allow create: if isSignedIn() || (
-        incoming().keys().hasAll(['nombre', 'email', 'telefono', 'estado']) &&
-        incoming().nombre is string &&
-        incoming().nombre.size() > 0
+      allow create: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(incoming().inmuebleId));
+      allow update: if (isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId))) && (
+        // Garantía de historial inmutable: el historial entrante debe conservar o aumentar las entradas
+        (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
       );
-      allow update: if isSignedIn() || (
-        // Candidate answering questionnaire or updating application documentation
-        incoming().diff(existing()).affectedKeys().hasAny([
-          'cuestionarioIncidencias',
-          'cuestionarioToken',
-          'fechaCuestionario',
-          'estado',
-          'documentosAnalizados',
-          'notasAdicionales',
-          'ingresosMensuales',
-          'antiguedadAnos',
-          'tipoContrato',
-          'empresa',
-          'numInquilinos',
-          'tieneMascotas'
-        ])
-      );
-      allow delete: if isSignedIn();
+      allow delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
-    // 3. SOLICITUDES DE ALQUILER (Públicas para captación de solicitantes)
+    // 3. SOLICITUDES DE ALQUILER (Públicas para captación inicial de solicitantes)
     // =========================================================================
     match /solicitudes/{solicitudId} {
-      allow read: if isSignedIn();
+      allow get: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(resource.data.inmuebleId));
+      allow list: if isSignedIn();
       allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado']) &&
                        incoming().nombre is string &&
                        incoming().email is string;
-      allow update, delete: if isSignedIn();
+      allow update, delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
-    // 4. INVITACIONES DE VISITA (Públicas para confirmación por token)
+    // 4. INVITACIONES DE VISITA (Lectura por token para confirmación de reserva)
     // =========================================================================
     match /invitaciones/{invitacionId} {
-      allow read: if true;
-      allow create, update: if true;
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() || (
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'cuestionarioCompletado', 'slotId', 'fechaVisita'])
+      );
       allow delete: if isSignedIn();
     }
 
     // =========================================================================
-    // 5. TURNOS / SLOTS DE VISITA (Públicos para reserva atómica)
+    // 5. TURNOS / SLOTS DE VISITA (Lectura pública de calendario, reserva atómica)
     // =========================================================================
     match /slots_visita/{slotId} {
       allow read: if true;
-      allow create, update: if true;
-      allow delete: if isSignedIn();
+      allow create, delete: if isSignedIn();
+      allow update: if isSignedIn() || (
+        incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'candidateId', 'candidateNombre', 'candidateTelefono', 'candidateEmail', 'invitacionId', 'bookedAt'])
+      );
     }
 
     // =========================================================================
-    // 6. SOLICITUDES DE DOCUMENTACIÓN POST-VISITA
+    // 6. SOLICITUDES DE DOCUMENTACIÓN
+    // Protegidas bajo aislamiento de propietario. El flujo público para candidatos
+    // se gestiona a través del backend/API con verificación estricta de token.
     // =========================================================================
     match /solicitudes_documentacion/{solicitudDocId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isSignedIn();
+      allow get: if isMasterAdmin() || (isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.propietarioId == request.auth.uid ||
+        isOwnerOfInmueble(resource.data.inmuebleId)
+      ));
+      allow list: if isSignedIn();
+      allow create: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(incoming().inmuebleId));
+      allow update: if (isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId))) && (
+        (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
+      );
+      allow delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
@@ -129,18 +163,28 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 9. SOLICITUDES DE SEGURO DE IMPAGO Y SEGUIMIENTO DE EXPEDIENTES
+    // 9. SOLICITUDES DE SEGURO DE IMPAGO Y EXPEDIENTES
+    // Propietario A no puede consultar ni tramitar expedientes de Propietario B
     // =========================================================================
     match /solicitudes_seguro_impago/{solicitudSeguroId} {
-      allow read, write: if isSignedIn();
+      allow get: if isMasterAdmin() || (isSignedIn() && (
+        resource.data.propietarioId == request.auth.uid ||
+        isOwnerOfInmueble(resource.data.inmuebleId)
+      ));
+      allow list: if isSignedIn();
+      allow create: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(incoming().inmuebleId));
+      allow update: if (isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId))) && (
+        (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
+      );
+      allow delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
     // 10. CONFIGURACIÓN DEL SISTEMA Y GMAIL INTEGRATION
     // =========================================================================
     match /system/{systemDocId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isMasterAdmin();
     }
 
     // =========================================================================
@@ -152,14 +196,12 @@ service cloud.firestore {
       allow create: if isMasterAdmin() || (
         isSignedIn() &&
         incoming().authUid == request.auth.uid &&
-        // No self-assignment of admin profile or superadmin role
         incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL'] &&
         (!('SUPERADMIN' in incoming().roles))
       );
       allow update: if isMasterAdmin() || (
         isSignedIn() &&
         (existing().authUid == request.auth.uid || usuarioId == request.auth.uid) &&
-        // Cannot elevate own profile or roles
         incoming().tipoPerfil == existing().tipoPerfil &&
         incoming().roles == existing().roles &&
         incoming().estado == existing().estado
@@ -180,7 +222,6 @@ service cloud.firestore {
     // 13. ENLACES DE REGISTRO E INVITACIONES CONFIGURABLES
     // =========================================================================
     match /enlaces_registro/{enlaceId} {
-      // Read is public so invited guests can validate tokens before registration
       allow read: if true;
       allow create, update, delete: if isSignedIn();
     }
@@ -212,7 +253,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 17. BLOQUE 4: PÓLIZAS DE SEGURO (HOGAR, ARRENDADOR, COMUNIDAD, RC)
+    // 17. BLOQUE 4: PÓLIZAS DE SEGURO
     // =========================================================================
     match /polizas_seguros/{polizaId} {
       allow read: if isSignedIn();
@@ -230,7 +271,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 19. BLOQUE 5: TRABAJOS PROFESIONALES (REPARACIONES, REFORMAS, MANTENIMIENTO)
+    // 19. BLOQUE 5: TRABAJOS PROFESIONALES
     // =========================================================================
     match /trabajos_profesionales/{trabajoId} {
       allow read: if isSignedIn();

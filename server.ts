@@ -16,13 +16,124 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // In-memory document storage for persistent, fast serving of uploaded candidate documents
 const documentsStore = new Map<
   string,
-  { buffer: Buffer; mimeType: string; filename: string; uploadedAt: string }
+  { buffer: Buffer; mimeType: string; filename: string; uploadedAt: string; solicitudId?: string; token?: string }
 >();
+
+// In-memory store for public documentation requests accessible via verified token
+interface StoredSolicitudDoc {
+  id: string;
+  token: string;
+  candidatoId: string;
+  candidatoNombre: string;
+  candidatoTelefono: string;
+  candidatoEmail?: string;
+  inmuebleId: string;
+  inmuebleNombre: string;
+  inmuebleDireccion?: string;
+  inmuebleCiudad?: string;
+  fechaVisita?: string;
+  ownerId?: string;
+  estado: string;
+  mensajePropietario?: string;
+  documentos: any[];
+  fechaCreacion: string;
+  historial?: any[];
+}
+const publicSolicitudesDocStore = new Map<string, StoredSolicitudDoc>();
+
+// Register or sync a documentation request from authenticated owner
+app.post('/api/solicitudes-documentacion/register', (req, res) => {
+  try {
+    const solicitud = req.body as StoredSolicitudDoc;
+    if (!solicitud || !solicitud.token || !solicitud.id) {
+      return res.status(400).json({ error: 'Faltan datos obligatorios de la solicitud.' });
+    }
+    publicSolicitudesDocStore.set(solicitud.token, solicitud);
+    publicSolicitudesDocStore.set(solicitud.id, solicitud);
+    return res.json({ success: true, token: solicitud.token });
+  } catch (err) {
+    console.error('Error registrando solicitud doc en backend:', err);
+    return res.status(500).json({ error: 'Error registrando solicitud' });
+  }
+});
+
+// GET Public candidate documentation view - Strict token validation with ZERO data leakage
+app.get('/api/public/solicitud-documentacion/:token', (req, res) => {
+  const { token } = req.params;
+  if (!token || typeof token !== 'string' || token.trim().length === 0) {
+    return res.status(400).json({ error: 'Token no especificado' });
+  }
+
+  const solicitud = publicSolicitudesDocStore.get(token);
+  if (!solicitud || (solicitud.token !== token && solicitud.id !== token)) {
+    return res.status(404).json({ error: 'Solicitud de documentación no encontrada o enlace caducado.' });
+  }
+
+  // Strictly sanitized representation: NO scoring, NO internal owner notes, NO insurer contracts
+  const publicData = {
+    id: solicitud.id,
+    token: solicitud.token,
+    candidatoNombre: solicitud.candidatoNombre,
+    candidatoTelefono: solicitud.candidatoTelefono,
+    inmuebleNombre: solicitud.inmuebleNombre,
+    inmuebleDireccion: solicitud.inmuebleDireccion || '',
+    inmuebleCiudad: solicitud.inmuebleCiudad || '',
+    fechaVisita: solicitud.fechaVisita,
+    estado: solicitud.estado,
+    mensajePropietario: solicitud.mensajePropietario,
+    documentos: solicitud.documentos,
+    fechaCreacion: solicitud.fechaCreacion,
+  };
+
+  return res.json(publicData);
+});
+
+// POST Public candidate documentation submission - Validates token and updates documents atomically
+app.post('/api/public/solicitud-documentacion/:token/submit', (req, res) => {
+  const { token } = req.params;
+  const { updatedDocs, isFinalSubmit } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Token no especificado' });
+  }
+
+  const solicitud = publicSolicitudesDocStore.get(token);
+  if (!solicitud || (solicitud.token !== token && solicitud.id !== token)) {
+    return res.status(404).json({ error: 'Acceso denegado: Token inexistente o manipulado.' });
+  }
+
+  const nuevoEstado = isFinalSubmit ? 'COMPLETADA' : 'EN_PROCESO';
+  const nowLegible = new Date().toLocaleString('es-ES');
+
+  solicitud.documentos = updatedDocs || solicitud.documentos;
+  solicitud.estado = nuevoEstado;
+  solicitud.historial = [
+    ...(solicitud.historial || []),
+    {
+      id: `h_pub_${Date.now()}`,
+      fecha: nowLegible,
+      autor: 'candidato',
+      accion: isFinalSubmit
+        ? 'Documentación aportada completamente por el candidato'
+        : 'Documentos parciales aportados por el candidato',
+      detalle: `Portal público: el candidato ha actualizado los ficheros requeridos (${nuevoEstado}).`,
+    },
+  ];
+
+  publicSolicitudesDocStore.set(solicitud.token, solicitud);
+  publicSolicitudesDocStore.set(solicitud.id, solicitud);
+
+  return res.json({
+    success: true,
+    estado: nuevoEstado,
+    documentos: solicitud.documentos,
+  });
+});
 
 // Endpoint to upload and store documents reliably
 app.post('/api/upload-document', async (req, res) => {
   try {
-    const { fileBase64, filename, mimeType, itemId, solicitudId } = req.body;
+    const { fileBase64, filename, mimeType, itemId, solicitudId, token } = req.body;
     if (!fileBase64) {
       return res.status(400).json({ error: 'No file data provided' });
     }
@@ -42,6 +153,8 @@ app.post('/api/upload-document', async (req, res) => {
       mimeType: safeMime,
       filename: safeFilename,
       uploadedAt: new Date().toISOString(),
+      solicitudId,
+      token,
     });
 
     const fileUrl = `/api/documents/${fileId}`;

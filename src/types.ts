@@ -24,12 +24,21 @@ export type SectionType =
 
 export type CandidateStatus =
   | 'nuevo'
-  | 'pendiente_doc'
-  | 'pendiente_analisis'
-  | 'analizado'
   | 'preseleccionado'
   | 'visita_reservada'
   | 'seleccionado'
+  | 'pendiente_doc'
+  | 'doc_solicitada'
+  | 'doc_recibida'
+  | 'pendiente_analisis'
+  | 'en_analisis'
+  | 'analizado'
+  | 'seguro_solicitado'
+  | 'aprobado_seguro'
+  | 'rechazado_seguro'
+  | 'decision_pendiente'
+  | 'aceptado_final'
+  | 'rechazado_final'
   | 'formalizado'
   | 'no_seleccionado';
 
@@ -343,6 +352,20 @@ export interface CuestionarioIncidenciasData {
   analisisIa?: AnalisisIncidencias;
 }
 
+export interface CandidatoHistorialItem {
+  id: string;
+  fecha: string;
+  timestamp?: number;
+  autor: 'propietario' | 'candidato' | 'sistema_ia' | 'aseguradora';
+  autorNombre?: string;
+  fase: 'preseleccion' | 'seleccion' | 'documentacion' | 'analisis_ia' | 'seguro' | 'decision_final';
+  accion: string;
+  detalle?: string;
+  estadoAnterior?: CandidateStatus | string;
+  estadoNuevo?: CandidateStatus | string;
+  metadatos?: Record<string, any>;
+}
+
 export interface Candidato {
   id: string;
   nombre: string;
@@ -350,6 +373,8 @@ export interface Candidato {
   email: string;
   inmuebleId: string;
   inmuebleNombre: string;
+  inmuebleInteresId?: string;
+  propietarioId?: string; // ID permanente del propietario arrendador vinculante
   numPersonas: number;
   ingresosNetos: number; // en euros mensuales
   tipoEmpleo: EmploymentType;
@@ -375,6 +400,20 @@ export interface Candidato {
   // Campos preparados para puntuación / IA posterior
   scoreEstimado?: number; // 0 - 100
   ratioSolvencia?: number; // % sobre el alquiler del inmueble
+  // Trazabilidad del circuito completo hasta seguro de impago y decisión
+  historial?: CandidatoHistorialItem[];
+  fechaPreseleccion?: string;
+  fechaSeleccion?: string;
+  seleccionadoMotivo?: string;
+  clasificacionDocumental?: 'COMPLETO' | 'INCOMPLETO' | 'REVISAR' | 'NO_VALIDO';
+  clasificacionDocumentalMotivo?: string;
+  solicitudDocId?: string;
+  solicitudSeguroId?: string;
+  seguroDictamen?: DictamenAseguradora;
+  decisionFinal?: 'ACEPTAR' | 'RECHAZAR' | 'PENDIENTE';
+  decisionFinalMotivo?: string;
+  decisionFinalFecha?: string;
+  decisionFinalAutor?: string;
 }
 
 export interface InmuebleImage {
@@ -570,7 +609,7 @@ export type SolicitudDocEstado =
   | 'APROBADA'
   | 'RECHAZADA';
 
-export type DocItemEstado = 'pendiente' | 'subido' | 'requiere_correccion' | 'validado';
+export type DocItemEstado = 'pendiente' | 'subido' | 'requiere_correccion' | 'validado' | 'revisar' | 'rechazado';
 
 export interface ArchivoAportado {
   id: string;
@@ -1021,6 +1060,7 @@ export interface SolicitudSeguroImpago {
   referenciaUnica: string; // e.g. "REF-IMPAGO-2026-0819-A8F"
   candidatoId: string;
   inmuebleId: string;
+  propietarioId?: string; // ID del propietario arrendador vinculante
   inmuebleNombre: string;
   inmuebleDireccion: string;
   inmuebleCiudad: string;

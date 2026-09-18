@@ -115,7 +115,7 @@ import { CrearEnlaceSolicitudModal } from './components/CrearEnlaceSolicitudModa
 import { PortalVisitaPublicaView } from './components/PortalVisitaPublicaView';
 import { CrearSolicitudDocModal } from './components/CrearSolicitudDocModal';
 import { DetalleSolicitudDocModal } from './components/DetalleSolicitudDocModal';
-import { PortalDocumentacionPublicaView } from './components/PortalDocumentacionPublicaView';
+import { PortalDocumentacionPublicaContainer } from './components/PortalDocumentacionPublicaContainer';
 import { FormalizarContratoModal } from './components/FormalizarContratoModal';
 import { CrearSolicitudSeguroModal } from './components/CrearSolicitudSeguroModal';
 import { DetalleSolicitudSeguroModal } from './components/DetalleSolicitudSeguroModal';
@@ -157,6 +157,14 @@ import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
 import { CrearProfesionalModal } from './components/modals/CrearProfesionalModal';
 import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistroModal';
+import {
+  preseleccionarCandidatoParaVisita,
+  seleccionarCandidato,
+  tramitarSolicitudSeguroImpago,
+  registrarDictamenAseguradora,
+  registrarDecisionFinalPropietario,
+  agregarHistorialCandidato,
+} from './utils/candidateCircuitEngine';
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
@@ -887,54 +895,171 @@ export default function App() {
   };
 
   // Update candidate status handler
-  const handleUpdateStatus = (candidateId: string, newStatus: CandidateStatus) => {
-    let updatedCandObj: Candidato | undefined;
+  const handleUpdateStatus = async (candidateId: string, newStatus: CandidateStatus) => {
+    const cand = candidatos.find((c) => c.id === candidateId);
+    if (!cand) return;
+
+    if (newStatus === 'seleccionado') {
+      await handleSelectCandidate(cand);
+      return;
+    }
+
+    const prop = inmuebles.find((i) => i.id === cand.inmuebleId);
+    let updatedCand: Candidato;
+
+    if (newStatus === 'preseleccionado' && prop) {
+      const res = preseleccionarCandidatoParaVisita(cand, prop, 'propietario', userProfile?.nombre);
+      updatedCand = res.candidatoActualizado;
+    } else {
+      updatedCand = { ...cand, estado: newStatus };
+      updatedCand = agregarHistorialCandidato(updatedCand, {
+        autor: 'propietario',
+        autorNombre: userProfile?.nombre || 'Propietario',
+        fase:
+          newStatus.includes('seguro')
+            ? 'seguro'
+            : newStatus.includes('doc')
+            ? 'documentacion'
+            : newStatus.includes('analisis')
+            ? 'analisis_ia'
+            : newStatus.includes('decision')
+            ? 'decision_final'
+            : 'preseleccion',
+        accion: `Estado cambiado a ${newStatus}`,
+        detalle: `El propietario actualizó el estado de ${cand.estado} a ${newStatus}.`,
+        estadoAnterior: cand.estado,
+        estadoNuevo: newStatus,
+      });
+    }
+
     setCandidatos((prev) =>
-      prev.map((c) => {
-        if (c.id === candidateId) {
-          const updated = { ...c, estado: newStatus };
-          updatedCandObj = updated;
-          saveCandidatoFirestore(updated);
-          return updated;
-        }
-        return c;
-      })
+      prev.map((c) => (c.id === candidateId ? updatedCand : c))
     );
+    await saveCandidatoFirestore(updatedCand);
 
     if (selectedCandidateForModal && selectedCandidateForModal.id === candidateId) {
-      setSelectedCandidateForModal((prev) => (prev ? { ...prev, estado: newStatus } : null));
+      setSelectedCandidateForModal(updatedCand);
     }
 
     // Auto-create visit invitation if candidate is preselected
     if (newStatus === 'preseleccionado') {
-      const cand = updatedCandObj || candidatos.find((c) => c.id === candidateId);
-      if (cand) {
-        const existingInv = invitaciones.find((i) => i.candidateId === candidateId);
-        if (!existingInv) {
-          const sol = solicitudes.find((s) => s.candidatoId === cand.id);
-          const tokenVal = cand.cuestionarioToken || `vst-${cand.id}-${Math.random().toString(36).substring(2, 7)}`;
-          const newInv: InvitacionVisita = {
-            id: `inv-${cand.id}`,
-            token: tokenVal,
-            candidateId: cand.id,
-            candidateNombre: cand.nombre,
-            candidateTelefono: cand.telefono,
-            candidateEmail: cand.email,
-            inmuebleId: cand.inmuebleId,
-            inmuebleNombre: cand.inmuebleNombre || 'Inmueble',
-            inmueblePrecio: sol?.inmueblePrecio || 900,
-            inmuebleCiudad: sol?.inmuebleCiudad || 'Ciudad',
-            solicitudEstado: sol?.estado || 'DOCUMENTACIÓN COMPLETA',
-            cuestionarioCompletado: !!cand.cuestionarioIncidencias?.completado,
-            scoreSolvencia: cand.scoreEstimado || sol?.scoreSolvencia || 80,
-            perfilOperativo: sol?.perfilOperativo || 80,
-            status: 'PENDIENTE DE ENVIAR',
-            fechaPreseleccion: new Date().toISOString().split('T')[0],
-            createdAt: new Date().toISOString(),
-          };
-          handleSaveInvitacion(newInv);
-        }
+      const existingInv = invitaciones.find((i) => i.candidateId === candidateId);
+      if (!existingInv) {
+        const sol = solicitudes.find((s) => s.candidatoId === cand.id);
+        const tokenVal = cand.cuestionarioToken || `vst-${cand.id}-${Math.random().toString(36).substring(2, 7)}`;
+        const newInv: InvitacionVisita = {
+          id: `inv-${cand.id}`,
+          token: tokenVal,
+          candidateId: cand.id,
+          candidateNombre: cand.nombre,
+          candidateTelefono: cand.telefono,
+          candidateEmail: cand.email,
+          inmuebleId: cand.inmuebleId,
+          inmuebleNombre: cand.inmuebleNombre || 'Inmueble',
+          inmueblePrecio: sol?.inmueblePrecio || 900,
+          inmuebleCiudad: sol?.inmuebleCiudad || 'Ciudad',
+          solicitudEstado: sol?.estado || 'DOCUMENTACIÓN COMPLETA',
+          cuestionarioCompletado: !!cand.cuestionarioIncidencias?.completado,
+          scoreSolvencia: cand.scoreEstimado || sol?.scoreSolvencia || 80,
+          perfilOperativo: sol?.perfilOperativo || 80,
+          status: 'PENDIENTE DE ENVIAR',
+          fechaPreseleccion: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString(),
+        };
+        handleSaveInvitacion(newInv);
       }
+    }
+  };
+
+  // Selector idempotente de candidato (Circuito Completo)
+  const handleSelectCandidate = async (candidate: Candidato, motivo?: string) => {
+    const property = inmuebles.find((i) => i.id === candidate.inmuebleId) || (({
+      id: candidate.inmuebleId || `inm_${Date.now()}`,
+      direccion: candidate.inmuebleNombre || 'Inmueble en Alquiler',
+      ciudad: 'Ciudad',
+      propietarioId: userProfile?.id || 'prop_1',
+      precio: 1000,
+      fianza: 1000,
+      tipo: 'Piso',
+      estado: 'disponible',
+      habitaciones: 2,
+      banos: 1,
+      superficie: 75,
+      caracteristicas: [],
+      fotos: [],
+      fechaPublicacion: new Date().toISOString(),
+    } as unknown) as Inmueble);
+
+    const result = seleccionarCandidato(
+      candidate,
+      property,
+      solicitudesDoc,
+      'propietario',
+      userProfile?.nombre || 'Propietario',
+      motivo
+    );
+
+    // Save candidate
+    setCandidatos((prev) =>
+      prev.map((c) => (c.id === result.candidatoActualizado.id ? result.candidatoActualizado : c))
+    );
+    await saveCandidatoFirestore(result.candidatoActualizado);
+
+    // Save or update SolicitudDocumentacion
+    setSolicitudesDoc((prev) => {
+      const exists = prev.some((s) => s.id === result.solicitudDoc.id);
+      if (exists) {
+        return prev.map((s) => (s.id === result.solicitudDoc.id ? result.solicitudDoc : s));
+      }
+      return [result.solicitudDoc, ...prev];
+    });
+    await saveSolicitudDocFirestore(result.solicitudDoc);
+
+    if (selectedCandidateForModal && selectedCandidateForModal.id === candidate.id) {
+      setSelectedCandidateForModal(result.candidatoActualizado);
+    }
+  };
+
+  // Open modal para tramitar seguro de impago
+  const handleOpenTramitarSeguro = (cand: Candidato) => {
+    const prop = inmuebles.find((i) => i.id === cand.inmuebleId);
+    setCandidateForCrearSeguro(cand);
+    setInmuebleForCrearSeguro(prop || null);
+    setShowCrearSeguroModal(true);
+  };
+
+  // Registrar decisión final vinculante del propietario
+  const handleRegistrarDecisionFinal = async (
+    candidate: Candidato,
+    decision: 'ACEPTAR' | 'RECHAZAR',
+    motivo: string
+  ) => {
+    const solSeguro = solicitudesSeguro.find(
+      (s) => s.candidatoId === candidate.id || (candidate.solicitudSeguroId && s.id === candidate.solicitudSeguroId)
+    );
+
+    const { candidatoActualizado, solicitudSeguroActualizada } = registrarDecisionFinalPropietario(
+      candidate,
+      decision,
+      motivo,
+      userProfile?.nombre || 'Propietario',
+      solSeguro
+    );
+
+    setCandidatos((prev) =>
+      prev.map((c) => (c.id === candidatoActualizado.id ? candidatoActualizado : c))
+    );
+    await saveCandidatoFirestore(candidatoActualizado);
+
+    if (solicitudSeguroActualizada) {
+      setSolicitudesSeguro((prev) =>
+        prev.map((s) => (s.id === solicitudSeguroActualizada.id ? solicitudSeguroActualizada : s))
+      );
+      await saveSolicitudSeguroFirestore(solicitudSeguroActualizada);
+    }
+
+    if (selectedCandidateForModal && selectedCandidateForModal.id === candidate.id) {
+      setSelectedCandidateForModal(candidatoActualizado);
     }
   };
 
@@ -1618,12 +1743,31 @@ export default function App() {
 
     const estadoDoc = isComplete ? 'completa' : isPartial ? 'parcial' : targetCand.estadoDocumentacion || 'solicitada';
 
-    const updatedCand: Candidato = {
+    const shouldUpdateStatusToDocRecibida =
+      isComplete &&
+      (targetCand.estado === 'seleccionado' ||
+        targetCand.estado === 'pendiente_doc' ||
+        targetCand.estado === 'doc_solicitada');
+
+    let updatedCand: Candidato = {
       ...targetCand,
       documentosAnalizados: finalDocsAnalizados,
       documentos: updatedDocumentosList,
       estadoDocumentacion: estadoDoc,
+      estado: shouldUpdateStatusToDocRecibida ? 'doc_recibida' : targetCand.estado,
     };
+
+    if (shouldUpdateStatusToDocRecibida) {
+      updatedCand = agregarHistorialCandidato(updatedCand, {
+        autor: 'candidato',
+        autorNombre: targetCand.nombre,
+        fase: 'documentacion',
+        accion: 'Toda la documentación requerida ha sido aportada',
+        detalle: 'El candidato ha completado la subida de los documentos obligatorios requeridos.',
+        estadoAnterior: targetCand.estado,
+        estadoNuevo: 'doc_recibida',
+      });
+    }
 
     const updatedCandidates = candidateList.map((c) => (c.id === updatedCand.id ? updatedCand : c));
     return { updatedCandidates, targetCand: updatedCand };
@@ -1658,6 +1802,17 @@ export default function App() {
     updatedDocs: ItemDocumentoSolicitado[],
     isFinalSubmit: boolean
   ) => {
+    // 1. Siempre notificar al endpoint seguro del backend con verificación de token
+    try {
+      await fetch(`/api/public/solicitud-documentacion/${encodeURIComponent(targetToken)}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updatedDocs, isFinalSubmit }),
+      });
+    } catch (e) {
+      console.warn('Error sincronizando con backend público:', e);
+    }
+
     const existing = solicitudesDoc.find(
       (s) =>
         s.token === targetToken ||
@@ -1667,42 +1822,43 @@ export default function App() {
         s.id === activePublicDocToken ||
         (activePublicDocToken && (s.token.includes(activePublicDocToken) || activePublicDocToken.includes(s.token)))
     );
-    if (!existing) return;
 
-    const allUploaded = updatedDocs.every(
-      (d) => (d.archivos && d.archivos.length > 0) || !d.obligatorio
-    );
+    if (existing) {
+      const allUploaded = updatedDocs.every(
+        (d) => (d.archivos && d.archivos.length > 0) || !d.obligatorio
+      );
 
-    const newEstado = isFinalSubmit
-      ? allUploaded
-        ? 'COMPLETADA'
-        : 'PARCIALMENTE_APORTADA'
-      : existing.estado === 'PENDIENTE' || existing.estado === 'SOLICITADA'
-      ? 'PARCIALMENTE_APORTADA'
-      : existing.estado;
+      const newEstado = isFinalSubmit
+        ? allUploaded
+          ? 'COMPLETADA'
+          : 'PARCIALMENTE_APORTADA'
+        : existing.estado === 'PENDIENTE' || existing.estado === 'SOLICITADA'
+        ? 'PARCIALMENTE_APORTADA'
+        : existing.estado;
 
-    const newHistorial = [
-      ...existing.historial,
-      {
-        id: `h-${Date.now()}`,
-        fecha: new Date().toLocaleString('es-ES'),
-        autor: 'candidato' as const,
-        accion: isFinalSubmit ? 'Documentación enviada' : 'Documentos actualizados',
-        detalle: isFinalSubmit
-          ? 'El candidato finalizó y envió la documentación para su revisión'
-          : 'El candidato aportó o modificó archivos adjuntos',
-      },
-    ];
+      const newHistorial = [
+        ...existing.historial,
+        {
+          id: `h-${Date.now()}`,
+          fecha: new Date().toLocaleString('es-ES'),
+          autor: 'candidato' as const,
+          accion: isFinalSubmit ? 'Documentación enviada' : 'Documentos actualizados',
+          detalle: isFinalSubmit
+            ? 'El candidato finalizó y envió la documentación para su revisión'
+            : 'El candidato aportó o modificó archivos adjuntos',
+        },
+      ];
 
-    const updated: SolicitudDocumentacion = {
-      ...existing,
-      documentos: updatedDocs,
-      estado: newEstado,
-      fechaUltimaActividad: new Date().toISOString(),
-      historial: newHistorial,
-    };
+      const updated: SolicitudDocumentacion = {
+        ...existing,
+        documentos: updatedDocs,
+        estado: newEstado,
+        fechaUltimaActividad: new Date().toISOString(),
+        historial: newHistorial,
+      };
 
-    await handleSaveSolicitudDoc(updated);
+      await handleSaveSolicitudDoc(updated);
+    }
   };
 
   // Handlers for Formalización & Contratos LAU (Fase 3)
@@ -1847,6 +2003,50 @@ export default function App() {
       return [sol, ...prev];
     });
     await saveSolicitudSeguroFirestore(sol);
+
+    // Synchronize status and dictamen to candidate profile
+    const targetCand = candidatos.find((c) => c.id === sol.candidatoId);
+    if (targetCand) {
+      let candActualizado: Candidato = {
+        ...targetCand,
+        solicitudSeguroId: sol.id,
+      };
+
+      if (sol.dictamenAseguradora) {
+        const dictamenRes = registrarDictamenAseguradora(
+          sol,
+          candActualizado,
+          sol.dictamenAseguradora,
+          {
+            importeMaximo: sol.importeMaximoAsegurable,
+            condiciones: sol.condicionesEstipuladas,
+            documentosExtra: sol.documentosSolicitadosExtra,
+            comentario: sol.comentariosAseguradora,
+          }
+        );
+        candActualizado = dictamenRes.candidatoActualizado;
+      } else if (candActualizado.estado !== 'seguro_solicitado') {
+        candActualizado.estado = 'seguro_solicitado';
+        candActualizado = agregarHistorialCandidato(candActualizado, {
+          autor: 'propietario',
+          autorNombre: userProfile?.nombre || 'Propietario',
+          fase: 'seguro',
+          accion: 'Expediente tramitado con aseguradora',
+          detalle: `Solicitud enviada a ${sol.aseguradoraNombre} con referencia [${sol.referenciaUnica}].`,
+          estadoAnterior: targetCand.estado,
+          estadoNuevo: 'seguro_solicitado',
+        });
+      }
+
+      setCandidatos((prev) =>
+        prev.map((c) => (c.id === candActualizado.id ? candActualizado : c))
+      );
+      await saveCandidatoFirestore(candActualizado);
+
+      if (selectedCandidateForModal && selectedCandidateForModal.id === candActualizado.id) {
+        setSelectedCandidateForModal(candActualizado);
+      }
+    }
   };
 
   const handleDeleteSolicitudSeguro = async (solId: string) => {
@@ -2162,44 +2362,16 @@ export default function App() {
 
   // Standalone Candidate Document Submission Portal View (Public URL - Fase 2)
   if (activePublicDocToken) {
-    const publicSolDoc = solicitudesDoc.find(
+    const localPublicSolDoc = solicitudesDoc.find(
       (s) => s.token === activePublicDocToken || s.id === activePublicDocToken
     );
 
-    if (!publicSolDoc) {
-      return (
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-          <div className="bg-slate-800 border border-slate-700 text-white p-6 rounded-2xl shadow-xl text-center space-y-3 max-w-md">
-            <p className="text-base font-bold text-white">Solicitud de documentación no encontrada o enlace caducado</p>
-            <p className="text-xs text-slate-400">
-              El enlace no es válido o ha expirado. Por favor, contacta con la propiedad o agencia inmobiliaria para solicitar un nuevo acceso.
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    // Isolated sanitized representation for candidate portal
-    // Guarantees zero leakage of private owner notes or internal scores
-    const sanitizedPublicDocData: SolicitudDocPublicData = {
-      id: publicSolDoc.id,
-      token: publicSolDoc.token,
-      candidatoNombre: publicSolDoc.candidatoNombre,
-      candidatoTelefono: publicSolDoc.candidatoTelefono,
-      inmuebleNombre: publicSolDoc.inmuebleNombre,
-      inmuebleCiudad: publicSolDoc.inmuebleCiudad,
-      fechaVisita: publicSolDoc.fechaVisita,
-      mensajePropietario: publicSolDoc.mensajePropietario,
-      documentos: publicSolDoc.documentos,
-      estado: publicSolDoc.estado,
-      fechaCreacion: publicSolDoc.fechaCreacion,
-    };
-
     return (
-      <PortalDocumentacionPublicaView
-        solicitud={sanitizedPublicDocData}
+      <PortalDocumentacionPublicaContainer
+        token={activePublicDocToken}
+        localSolicitud={localPublicSolDoc}
         onSubmit={async (updatedDocs, isFinalSubmit) => {
-          await handlePublicDocSubmit(publicSolDoc.token, updatedDocs, isFinalSubmit);
+          await handlePublicDocSubmit(activePublicDocToken, updatedDocs, isFinalSubmit);
         }}
       />
     );
@@ -2646,10 +2818,18 @@ export default function App() {
         candidato={selectedCandidateForModal}
         inmuebles={scopedInmuebles}
         solicitudesDoc={solicitudesDoc}
+        solicitudesSeguro={solicitudesSeguro}
         contratos={scopedContratos}
         onClose={() => setSelectedCandidateForModal(null)}
         onUpdateStatus={handleUpdateStatus}
         onUpdateCandidateDocs={handleUpdateCandidateDocs}
+        onSelectCandidate={handleSelectCandidate}
+        onOpenTramitarSeguro={handleOpenTramitarSeguro}
+        onOpenDetalleSeguro={(sol) => {
+          setSelectedCandidateForModal(null);
+          setSelectedSolicitudSeguroForDetail(sol);
+        }}
+        onRegistrarDecisionFinal={handleRegistrarDecisionFinal}
         onGoToAnalysis={(cand) => {
           setSelectedCandidateForAnalysis(cand);
           setActiveSection('analisis');

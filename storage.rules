@@ -1,0 +1,57 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMasterAdmin() {
+      return request.auth != null && 
+             'email' in request.auth.token && 
+             request.auth.token.email == 'sarqsan2@gmail.com';
+    }
+
+    // =========================================================================
+    // DOCUMENTOS SOLICITADOS (EXPEDIENTES PRIVADOS DE CANDIDATOS)
+    // =========================================================================
+    // Lectura: Únicamente usuarios autenticados (propietarios o administradores)
+    // Subida: Permitida para aportación de documentos en formatos válidos (PDF / imágenes)
+    // con límite estricto de tamaño a 25MB para evitar ataques de denegación de servicio.
+    // Propietarios de otros inmuebles no deben acceder a documentos ajenos.
+    // =========================================================================
+    match /documentos_solicitados/{solicitudDocId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if request.resource.size < 25 * 1024 * 1024 &&
+                      request.resource.contentType.matches('application/pdf|image/(jpeg|jpg|png|webp)');
+    }
+
+    // =========================================================================
+    // FOTOGRAFÍAS Y MULTIMEDIA DE INMUEBLES
+    // =========================================================================
+    match /inmuebles/{inmuebleId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isSignedIn() && request.resource.size < 15 * 1024 * 1024;
+    }
+
+    // =========================================================================
+    // DOCUMENTACIÓN DE PROFESIONALES Y PRESUPUESTOS
+    // =========================================================================
+    match /profesionales/{profesionalId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.resource.size < 25 * 1024 * 1024;
+    }
+
+    match /presupuestos/{presupuestoId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.resource.size < 25 * 1024 * 1024;
+    }
+
+    // =========================================================================
+    // DEFAULT DENY
+    // =========================================================================
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

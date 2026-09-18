@@ -42,6 +42,7 @@ import {
   LeadInmobiliario,
   Incidencia,
   TareaMantenimiento,
+  GarantiaReparacion,
   TrabajoProfesional,
   PresupuestoProfesional,
   ValoracionProfesionalTrabajo,
@@ -101,6 +102,7 @@ const PROPUESTAS_INMOBILIARIA_COL = collection(db, 'propuestas_inmobiliaria');
 const LEADS_INMOBILIARIOS_COL = collection(db, 'leads_inmobiliario');
 const INCIDENCIAS_COL = collection(db, 'incidencias');
 const TAREAS_MANTENIMIENTO_COL = collection(db, 'tareas_mantenimiento');
+export const GARANTIAS_REPARACION_COL = collection(db, 'garantias_reparacion');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
 export const POLIZAS_SEGUROS_COL = collection(db, 'polizas_seguros');
@@ -1200,6 +1202,36 @@ export async function deleteTareaMantenimientoFirestore(id: string) {
     await deleteDoc(doc(db, 'tareas_mantenimiento', id));
   } catch (err) {
     console.error('Error deleting tarea mantenimiento:', err);
+  }
+}
+
+export function subscribeGarantiasReparacion(
+  callback: (items: GarantiaReparacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<GarantiaReparacion>(
+    GARANTIAS_REPARACION_COL,
+    callback,
+    scope,
+    'garantias_reparacion'
+  );
+}
+
+export async function saveGarantiaReparacionFirestore(item: GarantiaReparacion) {
+  try {
+    await setDoc(doc(db, 'garantias_reparacion', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving garantia reparacion:', err);
+  }
+}
+
+export async function deleteGarantiaReparacionFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'garantias_reparacion', id));
+  } catch (err) {
+    console.error('Error deleting garantia reparacion:', err);
   }
 }
 

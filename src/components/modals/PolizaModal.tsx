@@ -145,17 +145,6 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
   if (!isOpen) return null;
 
   const selectedInmueble = inmuebles.find((i) => i.id === inmuebleId);
-  // Propietario de la póliza (clave de aislamiento en Firestore): el usuario
-  // propietario autenticado o el titular del inmueble. Nunca un valor
-  // provisional, que dejaría la póliza fuera del ámbito de su propietario.
-  const propietarioEfectivo =
-    currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId
-      ? currentUser.propietarioId
-      : polizaToEdit?.propietarioId ||
-        selectedInmueble?.propietarioId ||
-        selectedInmueble?.propietarioPrincipalId ||
-        selectedInmueble?.datosFiscales?.propietarioPrincipal?.propietarioId ||
-        '';
 
   const toggleCobertura = (cob: string) => {
     if (coberturas.includes(cob)) {
@@ -194,12 +183,7 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
     setErrorMsg('');
 
     try {
-      const propId = propietarioEfectivo;
-      if (!propId) {
-        setErrorMsg('No se pudo determinar el propietario de la póliza. Selecciona un inmueble con titular asignado.');
-        setIsSubmitting(false);
-        return;
-      }
+      const propId = selectedInmueble?.datosFiscales?.propietarioId || 'prop_general';
       const now = new Date().toISOString();
 
       const polizaData: PolizaSeguro = {

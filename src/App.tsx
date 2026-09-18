@@ -92,8 +92,6 @@ import {
   subscribeEspecialidades,
   subscribeAuditLogs,
   subscribeModulosConfig,
-  subscribeIncidencias,
-  subscribeTrabajosProfesionales,
   saveInmuebleFirestore,
   deleteInmuebleFirestore,
   saveCandidatoFirestore,
@@ -177,8 +175,6 @@ import { CobrosSection } from './components/sections/CobrosSection';
 import { GastosSection } from './components/sections/GastosSection';
 import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
 import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
-import { IncidenciasSection } from './components/sections/IncidenciasSection';
-import { ProfesionalesSection } from './components/sections/ProfesionalesSection';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
@@ -188,7 +184,6 @@ import { ProfesionalPortalSection } from './components/sections/ProfesionalPorta
 import { PortalRegistroView } from './components/PortalRegistroView';
 import { LoginView } from './components/LoginView';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
-import type { DataAccessScope } from './lib/firebase';
 import {
   subscribeAuthState,
   logoutUser,
@@ -207,8 +202,6 @@ import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistr
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
-  const [incidenciasCount, setIncidenciasCount] = useState<number>(0);
-  const [trabajosActivosCount, setTrabajosActivosCount] = useState<number>(0);
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -400,28 +393,12 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      // Bloque 4/5: el propietario accede a SU panel y a sus incidencias,
-      // seguros, siniestros, trabajos, presupuestos y profesionales
-      // relacionados. Nunca al Centro de Control ni a datos de terceros.
-      const allowedSections: SectionType[] = [
-        'propietarios',
-        'inmuebles',
-        'formalizacion',
-        'cobros',
-        'gastos',
-        'recomercializacion',
-        'incidencias',
-        'profesionales',
-        'configuracion',
-      ];
+      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'cobros', 'gastos', 'recomercializacion', 'configuracion'];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
     } else if (perfil === 'PROFESIONAL') {
-      // El profesional sólo entra a su portal, a los inmuebles asignados y a
-      // las órdenes de trabajo que tiene asignadas. Sin acceso a candidatos,
-      // contratos, cobros, gastos ni información económica.
-      const allowedSections: SectionType[] = ['administracion', 'inmuebles', 'incidencias', 'configuracion'];
+      const allowedSections: SectionType[] = ['administracion', 'inmuebles', 'configuracion'];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('administracion');
       }
@@ -758,11 +735,9 @@ export default function App() {
     // FASE 1.4: ámbito de datos para que las escuchas nunca soliciten la
     // colección completa a un propietario (defensa en profundidad; la UI ya
     // filtraba, pero ahora la propia consulta queda acotada en origen).
-    const dataScope: DataAccessScope = {
+    const dataScope = {
       tipoPerfil: currentUser.tipoPerfil,
       propietarioId: currentUser.propietarioId,
-      profesionalId: currentUser.profesionalId,
-      usuarioId: currentUser.id,
       inmuebleIds: currentUser.inmuebleIds || [],
     };
 
@@ -844,24 +819,6 @@ export default function App() {
       }
     });
 
-    // Bloque 4: contador de incidencias abiertas con el MISMO ámbito que el
-    // resto de escuchas (el propietario sólo consulta las suyas; el
-    // profesional, las asignadas).
-    const unsubscribeIncidenciasHook = subscribeIncidencias((data) => {
-      if (data) {
-        const abiertas = data.filter((i) => i.estado !== 'RESUELTA' && i.estado !== 'CANCELADA').length;
-        setIncidenciasCount(abiertas);
-      }
-    }, dataScope);
-
-    // Bloque 5: órdenes de trabajo activas acotadas por rol.
-    const unsubscribeTrabajosHook = subscribeTrabajosProfesionales((data) => {
-      if (data) {
-        const activos = data.filter((t) => t.estado !== 'FINALIZADO' && t.estado !== 'CANCELADO').length;
-        setTrabajosActivosCount(activos);
-      }
-    }, dataScope);
-
     let unsubscribeAseguradoras: (() => void) | undefined;
     let unsubscribeGmail: (() => void) | undefined;
     let unsubscribeUsuariosHook: (() => void) | undefined;
@@ -911,8 +868,6 @@ export default function App() {
       unsubscribeLeads();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
-      unsubscribeIncidenciasHook();
-      unsubscribeTrabajosHook();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
       if (unsubscribeGmail) unsubscribeGmail();
       if (unsubscribeUsuariosHook) unsubscribeUsuariosHook();
@@ -2912,8 +2867,6 @@ export default function App() {
         contratosCount={scopedContratos.length}
         solicitudesSeguroCount={solicitudesSeguro.length}
         cobrosPendientesCount={cobrosPendientesCount}
-        incidenciasCount={incidenciasCount}
-        trabajosActivosCount={trabajosActivosCount}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
@@ -2933,8 +2886,6 @@ export default function App() {
           contratosCount={scopedContratos.length}
           solicitudesSeguroCount={solicitudesSeguro.length}
           cobrosPendientesCount={cobrosPendientesCount}
-          incidenciasCount={incidenciasCount}
-          trabajosActivosCount={trabajosActivosCount}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -3092,26 +3043,6 @@ export default function App() {
             />
           )}
 
-          {activeSection === 'incidencias' && (
-            <IncidenciasSection
-              inmuebles={scopedInmuebles}
-              propietarios={scopedPropietarios}
-              contratos={scopedContratos}
-              profesionales={scopedProfesionales}
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeSection === 'profesionales' && (
-            <ProfesionalesSection
-              inmuebles={scopedInmuebles}
-              propietarios={scopedPropietarios}
-              currentUser={currentUser}
-              especialidadesDisponibles={especialidades}
-              onNavigateToIncidencias={() => setActiveSection('incidencias')}
-            />
-          )}
-
           {activeSection === 'inmuebles' && (
             <InmueblesSection
               inmuebles={scopedInmuebles}
@@ -3133,13 +3064,13 @@ export default function App() {
               onUpdateSlot={handleUpdateSlot}
               onNavigateToPropietarios={() => setActiveSection('propietarios')}
               contratos={scopedContratos}
+              profesionales={scopedProfesionales}
               currentUser={currentUser}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onFinalizarContrato={handleFinalizarContrato}
               onRecomercializarInmueble={(inmuebleId, contratoAnteriorId) =>
                 handleRecomercializarInmueble(inmuebleId, contratoAnteriorId)
               }
-              onSaveContrato={handleSaveContrato}
             />
           )}
 

@@ -55,6 +55,22 @@ service cloud.firestore {
       return activeUser() && me().tipoPerfil == 'PROPIETARIO';
     }
 
+    function isProfesionalRole() {
+      return activeUser() && me().tipoPerfil == 'PROFESIONAL';
+    }
+
+    function myProfId() {
+      return me().profesionalId;
+    }
+
+    // El profesional sólo puede ver una incidencia que le haya sido asignada
+    // (presupuestos pendientes o datos económicos de otros quedan ocultos).
+    function incidenciaAsignadaAmi(src) {
+      return isProfesionalRole()
+        && 'profesionalAsignadoId' in src
+        && src.profesionalAsignadoId == myProfId();
+    }
+
     function myPropId() {
       return me().propietarioId;
     }
@@ -119,66 +135,6 @@ service cloud.firestore {
       return isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
         && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();
-    }
-
-    // --- Bloque 4/5: rol profesional y asignación -----------------------------
-    // El profesional se identifica con el espejo usuarios_auth/{uid}
-    // (profesionalId). Sólo accede a lo que tiene asignado.
-    function isProfesionalRole() {
-      return activeUser() && me().tipoPerfil == 'PROFESIONAL';
-    }
-
-    function myProfId() {
-      return me().profesionalId;
-    }
-
-    function profIdAsignado(d) {
-      return isProfesionalRole()
-        && 'profesionalId' in d
-        && d.profesionalId is string
-        && d.profesionalId.size() > 0
-        && d.profesionalId == myProfId();
-    }
-
-    // Recurso del propietario autenticado: por titularidad directa o por
-    // inmueble asignado (mismo criterio que contratos/gastos).
-    function recursoPropietarioVisible(d) {
-      return isPropietarioRole() &&
-        (('propietarioId' in d && d.propietarioId == myPropId()) ||
-         ('inmuebleId' in d && d.inmuebleId is string && myInmuebleIds().hasAny([d.inmuebleId])));
-    }
-
-    // Para CONSULTAS (list) la única condición demostrable sin `get` extra es el
-    // filtro por propietarioId, así que las listas exigen
-    // where('propietarioId','==', mi propietarioId).
-    function recursoPropietarioListable(d) {
-      return isPropietarioRole() && 'propietarioId' in d && d.propietarioId == myPropId();
-    }
-
-    // El profesional sólo consulta por asignación:
-    // where('profesionalId','==', mi profesionalId).
-    function recursoProfesionalListable(d) {
-      return isProfesionalRole() && 'profesionalId' in d && d.profesionalId == myProfId();
-    }
-
-    function propietarioCreaOk() {
-      return isPropietarioRole()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-        && 'inmuebleId' in incoming() && incoming().inmuebleId is string && incoming().inmuebleId.size() > 0;
-    }
-
-    function propietarioMantieneDueno() {
-      return isPropietarioRole()
-        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();
-    }
-
-    // El profesional asignado puede actualizar su orden, pero NO puede cambiar
-    // el propietario ni reasignarse el trabajo a sí mismo o a otro.
-    function profesionalActualizaAsignado() {
-      return profIdAsignado(existing())
-        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
-        && 'profesionalId' in incoming() && incoming().profesionalId == existing().profesionalId;
     }
 
     // Validación del espejo de identidad contra el perfil autoritativo.
@@ -437,6 +393,61 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 2F. INCIDENCIAS Y MANTENIMIENTO (BLOQUE 4)
+    // Datos operativos del propietario, aislados por propietarioId (patrón de
+    // contratos/gastos). El profesional puede LEER únicamente las incidencias
+    // que le han sido asignadas (la consulta obliga a
+    // where('profesionalAsignadoId','==', suId)); no puede escribir.
+    // =========================================================================
+    match /incidencias/{incidenciaId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || incidenciaAsignadaAmi(existing());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole()
+          && 'profesionalAsignadoId' in resource.data
+          && resource.data.profesionalAsignadoId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // Plan de mantenimiento preventivo: estrictamente propietario/admin; los
+    // profesionales no lo consultan (sólo reciben la incidencia resultante).
+    match /tareas_mantenimiento/{tareaId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2G. GARANTÍAS DE REPARACIÓN Y SEGUIMIENTO POST-INTERVENCIÓN
+    // =========================================================================
+    match /garantias_reparacion/{garantiaId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
     // 3. CANDIDATOS (expedientes y cuestionarios)
     // El listado y la gestión requieren cuenta interna. Se conserva el enlace
     // público de cuestionario (autoservicio del candidato por token), que sólo
@@ -616,136 +627,6 @@ service cloud.firestore {
       allow read: if isMasterAdmin();
       allow create: if isSignedIn();
       allow update, delete: if false;
-    }
-
-    // =========================================================================
-    // 16. INCIDENCIAS Y MANTENIMIENTO (BLOQUE 4)
-    // Cada propietario accede ÚNICAMENTE a sus incidencias; el profesional, a
-    // las que tiene asignadas. El administrador principal, a todas.
-    // Los profesionales NO pueden crear incidencias ni eliminar registros.
-    // =========================================================================
-    match /incidencias/{incidenciaId} {
-      allow get: if isMasterAdmin()
-        || recursoPropietarioVisible(existing())
-        || profIdAsignado(existing());
-
-      // list: propietario -> where('propietarioId','==', myPropId())
-      //       profesional -> where('profesionalId','==', myProfId())
-      allow list: if isMasterAdmin()
-        || recursoPropietarioListable(resource.data)
-        || recursoProfesionalListable(resource.data);
-
-      allow create: if isMasterAdmin() || propietarioCreaOk();
-
-      allow update: if isMasterAdmin()
-        || propietarioMantieneDueno()
-        || profesionalActualizaAsignado();
-
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // 17. PÓLIZAS DE SEGURO (BLOQUE 4)
-    // Documentación económica privada del propietario. Los profesionales no
-    // tienen ningún acceso (ni lectura) a las pólizas.
-    // =========================================================================
-    match /polizas_seguros/{polizaId} {
-      allow get: if isMasterAdmin() || recursoPropietarioVisible(existing());
-      allow list: if isMasterAdmin() || recursoPropietarioListable(resource.data);
-
-      allow create: if isMasterAdmin() || propietarioCreaOk();
-      allow update: if isMasterAdmin() || propietarioMantieneDueno();
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // 18. SINIESTROS (BLOQUE 4)
-    // Heredan el ámbito de la incidencia/póliza de origen mediante el
-    // propietarioId denormalizado en la escritura. Profesionales sin acceso.
-    // =========================================================================
-    match /siniestros/{siniestroId} {
-      allow get: if isMasterAdmin() || recursoPropietarioVisible(existing());
-      allow list: if isMasterAdmin() || recursoPropietarioListable(resource.data);
-
-      allow create: if isMasterAdmin() || propietarioCreaOk();
-      allow update: if isMasterAdmin() || propietarioMantieneDueno();
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // 19. ÓRDENES DE TRABAJO PROFESIONAL (BLOQUE 5)
-    // Propietario: las de sus inmuebles. Profesional: únicamente las asignadas;
-    // puede progresar el estado pero no cambiar de propietario ni reasignarse.
-    // =========================================================================
-    match /trabajos_profesionales/{trabajoId} {
-      allow get: if isMasterAdmin()
-        || recursoPropietarioVisible(existing())
-        || profIdAsignado(existing());
-
-      allow list: if isMasterAdmin()
-        || recursoPropietarioListable(resource.data)
-        || recursoProfesionalListable(resource.data);
-
-      allow create: if isMasterAdmin() || propietarioCreaOk();
-
-      allow update: if isMasterAdmin()
-        || propietarioMantieneDueno()
-        || profesionalActualizaAsignado();
-
-      allow delete: if isMasterAdmin()
-        || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId());
-    }
-
-    // =========================================================================
-    // 20. PRESUPUESTOS PROFESIONALES (BLOQUE 5)
-    // Propietario: los de sus inmuebles. Profesional: los que emitió él mismo
-    // (y sólo puede emitir contra una orden que tenga asignada).
-    // =========================================================================
-    match /presupuestos_profesionales/{presupuestoId} {
-      allow get: if isMasterAdmin()
-        || recursoPropietarioVisible(existing())
-        || profIdAsignado(existing());
-
-      allow list: if isMasterAdmin()
-        || recursoPropietarioListable(resource.data)
-        || recursoProfesionalListable(resource.data);
-
-      allow create: if isMasterAdmin()
-        || propietarioCreaOk()
-        || (isProfesionalRole()
-            && 'profesionalId' in incoming() && incoming().profesionalId == myProfId()
-            && 'propietarioId' in incoming() && incoming().propietarioId is string && incoming().propietarioId.size() > 0
-            && 'trabajoId' in incoming() && incoming().trabajoId is string
-            && get(/databases/$(database)/documents/trabajos_profesionales/$(incoming().trabajoId)).data.profesionalId == myProfId());
-
-      allow update: if isMasterAdmin()
-        || propietarioMantieneDueno()
-        || (profIdAsignado(existing())
-            && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
-            && 'profesionalId' in incoming() && incoming().profesionalId == existing().profesionalId);
-
-      allow delete: if isMasterAdmin()
-        || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId());
-    }
-
-    // =========================================================================
-    // 21. VALORACIONES DE PROFESIONALES (BLOQUE 5)
-    // Las emite el propietario (o el administrador) sobre un trabajo suyo. El
-    // profesional sólo puede LEER las recibidas: nunca editarlas ni borrarlas.
-    // =========================================================================
-    match /valoraciones_profesionales/{valoracionId} {
-      allow get: if isMasterAdmin()
-        || recursoPropietarioVisible(existing())
-        || profIdAsignado(existing());
-
-      allow list: if isMasterAdmin()
-        || recursoPropietarioListable(resource.data)
-        || recursoProfesionalListable(resource.data);
-
-      allow create: if isMasterAdmin() || propietarioCreaOk();
-      allow update: if isMasterAdmin() || propietarioMantieneDueno();
-      allow delete: if isMasterAdmin()
-        || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId());
     }
 
     // =========================================================================

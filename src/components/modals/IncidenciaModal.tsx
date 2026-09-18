@@ -102,22 +102,6 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
   if (!isOpen) return null;
 
   const selectedInmueble = inmuebles.find((i) => i.id === inmuebleId);
-  /**
-   * Propietario de la incidencia (clave de aislamiento en Firestore):
-   *  1. el usuario propietario autenticado (su propio ámbito),
-   *  2. el titular del inmueble seleccionado,
-   *  3. el propietario principal de su ficha fiscal.
-   * Nunca se inventa un valor provisional: si no se puede determinar, el
-   * guardado se bloquea con un aviso.
-   */
-  const propietarioEfectivo =
-    currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId
-      ? currentUser.propietarioId
-      : incidenciaToEdit?.propietarioId ||
-        selectedInmueble?.propietarioId ||
-        selectedInmueble?.propietarioPrincipalId ||
-        selectedInmueble?.datosFiscales?.propietarioPrincipal?.propietarioId ||
-        '';
   // Buscar contrato activo para asociar inquilino automáticamente
   const activeContract = contratos.find(
     (c) => c.inmuebleId === inmuebleId && (c.estado === 'ACTIVO' || c.estado === 'FIRMADO' || c.estado === 'PENDIENTE_FIRMA')
@@ -141,8 +125,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
         const isDoc = file.type.includes('pdf') || file.type.includes('word') || file.type.includes('text');
         const tipo: 'imagen' | 'documento' = isImage ? 'imagen' : 'documento';
 
-        const { downloadUrl, storagePath } = await uploadIncidenciaAdjuntoStorage(
-          propietarioEfectivo,
+        const downloadUrl = await uploadIncidenciaAdjuntoStorage(
           tempIncidenciaId,
           file,
           file.name,
@@ -153,12 +136,12 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
           id: `adj_${Date.now()}_${i}`,
           incidenciaId: tempIncidenciaId,
           inmuebleId,
-          propietarioId: propietarioEfectivo,
+          propietarioId: selectedInmueble?.datosFiscales?.propietarioId,
           nombre: file.name,
           tipo,
           mimeType: file.type,
           url: downloadUrl,
-          storagePath,
+          storagePath: `incidencias/${tempIncidenciaId}/${file.name}`,
           tamanoBytes: file.size,
           fechaSubida: new Date().toISOString(),
           subidoPor: currentUser?.nombre || 'Usuario',
@@ -211,12 +194,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
     setErrorMsg('');
 
     try {
-      const propId = propietarioEfectivo;
-      if (!propId) {
-        setErrorMsg('No se pudo determinar el propietario de la incidencia. Selecciona un inmueble con titular asignado.');
-        setIsSubmitting(false);
-        return;
-      }
+      const propId = selectedInmueble?.datosFiscales?.propietarioId || 'prop_general';
       const now = new Date().toISOString();
       const userName = currentUser?.nombre || 'Administrador';
 
@@ -273,11 +251,11 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
           origen,
           fechaCreacion: now,
           fechaActualizacion: now,
-          responsabilidad: 'PENDIENTE_COMPROBACION',
-          responsabilidadNotas: 'Pendiente de inspección o análisis pericial.',
-          seguroEstado: 'PENDIENTE_COMPROBACION',
+          responsabilidad: 'PENDIENTE_DETERMINAR',
+          responsabilidadNotas: 'Pendiente de determinar quién debe asumir la actuación.',
+          seguroEstado: 'PENDIENTE_VERIFICACION',
           seguroComprobacionNotas: 'Cotejando con pólizas de seguro del inmueble.',
-          viaActuacion: 'PROFESIONAL',
+          viaActuacion: 'PROFESIONAL_DIRECTO',
           observaciones: observaciones.trim(),
           creadoPor: userName,
           actualizadoPor: userName,

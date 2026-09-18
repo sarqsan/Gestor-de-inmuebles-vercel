@@ -13,7 +13,9 @@ import {
   CobroPeriodo,
   EstadoCobroAlquiler,
   UsuarioApp,
+  Profesional,
 } from '../../types';
+import { MantenimientoInmueblePanel } from '../mantenimiento/MantenimientoInmueblePanel';
 import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
@@ -87,6 +89,7 @@ interface InmueblesSectionProps {
   inmuebles: Inmueble[];
   candidatos: Candidato[];
   propietarios?: Propietario[];
+  profesionales?: Profesional[];
   slots?: VisitSlot[];
   invitaciones?: InvitacionVisita[];
   contratos?: ContratoFormalizacion[];
@@ -112,6 +115,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   inmuebles,
   candidatos,
   propietarios = [],
+  profesionales = [],
   slots = [],
   invitaciones = [],
   contratos = [],
@@ -1623,6 +1627,18 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             </div>
           )}
         </div>
+
+        {/* FASE 4: Mantenimiento Preventivo, Garantías e Historial Técnico */}
+        {selectedInmueble && (
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
+            <MantenimientoInmueblePanel
+              inmueble={selectedInmueble}
+              propietarios={propietarios}
+              profesionales={profesionales}
+              currentUser={currentUser || undefined}
+            />
+          </div>
+        )}
 
         {/* Candidates Interested in this Property */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">

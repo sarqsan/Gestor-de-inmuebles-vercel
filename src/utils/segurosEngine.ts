@@ -20,19 +20,15 @@ export interface EvaluacionSeguroResultado {
 
 // Mapeo orientativo de categorías de incidencias a posibles coberturas típicas de seguros multirriesgo
 const MAPEO_COBERTURAS_CATEGORIA: Record<CategoriaIncidencia, string[]> = {
-  AGUA: [
-    'Daños por agua',
-    'Rotura de tuberías',
-    'Filtraciones',
-    'Localización de averías',
-    'Gastos de desatasco',
-    'Responsabilidad Civil por agua',
-  ],
   FONTANERIA: [
     'Daños por agua',
     'Rotura de tuberías e instalaciones',
     'Fontanería de urgencia',
     'Asistencia 24h',
+    'Filtraciones',
+    'Localización de averías',
+    'Gastos de desatasco',
+    'Responsabilidad Civil por agua',
   ],
   ELECTRICIDAD: [
     'Daños eléctricos',
@@ -40,12 +36,13 @@ const MAPEO_COBERTURAS_CATEGORIA: Record<CategoriaIncidencia, string[]> = {
     'Electricidad de urgencia 24h',
     'Averías en instalaciones fijas',
   ],
-  CLIMATIZACION: [
+  CALEFACCION_ACS: [
     'Avería de caldera o termo',
     'Instalaciones fijas de climatización',
     'Asistencia técnica de urgencia',
+    'Gas y calefacción',
   ],
-  ELECTRODOMESTICO: [
+  ELECTRODOMESTICOS: [
     'Avería de electrodomésticos (línea blanca)',
     'Daños eléctricos en electrodomésticos',
     'Rotura de vitrocerámica',
@@ -61,22 +58,29 @@ const MAPEO_COBERTURAS_CATEGORIA: Record<CategoriaIncidencia, string[]> = {
     'Fenómenos meteorológicos',
     'Daños a terceros (RC)',
   ],
-  ESTRUCTURAL: [
-    'Daños al continente',
-    'Fenómenos extraordinarios (Consorcio)',
-    'Hundimiento o colapso',
-    'Responsabilidad Civil inmobiliaria',
+  CARPINTERIA: [
+    'Puertas, ventanas y cerraduras',
+    'Daños en tarima o parqué por agua',
+    'Persianas exteriores',
   ],
-  COMUNIDAD: [
-    'Seguro de la Comunidad de Propietarios',
-    'Elementos comunes (bajantes, cubierta, fachadas)',
-    'Responsabilidad Civil comunitaria',
+  PINTURA: [
+    'Restauración estética por siniestro cubierto',
+    'Pintura por daños de agua',
   ],
-  PLAGAS: [
-    'Control de plagas (si está contratado servicio especial)',
-    'Desinfección / Desinsectación',
+  CRISTALERIA: [
+    'Rotura accidental de cristales, espejos y lunas',
+    'Mamparas de baño',
+    'Vidrios de ventanas climalit',
   ],
-  OTRO: [
+  PLAGAS_SANEAMIENTO: [
+    'Control de plagas y desinfección',
+    'Saneamiento higiénico',
+  ],
+  LIMPIEZA: [
+    'Limpieza y achique tras siniestro',
+    'Desescombro',
+  ],
+  OTROS: [
     'Responsabilidad Civil general',
     'Defensa jurídica',
     'Asistencia en el hogar',
@@ -94,9 +98,7 @@ export function evaluarCoberturaPolizas(
   // 1. Filtrar pólizas vigentes asociadas al inmueble o al propietario
   const polizasRelevantes = polizas.filter((p) => {
     if (p.estado !== 'VIGENTE') return false;
-    // Si la póliza está explícitamente ligada a este inmueble
     if (p.inmuebleId && p.inmuebleId === incidencia.inmuebleId) return true;
-    // Si es póliza de comunidad o global del propietario sin inmuebleId restrictivo
     if (p.propietarioId === incidencia.propietarioId && (!p.inmuebleId || p.inmuebleId === incidencia.inmuebleId)) {
       return true;
     }
@@ -105,7 +107,7 @@ export function evaluarCoberturaPolizas(
 
   if (polizasRelevantes.length === 0) {
     return {
-      estado: 'SIN_SEGURO_APLICABLE',
+      estado: 'NO_APLICA',
       polizasAplicables: [],
       coberturasIdentificadas: [],
       explicacion: 'No se han localizado pólizas de seguro vigentes registradas para este inmueble o propietario.',
@@ -128,7 +130,6 @@ export function evaluarCoberturaPolizas(
 
     for (const cob of cobPoliza) {
       const cobLower = cob.toLowerCase();
-      // Ver si coincide con palabras clave de la categoría o el texto de la incidencia
       const coincideConSugeridas = coberturasSugeridas.some((sug) =>
         cobLower.includes(sug.toLowerCase()) || sug.toLowerCase().includes(cobLower)
       );
@@ -160,7 +161,7 @@ export function evaluarCoberturaPolizas(
     );
 
     return {
-      estado: 'POSIBLEMENTE_CUBIERTA',
+      estado: 'POSIBLE_COBERTURA',
       polizasAplicables: polizasConCoincidencias.map((p) => p.poliza),
       polizaPrincipal: mejor.poliza,
       coberturasIdentificadas: todasCoberturas,
@@ -168,14 +169,13 @@ export function evaluarCoberturaPolizas(
       recomendacion: 'Contactar inmediatamente con la línea de asistencia de la aseguradora antes de iniciar reparaciones privadas.',
       telefonoAsistencia: mejor.poliza.contacto?.asistencia24h || mejor.poliza.contacto?.telefono,
       franquiciaAplicable: mejor.poliza.franquicia,
-      requierePeritaje: incidencia.categoria === 'AGUA' || incidencia.categoria === 'ESTRUCTURAL' || incidencia.categoria === 'HUMEDADES',
+      requierePeritaje: incidencia.categoria === 'FONTANERIA' || incidencia.categoria === 'HUMEDADES',
       advertencia: 'COMPROBACIÓN ORIENTATIVA: La cobertura real está supeditada al dictamen del perito de la aseguradora y al clausulado particular.',
     };
   }
 
-  // Si hay pólizas vigentes pero ninguna cobertura coincide de forma evidente
   return {
-    estado: 'COBERTURA_DUDOSA',
+    estado: 'PENDIENTE_VERIFICACION',
     polizasAplicables: polizasRelevantes,
     polizaPrincipal: polizasRelevantes[0],
     coberturasIdentificadas: [],

@@ -2449,30 +2449,151 @@ export interface PresupuestoProfesional {
   plazoDias?: number;
 }
 
-// FASE 4.6 — Plan de mantenimiento preventivo por inmueble.
+// =========================================================================
+// MANTENIMIENTO PREVENTIVO, GARANTÍAS Y SEGUIMIENTO POST-REPARACIÓN
+// =========================================================================
+
+export type TipoMantenimiento =
+  | 'PREVENTIVO'
+  | 'CORRECTIVO'
+  | 'GARANTIA'
+  | 'REVISION'
+  | 'LEGAL_OBLIGATORIO'
+  | 'OTRO';
+
 export type PeriodicidadMantenimiento =
+  | 'PUNTUAL'
+  | 'UNICA'
   | 'MENSUAL'
   | 'BIMESTRAL'
   | 'TRIMESTRAL'
   | 'SEMESTRAL'
   | 'ANUAL'
   | 'BIENAL'
-  | 'QUINQUENAL';
+  | 'QUINQUENAL'
+  | 'PERSONALIZADA';
+
+export type EstadoSeguimientoMantenimiento =
+  | 'ACTIVO'
+  | 'FUTURO'
+  | 'PROXIMO'
+  | 'VENCIDO'
+  | 'EN_CURSO'
+  | 'COMPLETADO'
+  | 'CANCELADO'
+  | 'INACTIVO';
+
+export interface ActuacionMantenimientoHistorial {
+  id: string;
+  fecha: string; // ISO
+  fechaRealizacion: string; // ISO date
+  ordenTrabajoId?: string;
+  profesionalId?: string;
+  profesionalNombre?: string;
+  costeReal?: number;
+  gastoId?: string;
+  observaciones?: string;
+  realizadoPor?: string;
+}
+
+export interface DocumentoMantenimiento {
+  id: string;
+  nombre: string;
+  url: string;
+  storagePath?: string;
+  fechaSubida: string;
+  tipo?: string;
+}
 
 export interface TareaMantenimiento {
-  id: string;
+  id: string; // "mant_{inmuebleId}_{ts}"
   inmuebleId: string;
+  inmuebleDireccion?: string;
   propietarioId: string; // Aislamiento
+  elementoInventarioId?: string; // Vinculación opcional a elemento de inventario
+  elementoNombre?: string;
   titulo: string;
   descripcion?: string;
+  tipo?: TipoMantenimiento;
   categoria?: CategoriaIncidencia;
   periodicidad: PeriodicidadMantenimiento;
-  ultimaFecha?: string; // ISO date de la última realización
+  diasIntervaloPersonalizado?: number;
+  
+  // Fechas deterministas
+  fechaInicio?: string; // ISO
+  ultimaFecha?: string; // ISO date de la última realización (compatibilidad legacy)
+  ultimaFechaRealizada?: string; // ISO date
   proximaFecha: string; // ISO date calculada
+  
+  // Responsable y asignación
+  responsableTipo?: 'PROPIETARIO' | 'INQUILINO' | 'COMUNIDAD' | 'EMPRESA_MANTENIMIENTO';
   profesionalPreferidoId?: string;
+  profesionalPreferidoNombre?: string;
+  
+  // Estado y seguimiento
   activa: boolean;
+  estadoSeguimiento?: EstadoSeguimientoMantenimiento;
+  costeEstimado?: number;
+  ultimoCosteReal?: number;
+  
+  // Relaciones con OT, Incidencia y Gasto
+  ultimaOrdenTrabajoId?: string;
+  ultimoPresupuestoId?: string;
+  ultimoGastoId?: string;
   ultimaIncidenciaId?: string;
+  garantiaId?: string;
+  
+  historialActuaciones?: ActuacionMantenimientoHistorial[];
+  documentos?: DocumentoMantenimiento[];
   notas?: string;
+  creadoPor?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PlanMantenimiento = TareaMantenimiento;
+
+export type EstadoGarantia = 'ACTIVA' | 'VENCIDA' | 'SIN_GARANTIA' | 'RECLAMADA';
+
+export interface GarantiaReparacion {
+  id: string; // "gar_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  propietarioId: string;
+  trabajoId: string; // OT de origen
+  incidenciaId?: string;
+  presupuestoId?: string;
+  gastoId?: string;
+  elementoInventarioId?: string;
+  elementoNombre?: string;
+  
+  titulo: string;
+  concepto: string;
+  categoria: CategoriaIncidencia;
+  
+  proveedor: string; // Profesional o empresa emisora
+  profesionalId?: string;
+  profesionalContacto?: string;
+  
+  fechaInicio: string; // ISO date (YYYY-MM-DD o ISO)
+  duracionMeses: number; // Ej: 6, 12, 24
+  fechaFin: string; // ISO date
+  
+  cobertura: string;
+  documentoUrl?: string;
+  documentoStoragePath?: string;
+  facturaRef?: string;
+  
+  estado: EstadoGarantia;
+  notas?: string;
+  
+  reincidencias?: {
+    incidenciaId: string;
+    fecha: string;
+    resultado: string;
+  }[];
+  
+  creadoPor?: string;
   createdAt: string;
   updatedAt: string;
 }

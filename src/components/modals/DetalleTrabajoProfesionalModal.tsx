@@ -52,8 +52,10 @@ import {
   saveTrabajoProfesionalFirestore,
   saveIncidenciaFirestore,
   saveGastoFirestore,
+  saveGarantiaReparacionFirestore,
   subscribeGastos,
 } from '../../lib/firebase';
+import { registrarGarantiaDesdeTrabajo } from '../../utils/mantenimientoEngine';
 
 interface DetalleTrabajoProfesionalModalProps {
   isOpen: boolean;
@@ -101,6 +103,8 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   const [dialogFinalizarOpen, setDialogFinalizarOpen] = useState(false);
   const [costeRealInput, setCosteRealInput] = useState<string>('');
   const [generarGastoAuto, setGenerarGastoAuto] = useState<boolean>(true);
+  const [generarGarantiaAuto, setGenerarGarantiaAuto] = useState<boolean>(true);
+  const [mesesGarantiaAuto, setMesesGarantiaAuto] = useState<number>(6);
   const [generandoGasto, setGenerandoGasto] = useState(false);
   const [errorGasto, setErrorGasto] = useState<string>('');
 
@@ -205,6 +209,23 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
           gastoGeneradoId = genResult.gasto.id;
           trabajoActualizado.gastoId = gastoGeneradoId;
           onGastoGenerado?.(genResult.gasto);
+        }
+      }
+
+      // Si se marcó registrar garantía post-reparación
+      if (generarGarantiaAuto && !esProfesional) {
+        try {
+          const resGar = registrarGarantiaDesdeTrabajo({
+            trabajo: trabajoActualizado,
+            duracionMeses: mesesGarantiaAuto,
+            cobertura: `Cobertura de mano de obra y piezas por ${mesesGarantiaAuto} meses tras orden ${trabajoActualizado.id}.`,
+            usuarioNombre,
+          });
+          if (resGar.garantia && !resGar.yaExiste) {
+            await saveGarantiaReparacionFirestore(resGar.garantia);
+          }
+        } catch (errGar) {
+          console.warn('Advertencia al registrar garantía automática:', errGar);
         }
       }
 
@@ -1283,20 +1304,37 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                 </div>
 
                 {!esProfesional && (
-                  <label className="flex items-start space-x-2 p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={generarGastoAuto}
-                      onChange={(e) => setGenerarGastoAuto(e.target.checked)}
-                      className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <div className="text-[11px] leading-tight">
-                      <span className="font-bold text-emerald-950 block">Registrar apunte en módulo de Gastos</span>
-                      <span className="text-emerald-800/80">
-                        Genera automáticamente un gasto de explotación (categoría Reparación/Mantenimiento) asociado a esta orden.
-                      </span>
-                    </div>
-                  </label>
+                  <>
+                    <label className="flex items-start space-x-2 p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={generarGastoAuto}
+                        onChange={(e) => setGenerarGastoAuto(e.target.checked)}
+                        className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div className="text-[11px] leading-tight">
+                        <span className="font-bold text-emerald-950 block">Registrar apunte en módulo de Gastos</span>
+                        <span className="text-emerald-800/80">
+                          Genera automáticamente un gasto de explotación (categoría Reparación/Mantenimiento) asociado a esta orden.
+                        </span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start space-x-2 p-3 bg-blue-50/60 border border-blue-200 rounded-xl cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={generarGarantiaAuto}
+                        onChange={(e) => setGenerarGarantiaAuto(e.target.checked)}
+                        className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="text-[11px] leading-tight">
+                        <span className="font-bold text-blue-950 block">Registrar Garantía Post-Reparación</span>
+                        <span className="text-blue-800/80">
+                          Protege el inmueble registrando una garantía de {mesesGarantiaAuto} meses con el profesional para detección de reincidencias.
+                        </span>
+                      </div>
+                    </label>
+                  </>
                 )}
 
                 {errorGasto && (

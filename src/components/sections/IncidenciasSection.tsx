@@ -11,9 +11,11 @@ import {
   EstadoIncidencia,
   PrioridadIncidencia,
   CategoriaIncidencia,
+  TareaMantenimiento,
+  GarantiaReparacion,
+  TrabajoProfesional,
 } from '../../types';
 import {
-  scopeFromUsuario,
   subscribeIncidencias,
   saveIncidenciaFirestore,
   deleteIncidenciaFirestore,
@@ -23,6 +25,9 @@ import {
   subscribeSiniestros,
   saveSiniestroFirestore,
   deleteSiniestroFirestore,
+  subscribeTareasMantenimiento,
+  subscribeGarantiasReparacion,
+  subscribeTrabajosProfesionales,
 } from '../../lib/firebase';
 import {
   ESTADOS_INCIDENCIA_LABELS,
@@ -37,6 +42,8 @@ import { IncidenciaModal } from '../modals/IncidenciaModal';
 import { PolizaModal } from '../modals/PolizaModal';
 import { SiniestroModal } from '../modals/SiniestroModal';
 import { DetalleIncidenciaModal } from '../modals/DetalleIncidenciaModal';
+import { MantenimientoPreventivoPanel } from '../mantenimiento/MantenimientoPreventivoPanel';
+import { GarantiasReparacionPanel } from '../mantenimiento/GarantiasReparacionPanel';
 import {
   AlertTriangle,
   ShieldCheck,
@@ -77,34 +84,16 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
   profesionales,
   currentUser,
 }) => {
-  /**
-   * Rol efectivo: ADMINISTRADOR gestiona todo; PROPIETARIO sólo su ámbito;
-   * PROFESIONAL únicamente las órdenes de trabajo asignadas (sin acceso a
-   * pólizas, siniestros ni información económica).
-   */
-  const perfil = currentUser?.tipoPerfil || 'ADMINISTRADOR';
-  const esAdmin = perfil === 'ADMINISTRADOR';
-  const esPropietario = perfil === 'PROPIETARIO';
-  const esProfesional = perfil === 'PROFESIONAL';
-  // Ámbito de consulta: la suscripción queda acotada en origen (nunca se
-  // descarga la colección completa para filtrarla en cliente).
-  const dataScope = scopeFromUsuario(currentUser);
-  // Clave estable del ámbito: evita reabrir las escuchas en cada render.
-  const scopeKey = `${perfil}:${currentUser?.propietarioId || ''}:${currentUser?.profesionalId || ''}:${currentUser?.id || ''}`;
-  // El profesional sólo ve el subpanel de órdenes de trabajo.
-  const puedeVerSeguros = !esProfesional;
-  const puedeEliminar = esAdmin;
-  // Las incidencias las abre el propietario (o el administrador en su nombre)
-  // y las ejecuta el profesional: mismo criterio que las Firestore Rules.
-  const puedeCrearIncidencia = esPropietario || esAdmin;
-
   const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
   const [polizas, setPolizas] = useState<PolizaSeguro[]>([]);
   const [siniestros, setSiniestros] = useState<Siniestro[]>([]);
+  const [tareas, setTareas] = useState<TareaMantenimiento[]>([]);
+  const [garantias, setGarantias] = useState<GarantiaReparacion[]>([]);
+  const [trabajos, setTrabajos] = useState<TrabajoProfesional[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Pestaña activa del módulo
-  const [subTab, setSubTab] = useState<'incidencias' | 'polizas' | 'siniestros'>('incidencias');
+  const [subTab, setSubTab] = useState<'incidencias' | 'preventivo' | 'garantias' | 'polizas' | 'siniestros'>('incidencias');
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -133,24 +122,37 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
     const unsubIncidencias = subscribeIncidencias((items) => {
       setIncidencias(items);
       setLoading(false);
-    }, dataScope);
+    });
 
     const unsubPolizas = subscribePolizas((items) => {
       setPolizas(items);
-    }, dataScope);
+    });
 
     const unsubSiniestros = subscribeSiniestros((items) => {
       setSiniestros(items);
-    }, dataScope);
+    });
+
+    const unsubTareas = subscribeTareasMantenimiento((items) => {
+      setTareas(items);
+    });
+
+    const unsubGarantias = subscribeGarantiasReparacion((items) => {
+      setGarantias(items);
+    });
+
+    const unsubTrabajos = subscribeTrabajosProfesionales((items) => {
+      setTrabajos(items);
+    });
 
     return () => {
       unsubIncidencias();
       unsubPolizas();
       unsubSiniestros();
+      unsubTareas();
+      unsubGarantias();
+      unsubTrabajos();
     };
-    // Se reabren las escuchas si cambia el rol/ámbito del usuario, no en cada render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeKey]);
+  }, []);
 
   // Mantener actualizado el modal de detalle si la incidencia cambia en Firestore
   useEffect(() => {
@@ -235,31 +237,27 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          {puedeVerSeguros && (
-            <button
-              onClick={() => {
-                setPolizaToEdit(null);
-                setIsPolizaModalOpen(true);
-              }}
-              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5"
-            >
-              <ShieldCheck className="w-4 h-4 text-blue-600" />
-              <span>+ Nueva Póliza</span>
-            </button>
-          )}
+          <button
+            onClick={() => {
+              setPolizaToEdit(null);
+              setIsPolizaModalOpen(true);
+            }}
+            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5"
+          >
+            <ShieldCheck className="w-4 h-4 text-blue-600" />
+            <span>+ Nueva Póliza</span>
+          </button>
 
-          {puedeCrearIncidencia && (
-            <button
-              onClick={() => {
-                setIncidenciaToEdit(null);
-                setIsIncidenciaModalOpen(true);
-              }}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>+ Nueva Incidencia</span>
-            </button>
-          )}
+          <button
+            onClick={() => {
+              setIncidenciaToEdit(null);
+              setIsIncidenciaModalOpen(true);
+            }}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Nueva Incidencia</span>
+          </button>
         </div>
       </div>
 
@@ -321,7 +319,7 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
       </div>
 
       {/* Selector de Sub-Pestañas */}
-      <div className="flex items-center gap-2 border-b border-slate-200 bg-white p-2 rounded-xl shadow-xs">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-2 rounded-xl shadow-xs">
         <button
           onClick={() => setSubTab('incidencias')}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
@@ -334,7 +332,30 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
           <span>Incidencias ({incidencias.length})</span>
         </button>
 
-        {puedeVerSeguros && (
+        <button
+          onClick={() => setSubTab('preventivo')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+            subTab === 'preventivo'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Wrench className="w-4 h-4" />
+          <span>Mantenimiento Preventivo ({tareas.length})</span>
+        </button>
+
+        <button
+          onClick={() => setSubTab('garantias')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+            subTab === 'garantias'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          <span>Garantías de Reparación ({garantias.length})</span>
+        </button>
+
         <button
           onClick={() => setSubTab('polizas')}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
@@ -344,11 +365,9 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
           }`}
         >
           <ShieldCheck className="w-4 h-4" />
-          <span>Pólizas de Seguro ({polizas.length})</span>
+          <span>Pólizas ({polizas.length})</span>
         </button>
-        )}
 
-        {puedeVerSeguros && (
         <button
           onClick={() => setSubTab('siniestros')}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
@@ -358,9 +377,8 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
           }`}
         >
           <FileCheck className="w-4 h-4" />
-          <span>Siniestros Tramitados ({siniestros.length})</span>
+          <span>Siniestros ({siniestros.length})</span>
         </button>
-        )}
       </div>
 
       {/* SUBTAB 1: INCIDENCIAS */}
@@ -599,7 +617,6 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
                           <Edit className="w-3.5 h-3.5" />
                         </button>
 
-                        {puedeEliminar && (
                         <button
                           onClick={() => handleDeleteIncidencia(inc.id)}
                           className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -607,7 +624,6 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -616,6 +632,29 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* SUBTAB PREVENTIVO: MANTENIMIENTO PREVENTIVO */}
+      {subTab === 'preventivo' && (
+        <MantenimientoPreventivoPanel
+          tareas={tareas}
+          inmuebles={inmuebles}
+          propietarios={propietarios}
+          profesionales={profesionales}
+          trabajos={trabajos}
+          currentUser={currentUser}
+        />
+      )}
+
+      {/* SUBTAB GARANTIAS: GARANTÍAS DE REPARACIÓN */}
+      {subTab === 'garantias' && (
+        <GarantiasReparacionPanel
+          garantias={garantias}
+          inmuebles={inmuebles}
+          propietarios={propietarios}
+          profesionales={profesionales}
+          currentUser={currentUser}
+        />
       )}
 
       {/* SUBTAB 2: PÓLIZAS DE SEGURO */}
@@ -760,15 +799,13 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
                         <span>Editar</span>
                       </button>
 
-                      {puedeEliminar && (
-                        <button
-                          onClick={() => handleDeletePoliza(pol.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Eliminar póliza"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleDeletePoliza(pol.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Eliminar póliza"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -857,7 +894,6 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
                           <span>Gestionar</span>
                         </button>
 
-                        {puedeEliminar && (
                         <button
                           onClick={() => handleDeleteSiniestro(sin.id)}
                           className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -865,7 +901,6 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                        )}
                       </div>
                     </div>
                   </div>

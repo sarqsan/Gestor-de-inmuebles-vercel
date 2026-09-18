@@ -92,21 +92,8 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
 
       const valoracionId = `val_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-      // La valoración hereda el ámbito del trabajo valorado (aislamiento por
-      // propietario en Firestore).
-      const propietarioIdValoracion =
-        trabajo.propietarioId ||
-        (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId : '') ||
-        '';
-      if (!propietarioIdValoracion) {
-        setErrorMsg('No se pudo determinar el propietario del trabajo valorado.');
-        setGuardando(false);
-        return;
-      }
-
       const valoracion: ValoracionProfesionalTrabajo = {
         id: valoracionId,
-        propietarioId: propietarioIdValoracion,
         trabajoId: trabajo.id,
         profesionalId: trabajo.profesionalId,
         inmuebleId: trabajo.inmuebleId,
@@ -119,8 +106,8 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
         resultado,
         comentario: comentario.trim() || undefined,
         fecha: new Date().toISOString(),
-        usuarioId: currentUser?.id || 'usuario',
-        usuarioNombre,
+        evaluador: usuarioNombre,
+        createdAt: new Date().toISOString(),
       };
 
       // 1. Save evaluation in Firestore

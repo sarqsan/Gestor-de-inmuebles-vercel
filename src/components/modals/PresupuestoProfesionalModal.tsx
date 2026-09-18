@@ -209,6 +209,8 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
         importeTotal,
         documentoUrl: documentoUrl || undefined,
         estado,
+        creadoPor: currentUser?.nombre || presupuestoParaEditar?.creadoPor || 'Sistema',
+        actualizadoPor: currentUser?.nombre || 'Sistema',
         createdAt: presupuestoParaEditar?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

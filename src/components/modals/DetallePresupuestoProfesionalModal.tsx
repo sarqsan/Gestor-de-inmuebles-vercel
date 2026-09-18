@@ -188,10 +188,10 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
               </button>
             )}
 
-            {presupuesto.estado !== 'EN_NEGOCIACION' && (
+            {presupuesto.estado !== 'EN_REVISION' && (
               <button
                 disabled={isUpdating}
-                onClick={() => handleCambiarEstado('EN_NEGOCIACION')}
+                onClick={() => handleCambiarEstado('EN_REVISION' as EstadoPresupuestoProfesional)}
                 className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-semibold rounded-lg transition-colors"
               >
                 Solicitar Ajuste / Revisión

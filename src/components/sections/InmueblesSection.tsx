@@ -278,7 +278,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [payImporte, setPayImporte] = useState<number>(0);
   const [payFecha, setPayFecha] = useState<string>(new Date().toISOString().split('T')[0]);
   const [payMetodo, setPayMetodo] = useState<'transferencia' | 'domiciliacion' | 'bizum' | 'efectivo' | 'otro'>('transferencia');
-  const [payEstado, setPayEstado] = useState<EstadoCobroAlquiler>('RECIBIDO');
+  const [payEstado, setPayEstado] = useState<EstadoCobroAlquiler>('PAGADO');
   const [payObservaciones, setPayObservaciones] = useState<string>('');
   const [payReferencia, setPayReferencia] = useState<string>('');
   const [payFile, setPayFile] = useState<File | null>(null);
@@ -289,7 +289,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setPayImporte(cobro.importeRecibido > 0 ? cobro.importeRecibido : cobro.importePrevisto);
     setPayFecha(cobro.fechaPago || new Date().toISOString().split('T')[0]);
     setPayMetodo(cobro.metodoPago || 'transferencia');
-    setPayEstado(cobro.importeRecibido > 0 ? cobro.estado : 'RECIBIDO');
+    setPayEstado(cobro.importeRecibido > 0 ? cobro.estado : 'PAGADO');
     setPayObservaciones(cobro.observaciones || '');
     setPayReferencia(cobro.referenciaBancaria || '');
     setPayFile(null);
@@ -1477,12 +1477,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           <span
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              cobro.estado === 'RECIBIDO' || cobro.estado === 'VERIFICADO'
+                              cobro.estado === 'PAGADO' || cobro.estado === 'RECIBIDO' || cobro.estado === 'VERIFICADO'
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : cobro.estado === 'RETRASADO'
-                                ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                : cobro.estado === 'INCIDENCIA'
+                                : cobro.estado === 'PAGADO_PARCIAL'
                                 ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : cobro.estado === 'IMPAGADO' || cobro.estado === 'RETRASADO'
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                : cobro.estado === 'ANULADO'
+                                ? 'bg-slate-100 text-slate-500 border border-slate-200 line-through'
                                 : 'bg-slate-100 text-slate-700 border border-slate-200'
                             }`}
                           >
@@ -3283,11 +3285,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     onChange={(e) => setPayEstado(e.target.value as EstadoCobroAlquiler)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900"
                   >
-                    <option value="RECIBIDO">RECIBIDO</option>
-                    <option value="VERIFICADO">VERIFICADO</option>
+                    <option value="PAGADO">PAGADO</option>
+                    <option value="PAGADO_PARCIAL">PAGADO_PARCIAL</option>
                     <option value="PENDIENTE">PENDIENTE</option>
-                    <option value="RETRASADO">RETRASADO</option>
-                    <option value="INCIDENCIA">INCIDENCIA</option>
+                    <option value="IMPAGADO">IMPAGADO</option>
+                    <option value="ANULADO">ANULADO</option>
+                    <option value="RECIBIDO">RECIBIDO (compat)</option>
+                    <option value="VERIFICADO">VERIFICADO (compat)</option>
                   </select>
                 </div>
               </div>

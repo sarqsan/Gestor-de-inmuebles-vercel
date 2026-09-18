@@ -11,6 +11,9 @@ import {
   onSnapshot,
   writeBatch,
   runTransaction,
+  query,
+  where,
+  Query,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -48,6 +51,7 @@ import {
   PresupuestoProfesional,
   ValoracionProfesionalTrabajo,
   DocumentoProfesional,
+  Gasto,
 } from '../types';
 import {
   INITIAL_CANDIDATOS,
@@ -101,6 +105,14 @@ export const SINIESTROS_COL = collection(db, 'siniestros');
 export const TRABAJOS_PROFESIONALES_COL = collection(db, 'trabajos_profesionales');
 export const PRESUPUESTOS_PROFESIONALES_COL = collection(db, 'presupuestos_profesionales');
 export const VALORACIONES_PROFESIONALES_COL = collection(db, 'valoraciones_profesionales');
+
+// Colección Bloque 6: Gastos Patrimoniales (circuito oficial único)
+export const GASTOS_COL = collection(db, 'gastos');
+
+// Colección Bloque 7: Cobros de Alquiler (ARENA D - circuito oficial único)
+// Nota: cobros principales residen en contrato.registroCobros, pero colección opcional para justificantes trazables
+// y futura extensión. Seguridad: propietario solo autorizados, profesional denegado, admin global.
+export const COBROS_COL = collection(db, 'cobros');
 
 /**
  * Seeds initial mock data into Firestore if database has never been initialized,
@@ -1549,7 +1561,8 @@ export async function deleteIncidenciaFirestore(incidenciaId: string) {
 }
 
 /**
- * Escucha en tiempo real de Pólizas de Seguro
+ * Escucha en tiempo real de Pólizas de Seguro (ADMIN - descarga completa con Rules que permiten admin)
+ * Para PROPIETARIO usar subscribePolizasSeguras que filtra en servidor por inmuebleIds.
  */
 export function subscribePolizas(callback: (polizas: PolizaSeguro[]) => void) {
   return onSnapshot(
@@ -1566,6 +1579,148 @@ export function subscribePolizas(callback: (polizas: PolizaSeguro[]) => void) {
       console.error('Firestore polizas snapshot error:', err);
     }
   );
+}
+
+/**
+ * Escucha segura por lista de inmuebleIds (PROPIETARIO) - evita descarga global.
+ * Usa query where inmuebleId in [chunk] respetando límite 10 de Firestore.
+ * Si la lista excede 10, se hacen múltiples listeners y se mergean.
+ * Retorna función unsubscribe combinada.
+ * Si inmuebleIds vacío, callback([]).
+ */
+export function subscribePolizasByInmuebleIds(
+  inmuebleIds: string[],
+  callback: (polizas: PolizaSeguro[]) => void
+): () => void {
+  if (!inmuebleIds || inmuebleIds.length === 0) {
+    callback([]);
+    return () => {};
+  }
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < inmuebleIds.length; i += 10) {
+    chunks.push(inmuebleIds.slice(i, i + 10));
+  }
+
+  const merged = new Map<string, PolizaSeguro>();
+  const unsubs: (() => void)[] = [];
+  let pendingChunks = chunks.length;
+
+  const notify = () => {
+    const items = Array.from(merged.values()).sort((a, b) =>
+      (a.inmuebleDireccion || '').localeCompare(b.inmuebleDireccion || '')
+    );
+    callback(items);
+  };
+
+  chunks.forEach((chunk) => {
+    const q = query(POLIZAS_COL, where('inmuebleId', 'in', chunk));
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        // Actualizar mapa: eliminar los que ya no están en este chunk snapshot? Mejor limpiar y reinsertar chunk
+        // Para simplicidad: borrar todas las del chunk previo y reinsertar
+        // Primero borrar todas las que pertenecen a este chunk
+        const idsInChunkSnap = new Set<string>();
+        snapshot.forEach((docSnap) => {
+          const pol = { id: docSnap.id, ...docSnap.data() } as PolizaSeguro;
+          merged.set(pol.id, pol);
+          idsInChunkSnap.add(pol.id);
+        });
+        // Eliminar del merged aquellas que pertenecen a este chunk pero ya no están en snapshot
+        // Para eso necesitamos saber qué polizas eran de este chunk; aproximamos por inmuebleId in chunk
+        for (const [id, pol] of merged.entries()) {
+          if (chunk.includes(pol.inmuebleId) && !idsInChunkSnap.has(id)) {
+            // Verificar si realmente está en otro chunk snapshot? Si no, borrar
+            // Solo borrar si su inmuebleId está en este chunk
+            if (chunk.includes(pol.inmuebleId)) {
+              // Check si snapshot no contiene - significa borrada
+              // Pero si hay overlap de chunks no hay, así que borrar
+              const stillExistsInOtherChunk = chunks.some(
+                (c) => c !== chunk && c.includes(pol.inmuebleId) && merged.has(id)
+              );
+              if (!stillExistsInOtherChunk) {
+                // No hacemos borrado agresivo para evitar race; solo si no está en idsInChunkSnap
+                // Mejor: recorrer snapshot docs para saber qué sigue existiendo; si una poliza de este chunk no está en snapshot, eliminarla
+                merged.delete(id);
+                // Re-insert si era de otro chunk? handled below
+              }
+            }
+          }
+        }
+        // Más simple: reconstruir desde cero con snapshot de todos los chunks sería complejo.
+        // Estrategia: si snapshot vacío para este chunk, eliminar del merged todas las polizas cuyo inmuebleId está en este chunk
+        if (snapshot.empty) {
+          for (const [id, pol] of Array.from(merged.entries())) {
+            if (chunk.includes(pol.inmuebleId)) {
+              merged.delete(id);
+            }
+          }
+        }
+        notify();
+      },
+      (err) => {
+        console.error('Firestore polizas by inmuebleIds snapshot error:', err);
+      }
+    );
+    unsubs.push(unsub);
+  });
+
+  return () => {
+    unsubs.forEach((u) => u());
+  };
+}
+
+/**
+ * Escucha segura según UsuarioApp: ADMIN -> global, PROPIETARIO -> por inmuebleIds, PROFESIONAL -> vacío (sin acceso)
+ * Cambio mínimo para respetar Firestore Rules y no descargar todo + filter en cliente.
+ */
+export function subscribePolizasSeguras(
+  currentUser: { tipoPerfil?: string; inmuebleIds?: string[]; propietarioId?: string } | undefined,
+  callback: (polizas: PolizaSeguro[]) => void
+): () => void {
+  if (!currentUser) {
+    return subscribePolizas(callback);
+  }
+  if (currentUser.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (currentUser.tipoPerfil === 'PROPIETARIO' && currentUser.inmuebleIds && currentUser.inmuebleIds.length > 0) {
+    return subscribePolizasByInmuebleIds(currentUser.inmuebleIds, callback);
+  }
+  // Si propietario tiene propietarioId pero no inmuebleIds, fallback a global filtrado cliente (temporal)
+  // Idealmente Rules permitirían where propietarioId == ...
+  // Intentamos filtrar por propietarioId si existe
+  if (currentUser.tipoPerfil === 'PROPIETARIO' && (currentUser as any).propietarioId) {
+    try {
+      const q = query(POLIZAS_COL, where('propietarioId', '==', (currentUser as any).propietarioId));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const items: PolizaSeguro[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...docSnap.data() } as PolizaSeguro);
+          });
+          items.sort((a, b) => (a.inmuebleDireccion || '').localeCompare(b.inmuebleDireccion || ''));
+          callback(items);
+        },
+        (err) => {
+          console.error('Firestore polizas by propietarioId snapshot error:', err);
+          // Fallback a global con filtro cliente si Rules lo bloquea
+          const unsub = subscribePolizas((all) => {
+            const filtered = all.filter((p) => p.propietarioId === (currentUser as any).propietarioId);
+            callback(filtered);
+          });
+          // No podemos retornar dos unsubs aquí, pero intentamos
+        }
+      );
+    } catch (e) {
+      console.warn('subscribePolizasSeguras fallback global', e);
+      return subscribePolizas(callback);
+    }
+  }
+  return subscribePolizas(callback);
 }
 
 /**
@@ -1902,6 +2057,237 @@ export async function uploadTrabajoAdjuntoStorage(
       reader.onerror = () => resolve('https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80');
       reader.readAsDataURL(file);
     });
+  }
+}
+
+// =========================================================================
+// BLOQUE 6: GASTOS PATRIMONIALES - CIRCUITO OFICIAL ÚNICO
+// Reutiliza pattern storagePath/downloadURL y chunk 10 where in (seguros)
+// Seguridad: no descarga global para propietario, solo inmuebles autorizados
+// =========================================================================
+
+export function subscribeGastos(callback: (gastos: Gasto[]) => void) {
+  return onSnapshot(
+    GASTOS_COL,
+    (snapshot) => {
+      const items: Gasto[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Gasto);
+      });
+      items.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore gastos snapshot error:', err);
+    }
+  );
+}
+
+/**
+ * Escucha segura por lista de inmuebleIds (PROPIETARIO) - evita descarga global.
+ * Reutiliza patrón chunk 10 de polizas.
+ */
+export function subscribeGastosByInmuebleIds(
+  inmuebleIds: string[],
+  callback: (gastos: Gasto[]) => void
+): () => void {
+  if (!inmuebleIds || inmuebleIds.length === 0) {
+    callback([]);
+    return () => {};
+  }
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < inmuebleIds.length; i += 10) {
+    chunks.push(inmuebleIds.slice(i, i + 10));
+  }
+
+  const merged = new Map<string, Gasto>();
+  const unsubs: (() => void)[] = [];
+
+  const notify = () => {
+    const items = Array.from(merged.values()).sort(
+      (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
+    );
+    callback(items);
+  };
+
+  chunks.forEach((chunk) => {
+    const q = query(GASTOS_COL, where('inmuebleId', 'in', chunk));
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const idsInChunkSnap = new Set<string>();
+        snapshot.forEach((docSnap) => {
+          const gasto = { id: docSnap.id, ...docSnap.data() } as Gasto;
+          merged.set(gasto.id, gasto);
+          idsInChunkSnap.add(gasto.id);
+        });
+        // Limpiar eliminados de este chunk
+        if (snapshot.empty) {
+          for (const [id, g] of Array.from(merged.entries())) {
+            if (chunk.includes(g.inmuebleId)) {
+              merged.delete(id);
+            }
+          }
+        } else {
+          // Eliminar los que pertenecían a este chunk pero ya no están
+          for (const [id, g] of Array.from(merged.entries())) {
+            if (chunk.includes(g.inmuebleId) && !idsInChunkSnap.has(id)) {
+              // Verificar si sigue en snapshot de este chunk
+              let found = false;
+              snapshot.forEach((ds) => {
+                if (ds.id === id) found = true;
+              });
+              if (!found) {
+                // Solo borrar si realmente no está en snapshot actual de este chunk
+                // Para evitar borrar por race, check si inmuebleId está en chunk y no en idsInChunkSnap
+                merged.delete(id);
+              }
+            }
+          }
+        }
+        notify();
+      },
+      (err) => {
+        console.error('Firestore gastos by inmuebleIds snapshot error:', err);
+      }
+    );
+    unsubs.push(unsub);
+  });
+
+  return () => {
+    unsubs.forEach((u) => u());
+  };
+}
+
+/**
+ * Escucha segura según UsuarioApp: ADMIN -> global, PROPIETARIO -> por inmuebleIds, PROFESIONAL -> vacío
+ */
+export function subscribeGastosSeguros(
+  currentUser: { tipoPerfil?: string; inmuebleIds?: string[]; propietarioId?: string } | undefined,
+  callback: (gastos: Gasto[]) => void
+): () => void {
+  if (!currentUser) {
+    return subscribeGastos(callback);
+  }
+  if (currentUser.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (currentUser.tipoPerfil === 'PROPIETARIO' && currentUser.inmuebleIds && currentUser.inmuebleIds.length > 0) {
+    return subscribeGastosByInmuebleIds(currentUser.inmuebleIds, callback);
+  }
+  if (currentUser.tipoPerfil === 'PROPIETARIO' && (currentUser as any).propietarioId) {
+    try {
+      const q = query(GASTOS_COL, where('propietarioId', '==', (currentUser as any).propietarioId));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const items: Gasto[] = [];
+          snapshot.forEach((docSnap) => {
+            items.push({ id: docSnap.id, ...docSnap.data() } as Gasto);
+          });
+          items.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+          callback(items);
+        },
+        (err) => {
+          console.error('Firestore gastos by propietarioId snapshot error:', err);
+        }
+      );
+    } catch (e) {
+      console.warn('subscribeGastosSeguros fallback global', e);
+      return subscribeGastos(callback);
+    }
+  }
+  return subscribeGastos(callback);
+}
+
+export async function saveGastoFirestore(gasto: Gasto): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...gasto,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'gastos', gasto.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving gasto to Firestore:', err);
+    throw err;
+  }
+}
+
+export async function deleteGastoFirestore(gastoId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'gastos', gastoId));
+  } catch (err) {
+    console.error('Error deleting gasto from Firestore:', err);
+    throw err;
+  }
+}
+
+/**
+ * Sube documento justificativo de gasto a Firebase Storage
+ * Reutiliza storagePath/downloadURL pattern existente (Poliza, Cobro, Incidencia)
+ */
+export async function uploadGastoDocumentoStorage(
+  gastoId: string,
+  file: File | Blob,
+  nombreArchivo: string
+): Promise<{ downloadUrl: string; storagePath: string }> {
+  const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `gastos/${gastoId}/${Date.now()}_${sanitizedName}`;
+  const fileRef = ref(storage, storagePath);
+
+  try {
+    const mimeType = file.type || 'application/pdf';
+    await uploadBytes(fileRef, file, { contentType: mimeType });
+    const downloadUrl = await getDownloadURL(fileRef);
+    return { downloadUrl, storagePath };
+  } catch (err) {
+    console.warn('Firebase Storage upload failed for gasto document, using fallback:', err);
+    const downloadUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+    return { downloadUrl, storagePath };
+  }
+}
+
+// =========================================================================
+// BLOQUE 7: COBROS DE ALQUILER - CIRCUITO OFICIAL ÚNICO ARENA D
+// Recibo mensual → Estado → Registro Pago → Justificante → Vencimiento → Impago → Alerta → Histórico
+// Reutiliza storagePath/downloadURL, aislamiento propietario (chunk 10), profesional denegado
+// =========================================================================
+
+/**
+ * Sube justificante de cobro a Firebase Storage
+ * Reutiliza infraestructura existente, guarda storagePath/downloadURL/nombre/fecha/tipo
+ * No público, solo propietario autorizado
+ */
+export async function uploadCobroJustificanteStorage(
+  cobroId: string,
+  file: File | Blob,
+  nombreArchivo: string
+): Promise<{ downloadUrl: string; storagePath: string }> {
+  const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `cobros/${cobroId}/${Date.now()}_${sanitizedName}`;
+  const fileRef = ref(storage, storagePath);
+
+  try {
+    const mimeType = file.type || 'application/pdf';
+    await uploadBytes(fileRef, file, { contentType: mimeType });
+    const downloadUrl = await getDownloadURL(fileRef);
+    return { downloadUrl, storagePath };
+  } catch (err) {
+    console.warn('Firebase Storage upload failed for cobro justificante, using fallback:', err);
+    const downloadUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+    return { downloadUrl, storagePath };
   }
 }
 

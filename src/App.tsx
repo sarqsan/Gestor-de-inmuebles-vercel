@@ -132,6 +132,8 @@ import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
+import { GastosSection } from './components/sections/GastosSection';
+import { FiscalidadSection } from './components/sections/FiscalidadSection';
 import { IncidenciasSection } from './components/sections/IncidenciasSection';
 import { ProfesionalesSection } from './components/sections/ProfesionalesSection';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
@@ -334,18 +336,33 @@ export default function App() {
     };
   }, []);
 
-  // 2. Route Guard Estricto de Navegación por Perfil
+  // 2. Route Guard Estricto de Navegación por Perfil - Incluye fiscal, cobros, gastos, incidencias, profesionales
   useEffect(() => {
     if (!currentUser) return;
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'configuracion'];
+      const allowedSections: SectionType[] = [
+        'propietarios',
+        'inmuebles',
+        'formalizacion',
+        'cobros',
+        'gastos',
+        'fiscal',
+        'profesionales',
+        'incidencias',
+        'configuracion',
+      ];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
     } else if (perfil === 'PROFESIONAL') {
-      const allowedSections: SectionType[] = ['administracion', 'inmuebles', 'configuracion'];
+      const allowedSections: SectionType[] = [
+        'administracion',
+        'inmuebles',
+        'incidencias',
+        'configuracion',
+      ];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('administracion');
       }
@@ -2493,6 +2510,27 @@ export default function App() {
               propietarios={scopedPropietarios}
               currentUser={currentUser}
               onSaveContrato={handleSaveContrato}
+              onNavigateToInmueble={(inmId) => {
+                setActiveSection('inmuebles');
+              }}
+            />
+          )}
+
+          {activeSection === 'gastos' && (
+            <GastosSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+              modo={currentUser?.tipoPerfil === 'PROPIETARIO' ? 'PROPIETARIO' : 'ADMIN'}
+            />
+          )}
+
+          {activeSection === 'fiscal' && (
+            <FiscalidadSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={[] /* GastosSection usa subscription interna, fiscal usa derivación; si Gastos disponibles desde Firestore se pueden pasar aquí. Para demo, usamos contratos con gastos vacíos y se puede ampliar */}
+              currentUser={currentUser}
               onNavigateToInmueble={(inmId) => {
                 setActiveSection('inmuebles');
               }}

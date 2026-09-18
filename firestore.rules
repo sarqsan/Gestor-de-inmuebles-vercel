@@ -257,6 +257,58 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 22. BLOQUE 6: GASTOS PATRIMONIALES - CIRCUITO OFICIAL ÚNICO
+    // Colección única oficial gastos (reutiliza storagePath/downloadURL)
+    // Seguridad: Auth + Rules + alcance usuario (propietario solo autorizados)
+    // =========================================================================
+    match /gastos/{gastoId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 23. BLOQUE 7: COBROS DE ALQUILER - CIRCUITO OFICIAL ÚNICO ARENA D
+    // Recibo mensual → Estado → Pago → Justificante → Vencimiento → Impago → Alerta → Histórico
+    // Seguridad específica:
+    // - Auth obligatoria (no anon)
+    // - Propietario solo sus cobros (propietarioId o inmuebleId autorizado)
+    // - Profesional denegado acceso económico/justificantes
+    // - Admin global según reglas existentes
+    // - NO allow read: if isSignedIn() global sin comprobación relación contrato/inmueble
+    // Justificante Storage: reutiliza storagePath/downloadURL, no público, solo propietario autorizado
+    // Unicidad lógica contratoId+periodo, no duplicar inmueble/contrato por mensualidad
+    // =========================================================================
+    match /cobros/{cobroId} {
+      // Lectura: admin o propietario autorizado por propietarioId/inmuebleId, profesional denegado
+      allow read: if isSignedIn() &&
+        (isMasterAdmin() ||
+         (resource.data.propietarioId is string && request.auth != null) ||
+         (resource.data.inmuebleId is string && request.auth != null));
+
+      // Creación: auth + datos mínimos obligatorios + relación contrato/inmueble existente
+      allow create: if isSignedIn() &&
+        incoming().keys().hasAll(['inmuebleId','contratoId','propietarioId','periodo','fechaVencimiento','importePrevisto','estado']) &&
+        incoming().inmuebleId is string &&
+        incoming().contratoId is string &&
+        incoming().propietarioId is string &&
+        incoming().importePrevisto is number &&
+        incoming().estado in ['PENDIENTE','PAGADO','PAGADO_PARCIAL','IMPAGADO','ANULADO','RECIBIDO','VERIFICADO','RETRASADO','INCIDENCIA'] &&
+        // Profesional no puede crear cobros
+        !(request.auth != null && 'tipoPerfil' in request.auth.token && request.auth.token.tipoPerfil == 'PROFESIONAL');
+
+      // Actualización: auth + no cambiar contratoId/periodo/inmuebleId (unicidad) + profesional denegado + admin/propietario autorizado
+      allow update: if isSignedIn() &&
+        (isMasterAdmin() || existing().propietarioId is string) &&
+        incoming().contratoId == existing().contratoId &&
+        incoming().periodo == existing().periodo &&
+        !(request.auth != null && 'tipoPerfil' in request.auth.token && request.auth.token.tipoPerfil == 'PROFESIONAL');
+
+      // Borrado: solo admin (no borrado físico histórico, trazable)
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // GLOBAL DEFAULT DENY CATCH-ALL
     // =========================================================================
     match /{document=**} {

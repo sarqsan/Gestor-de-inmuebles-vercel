@@ -20,6 +20,8 @@ import {
   LogOut,
   Receipt,
   AlertTriangle,
+  TrendingDown,
+  FileCheck2,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -77,6 +79,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
+      { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
+      { id: 'fiscal', label: 'Fiscalidad Anual', icon: FileCheck2 },
       { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
@@ -94,6 +98,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
+      { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
+      { id: 'fiscal', label: 'Fiscalidad Anual', icon: FileCheck2 },
       { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
       { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },

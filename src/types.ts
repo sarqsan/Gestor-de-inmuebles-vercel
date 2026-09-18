@@ -3,6 +3,8 @@ export type SectionType =
   | 'inmuebles'
   | 'propietarios'
   | 'cobros'
+  | 'gastos'
+  | 'fiscal'
   | 'incidencias'
   | 'profesionales'
   | 'preseleccionados'
@@ -844,10 +846,15 @@ export interface ContratoFormalizacion {
 
 // ==========================================
 // GESTIÓN DE COBROS DE ALQUILER & JUSTIFICANTES
+// ARENA D - Circuito oficial: RECIBO MENSUAL → ESTADO → PAGO → JUSTIFICANTE → VENCIMIENTO → IMPAGO → ALERTA → HISTÓRICO
 // ==========================================
 
 export type EstadoCobroAlquiler =
   | 'PENDIENTE'
+  | 'PAGADO'
+  | 'PAGADO_PARCIAL'
+  | 'IMPAGADO'
+  | 'ANULADO'
   | 'RECIBIDO'
   | 'VERIFICADO'
   | 'RETRASADO'
@@ -857,6 +864,7 @@ export interface JustificanteCobro {
   id: string;
   nombreArchivo: string;
   url?: string;
+  downloadURL?: string; // Reutiliza pattern Storage existente (storagePath/downloadURL)
   storagePath?: string;
   tipoMime?: string;
   tamanoBytes?: number;
@@ -1585,6 +1593,7 @@ export type TipoPolizaSeguro =
   | 'IMPAGO_ALQUILER'
   | 'RESPONSABILIDAD_CIVIL'
   | 'COMUNIDAD'
+  | 'ELECTRODOMESTICOS'
   | 'OTRO';
 
 export type EstadoPolizaSeguro =
@@ -1593,6 +1602,25 @@ export type EstadoPolizaSeguro =
   | 'CANCELADA'
   | 'EN_TRAMITE';
 
+export type EstadoRenovacionPoliza =
+  | 'VIGENTE'
+  | 'PENDIENTE'
+  | 'PENDIENTE_RENOVACION'
+  | 'RENOVACION_SOLICITADA'
+  | 'RENOVACION_RECIBIDA'
+  | 'RENOVADA'
+  | 'NO_RENOVADA'
+  | 'SUSTITUIDA'
+  | 'CANCELADA';
+
+export type TipoDocumentoPoliza =
+  | 'POLIZA_ORIGINAL'
+  | 'POLIZA_RENOVACION'
+  | 'CARTA_RENOVACION'
+  | 'CONDICIONES_PARTICULARES'
+  | 'RECIBO_PRIMA'
+  | 'OTRO';
+
 export interface DocumentoPoliza {
   id: string;
   nombre: string;
@@ -1600,6 +1628,111 @@ export interface DocumentoPoliza {
   storagePath?: string;
   tipo?: string;
   fechaSubida: string;
+}
+
+export interface DocumentoRenovacionPoliza {
+  id: string;
+  nombre: string;
+  tipo: TipoDocumentoPoliza;
+  url: string;
+  storagePath?: string;
+  fechaRecepcion: string; // YYYY-MM-DD fecha en que se recibió físicamente
+  fechaSubida: string; // ISO
+  subidoPor?: string;
+  subidoPorId?: string;
+  tamanoBytes?: number;
+  mimeType?: string;
+  observaciones?: string;
+}
+
+export interface HistorialPolizaItem {
+  id: string;
+  fecha: string; // ISO
+  usuario: string; // nombre visible
+  usuarioId?: string;
+  accion:
+    | 'CREACION'
+    | 'COMPROBACION_RENOVACION'
+    | 'RENOVACION_SOLICITADA'
+    | 'RENOVACION_RECIBIDA'
+    | 'RENOVACION_CONFIRMADA'
+    | 'MODIFICACION'
+    | 'SUSTITUCION'
+    | 'CANCELACION'
+    | 'NO_RENOVACION'
+    | 'DOCUMENTO_ADJUNTADO'
+    | 'COMPARACION_REALIZADA'
+    | 'ESTADO_MODIFICADO'
+    | 'ALERTA_GENERADA';
+  detalle?: string;
+  resultado?: string;
+  observaciones?: string;
+  estadoAnterior?: string;
+  estadoNuevo?: string;
+  datosAnteriores?: Partial<PolizaSeguro>;
+  datosNuevos?: Partial<PolizaSeguro>;
+}
+
+export interface DatosExtraidosRenovacion {
+  aseguradora?: string;
+  numeroPoliza?: string;
+  fechaInicio?: string;
+  fechaVencimiento?: string;
+  primaAnual?: number;
+  coberturas?: string[];
+  franquicia?: number;
+  limites?: string;
+  cambiosRelevantes?: string[];
+  confianza: 'ALTA' | 'MEDIA' | 'BAJA';
+  fechaExtraccion: string;
+  confirmadoUsuario: boolean;
+  confirmadoPor?: string;
+  fechaConfirmacion?: string;
+  observaciones?: string;
+}
+
+export interface ComparacionPoliza {
+  id: string;
+  polizaAnteriorId: string;
+  polizaNuevaId: string;
+  primaAnterior?: number;
+  primaNueva?: number;
+  diferenciaAbsoluta?: number;
+  variacionPorcentual?: number;
+  fechaInicioAnterior?: string;
+  fechaInicioNueva?: string;
+  fechaVencimientoAnterior?: string;
+  fechaVencimientoNueva?: string;
+  coberturasAnadidas: string[];
+  coberturasEliminadas: string[];
+  coberturasComunes: string[];
+  franquiciaAnterior?: number;
+  franquiciaNueva?: number;
+  diferenciaFranquicia?: number;
+  aumentoPrima: boolean;
+  reduccionCobertura: boolean;
+  aumentoFranquicia: boolean;
+  modificacionLimites: boolean;
+  observaciones?: string;
+  fechaComparacion: string;
+  generadoPor?: string;
+  generadoPorId?: string;
+}
+
+export interface AlertaRenovacionPoliza {
+  polizaId: string;
+  polizaNumero: string;
+  aseguradora: string;
+  inmuebleId?: string;
+  inmuebleDireccion?: string;
+  propietarioId: string;
+  fechaVencimiento: string;
+  diasRestantes: number;
+  nivelProximidad: 60 | 45 | 30 | 15 | 0 | -1; // 0 hoy, -1 vencida
+  estadoRenovacion: EstadoRenovacionPoliza;
+  tipoPoliza: TipoPolizaSeguro;
+  primaAnual?: number;
+  ultimaComprobacion?: string;
 }
 
 export interface PolizaSeguro {
@@ -1625,6 +1758,27 @@ export interface PolizaSeguro {
   observaciones?: string;
   createdAt: string;
   updatedAt: string;
+
+  // --- CIRCUITO DE RENOVACIÓN ARENA D ---
+  estadoRenovacion?: EstadoRenovacionPoliza;
+  fechaUltimaComprobacion?: string; // ISO
+  usuarioUltimaComprobacion?: string;
+  usuarioUltimaComprobacionId?: string;
+  resultadoUltimaComprobacion?: string;
+  observacionesRenovacion?: string;
+  polizaAnteriorId?: string;
+  polizaSiguienteId?: string;
+  historial?: HistorialPolizaItem[];
+  documentosRenovacion?: DocumentoRenovacionPoliza[];
+  datosExtraidosRenovacion?: DatosExtraidosRenovacion;
+  comparacionUltima?: ComparacionPoliza;
+  comparacionesHistorial?: ComparacionPoliza[];
+  fechaRecepcionRenovacion?: string; // YYYY-MM-DD
+  primaAnterior?: number;
+  alertaGenerada?: boolean;
+  fechaAlertaGenerada?: string;
+  nivelAlertaActual?: 60 | 45 | 30 | 15 | 0 | -1;
+  diasRestantes?: number; // calculado, opcional persistido para queries
 }
 
 // -------------------------------------------------------------------------
@@ -1845,5 +1999,124 @@ export interface PresupuestoProfesional {
   updatedAt: string;
 }
 
+// =========================================================================
+// BLOQUE 6: GASTOS PATRIMONIALES - CIRCUITO GASTO → INMUEBLE → CATEGORÍA → DOCUMENTO → HISTÓRICO
+// ARENA D - Segunda orden
+// =========================================================================
 
+export type CategoriaGasto =
+  | 'MANTENIMIENTO'
+  | 'REPARACION'
+  | 'SUMINISTROS'
+  | 'SEGUROS'
+  | 'IMPUESTOS_TASAS'
+  | 'COMUNIDAD'
+  | 'ELECTRODOMESTICOS'
+  | 'MOBILIARIO'
+  | 'REFORMAS'
+  | 'LIMPIEZA'
+  | 'GESTION'
+  | 'OTRO';
 
+export type EstadoGasto =
+  | 'PENDIENTE'
+  | 'PAGADO'
+  | 'ANULADO'
+  | 'EN_REVISION';
+
+export type TipoDocumentoGasto =
+  | 'FACTURA'
+  | 'TICKET'
+  | 'RECIBO'
+  | 'JUSTIFICANTE'
+  | 'OTRO';
+
+export interface DocumentoGasto {
+  id: string;
+  nombre: string;
+  tipo: TipoDocumentoGasto;
+  url: string;
+  storagePath?: string;
+  fechaSubida: string;
+  subidoPor?: string;
+  subidoPorId?: string;
+  tamanoBytes?: number;
+  mimeType?: string;
+}
+
+export interface HistorialGastoItem {
+  id: string;
+  fecha: string;
+  usuario: string;
+  usuarioId?: string;
+  accion:
+    | 'CREACION'
+    | 'MODIFICACION_IMPORTE'
+    | 'MODIFICACION_CATEGORIA'
+    | 'MODIFICACION_INMUEBLE'
+    | 'MODIFICACION_CONCEPTO'
+    | 'DOCUMENTO_ADJUNTADO'
+    | 'DOCUMENTO_ELIMINADO'
+    | 'DOCUMENTO_SUSTITUIDO'
+    | 'SUSTITUCION_DOCUMENTO'
+    | 'ESTADO_MODIFICADO'
+    | 'MODIFICACION_ESTADO'
+    | 'ANULACION'
+    | 'MODIFICACION_GENERAL';
+  detalle?: string;
+  valorAnterior?: string;
+  valorNuevo?: string;
+  observaciones?: string;
+}
+
+export interface Gasto {
+  id: string;
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  propietarioId?: string;
+  fecha: string;
+  concepto: string;
+  categoria: CategoriaGasto;
+  importe: number;
+  proveedor?: string;
+  estado: EstadoGasto;
+  documento?: DocumentoGasto;
+  documentos?: DocumentoGasto[];
+  observaciones?: string;
+  historial?: HistorialGastoItem[];
+  creadoPor?: string;
+  creadoPorId?: string;
+  actualizadoPor?: string;
+  actualizadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+  contratoId?: string;
+  incidenciaId?: string;
+  trabajoId?: string;
+  // Fiscalidad anual - reutiliza campo deducibilidad si existe
+  esDeducible?: boolean; // true=deducible, false=no deducible, undefined=inferir por categoría
+  tipoDeducible?: 'DEDUCIBLE' | 'NO_DEDUCIBLE';
+  ejercicioFiscal?: number; // Año fiscal al que pertenece (derivado de fecha, pero puede forzarse)
+}
+
+export const CATEGORIA_GASTO_LABELS: Record<CategoriaGasto, { label: string; color: string; badgeClass: string }> = {
+  MANTENIMIENTO: { label: 'Mantenimiento', color: 'blue', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
+  REPARACION: { label: 'Reparación', color: 'amber', badgeClass: 'bg-amber-50 text-amber-800 border-amber-200' },
+  SUMINISTROS: { label: 'Suministros', color: 'cyan', badgeClass: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+  SEGUROS: { label: 'Seguros', color: 'indigo', badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  IMPUESTOS_TASAS: { label: 'Impuestos/Tasas', color: 'rose', badgeClass: 'bg-rose-50 text-rose-700 border-rose-200' },
+  COMUNIDAD: { label: 'Comunidad', color: 'emerald', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  ELECTRODOMESTICOS: { label: 'Electrodomésticos', color: 'purple', badgeClass: 'bg-purple-50 text-purple-700 border-purple-200' },
+  MOBILIARIO: { label: 'Mobiliario', color: 'orange', badgeClass: 'bg-orange-50 text-orange-700 border-orange-200' },
+  REFORMAS: { label: 'Reformas', color: 'slate', badgeClass: 'bg-slate-100 text-slate-700 border-slate-200' },
+  LIMPIEZA: { label: 'Limpieza', color: 'teal', badgeClass: 'bg-teal-50 text-teal-700 border-teal-200' },
+  GESTION: { label: 'Gestión', color: 'pink', badgeClass: 'bg-pink-50 text-pink-700 border-pink-200' },
+  OTRO: { label: 'Otro', color: 'gray', badgeClass: 'bg-gray-100 text-gray-700 border-gray-200' },
+};
+
+export const ESTADO_GASTO_LABELS: Record<EstadoGasto, { label: string; badgeClass: string }> = {
+  PENDIENTE: { label: 'Pendiente', badgeClass: 'bg-amber-50 text-amber-800 border-amber-200' },
+  PAGADO: { label: 'Pagado', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  ANULADO: { label: 'Anulado', badgeClass: 'bg-rose-50 text-rose-700 border-rose-200' },
+  EN_REVISION: { label: 'En Revisión', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
+};

@@ -106,8 +106,8 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
         resultado,
         comentario: comentario.trim() || undefined,
         fecha: new Date().toISOString(),
-        evaluador: usuarioNombre,
-        createdAt: new Date().toISOString(),
+        usuarioId: currentUser?.id || 'user_default',
+        usuarioNombre,
       };
 
       // 1. Save evaluation in Firestore

@@ -107,9 +107,9 @@ export function coincideUbicacion(profesional: Profesional, inmueble?: Inmueble)
   if (!inmueble) return true;
   if (!profesional.zonasServicio || profesional.zonasServicio.length === 0) return true;
 
-  const inmProvincia = (inmueble.datosFiscales?.provincia || inmueble.ciudad || '').toLowerCase().trim();
+  const inmProvincia = ((inmueble.datosFiscales as any)?.provincia || (inmueble as any).provincia || inmueble.ciudad || '').toLowerCase().trim();
   const inmMunicipio = (inmueble.ciudad || '').toLowerCase().trim();
-  const inmCP = (inmueble.datosFiscales?.codigoPostal || '').trim();
+  const inmCP = (inmueble.datosFiscales?.codigoPostal || (inmueble as any).codigoPostal || '').trim();
 
   return profesional.zonasServicio.some((zona) => {
     const zonaProvincia = (zona.provincia || '').toLowerCase().trim();
@@ -354,6 +354,24 @@ export function calcularMetricasGeneralesTrabajos(
     profesionalesActivos,
     totalProfesionales: profesionales.length,
   };
+}
+
+/**
+ * Calcula totales de presupuesto (compatibilidad para build tras refactor Arena A)
+ * Esta función es mínima para no romper circuito presupuestos profesionales (Arena A) y permitir build.
+ * Documentado como dependencia inevitable de build.
+ */
+export function calcularTotalesPresupuesto(
+  partidas: { cantidad: number; precioUnitario: number; importe?: number }[] = [],
+  porcentajeIva: number = 21
+): { base: number; iva: number; total: number; importeBase: number; importeTotal: number } {
+  const base = partidas.reduce((sum, p) => {
+    const imp = p.importe !== undefined ? p.importe : (p.cantidad || 0) * (p.precioUnitario || 0);
+    return sum + imp;
+  }, 0);
+  const iva = Math.round((base * porcentajeIva) / 100 * 100) / 100;
+  const total = Math.round((base + iva) * 100) / 100;
+  return { base, iva, total, importeBase: base, importeTotal: total };
 }
 
 /**

@@ -16,6 +16,7 @@ import {
   Building,
   ArrowRight,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -25,6 +26,8 @@ import {
   Especialidad,
   Propietario,
 } from '../../types';
+import { PolizasSegurosSection } from './PolizasSegurosSection';
+import { GastosSection } from './GastosSection';
 
 interface PropietarioPortalSectionProps {
   currentUser: UsuarioApp;
@@ -50,7 +53,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   onNavigateToInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'viviendas' | 'profesionales' | 'contratos' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
+    'viviendas' | 'profesionales' | 'contratos' | 'seguros' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
   >('viviendas');
 
   const [profesionalTab, setProfesionalTab] = useState<'catalogo' | 'privados'>('catalogo');
@@ -149,7 +152,8 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
               count: misProfesionalesPrivados.length,
             },
             { id: 'contratos', label: 'Mis Contratos', icon: FileCheck, count: misContratos.length },
-            { id: 'gastos', label: 'Gastos', icon: TrendingDown, badge: 'Próximamente' },
+            { id: 'seguros', label: 'Mis Seguros', icon: ShieldCheck },
+            { id: 'gastos', label: 'Gastos', icon: TrendingDown },
             { id: 'cobros', label: 'Cobros', icon: DollarSign, badge: 'Próximamente' },
             { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, badge: 'Próximamente' },
             { id: 'perfil', label: 'Mi Perfil', icon: User },
@@ -544,20 +548,24 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             </div>
           )}
 
-          {/* SUBTAB 4: GASTOS (PRÓXIMAMENTE) */}
+          {/* SUBTAB 4: SEGUROS - CIRCUITO RENOVACIÓN ARENA D */}
+          {activeSubTab === 'seguros' && (
+            <PolizasSegurosSection
+              inmuebles={misViviendas}
+              propietarios={propietarios}
+              currentUser={currentUser}
+              modo="PROPIETARIO"
+            />
+          )}
+
+          {/* SUBTAB 5: GASTOS - CIRCUITO OFICIAL ARENA D */}
           {activeSubTab === 'gastos' && (
-            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
-              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto">
-                <TrendingDown className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-bold text-slate-900">Módulo de Gastos (Próximamente)</h3>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Este módulo te permitirá llevar el control exacto de facturas de suministros, recibos de IBI, cuotas de comunidad de propietarios, seguros de hogar y deducciones fiscales de tus viviendas.
-              </p>
-              <div className="inline-block px-3 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-semibold">
-                Fase 2 de Desarrollo
-              </div>
-            </div>
+            <GastosSection
+              inmuebles={misViviendas}
+              propietarios={propietarios}
+              currentUser={currentUser}
+              modo="PROPIETARIO"
+            />
           )}
 
           {/* SUBTAB 5: COBROS (PRÓXIMAMENTE) */}

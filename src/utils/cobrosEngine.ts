@@ -60,19 +60,117 @@ export interface ResumenFiscalInmuebleAnual {
   justificantesCount: number;
 }
 
+export interface AlertaImpago {
+  cobroId: string;
+  contratoId: string;
+  inmuebleId: string;
+  inmuebleDireccion: string;
+  propietarioId: string;
+  inquilinoNombre?: string;
+  periodo: string; // YYYY-MM
+  nombreMes: string;
+  fechaVencimiento: string;
+  importePrevisto: number;
+  importeRecibido: number;
+  importePendiente: number;
+  diasRetraso: number;
+  estado: EstadoCobroAlquiler;
+}
+
+/**
+ * Calcula días de retraso desde vencimiento hasta hoy (o fecha dada)
+ */
+export function calcularDiasRetraso(fechaVencimiento: string, fechaReferencia?: string): number {
+  const venc = new Date(fechaVencimiento);
+  if (isNaN(venc.getTime())) return 0;
+  const ref = fechaReferencia ? new Date(fechaReferencia) : new Date();
+  const diffMs = ref.getTime() - venc.getTime();
+  const diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return diffDias > 0 ? diffDias : 0;
+}
+
+/**
+ * Determina si un recibo está vencido
+ */
+export function estaVencido(fechaVencimiento: string, fechaReferencia?: string): boolean {
+  const venc = new Date(fechaVencimiento);
+  if (isNaN(venc.getTime())) return false;
+  const ref = fechaReferencia ? new Date(fechaReferencia) : new Date();
+  return ref > venc;
+}
+
+/**
+ * Determina el estado de cobro según importe y vencimiento
+ * - Si importe recibido == previsto → PAGADO
+ * - Si importe recibido >0 < previsto → PAGADO_PARCIAL
+ * - Si importe 0 y vencido → IMPAGADO
+ * - Si no vencido y 0 → PENDIENTE
+ */
+export function determinarEstadoCobro(
+  importePrevisto: number,
+  importeRecibido: number,
+  fechaVencimiento: string,
+  estadoActual?: EstadoCobroAlquiler
+): EstadoCobroAlquiler {
+  if (estadoActual === 'ANULADO') return 'ANULADO';
+  const previsto = Number(importePrevisto) || 0;
+  const recibido = Number(importeRecibido) || 0;
+
+  if (recibido >= previsto && previsto > 0) {
+    return 'PAGADO';
+  }
+  if (recibido > 0 && recibido < previsto) {
+    return 'PAGADO_PARCIAL';
+  }
+  // recibido ==0
+  if (estaVencido(fechaVencimiento)) {
+    return 'IMPAGADO';
+  }
+  return 'PENDIENTE';
+}
+
+/**
+ * Compatibilidad: mapea estados nuevos a antiguos para UI existente
+ */
+export function normalizarEstadoCobro(estado: EstadoCobroAlquiler): EstadoCobroAlquiler {
+  // Mantener nuevos como principales, pero mapear antiguos a nuevos para lógica
+  switch (estado) {
+    case 'RECIBIDO':
+    case 'VERIFICADO':
+      return 'PAGADO';
+    case 'RETRASADO':
+      return 'IMPAGADO';
+    case 'INCIDENCIA':
+      return 'PAGADO_PARCIAL';
+    default:
+      return estado;
+  }
+}
+
 /**
  * Genera o complementa los periodos mensuales de cobro para un contrato.
  * REGLA ESTRICTA: Los periodos que ya existen NO se recalculan ni sobrescriben.
  * Conservan su importe previsto original, pagos registrados, justificantes y trazabilidad.
+ * Unicidad lógica: contratoId + periodo (periodoMesAnio)
+ * NO duplica por modalidad habitaciones.
  */
 export function generarPeriodosParaContrato(
   contrato: ContratoFormalizacion,
   limiteMesesFuturos: number = 2
 ): CobroPeriodo[] {
+  // NO implementar cobros por habitación
+  if (contrato.modalidadAlquiler === 'habitaciones') {
+    // Retornar existentes sin generar nuevos por habitación
+    return contrato.registroCobros ? [...contrato.registroCobros] : [];
+  }
+
   const existingCobros = contrato.registroCobros || [];
   const existingMap = new Map<string, CobroPeriodo>();
   for (const c of existingCobros) {
+    // Unicidad por periodoMesAnio
     existingMap.set(c.periodoMesAnio, c);
+    // También por id para seguridad
+    existingMap.set(c.id, c);
   }
 
   // Determinar fecha de inicio
@@ -121,19 +219,40 @@ export function generarPeriodosParaContrato(
 
   while (y < endYear || (y === endYear && m <= endMonth)) {
     const periodoKey = `${y}-${String(m).padStart(2, '0')}`;
-    const existing = existingMap.get(periodoKey);
+    const idKey = `cobro_${contrato.id}_${y}_${String(m).padStart(2, '0')}`;
+    const existingByPeriodo = existingMap.get(periodoKey);
+    const existingById = existingMap.get(idKey);
+    const existing = existingByPeriodo || existingById;
 
     if (existing) {
-      // Si ya existía, conservar intacto
-      result.push(existing);
+      // Si ya existía, conservar intacto (no modificar retroactivamente)
+      // Pero actualizar estado si está vencido y sigue pendiente (coherencia)
+      const estadoActualizado = determinarEstadoCobro(
+        existing.importePrevisto,
+        existing.importeRecibido,
+        existing.fechaVencimiento,
+        existing.estado
+      );
+      // Solo auto-actualizar PENDIENTE→IMPAGADO, no tocar PAGADO/PARCIAL/ANULADO
+      if (
+        existing.estado !== estadoActualizado &&
+        (existing.estado === 'PENDIENTE' || existing.estado === 'RETRASADO') &&
+        (estadoActualizado === 'IMPAGADO' || estadoActualizado === 'PENDIENTE')
+      ) {
+        result.push({ ...existing, estado: estadoActualizado });
+      } else {
+        result.push(existing);
+      }
     } else {
       // Crear nuevo periodo con los importes contratados
       const fechaVencimiento = `${y}-${String(m).padStart(2, '0')}-${String(diaLimite).padStart(2, '0')}`;
       const vencimientoDate = new Date(`${fechaVencimiento}T23:59:59`);
       const yaVencido = vencimientoDate < hoy;
 
+      const estadoInicial = yaVencido ? 'IMPAGADO' : 'PENDIENTE';
+
       const nuevoPeriodo: CobroPeriodo = {
-        id: `cobro_${contrato.id}_${y}_${String(m).padStart(2, '0')}`,
+        id: idKey,
         inmuebleId: contrato.inmuebleId,
         contratoId: contrato.id,
         inquilinoId: contrato.candidatoId,
@@ -156,7 +275,7 @@ export function generarPeriodosParaContrato(
         importeRecibido: 0,
         fechaVencimiento,
 
-        estado: yaVencido ? 'RETRASADO' : 'PENDIENTE',
+        estado: estadoInicial,
 
         historialCambios: [
           {
@@ -179,8 +298,16 @@ export function generarPeriodosParaContrato(
     }
   }
 
-  // Ordenar cronológicamente ascendente
-  return result.sort((a, b) => {
+  // Ordenar cronológicamente ascendente y asegurar unicidad final
+  const uniqueMap = new Map<string, CobroPeriodo>();
+  for (const p of result) {
+    const key = `${p.contratoId}_${p.periodoMesAnio}`;
+    if (!uniqueMap.has(key)) {
+      uniqueMap.set(key, p);
+    }
+  }
+
+  return Array.from(uniqueMap.values()).sort((a, b) => {
     if (a.anio !== b.anio) return a.anio - b.anio;
     return a.mes - b.mes;
   });
@@ -242,6 +369,10 @@ export function obtenerTodosCobros(contratos: ContratoFormalizacion[]): CobroPer
 
 /**
  * Registra o actualiza el pago de un periodo mensual con trazabilidad inmutable.
+ * Lógica de estados según orden:
+ * - importe recibido = previsto → PAGADO
+ * - importe recibido >0 < previsto → PAGADO_PARCIAL
+ * - importe 0 y vencido → IMPAGADO
  */
 export function registrarPagoPeriodo(
   contrato: ContratoFormalizacion,
@@ -262,9 +393,16 @@ export function registrarPagoPeriodo(
   if (idx === -1) return contrato;
 
   const actual = periodos[idx];
-  const estadoNuevo: EstadoCobroAlquiler = datosPago.estado || (
-    datosPago.importeRecibido >= actual.importePrevisto ? 'RECIBIDO' : 'INCIDENCIA'
+
+  // No alterar importe contractual original, solo registrar recibido
+  const estadoCalculado = determinarEstadoCobro(
+    actual.importePrevisto,
+    datosPago.importeRecibido,
+    actual.fechaVencimiento,
+    actual.estado
   );
+
+  const estadoNuevo: EstadoCobroAlquiler = datosPago.estado || estadoCalculado;
 
   const cambioItem: HistorialCobroItem = {
     id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -276,7 +414,7 @@ export function registrarPagoPeriodo(
     estadoNuevo,
     importeAnterior: actual.importeRecibido,
     importeNuevo: datosPago.importeRecibido,
-    detalles: datosPago.observaciones || `Cobro de ${datosPago.importeRecibido} € registrado el ${datosPago.fechaPago}`,
+    detalles: datosPago.observaciones || `Cobro de ${datosPago.importeRecibido} € registrado el ${datosPago.fechaPago} - Estado: ${estadoNuevo}`,
   };
 
   const periodoActualizado: CobroPeriodo = {
@@ -306,7 +444,7 @@ export function registrarPagoPeriodo(
 }
 
 /**
- * Registra una incidencia en un periodo de cobro.
+ * Registra una incidencia en un periodo de cobro (compatibilidad)
  */
 export function registrarIncidenciaPeriodo(
   contrato: ContratoFormalizacion,
@@ -326,13 +464,13 @@ export function registrarIncidenciaPeriodo(
     usuarioNombre: usuario?.nombre || usuario?.email || 'Administrador',
     accion: 'Incidencia de cobro reportada',
     estadoAnterior: actual.estado,
-    estadoNuevo: 'INCIDENCIA',
+    estadoNuevo: 'PAGADO_PARCIAL',
     detalles: motivoIncidencia,
   };
 
   const periodoActualizado: CobroPeriodo = {
     ...actual,
-    estado: 'INCIDENCIA',
+    estado: 'PAGADO_PARCIAL',
     motivoIncidencia,
     ultimaModificacion: new Date().toISOString(),
     historialCambios: [cambioItem, ...actual.historialCambios],
@@ -349,6 +487,74 @@ export function registrarIncidenciaPeriodo(
 }
 
 /**
+ * Detección de impagos: recibos pendientes después de vencimiento
+ */
+export function detectarImpagos(cobros: CobroPeriodo[]): CobroPeriodo[] {
+  return cobros.filter((c) => {
+    if (c.estado === 'ANULADO') return false;
+    if (c.estado === 'PAGADO') return false;
+    if (c.estado === 'PAGADO_PARCIAL') {
+      // Si parcial pero vencido con pendiente, sigue siendo alerta
+      return estaVencido(c.fechaVencimiento) && c.importeRecibido < c.importePrevisto;
+    }
+    return c.estado === 'IMPAGADO' || (c.estado === 'PENDIENTE' && estaVencido(c.fechaVencimiento));
+  });
+}
+
+export function generarAlertasImpago(cobros: CobroPeriodo[]): AlertaImpago[] {
+  const impagos = detectarImpagos(cobros);
+  return impagos.map((c) => {
+    const pendiente = (c.importePrevisto || 0) - (c.importeRecibido || 0);
+    return {
+      cobroId: c.id,
+      contratoId: c.contratoId,
+      inmuebleId: c.inmuebleId,
+      inmuebleDireccion: c.inmuebleDireccion || c.inmuebleId,
+      propietarioId: c.propietarioId,
+      inquilinoNombre: c.inquilinoNombre,
+      periodo: c.periodoMesAnio,
+      nombreMes: c.nombreMes,
+      fechaVencimiento: c.fechaVencimiento,
+      importePrevisto: c.importePrevisto,
+      importeRecibido: c.importeRecibido,
+      importePendiente: pendiente,
+      diasRetraso: calcularDiasRetraso(c.fechaVencimiento),
+      estado: c.estado,
+    };
+  }).sort((a, b) => b.diasRetraso - a.diasRetraso);
+}
+
+/**
+ * Seguridad cobros: aislamiento por propietario
+ */
+export function canAccessCobro(cobro: CobroPeriodo, currentUser?: UsuarioApp | null): boolean {
+  if (!currentUser) return true; // legacy admin
+  const perfil = currentUser.tipoPerfil || 'ADMINISTRADOR';
+  if (perfil === 'ADMINISTRADOR') return true;
+  if (perfil === 'PROPIETARIO') {
+    if (currentUser.propietarioId && cobro.propietarioId && cobro.propietarioId === currentUser.propietarioId) return true;
+    if (currentUser.inmuebleIds && cobro.inmuebleId && currentUser.inmuebleIds.includes(cobro.inmuebleId)) return true;
+    return false;
+  }
+  if (perfil === 'PROFESIONAL') {
+    return false;
+  }
+  return false;
+}
+
+export function filtrarCobrosPorUsuario(cobros: CobroPeriodo[], currentUser?: UsuarioApp | null): CobroPeriodo[] {
+  if (!currentUser) return cobros;
+  if (currentUser.tipoPerfil === 'ADMINISTRADOR') return cobros;
+  return cobros.filter((c) => canAccessCobro(c, currentUser));
+}
+
+export function filtrarCobrosPorContratoIds(cobros: CobroPeriodo[], contratoIds: string[]): CobroPeriodo[] {
+  if (!contratoIds || contratoIds.length === 0) return [];
+  const set = new Set(contratoIds);
+  return cobros.filter((c) => set.has(c.contratoId));
+}
+
+/**
  * Calcula los totales agregados de un conjunto de periodos de cobro.
  */
 export function calcularResumenCobros(cobros: CobroPeriodo[]) {
@@ -357,28 +563,54 @@ export function calcularResumenCobros(cobros: CobroPeriodo[]) {
   let totalPendiente = 0;
   let totalRetrasado = 0;
   let totalIncidencias = 0;
+  let totalImpagado = 0;
+  let totalParcial = 0;
+  let totalAnulado = 0;
   let countCobrados = 0;
   let countPendientes = 0;
   let countRetrasados = 0;
   let countIncidencias = 0;
+  let countImpagados = 0;
+  let countParcial = 0;
+  let countAnulados = 0;
   let countConJustificante = 0;
 
   for (const c of cobros) {
     totalPrevisto += c.importePrevisto || 0;
     totalRecibido += c.importeRecibido || 0;
 
-    if (c.estado === 'RECIBIDO' || c.estado === 'VERIFICADO') {
-      countCobrados++;
-    } else if (c.estado === 'RETRASADO') {
-      countRetrasados++;
-      totalRetrasado += (c.importePrevisto || 0) - (c.importeRecibido || 0);
-    } else if (c.estado === 'INCIDENCIA') {
-      countIncidencias++;
-      totalIncidencias += (c.importePrevisto || 0) - (c.importeRecibido || 0);
-    } else {
-      // PENDIENTE
-      countPendientes++;
-      totalPendiente += (c.importePrevisto || 0) - (c.importeRecibido || 0);
+    const pendiente = (c.importePrevisto || 0) - (c.importeRecibido || 0);
+
+    switch (c.estado) {
+      case 'PAGADO':
+      case 'RECIBIDO':
+      case 'VERIFICADO':
+        countCobrados++;
+        break;
+      case 'PAGADO_PARCIAL':
+        countParcial++;
+        totalParcial += pendiente;
+        break;
+      case 'IMPAGADO':
+        countImpagados++;
+        totalImpagado += pendiente;
+        break;
+      case 'ANULADO':
+        countAnulados++;
+        totalAnulado += c.importePrevisto || 0;
+        break;
+      case 'RETRASADO':
+        countRetrasados++;
+        totalRetrasado += pendiente;
+        break;
+      case 'INCIDENCIA':
+        countIncidencias++;
+        totalIncidencias += pendiente;
+        break;
+      default: // PENDIENTE
+        countPendientes++;
+        totalPendiente += pendiente;
+        break;
     }
 
     if (c.justificante) {
@@ -394,10 +626,16 @@ export function calcularResumenCobros(cobros: CobroPeriodo[]) {
     totalPendiente,
     totalRetrasado,
     totalIncidencias,
+    totalImpagado,
+    totalParcial,
+    totalAnulado,
     countCobrados,
     countPendientes,
     countRetrasados,
     countIncidencias,
+    countImpagados,
+    countParcial,
+    countAnulados,
     countConJustificante,
     porcentajeCobrado,
     totalPeriodos: cobros.length,
@@ -406,8 +644,6 @@ export function calcularResumenCobros(cobros: CobroPeriodo[]) {
 
 /**
  * Prepara la estructura para el futuro resumen fiscal anual de un inmueble.
- * Agrupa todos los inquilinos y contratos que han habitado el inmueble en el año fiscal,
- * garantizando que si cambiaron inquilinos o rentas, se conserve cada tramo y el total cobrado.
  */
 export function generarResumenFiscalInmueble(
   inmuebleId: string,
@@ -433,7 +669,6 @@ export function generarResumenFiscalInmueble(
       ? contrato.registroCobros
       : generarPeriodosParaContrato(contrato);
 
-    // Filtrar periodos del año seleccionado
     const periodosAnio = periodos.filter((p) => p.anio === anio);
     if (periodosAnio.length === 0) continue;
 
@@ -443,13 +678,13 @@ export function generarResumenFiscalInmueble(
       totalAnualCobrado += p.importeRecibido || 0;
       subtotalCobrado += p.importeRecibido || 0;
 
-      if (p.estado === 'RECIBIDO' || p.estado === 'VERIFICADO') {
+      if (p.estado === 'PAGADO' || p.estado === 'RECIBIDO' || p.estado === 'VERIFICADO') {
         mesesCobradosCount++;
-      } else if (p.estado === 'RETRASADO') {
+      } else if (p.estado === 'IMPAGADO' || p.estado === 'RETRASADO') {
         totalAnualPendiente += (p.importePrevisto || 0) - (p.importeRecibido || 0);
-      } else if (p.estado === 'INCIDENCIA') {
+      } else if (p.estado === 'INCIDENCIA' || p.estado === 'PAGADO_PARCIAL') {
         totalAnualIncidencias += (p.importePrevisto || 0) - (p.importeRecibido || 0);
-      } else {
+      } else if (p.estado !== 'ANULADO') {
         totalAnualPendiente += (p.importePrevisto || 0) - (p.importeRecibido || 0);
       }
 

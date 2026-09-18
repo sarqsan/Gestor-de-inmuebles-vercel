@@ -191,8 +191,8 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
     ? valoraciones.filter((v) => propietarioInmueblesIds.includes(v.inmuebleId))
     : valoraciones;
 
-  // General Metrics
-  const metricasGenerales = calcularMetricasGeneralesTrabajos(scopedTrabajos, scopedPresupuestos);
+  // General Metrics - compatibilidad con refactor Arena A (añadido profesionales como 3er arg)
+  const metricasGenerales = calcularMetricasGeneralesTrabajos(scopedTrabajos, scopedPresupuestos, scopedProfesionales);
 
   // Filtered Professionals
   const profesionalesFiltrados = scopedProfesionales.filter((p) => {
@@ -327,7 +327,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
             {metricasGenerales.totalTrabajos}
           </span>
           <span className="text-[11px] text-slate-500 font-medium mt-0.5 block">
-            {metricasGenerales.trabajosEnEjecucion} en ejecución
+            {(metricasGenerales as any).trabajosEnEjecucion ?? metricasGenerales.enEjecucion} en ejecución
           </span>
         </div>
 
@@ -336,7 +336,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
             Finalizados
           </span>
           <span className="text-xl font-bold text-emerald-600 mt-1 block">
-            {metricasGenerales.trabajosFinalizados}
+            {(metricasGenerales as any).trabajosFinalizados ?? metricasGenerales.finalizados}
           </span>
           <span className="text-[11px] text-slate-500 font-medium mt-0.5 block">Intervenciones ok</span>
         </div>
@@ -349,7 +349,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
             {metricasGenerales.totalPresupuestos}
           </span>
           <span className="text-[11px] text-emerald-600 font-medium mt-0.5 block">
-            {metricasGenerales.presupuestosAceptados} aprobados
+            {(metricasGenerales as any).presupuestosAceptados ?? 0} aprobados
           </span>
         </div>
 
@@ -358,7 +358,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
             Gasto Facturado
           </span>
           <span className="text-xl font-bold text-slate-900 mt-1 block">
-            {metricasGenerales.totalImporteFacturado.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}
+            {((metricasGenerales as any).totalImporteFacturado ?? metricasGenerales.gastoTotalAprobado).toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}
           </span>
           <span className="text-[11px] text-slate-400 font-medium mt-0.5 block">Liquidado a proveedores</span>
         </div>
@@ -370,7 +370,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
           <div className="flex items-center space-x-1 mt-1">
             <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
             <span className="text-xl font-bold text-slate-900">
-              {metricasGenerales.mediaPuntuacionGlobal > 0 ? metricasGenerales.mediaPuntuacionGlobal.toFixed(1) : 'S/V'}
+              {(metricasGenerales as any).mediaPuntuacionGlobal > 0 ? (metricasGenerales as any).mediaPuntuacionGlobal.toFixed(1) : 'S/V'}
             </span>
           </div>
           <span className="text-[11px] text-slate-400 font-medium mt-0.5 block">

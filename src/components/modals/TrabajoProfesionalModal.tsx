@@ -145,10 +145,14 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
 
       const nuevoAdjunto: AdjuntoIncidencia = {
         id: `adj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        incidenciaId: tempTrabajoId,
+        inmuebleId: inmuebleId || 'inm_default',
+        propietarioId: currentUser?.propietarioId,
         nombre: file.name,
         tipo: file.type.startsWith('image/') ? 'imagen' : 'documento',
-        tamano: file.size,
+        tamanoBytes: file.size,
         url: downloadUrl,
+        storagePath: `trabajos/${tempTrabajoId}/${file.name}`,
         fechaSubida: new Date().toISOString(),
         subidoPor: currentUser?.nombre ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim() : 'Usuario',
       };

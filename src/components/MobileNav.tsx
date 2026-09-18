@@ -22,6 +22,8 @@ import {
   ArrowLeftRight,
   Receipt,
   AlertTriangle,
+  TrendingDown,
+  FileCheck2,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -79,6 +81,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
+          { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Gastos patrimoniales' },
+          { id: 'fiscal', label: 'Fiscalidad Anual', icon: FileCheck2, description: 'Resumen ingresos/gastos anual' },
           { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías y mantenimiento' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
@@ -94,6 +98,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
+          { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Gastos patrimoniales e inmuebles' },
+          { id: 'fiscal', label: 'Fiscalidad Anual', icon: FileCheck2, description: 'Resumen fiscal ingresos/gastos anual' },
           { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías, peritajes IA y siniestros' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },

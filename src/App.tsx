@@ -2930,6 +2930,7 @@ export default function App() {
                   setShowCrearProfesionalModal(true);
                 }}
                 onSaveProfesional={handleSaveProfesional}
+                onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
               />
             ) : (
@@ -3182,6 +3183,7 @@ export default function App() {
                   setShowCrearProfesionalModal(true);
                 }}
                 onSaveProfesional={handleSaveProfesional}
+                onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
               />
             )

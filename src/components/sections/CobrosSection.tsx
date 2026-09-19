@@ -534,6 +534,11 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                       <td className="py-3.5 px-4">
                         <div className="font-semibold text-slate-900">
                           {cobro.inmuebleDireccion}
+                          {cobro.habitacionId ? (
+                            <span className="ml-1 text-[10px] font-medium text-indigo-600">
+                              · hab. {cobro.habitacionId}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
                           <span className="flex items-center gap-1 font-medium text-slate-700">

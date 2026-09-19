@@ -138,6 +138,7 @@ export function generarPeriodosParaContrato(
         contratoId: contrato.id,
         inquilinoId: contrato.candidatoId,
         propietarioId: contrato.propietarioId || '',
+        habitacionId: contrato.habitacionId,
 
         inmuebleDireccion: contrato.inmuebleDireccion,
         inmuebleCiudad: contrato.inmuebleCiudad,
@@ -499,4 +500,96 @@ export function generarResumenFiscalInmueble(
     contratosPeriodos,
     justificantesCount,
   };
+}
+
+/** Contratos que alimentan ingresos actuales según modalidad (sin mezclar modelos). */
+export function contratosIngresosSegunModalidad(
+  inmueble: Inmueble,
+  contratos: ContratoFormalizacion[]
+): ContratoFormalizacion[] {
+  const delInmueble = contratos.filter((c) => c.inmuebleId === inmueble.id);
+  if (inmueble.modalidadAlquiler === 'habitaciones') {
+    return delInmueble.filter((c) => !!c.habitacionId);
+  }
+  return delInmueble.filter((c) => !c.habitacionId);
+}
+
+export function cobrosPorHabitacion(
+  cobros: CobroPeriodo[],
+  habitacionId: string
+): CobroPeriodo[] {
+  return cobros.filter((c) => c.habitacionId === habitacionId);
+}
+
+export function claveIdempotenteCobro(contratoId: string, periodoMesAnio: string): string {
+  const [y, m] = periodoMesAnio.split('-');
+  return `cobro_${contratoId}_${y}_${m}`;
+}
+
+export function generarPeriodosIdempotente(contrato: ContratoFormalizacion): CobroPeriodo[] {
+  const primera = generarPeriodosParaContrato(contrato);
+  return generarPeriodosParaContrato({ ...contrato, registroCobros: primera });
+}
+
+export function ingresosInmuebleDesdeCircuito(
+  inmueble: Inmueble,
+  contratos: ContratoFormalizacion[]
+) {
+  const vigentes = contratosIngresosSegunModalidad(inmueble, contratos);
+  const cobros = obtenerTodosCobros(vigentes);
+  const resumen = calcularResumenCobros(cobros);
+  return {
+    ingresoPrevisto: resumen.totalPrevisto,
+    ingresoCobrado: resumen.totalRecibido,
+    ingresoPendiente: resumen.totalPendiente,
+    ingresoVencido: resumen.totalRetrasado + resumen.totalIncidencias,
+    cobros,
+  };
+}
+
+export function rentabilidadInmuebleDesdeCircuito(
+  inmueble: Inmueble,
+  contratos: ContratoFormalizacion[]
+): { base: number; ingresosCobrados: number; rentabilidadPct: number | null } {
+  const { ingresoCobrado } = ingresosInmuebleDesdeCircuito(inmueble, contratos);
+  const base = Number(inmueble.valorAdquisicion) || 0;
+  if (!base) return { base: 0, ingresosCobrados: ingresoCobrado, rentabilidadPct: null };
+  return {
+    base,
+    ingresosCobrados: ingresoCobrado,
+    rentabilidadPct: Math.round((ingresoCobrado / base) * 10000) / 100,
+  };
+}
+
+export function historialEconomicoHabitacion(
+  habitacionId: string,
+  contratos: ContratoFormalizacion[]
+) {
+  const contratosHab = contratos.filter((c) => c.habitacionId === habitacionId);
+  const cobros = obtenerTodosCobros(contratosHab);
+  return { contratos: contratosHab, cobros, resumen: calcularResumenCobros(cobros) };
+}
+
+export function impagoAisladoEntreHabitaciones(
+  cobrosA: CobroPeriodo[],
+  cobrosB: CobroPeriodo[]
+): boolean {
+  const aImpago = cobrosA.some((c) => c.estado === 'RETRASADO' || c.estado === 'INCIDENCIA');
+  const bSano = cobrosB.every((c) => c.estado !== 'RETRASADO' && c.estado !== 'INCIDENCIA');
+  return aImpago && bSano;
+}
+
+export function payloadEconomicoIdsCruzadosDenegado(
+  incoming: { inmuebleId: string; contratoId?: string; habitacionId?: string; propietarioId?: string },
+  contrato: ContratoFormalizacion
+): boolean {
+  if (incoming.inmuebleId !== contrato.inmuebleId) return true;
+  if (incoming.contratoId && incoming.contratoId !== contrato.id) return true;
+  if (incoming.habitacionId && contrato.habitacionId && incoming.habitacionId !== contrato.habitacionId) {
+    return true;
+  }
+  if (incoming.propietarioId && contrato.propietarioId && incoming.propietarioId !== contrato.propietarioId) {
+    return true;
+  }
+  return false;
 }

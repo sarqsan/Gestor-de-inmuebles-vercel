@@ -21,7 +21,7 @@ import {
   profesionalPuedeVerEconomiaHabitacion,
   resumenRentasHabitaciones,
 } from '../utils/habitacionesEngine';
-import { obtenerCobrosInmueble } from '../utils/cobrosEngine';
+import { ingresosInmuebleDesdeCircuito, obtenerCobrosInmueble } from '../utils/cobrosEngine';
 
 interface Props {
   inmueble: Inmueble;
@@ -73,6 +73,10 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
   const cobrosInmueble = useMemo(
     () => obtenerCobrosInmueble(inmueble.id, contratos),
     [inmueble.id, contratos]
+  );
+  const ingresosCircuito = useMemo(
+    () => ingresosInmuebleDesdeCircuito(inmueble, contratos),
+    [inmueble, contratos]
   );
 
   if (!canView) {
@@ -226,7 +230,7 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
           </div>
           {verEco && (
             <p className="text-[11px] text-slate-600">
-              Renta potencial {resumen.rentaPotencial.toLocaleString('es-ES')} € · ocupada {resumen.rentaOcupada.toLocaleString('es-ES')} € · pendiente {resumen.rentaPendiente.toLocaleString('es-ES')} €
+              Circuito real — previsto {ingresosCircuito.ingresoPrevisto.toLocaleString('es-ES')} € · cobrado {ingresosCircuito.ingresoCobrado.toLocaleString('es-ES')} € · pendiente {ingresosCircuito.ingresoPendiente.toLocaleString('es-ES')} € · vencido {ingresosCircuito.ingresoVencido.toLocaleString('es-ES')} €
             </p>
           )}
           <div className="flex items-center justify-between">

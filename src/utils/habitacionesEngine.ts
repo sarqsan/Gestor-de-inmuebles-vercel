@@ -17,8 +17,10 @@ import { generarPeriodosParaContrato } from './cobrosEngine';
 export const ESTADOS_HABITACION: EstadoHabitacion[] = [
   'DISPONIBLE',
   'RESERVADA',
+  'EN_PROCESO',
   'OCUPADA',
   'ALQUILADA',
+  'NO_DISPONIBLE',
   'BLOQUEADA',
   'INACTIVA',
 ];
@@ -380,4 +382,195 @@ export function habitacionDisponibleParaNuevaSeleccion(
   const d = disponibilidadHabitacion(hab, contratos);
   const e = estadoHabitacionEfectivo(d.estado);
   return e === 'DISPONIBLE' && hab.activo !== false;
+}
+
+export interface SeleccionCandidatoHabitacion {
+  candidatoId: string;
+  habitacionId: string;
+  inmuebleId: string;
+  propietarioId: string;
+  fechaSeleccion: string;
+  usuarioNombre: string;
+}
+
+export function candidatoAsociadoAHabitacion(
+  candidato: Pick<Candidato, 'habitacionId' | 'inmuebleId'>,
+  habitacion: HabitacionInmueble,
+  inmueble: Inmueble
+): boolean {
+  return (
+    candidato.habitacionId === habitacion.id &&
+    candidato.inmuebleId === inmueble.id &&
+    habitacion.inmuebleId === inmueble.id
+  );
+}
+
+export function visitaConHabitacion(
+  slot: VisitSlot | InvitacionVisita,
+  habitacionId: string,
+  inmuebleId: string
+): boolean {
+  return slot.habitacionId === habitacionId && slot.inmuebleId === inmuebleId;
+}
+
+export type ResultadoAsignacionHabitacion =
+  | { ok: true; habitacion: HabitacionInmueble; seleccion: SeleccionCandidatoHabitacion }
+  | { ok: false; motivo: string; conflicto: true };
+
+export function intentarReservarHabitacion(opts: {
+  habitacion: HabitacionInmueble;
+  candidatoId: string;
+  inmueble: Inmueble;
+  usuarioNombre: string;
+  expectedFechaModificacion?: string;
+  contratos?: ContratoFormalizacion[];
+}): ResultadoAsignacionHabitacion {
+  const { habitacion, candidatoId, inmueble, usuarioNombre, expectedFechaModificacion, contratos = [] } = opts;
+  if (habitacion.inmuebleId !== inmueble.id) {
+    return { ok: false, motivo: 'La habitación no pertenece al inmueble.', conflicto: true };
+  }
+  if (
+    expectedFechaModificacion &&
+    habitacion.fechaModificacion &&
+    expectedFechaModificacion !== habitacion.fechaModificacion
+  ) {
+    return { ok: false, motivo: 'Conflicto de concurrencia: la habitación ha cambiado.', conflicto: true };
+  }
+  if (habitacion.selectedCandidatoId && habitacion.selectedCandidatoId !== candidatoId) {
+    return { ok: false, motivo: 'La habitación ya está reservada/asignada a otro candidato.', conflicto: true };
+  }
+  if (habitacion.selectedCandidatoId === candidatoId && estadoHabitacionEfectivo(habitacion.estado) === 'RESERVADA') {
+    return {
+      ok: true,
+      habitacion,
+      seleccion: {
+        candidatoId,
+        habitacionId: habitacion.id,
+        inmuebleId: inmueble.id,
+        propietarioId: habitacion.propietarioId || inmueble.propietarioId || '',
+        fechaSeleccion: habitacion.fechaModificacion,
+        usuarioNombre,
+      },
+    };
+  }
+  if (!habitacionDisponibleParaNuevaSeleccion(habitacion, contratos) && estadoHabitacionEfectivo(habitacion.estado) !== 'RESERVADA') {
+    return { ok: false, motivo: 'La habitación no está disponible para reserva.', conflicto: true };
+  }
+  const next = aplicarReservaHabitacion({ ...habitacion, selectedCandidatoId: candidatoId }, usuarioNombre);
+  next.selectedCandidatoId = candidatoId;
+  return {
+    ok: true,
+    habitacion: next,
+    seleccion: {
+      candidatoId,
+      habitacionId: next.id,
+      inmuebleId: inmueble.id,
+      propietarioId: next.propietarioId || inmueble.propietarioId || '',
+      fechaSeleccion: next.fechaModificacion,
+      usuarioNombre,
+    },
+  };
+}
+
+export function intentarSeleccionarCandidatoHabitacion(opts: {
+  habitacion: HabitacionInmueble;
+  candidato: Pick<Candidato, 'id' | 'habitacionId' | 'inmuebleId'>;
+  inmueble: Inmueble;
+  usuarioNombre: string;
+  expectedFechaModificacion?: string;
+  contratos?: ContratoFormalizacion[];
+}): ResultadoAsignacionHabitacion {
+  const { habitacion, candidato, inmueble, usuarioNombre, expectedFechaModificacion, contratos = [] } = opts;
+  if (candidato.inmuebleId !== inmueble.id || candidato.habitacionId !== habitacion.id) {
+    return { ok: false, motivo: 'El candidato no está asociado a esta habitación.', conflicto: true };
+  }
+  if (
+    expectedFechaModificacion &&
+    habitacion.fechaModificacion &&
+    expectedFechaModificacion !== habitacion.fechaModificacion
+  ) {
+    return { ok: false, motivo: 'Conflicto de concurrencia (pestaña/reintento).', conflicto: true };
+  }
+  if (habitacion.selectedCandidatoId && habitacion.selectedCandidatoId !== candidato.id) {
+    return { ok: false, motivo: 'Ya existe una selección incompatible.', conflicto: true };
+  }
+  const d = disponibilidadHabitacion(habitacion, contratos);
+  if (estadoHabitacionEfectivo(d.estado) === 'OCUPADA') {
+    return { ok: false, motivo: 'Habitación ocupada: selección denegada.', conflicto: true };
+  }
+  const next: HabitacionInmueble = {
+    ...habitacion,
+    selectedCandidatoId: candidato.id,
+    estado: estadoHabitacionEfectivo(habitacion.estado) === 'RESERVADA' ? habitacion.estado : 'EN_PROCESO',
+    fechaModificacion: new Date().toISOString(),
+    actualizadoPor: usuarioNombre,
+  };
+  return {
+    ok: true,
+    habitacion: next,
+    seleccion: {
+      candidatoId: candidato.id,
+      habitacionId: habitacion.id,
+      inmuebleId: inmueble.id,
+      propietarioId: habitacion.propietarioId || inmueble.propietarioId || inmueble.propietarioPrincipalId || '',
+      fechaSeleccion: next.fechaModificacion,
+      usuarioNombre,
+    },
+  };
+}
+
+export function trazabilidadCircuitoHabitacion(opts: {
+  candidato: Pick<Candidato, 'id' | 'habitacionId' | 'inmuebleId'>;
+  visita?: InvitacionVisita | VisitSlot;
+  habitacion: HabitacionInmueble;
+  seleccion?: SeleccionCandidatoHabitacion;
+  contrato?: ContratoFormalizacion;
+  cobros?: CobroPeriodo[];
+}): boolean {
+  const { candidato, visita, habitacion, seleccion, contrato, cobros } = opts;
+  if (candidato.habitacionId !== habitacion.id) return false;
+  if (visita && visita.habitacionId && visita.habitacionId !== habitacion.id) return false;
+  if (seleccion && seleccion.habitacionId !== habitacion.id) return false;
+  if (seleccion && seleccion.candidatoId !== candidato.id) return false;
+  if (contrato && contrato.habitacionId !== habitacion.id) return false;
+  if (contrato && contrato.candidatoId !== candidato.id) return false;
+  if (cobros && cobros.some((c) => c.habitacionId && c.habitacionId !== habitacion.id)) return false;
+  return true;
+}
+
+export function tokenPublicoSoloRecursoAutorizado(
+  token: string,
+  invitacion: InvitacionVisita,
+  otras: InvitacionVisita[]
+): InvitacionVisita[] {
+  if (!token || invitacion.token !== token) return [];
+  return otras.filter(
+    (i) =>
+      i.token === token &&
+      i.id === invitacion.id &&
+      (!invitacion.habitacionId || i.habitacionId === invitacion.habitacionId)
+  );
+}
+
+export function simulacionDobleAsignacion(
+  habitacion: HabitacionInmueble,
+  candidatoA: string,
+  candidatoB: string,
+  inmueble: Inmueble
+): { ganador: string; perdedorDenegado: boolean } {
+  const r1 = intentarReservarHabitacion({
+    habitacion,
+    candidatoId: candidatoA,
+    inmueble,
+    usuarioNombre: 'A',
+  });
+  if (!r1.ok) return { ganador: '', perdedorDenegado: true };
+  const r2 = intentarReservarHabitacion({
+    habitacion: r1.habitacion,
+    candidatoId: candidatoB,
+    inmueble,
+    usuarioNombre: 'B',
+    expectedFechaModificacion: habitacion.fechaModificacion,
+  });
+  return { ganador: candidatoA, perdedorDenegado: !r2.ok };
 }

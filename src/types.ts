@@ -625,6 +625,7 @@ export interface HabitacionInmueble {
   contratoId?: string;
   motivoBloqueo?: string;
   fianza?: number;
+  selectedCandidatoId?: string;
 }
 
 export interface UserProfile {

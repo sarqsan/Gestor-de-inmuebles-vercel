@@ -272,7 +272,8 @@ export function crearBorradorContrato(
     propietarioId: propPrincipal?.propietarioId || inmueble.propietarioId || inmueble.propietarioPrincipalId || undefined,
     solicitudDocId: solicitudDoc?.id,
     esVigente: true,
-    modalidadAlquiler: inmueble.modalidadAlquiler || 'completo',
+    modalidadAlquiler: inmueble.modalidadAlquiler || (candidato.habitacionId ? 'habitaciones' : 'completo'),
+    habitacionId: candidato.habitacionId,
 
     // Inmueble
     inmuebleNombre: inmueble.direccion || 'Vivienda en Alquiler',

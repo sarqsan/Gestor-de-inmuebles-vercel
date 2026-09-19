@@ -512,6 +512,7 @@ export async function bookSlotTransaction(
       reservaCandidateId: candidateData.id,
       reservaCandidateNombre: candidateData.nombre,
       reservaInvitationId: invitacionId,
+      ...(slotData.habitacionId ? { habitacionId: slotData.habitacionId } : {}),
     });
 
     // 2. Update invitation status
@@ -2049,6 +2050,31 @@ export async function saveHabitacionFirestore(habitacion: HabitacionInmueble): P
   }
   const clean = sanitizeObjectForFirestore(habitacion);
   await setDoc(refH, clean, { merge: true });
+}
+
+/** Asignación atómica: solo un candidato puede quedar selectedCandidatoId. */
+export async function asignarCandidatoHabitacionFirestore(
+  habitacionId: string,
+  candidatoId: string,
+  usuarioNombre: string
+): Promise<HabitacionInmueble> {
+  const refH = doc(db, 'habitaciones_inmueble', habitacionId);
+  return runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(refH);
+    if (!snap.exists()) throw new Error('La habitación no existe.');
+    const prev = { id: snap.id, ...snap.data() } as HabitacionInmueble;
+    if (prev.selectedCandidatoId && prev.selectedCandidatoId !== candidatoId) {
+      throw new Error('Conflicto: la habitación ya está asignada a otro candidato.');
+    }
+    const next: HabitacionInmueble = {
+      ...prev,
+      selectedCandidatoId: candidatoId,
+      fechaModificacion: new Date().toISOString(),
+      actualizadoPor: usuarioNombre,
+    };
+    transaction.set(refH, sanitizeObjectForFirestore(next), { merge: true });
+    return next;
+  });
 }
 
 export {

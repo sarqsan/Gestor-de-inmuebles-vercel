@@ -13,6 +13,7 @@ import {
   PrioridadIncidencia,
 } from '../../types';
 import {
+  scopeFromUsuario,
   subscribeProfesionales,
   subscribeTrabajosProfesionales,
   subscribePresupuestosProfesionales,
@@ -25,6 +26,7 @@ import {
   savePresupuestoProfesionalFirestore,
   deletePresupuestoProfesionalFirestore,
 } from '../../lib/firebase';
+import { perfilAutorizado } from '../../lib/authService';
 import {
   TIPO_PROFESIONAL_LABELS,
   ESTADO_PROFESIONAL_LABELS,
@@ -95,6 +97,15 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
 }) => {
   // Collections State
   const [profesionales, setProfesionales] = useState<Profesional[]>([]);
+  // Autorización centralizada: sin usuario, sin estado ACTIVO o sin tipoPerfil
+  // reconocido -> perfil null (DENEGADO). Nunca se asume administrador.
+  const perfil = perfilAutorizado(currentUser);
+  const esPropietario = perfil === 'PROPIETARIO';
+  const esProfesional = perfil === 'PROFESIONAL';
+  // Ámbito de consulta acotado en origen (nunca la colección completa).
+  const dataScope = scopeFromUsuario(currentUser);
+  const scopeKey = `${perfil}:${currentUser?.propietarioId || ''}:${currentUser?.profesionalId || ''}:${currentUser?.id || ''}`;
+
   const [trabajos, setTrabajos] = useState<TrabajoProfesional[]>([]);
   const [presupuestos, setPresupuestos] = useState<PresupuestoProfesional[]>([]);
   const [valoraciones, setValoraciones] = useState<ValoracionProfesionalTrabajo[]>([]);
@@ -141,24 +152,25 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
 
     const unsubProf = subscribeProfesionales((data) => {
       setProfesionales(data);
-    });
+      // El profesional sólo recibe su propia ficha (aislamiento en origen).
+    }, dataScope);
 
     const unsubTrab = subscribeTrabajosProfesionales((data) => {
       setTrabajos(data);
-    });
+    }, dataScope);
 
     const unsubPres = subscribePresupuestosProfesionales((data) => {
       setPresupuestos(data);
-    });
+    }, dataScope);
 
     const unsubVal = subscribeValoracionesProfesionales((data) => {
       setValoraciones(data);
-    });
+    }, dataScope);
 
     const unsubInc = subscribeIncidencias((data) => {
       setIncidencias(data);
       setLoading(false);
-    });
+    }, dataScope);
 
     return () => {
       unsubProf();
@@ -167,32 +179,66 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
       unsubVal();
       unsubInc();
     };
-  }, []);
+    // Se reabren las escuchas si cambia el rol/ámbito del usuario.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey]);
 
-  // Filter Scopes for Owner vs Admin
-  const isOwner = currentUser?.tipoPerfil === 'PROPIETARIO';
+  // Ámbito por rol (defensa en profundidad: la consulta ya viene acotada y las
+  // Security Rules aplican el mismo criterio).
+  // IMPORTANTE: el propietario se identifica con `currentUser.propietarioId`
+  // (no con el id del documento de usuario).
+  const isOwner = esPropietario;
+  const miPropietarioId = currentUser?.propietarioId || '';
   const propietarioInmueblesIds = isOwner
-    ? inmuebles.filter((i) => i.propietarioId === currentUser?.id).map((i) => i.id)
+    ? inmuebles
+        .filter(
+          (i) =>
+            (miPropietarioId && (i.propietarioId === miPropietarioId || i.propietarioPrincipalId === miPropietarioId)) ||
+            (currentUser?.inmuebleIds || []).includes(i.id)
+        )
+        .map((i) => i.id)
     : [];
 
   const scopedProfesionales = isOwner
-    ? profesionales.filter((p) => !p.esPrivado || p.creadoPorPropietarioId === currentUser?.id)
+    ? profesionales.filter(
+        (p) =>
+          !p.esPrivado ||
+          p.creadoPorPropietarioId === miPropietarioId ||
+          p.creadoPorPropietarioId === currentUser?.id
+      )
+    : esProfesional
+    ? // El técnico sólo ve su propia ficha: no accede al directorio interno de
+      // otros profesionales ni a los datos de sus propietarios.
+      profesionales.filter(
+        (p) => p.id === currentUser?.profesionalId || p.usuarioId === currentUser?.id
+      )
     : profesionales;
 
   const scopedTrabajos = isOwner
-    ? trabajos.filter((t) => propietarioInmueblesIds.includes(t.inmuebleId) || t.propietarioId === currentUser?.id)
+    ? trabajos.filter(
+        (t) => t.propietarioId === miPropietarioId || propietarioInmueblesIds.includes(t.inmuebleId)
+      )
     : trabajos;
 
   const scopedPresupuestos = isOwner
-    ? presupuestos.filter((p) => propietarioInmueblesIds.includes(p.inmuebleId) || p.propietarioId === currentUser?.id)
+    ? presupuestos.filter(
+        (p) => p.propietarioId === miPropietarioId || propietarioInmueblesIds.includes(p.inmuebleId)
+      )
     : presupuestos;
 
   const scopedValoraciones = isOwner
-    ? valoraciones.filter((v) => propietarioInmueblesIds.includes(v.inmuebleId))
+    ? valoraciones.filter(
+        (v) => v.propietarioId === miPropietarioId || propietarioInmueblesIds.includes(v.inmuebleId)
+      )
     : valoraciones;
 
   // General Metrics
-  const metricasGenerales = calcularMetricasGeneralesTrabajos(scopedTrabajos, scopedPresupuestos);
+  const metricasGenerales = calcularMetricasGeneralesTrabajos(
+    scopedTrabajos,
+    scopedPresupuestos,
+    scopedProfesionales,
+    scopedValoraciones
+  );
 
   // Filtered Professionals
   const profesionalesFiltrados = scopedProfesionales.filter((p) => {
@@ -256,13 +302,15 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Profesionales, Obras y Servicios</h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Gestión desacoplada de técnicos, órdenes de trabajo independientes, presupuestos y control pericial
+              {esProfesional
+                ? 'Tus asignaciones, presupuestos emitidos y valoraciones recibidas'
+                : 'Gestión desacoplada de técnicos, órdenes de trabajo independientes, presupuestos y control pericial'}
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-2.5 flex-wrap gap-y-2">
-          {activeTab === 'profesionales' && (
+          {!esProfesional && activeTab === 'profesionales' && (
             <button
               onClick={() => {
                 setProfesionalParaEditar(null);
@@ -275,7 +323,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
             </button>
           )}
 
-          {activeTab === 'trabajos' && (
+          {!esProfesional && activeTab === 'trabajos' && (
             <button
               onClick={() => {
                 setTrabajoParaEditar(null);
@@ -289,7 +337,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
             </button>
           )}
 
-          {activeTab === 'presupuestos' && (
+          {!esProfesional && activeTab === 'presupuestos' && (
             <button
               onClick={() => {
                 setPresupuestoParaEditar(null);
@@ -742,7 +790,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
                     {/* Quick Card Action Buttons */}
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2 text-xs">
                       <div className="flex items-center space-x-2">
-                        {trabajo.estado === 'FINALIZADO' && !trabajo.valoracion && (
+                        {!esProfesional && trabajo.estado === 'FINALIZADO' && !trabajo.valoracion && (
                           <button
                             onClick={() => {
                               setTrabajoParaValorar(trabajo);

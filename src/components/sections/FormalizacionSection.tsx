@@ -28,6 +28,7 @@ import {
   ExternalLink,
   Trash2,
   Edit3,
+  RefreshCw,
 } from 'lucide-react';
 
 interface FormalizacionSectionProps {
@@ -38,6 +39,8 @@ interface FormalizacionSectionProps {
   userProfile?: UserProfile;
   onOpenFormalizarModal: (candidato: Candidato, inmueble?: Inmueble, contrato?: ContratoFormalizacion) => void;
   onDeleteContrato: (contratoId: string) => Promise<void>;
+  // FASE 3.1: «el inquilino me ha comunicado que se va».
+  onRecomercializarContrato?: (contrato: ContratoFormalizacion) => void;
 }
 
 export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
@@ -48,6 +51,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
   userProfile,
   onOpenFormalizarModal,
   onDeleteContrato,
+  onRecomercializarContrato,
 }) => {
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState<string>('todos');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('todos');
@@ -370,6 +374,15 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                     >
                       <Printer className="w-4 h-4" />
                     </button>
+                    {onRecomercializarContrato && contrato.estado !== 'CANCELADO' && (
+                      <button
+                        onClick={() => onRecomercializarContrato(contrato)}
+                        title="El inquilino se va: iniciar recomercialización"
+                        className="p-2 text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-xl transition-colors"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       onClick={async () => {
                         if (confirm(`¿Eliminar el expediente de ${contrato.candidatoNombre}?`)) {

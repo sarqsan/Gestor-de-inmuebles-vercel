@@ -21,8 +21,13 @@ import {
   Inmueble,
   UsuarioApp,
   EstadoPresupuestoProfesional,
+  HistorialDecisionPresupuesto,
 } from '../../types';
-import { ESTADO_PRESUPUESTO_LABELS, calcularTotalesPresupuesto } from '../../utils/profesionalesEngine';
+import {
+  ESTADO_PRESUPUESTO_LABELS,
+  calcularTotalesPresupuesto,
+  crearItemHistorialTrabajo,
+} from '../../utils/profesionalesEngine';
 import {
   savePresupuestoProfesionalFirestore,
   uploadPresupuestoDocumentoStorage,
@@ -125,6 +130,20 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
   // Calculations
   const { importeBase, iva, importeTotal } = calcularTotalesPresupuesto(partidas, porcentajeIva);
 
+  // Nombre del usuario que firma/actualiza el presupuesto (auditoría interna).
+  const nombreUsuario = currentUser?.nombre
+    ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+    : 'Usuario';
+
+  // Propietario del presupuesto: el trabajo es la fuente principal (su ámbito
+  // es el del inmueble). Sin valores provisionales: si no puede resolverse,
+  // el guardado se bloquea más abajo.
+  const propietarioPresupuesto =
+    presupuestoParaEditar?.propietarioId ||
+    trabajoActual?.propietarioId ||
+    (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId : '') ||
+    '';
+
   const handleUpdatePartida = (index: number, campo: keyof PartidaPresupuesto, valor: any) => {
     const updated = [...partidas];
     const item = { ...updated[index], [campo]: valor };
@@ -161,7 +180,21 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
       setUploadingDoc(true);
       setErrorMsg('');
       const tempPresId = presupuestoParaEditar?.id || `pres_${Date.now()}`;
-      const downloadUrl = await uploadPresupuestoDocumentoStorage(tempPresId, file, file.name);
+      const propietarioId =
+        presupuestoParaEditar?.propietarioId ||
+        trabajoActual?.propietarioId ||
+        (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId : '') ||
+        '';
+      if (!propietarioId) {
+        setErrorMsg('No se pudo determinar el propietario del presupuesto.');
+        return;
+      }
+      const { downloadUrl } = await uploadPresupuestoDocumentoStorage(
+        propietarioId,
+        tempPresId,
+        file,
+        file.name
+      );
       setDocumentoUrl(downloadUrl);
       setNombreArchivo(file.name);
     } catch (err: any) {
@@ -191,14 +224,35 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
       const presId =
         presupuestoParaEditar?.id || `pres_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
+      if (!propietarioPresupuesto) {
+        setErrorMsg('No se pudo determinar el propietario del presupuesto.');
+        setGuardando(false);
+        return;      }
+
+
+      // Trazabilidad de la decisión (9af1228): se registra en el propio presupuesto.
+      const historialDecision = presupuestoParaEditar?.historialDecision
+        ? [...presupuestoParaEditar.historialDecision]
+        : [];
+      if (estado === 'ACEPTADO' && (!presupuestoParaEditar || presupuestoParaEditar.estado !== 'ACEPTADO')) {
+        historialDecision.push({
+          fecha: new Date().toISOString(),
+          usuario: nombreUsuario,
+          estadoAnterior: presupuestoParaEditar?.estado || 'BORRADOR',
+          estadoNuevo: 'ACEPTADO',
+          observaciones: 'Presupuesto aprobado y adjudicado',
+        });
+      }
+
       const presupuestoFinal: PresupuestoProfesional = {
         id: presId,
         trabajoId,
         profesionalId,
         profesionalNombre: profesionalSeleccionado?.nombreComercial || 'Profesional',
-        propietarioId: trabajoActual?.propietarioId || currentUser?.propietarioId || 'prop_default',
+        propietarioId: propietarioPresupuesto,
         inmuebleId: trabajoActual?.inmuebleId || '',
         inmuebleDireccion: trabajoActual?.inmuebleDireccion || inmuebleSeleccionado?.direccion,
+        incidenciaId: trabajoActual?.incidenciaId || undefined,
         numeroPresupuesto: numeroPresupuesto.trim(),
         fecha: new Date(fecha).toISOString(),
         validez: validez.trim(),
@@ -206,29 +260,46 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
         partidas,
         importeBase,
         iva,
+        porcentajeIva,
         importeTotal,
         documentoUrl: documentoUrl || undefined,
         estado,
-        createdAt: presupuestoParaEditar?.createdAt || new Date().toISOString(),
+        historialDecision: historialDecision.length > 0 ? historialDecision : undefined,
+        creadoPor: presupuestoParaEditar?.creadoPor || nombreUsuario,
+        actualizadoPor: nombreUsuario,        createdAt: presupuestoParaEditar?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       await savePresupuestoProfesionalFirestore(presupuestoFinal);
 
-      // If budget is accepted, update work order status to ACEPTADO and set budget ID
+      // If budget is registered, sync work order status and budget ID
       if (trabajoActual) {
-        let trabajoActualizado: TrabajoProfesional = {
+        let nuevoEstadoTrabajo = trabajoActual.estado;
+        if (estado === 'ACEPTADO' && trabajoActual.estado !== 'ACEPTADO' && trabajoActual.estado !== 'PROGRAMADO' && trabajoActual.estado !== 'EN_EJECUCION' && trabajoActual.estado !== 'FINALIZADO') {
+          nuevoEstadoTrabajo = 'ACEPTADO';
+        } else if (trabajoActual.estado === 'PENDIENTE' || trabajoActual.estado === 'BUSCANDO_PROFESIONAL' || trabajoActual.estado === 'PRESUPUESTO_SOLICITADO') {
+          nuevoEstadoTrabajo = 'PRESUPUESTO_RECIBIDO';
+        }
+
+        const nuevoHistorial = [
+          ...(trabajoActual.historial || []),
+          crearItemHistorialTrabajo(
+            'PRESUPUESTO_RECIBIDO',
+            nombreUsuario,
+            trabajoActual.estado,
+            nuevoEstadoTrabajo,
+            `Presupuesto ${presupuestoFinal.numeroPresupuesto || presId} registrado por ${importeTotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}`
+          ),
+        ];
+
+        const trabajoActualizado: TrabajoProfesional = {
           ...trabajoActual,
+          estado: nuevoEstadoTrabajo,
           presupuestoId: presId,
           importeEstimado: importeTotal,
+          historial: nuevoHistorial,
           updatedAt: new Date().toISOString(),
         };
-
-        if (estado === 'ACEPTADO' && trabajoActual.estado !== 'ACEPTADO' && trabajoActual.estado !== 'PROGRAMADO' && trabajoActual.estado !== 'EN_EJECUCION' && trabajoActual.estado !== 'FINALIZADO') {
-          trabajoActualizado.estado = 'ACEPTADO';
-        } else if (trabajoActual.estado === 'PENDIENTE' || trabajoActual.estado === 'BUSCANDO_PROFESIONAL' || trabajoActual.estado === 'PRESUPUESTO_SOLICITADO') {
-          trabajoActualizado.estado = 'PRESUPUESTO_RECIBIDO';
-        }
 
         await saveTrabajoProfesionalFirestore(trabajoActualizado);
       }

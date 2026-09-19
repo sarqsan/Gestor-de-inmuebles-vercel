@@ -11,6 +11,13 @@ import {
   onSnapshot,
   writeBatch,
   runTransaction,
+  query,
+  where,
+  documentId,
+  getDoc,
+  type Unsubscribe,
+  type QuerySnapshot,
+  updateDoc,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -29,6 +36,13 @@ import {
   VisitSlot,
   SolicitudDocumentacion,
   ContratoFormalizacion,
+  Gasto,
+  GastoRecurrente,
+  Prestamo,
+  ExpedienteRecomercializacion,
+  InmobiliariaDirectorio,
+  PropuestaInmobiliaria,
+  LeadInmobiliario,
   ConfiguracionAseguradora,
   SolicitudSeguroImpago,
   GmailIntegracionConfig,
@@ -48,6 +62,8 @@ import {
   PresupuestoProfesional,
   ValoracionProfesionalTrabajo,
   DocumentoProfesional,
+  ItemDocumentoSolicitado,
+  SolicitudDocHistorialItem,
 } from '../types';
 import {
   INITIAL_CANDIDATOS,
@@ -81,6 +97,14 @@ const INVITACIONES_COL = collection(db, 'invitaciones');
 const SLOTS_VISITA_COL = collection(db, 'slots_visita');
 const SOLICITUDES_DOC_COL = collection(db, 'solicitudes_documentacion');
 const CONTRATOS_COL = collection(db, 'contratos_formalizacion');
+const GASTOS_COL = collection(db, 'gastos');
+const GASTOS_RECURRENTES_COL = collection(db, 'gastos_recurrentes');
+const PRESTAMOS_COL = collection(db, 'prestamos');
+// FASE 3 — Recomercialización inteligente
+const EXPEDIENTES_RECOMERCIALIZACION_COL = collection(db, 'expedientes_recomercializacion');
+const INMOBILIARIAS_DIRECTORIO_COL = collection(db, 'inmobiliarias_directorio');
+const PROPUESTAS_INMOBILIARIA_COL = collection(db, 'propuestas_inmobiliaria');
+const LEADS_INMOBILIARIOS_COL = collection(db, 'leads_inmobiliario');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
 
@@ -138,9 +162,345 @@ export async function seedInitialDataIfEmpty() {
 }
 
 /**
- * Real-time listener for Propietarios
+ * Ámbito de acceso a datos (FASE 1.4).
+ * - ADMINISTRADOR / sin ámbito: colección completa.
+ * - PROPIETARIO: únicamente sus propios recursos.
+ * - PROFESIONAL: sin acceso a datos económicos/fiscales.
  */
-export function subscribePropietarios(callback: (propietarios: Propietario[]) => void) {
+/** Roles con acceso interno a datos globales (administración). */
+/**
+ * Administración EXPLÍCITA: exige perfil reconocido. Se usa en las escuchas que
+ * sólo pueden servir a la administración (deny by default para el resto).
+ */
+function scopeEsAdminConocido(scope?: DataAccessScope): boolean {
+  return !!scope && scope.tipoPerfil === 'ADMINISTRADOR';
+}
+
+/**
+ * Alcance de los flujos públicos por token. El visitante (con o sin sesión) NO
+ * descarga colecciones completas: resuelve ÚNICAMENTE el recurso de su token
+ * mediante las funciones subscribe*PorToken; la administración sí consulta la
+ * colección completa para gestión interna. Este alcance explícito representa
+ * "ninguna descarga" y se pasa a las escuchas generales para que no lancen
+ * ninguna consulta.
+ */
+export const ALCANCE_SIN_DESCARGA: DataAccessScope = { tipoPerfil: 'PUBLICO_SIN_DESCARGA' };
+
+function scopePermiteFlujoPublico(scope?: DataAccessScope): boolean {
+  return !!scope && scope.tipoPerfil === 'ADMINISTRADOR';
+}
+
+/**
+ * Lecturas puntuales de los flujos públicos por TOKEN: cada visitante obtiene
+ * exclusivamente el documento de su enlace (consulta filtrada por token), nunca
+ * la colección completa. Esto no sustituye a la verificación en servidor: las
+ * Security Rules no pueden comprobar el token (no hay custom claims), de modo
+ * que el aislamiento estricto depende del endpoint de servidor existente.
+ */
+export function subscribeSolicitudDocPorToken(
+  token: string,
+  callback: (solicitud: SolicitudDocumentacion | null) => void
+): Unsubscribe {
+  if (!token) {
+    callback(null);
+    return () => {};
+  }
+  return onSnapshot(
+    query(SOLICITUDES_DOC_COL, where('token', '==', token)),
+    (snapshot) => {
+      if (snapshot.empty) {
+        callback(null);
+        return;
+      }
+      const docSnap = snapshot.docs[0];
+      callback({ id: docSnap.id, ...docSnap.data() } as SolicitudDocumentacion);
+    },
+    (err) => {
+      console.error('Firestore solicitud_documentacion (token) snapshot error:', err);
+      callback(null);
+    }
+  );
+}
+
+export function subscribeInvitacionPorToken(
+  token: string,
+  callback: (invitaciones: InvitacionVisita[]) => void
+): Unsubscribe {
+  if (!token) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    query(INVITACIONES_COL, where('token', '==', token)),
+    (snapshot) => {
+      const items: InvitacionVisita[] = [];
+      snapshot.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as InvitacionVisita));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore invitacion (token) snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export function subscribeSlotsDeInmueble(
+  inmuebleId: string,
+  callback: (slots: VisitSlot[]) => void
+): Unsubscribe {
+  if (!inmuebleId) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    query(SLOTS_VISITA_COL, where('inmuebleId', '==', inmuebleId)),
+    (snapshot) => {
+      const items: VisitSlot[] = [];
+      snapshot.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as VisitSlot));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore slots (inmueble) snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export function subscribeEnlacePorToken(
+  token: string,
+  callback: (enlaces: EnlaceRegistro[]) => void
+): Unsubscribe {
+  if (!token) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    query(ENLACES_REGISTRO_COL, where('token', '==', token)),
+    (snapshot) => {
+      const items: EnlaceRegistro[] = [];
+      snapshot.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as EnlaceRegistro));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore enlace_registro (token) snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export function subscribeProfesionalPorTokenInvitacion(
+  token: string,
+  callback: (profesionales: Profesional[]) => void
+): Unsubscribe {
+  if (!token) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    query(PROFESIONALES_COL, where('tokenInvitacion', '==', token)),
+    (snapshot) => {
+      const items: Profesional[] = [];
+      snapshot.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as Profesional));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore profesional (token invitación) snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+function scopeEsAdmin(scope?: DataAccessScope): boolean {
+  return !scope || scope.tipoPerfil === 'ADMINISTRADOR' || !scope.tipoPerfil;
+}
+
+/**
+ * Divide una lista de ids en bloques de 30 (límite de `in` en Firestore).
+ */
+function bloquesDe30(ids: string[]): string[][] {
+  const bloques: string[][] = [];
+  for (let i = 0; i < ids.length; i += 30) bloques.push(ids.slice(i, i + 30));
+  return bloques;
+}
+
+/**
+ * Escucha acotada por lista de ids de documento (where documentId() in [...]).
+ * Nunca solicita la colección completa: si no hay ids, no hay consulta.
+ */
+function onSnapshotPorIds<T>(
+  col: ReturnType<typeof collection>,
+  ids: string[],
+  mapDoc: (id: string, data: Record<string, unknown>) => T,
+  setItems: (items: T[]) => void
+): Unsubscribe {
+  if (ids.length === 0) {
+    setItems([]);
+    return () => {};
+  }
+  const acumuladoPorBloque = new Map<number, T[]>();
+  const unsubs: Unsubscribe[] = bloquesDe30(ids).map((bloque, idx) =>
+    onSnapshot(
+      query(col, where(documentId(), 'in', bloque)),
+      (snapshot) => {
+        const items: T[] = [];
+        snapshot.forEach((docSnap) => items.push(mapDoc(docSnap.id, docSnap.data())));
+        acumuladoPorBloque.set(idx, items);
+        const todos: T[] = [];
+        acumuladoPorBloque.forEach((lista) => todos.push(...lista));
+        setItems(todos);
+      },
+      (err) => {
+        console.error('Firestore snapshot acotado por ids error:', err);
+      }
+    )
+  );
+  return () => unsubs.forEach((u) => u());
+}
+
+/**
+ * Escucha ACOTADA del propietario sobre una colección: nunca solicita la
+ * colección completa. Combina las ramas demostrables para las Security Rules
+ * (where('propietarioId','==',mío) y where('inmuebleId','in',[mis inmuebles]))
+ * y emite la unión sin duplicados. Si el propietario no tiene ningún vínculo
+ * demostrable, no se lanza ninguna consulta.
+ */
+function onSnapshotPropietario<T>(
+  col: ReturnType<typeof collection>,
+  scope: DataAccessScope,
+  camposTitularidad: string[],
+  mapItem: (id: string, data: Record<string, unknown>) => T,
+  setItems: (items: T[]) => void
+): Unsubscribe {
+  const pid = scope.propietarioId;
+  const inmuebles = (scope.inmuebleIds || []).filter(Boolean);
+  const ramas: { clave: string; aplicar: (unsubs: Unsubscribe[]) => void }[] = [];
+
+  if (pid) {
+    camposTitularidad.forEach((campo) => {
+      ramas.push({
+        clave: campo,
+        aplicar: (unsubs) =>
+          unsubs.push(
+            onSnapshot(query(col, where(campo, '==', pid)), (snapshot) => {
+              const items: T[] = [];
+              snapshot.forEach((docSnap) => items.push(mapItem(docSnap.id, docSnap.data())));
+              registrarRama(campo, items);
+            })
+          ),
+      });
+    });
+  }
+
+  if (inmuebles.length > 0) {
+    bloquesDe30(inmuebles).forEach((bloque, idx) => {
+      const clave = `inmuebleId_${idx}`;
+      ramas.push({
+        clave,
+        aplicar: (unsubs) =>
+          unsubs.push(
+            onSnapshot(query(col, where('inmuebleId', 'in', bloque)), (snapshot) => {
+              const items: T[] = [];
+              snapshot.forEach((docSnap) => items.push(mapItem(docSnap.id, docSnap.data())));
+              registrarRama(clave, items);
+            })
+          ),
+      });
+    });
+  }
+
+  if (ramas.length === 0) {
+    setItems([]);
+    return () => {};
+  }
+
+  const porRama = new Map<string, Map<string, T>>();
+  const emitir = () => {
+    const union = new Map<string, T>();
+    porRama.forEach((mapa) => mapa.forEach((item, id) => union.set(id, item)));
+    setItems(Array.from(union.values()));
+  };
+  function registrarRama(clave: string, items: T[]) {
+    const mapa = new Map<string, T>();
+    items.forEach((item) => {
+      const id = (item as { id?: string }).id;
+      if (id) mapa.set(id, item);
+    });
+    porRama.set(clave, mapa);
+    emitir();
+  }
+
+  const unsubs: Unsubscribe[] = [];
+  ramas.forEach((rama) => rama.aplicar(unsubs));
+  return () => unsubs.forEach((u) => u());
+}
+
+export interface DataAccessScope {
+  tipoPerfil?: string;
+  propietarioId?: string;
+  profesionalId?: string;
+  usuarioId?: string;
+  inmuebleIds?: string[];
+}
+
+/**
+ * Resuelve el ámbito de datos a partir del usuario autenticado.
+ * - ADMINISTRADOR: sin ámbito (colección completa).
+ * - PROPIETARIO: sólo sus recursos (propietarioId).
+ * - PROFESIONAL: sólo su ámbito (profesionalId) y sin datos económicos.
+ *
+ * Es una ayuda de construcción de consultas; la autorización REAL la imponen
+ * las Security Rules de Firestore (el cliente nunca es la fuente de verdad).
+ */
+export function scopeFromUsuario(
+  usuario?: {
+    tipoPerfil?: string;
+    propietarioId?: string;
+    profesionalId?: string;
+    id?: string;
+    inmuebleIds?: string[];
+  } | null
+): DataAccessScope | undefined {
+  if (!usuario || usuario.tipoPerfil === 'ADMINISTRADOR') return undefined;
+  return {
+    tipoPerfil: usuario.tipoPerfil,
+    propietarioId: usuario.propietarioId,
+    profesionalId: usuario.profesionalId,
+    usuarioId: usuario.id,
+    inmuebleIds: usuario.inmuebleIds || [],
+  };
+}
+
+/**
+ * Real-time listener for Propietarios.
+ * Con ámbito de propietario escucha únicamente SU ficha (datos fiscales/cuentas);
+ * los profesionales no reciben nada y el administrador, la colección completa.
+ */
+export function subscribePropietarios(
+  callback: (propietarios: Propietario[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    const pid = scope.propietarioId;
+    if (!pid) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      doc(db, 'propietarios', pid),
+      (docSnap) => {
+        callback(docSnap.exists() ? [{ id: docSnap.id, ...docSnap.data() } as Propietario] : []);
+      },
+      (err) => {
+        console.error('Firestore propietario (scoped) snapshot error:', err);
+      }
+    );
+  }
+
   return onSnapshot(
     PROPIETARIOS_COL,
     (snapshot) => {
@@ -182,70 +542,298 @@ export async function deletePropietarioFirestore(propietarioId: string) {
 /**
  * Real-time listener for Inmuebles
  */
-export function subscribeInmuebles(callback: (inmuebles: Inmueble[]) => void) {
-  return onSnapshot(
-    INMUEBLES_COL,
-    (snapshot) => {
-      const items: Inmueble[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as Inmueble);
-      });
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore inmuebles snapshot error:', err);
+/**
+ * Resolución PUNTUAL de viviendas para los flujos públicos por token: lectura
+ * directa por documento (get) y consulta acotada por token de solicitud. Nunca
+ * descarga el catálogo completo.
+ */
+export async function getInmueblePorId(inmuebleId: string): Promise<Inmueble | null> {
+  try {
+    const snap = await getDoc(doc(db, 'inmuebles', inmuebleId));
+    return snap.exists() ? ({ id: snap.id, ...snap.data() } as Inmueble) : null;
+  } catch (err) {
+    console.error('Error resolviendo inmueble público por id:', err);
+    return null;
+  }
+}
+
+export async function getInmueblesPorTokenSolicitud(token: string): Promise<Inmueble[]> {
+  try {
+    const snap = await getDocs(query(INMUEBLES_COL, where('tokenSolicitud', '==', token)));
+    const items: Inmueble[] = [];
+    snap.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as Inmueble));
+    return items;
+  } catch (err) {
+    console.error('Error resolviendo inmueble público por token:', err);
+    return [];
+  }
+}
+
+/**
+ * Proyección pública de una vivienda: elimina los campos internos (cuentas
+ * bancarias, datos fiscales, notas y datos del inquilino) antes de entregar el
+ * objeto a una vista pública por token.
+ */
+export function sanitizeInmuebleParaFlujoPublico(inmueble: Inmueble): Inmueble {
+  const {
+    ibanCobro,
+    cuentaBancariaCobroId,
+    datosFiscales,
+    notasInternas,
+    valorAdquisicion,
+    valoracionEstimada,
+    rentabilidadEstimada,
+    fechaAdquisicion,
+    inquilinoActualId,
+    inquilinoActualNombre,
+    contratoActivoId,
+    propietarioId,
+    propietarioPrincipalId,
+    propietarioSecundarioId,
+    ...publico
+  } = inmueble as Inmueble & Record<string, unknown>;
+  void ibanCobro;
+  void cuentaBancariaCobroId;
+  void datosFiscales;
+  void notasInternas;
+  void valorAdquisicion;
+  void valoracionEstimada;
+  void rentabilidadEstimada;
+  void fechaAdquisicion;
+  void inquilinoActualId;
+  void inquilinoActualNombre;
+  void contratoActivoId;
+  void propietarioId;
+  void propietarioPrincipalId;
+  void propietarioSecundarioId;
+  return publico as Inmueble;
+}
+
+export function subscribeInmuebles(
+  callback: (inmuebles: Inmueble[]) => void,
+  scope?: DataAccessScope
+) {
+  const mapInmueble = (id: string, data: Record<string, unknown>) =>
+    ({ id, ...data } as Inmueble);
+
+  // Administración: catálogo completo (alcance global explícito).
+  if (scopeEsAdmin(scope)) {
+    return onSnapshot(
+      INMUEBLES_COL,
+      (snapshot) => {
+        const items: Inmueble[] = [];
+        snapshot.forEach((docSnap) => items.push(mapInmueble(docSnap.id, docSnap.data())));
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore inmuebles snapshot error:', err);
+      }
+    );
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    const pid = scope.propietarioId;
+    if (!pid) {
+      callback([]);
+      return () => {};
     }
-  );
+    // Titularidad (propietarioId / propietarioPrincipalId) + viviendas
+    // compartidas explícitamente (inmuebleIds). Nunca la colección completa.
+    const acumulado = new Map<string, Inmueble>();
+    const emitir = () => callback(Array.from(acumulado.values()));
+    const unsubs: Unsubscribe[] = [];
+    const escucharCampo = (campo: string) => {
+      unsubs.push(
+        onSnapshot(
+          query(INMUEBLES_COL, where(campo, '==', pid)),
+          (snapshot) => {
+            const ids = new Set<string>();
+            snapshot.forEach((docSnap) => {
+              ids.add(docSnap.id);
+              acumulado.set(docSnap.id, mapInmueble(docSnap.id, docSnap.data()));
+            });
+            // purgar los que ya no pertenecen a esta rama del alcance
+            acumulado.forEach((_v, key) => {
+              if (!ids.has(key) && !(sharedIds || []).includes(key)) {
+                const sigueEnOtraRama = acumuladoRamas.get(key);
+                if (!sigueEnOtraRama) acumulado.delete(key);
+              }
+            });
+            acumuladoRamas.set(campo, ids);
+            emitir();
+          },
+          (err) => {
+            console.error('Firestore inmuebles (propietario) snapshot error:', err);
+          }
+        )
+      );
+    };
+    const acumuladoRamas = new Map<string, Set<string>>();
+    const sharedIds = scope.inmuebleIds || [];
+    escucharCampo('propietarioId');
+    escucharCampo('propietarioPrincipalId');
+    if (sharedIds.length > 0) {
+      unsubs.push(
+        onSnapshotPorIds(
+          INMUEBLES_COL,
+          sharedIds,
+          (id, data) => mapInmueble(id, data),
+          (items) => {
+            const ids = new Set(items.map((i) => i.id));
+            items.forEach((i) => acumulado.set(i.id, i));
+            acumulado.forEach((_v, key) => {
+              const enOtraRama = Array.from(acumuladoRamas.values()).some((set) => set.has(key));
+              if (!ids.has(key) && !enOtraRama) acumulado.delete(key);
+            });
+            acumuladoRamas.set('__shared__', ids);
+            emitir();
+          }
+        )
+      );
+    }
+    return () => unsubs.forEach((u) => u());
+  }
+
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    const asignados = scope.inmuebleIds || [];
+    const arrancar = (ids: string[]) => onSnapshotPorIds(
+      INMUEBLES_COL,
+      ids,
+      (id, data) => mapInmueble(id, data),
+      callback
+    );
+    if (asignados.length > 0) return arrancar(asignados);
+    // Las viviendas asignadas viven en la ficha del profesional: se resuelve
+    // primero su propia ficha (nunca la colección completa de inmuebles).
+    let unsubscribeInmuebles: Unsubscribe = () => {};
+    let cancelado = false;
+    const cargarAsignados = async () => {
+      const ids = new Set<string>(asignados);
+      try {
+        const propias: string[] = [];
+        if (scope.profesionalId) propias.push(scope.profesionalId);
+        if (scope.usuarioId) {
+          const snap = await getDocs(
+            query(PROFESIONALES_COL, where('usuarioId', '==', scope.usuarioId))
+          );
+          snap.forEach((d) => propias.push(d.id));
+        }
+        for (const id of propias) {
+          const docSnap = await getDoc(doc(PROFESIONALES_COL, id));
+          if (!docSnap.exists()) continue;
+          const data = docSnap.data() as Profesional;
+          (data.inmuebleIdsAsignados || []).forEach((inm) => ids.add(inm));
+        }
+      } catch (err) {
+        console.error('Error resolviendo viviendas asignadas del profesional:', err);
+      }
+      if (cancelado) return;
+      unsubscribeInmuebles = arrancar(Array.from(ids));
+    };
+    void cargarAsignados();
+    return () => {
+      cancelado = true;
+      unsubscribeInmuebles();
+    };
+  }
+
+  // Sin perfil autorizado reconocido -> DENEGAR (nunca descarga global).
+  callback([]);
+  return () => {};
 }
 
 /**
  * Real-time listener for Candidatos
  */
-export function subscribeCandidatos(callback: (candidatos: Candidato[]) => void) {
-  return onSnapshot(
-    CANDIDATOS_COL,
-    (snapshot) => {
-      const items: Candidato[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Candidato;
-        const initialMatch = INITIAL_CANDIDATOS.find((ic) => ic.id === docSnap.id);
-
-        if (!data.cuestionarioToken) {
-          data.cuestionarioToken = initialMatch?.cuestionarioToken || `q-${docSnap.id}`;
-        }
-
-        // Merge initial mock questionnaire if completely missing on Firestore doc
-        if (initialMatch?.cuestionarioIncidencias && !data.cuestionarioIncidencias) {
-          data.cuestionarioIncidencias = initialMatch.cuestionarioIncidencias;
-        }
-
-        items.push({ id: docSnap.id, ...data });
-      });
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore candidatos snapshot error:', err);
+export function subscribeCandidatos(
+  callback: (candidatos: Candidato[]) => void,
+  scope?: DataAccessScope
+) {
+  const mapCandidato = (id: string, raw: Record<string, unknown>): Candidato => {
+    const data = raw as unknown as Candidato;
+    const initialMatch = INITIAL_CANDIDATOS.find((ic) => ic.id === id);
+    if (!data.cuestionarioToken) {
+      data.cuestionarioToken = initialMatch?.cuestionarioToken || `q-${id}`;
     }
-  );
+    // Merge initial mock questionnaire if completely missing on Firestore doc
+    if (initialMatch?.cuestionarioIncidencias && !data.cuestionarioIncidencias) {
+      data.cuestionarioIncidencias = initialMatch.cuestionarioIncidencias;
+    }
+    return { id, ...data };
+  };
+
+  // Aislamiento por rol (deny by default):
+  //  - ADMINISTRACIÓN: expedientes completos (visión global de gestión).
+  //  - PROPIETARIO: SÓLO los candidatos de SUS inmuebles / su titularidad.
+  //  - PROFESIONAL: ningún dato personal de candidatos.
+  // Los flujos públicos por token siguen resolviendo su expediente con lecturas
+  // directas (get por documento), nunca con esta escucha interna.
+  if (scopeEsAdminConocido(scope)) {
+    return onSnapshot(
+      CANDIDATOS_COL,
+      (snapshot) => {
+        const items: Candidato[] = [];
+        snapshot.forEach((docSnap) => items.push(mapCandidato(docSnap.id, docSnap.data())));
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore candidatos snapshot error:', err);
+      }
+    );
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    return onSnapshotPropietario(
+      CANDIDATOS_COL,
+      scope,
+      ['propietarioId'],
+      mapCandidato,
+      callback
+    );
+  }
+
+  callback([]);
+  return () => {};
 }
 
 /**
  * Real-time listener for Solicitudes
  */
-export function subscribeSolicitudes(callback: (solicitudes: SolicitudAlquiler[]) => void) {
-  return onSnapshot(
-    SOLICITUDES_COL,
-    (snapshot) => {
-      const items: SolicitudAlquiler[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as SolicitudAlquiler);
-      });
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore solicitudes snapshot error:', err);
-    }
-  );
+export function subscribeSolicitudes(
+  callback: (solicitudes: SolicitudAlquiler[]) => void,
+  scope?: DataAccessScope
+) {
+  // Aislamiento por rol (deny by default): las solicitudes de alquiler son
+  // información de captación con datos personales. La administración las ve
+  // todas; el propietario, SÓLO las de sus inmuebles; el profesional, ninguna.
+  if (scopeEsAdminConocido(scope)) {
+    return onSnapshot(
+      SOLICITUDES_COL,
+      (snapshot) => {
+        const items: SolicitudAlquiler[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as SolicitudAlquiler);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore solicitudes snapshot error:', err);
+      }
+    );
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    return onSnapshotPropietario(
+      SOLICITUDES_COL,
+      scope,
+      [],
+      (id, data) => ({ id, ...data } as SolicitudAlquiler),
+      callback
+    );
+  }
+
+  callback([]);
+  return () => {};
 }
 
 /**
@@ -391,9 +979,36 @@ export async function saveCandidatoFirestore(candidato: Candidato) {
         return d;
       });
     }
-    await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
+
+    const docRef = doc(db, 'candidatos', candidato.id);
+    await runTransaction(db, async (transaction) => {
+      const existingSnap = await transaction.get(docRef);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data() as Candidato;
+        // Preservación estricta de historial inmutable
+        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
+        const incomingHist = Array.isArray(cleanCand.historial) ? cleanCand.historial : [];
+        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
+
+        // Impedir que un candidato en estado rechazado_final sea revertido sin autorización de propietario
+        if (existingData.estado === 'rechazado_final' && cleanCand.estado !== 'rechazado_final' && !cleanCand.decisionFinalAutor) {
+          cleanCand.estado = 'rechazado_final';
+          cleanCand.decisionFinal = 'RECHAZAR';
+        }
+
+        transaction.set(docRef, { ...cleanCand, historial: mergedHist }, { merge: true });
+      } else {
+        transaction.set(docRef, cleanCand);
+      }
+    });
   } catch (err) {
     console.error('Error saving candidato to Firestore:', err);
+    try {
+      const cleanCand = deepCleanForFirestore(candidato);
+      await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
+    } catch (fallbackErr) {
+      console.error('Fallback setDoc also failed:', fallbackErr);
+    }
   }
 }
 
@@ -411,7 +1026,14 @@ export async function deleteCandidatoFirestore(candidateId: string) {
 /**
  * Real-time listener for Invitaciones de Visita
  */
-export function subscribeInvitaciones(callback: (invitaciones: InvitacionVisita[]) => void) {
+export function subscribeInvitaciones(callback: (items: InvitacionVisita[]) => void, scope?: DataAccessScope) {
+  // Flujo público por token o administración (deny by default para las
+  // sesiones de propietario/profesional, que no usan esta colección).
+  if (!scopePermiteFlujoPublico(scope)) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
     INVITACIONES_COL,
     (snapshot) => {
@@ -430,7 +1052,14 @@ export function subscribeInvitaciones(callback: (invitaciones: InvitacionVisita[
 /**
  * Real-time listener for Visit Slots
  */
-export function subscribeVisitSlots(callback: (slots: VisitSlot[]) => void) {
+export function subscribeVisitSlots(callback: (items: VisitSlot[]) => void, scope?: DataAccessScope) {
+  // Flujo público por token o administración (deny by default para las
+  // sesiones de propietario/profesional, que no usan esta colección).
+  if (!scopePermiteFlujoPublico(scope)) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
     SLOTS_VISITA_COL,
     (snapshot) => {
@@ -599,7 +1228,17 @@ export async function saveSolicitudFirestore(solicitud: SolicitudAlquiler) {
 /**
  * Real-time listener for Solicitudes de Documentación Post-Visita
  */
-export function subscribeSolicitudesDoc(callback: (solicitudesDoc: SolicitudDocumentacion[]) => void) {
+export function subscribeSolicitudesDoc(
+  callback: (solicitudesDoc: SolicitudDocumentacion[]) => void,
+  scope?: DataAccessScope
+) {
+  // Flujo público de documentación por token o administración (deny by default
+  // para las sesiones de propietario/profesional).
+  if (!scopePermiteFlujoPublico(scope)) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
     SOLICITUDES_DOC_COL,
     (snapshot) => {
@@ -618,12 +1257,101 @@ export function subscribeSolicitudesDoc(callback: (solicitudesDoc: SolicitudDocu
 /**
  * Save / Update Solicitud de Documentación in Firestore
  */
+/**
+ * Persistencia DURABLE de la aportación documental hecha por el candidato desde
+ * el enlace público por token.
+ *
+ * Escribe SÓLO las claves que el candidato puede aportar (documentos, estado,
+ * historial append-only y marca de actividad) sobre su propio expediente,
+ * identificado por id de documento. No usa listados ni consultas — por eso no
+ * necesita (ni tiene) permiso de list — y nunca toca titularidad, candidato,
+ * token ni notas internas.
+ */
+export async function updateSolicitudDocPublicaFirestore(patch: {
+  id: string;
+  documentos: ItemDocumentoSolicitado[];
+  estado: SolicitudDocumentacion['estado'];
+  historial: SolicitudDocHistorialItem[];
+  fechaUltimaActividad: string;
+}): Promise<void> {
+  const { id, ...resto } = patch;
+  try {
+    await updateDoc(doc(db, 'solicitudes_documentacion', id), {
+      documentos: sanitizeDocForFirestore(resto.documentos),
+      estado: resto.estado,
+      historial: sanitizeDocForFirestore(resto.historial),
+      fechaUltimaActividad: resto.fechaUltimaActividad,
+    });
+  } catch (err) {
+    console.error('Error persistiendo la aportación documental pública:', err);
+    throw err;
+  }
+}
+
 export async function saveSolicitudDocFirestore(solicitudDoc: SolicitudDocumentacion) {
   try {
     const cleanDoc = sanitizeDocForFirestore(solicitudDoc);
-    await setDoc(doc(db, 'solicitudes_documentacion', solicitudDoc.id), cleanDoc, { merge: true });
+    const docRef = doc(db, 'solicitudes_documentacion', solicitudDoc.id);
+
+    await runTransaction(db, async (transaction) => {
+      const existingSnap = await transaction.get(docRef);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data() as SolicitudDocumentacion;
+        // Merge without losing previously uploaded files if incoming is partial
+        const incomingItems = cleanDoc.documentos || [];
+        const existingItems = existingData.documentos || [];
+
+        const mergedItems = incomingItems.map((inc) => {
+          const prev = existingItems.find((p) => p.id === inc.id);
+          if (prev && Array.isArray(prev.archivos) && prev.archivos.length > 0) {
+            const incArchivos = Array.isArray(inc.archivos) ? inc.archivos : [];
+            if (incArchivos.length < prev.archivos.length) {
+              return {
+                ...inc,
+                archivos: prev.archivos,
+                estado: prev.estado || inc.estado,
+                fechaSubida: prev.fechaSubida || inc.fechaSubida,
+              };
+            }
+          }
+          return inc;
+        });
+
+        // Ensure immutable history items preservation
+        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
+        const incomingHist = Array.isArray(cleanDoc.historial) ? cleanDoc.historial : [];
+        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
+
+        transaction.set(docRef, { ...cleanDoc, documentos: mergedItems, historial: mergedHist }, { merge: true });
+      } else {
+        transaction.set(docRef, cleanDoc);
+      }
+    });
+    // Sincronización proactiva con backend para portal público con validación segura de token
+    try {
+      if (typeof window !== 'undefined' && window.fetch) {
+        fetch('/api/solicitudes-documentacion/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cleanDoc),
+        }).catch(() => {});
+      }
+    } catch (e) {}
   } catch (err) {
-    console.error('Error saving solicitud documentacion to Firestore:', err);
+    console.error('Error saving solicitud documentacion with transaction:', err);
+    try {
+      const cleanDoc = sanitizeDocForFirestore(solicitudDoc);
+      await setDoc(doc(db, 'solicitudes_documentacion', solicitudDoc.id), cleanDoc, { merge: true });
+      if (typeof window !== 'undefined' && window.fetch) {
+        fetch('/api/solicitudes-documentacion/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cleanDoc),
+        }).catch(() => {});
+      }
+    } catch (fallbackErr) {
+      console.error('Fallback setDoc also failed:', fallbackErr);
+    }
   }
 }
 
@@ -639,20 +1367,62 @@ export async function deleteSolicitudDocFirestore(solicitudDocId: string) {
 }
 
 /**
- * Real-time listener for Contratos de Formalización (Fase 3)
+ * Real-time listener for Contratos de Formalización (Fase 3).
+ * FASE 1.4: con ámbito de PROPIETARIO lanza una consulta acotada por
+ * propietarioId (nunca la colección completa). Es exactamente el filtro que las
+ * Security Rules exigen para conceder el listado. Los profesionales no reciben
+ * contratos. El administrador mantiene la escucha global.
  */
-export function subscribeContratos(callback: (contratos: ContratoFormalizacion[]) => void) {
+export function subscribeContratos(
+  callback: (contratos: ContratoFormalizacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // Profesionales: cero acceso a contratos/cobros.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  // Administrador o sin ámbito: colección completa.
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      CONTRATOS_COL,
+      (snapshot) => {
+        const items: ContratoFormalizacion[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore contratos_formalizacion snapshot error:', err);
+      }
+    );
+  }
+
+  // --- PROPIETARIO ---
+  // La regla de Firestore EXIGE el filtro de igualdad por propietarioId (las
+  // reglas no filtran); por eso se consulta únicamente por ese campo. Un
+  // inmueble compartido pero titularidad de otro propietario no pertenece
+  // económicamente a este usuario y, por tanto, no se incluye aquí.
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+
+  const scopedQuery = query(CONTRATOS_COL, where('propietarioId', '==', pid));
   return onSnapshot(
-    CONTRATOS_COL,
-    (snapshot) => {
+    scopedQuery,
+    (snap) => {
       const items: ContratoFormalizacion[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion);
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as ContratoFormalizacion);
       });
       callback(items);
     },
     (err) => {
-      console.error('Firestore contratos_formalizacion snapshot error:', err);
+      console.error('Firestore contratos (scoped) snapshot error:', err);
     }
   );
 }
@@ -677,6 +1447,444 @@ export async function deleteContratoFirestore(contratoId: string) {
     await deleteDoc(doc(db, 'contratos_formalizacion', contratoId));
   } catch (err) {
     console.error('Error deleting contrato formalizacion from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.0 — GASTOS (explotación vs financiación)
+// ============================================================
+
+/**
+ * Listener de gastos con el mismo aislamiento que los contratos:
+ * - PROFESIONAL: cero acceso (son datos económicos).
+ * - PROPIETARIO: consulta demostrable where('propietarioId','==', pid).
+ * - ADMINISTRADOR / sin ámbito: colección completa.
+ */
+export function subscribeGastos(
+  callback: (gastos: Gasto[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      GASTOS_COL,
+      (snapshot) => {
+        const items: Gasto[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Gasto);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore gastos snapshot error:', err);
+      }
+    );
+  }
+
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+
+  const scopedQuery = query(GASTOS_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: Gasto[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as Gasto);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore gastos (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function saveGastoFirestore(gasto: Gasto) {
+  try {
+    const cleanGasto = sanitizeObjectForFirestore(gasto);
+    await setDoc(doc(db, 'gastos', gasto.id), cleanGasto, { merge: true });
+  } catch (err) {
+    console.error('Error saving gasto to Firestore:', err);
+  }
+}
+
+export async function deleteGastoFirestore(gastoId: string) {
+  try {
+    await deleteDoc(doc(db, 'gastos', gastoId));
+  } catch (err) {
+    console.error('Error deleting gasto from Firestore:', err);
+  }
+}
+
+/**
+ * Listener de plantillas de gastos recurrentes con el mismo aislamiento que los
+ * gastos: profesionales sin datos, propietario por where('propietarioId','=='),
+ * administrador con la colección completa.
+ */
+export function subscribeGastosRecurrentes(
+  callback: (plantillas: GastoRecurrente[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      GASTOS_RECURRENTES_COL,
+      (snapshot) => {
+        const items: GastoRecurrente[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as GastoRecurrente);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore gastos_recurrentes snapshot error:', err);
+      }
+    );
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  const scopedQuery = query(GASTOS_RECURRENTES_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: GastoRecurrente[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as GastoRecurrente);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore gastos_recurrentes (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function saveGastoRecurrenteFirestore(plantilla: GastoRecurrente) {
+  try {
+    const clean = sanitizeObjectForFirestore(plantilla);
+    await setDoc(doc(db, 'gastos_recurrentes', plantilla.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving gasto recurrente to Firestore:', err);
+  }
+}
+
+export async function deleteGastoRecurrenteFirestore(plantillaId: string) {
+  try {
+    // No se eliminan los apuntes ya materializados: se conserva el histórico.
+    await deleteDoc(doc(db, 'gastos_recurrentes', plantillaId));
+  } catch (err) {
+    console.error('Error deleting gasto recurrente from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.3 — PRÉSTAMOS / HIPOTECAS (condiciones financieras)
+// ============================================================
+
+export function subscribePrestamos(
+  callback: (prestamos: Prestamo[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      PRESTAMOS_COL,
+      (snapshot) => {
+        const items: Prestamo[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Prestamo);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore prestamos snapshot error:', err);
+      }
+    );
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  const scopedQuery = query(PRESTAMOS_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: Prestamo[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as Prestamo);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore prestamos (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function savePrestamoFirestore(prestamo: Prestamo) {
+  try {
+    const clean = sanitizeObjectForFirestore(prestamo);
+    await setDoc(doc(db, 'prestamos', prestamo.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving prestamo to Firestore:', err);
+  }
+}
+
+export async function deletePrestamoFirestore(prestamoId: string) {
+  try {
+    await deleteDoc(doc(db, 'prestamos', prestamoId));
+  } catch (err) {
+    console.error('Error deleting prestamo from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 3.0 — RECOMERCIALIZACIÓN INTELIGENTE
+// Suscripción genérica aislada por propietario (patrón de
+// contratos/gastos): profesionales sin datos, propietario con
+// where('propietarioId','==', pid), administrador con todo.
+// ============================================================
+function subscribeColeccionPropietario<T extends { id: string }>(
+  col: ReturnType<typeof collection>,
+  callback: (items: T[]) => void,
+  scope: DataAccessScope | undefined,
+  etiqueta: string
+): Unsubscribe {
+  const mapear = (snap: QuerySnapshot) => {
+    const items: T[] = [];
+    snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as unknown as T));
+    callback(items);
+  };
+  const onError = (err: unknown) => console.error(`Firestore ${etiqueta} snapshot error:`, err);
+
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(col, mapear, onError);
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(query(col, where('propietarioId', '==', pid)), mapear, onError);
+}
+
+// ---- Expedientes de recomercialización ----
+export function subscribeExpedientesRecomercializacion(
+  callback: (items: ExpedienteRecomercializacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<ExpedienteRecomercializacion>(
+    EXPEDIENTES_RECOMERCIALIZACION_COL,
+    callback,
+    scope,
+    'expedientes_recomercializacion'
+  );
+}
+export async function saveExpedienteRecomercializacionFirestore(item: ExpedienteRecomercializacion) {
+  try {
+    await setDoc(
+      doc(db, 'expedientes_recomercializacion', item.id),
+      sanitizeObjectForFirestore(item),
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error saving expediente recomercializacion:', err);
+  }
+}
+export async function deleteExpedienteRecomercializacionFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'expedientes_recomercializacion', id));
+  } catch (err) {
+    console.error('Error deleting expediente recomercializacion:', err);
+  }
+}
+
+// ---- Directorio de inmobiliarias (lectura propietario+admin; escritura admin) ----
+export function subscribeInmobiliarias(
+  callback: (items: InmobiliariaDirectorio[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // El directorio lo consultan administrador y propietario (bolsa para delegar);
+  // los profesionales no participan en la comercialización.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    INMOBILIARIAS_DIRECTORIO_COL,
+    (snap) => {
+      const items: InmobiliariaDirectorio[] = [];
+      snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as InmobiliariaDirectorio));
+      callback(items);
+    },
+    (err) => console.error('Firestore inmobiliarias_directorio snapshot error:', err)
+  );
+}
+export async function saveInmobiliariaFirestore(item: InmobiliariaDirectorio) {
+  try {
+    await setDoc(doc(db, 'inmobiliarias_directorio', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving inmobiliaria:', err);
+  }
+}
+export async function deleteInmobiliariaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'inmobiliarias_directorio', id));
+  } catch (err) {
+    console.error('Error deleting inmobiliaria:', err);
+  }
+}
+
+// ---- Propuestas de inmobiliarias (RFP) ----
+export function subscribePropuestasInmobiliaria(
+  callback: (items: PropuestaInmobiliaria[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<PropuestaInmobiliaria>(
+    PROPUESTAS_INMOBILIARIA_COL,
+    callback,
+    scope,
+    'propuestas_inmobiliaria'
+  );
+}
+export async function savePropuestaInmobiliariaFirestore(item: PropuestaInmobiliaria) {
+  try {
+    await setDoc(doc(db, 'propuestas_inmobiliaria', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving propuesta inmobiliaria:', err);
+  }
+}
+export async function deletePropuestaInmobiliariaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'propuestas_inmobiliaria', id));
+  } catch (err) {
+    console.error('Error deleting propuesta inmobiliaria:', err);
+  }
+}
+
+// ---- Leads de intermediación ----
+export function subscribeLeadsInmobiliarios(
+  callback: (items: LeadInmobiliario[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<LeadInmobiliario>(
+    LEADS_INMOBILIARIOS_COL,
+    callback,
+    scope,
+    'leads_inmobiliario'
+  );
+}
+export async function saveLeadInmobiliarioFirestore(item: LeadInmobiliario) {
+  try {
+    await setDoc(doc(db, 'leads_inmobiliario', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving lead inmobiliario:', err);
+  }
+}
+export async function deleteLeadInmobiliarioFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'leads_inmobiliario', id));
+  } catch (err) {
+    console.error('Error deleting lead inmobiliario:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.2 — FACTURAS / JUSTIFICANTES DE GASTOS en Storage
+// Ruta: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
+// ============================================================
+
+export async function uploadFacturaGasto(
+  gastoId: string,
+  file: File | Blob,
+  fileName: string,
+  propietarioId?: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `gastos_facturas/${ownerSeg}/${gastoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+    console.warn('Timeout subiendo la factura del gasto a Firebase Storage.');
+  } catch (err) {
+    console.warn('Firebase Storage no disponible para la factura del gasto:', err);
+  }
+
+  // Respaldo por el endpoint del servidor (igual que los justificantes de cobro).
+  try {
+    const dataURL = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch('/api/upload-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileBase64: dataURL, filename: fileName, mimeType: mime, itemId: gastoId }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.url) {
+        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Falló también la subida de la factura por servidor:', serverErr);
+  }
+
+  throw new Error('No se ha podido almacenar la factura. Revisa la conexión e inténtalo de nuevo.');
+}
+
+export async function deleteFacturaGastoStorage(storagePath?: string): Promise<void> {
+  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar la factura de Storage:', err);
   }
 }
 
@@ -744,20 +1952,41 @@ export async function deleteAseguradoraFirestore(aseguradoraId: string) {
 /**
  * Real-time listener for Solicitudes de Seguro de Impago (Fase 4 & 5)
  */
-export function subscribeSolicitudesSeguro(callback: (solicitudes: SolicitudSeguroImpago[]) => void) {
-  return onSnapshot(
-    SOLICITUDES_SEGURO_COL,
-    (snapshot) => {
-      const items: SolicitudSeguroImpago[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as SolicitudSeguroImpago);
-      });
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore solicitudes_seguro_impago snapshot error:', err);
-    }
-  );
+export function subscribeSolicitudesSeguro(
+  callback: (solicitudes: SolicitudSeguroImpago[]) => void,
+  scope?: DataAccessScope
+) {
+  // Aislamiento por rol (deny by default): los estudios de solvencia son
+  // información económica y personal. Administración (global) o el propietario
+  // titular de SU inmueble (tramita su expediente). Profesionales: ninguno.
+  if (scopeEsAdminConocido(scope)) {
+    return onSnapshot(
+      SOLICITUDES_SEGURO_COL,
+      (snapshot) => {
+        const items: SolicitudSeguroImpago[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as SolicitudSeguroImpago);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore solicitudes_seguro_impago snapshot error:', err);
+      }
+    );
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    return onSnapshotPropietario(
+      SOLICITUDES_SEGURO_COL,
+      scope,
+      ['propietarioId'],
+      (id, data) => ({ id, ...data } as SolicitudSeguroImpago),
+      callback
+    );
+  }
+
+  callback([]);
+  return () => {};
 }
 
 /**
@@ -766,9 +1995,38 @@ export function subscribeSolicitudesSeguro(callback: (solicitudes: SolicitudSegu
 export async function saveSolicitudSeguroFirestore(solicitud: SolicitudSeguroImpago) {
   try {
     const cleanSol = sanitizeObjectForFirestore(solicitud);
-    await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
+    const docRef = doc(db, 'solicitudes_seguro_impago', solicitud.id);
+
+    await runTransaction(db, async (transaction) => {
+      const existingSnap = await transaction.get(docRef);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data() as SolicitudSeguroImpago;
+        // Keep immutable reference code and existing history if concurrent save occurs
+        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
+        const incomingHist = Array.isArray(cleanSol.historial) ? cleanSol.historial : [];
+        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
+
+        transaction.set(
+          docRef,
+          {
+            ...cleanSol,
+            referenciaUnica: existingData.referenciaUnica || cleanSol.referenciaUnica,
+            historial: mergedHist,
+          },
+          { merge: true }
+        );
+      } else {
+        transaction.set(docRef, cleanSol);
+      }
+    });
   } catch (err) {
-    console.error('Error saving solicitud seguro impago to Firestore:', err);
+    console.error('Error saving solicitud seguro impago with transaction:', err);
+    try {
+      const cleanSol = sanitizeObjectForFirestore(solicitud);
+      await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
+    } catch (fallbackErr) {
+      console.error('Fallback setDoc also failed:', fallbackErr);
+    }
   }
 }
 
@@ -974,6 +2232,160 @@ export async function uploadInmuebleImageToStorage(
   }
 }
 
+// ============================================================
+// FASE 3.2 — FOTOGRAFÍAS DE INSPECCIÓN (recomercialización)
+// Ruta privada por propietario y expediente:
+//   recomercializacion_fotos/{propietarioId}/{expedienteId}/{archivo}
+// A diferencia de las imágenes de catálogo, estas fotos son documentos de
+// trabajo internos (estado/deterioro) y NO se leen públicamente. Tampoco se
+// usa fallback base64: un expediente acumula muchas fotos y un data URL
+// inflaría el documento de Firestore por encima de su límite de 1 MB. Si
+// Storage falla, se lanza el error y la UI ofrece reintentar.
+// ============================================================
+
+export async function uploadFotoInspeccionStorage(
+  propietarioId: string,
+  expedienteId: string,
+  estancia: string,
+  blob: Blob,
+  fileName: string
+): Promise<{ url: string; storagePath: string }> {
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const expSeg = (expedienteId || 'exp').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const estSeg = (estancia || 'otro').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = (fileName || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const rand = Math.random().toString(36).substring(2, 6);
+  const storagePath = `recomercializacion_fotos/${ownerSeg}/${expSeg}/${estSeg}_${Date.now()}_${rand}_${safeName}`;
+
+  const fileRef = ref(storage, storagePath);
+  const uploadWork = (async () => {
+    await uploadBytes(fileRef, blob, { contentType: blob.type || 'image/jpeg' });
+    return getDownloadURL(fileRef);
+  })();
+
+  // 20 s: las inspecciones pueden incluir varias fotos con conexión lenta.
+  const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000));
+  const url = await Promise.race([uploadWork, timeoutGuard]);
+  if (!url || typeof url !== 'string') {
+    throw new Error('La subida de la fotografía ha tardado demasiado. Revisa la conexión e inténtalo de nuevo.');
+  }
+  return { url, storagePath };
+}
+
+export async function deleteFotoInspeccionStorage(storagePath?: string): Promise<void> {
+  if (!storagePath) return;
+  // Nunca borrar referencias locales/efímeras ni URLs http directas.
+  if (
+    storagePath.startsWith('local_') ||
+    storagePath.startsWith('server_') ||
+    storagePath.startsWith('data:') ||
+    storagePath.startsWith('http')
+  ) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    // El objeto puede ya no existir; no debe bloquear la baja del metadato.
+    console.warn('No se pudo eliminar la foto de inspección de Storage:', err);
+  }
+}
+
+/**
+ * Sube el justificante mensual de un cobro (transferencia / ingreso) a Firebase Storage.
+ * Regla arquitectónica: Firestore guarda SOLO metadatos y la URL; el PDF/imagen va a Storage.
+ * Nunca se codifica el documento en base64 dentro del documento económico.
+ *
+ * Estrategia resilente:
+ *  1) Firebase Storage (almacenamiento duradero).
+ *  2) Si Storage falla o tarda demasiado, se intenta mediante el endpoint del servidor.
+ *  3) Si ambos fallan, se lanza un error para no guardar una referencia efímera/rota.
+ */
+export async function uploadJustificanteCobro(
+  cobroPeriodoId: string,
+  file: File | Blob,
+  fileName: string,
+  propietarioId?: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  // FASE 1.4: se segmenta por propietario para que Storage Rules pueda aislar
+  // los justificantes (datos económicos). Si no hay propietarioId se usa la
+  // carpeta genérica "sin_asignar".
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `cobros_justificantes/${ownerSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  // 1) Firebase Storage
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+    console.warn('Timeout subiendo justificante a Firebase Storage; se intenta por servidor.');
+  } catch (err) {
+    console.warn('Firebase Storage no disponible para el justificante; se intenta por servidor:', err);
+  }
+
+  // 2) Respaldo mediante el endpoint del servidor (almacén de proceso)
+  try {
+    const dataURL = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+      reader.readAsDataURL(file);
+    });
+
+    const res = await fetch('/api/upload-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileBase64: dataURL,
+        filename: fileName,
+        mimeType: mime,
+        itemId: cobroPeriodoId,
+      }),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      if (json.url) {
+        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Fallo también la subida del justificante por servidor:', serverErr);
+  }
+
+  throw new Error(
+    'No se ha podido almacenar el justificante. Revisa la conexión o Firebase Storage e inténtalo de nuevo.'
+  );
+}
+
+/**
+ * Elimina un justificante de Firebase Storage. Las referencias del almacén temporal
+ * del servidor (server_*) no se eliminan de Storage.
+ */
+export async function deleteJustificanteCobro(storagePath?: string): Promise<void> {
+  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar el justificante de Storage:', err);
+  }
+}
+
 /**
  * Deletes an image file from Firebase Storage.
  */
@@ -1027,7 +2439,46 @@ export async function deleteUsuarioFirestore(usuarioId: string): Promise<void> {
 // GESTIÓN DE PROFESIONALES Y MANTENIMIENTO
 // =========================================================================
 
-export function subscribeProfesionales(callback: (profesionales: Profesional[]) => void) {
+export function subscribeProfesionales(
+  callback: (profesionales: Profesional[]) => void,
+  scope?: DataAccessScope
+) {
+  // Aislamiento por rol: un profesional sólo consulta SU ficha (nunca el
+  // directorio completo de técnicos). Propietario y administración mantienen el
+  // directorio que ya usaban.
+  if (scope?.tipoPerfil === 'PROFESIONAL' && scope.usuarioId) {
+    const acumulado = new Map<string, Profesional>();
+    const emitir = () => callback(Array.from(acumulado.values()));
+    const unsubs: Unsubscribe[] = [];
+    if (scope.profesionalId) {
+      unsubs.push(
+        onSnapshot(
+          doc(PROFESIONALES_COL, scope.profesionalId),
+          (docSnap) => {
+            if (docSnap.exists()) {
+              acumulado.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as Profesional);
+              emitir();
+            }
+          },
+          (err) => console.error('Firestore profesional (propia ficha) snapshot error:', err)
+        )
+      );
+    }
+    unsubs.push(
+      onSnapshot(
+        query(PROFESIONALES_COL, where('usuarioId', '==', scope.usuarioId)),
+        (snapshot) => {
+          snapshot.forEach((docSnap) =>
+            acumulado.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as Profesional)
+          );
+          emitir();
+        },
+        (err) => console.error('Firestore profesionales (propios) snapshot error:', err)
+      )
+    );
+    return () => unsubs.forEach((u) => u());
+  }
+
   return onSnapshot(
     PROFESIONALES_COL,
     (snapshot) => {
@@ -1061,7 +2512,14 @@ export async function deleteProfesionalFirestore(profesionalId: string): Promise
 // ENLACES DE REGISTRO E INVITACIONES
 // =========================================================================
 
-export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) => void) {
+export function subscribeEnlacesRegistro(callback: (items: EnlaceRegistro[]) => void, scope?: DataAccessScope) {
+  // Flujo público por token o administración (deny by default para las
+  // sesiones de propietario/profesional, que no usan esta colección).
+  if (!scopePermiteFlujoPublico(scope)) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
     ENLACES_REGISTRO_COL,
     (snapshot) => {
@@ -1505,7 +2963,60 @@ export async function seedAuthAndRolesIfEmpty() {
 /**
  * Escucha en tiempo real de Incidencias
  */
-export function subscribeIncidencias(callback: (incidencias: Incidencia[]) => void) {
+export function subscribeIncidencias(
+  callback: (incidencias: Incidencia[]) => void,
+  scope?: DataAccessScope
+) {
+  // Aislamiento (FASE 1.4 + Bloque 4): el propietario sólo consulta SUS
+  // incidencias y el profesional únicamente las que tiene asignadas. La
+  // consulta queda acotada en origen (no se descarga la colección para
+  // filtrarla después) y las Security Rules reproducen el mismo criterio.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    const profId = scope.profesionalId;
+    if (!profId) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(INCIDENCIAS_COL, where('profesionalId', '==', profId)),
+      (snapshot) => {
+        const items: Incidencia[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Incidencia);
+        });
+        items.sort((a, b) => new Date(b.fechaCreacion).getTime() - new Date(a.fechaCreacion).getTime());
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore incidencias (scoped profesional) snapshot error:', err);
+        callback([]);
+      }
+    );
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    const pid = scope.propietarioId;
+    if (!pid) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(INCIDENCIAS_COL, where('propietarioId', '==', pid)),
+      (snapshot) => {
+        const items: Incidencia[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Incidencia);
+        });
+        items.sort((a, b) => new Date(b.fechaCreacion).getTime() - new Date(a.fechaCreacion).getTime());
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore incidencias (scoped propietario) snapshot error:', err);
+        callback([]);
+      }
+    );
+  }
+
   return onSnapshot(
     INCIDENCIAS_COL,
     (snapshot) => {
@@ -1528,7 +3039,8 @@ export function subscribeIncidencias(callback: (incidencias: Incidencia[]) => vo
  */
 export async function saveIncidenciaFirestore(incidencia: Incidencia) {
   try {
-    const cleanInc = sanitizeObjectForFirestore(incidencia);
+    const propietarioId = exigirPropietarioId(incidencia.propietarioId, 'incidencia');
+    const cleanInc = sanitizeObjectForFirestore({ ...incidencia, propietarioId });
     await setDoc(doc(db, 'incidencias', incidencia.id), cleanInc, { merge: true });
   } catch (err) {
     console.error('Error saving incidencia to Firestore:', err);
@@ -1551,9 +3063,25 @@ export async function deleteIncidenciaFirestore(incidenciaId: string) {
 /**
  * Escucha en tiempo real de Pólizas de Seguro
  */
-export function subscribePolizas(callback: (polizas: PolizaSeguro[]) => void) {
+export function subscribePolizas(
+  callback: (polizas: PolizaSeguro[]) => void,
+  scope?: DataAccessScope
+) {
+  // Las pólizas son documentación económica privada: el propietario sólo
+  // accede a las suyas y el profesional no tiene acceso alguno.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
+  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
-    POLIZAS_COL,
+    pid ? query(POLIZAS_COL, where('propietarioId', '==', pid)) : POLIZAS_COL,
     (snapshot) => {
       const items: PolizaSeguro[] = [];
       snapshot.forEach((docSnap) => {
@@ -1573,7 +3101,8 @@ export function subscribePolizas(callback: (polizas: PolizaSeguro[]) => void) {
  */
 export async function savePolizaFirestore(poliza: PolizaSeguro) {
   try {
-    const cleanPol = sanitizeObjectForFirestore(poliza);
+    const propietarioId = exigirPropietarioId(poliza.propietarioId, 'póliza de seguro');
+    const cleanPol = sanitizeObjectForFirestore({ ...poliza, propietarioId });
     await setDoc(doc(db, 'polizas_seguros', poliza.id), cleanPol, { merge: true });
   } catch (err) {
     console.error('Error saving poliza to Firestore:', err);
@@ -1596,9 +3125,26 @@ export async function deletePolizaFirestore(polizaId: string) {
 /**
  * Escucha en tiempo real de Siniestros
  */
-export function subscribeSiniestros(callback: (siniestros: Siniestro[]) => void) {
+export function subscribeSiniestros(
+  callback: (siniestros: Siniestro[]) => void,
+  scope?: DataAccessScope
+) {
+  // El siniestro hereda el ámbito de la incidencia/póliza de origen
+  // (propietarioId denormalizado). El profesional no accede a expedientes
+  // de seguro: sólo a la orden de trabajo asignada.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
+  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
-    SINIESTROS_COL,
+    pid ? query(SINIESTROS_COL, where('propietarioId', '==', pid)) : SINIESTROS_COL,
     (snapshot) => {
       const items: Siniestro[] = [];
       snapshot.forEach((docSnap) => {
@@ -1616,9 +3162,31 @@ export function subscribeSiniestros(callback: (siniestros: Siniestro[]) => void)
 /**
  * Guarda o actualiza un Siniestro en Firestore
  */
+/**
+ * Bloque 4/5 — Guardia de ámbito en la ESCRITURA.
+ *
+ * Todo documento de incidencias, seguros, siniestros, trabajos, presupuestos y
+ * valoraciones DEBE llevar un `propietarioId` real: es la clave con la que las
+ * Security Rules aíslan a cada propietario. Antes se usaban valores
+ * provisionales ("prop_general" / "prop_default") que dejaban el documento
+ * fuera del ámbito de cualquier propietario; ahora la escritura falla en lugar
+ * de persistir un documento inacotado.
+ */
+function exigirPropietarioId(propietarioId: string | undefined, contexto: string): string {
+  const pid = (propietarioId || '').trim();
+  if (!pid) {
+    throw new Error(
+      `No se pudo determinar el propietario del documento (${contexto}). ` +
+      'Selecciona un inmueble con titular asignado antes de guardar.'
+    );
+  }
+  return pid;
+}
+
 export async function saveSiniestroFirestore(siniestro: Siniestro) {
   try {
-    const cleanSin = sanitizeObjectForFirestore(siniestro);
+    const propietarioId = exigirPropietarioId(siniestro.propietarioId, 'siniestro');
+    const cleanSin = sanitizeObjectForFirestore({ ...siniestro, propietarioId });
     await setDoc(doc(db, 'siniestros', siniestro.id), cleanSin, { merge: true });
   } catch (err) {
     console.error('Error saving siniestro to Firestore:', err);
@@ -1643,14 +3211,18 @@ export async function deleteSiniestroFirestore(siniestroId: string) {
  * Con timeout guard y fallback seguro para máxima fiabilidad.
  */
 export async function uploadIncidenciaAdjuntoStorage(
+  propietarioId: string,
   incidenciaId: string,
   file: File | Blob,
   nombreArchivo: string,
   tipo: 'imagen' | 'video' | 'documento'
-): Promise<string> {
+): Promise<{ downloadUrl: string; storagePath: string }> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const path = `incidencias/${incidenciaId}/${Date.now()}_${sanitizedName}`;
-  const fileRef = ref(storage, path);
+  // Ruta privada acotada por propietario (ver storage.rules):
+  //   incidencias/{propietarioId}/{incidenciaId}/{archivo}
+  const pid = exigirPropietarioId(propietarioId, 'adjunto de incidencia');
+  const storagePath = `incidencias/${pid}/${incidenciaId}/${Date.now()}_${sanitizedName}`;
+  const fileRef = ref(storage, storagePath);
 
   try {
     const uploadPromise = async () => {
@@ -1663,16 +3235,18 @@ export async function uploadIncidenciaAdjuntoStorage(
       setTimeout(() => reject(new Error('Storage upload timeout')), 12000)
     );
 
-    return await Promise.race([uploadPromise(), timeoutGuard]);
+    const downloadUrl = await Promise.race([uploadPromise(), timeoutGuard]);
+    return { downloadUrl, storagePath };
   } catch (err) {
     console.warn('Firebase Storage upload failed/timed out, attempting data fallback:', err);
-    // Para imágenes, generar una URL rápida segura
-    return new Promise((resolve) => {
+    // Para imágenes, generar una URL rápida segura (modo degradado sin Storage).
+    const downloadUrl = await new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = () => resolve('https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80');
       reader.readAsDataURL(file);
     });
+    return { downloadUrl, storagePath };
   }
 }
 
@@ -1683,9 +3257,43 @@ export async function uploadIncidenciaAdjuntoStorage(
 /**
  * Escucha en tiempo real de Trabajos Profesionales
  */
-export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfesional[]) => void) {
+export function subscribeTrabajosProfesionales(
+  callback: (trabajos: TrabajoProfesional[]) => void,
+  scope?: DataAccessScope
+) {
+  // Órdenes de trabajo: el propietario ve las de sus inmuebles y el
+  // profesional únicamente las que tiene asignadas.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    const profId = scope.profesionalId;
+    if (!profId) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(TRABAJOS_PROFESIONALES_COL, where('profesionalId', '==', profId)),
+      (snapshot) => {
+        const items: TrabajoProfesional[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as TrabajoProfesional);
+        });
+        items.sort((a, b) => new Date(b.createdAt || b.fechaSolicitud).getTime() - new Date(a.createdAt || a.fechaSolicitud).getTime());
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore trabajos_profesionales (scoped profesional) snapshot error:', err);
+        callback([]);
+      }
+    );
+  }
+
+  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
+  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
-    TRABAJOS_PROFESIONALES_COL,
+    pid ? query(TRABAJOS_PROFESIONALES_COL, where('propietarioId', '==', pid)) : TRABAJOS_PROFESIONALES_COL,
     (snapshot) => {
       const items: TrabajoProfesional[] = [];
       snapshot.forEach((docSnap) => {
@@ -1705,8 +3313,10 @@ export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfe
  */
 export async function saveTrabajoProfesionalFirestore(trabajo: TrabajoProfesional): Promise<void> {
   try {
+    const propietarioId = exigirPropietarioId(trabajo.propietarioId, 'orden de trabajo');
     const cleanTrabajo = sanitizeObjectForFirestore({
       ...trabajo,
+      propietarioId,
       updatedAt: new Date().toISOString(),
     });
     await setDoc(doc(db, 'trabajos_profesionales', trabajo.id), cleanTrabajo, { merge: true });
@@ -1731,9 +3341,43 @@ export async function deleteTrabajoProfesionalFirestore(trabajoId: string): Prom
 /**
  * Escucha en tiempo real de Presupuestos de Profesionales
  */
-export function subscribePresupuestosProfesionales(callback: (presupuestos: PresupuestoProfesional[]) => void) {
+export function subscribePresupuestosProfesionales(
+  callback: (presupuestos: PresupuestoProfesional[]) => void,
+  scope?: DataAccessScope
+) {
+  // Presupuestos: el propietario ve los de sus inmuebles; el profesional los
+  // que él mismo ha emitido (documento económico propio).
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    const profId = scope.profesionalId;
+    if (!profId) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(PRESUPUESTOS_PROFESIONALES_COL, where('profesionalId', '==', profId)),
+      (snapshot) => {
+        const items: PresupuestoProfesional[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as PresupuestoProfesional);
+        });
+        items.sort((a, b) => new Date(b.createdAt || b.fecha).getTime() - new Date(a.createdAt || a.fecha).getTime());
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore presupuestos_profesionales (scoped profesional) snapshot error:', err);
+        callback([]);
+      }
+    );
+  }
+
+  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
+  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
-    PRESUPUESTOS_PROFESIONALES_COL,
+    pid ? query(PRESUPUESTOS_PROFESIONALES_COL, where('propietarioId', '==', pid)) : PRESUPUESTOS_PROFESIONALES_COL,
     (snapshot) => {
       const items: PresupuestoProfesional[] = [];
       snapshot.forEach((docSnap) => {
@@ -1753,8 +3397,10 @@ export function subscribePresupuestosProfesionales(callback: (presupuestos: Pres
  */
 export async function savePresupuestoProfesionalFirestore(presupuesto: PresupuestoProfesional): Promise<void> {
   try {
+    const propietarioId = exigirPropietarioId(presupuesto.propietarioId, 'presupuesto profesional');
     const cleanPresupuesto = sanitizeObjectForFirestore({
       ...presupuesto,
+      propietarioId,
       updatedAt: new Date().toISOString(),
     });
     await setDoc(doc(db, 'presupuestos_profesionales', presupuesto.id), cleanPresupuesto, { merge: true });
@@ -1779,9 +3425,43 @@ export async function deletePresupuestoProfesionalFirestore(presupuestoId: strin
 /**
  * Escucha en tiempo real de Valoraciones de Profesionales
  */
-export function subscribeValoracionesProfesionales(callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void) {
+export function subscribeValoracionesProfesionales(
+  callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void,
+  scope?: DataAccessScope
+) {
+  // Valoraciones: el propietario ve las de sus trabajos; el profesional,
+  // únicamente las recibidas por él.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    const profId = scope.profesionalId;
+    if (!profId) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(VALORACIONES_PROFESIONALES_COL, where('profesionalId', '==', profId)),
+      (snapshot) => {
+        const items: ValoracionProfesionalTrabajo[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as ValoracionProfesionalTrabajo);
+        });
+        items.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore valoraciones_profesionales (scoped profesional) snapshot error:', err);
+        callback([]);
+      }
+    );
+  }
+
+  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId : undefined;
+  if (scope?.tipoPerfil === 'PROPIETARIO' && !pid) {
+    callback([]);
+    return () => {};
+  }
+
   return onSnapshot(
-    VALORACIONES_PROFESIONALES_COL,
+    pid ? query(VALORACIONES_PROFESIONALES_COL, where('propietarioId', '==', pid)) : VALORACIONES_PROFESIONALES_COL,
     (snapshot) => {
       const items: ValoracionProfesionalTrabajo[] = [];
       snapshot.forEach((docSnap) => {
@@ -1802,7 +3482,8 @@ export function subscribeValoracionesProfesionales(callback: (valoraciones: Valo
 export async function saveValoracionProfesionalFirestore(valoracion: ValoracionProfesionalTrabajo): Promise<void> {
   try {
     const valId = valoracion.id || `val_${valoracion.trabajoId}_${Date.now()}`;
-    const cleanVal = sanitizeObjectForFirestore({ ...valoracion, id: valId });
+    const propietarioId = exigirPropietarioId(valoracion.propietarioId, 'valoración profesional');
+    const cleanVal = sanitizeObjectForFirestore({ ...valoracion, id: valId, propietarioId });
     await setDoc(doc(db, 'valoraciones_profesionales', valId), cleanVal, { merge: true });
 
     // También actualizar la valoración en el trabajo correspondiente si existe
@@ -1829,6 +3510,8 @@ export async function uploadProfesionalDocumentoStorage(
   tipoDoc: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
+  // Documentación del profesional (RC, IAE, PRL...). Ruta privada:
+  //   profesionales/{profesionalId}/documentos/{archivo}
   const storagePath = `profesionales/${profesionalId}/documentos/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
 
@@ -1853,12 +3536,16 @@ export async function uploadProfesionalDocumentoStorage(
  * Sube un archivo de presupuesto (PDF / factura proforma) a Firebase Storage
  */
 export async function uploadPresupuestoDocumentoStorage(
+  propietarioId: string,
   presupuestoId: string,
   file: File | Blob,
   nombreArchivo: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `presupuestos/${presupuestoId}/${Date.now()}_${sanitizedName}`;
+  // Ruta privada acotada por propietario:
+  //   presupuestos/{propietarioId}/{presupuestoId}/{archivo}
+  const pid = exigirPropietarioId(propietarioId, 'documento de presupuesto');
+  const storagePath = `presupuestos/${pid}/${presupuestoId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
 
   try {
@@ -1882,26 +3569,32 @@ export async function uploadPresupuestoDocumentoStorage(
  * Sube un adjunto fotográfico o informe a un Trabajo Profesional en Firebase Storage
  */
 export async function uploadTrabajoAdjuntoStorage(
+  propietarioId: string,
   trabajoId: string,
   file: File | Blob,
   nombreArchivo: string
-): Promise<string> {
+): Promise<{ downloadUrl: string; storagePath: string }> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `trabajos/${trabajoId}/${Date.now()}_${sanitizedName}`;
+  // Ruta privada acotada por propietario:
+  //   trabajos/{propietarioId}/{trabajoId}/{archivo}
+  const pid = exigirPropietarioId(propietarioId, 'adjunto de trabajo');
+  const storagePath = `trabajos/${pid}/${trabajoId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
 
   try {
     const mimeType = file.type || 'image/jpeg';
     await uploadBytes(fileRef, file, { contentType: mimeType });
-    return await getDownloadURL(fileRef);
+    const downloadUrl = await getDownloadURL(fileRef);
+    return { downloadUrl, storagePath };
   } catch (err) {
     console.warn('Firebase Storage upload failed for trabajo adjunto, using data fallback:', err);
-    return new Promise((resolve) => {
+    const downloadUrl = await new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = () => resolve('https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80');
       reader.readAsDataURL(file);
     });
+    return { downloadUrl, storagePath };
   }
 }
 
@@ -1913,4 +3606,6 @@ export {
   deleteDoc,
   onSnapshot,
   writeBatch,
+  query,
+  where,
 };

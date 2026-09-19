@@ -37,6 +37,7 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface DetalleSolicitudDocModalProps {
   solicitud: SolicitudDocumentacion;
@@ -45,6 +46,10 @@ interface DetalleSolicitudDocModalProps {
   onUpdateSolicitud: (updated: SolicitudDocumentacion) => Promise<void>;
   onOpenWhatsapp?: (url: string) => void;
   onUpdateCandidateDocs?: (candidateId: string, docs: DocumentoAnalizado[]) => void;
+  /** Eliminar definitivamente el expediente documental (con confirmación). */
+  onDeleteSolicitud?: (solicitudId: string) => void | Promise<void>;
+  /** Abrir el portal público de documentación dentro de la propia aplicación. */
+  onOpenPublicView?: (token: string) => void;
 }
 
 export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> = ({
@@ -54,9 +59,12 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
   onUpdateSolicitud,
   onOpenWhatsapp,
   onUpdateCandidateDocs,
+  onDeleteSolicitud,
+  onOpenPublicView,
 }) => {
   const [solState, setSolState] = useState<SolicitudDocumentacion>(solicitud);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<boolean>(false);
   const [copiedMsg, setCopiedMsg] = useState<boolean>(false);
   const [correctionTargetId, setCorrectionTargetId] = useState<string | null>(null);
   const [correctionReason, setCorrectionReason] = useState<string>('');
@@ -456,11 +464,29 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
                   href={publicUrl}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={(e) => {
+                    // Si la aplicación ofrece la vista interna, se usa el enrutado
+                    // propio (la URL directa se mantiene como respaldo).
+                    if (onOpenPublicView) {
+                      e.preventDefault();
+                      onOpenPublicView(solState.token);
+                    }
+                  }}
                   className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl font-semibold flex items-center gap-1.5 transition-colors"
                 >
                   <Eye className="w-3.5 h-3.5 text-slate-500" />
                   <span>Ver Portal como Candidato</span>
                 </a>
+
+                {onDeleteSolicitud && (
+                  <button
+                    onClick={() => setConfirmDeleteOpen(true)}
+                    className="px-3 py-1.5 bg-white border border-rose-200 hover:bg-rose-50 text-rose-700 rounded-xl font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar Expediente</span>
+                  </button>
+                )}
               </div>
 
               <button
@@ -937,6 +963,20 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
           </div>
         )}
       </div>
+
+      {onDeleteSolicitud && (
+        <ConfirmDeleteModal
+          isOpen={confirmDeleteOpen}
+          title="Eliminar expediente documental"
+          description={`Se eliminará definitivamente la solicitud de documentación de ${solState.candidatoNombre} y su enlace privado dejará de ser válido. Esta acción no se puede deshacer.`}
+          confirmText="Eliminar Expediente"
+          onConfirm={async () => {
+            setConfirmDeleteOpen(false);
+            await onDeleteSolicitud(solState.id);
+          }}
+          onCancel={() => setConfirmDeleteOpen(false)}
+        />
+      )}
     </div>
   );
 };

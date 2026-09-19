@@ -2,6 +2,7 @@ import {
   Profesional,
   TrabajoProfesional,
   PresupuestoProfesional,
+  PartidaPresupuesto,
   ValoracionProfesionalTrabajo,
   Inmueble,
   EspecialidadCodigo,
@@ -66,16 +67,21 @@ export const ESTADO_TRABAJO_LABELS: Record<
   PENDIENTE: { label: 'Pendiente', badgeClass: 'bg-slate-100 text-slate-700 border-slate-200', step: 1, color: 'slate' },
   BUSCANDO_PROFESIONAL: { label: 'Buscando Profesional', badgeClass: 'bg-sky-100 text-sky-800 border-sky-200', step: 2, color: 'sky' },
   PROFESIONAL_PROPUESTO: { label: 'Profesional Propuesto', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200', step: 2, color: 'blue' },
+  ASIGNADO: { label: 'Asignada', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200', step: 2, color: 'blue' },
+  ASIGNADA: { label: 'Asignada', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200', step: 2, color: 'blue' },
   PRESUPUESTO_SOLICITADO: { label: 'Presupuesto Solicitado', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200', step: 3, color: 'amber' },
   PRESUPUESTO_RECIBIDO: { label: 'Presupuesto Recibido', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200', step: 4, color: 'purple' },
   PENDIENTE_ACEPTACION: { label: 'Pendiente Aceptación', badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200', step: 4, color: 'indigo' },
   ACEPTADO: { label: 'Aceptado', badgeClass: 'bg-teal-100 text-teal-800 border-teal-200', step: 5, color: 'teal' },
   PROGRAMADO: { label: 'Programado', badgeClass: 'bg-cyan-100 text-cyan-800 border-cyan-200', step: 6, color: 'cyan' },
   EN_EJECUCION: { label: 'En Ejecución', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200 animate-pulse', step: 7, color: 'blue' },
+  EN_CURSO: { label: 'En Curso', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200 animate-pulse', step: 7, color: 'amber' },
   PENDIENTE_MATERIAL: { label: 'Pendiente Material', badgeClass: 'bg-orange-100 text-orange-800 border-orange-200', step: 7, color: 'orange' },
   PENDIENTE_PROPIETARIO: { label: 'Pendiente Propietario', badgeClass: 'bg-yellow-100 text-yellow-800 border-yellow-200', step: 7, color: 'yellow' },
-  FINALIZADO: { label: 'Finalizado', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200', step: 8, color: 'emerald' },
-  CANCELADO: { label: 'Cancelado', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200', step: 0, color: 'rose' },
+  FINALIZADO: { label: 'Finalizada', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200', step: 8, color: 'emerald' },
+  FINALIZADA: { label: 'Finalizada', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200', step: 8, color: 'emerald' },
+  CANCELADO: { label: 'Cancelada', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200', step: 0, color: 'rose' },
+  CANCELADA: { label: 'Cancelada', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200', step: 0, color: 'rose' },
 };
 
 export const ESTADO_PRESUPUESTO_LABELS: Record<
@@ -88,6 +94,7 @@ export const ESTADO_PRESUPUESTO_LABELS: Record<
   ACEPTADO: { label: 'Aceptado', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   RECHAZADO: { label: 'Rechazado', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200' },
   CADUCADO: { label: 'Caducado', badgeClass: 'bg-zinc-100 text-zinc-600 border-zinc-200' },
+  EN_NEGOCIACION: { label: 'En Negociación', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
 };
 
 export const PRIORIDAD_TRABAJO_LABELS: Record<
@@ -107,7 +114,7 @@ export function coincideUbicacion(profesional: Profesional, inmueble?: Inmueble)
   if (!inmueble) return true;
   if (!profesional.zonasServicio || profesional.zonasServicio.length === 0) return true;
 
-  const inmProvincia = (inmueble.datosFiscales?.provincia || inmueble.ciudad || '').toLowerCase().trim();
+  const inmProvincia = ((inmueble.datosFiscales as Record<string, any>)?.provincia || inmueble.ciudad || '').toLowerCase().trim();
   const inmMunicipio = (inmueble.ciudad || '').toLowerCase().trim();
   const inmCP = (inmueble.datosFiscales?.codigoPostal || '').trim();
 
@@ -310,19 +317,40 @@ export function calcularMetricasProfesional(
 }
 
 /**
+ * Calcula los importes de base imponible, IVA y total para las partidas de un presupuesto.
+ */
+export function calcularTotalesPresupuesto(
+  partidas: PartidaPresupuesto[] = [],
+  porcentajeIva: number = 21
+) {
+  const importeBase = partidas.reduce(
+    (sum, p) => sum + (p.importe || (p.cantidad * p.precioUnitario) || 0),
+    0
+  );
+  const iva = Math.round(importeBase * (porcentajeIva / 100) * 100) / 100;
+  const importeTotal = Math.round((importeBase + iva) * 100) / 100;
+  return {
+    importeBase: Number(importeBase.toFixed(2)),
+    iva: Number(iva.toFixed(2)),
+    importeTotal: Number(importeTotal.toFixed(2)),
+  };
+}
+
+/**
  * Calcula métricas agregadas de todos los trabajos y presupuestos profesionales.
  */
 export function calcularMetricasGeneralesTrabajos(
-  trabajos: TrabajoProfesional[],
-  presupuestos: PresupuestoProfesional[],
-  profesionales: Profesional[]
+  trabajos: TrabajoProfesional[] = [],
+  presupuestos: PresupuestoProfesional[] = [],
+  profesionales: Profesional[] = [],
+  valoraciones: ValoracionProfesionalTrabajo[] = []
 ) {
   const activos = trabajos.filter(
-    (t) => t.estado !== 'FINALIZADO' && t.estado !== 'CANCELADO'
+    (t) => t.estado !== 'FINALIZADO' && t.estado !== 'FINALIZADA' && t.estado !== 'CANCELADO' && t.estado !== 'CANCELADA'
   ).length;
 
   const urgentes = trabajos.filter(
-    (t) => t.prioridad === 'URGENTE' && t.estado !== 'FINALIZADO' && t.estado !== 'CANCELADO'
+    (t) => t.prioridad === 'URGENTE' && t.estado !== 'FINALIZADO' && t.estado !== 'FINALIZADA' && t.estado !== 'CANCELADO' && t.estado !== 'CANCELADA'
   ).length;
 
   const pendientesPresupuesto = trabajos.filter(
@@ -330,17 +358,31 @@ export function calcularMetricasGeneralesTrabajos(
   ).length;
 
   const enEjecucion = trabajos.filter(
-    (t) => t.estado === 'EN_EJECUCION' || t.estado === 'PROGRAMADO'
+    (t) => t.estado === 'EN_EJECUCION' || t.estado === 'EN_CURSO' || t.estado === 'PROGRAMADO'
   ).length;
 
-  const finalizados = trabajos.filter((t) => t.estado === 'FINALIZADO').length;
+  const finalizados = trabajos.filter(
+    (t) => t.estado === 'FINALIZADO' || t.estado === 'FINALIZADA'
+  ).length;
 
-  const presupuestosAceptados = presupuestos.filter((p) => p.estado === 'ACEPTADO');
-  const gastoTotalAprobado = presupuestosAceptados.reduce((sum, p) => sum + (p.importeTotal || 0), 0);
+  const presupuestosAceptadosList = presupuestos.filter((p) => p.estado === 'ACEPTADO');
+  const gastoTotalAprobado = presupuestosAceptadosList.reduce((sum, p) => sum + (p.importeTotal || 0), 0);
 
   const profesionalesActivos = profesionales.filter((p) =>
     p.estado ? p.estado === 'ACTIVO' : p.activo !== false
   ).length;
+
+  let mediaPuntuacionGlobal = 0;
+  if (valoraciones && valoraciones.length > 0) {
+    const sumPunt = valoraciones.reduce((acc, v) => acc + (v.puntuacion || 0), 0);
+    mediaPuntuacionGlobal = Number((sumPunt / valoraciones.length).toFixed(1));
+  } else if (profesionales.length > 0) {
+    const profsConValoracion = profesionales.filter((p) => typeof p.valoracionMedia === 'number' && p.valoracionMedia > 0);
+    if (profsConValoracion.length > 0) {
+      const sum = profsConValoracion.reduce((acc, p) => acc + (p.valoracionMedia || 0), 0);
+      mediaPuntuacionGlobal = Number((sum / profsConValoracion.length).toFixed(1));
+    }
+  }
 
   return {
     totalTrabajos: trabajos.length,
@@ -348,11 +390,16 @@ export function calcularMetricasGeneralesTrabajos(
     urgentes,
     pendientesPresupuesto,
     enEjecucion,
+    trabajosEnEjecucion: enEjecucion,
     finalizados,
+    trabajosFinalizados: finalizados,
     gastoTotalAprobado,
+    totalImporteFacturado: gastoTotalAprobado,
     totalPresupuestos: presupuestos.length,
+    presupuestosAceptados: presupuestosAceptadosList.length,
     profesionalesActivos,
     totalProfesionales: profesionales.length,
+    mediaPuntuacionGlobal,
   };
 }
 

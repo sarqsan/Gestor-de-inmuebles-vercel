@@ -32,6 +32,58 @@ import {
 export const ADMIN_MASTER_EMAIL = 'sarqsan2@gmail.com';
 
 /**
+ * FASE 1.4 — Mantiene el espejo de identidad `usuarios_auth/{uid}` que las
+ * Security Rules usan para resolver el rol y el propietarioId a partir del UID
+ * de Firebase Authentication (las reglas no pueden hacer consultas, sólo una
+ * lectura puntual por ruta). El documento es reducido y el usuario sólo puede
+ * escribirlo si coincide con su perfil autoritativo de `usuarios/{id}` (la
+ * propia regla lo fuerza), por lo que no sirve para escalar privilegios.
+ * Es idempotente y nunca debe bloquear el inicio de sesión.
+ */
+export async function syncAuthIndex(
+  usuario: UsuarioApp,
+  authUser?: { uid: string } | null
+): Promise<void> {
+  try {
+    const fb = authUser || auth.currentUser;
+    if (!fb || !fb.uid || !usuario || !usuario.id) return;
+    const payload = {
+      uid: fb.uid,
+      usuarioId: usuario.id,
+      email: usuario.email || '',
+      tipoPerfil: usuario.tipoPerfil,
+      estado: usuario.estado,
+      roles: Array.isArray(usuario.roles) ? usuario.roles : [],
+      propietarioId: usuario.propietarioId || '',
+      profesionalId: usuario.profesionalId || '',
+      inmuebleIds: Array.isArray(usuario.inmuebleIds) ? usuario.inmuebleIds : [],
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, 'usuarios_auth', fb.uid), payload, { merge: true });
+  } catch (err) {
+    console.warn('No se pudo sincronizar el espejo de identidad usuarios_auth:', err);
+  }
+}
+
+// Autorización centralizada (deny by default) en un módulo PURO y verificable.
+// Se re-exporta aquí para no romper los imports existentes.
+export {
+  PERFILES_VALIDOS,
+  ESTADOS_SIN_ACCESO,
+  SECCIONES_POR_PERFIL,
+  estadoConAcceso,
+  perfilAutorizado,
+  seccionesPermitidas,
+  puedeAccederSeccion,
+  seccionInicialPorPerfil,
+  esAdministradorAutorizado,
+  esPropietarioAutorizado,
+  esProfesionalAutorizado,
+  alcanceDatos,
+} from './authorization';
+export type { PerfilValido, AlcanceDatosResuelto } from './authorization';
+
+/**
  * Genera un hash criptográfico SHA-256 seguro para verificación de credenciales directas.
  */
 async function hashPassword(password: string): Promise<string> {
@@ -73,6 +125,55 @@ export async function getUsuarioByAuthUid(
       // Continuar
     }
 
+    // 0.b Espejo de identidad: el propio UID puede leer `usuarios_auth/{uid}`
+    // (regla acotada al uid), que apunta al perfil autoritativo (usuarioId).
+    // Permite resolver la sesión SIN consultar la colección completa de
+    // usuarios (que está reservada a la administración). Si el perfil aún no
+    // tiene authUid, sólo se vincula cuando el email verificado por Firebase
+    // coincide con el del perfil (vinculación explícita y de un solo uso).
+    try {
+      const mirrorSnap = await getDoc(doc(db, 'usuarios_auth', authUid));
+      if (mirrorSnap.exists()) {
+        const mirror = mirrorSnap.data() as { usuarioId?: string };
+        if (mirror.usuarioId) {
+          const perfilSnap = await getDoc(doc(db, 'usuarios', mirror.usuarioId));
+          if (perfilSnap.exists()) {
+            const perfil = perfilSnap.data() as UsuarioApp;
+            const emailCoincide =
+              !!fallbackEmail &&
+              !!perfil.email &&
+              perfil.email.trim().toLowerCase() === fallbackEmail.trim().toLowerCase();
+            if (perfil.authUid === authUid) {
+              return { id: perfilSnap.id, ...perfil } as UsuarioApp;
+            }
+            if (!perfil.authUid && emailCoincide) {
+              const vinculado: UsuarioApp = {
+                ...perfil,
+                id: perfilSnap.id,
+                authUid,
+                updatedAt: new Date().toISOString(),
+                lastLoginAt: new Date().toISOString(),
+              };
+              await setDoc(doc(db, 'usuarios', perfilSnap.id), vinculado, { merge: true });
+              await saveAuditLogFirestore({
+                usuarioId: perfilSnap.id,
+                usuarioEmail: vinculado.email,
+                usuarioNombre: vinculado.nombre,
+                accion: 'USUARIO_AUTHUID_VINCULADO',
+                descripcion: `Vinculación de identidad real de Firebase Authentication UID [${authUid}] con el registro de usuario (vía espejo de identidad).`,
+                entidadAfectada: 'usuario',
+                idAfectado: perfilSnap.id,
+                resultado: 'EXITO',
+              });
+              return vinculado;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Continuar con los siguientes mecanismos
+    }
+
     // Si es el Administrador Principal, comprobar directamente su documento fijo
     if (fallbackEmail && fallbackEmail.trim().toLowerCase() === ADMIN_MASTER_EMAIL) {
       try {
@@ -104,7 +205,11 @@ export async function getUsuarioByAuthUid(
       return { id: docSnap.id, ...docSnap.data() } as UsuarioApp;
     }
 
-    // 2. Si no se encuentra por authUid pero tenemos el email verificado de Firebase Auth
+    // 2. Vinculación por email: requiere CONSULTAR la colección completa de
+    // usuarios, reservada a la administración (deny by default). Para el resto
+    // de perfiles la ruta válida es el espejo `usuarios_auth/{uid}` del paso
+    // 0.b. Si esta consulta es denegada, el acceso se rechaza (nunca se concede
+    // identidad sin perfil autoritativo).
     if (fallbackEmail) {
       const normalizedEmail = fallbackEmail.trim().toLowerCase();
       const qEmail = query(USUARIOS_COL, where('email', '==', normalizedEmail));
@@ -261,6 +366,11 @@ export async function loginWithEmail(
     idAfectado: usuario.id,
     resultado: 'EXITO',
   });
+
+  // FASE 1.4: escribir el espejo de identidad para las Security Rules.
+  if (firebaseUser) {
+    await syncAuthIndex(usuario, firebaseUser);
+  }
 
   return { firebaseUser, usuarioApp: usuario };
 }
@@ -427,11 +537,28 @@ export async function registerWithInvitationLink(params: {
     lastLoginAt: new Date().toISOString(),
   };
 
-  // 3. Crear entidad relacionada (Propietario o Profesional)
+  // 3. Determinar el ID de la entidad relacionada y vincularlo al usuario
+  let propId: string | undefined;
+  let profId: string | undefined;
   if (tipoPerfil === 'PROPIETARIO') {
-    const propId = enlace.propietarioIdVinculado || `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    propId = enlace.propietarioIdVinculado || `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     nuevoUsuario.propietarioId = propId;
+  } else {
+    profId = enlace.profesionalIdVinculado || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    nuevoUsuario.profesionalId = profId;
+  }
 
+  // 4. Guardar PRIMERO el registro de usuario (documento autoritativo)...
+  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario, passwordHash: pHash });
+
+  // 4b. ...y después el espejo de identidad que leen las Security Rules.
+  //     Debe existir antes de crear la ficha de propietario (su regla lo exige).
+  if (firebaseUser) {
+    await syncAuthIndex(nuevoUsuario, firebaseUser);
+  }
+
+  // 5. Crear la entidad relacionada (Propietario o Profesional)
+  if (tipoPerfil === 'PROPIETARIO' && propId) {
     const propietarioData: Propietario = {
       id: propId,
       nombre: `${nombre.trim()} ${apellidos?.trim() || ''}`.trim(),
@@ -448,10 +575,7 @@ export async function registerWithInvitationLink(params: {
       fechaActualizacion: new Date().toISOString(),
     };
     await setDoc(doc(db, 'propietarios', propId), propietarioData, { merge: true });
-  } else {
-    const profId = enlace.profesionalIdVinculado || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    nuevoUsuario.profesionalId = profId;
-
+  } else if (tipoPerfil === 'PROFESIONAL' && profId) {
     const profesionalData: Profesional = {
       id: profId,
       usuarioId: userId,
@@ -471,10 +595,7 @@ export async function registerWithInvitationLink(params: {
     await setDoc(doc(db, 'profesionales', profId), profesionalData, { merge: true });
   }
 
-  // 4. Guardar registro de usuario en Firestore
-  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario, passwordHash: pHash });
-
-  // 5. Incrementar usos del enlace
+  // 6. Incrementar usos del enlace
   await setDoc(
     doc(db, 'enlaces_registro', enlace.id),
     { usosActuales: (enlace.usosActuales || 0) + 1 },
@@ -554,41 +675,18 @@ export function subscribeAuthState(
     loading: boolean
   ) => void
 ) {
-  // Comprobación síncrona/inmediata de sesión activa almacenada
-  const checkStoredSession = async () => {
-    try {
-      const saved = localStorage.getItem('rentselect_active_session');
-      if (saved) {
-        const parsed = JSON.parse(saved) as UsuarioApp;
-        if (parsed && parsed.id) {
-          callback(null, parsed, false);
-          // Verificar en segundo plano si el usuario sigue activo en Firestore
-          try {
-            const snap = await getDoc(doc(db, 'usuarios', parsed.id));
-            if (snap.exists()) {
-              const fresh = { id: snap.id, ...snap.data() } as UsuarioApp;
-              if (fresh.estado === 'BLOQUEADO' || fresh.estado === 'INACTIVO') {
-                localStorage.removeItem('rentselect_active_session');
-                callback(null, null, false);
-              } else {
-                localStorage.setItem('rentselect_active_session', JSON.stringify(fresh));
-                callback(null, fresh, false);
-              }
-            }
-          } catch (e) {}
-        }
-      }
-    } catch (e) {}
-  };
-
-  checkStoredSession();
+  // NOTA DE SEGURIDAD (sin cambios de arquitectura): Firebase Authentication es
+  // la ÚNICA fuente de identidad. El almacenamiento local se usa como caché de
+  // rendimiento (perfil ya resuelto), nunca para decidir quién es el usuario ni
+  // qué privilegios tiene: al abrir la aplicación, el estado de sesión sólo se
+  // acepta si viene de Firebase Auth y el perfil se vuelve a resolver desde
+  // Firestore (con su espejo de identidad usuarios_auth).
 
   return onAuthStateChanged(auth, async (user) => {
     if (!user) {
-      const saved = localStorage.getItem('rentselect_active_session');
-      if (!saved) {
-        callback(null, null, false);
-      }
+      // Sin usuario de Firebase Auth no hay identidad: nunca se reutiliza una
+      // sesión cacheada en el navegador.
+      callback(null, null, false);
       return;
     }
 
@@ -601,12 +699,18 @@ export function subscribeAuthState(
         return;
       }
 
-      if (usuarioApp.estado === 'BLOQUEADO') {
+      // Sólo ACTIVO concede acceso: PENDIENTE, BLOQUEADO e INACTIVO se rechazan
+      // aquí mismo (y App los vuelve a denegar), sin fabricar identidad.
+      if (usuarioApp.estado !== 'ACTIVO') {
         await signOut(auth);
         localStorage.removeItem('rentselect_active_session');
         callback(null, null, false);
         return;
       }
+
+      // FASE 1.4: asegurar que el espejo de identidad existe ANTES de que la
+      // aplicación abra las suscripciones de datos (las reglas lo necesitan).
+      await syncAuthIndex(usuarioApp, user);
 
       try {
         localStorage.setItem('rentselect_active_session', JSON.stringify(usuarioApp));

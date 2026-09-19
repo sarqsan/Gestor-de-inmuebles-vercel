@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Home,
   Wrench,
@@ -16,6 +16,7 @@ import {
   Building,
   ArrowRight,
   ShieldAlert,
+  Save,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -24,6 +25,7 @@ import {
   ContratoFormalizacion,
   Especialidad,
   Propietario,
+  SectionType,
 } from '../../types';
 
 interface PropietarioPortalSectionProps {
@@ -35,7 +37,10 @@ interface PropietarioPortalSectionProps {
   propietarios: Propietario[];
   onOpenCrearProfesionalModal: (profesional?: Profesional) => void;
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
+  onSavePropietario?: (propietario: Propietario) => Promise<void>;
   onNavigateToInmueble?: (inmuebleId: string) => void;
+  /** Navegación a los módulos reales ya implementados (cobros, gastos, incidencias…). */
+  onNavigateToSection?: (section: SectionType) => void;
 }
 
 export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> = ({
@@ -47,7 +52,9 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   propietarios,
   onOpenCrearProfesionalModal,
   onSaveProfesional,
+  onSavePropietario,
   onNavigateToInmueble,
+  onNavigateToSection,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
     'viviendas' | 'profesionales' | 'contratos' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
@@ -57,14 +64,28 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEspecialidad, setSelectedEspecialidad] = useState<string>('TODAS');
   const [copiedLinkProfId, setCopiedLinkProfId] = useState<string | null>(null);
+  // Ficha fiscal del propietario: edición de SUS propios datos (las reglas de
+  // Firestore permiten al propietario crear/editar únicamente su ficha).
+  const [formFicha, setFormFicha] = useState<{
+    nombre: string;
+    nifCif: string;
+    telefono: string;
+    email: string;
+    direccion: string;
+    ciudad: string;
+    codigoPostal: string;
+  } | null>(null);
+  const [guardandoFicha, setGuardandoFicha] = useState<boolean>(false);
+  const [mensajeFicha, setMensajeFicha] = useState<string | null>(null);
 
   // Security check: Only filter properties that belong to this owner
+  // Aislamiento por propietario: se aceptan las dos formas de titularidad con
+  // las que trabaja la aplicación (propietarioId y propietarioPrincipalId), más
+  // la asignación explícita por inmuebleIds. Nunca se muestran viviendas ajenas.
   const misViviendas = inmuebles.filter((inm) => {
-    const isOwnerByPropietarioId =
-      currentUser.propietarioId && inm.propietarioPrincipalId === currentUser.propietarioId;
-    const isOwnerByInmuebleIds =
-      currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
-    // If user has no specific filter but is a demo owner, show their associated properties
+    const pid = currentUser.propietarioId;
+    const isOwnerByPropietarioId = !!pid && (inm.propietarioId === pid || inm.propietarioPrincipalId === pid);
+    const isOwnerByInmuebleIds = !!currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
     return isOwnerByPropietarioId || isOwnerByInmuebleIds;
   });
 
@@ -83,6 +104,70 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
 
   // Associated Propietario record
   const miFichaPropietario = propietarios.find((p) => p.id === currentUser.propietarioId);
+
+  // La ficha se rellena desde Firestore (lectura acotada a la ficha propia) y se
+  // vuelve a sincronizar cuando llega la versión guardada: tras recargar, los
+  // datos persistidos son los que se muestran.
+  useEffect(() => {
+    setFormFicha({
+      nombre: miFichaPropietario?.nombre || `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim(),
+      nifCif: miFichaPropietario?.nifCif || '',
+      telefono: miFichaPropietario?.telefono || currentUser.telefono || '',
+      email: miFichaPropietario?.email || currentUser.email || '',
+      direccion: miFichaPropietario?.direccion || '',
+      ciudad: miFichaPropietario?.ciudad || '',
+      codigoPostal: miFichaPropietario?.codigoPostal || '',
+    });
+  }, [miFichaPropietario, currentUser]);
+
+  const puedeEditarFicha = !!onSavePropietario && !!currentUser.propietarioId;
+
+  const handleGuardarFicha = async () => {
+    if (!onSavePropietario || !currentUser.propietarioId || !formFicha) return;
+    setGuardandoFicha(true);
+    setMensajeFicha(null);
+    try {
+      // Se conserva la ficha existente (tipo de propietario, cuentas bancarias,
+      // representante legal…): sólo se actualizan los datos editables aquí.
+      const base: Propietario =
+        miFichaPropietario ||
+        ({
+          id: currentUser.propietarioId,
+          nombre: formFicha.nombre,
+          nifCif: formFicha.nifCif,
+          tipoPropietario: 'persona_fisica',
+          telefono: formFicha.telefono,
+          email: formFicha.email,
+          direccion: formFicha.direccion,
+          ciudad: formFicha.ciudad,
+          codigoPostal: formFicha.codigoPostal,
+          cuentasBancarias: [],
+          fechaCreacion: new Date().toISOString(),
+          fechaActualizacion: new Date().toISOString(),
+        } as Propietario);
+
+      const actualizada: Propietario = {
+        ...base,
+        id: currentUser.propietarioId,
+        nombre: formFicha.nombre.trim() || base.nombre,
+        nifCif: formFicha.nifCif.trim(),
+        telefono: formFicha.telefono.trim(),
+        email: formFicha.email.trim(),
+        direccion: formFicha.direccion.trim(),
+        ciudad: formFicha.ciudad.trim(),
+        codigoPostal: formFicha.codigoPostal.trim(),
+        fechaActualizacion: new Date().toISOString(),
+      };
+
+      await onSavePropietario(actualizada);
+      setMensajeFicha('Datos guardados correctamente.');
+    } catch (err) {
+      console.error('Error guardando la ficha del propietario:', err);
+      setMensajeFicha('No se han podido guardar los datos. Inténtalo de nuevo.');
+    } finally {
+      setGuardandoFicha(false);
+    }
+  };
 
   const handleCopyInvitacion = (prof: Profesional) => {
     const token = prof.tokenInvitacion || `inv_${prof.id}`;
@@ -149,9 +234,9 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
               count: misProfesionalesPrivados.length,
             },
             { id: 'contratos', label: 'Mis Contratos', icon: FileCheck, count: misContratos.length },
-            { id: 'gastos', label: 'Gastos', icon: TrendingDown, badge: 'Próximamente' },
-            { id: 'cobros', label: 'Cobros', icon: DollarSign, badge: 'Próximamente' },
-            { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, badge: 'Próximamente' },
+            { id: 'gastos', label: 'Gastos', icon: TrendingDown },
+            { id: 'cobros', label: 'Cobros', icon: DollarSign },
+            { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle },
             { id: 'perfil', label: 'Mi Perfil', icon: User },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -175,11 +260,6 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                     }`}
                   >
                     {tab.count}
-                  </span>
-                )}
-                {tab.badge && (
-                  <span className="text-[9px] px-1.5 py-0.2 rounded-sm font-semibold bg-amber-100 text-amber-800">
-                    {tab.badge}
                   </span>
                 )}
               </button>
@@ -544,55 +624,79 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             </div>
           )}
 
-          {/* SUBTAB 4: GASTOS (PRÓXIMAMENTE) */}
+          {/* SUBTAB 4: GASTOS — módulo real ya operativo (acotado a tus viviendas) */}
           {activeSubTab === 'gastos' && (
-            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
+            <div className="p-8 text-center border border-slate-200 rounded-2xl bg-white space-y-3 max-w-lg mx-auto">
               <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto">
                 <TrendingDown className="w-6 h-6" />
               </div>
-              <h3 className="text-sm font-bold text-slate-900">Módulo de Gastos (Próximamente)</h3>
+              <h3 className="text-sm font-bold text-slate-900">Gestión de Gastos de Tus Viviendas</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Este módulo te permitirá llevar el control exacto de facturas de suministros, recibos de IBI, cuotas de comunidad de propietarios, seguros de hogar y deducciones fiscales de tus viviendas.
+                Suministros, IBI, comunidad, seguros de hogar, gastos recurrentes, préstamos y cuadre de
+                rentabilidad de tus inmuebles. Sólo se muestran los gastos de tus viviendas.
               </p>
-              <div className="inline-block px-3 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-semibold">
-                Fase 2 de Desarrollo
-              </div>
+              {onNavigateToSection && (
+                <button
+                  onClick={() => onNavigateToSection('gastos')}
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  <TrendingDown className="w-4 h-4" />
+                  <span>Abrir Mis Gastos</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           )}
 
-          {/* SUBTAB 5: COBROS (PRÓXIMAMENTE) */}
+          {/* SUBTAB 5: COBROS — módulo real ya operativo (calendario y justificantes) */}
           {activeSubTab === 'cobros' && (
-            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
+            <div className="p-8 text-center border border-slate-200 rounded-2xl bg-white space-y-3 max-w-lg mx-auto">
               <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center mx-auto">
                 <DollarSign className="w-6 h-6" />
               </div>
-              <h3 className="text-sm font-bold text-slate-900">Módulo de Cobros y Liquidaciones (Próximamente)</h3>
+              <h3 className="text-sm font-bold text-slate-900">Cobros y Liquidaciones</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Visualiza los cobros mensuales de tus inquilinos, genera recibos automáticos y recibe avisos inmediatos en caso de retraso en el pago de la renta.
+                Calendario mensual de rentas de tus contratos, recibo de cada periodo, justificantes en
+                Firebase Storage, avisos y control de retrasos.
               </p>
-              <div className="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                Fase 2 de Desarrollo
-              </div>
+              {onNavigateToSection && (
+                <button
+                  onClick={() => onNavigateToSection('cobros')}
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span>Abrir Mis Cobros</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           )}
 
-          {/* SUBTAB 6: INCIDENCIAS (PRÓXIMAMENTE) */}
+          {/* SUBTAB 6: INCIDENCIAS — módulo real ya operativo (incidencias, seguros y siniestros) */}
           {activeSubTab === 'incidencias' && (
-            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
+            <div className="p-8 text-center border border-slate-200 rounded-2xl bg-white space-y-3 max-w-lg mx-auto">
               <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center mx-auto">
                 <AlertTriangle className="w-6 h-6" />
               </div>
-              <h3 className="text-sm font-bold text-slate-900">Sistema de Incidencias y Reparaciones (Próximamente)</h3>
+              <h3 className="text-sm font-bold text-slate-900">Incidencias, Mantenimiento y Seguros</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Avisos en tiempo real reportados por inquilinos, asignación directa a tus profesionales autorizados, presupuestos y control fotográfico de fin de obra.
+                Averías y mantenimiento de tus inmuebles con dictamen pericial IA, tus pólizas de seguro y
+                los partes de siniestro tramitados.
               </p>
-              <div className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-semibold">
-                Fase 2 de Desarrollo
-              </div>
+              {onNavigateToSection && (
+                <button
+                  onClick={() => onNavigateToSection('incidencias')}
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Abrir Mis Incidencias</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           )}
 
-          {/* SUBTAB 7: MI PERFIL */}
+          {/* SUBTAB 7: MI PERFIL — datos de acceso y ficha fiscal editable */}
           {activeSubTab === 'perfil' && (
             <div className="space-y-4 max-w-xl">
               <div>
@@ -604,29 +708,19 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
 
               <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3 text-xs">
                 <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-slate-500">Nombre completo:</span>
-                  <span className="font-semibold text-slate-900">
-                    {currentUser.nombre} {currentUser.apellidos || ''}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-slate-500">Email:</span>
+                  <span className="text-slate-500">Email de acceso:</span>
                   <span className="font-semibold text-slate-900">{currentUser.email}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-slate-500">Teléfono:</span>
-                  <span className="font-semibold text-slate-900">{currentUser.telefono || 'No indicado'}</span>
                 </div>
                 {miFichaPropietario && (
                   <>
                     <div className="flex justify-between py-1 border-b border-slate-100">
                       <span className="text-slate-500">NIF/CIF Fiscal:</span>
-                      <span className="font-semibold text-slate-900">{miFichaPropietario.nifCif}</span>
+                      <span className="font-semibold text-slate-900">{miFichaPropietario.nifCif || 'No indicado'}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-100">
                       <span className="text-slate-500">Domicilio de Notificaciones:</span>
                       <span className="font-semibold text-slate-900">
-                        {miFichaPropietario.direccion}, {miFichaPropietario.ciudad}
+                        {miFichaPropietario.direccion ? `${miFichaPropietario.direccion}, ${miFichaPropietario.ciudad}` : 'No indicado'}
                       </span>
                     </div>
                   </>
@@ -636,6 +730,97 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                   <span className="font-bold text-blue-700">{misViviendas.length} viviendas</span>
                 </div>
               </div>
+
+              {puedeEditarFicha && formFicha && (
+                <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">Mi Ficha Fiscal</h4>
+                    <p className="text-xs text-slate-500">
+                      Estos datos se guardan en tu ficha de propietario y se conservan al recargar.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Nombre y apellidos / Razón social</span>
+                      <input
+                        type="text"
+                        value={formFicha.nombre}
+                        onChange={(e) => setFormFicha({ ...formFicha, nombre: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">NIF / CIF / NIE</span>
+                      <input
+                        type="text"
+                        value={formFicha.nifCif}
+                        onChange={(e) => setFormFicha({ ...formFicha, nifCif: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Teléfono</span>
+                      <input
+                        type="tel"
+                        value={formFicha.telefono}
+                        onChange={(e) => setFormFicha({ ...formFicha, telefono: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Email de contacto</span>
+                      <input
+                        type="email"
+                        value={formFicha.email}
+                        onChange={(e) => setFormFicha({ ...formFicha, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Domicilio a efectos de notificaciones</span>
+                      <input
+                        type="text"
+                        value={formFicha.direccion}
+                        onChange={(e) => setFormFicha({ ...formFicha, direccion: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Ciudad</span>
+                      <input
+                        type="text"
+                        value={formFicha.ciudad}
+                        onChange={(e) => setFormFicha({ ...formFicha, ciudad: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Código postal</span>
+                      <input
+                        type="text"
+                        value={formFicha.codigoPostal}
+                        onChange={(e) => setFormFicha({ ...formFicha, codigoPostal: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={handleGuardarFicha}
+                      disabled={guardandoFicha}
+                      className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>{guardandoFicha ? 'Guardando…' : 'Guardar Mi Ficha'}</span>
+                    </button>
+                    {mensajeFicha && (
+                      <span className="text-xs font-semibold text-slate-600">{mensajeFicha}</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

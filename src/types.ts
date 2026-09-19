@@ -3,11 +3,13 @@ export type SectionType =
   | 'inmuebles'
   | 'propietarios'
   | 'cobros'
+  | 'gastos'
   | 'incidencias'
   | 'profesionales'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'
+  | 'recomercializacion'
   | 'solicitudes'
   | 'candidatos'
   | 'nuevo_candidato'
@@ -24,12 +26,21 @@ export type SectionType =
 
 export type CandidateStatus =
   | 'nuevo'
-  | 'pendiente_doc'
-  | 'pendiente_analisis'
-  | 'analizado'
   | 'preseleccionado'
   | 'visita_reservada'
   | 'seleccionado'
+  | 'pendiente_doc'
+  | 'doc_solicitada'
+  | 'doc_recibida'
+  | 'pendiente_analisis'
+  | 'en_analisis'
+  | 'analizado'
+  | 'seguro_solicitado'
+  | 'aprobado_seguro'
+  | 'rechazado_seguro'
+  | 'decision_pendiente'
+  | 'aceptado_final'
+  | 'rechazado_final'
   | 'formalizado'
   | 'no_seleccionado';
 
@@ -343,6 +354,20 @@ export interface CuestionarioIncidenciasData {
   analisisIa?: AnalisisIncidencias;
 }
 
+export interface CandidatoHistorialItem {
+  id: string;
+  fecha: string;
+  timestamp?: number;
+  autor: 'propietario' | 'candidato' | 'sistema_ia' | 'aseguradora';
+  autorNombre?: string;
+  fase: 'preseleccion' | 'seleccion' | 'documentacion' | 'analisis_ia' | 'seguro' | 'decision_final';
+  accion: string;
+  detalle?: string;
+  estadoAnterior?: CandidateStatus | string;
+  estadoNuevo?: CandidateStatus | string;
+  metadatos?: Record<string, any>;
+}
+
 export interface Candidato {
   id: string;
   nombre: string;
@@ -350,6 +375,8 @@ export interface Candidato {
   email: string;
   inmuebleId: string;
   inmuebleNombre: string;
+  inmuebleInteresId?: string;
+  propietarioId?: string; // ID permanente del propietario arrendador vinculante
   numPersonas: number;
   ingresosNetos: number; // en euros mensuales
   tipoEmpleo: EmploymentType;
@@ -375,6 +402,20 @@ export interface Candidato {
   // Campos preparados para puntuación / IA posterior
   scoreEstimado?: number; // 0 - 100
   ratioSolvencia?: number; // % sobre el alquiler del inmueble
+  // Trazabilidad del circuito completo hasta seguro de impago y decisión
+  historial?: CandidatoHistorialItem[];
+  fechaPreseleccion?: string;
+  fechaSeleccion?: string;
+  seleccionadoMotivo?: string;
+  clasificacionDocumental?: 'COMPLETO' | 'INCOMPLETO' | 'REVISAR' | 'NO_VALIDO';
+  clasificacionDocumentalMotivo?: string;
+  solicitudDocId?: string;
+  solicitudSeguroId?: string;
+  seguroDictamen?: DictamenAseguradora;
+  decisionFinal?: 'ACEPTAR' | 'RECHAZAR' | 'PENDIENTE';
+  decisionFinalMotivo?: string;
+  decisionFinalFecha?: string;
+  decisionFinalAutor?: string;
 }
 
 export interface InmuebleImage {
@@ -446,6 +487,7 @@ export interface PropietarioFiscal {
 export interface DatosFiscalesInmueble {
   referenciaCatastral?: string;
   codigoPostal?: string;
+  provincia?: string; // Provincia del inmueble (matching zona/servicio del profesional)
   ibanCobro?: string;
   certificadoEnergetico?: string;
   numeroRegistroPropiedad?: string;
@@ -472,6 +514,8 @@ export interface Inmueble {
   fianzaMeses: number;
   referenciaCatastral?: string;
   codigoPostal?: string;
+  // FASE 3.5.1 — detalle catastral para afinar la valoración
+  datosCatastrales?: DatosCatastrales;
   // Vinculación con Propietarios y Cuentas Bancarias
   propietarioId?: string; // ID permanente del Propietario titular vinculado
   propietarioPrincipalId?: string;
@@ -570,7 +614,7 @@ export type SolicitudDocEstado =
   | 'APROBADA'
   | 'RECHAZADA';
 
-export type DocItemEstado = 'pendiente' | 'subido' | 'requiere_correccion' | 'validado';
+export type DocItemEstado = 'pendiente' | 'subido' | 'requiere_correccion' | 'validado' | 'revisar' | 'rechazado';
 
 export interface ArchivoAportado {
   id: string;
@@ -619,6 +663,7 @@ export interface SolicitudDocumentacion {
   visitaId?: string; // ID de la invitación o slot de visita
   fechaVisita?: string; // e.g. "25/08/2026 11:30"
   ownerId?: string;
+  propietarioId?: string; // titularidad denormalizada (aislamiento por propietario)
   estado: SolicitudDocEstado;
   mensajePropietario?: string;
   documentos: ItemDocumentoSolicitado[];
@@ -641,6 +686,7 @@ export interface SolicitudDocPublicData {
   estado: SolicitudDocEstado;
   mensajePropietario?: string;
   documentos: ItemDocumentoSolicitado[];
+  historial?: SolicitudDocHistorialItem[];
   fechaCreacion?: string;
   fechaSolicitud?: string;
   fechaEnvioCandidato?: string;
@@ -927,6 +973,195 @@ export interface CobroPeriodo {
 }
 
 // ==========================================
+// FASE 2: GASTOS — EXPLOTACIÓN vs FINANCIACIÓN
+// ==========================================
+
+/**
+ * Naturaleza contable del gasto (clave de la Fase 2):
+ * - EXPLOTACION: costes de mantener y alquilar la vivienda (comunidad, IBI,
+ *   seguros, reparaciones, comisiones...). Computan al RESULTADO OPERATIVO del
+ *   alquiler y, en su mayoría, son fiscalmente deducibles.
+ * - FINANCIACION: cuotas de financiación ajena (hipoteca). Son una SALIDA DE
+ *   CAJA del propietario, pero NO un gasto operativo del inmueble: la parte de
+ *   capital es amortización de deuda (no es gasto); sólo los intereses serían
+ *   gasto financiero. Por eso se registran aparte y nunca se mezclan con los
+ *   gastos de explotación en los cuadres de rentabilidad.
+ */
+export type TipoGasto = 'EXPLOTACION' | 'FINANCIACION';
+
+export type CategoriaGasto =
+  // --- Explotación ---
+  | 'COMUNIDAD'
+  | 'IBI'
+  | 'SEGURO_HOGAR'
+  | 'SUMINISTROS'
+  | 'MANTENIMIENTO'
+  | 'REPARACION'
+  | 'ADMINISTRACION'
+  | 'LIMPIEZA'
+  | 'OTRO_EXPLOTACION'
+  // --- Financiación ---
+  | 'CUOTA_HIPOTECARIA'
+  | 'INTERESES_PRESTAMO'
+  | 'OTRO_FINANCIACION';
+
+export type EstadoGasto = 'PENDIENTE' | 'PAGADO' | 'ANULADO';
+
+export interface Gasto {
+  id: string; // "gas_{inmuebleId}_{timestamp}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario (igual que contratos)
+  contratoId?: string; // Opcional: vinculación a un contrato/período
+
+  tipo: TipoGasto;
+  categoria: CategoriaGasto;
+  concepto: string;
+  proveedor?: string;
+
+  importe: number; // Importe total del gasto (EUR)
+  estado: EstadoGasto;
+
+  // Fechas y período (para agrupación mensual/anual)
+  fechaDevengo?: string; // YYYY-MM-DD (fecha de la factura / período)
+  fechaPago?: string; // YYYY-MM-DD (cuando se abona)
+  periodoMesAnio?: string; // YYYY-MM
+
+  // ¿Quién soporta económicamente el coste según el contrato?
+  aCargoDe: 'arrendador' | 'arrendatario';
+  deducible?: boolean; // Deducible en IRPF del alquiler (gastos de explotación)
+
+  // Desglose financiero (solo FINANCIACION / hipoteca)
+  capitalAmortizado?: number; // Parte de la cuota que amortiza deuda (no es gasto)
+  intereses?: number; // Parte de intereses (gasto financiero)
+
+  metodoPago?: 'transferencia' | 'domiciliacion' | 'bizum' | 'efectivo' | 'otro';
+  justificanteUrl?: string;
+  justificantePath?: string;
+  notas?: string;
+
+  // Trazabilidad
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Frecuencia de un gasto recurrente (plantilla que genera apuntes `Gasto`).
+ */
+export type FrecuenciaRecurrente = 'MENSUAL' | 'TRIMESTRAL' | 'ANUAL';
+
+/**
+ * Plantilla de gasto periódico (comunidad mensual, IBI anual, cuota hipotecaria
+ * mensual…). No es un gasto en sí: el sistema materializa documentos `Gasto`
+ * en estado PENDIENTE a partir de ella. Los apuntes ya generados nunca se
+ * borran al desactivar/eliminar la plantilla (se conserva el histórico).
+ */
+export interface GastoRecurrente {
+  id: string; // "rec_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario
+
+  tipo: TipoGasto;
+  categoria: CategoriaGasto;
+  concepto: string;
+  proveedor?: string;
+  importe: number;
+
+  frecuencia: FrecuenciaRecurrente;
+  diaVencimiento: number; // Día del mes (1-28) de devengo de cada apunte
+  fechaInicio: string; // YYYY-MM (primer período)
+  fechaFin?: string; // YYYY-MM opcional (último período)
+
+  aCargoDe: 'arrendador' | 'arrendatario';
+  deducible?: boolean;
+  metodoPago?: Gasto['metodoPago'];
+  notas?: string;
+
+  activo: boolean;
+  ultimoPeriodoGenerado?: string; // YYYY-MM (cursór de materialización)
+
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * FASE 2.3 — Préstamo / financiación ajena (normalmente hipoteca). Describe las
+ * condiciones para calcular el cuadro de amortización (sistema francés de cuota
+ * constante) y así separar automáticamente capital e intereses en cada cuota.
+ * Al crearse se enlaza con una plantilla `GastoRecurrente` que materializa los
+ * recibos; este documento sólo guarda las condiciones financieras.
+ */
+export type TipoPrestamo = 'HIPOTECARIO' | 'PERSONAL';
+
+/**
+ * FASE 2.4 — Modalidad de la amortización anticipada:
+ * - REDUCE_CUOTA: se mantiene el plazo y baja el importe mensual.
+ * - REDUCE_PLAZO: se mantiene la cuota y el préstamo vence antes.
+ */
+export type ModalidadAmortizacion = 'REDUCE_CUOTA' | 'REDUCE_PLAZO';
+
+/** Amortización anticipada (cancelación parcial de principal) en un mes dado. */
+export interface AmortizacionAnticipada {
+  id: string;
+  periodo: string; // YYYY-MM en el que se aplica (al inicio del recibo)
+  importe: number;
+  modalidad: ModalidadAmortizacion;
+}
+
+/**
+ * Tramo de tipo de interés variable (p. ej. revisión anual del Euribor): a
+ * partir de `fechaInicio` pasa a aplicarse `tasaInteresAnual`. El primer tipo
+ * es el `tasaInteresAnual` del propio préstamo.
+ */
+export interface TramoTipoInteres {
+  id: string;
+  fechaInicio: string; // YYYY-MM desde el que rige este TIN
+  tasaInteresAnual: number;
+}
+
+/**
+ * FASE 2.4 — Tipo de carencia inicial:
+ * - TOTAL: no se paga nada durante la carencia; los intereses se capitalizan
+ *   (se añaden al saldo vivo).
+ * - PARCIAL: sólo se pagan intereses; no se amortiza capital.
+ */
+export type TipoCarencia = 'TOTAL' | 'PARCIAL';
+
+export interface Prestamo {
+  id: string; // "prest_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario
+
+  tipo: TipoPrestamo;
+  descripcion?: string;
+  entidad?: string; // Banco / acreedor
+
+  capitalInicial: number; // Principal prestado (EUR)
+  tasaInteresAnual: number; // TIN inicial en porcentaje (p.ej. 3,25 para el 3,25%)
+  plazoMeses: number;
+  fechaInicio: string; // YYYY-MM (primera cuota)
+  diaVencimiento: number; // Día de cargo (1-28)
+
+  // FASE 2.4 — flexibilidad financiera
+  carenciaMeses?: number; // Meses iniciales de carencia (0 por defecto)
+  tipoCarencia?: TipoCarencia; // 'TOTAL' | 'PARCIAL'
+  tramosTipo?: TramoTipoInteres[]; // Revisiones de tipo (variable)
+  amortizaciones?: AmortizacionAnticipada[]; // Amortizaciones anticipadas
+
+  gastoRecurrenteId?: string; // Plantilla vinculada que genera los recibos
+  activo: boolean;
+  notas?: string;
+
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ==========================================
 // FASE 4: ASEGURADORA DE IMPAGO & EXPEDIENTES
 // ==========================================
 
@@ -1021,6 +1256,7 @@ export interface SolicitudSeguroImpago {
   referenciaUnica: string; // e.g. "REF-IMPAGO-2026-0819-A8F"
   candidatoId: string;
   inmuebleId: string;
+  propietarioId?: string; // ID del propietario arrendador vinculante
   inmuebleNombre: string;
   inmuebleDireccion: string;
   inmuebleCiudad: string;
@@ -1372,6 +1608,9 @@ export interface ModulosConfig {
   incidencias: boolean;
 }
 
+// Estado REAL de los módulos implementados: gastos, cobros y préstamos/hipotecas
+// están operativos (Fases 1, 2 y 2.3) y no deben figurar como desactivados por
+// defecto. Los valores efectivos siguen viniendo de Firestore (system/modulos_config).
 export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   inmuebles: true,
   propietarios: true,
@@ -1380,12 +1619,288 @@ export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   contratos: true,
   seguros: true,
   profesionales: true,
-  gastos: false,
-  cobros: false,
-  hipotecas: false,
+  gastos: true,
+  cobros: true,
+  hipotecas: true,
   patrimonio: false,
   incidencias: true,
 };
+
+
+// ==========================================================
+// FASE 3 — RECOMERCIALIZACIÓN INTELIGENTE DEL INMUEBLE
+// Ciclo: salida del inquilino → inspección/IA → reformas/ROI →
+// pricing → estrategia de comercialización → nuevo contrato/venta.
+// INVARIANTE: se reutiliza siempre el mismo inmuebleId (histórico).
+// ==========================================================
+
+export type EstadoRecomercializacion =
+  | 'BORRADOR'
+  | 'SALIDA_NOTIFICADA'
+  | 'REVISION_PENDIENTE'
+  | 'FOTOS_ACTUALIZADAS'
+  | 'VALORACION_COMPLETADA'
+  | 'DECISION_ESTRATEGIA'
+  | 'EN_COMERCIALIZACION'
+  | 'CERRADO_REARRENDADO'
+  | 'CERRADO_VENDIDO'
+  | 'CANCELADO';
+
+export type DestinoInmueble =
+  | 'ALQUILER_TRADICIONAL'
+  | 'ALQUILER_HABITACIONES'
+  | 'ALQUILER_TEMPORAL'
+  | 'VENTA'
+  | 'INDECISO';
+
+export type ModalidadComercializacion = 'GESTION_PROPIA' | 'INMOBILIARIA' | 'AMBAS';
+
+export type EstanciaFoto =
+  | 'salon'
+  | 'cocina'
+  | 'bano'
+  | 'dormitorio'
+  | 'terraza'
+  | 'exterior'
+  | 'otro';
+
+export interface FotoInspeccion {
+  id: string;
+  estancia: EstanciaFoto;
+  url: string;
+  storagePath?: string;
+  fecha: string; // ISO
+  analisisIa?: {
+    observaciones: string[]; // Redacción no asertiva / prudente
+    sugerenciasMejora: string[];
+    // FASE 3.3: prioridad orientativa de revisión (no una certeza de daño)
+    prioridad?: 'baja' | 'media' | 'alta';
+    // 'gemini' = análisis multimodal real; 'heuristico' = respaldo sin API key
+    motor?: 'gemini' | 'heuristico';
+    analizFecha?: string;
+  };
+}
+
+export interface DatosSalidaInquilino {
+  fechaComunicacion?: string; // ISO: notificación del desistimiento/fin
+  fechaPrevistaSalida?: string; // ISO: desalojo pactado
+  fechaEntregaLlaves?: string; // ISO: inspección y recepción de llaves
+  observaciones?: string;
+  depositoFianzaADevolver?: number;
+  contratoEstado?: 'ACTIVO' | 'EN_PROCESO_RESOLUCION' | 'FINALIZADO_LIQUIDADO';
+}
+
+/**
+ * Datos catastrales del activo (FASE 3.5.1). El propietario puede
+ * transcribirlos desde el IBI / la Sede Electrónica del Catastro; la
+ * plataforma puede completar dirección y coordenadas con el servicio
+ * público OVC (sólo datos abiertos; superficie construida, año y valor
+ * catastral NO los sirve ese servicio sin convenio).
+ */
+export interface DatosCatastrales {
+  referenciaCatastral: string;
+  superficieCatastralConstruida?: number; // m² construidos catastrales
+  anioConstruccion?: number;
+  valorCatastral?: number;
+  usoCatastral?: string; // p. ej. "V: Vivienda"
+  planta?: string;
+  direccionCatastral?: string; // Domicilio normalizado (ldt) por la OVC
+  latitud?: number;
+  longitud?: number;
+  fuente?: 'manual' | 'catastro_ovc';
+  fechaConsulta?: string; // ISO
+  notas?: string;
+}
+
+/** Testigo/manual de mercado de la misma zona y tipología (FASE 3.5). */
+export interface ComparableMercado {
+  id: string;
+  fuente?: string; // Portal, inmobiliaria, enlace…
+  descripcion?: string;
+  metros?: number;
+  precioAlquilerMensual?: number;
+  precioVenta?: number;
+  // FASE 3.5.1 — características para comparar perfiles homogéneos
+  habitaciones?: number;
+  banos?: number;
+  tipoInmueble?: string;
+  planta?: string;
+  estadoConservacion?: 'nuevo' | 'bueno' | 'reformado' | 'a_reformar' | 'desconocido';
+  distanciaKm?: number; // distancia aproximada al activo
+}
+
+export interface PricingRecomercializacion {
+  rentaAnterior?: number;
+  escenarioConservador?: number;
+  escenarioRecomendado?: number;
+  escenarioMaximo?: number;
+  valoracionVentaEstimada?: number;
+  horquillaVentaMin?: number;
+  horquillaVentaMax?: number;
+  precioSalidaRecomendado?: number;
+  plazoMedioComercializacionDias?: number;
+  notasCalculo?: string;
+  fechaCalculo?: string; // ISO
+  // FASE 3.5 — hipótesis y datos de cálculo (trazabilidad del precio)
+  ipcAcumuladoPct?: number; // Variación por IPC desde el contrato anterior (%)
+  ajusteMercadoPct?: number; // Ajuste manual de mercado/zona (%) sin comparables
+  mejoraRentaConfirmada?: number; // Suma de incrementos de renta de mejoras confirmadas (€/mes)
+  precioM2Alquiler?: number; // €/m² al mes resultante del escenario recomendado
+  precioM2Venta?: number; // €/m² de venta estimado
+  comparables?: ComparableMercado[];
+  motor?: 'ia' | 'calculadora'; // Quién produjo la última estimación
+}
+
+export type CategoriaMejora =
+  | 'PINTURA'
+  | 'ILUMINACION'
+  | 'COCINA'
+  | 'BANO'
+  | 'SUELOS'
+  | 'MOBILIARIO'
+  | 'LIMPIEZA_PUESTA_A_PUNTO'
+  | 'EFICIENCIA_ENERGETICA'
+  | 'REPARACION'
+  | 'OTRA';
+
+export interface MejoraROI {
+  id: string;
+  actuacion: string;
+  categoria?: CategoriaMejora;
+  costeEstimadoMin?: number;
+  costeEstimadoMax?: number;
+  incrementoRentaMensual?: number;
+  incrementoValoracion?: number;
+  paybackMeses?: number;
+  // Impacto orientativo en la presentación del anuncio (no una certeza de daño)
+  impacto?: 'bajo' | 'medio' | 'alto';
+  confirmadaPorPropietario?: boolean;
+  profesionalIdSolicitado?: string;
+  presupuestoSolicitadoFecha?: string; // ISO
+  origen?: 'ia' | 'manual';
+}
+
+export interface KitPublicacion {
+  titulo?: string;
+  descripcion?: string;
+  puntosFuertes?: string[];
+  entorno?: string[];
+  extras?: string[]; // p. ej. "Ascensor (verificar en la visita)"
+  motor?: 'ia' | 'heuristico';
+  fechaGeneracion?: string;
+}
+
+export interface ComercializacionExpediente {
+  inmobiliariasContactadasIds: string[];
+  enlaceAnuncioManualGenerado?: boolean;
+  kitPublicacion?: KitPublicacion;
+  fechaPublicacion?: string; // ISO
+  // FASE 3.6 — cierre del ciclo
+  fechaInicioComercializacion?: string; // ISO
+  fechaCierre?: string; // ISO
+  resultadoCierre?: 'REARRENDADO' | 'VENDIDO';
+  nuevoContratoId?: string; // enlace al contrato que reabre el ciclo (mismo inmuebleId)
+}
+
+export interface ExpedienteRecomercializacion {
+  id: string;
+  inmuebleId: string; // INVARIANTE: mismo inmuebleId, se conserva el histórico
+  propietarioId: string; // Clave de aislamiento por propietario
+  contratoAnteriorId?: string;
+  fechaInicio: string; // ISO
+  estado: EstadoRecomercializacion;
+  destinoPrevisto: DestinoInmueble;
+  modalidadElegida?: ModalidadComercializacion;
+
+  datosSalida?: DatosSalidaInquilino;
+  revisionFotografica?: {
+    fechaCarga?: string;
+    fotografias: FotoInspeccion[];
+  };
+  mejorasPropuestas?: MejoraROI[];
+  pricing?: PricingRecomercializacion;
+  comercializacion?: ComercializacionExpediente;
+
+  notasInternas?: string;
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Directorio de inmobiliarias (bolsa para delegar/comparar la comercialización)
+export interface InmobiliariaDirectorio {
+  id: string;
+  nombreComercial: string;
+  razonSocial?: string;
+  cifNif?: string;
+  logoUrl?: string;
+  telefono: string;
+  email: string;
+  web?: string;
+
+  // Cobertura geográfica
+  localidad: string;
+  provincia: string;
+  codigosPostales: string[];
+
+  // Servicios y especialidades
+  operaVenta: boolean;
+  operaAlquiler: boolean;
+  operaHabitaciones: boolean;
+  especialidades: string[];
+  comisionMediaVenta?: string;
+  comisionMediaAlquiler?: string;
+
+  // Estado y verificación
+  origen: 'REGISTRADA_EN_PLATAFORMA' | 'LOCALIZADA_EXTERNA';
+  verificada: boolean;
+  esPatrocinada: boolean;
+  activo: boolean;
+
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Propuestas (RFP) emitidas por inmobiliarias para un expediente
+export type EstadoPropuestaInmobiliaria = 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'EXPIRADA';
+
+export interface PropuestaInmobiliaria {
+  id: string;
+  expedienteId: string;
+  inmuebleId: string;
+  propietarioId: string; // Aislamiento
+  inmobiliariaId: string;
+  fechaPropuesta: string; // ISO
+  honorariosPropuestos: string;
+  plazoEstimadoDias: number;
+  serviciosIncluidos: string[];
+  estrategiaResumen: string;
+  estado: EstadoPropuestaInmobiliaria;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Lead/contacto de intermediación con una inmobiliaria
+export type EstadoLeadInmobiliario =
+  | 'SOLICITADO'
+  | 'CONTACTADO'
+  | 'ACUERDO_FIRMADO'
+  | 'DESCARTADO';
+
+export interface LeadInmobiliario {
+  id: string;
+  inmuebleId: string;
+  propietarioId: string; // Aislamiento
+  inmobiliariaId: string;
+  fechaSolicitud: string; // ISO
+  tipoOperacion: 'ALQUILER' | 'VENTA' | 'HABITACIONES';
+  estado: EstadoLeadInmobiliario;
+  notas?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 
 // =========================================================================
 // BLOQUE 4: GESTIÓN DE INCIDENCIAS, MANTENIMIENTO, SEGUROS Y SINIESTROS
@@ -1431,6 +1946,15 @@ export type OrigenIncidencia =
   | 'OTRO';
 
 export type ResponsabilidadIncidencia =
+  | 'PENDIENTE_DE_DETERMINAR'
+  | 'PROPIETARIO'
+  | 'INQUILINO'
+  | 'GARANTIA'
+  | 'SEGURO'
+  | 'PROFESIONAL'
+  | 'COMUNIDAD'
+  | 'TERCERO'
+  // Compatibilidad con registros existentes
   | 'POSIBLE_PROPIETARIO'
   | 'POSIBLE_INQUILINO'
   | 'POSIBLE_COMUNIDAD'
@@ -1457,15 +1981,16 @@ export type ViaActuacionIncidencia =
 
 export interface AdjuntoIncidencia {
   id: string;
-  incidenciaId: string;
-  inmuebleId: string;
+  incidenciaId?: string;
+  inmuebleId?: string;
   propietarioId?: string;
   nombre: string;
   tipo: 'imagen' | 'video' | 'documento';
   mimeType?: string;
   url: string;
-  storagePath: string;
+  storagePath?: string;
   tamanoBytes?: number;
+  tamano?: number;
   fechaSubida: string;
   subidoPor?: string;
   observaciones?: string;
@@ -1558,6 +2083,10 @@ export interface Incidencia {
   fechaCierre?: string;
   responsabilidad: ResponsabilidadIncidencia;
   responsabilidadNotas?: string;
+  responsabilidadMotivo?: string;
+  responsabilidadFechaDecision?: string;
+  responsabilidadDecididoPor?: string;
+  responsabilidadGarantiaRef?: string;
   seguroEstado: EstadoSeguroIncidencia;
   seguroComprobacionNotas?: string;
   viaActuacion?: ViaActuacionIncidencia;
@@ -1653,6 +2182,11 @@ export interface Siniestro {
   incidenciaId: string;
   polizaId: string;
   aseguradora: string;
+  // Aislamiento por propietario (FASE 1.4 + Bloque 4): el siniestro hereda el
+  // ámbito de la incidencia/póliza de origen. Se denormaliza para que la
+  // consulta y las Security Rules puedan acotar sin lecturas adicionales.
+  propietarioId?: string;
+  inmuebleId?: string;
   numeroExpediente?: string;
   numeroSiniestro?: string;
   fechaComunicacion: string;
@@ -1707,16 +2241,21 @@ export type EstadoTrabajoProfesional =
   | 'PENDIENTE'
   | 'BUSCANDO_PROFESIONAL'
   | 'PROFESIONAL_PROPUESTO'
+  | 'ASIGNADO'
+  | 'ASIGNADA'
   | 'PRESUPUESTO_SOLICITADO'
   | 'PRESUPUESTO_RECIBIDO'
   | 'PENDIENTE_ACEPTACION'
   | 'ACEPTADO'
   | 'PROGRAMADO'
   | 'EN_EJECUCION'
+  | 'EN_CURSO'
   | 'PENDIENTE_MATERIAL'
   | 'PENDIENTE_PROPIETARIO'
   | 'FINALIZADO'
-  | 'CANCELADO';
+  | 'FINALIZADA'
+  | 'CANCELADO'
+  | 'CANCELADA';
 
 export interface HistorialTrabajoItem {
   id: string;
@@ -1743,6 +2282,8 @@ export interface HistorialTrabajoItem {
 
 export interface ValoracionProfesionalTrabajo {
   id?: string;
+  // Aislamiento por propietario: hereda el ámbito del trabajo valorado.
+  propietarioId?: string;
   puntuacion: number; // 1 a 5
   calidad: number; // 1 a 5
   puntualidad: number; // 1 a 5
@@ -1751,12 +2292,14 @@ export interface ValoracionProfesionalTrabajo {
   resultado: 'SATISFACTORIO' | 'ACEPTABLE' | 'DEFICIENTE';
   comentario?: string;
   fecha: string;
-  usuarioId: string;
+  usuarioId?: string;
   usuarioNombre?: string;
+  evaluador?: string;
   trabajoId: string;
   profesionalId: string;
   inmuebleId: string;
   inmuebleDireccion?: string;
+  createdAt?: string;
 }
 
 export interface TrabajoProfesional {
@@ -1798,7 +2341,8 @@ export type EstadoPresupuestoProfesional =
   | 'EN_REVISION'
   | 'ACEPTADO'
   | 'RECHAZADO'
-  | 'CADUCADO';
+  | 'CADUCADO'
+  | 'EN_NEGOCIACION';
 
 export interface PartidaPresupuesto {
   id: string;
@@ -1838,9 +2382,12 @@ export interface PresupuestoProfesional {
   observaciones?: string;
   documentoUrl?: string;
   documentoStoragePath?: string;
+  motivoRechazo?: string;
+  fechaDecision?: string;
+  decididoPor?: string;
   historialDecision?: HistorialDecisionPresupuesto[];
-  creadoPor: string;
-  actualizadoPor: string;
+  creadoPor?: string;
+  actualizadoPor?: string;
   createdAt: string;
   updatedAt: string;
 }

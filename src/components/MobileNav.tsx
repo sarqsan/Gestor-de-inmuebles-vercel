@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SectionType, Candidato, UsuarioApp } from '../types';
+import { perfilAutorizado, seccionesPermitidas } from '../lib/authService';
 import {
   Home,
   Building2,
@@ -21,7 +22,10 @@ import {
   Wrench,
   ArrowLeftRight,
   Receipt,
+  TrendingDown,
+  RefreshCw,
   AlertTriangle,
+  Inbox,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -63,7 +67,11 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const pendingCount = candidatos.filter((c) => c.estado === 'nuevo').length;
-  const perfil = currentUser?.tipoPerfil || 'ADMINISTRADOR';
+  // Autorización centralizada (deny by default): sin sesión, sin estado ACTIVO o
+  // sin tipoPerfil reconocido NO hay secciones autorizadas. El menú refleja la
+  // autorización pero NO es el mecanismo de seguridad.
+  const perfil = perfilAutorizado(currentUser);
+  const seccionesAutorizadas = seccionesPermitidas(currentUser);
 
   const allSections: {
     id: SectionType;
@@ -79,6 +87,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
+          { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
+          { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
           { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías y mantenimiento' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
@@ -87,25 +97,35 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
           { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
           { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount, description: 'Reparaciones asignadas' },
+          { id: 'profesionales', label: 'Mis Obras y Presupuestos', icon: Wrench, badge: trabajosActivosCount, description: 'Presupuestos y valoraciones' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
-      : [
+      : perfil === 'ADMINISTRADOR'
+      ? [
+          { id: 'inicio', label: 'Panel de Inicio', icon: Home, description: 'Resumen general' },
           { id: 'administracion', label: 'Centro de Control', icon: Shield, description: 'Gestión de usuarios, roles y seguridad' },
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
+          { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
           { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías, peritajes IA y siniestros' },
+          { id: 'solicitudes', label: 'Solicitudes Públicas', icon: Inbox, badge: solicitudesCount, description: 'Peticiones recibidas de los portales' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },
+          { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw, description: 'Salida, inspección y nueva comercialización' },
           { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length, description: 'Listado completo' },
           { id: 'analisis', label: 'Análisis IA', icon: Sparkles, description: 'Puntuación e informes' },
           { id: 'configuracion', label: 'Configuración', icon: Settings, description: 'Ajustes del sistema' },
-        ];
+        ]
+      : [];
 
-  const currentSectionItem = allSections.find((s) => s.id === activeSection) || allSections[0];
-  const CurrentIcon = currentSectionItem.icon;
+  // Coherencia del menú con la autorización central (deny by default).
+  const navItems = allSections.filter((item) => seccionesAutorizadas.includes(item.id));
+
+  const currentSectionItem = navItems.find((s) => s.id === activeSection) || navItems[0] || null;
+  const CurrentIcon = currentSectionItem?.icon || Home;
 
   // Close dropdown on outside click
   useEffect(() => {

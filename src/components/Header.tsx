@@ -53,6 +53,19 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Formalización de Contrato LAU', subtitle: 'Generación de contratos, scoring y entrega de llaves' };
       case 'seguro_impago':
         return { title: 'Seguro de Impago & Aseguradoras', subtitle: 'SEAG, ARAG, Caser, Mutua de Propietarios y control de pólizas' };
+      case 'cobros':
+        return { title: 'Gestión de Cobros', subtitle: 'Calendario de rentas, justificantes y control de retrasos' };
+      case 'gastos':
+        return { title: 'Gestión de Gastos', subtitle: 'Explotación, facturas, gastos recurrentes y financiación' };
+      case 'recomercializacion':
+        return { title: 'Recomercialización del Inmueble', subtitle: 'Salida del inquilino, inspección, reformas y nueva puesta en mercado' };
+      case 'incidencias':
+        return {
+          title: 'Incidencias, Mantenimiento y Seguros',
+          subtitle: 'Averías con dictamen IA, pólizas de seguro y partes de siniestro',
+        };
+      case 'profesionales':
+        return { title: 'Profesionales, Órdenes y Presupuestos', subtitle: 'Técnicos, órdenes de trabajo, presupuestos y valoraciones' };
       case 'analisis':
         return { title: 'Análisis Gemini IA', subtitle: 'Evaluación automatizada de solvencia y documentación' };
       case 'administracion':

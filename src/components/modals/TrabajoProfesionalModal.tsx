@@ -109,7 +109,15 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   );
   const [observaciones, setObservaciones] = useState<string>(trabajoParaEditar?.observaciones || '');
 
-  const [documentos, setDocumentos] = useState<AdjuntoIncidencia[]>(trabajoParaEditar?.documentos || []);
+  const [documentos, setDocumentos] = useState<AdjuntoIncidencia[]>(
+    trabajoParaEditar?.documentos ||
+      (incidenciaPreseleccionada
+        ? [
+            ...(incidenciaPreseleccionada.fotografias || []),
+            ...(incidenciaPreseleccionada.documentos || []),
+          ]
+        : [])
+  );
   const [uploadingFile, setUploadingFile] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -141,14 +149,33 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
       setUploadingFile(true);
       setErrorMsg('');
       const tempTrabajoId = trabajoParaEditar?.id || `trabajo_temp_${Date.now()}`;
-      const downloadUrl = await uploadTrabajoAdjuntoStorage(tempTrabajoId, file, file.name);
+      const propietarioId =
+        trabajoParaEditar?.propietarioId ||
+        (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId : '') ||
+        inmuebles.find((i) => i.id === (trabajoParaEditar?.inmuebleId || inmuebleId))?.propietarioId ||
+        '';
+      if (!propietarioId) {
+        setErrorMsg('No se pudo determinar el propietario de la orden de trabajo.');
+        return;
+      }
+      const { downloadUrl, storagePath } = await uploadTrabajoAdjuntoStorage(
+        propietarioId,
+        tempTrabajoId,
+        file,
+        file.name
+      );
 
       const nuevoAdjunto: AdjuntoIncidencia = {
         id: `adj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        incidenciaId: trabajoParaEditar?.incidenciaId || '',
+        inmuebleId: trabajoParaEditar?.inmuebleId || inmuebleId || '',
+        propietarioId,
         nombre: file.name,
         tipo: file.type.startsWith('image/') ? 'imagen' : 'documento',
-        tamano: file.size,
+        mimeType: file.type || undefined,
+        tamanoBytes: file.size,
         url: downloadUrl,
+        storagePath,
         fechaSubida: new Date().toISOString(),
         subidoPor: currentUser?.nombre ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim() : 'Usuario',
       };
@@ -256,18 +283,51 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
       if (incidenciaId) {
         const incTarget = incidencias.find((i) => i.id === incidenciaId);
         if (incTarget) {
+          const mappedEstadoTrabajo: 'ASIGNADO' | 'PRESUPUESTADO' | 'ACEPTADO' | 'EN_CURSO' | 'FINALIZADO' | 'CANCELADO' =
+            (estado === 'FINALIZADO' || estado === 'FINALIZADA')
+              ? 'FINALIZADO'
+              : (estado === 'EN_EJECUCION' || estado === 'EN_CURSO')
+              ? 'EN_CURSO'
+              : (estado === 'CANCELADO' || estado === 'CANCELADA')
+              ? 'CANCELADO'
+              : 'ASIGNADO';
+
+          const nuevoEstadoInc =
+            (estado === 'FINALIZADO' || estado === 'FINALIZADA')
+              ? 'RESUELTA'
+              : (estado === 'EN_EJECUCION' || estado === 'EN_CURSO')
+              ? 'EN_REPARACION'
+              : incTarget.estado;
+
           const incActualizada: Incidencia = {
             ...incTarget,
+            estado: nuevoEstadoInc,
+            viaActuacion: 'PROFESIONAL',
+            profesionalId: profesionalId || incTarget.profesionalId,
             trabajoProfesional: {
-              profesionalId: profesionalId || incTarget.trabajoProfesional?.profesionalId,
-              profesionalNombre: profesionalSeleccionado?.nombreComercial || incTarget.trabajoProfesional?.profesionalNombre,
+              profesionalId: profesionalId || incTarget.trabajoProfesional?.profesionalId || '',
+              profesionalNombre: profesionalSeleccionado?.nombreComercial || incTarget.trabajoProfesional?.profesionalNombre || 'Profesional',
               profesionalTelefono: profesionalSeleccionado?.telefono || incTarget.trabajoProfesional?.profesionalTelefono,
-              fechaAsignacion: profesionalId ? new Date().toISOString() : incTarget.trabajoProfesional?.fechaAsignacion,
+              profesionalEmail: profesionalSeleccionado?.email || incTarget.trabajoProfesional?.profesionalEmail,
+              especialidad: categoria,
+              servicio: categoria,
+              fechaAsignacion: profesionalId ? (incTarget.trabajoProfesional?.fechaAsignacion || new Date().toISOString()) : new Date().toISOString(),
               presupuestoEstimado: importeEstimado ? parseFloat(importeEstimado) : incTarget.trabajoProfesional?.presupuestoEstimado,
               costeReal: trabajoParaEditar?.importeFinal || incTarget.trabajoProfesional?.costeReal,
-              estado: estado === 'FINALIZADO' ? 'COMPLETADO' : estado === 'EN_EJECUCION' ? 'EN_CURSO' : 'ASIGNADO',
+              estadoTrabajo: mappedEstadoTrabajo,
+              fechaFinalizacion: (estado === 'FINALIZADO' || estado === 'FINALIZADA') ? new Date().toISOString() : incTarget.trabajoProfesional?.fechaFinalizacion,
             },
-            viaActuacion: 'PROFESIONAL',
+            historial: [
+              ...(incTarget.historial || []),
+              {
+                id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                fecha: new Date().toISOString(),
+                usuario: usuarioNombre,
+                accion: trabajoParaEditar ? 'ORDEN_TRABAJO_MODIFICADA' : 'ORDEN_TRABAJO_CREADA',
+                valorNuevo: ESTADO_TRABAJO_LABELS[estado]?.label || estado,
+                observacion: `Orden de trabajo "${titulo}": ${ESTADO_TRABAJO_LABELS[estado]?.label || estado}${profesionalSeleccionado ? ` (Asignado a ${profesionalSeleccionado.nombreComercial})` : ''}`,
+              },
+            ],
             updatedAt: new Date().toISOString(),
           };
           await saveIncidenciaFirestore(incActualizada);

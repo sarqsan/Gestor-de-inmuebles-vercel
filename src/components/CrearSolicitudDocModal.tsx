@@ -30,24 +30,32 @@ import {
   CheckCircle2,
   ShieldCheck,
   Send,
+  Eye,
 } from 'lucide-react';
 
 interface CrearSolicitudDocModalProps {
   candidato: Candidato;
   inmueble?: Inmueble;
   invitacion?: InvitacionVisita;
+  /** Solicitud ya emitida para este candidato: si existe se ACTUALIZA (mismo id y
+   *  token, sin duplicar el expediente documental ni su enlace público). */
+  existingSolicitud?: SolicitudDocumentacion | null;
   onClose: () => void;
   onSaveSolicitud: (solicitud: SolicitudDocumentacion) => Promise<void>;
   onOpenWhatsapp?: (url: string) => void;
+  /** Abrir directamente el portal público de documentación con el token creado. */
+  onOpenPublicView?: (token: string) => void;
 }
 
 export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
   candidato,
   inmueble,
   invitacion,
+  existingSolicitud,
   onClose,
   onSaveSolicitud,
   onOpenWhatsapp,
+  onOpenPublicView,
 }) => {
   const [documentos, setDocumentos] = useState<ItemDocumentoSolicitado[]>([]);
   const [mensajePropietario, setMensajePropietario] = useState<string>(
@@ -69,9 +77,17 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
 
   // Initialize suggested documents on mount
   useEffect(() => {
+    // Si ya existe una solicitud para el candidato se cargan sus documentos
+    // (para revisarlos/actualizarlos) en lugar de crear otra desde cero.
+    const previos = existingSolicitud?.documentos;
+    if (previos && previos.length > 0) {
+      setDocumentos(previos);
+      if (existingSolicitud?.mensajePropietario) setMensajePropietario(existingSolicitud.mensajePropietario);
+      return;
+    }
     const sugeridos = generarDocumentosSugeridos(candidato);
     setDocumentos(sugeridos);
-  }, [candidato]);
+  }, [candidato, existingSolicitud]);
 
   // Derived property info
   const targetInmueble: Inmueble = inmueble || {
@@ -149,7 +165,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
 
     setSaving(true);
     try {
-      const nuevaSol = buildSolicitudDocumentacion(
+      const base = buildSolicitudDocumentacion(
         candidato,
         targetInmueble,
         documentos,
@@ -159,6 +175,19 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
           mensajePropietario: mensajePropietario.trim(),
         }
       );
+
+      // Actualización del expediente existente (mismo id, token e historial).
+      const nuevaSol: SolicitudDocumentacion = existingSolicitud
+        ? {
+            ...base,
+            id: existingSolicitud.id,
+            token: existingSolicitud.token,
+            estado: existingSolicitud.estado,
+            fechaCreacion: existingSolicitud.fechaCreacion,
+            fechaEnvioCandidato: existingSolicitud.fechaEnvioCandidato,
+            historial: existingSolicitud.historial,
+          }
+        : base;
 
       await onSaveSolicitud(nuevaSol);
       setCreatedSolicitud(nuevaSol);
@@ -279,6 +308,16 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
                     {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedLink ? 'Copiado' : 'Copiar Enlace'}</span>
                   </button>
+
+                  {onOpenPublicView && (
+                    <button
+                      onClick={() => onOpenPublicView(createdSolicitud.token)}
+                      className="px-3 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Ver Portal Público</span>
+                    </button>
+                  )}
                 </div>
               </div>
 

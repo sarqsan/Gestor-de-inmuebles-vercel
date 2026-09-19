@@ -45,35 +45,76 @@ export const ESTADOS_INCIDENCIA_LABELS: Record<EstadoIncidencia, { label: string
 };
 
 export const RESPONSABILIDADES_LABELS: Record<ResponsabilidadIncidencia, { label: string; badgeClass: string; explicacion: string }> = {
-  POSIBLE_PROPIETARIO: {
+  PENDIENTE_DE_DETERMINAR: {
+    label: 'Pendiente de Determinar',
+    badgeClass: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+    explicacion: 'No se ha determinado aún quién debe asumir la actuación o los costes de la incidencia.',
+  },
+  PROPIETARIO: {
     label: 'Propietario / Arrendador (Art. 21.1 LAU)',
+    badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+    explicacion: 'Conservación de la habitabilidad de la vivienda, instalaciones fijas o deterioro por antigüedad.',
+  },
+  INQUILINO: {
+    label: 'Inquilino / Arrendatario (Art. 21.4 LAU)',
+    badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
+    explicacion: 'Pequeñas reparaciones por desgaste de uso ordinario o desperfecto por negligencia/mal uso.',
+  },
+  GARANTIA: {
+    label: 'Garantía (Fabricante / Instalador / Obra previa)',
+    badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    explicacion: 'Avería cubierta por garantía vigente de electrodoméstico, instalación o trabajo profesional previo.',
+  },
+  SEGURO: {
+    label: 'Seguro (Póliza Hogar / Arrendador / Comunidad)',
+    badgeClass: 'bg-sky-100 text-sky-800 border-sky-200',
+    explicacion: 'Siniestro indemnizable o con asistencia directa de la compañía aseguradora vinculada.',
+  },
+  PROFESIONAL: {
+    label: 'Profesional (Garantía de Obra / Defecto de Ejecución)',
+    badgeClass: 'bg-teal-100 text-teal-800 border-teal-200',
+    explicacion: 'Actuación a cargo del técnico o empresa reparadora por garantía de intervención anterior.',
+  },
+  COMUNIDAD: {
+    label: 'Comunidad de Propietarios',
+    badgeClass: 'bg-purple-100 text-purple-800 border-purple-200',
+    explicacion: 'Afectación originada en elementos comunes del edificio (bajante comunitaria, fachada, etc.).',
+  },
+  TERCERO: {
+    label: 'Tercero / Vecino Colindante',
+    badgeClass: 'bg-rose-100 text-rose-800 border-rose-200',
+    explicacion: 'Daño originado por una vivienda superior, contigua o un tercero ajeno a la finca.',
+  },
+  // Compatibilidad con valores periciales previos
+  POSIBLE_PROPIETARIO: {
+    label: 'Propietario / Arrendador (Estimada)',
     badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200',
     explicacion: 'Conservación de la vivienda para servir al uso convenido (desgaste natural o instalaciones fijas).',
   },
   POSIBLE_INQUILINO: {
-    label: 'Inquilino / Arrendatario (Art. 21.4 LAU)',
+    label: 'Inquilino / Arrendatario (Estimada)',
     badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
     explicacion: 'Pequeñas reparaciones por desgaste de uso ordinario o daño imputable a negligencia/mal uso.',
   },
   POSIBLE_COMUNIDAD: {
-    label: 'Comunidad de Propietarios',
+    label: 'Comunidad de Propietarios (Estimada)',
     badgeClass: 'bg-teal-100 text-teal-800 border-teal-200',
     explicacion: 'Afectación originada en elementos comunes del edificio (bajante comunitaria, cubierta, fachada).',
   },
   POSIBLE_TERCERO: {
-    label: 'Tercero / Vecino Colindante',
+    label: 'Tercero / Vecino Colindante (Estimada)',
     badgeClass: 'bg-purple-100 text-purple-800 border-purple-200',
     explicacion: 'Daño originado por una vivienda superior o contigua (ej. fuga en baño del piso de arriba).',
   },
   INDETERMINADA: {
-    label: 'Indeterminada',
-    badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+    label: 'Pendiente de Determinar',
+    badgeClass: 'bg-yellow-100 text-yellow-800 border-yellow-200',
     explicacion: 'No existen elementos suficientes para asignar responsabilidad clara en este momento.',
   },
   PENDIENTE_COMPROBACION: {
-    label: 'Pendiente de Comprobación',
+    label: 'Pendiente de Determinar',
     badgeClass: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    explicacion: 'Se precisa visita técnica o peritaje oficial para determinar el origen exacto del daño.',
+    explicacion: 'Se precisa visita técnica o comprobación para determinar quién asume la actuación.',
   },
 };
 
@@ -122,9 +163,14 @@ export function crearHistorialItem(
  * Control de acceso RBAC granular para incidencias
  */
 export function canAccessIncidencia(incidencia: Incidencia, currentUser?: UsuarioApp | null): boolean {
-  if (!currentUser) return true; // En modo local de pruebas
+  // SEGURIDAD: la ausencia de usuario autenticado NUNCA concede permisos.
+  // Ya no existe el "modo local de pruebas" ni un perfil por defecto: la
+  // autorización depende siempre del usuario autenticado (Firebase Auth),
+  // y Firestore Rules sigue siendo la autoridad final.
+  if (!currentUser) return false;
+  if (!currentUser.tipoPerfil) return false;
 
-  const perfil = currentUser.tipoPerfil || 'ADMINISTRADOR';
+  const perfil = currentUser.tipoPerfil;
   if (perfil === 'ADMINISTRADOR') return true;
 
   if (perfil === 'PROPIETARIO') {
@@ -147,6 +193,34 @@ export function canAccessIncidencia(incidencia: Incidencia, currentUser?: Usuari
     return false;
   }
 
+  return false;
+}
+
+/**
+ * Verifica si el usuario actual está formalmente autorizado para clasificar
+ * y registrar la responsabilidad legal y económica de la incidencia.
+ */
+export function canManageResponsabilidad(incidencia: Incidencia, currentUser?: UsuarioApp | null): boolean {
+  // SEGURIDAD: sin usuario autenticado se DENIEGA (nunca "modo demo") y no se
+  // asume el perfil de administrador por defecto: gestionan la responsabilidad
+  // únicamente el administrador y el propietario titular de la incidencia.
+  if (!currentUser) return false;
+  if (!currentUser.tipoPerfil) return false;
+
+  const perfil = currentUser.tipoPerfil;
+  if (perfil === 'ADMINISTRADOR') return true;
+
+  if (perfil === 'PROPIETARIO') {
+    if (currentUser.propietarioId && incidencia.propietarioId === currentUser.propietarioId) {
+      return true;
+    }
+    if (currentUser.inmuebleIds && currentUser.inmuebleIds.includes(incidencia.inmuebleId)) {
+      return true;
+    }
+    return false;
+  }
+
+  // Profesionales e inquilinos pueden consultar la decisión pero no modificar la clasificación
   return false;
 }
 

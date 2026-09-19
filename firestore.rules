@@ -3,15 +3,31 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // =========================================================================
-    // HELPER FUNCTIONS & AUTHENTICATION PREDICATES
+    // FASE 1.4 — PREDICADOS DE IDENTIDAD, ROL Y AISLAMIENTO POR PROPIETARIO
+    // =========================================================================
+    // NOTA DE DISEÑO:
+    //  - request.auth sólo está poblado cuando el usuario se autentica con
+    //    Firebase Authentication (Email/Contraseña). El modo "directo" sin Auth
+    //    no puede identificarse y, por tanto, no puede ser asegurado con reglas.
+    //  - El documento `usuarios_auth/{uid}` es un espejo REDUCIDO y NO
+    //    falsificable del perfil `usuarios/{id}`: la regla de escritura obliga
+    //    a que sus campos sensibles coincidan con el documento autoritativo,
+    //    que a su vez no puede ser modificado por el propio usuario para
+    //    cambiar de rol o de propietario.
     // =========================================================================
 
     function isSignedIn() {
-      return request.auth != null || true;
+      return request.auth != null;
     }
 
+    function authEmail() {
+      return isSignedIn() && 'email' in request.auth.token ? request.auth.token.email : '';
+    }
+
+    // El Administrador Principal se identifica por el email verificado por
+    // Firebase (imposible de suplantar desde el cliente).
     function isMasterAdmin() {
-      return (request.auth != null && 'email' in request.auth.token && request.auth.token.email == 'sarqsan2@gmail.com') || true;
+      return isSignedIn() && authEmail() == 'sarqsan2@gmail.com';
     }
 
     function isValidId(id) {
@@ -26,37 +42,521 @@ service cloud.firestore {
       return resource.data;
     }
 
+    // --- Espejo de identidad usuarios_auth/{uid} -----------------------------
+    function me() {
+      return get(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid)).data;
+    }
+
+    // El espejo de identidad existe (evita errores de `get` inexistente).
+    function hasIndex() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid));
+    }
+
+    // Sólo el estado ACTIVO concede acceso. PENDIENTE/BLOQUEADO/INACTIVO y la
+    // ausencia de espejo -> DENEGADO.
+    function activeUser() {
+      return hasIndex() && me().estado == 'ACTIVO';
+    }
+
+    // Rol de administración verificado por el espejo (no falsificable: el
+    // espejo sólo puede copiar el perfil autoritativo). El Administrador
+    // Principal se reconoce además por email verificado por Firebase (bootstrap
+    // imprescindible mientras su perfil no tenga espejo).
+    function isAdminRole() {
+      return activeUser() && me().tipoPerfil == 'ADMINISTRADOR';
+    }
+
+    function isStaff() {
+      return isMasterAdmin() || isAdminRole();
+    }
+
+    // ¿El inmueble pertenece al propietario autenticado? Por titularidad directa
+    // (propietarioId / propietarioPrincipalId) o por asignación explícita
+    // (usuario.inmuebleIds). Se usa en `get`; para `list` se exige el filtro
+    // demostrable (where propietarioId == mío o where inmuebleId in [...]).
+    function esInmuebleDeMiPropiedad(inmId) {
+      let inm = get(/databases/$(database)/documents/inmuebles/$(inmId)).data;
+      return isPropietarioRole() && (
+        ('propietarioId' in inm && inm.propietarioId == myPropId()) ||
+        ('propietarioPrincipalId' in inm && inm.propietarioPrincipalId == myPropId())
+      );
+    }
+
+    function esMiInmueble(inmId) {
+      return inmId is string && inmId.size() > 0 && isPropietarioRole() && (
+        myInmuebleIds().hasAny([inmId]) ||
+        (exists(/databases/$(database)/documents/inmuebles/$(inmId)) && esInmuebleDeMiPropiedad(inmId))
+      );
+    }
+
+    // Ficha del profesional autenticado: única fuente de sus viviendas asignadas.
+    function fichaProfesional() {
+      return get(/databases/$(database)/documents/profesionales/$(myProfId())).data;
+    }
+
+    function profTieneAsignado(inmId) {
+      return esProfesionalAutenticado()
+        && myProfId() is string
+        && exists(/databases/$(database)/documents/profesionales/$(myProfId()))
+        && 'inmuebleIdsAsignados' in fichaProfesional()
+        && fichaProfesional().inmuebleIdsAsignados is list
+        && fichaProfesional().inmuebleIdsAsignados.hasAny([inmId]);
+    }
+
+    function isPropietarioRole() {
+      return activeUser() && me().tipoPerfil == 'PROPIETARIO';
+    }
+
+    function myPropId() {
+      return me().propietarioId;
+    }
+
+    function myInmuebleIds() {
+      return me().inmuebleIds;
+    }
+
+    function ownsPropietario(pid) {
+      return isPropietarioRole() && pid is string && pid.size() > 0 && myPropId() == pid;
+    }
+
+    // ¿Puede el propietario ver el inmueble? Por titularidad o por asignación
+    // explícita (cuando se le comparte una vivienda que no es suya).
+    function canReachInmuebleId(inmId) {
+      return isPropietarioRole() && myInmuebleIds().hasAny([inmId]);
+    }
+
+    // ¿El contrato pertenece a este propietario? Es la ÚNICA condición
+    // demostrable para una CONSULTA (list): el cliente debe filtrar con
+    // where('propietarioId','==', propietarioId). El valor propietarioId se
+    // obtiene con un get de RUTA FIJA (sólo request.auth.uid), que el motor
+    // trata como constante, así que la restricción where satisface la regla.
+    function contratoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+
+    // Para un documento concreto (get) se admite también el inmueble asignado.
+    // NO se usa en list (la membresía por array no sería demostrable para una
+    // consulta sin el filtro adecuado).
+    function contratoVisible(d) {
+      return contratoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+
+    // FASE 2.0 — GASTOS (datos económicos): mismo aislamiento que los contratos,
+    // por propietarioId. La cuota hipotecaria también es un dato sensible.
+    function gastoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+    function gastoVisible(d) {
+      return gastoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+
+    // FASE 3 — Helpers genéricos de aislamiento por propietarioId, reutilizables
+    // por cualquier recurso económico del propietario (expedientes, propuestas,
+    // leads…). Mismas garantías que en contratos/gastos.
+    function aisladoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+    function aisladoVisible(d) {
+      return aisladoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+    function aisladoCreateOk() {
+      return isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string;
+    }
+    function aisladoUpdateOk() {
+      return isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();
+    }
+
+    // --- Bloque 4/5: rol profesional y asignación -----------------------------
+    // El profesional se identifica con el espejo usuarios_auth/{uid}
+    // (profesionalId). Sólo accede a lo que tiene asignado.
+    function isProfesionalRole() {
+      return activeUser() && me().tipoPerfil == 'PROFESIONAL';
+    }
+
+    // Variante DEFENSIVA: no lanza error cuando el usuario autenticado no tiene
+    // espejo de identidad (por ejemplo el Administrador Principal, que por
+    // diseño no lo tiene) y por tanto puede negarse sin romper otras reglas.
+    function esProfesionalAutenticado() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid))
+        && me().tipoPerfil == 'PROFESIONAL';
+    }
+
+    function myProfId() {
+      return me().profesionalId;
+    }
+
+    function profIdAsignado(d) {
+      return isProfesionalRole()
+        && 'profesionalId' in d
+        && d.profesionalId is string
+        && d.profesionalId.size() > 0
+        && d.profesionalId == myProfId();
+    }
+
+    // Recurso del propietario autenticado: por titularidad directa o por
+    // inmueble asignado (mismo criterio que contratos/gastos).
+    function recursoPropietarioVisible(d) {
+      return isPropietarioRole() &&
+        (('propietarioId' in d && d.propietarioId == myPropId()) ||
+         ('inmuebleId' in d && d.inmuebleId is string && myInmuebleIds().hasAny([d.inmuebleId])));
+    }
+
+    // Para CONSULTAS (list) la única condición demostrable sin `get` extra es el
+    // filtro por propietarioId, así que las listas exigen
+    // where('propietarioId','==', mi propietarioId).
+    function recursoPropietarioListable(d) {
+      return isPropietarioRole() && 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+
+    // El profesional sólo consulta por asignación:
+    // where('profesionalId','==', mi profesionalId).
+    function recursoProfesionalListable(d) {
+      return isProfesionalRole() && 'profesionalId' in d && d.profesionalId == myProfId();
+    }
+
+    function propietarioCreaOk() {
+      return isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string && incoming().inmuebleId.size() > 0;
+    }
+
+    function propietarioMantieneDueno() {
+      return isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();
+    }
+
+    // El profesional asignado puede actualizar su orden, pero NO puede cambiar
+    // el propietario ni reasignarse el trabajo a sí mismo o a otro.
+    function profesionalActualizaAsignado() {
+      return profIdAsignado(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && 'profesionalId' in incoming() && incoming().profesionalId == existing().profesionalId;
+    }
+
+    // Validación del espejo de identidad contra el perfil autoritativo.
+    function indexMatchesProfile(profileId) {
+      return get(/databases/$(database)/documents/usuarios/$(profileId)).data;
+    }
+
+    function indexIsTruthful() {
+      let src = indexMatchesProfile(incoming().usuarioId);
+      let propOk = ('propietarioId' in src)
+        ? incoming().propietarioId == src.propietarioId
+        : incoming().propietarioId == '';
+      let profOk = ('profesionalId' in src)
+        ? incoming().profesionalId == src.profesionalId
+        : incoming().profesionalId == '';
+      let inmOk = ('inmuebleIds' in src)
+        ? incoming().inmuebleIds == src.inmuebleIds
+        : incoming().inmuebleIds.size() == 0;
+      return incoming().usuarioId is string
+        && src.authUid == request.auth.uid
+        && incoming().email == src.email
+        && incoming().tipoPerfil == src.tipoPerfil
+        && incoming().estado == src.estado
+        && incoming().roles == src.roles
+        && propOk
+        && profOk
+        && inmOk;
+    }
+
     // =========================================================================
-    // 0. PROPIETARIOS Y CUENTAS BANCARIAS
+    // 0A. ESPEJO DE IDENTIDAD POR UID (usuarios_auth) — anti-elevación
     // =========================================================================
-    match /propietarios/{propietarioId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+    match /usuarios_auth/{uid} {
+      allow read: if isMasterAdmin() || (isSignedIn() && request.auth.uid == uid);
+
+      // El espejo sólo puede crearse/actualizarse para el UID propio y debe
+      // reflejar EXACTAMENTE el perfil autoritativo (indexIsTruthful compara
+      // tipoPerfil, estado, roles, propietarioId, profesionalId e inmuebleIds
+      // contra el documento `usuarios/{usuarioId}`). Por eso el propio usuario
+      // no puede elevarse: para declararse ADMINISTRADOR su perfil autoritativo
+      // tendría que serlo ya.
+      allow create: if isMasterAdmin() || (
+        isSignedIn()
+        && request.auth.uid == uid
+        && incoming().tipoPerfil in ['ADMINISTRADOR', 'PROPIETARIO', 'PROFESIONAL']
+        && indexIsTruthful()
+      );
+      allow update: if isMasterAdmin() || (
+        isSignedIn()
+        && request.auth.uid == uid
+        && incoming().tipoPerfil in ['ADMINISTRADOR', 'PROPIETARIO', 'PROFESIONAL']
+        && indexIsTruthful()
+      );
       allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
-    // 1. INMUEBLES & DATOS FISCALES
-    // Public listings are readable for candidate application links
+    // 0B. PROPIETARIOS — DATOS FISCALES Y CUENTAS BANCARIAS (máxima sensibilidad)
     // =========================================================================
-    match /inmuebles/{inmuebleId} {
-      allow read: if true;
-      allow create, update, delete: if isSignedIn();
+    match /propietarios/{propietarioId} {
+      // Cada propietario sólo puede leer su propia ficha. El Administrador, todas.
+      allow get: if isStaff() || ownsPropietario(propietarioId);
+      allow list: if isStaff();
+
+      // El propietario puede crear/editar únicamente SU ficha (id coincidente).
+      allow create: if isStaff() || (
+        isPropietarioRole()
+        && propietarioId == myPropId()
+        && 'id' in incoming() && incoming().id == propietarioId
+      );
+      allow update: if isStaff() || (
+        isPropietarioRole()
+        && propietarioId == myPropId()
+        && 'id' in existing() && existing().id == propietarioId
+      );
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 2. CANDIDATOS (Expedientes personales y cuestionarios)
+    // 1. INMUEBLES
+    // La lectura permanece pública porque da servicio al funnel de captación
+    // (listados, enlaces de solicitud y reserva de visita sin iniciar sesión).
+    // La ESCRITURA queda restringida al administrador o al propietario titular.
+    // RESIDUAL CONOCIDO (siguiente endurecimiento): la ficha de inmueble aún
+    // contiene campos fiscales/IBAN; conviene moverlos a una subcolección
+    // privada o despojarlos de la vista pública.
+    // =========================================================================
+    match /inmuebles/{inmuebleId} {
+      // RIESGO RESIDUAL DOCUMENTADO: el `get` por documento sigue siendo
+      // necesario para los flujos públicos por token (visita, solicitud,
+      // documentación y cuestionario resuelven SU vivienda con una lectura
+      // puntual). Sin poder verificar el token en las reglas (requeriría un
+      // canje de token en servidor) no se puede cerrar más sin romper esos
+      // flujos. Lo que SÍ queda cerrado es la DESCARGA MASIVA (list): ningún
+      // visitante anónimo puede enumerar el catálogo (que incluye IBAN, datos
+      // fiscales, notas internas y datos del inquilino).
+      allow get: if true;
+
+      allow list: if isStaff()
+        || (isPropietarioRole() && (
+              ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) ||
+              ('propietarioPrincipalId' in resource.data && resource.data.propietarioPrincipalId == myPropId()) ||
+              canReachInmuebleId(inmuebleId)
+           ))
+        || (esProfesionalAutenticado() && profTieneAsignado(inmuebleId));
+
+      allow create: if isStaff() || (
+        isPropietarioRole() && (
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
+          ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
+        )
+      );
+      allow update: if isStaff() || (
+        isPropietarioRole() && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId()) ||
+          canReachInmuebleId(inmuebleId)
+        )
+      );
+      allow delete: if isStaff();
+    }
+
+    // =========================================================================
+    // 2. CONTRATOS DE ARRENDAMIENTO = NÚCLEO ECONÓMICO (COBROS + JUSTIFICANTES)
+    // Aislamiento estricto por propietario. Un propietario sólo accede a sus
+    // contratos; los profesionales no tienen acceso en absoluto.
+    // =========================================================================
+    match /contratos_formalizacion/{contratoId} {
+      // get (documento concreto): titularidad directa o inmueble asignado.
+      allow get: if isStaff() || (isPropietarioRole() && contratoVisible(existing()));
+      // list (consulta): OBLIGA a where('propietarioId','==', mi propietarioId).
+      allow list: if isStaff() || (isPropietarioRole() && contratoEsMio(resource.data));
+
+      // El propietario sólo puede crear contratos a su nombre y con propietarioId.
+      allow create: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      // No puede mover un contrato a otro propietario ni tocar contratos ajenos.
+      allow update: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2B. GASTOS (FASE 2.0 — explotación vs financiación hipotecaria)
+    // Datos económicos privados: mismo aislamiento por propietarioId que los
+    // contratos. Los profesionales no tienen ninguna regla permitida (deny).
+    // =========================================================================
+    match /gastos/{gastoId} {
+      allow get: if isStaff() || (isPropietarioRole() && gastoVisible(existing()));
+      // list OBLIGA a where('propietarioId','==', mi propietarioId).
+      allow list: if isStaff() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      allow update: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2C. PLANTILLAS DE GASTOS RECURRENTES (FASE 2.2)
+    // Mismo aislamiento por propietarioId que los gastos/contratos.
+    // =========================================================================
+    match /gastos_recurrentes/{plantillaId} {
+      allow get: if isStaff() || (isPropietarioRole() && gastoVisible(existing()));
+      allow list: if isStaff() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      allow update: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2D. PRÉSTAMOS / HIPOTECAS (FASE 2.3 — condiciones financieras)
+    // Mismo aislamiento por propietarioId que gastos/contratos.
+    // =========================================================================
+    match /prestamos/{prestamoId} {
+      allow get: if isStaff() || (isPropietarioRole() && gastoVisible(existing()));
+      allow list: if isStaff() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      allow update: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2E. RECOMERCIALIZACIÓN (FASE 3.0)
+    // Expedientes, propuestas (RFP) y leads: datos del propietario aislados por
+    // propietarioId (patrón de contratos/gastos). Profesionales sin acceso.
+    // =========================================================================
+    match /expedientes_recomercializacion/{expedienteId} {
+      allow get: if isStaff() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isStaff() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isStaff() || aisladoCreateOk();
+      allow update: if isStaff() || aisladoUpdateOk();
+      allow delete: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /propuestas_inmobiliaria/{propuestaId} {
+      allow get: if isStaff() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isStaff() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isStaff() || aisladoCreateOk();
+      allow update: if isStaff() || aisladoUpdateOk();
+      allow delete: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /leads_inmobiliario/{leadId} {
+      allow get: if isStaff() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isStaff() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isStaff() || aisladoCreateOk();
+      allow update: if isStaff() || aisladoUpdateOk();
+      allow delete: if isStaff() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // Directorio de inmobiliarias: lo consultan administrador y propietarios
+    // (bolsa para delegar/comparar). La escritura (alta/verificación de una
+    // agencia) queda reservada al administrador; profesionales sin acceso.
+    // Cuando exista el rol de agencia se ampliará para que editen su ficha.
+    match /inmobiliarias_directorio/{inmobiliariaId} {
+      allow get, list: if isStaff() || isPropietarioRole();
+      allow write: if isStaff();
+    }
+
+    // =========================================================================
+    // 3. CANDIDATOS (expedientes y cuestionarios)
+    // El listado y la gestión requieren cuenta interna. Se conserva el enlace
+    // público de cuestionario (autoservicio del candidato por token), que sólo
+    // puede tocar un conjunto acotado de campos.
     // =========================================================================
     match /candidatos/{candidatoId} {
+      // get permanece accesible por el enlace de cuestionario por token.
       allow get: if true;
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() || (
-        incoming().keys().hasAll(['nombre', 'email', 'telefono', 'estado']) &&
-        incoming().nombre is string &&
-        incoming().nombre.size() > 0
+
+      // list: administración (visión global) o el PROPIETARIO TITULAR de SU
+      // inmueble. Nunca un profesional ni un tercero: para que la consulta sea
+      // admisible debe filtrarse por propietarioId propio o por inmuebleId
+      // asignado. PROPIETARIO A no puede leer candidatos de PROPIETARIO B.
+      allow list: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) ||
+        ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId]))
+      ));
+
+      allow create: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
+        ('inmuebleId' in incoming() && esMiInmueble(incoming().inmuebleId))
+      )) || (
+        incoming().keys().hasAll(['nombre', 'email', 'telefono', 'estado'])
+        && incoming().nombre is string
+        && incoming().nombre.size() > 0
+        && !esProfesionalAutenticado()
       );
-      allow update: if isSignedIn() || (
-        // Candidate answering questionnaire or updating application documentation
+
+      // Update: administración, propietario titular del candidato SUYO, o el
+      // propio candidato rellenando su cuestionario (campos acotados, más abajo).
+      // El HISTORIAL es append-only: jamás puede reducirse ni sustituirse.
+      allow update: if (isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && esMiInmueble(existing().inmuebleId))
+      ))) && (
+        !('historial' in existing()) || !('historial' in incoming())
+        || incoming().historial.size() >= existing().historial.size()
+      ) || (
+        // Candidato respondiendo su cuestionario / aportando documentación
         incoming().diff(existing()).affectedKeys().hasAny([
           'cuestionarioIncidencias',
           'cuestionarioToken',
@@ -71,193 +571,438 @@ service cloud.firestore {
           'numInquilinos',
           'tieneMascotas'
         ])
+        && !esProfesionalAutenticado()
+        && (!('historial' in existing()) || !('historial' in incoming())
+            || incoming().historial.size() >= existing().historial.size())
       );
-      allow delete: if isSignedIn();
+      allow delete: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && esMiInmueble(existing().inmuebleId))
+      ));
     }
 
     // =========================================================================
-    // 3. SOLICITUDES DE ALQUILER (Públicas para captación de solicitantes)
+    // 4. SOLICITUDES DE ALQUILER (creación pública de captación)
     // =========================================================================
     match /solicitudes/{solicitudId} {
-      allow read: if isSignedIn();
-      allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado']) &&
-                       incoming().nombre is string &&
-                       incoming().email is string;
-      allow update, delete: if isSignedIn();
+      // Datos personales de captación: administración o el propietario titular
+      // del inmueble solicitado (nunca profesionales ni terceros).
+      allow get: if isStaff() || (isPropietarioRole() && (
+        ('inmuebleId' in resource.data && esMiInmueble(resource.data.inmuebleId))
+      ));
+      allow list: if isStaff() || (isPropietarioRole() && (
+        'inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId])
+      ));
+      // Alta pública del portal de candidatura (campos mínimos obligatorios).
+      allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado'])
+        && incoming().nombre is string
+        && incoming().email is string
+        && !incoming().keys().hasAny(['roles', 'permisos', 'tipoPerfil']);
+      allow update, delete: if isStaff();
     }
 
     // =========================================================================
-    // 4. INVITACIONES DE VISITA (Públicas para confirmación por token)
+    // 5. INVITACIONES DE VISITA (confirmación/reserva pública por token)
     // =========================================================================
     match /invitaciones/{invitacionId} {
+      // Flujo público por token: la invitación se resuelve por enlace. La
+      // lectura permanece abierta (residual documentado: no hay canje de token
+      // en servidor), pero la ESCRITURA queda acotada a los campos del flujo.
       allow read: if true;
-      allow create, update: if true;
-      allow delete: if isSignedIn();
+      allow create: if incoming().keys().hasAll(['token', 'inmuebleId', 'status']);
+      allow update: if !esProfesionalAutenticado()
+        && !incoming().diff(existing()).affectedKeys().hasAny([
+             'token', 'inmuebleId', 'candidateId', 'candidateEmail', 'propietarioId', 'profesionalId'
+           ])
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+             'status', 'reserva', 'sentAt', 'openedAt', 'bookedAt', 'canceledAt',
+             'solicitudEstado', 'cuestionarioCompletado', 'scoreSolvencia',
+             'perfilOperativo', 'fechaPreseleccion', 'candidateNombre',
+             'candidateTelefono', 'candidateEmailInterno', 'updatedAt'
+           ]);
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 5. TURNOS / SLOTS DE VISITA (Públicos para reserva atómica)
+    // 6. TURNOS / SLOTS DE VISITA (reserva atómica pública)
     // =========================================================================
     match /slots_visita/{slotId} {
+      // Reserva pública por token (lectura residual documentada, escritura
+      // acotada a los campos de disponibilidad y reserva).
       allow read: if true;
-      allow create, update: if true;
-      allow delete: if isSignedIn();
+      allow create: if incoming().keys().hasAll(['inmuebleId', 'fecha', 'horaInicio', 'horaFin', 'disponible']);
+      allow update: if !esProfesionalAutenticado()
+        && !incoming().diff(existing()).affectedKeys().hasAny(['inmuebleId', 'propietarioId'])
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+             'disponible', 'bloqueadoPorPropietario', 'reservaCandidateId',
+             'reservaCandidateNombre', 'reservaInvitationId', 'fecha', 'horaInicio',
+             'horaFin', 'updatedAt'
+           ]);
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 6. SOLICITUDES DE DOCUMENTACIÓN POST-VISITA
+    // 7. SOLICITUDES DE DOCUMENTACIÓN POST-VISITA (portal público por token)
     // =========================================================================
     match /solicitudes_documentacion/{solicitudDocId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isSignedIn();
+      // Flujo público de aportación documental por token (lectura del propio
+      // expediente), gestión por el propietario titular del inmueble y por la
+      // administración. El profesional no interviene en este circuito.
+      allow get: if true;
+      allow list: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) ||
+        ('ownerId' in resource.data && resource.data.ownerId == myPropId()) ||
+        ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId]))
+      ));
+
+      allow create: if incoming().keys().hasAll(['token', 'inmuebleId', 'estado']);
+      allow update: if !esProfesionalAutenticado()
+        && !incoming().diff(existing()).affectedKeys().hasAny([
+             'token', 'inmuebleId', 'candidatoId', 'ownerId', 'profesionalId'
+           ])
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+             'estado', 'documentos', 'historial', 'fechaEnvioCandidato', 'fechaSolicitud',
+             'notasPropietario', 'mensajePropietario', 'fechaVisita', 'updatedAt',
+             'fechaUltimaActividad', 'propietarioId'
+           ])
+        // El HISTORIAL del expediente documental es append-only.
+        && (!('historial' in existing()) || !('historial' in incoming())
+            || incoming().historial.size() >= existing().historial.size());
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 7. CONTRATOS DE FORMALIZACIÓN, LAU Y ENTREGA DE LLAVES
-    // =========================================================================
-    match /contratos_formalizacion/{contratoId} {
-      allow read, create, update, delete: if isSignedIn();
-    }
-
-    // =========================================================================
-    // 8. CONFIGURACIÓN DE ASEGURADORAS (SEAG, Caser, etc.)
+    // 8. CONFIGURACIÓN DE ASEGURADORAS (sólo uso interno)
     // =========================================================================
     match /configuracion_aseguradoras/{aseguradoraId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
+      // Configuración interna de aseguradoras: ni propietarios ni profesionales.
+      allow read: if isStaff();
+      allow write: if isStaff();
     }
 
     // =========================================================================
-    // 9. SOLICITUDES DE SEGURO DE IMPAGO Y SEGUIMIENTO DE EXPEDIENTES
+    // 9. SOLICITUDES DE SEGURO DE IMPAGO (uso interno)
     // =========================================================================
     match /solicitudes_seguro_impago/{solicitudSeguroId} {
-      allow read, write: if isSignedIn();
+      // Estudios de solvencia: información personal y económica del propietario
+      // y del candidato. Administración (visión global) o el PROPIETARIO TITULAR
+      // del inmueble/candidato (tramita su propio expediente). Nunca un
+      // profesional ni un tercero. Antes, cualquier usuario con sesión podía leer
+      // y escribir los estudios de cualquier otro.
+      allow get: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) ||
+        ('inmuebleId' in resource.data && esMiInmueble(resource.data.inmuebleId))
+      ));
+      allow list: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) ||
+        ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId]))
+      ));
+      allow create: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
+        ('inmuebleId' in incoming() && esMiInmueble(incoming().inmuebleId))
+      ));
+      allow update: if isStaff() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && esMiInmueble(existing().inmuebleId))
+      )) && (!('historial' in existing()) || !('historial' in incoming())
+             || incoming().historial.size() >= existing().historial.size());
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 10. CONFIGURACIÓN DEL SISTEMA Y GMAIL INTEGRATION
+    // 10. CONFIGURACIÓN DEL SISTEMA
     // =========================================================================
     match /system/{systemDocId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      // Los flags de módulos son necesarios antes de iniciar sesión (lectura
+      // puntual del documento público). El resto de la configuración del
+      // sistema es interna.
+      allow get: if systemDocId == 'modulos_config' || isStaff();
+      allow list: if isStaff();
+      allow write: if isStaff();
     }
 
     // =========================================================================
     // 11. USUARIOS Y CONTROL DE ACCESO (PROTECCIÓN ESTRICTA CONTRA ELEVACIÓN)
     // =========================================================================
     match /usuarios/{usuarioId} {
-      allow get: if true;
-      allow list: if isSignedIn();
-      allow create: if isMasterAdmin() || (
-        isSignedIn() &&
-        incoming().authUid == request.auth.uid &&
-        // No self-assignment of admin profile or superadmin role
-        incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL'] &&
-        (!('SUPERADMIN' in incoming().roles))
+      // Deny by default: cada usuario sólo puede leer SU perfil (por id o por el
+      // authUid ya vinculado); la enumeración de usuarios queda reservada a la
+      // administración.
+      allow get: if isStaff()
+        || (isSignedIn() && (
+             usuarioId == request.auth.uid
+             || ('authUid' in resource.data && resource.data.authUid == request.auth.uid)
+           ));
+      allow list: if isStaff();
+
+      allow create: if isStaff() || (
+        isSignedIn()
+        && incoming().authUid == request.auth.uid
+        && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+        && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
+        && incoming().estado in ['ACTIVO', 'PENDIENTE']
+        // Un propietario nuevo sólo puede vincularse a una ficha de propietario
+        // que AÚN NO existe (no puede adueñarse de una ficha ajena existente).
+        && (
+          incoming().tipoPerfil == 'PROFESIONAL'
+          || !('propietarioId' in incoming())
+          || !exists(/databases/$(database)/documents/propietarios/$(incoming().propietarioId))
+        )
       );
-      allow update: if isMasterAdmin() || (
-        isSignedIn() &&
-        (existing().authUid == request.auth.uid || usuarioId == request.auth.uid) &&
-        // Cannot elevate own profile or roles
-        incoming().tipoPerfil == existing().tipoPerfil &&
-        incoming().roles == existing().roles &&
-        incoming().estado == existing().estado
+
+      allow update: if isStaff() || (
+        isSignedIn()
+        // El documento pertenece a este UID (salvo que se esté enlazando por
+        // primera vez un perfil sin authUid).
+        && (
+          !('authUid' in existing())
+          || existing().authUid == request.auth.uid
+          || usuarioId == request.auth.uid
+        )
+        && incoming().tipoPerfil == existing().tipoPerfil
+        && incoming().roles == existing().roles
+        && incoming().estado == existing().estado
+        // El usuario no puede cambiar por sí mismo su identidad ni sus permisos.
+        && !incoming().diff(existing()).affectedKeys().hasAny([
+          'permisos',
+          'propietarioId',
+          'profesionalId',
+          'inmuebleIds',
+          'email',
+          'createdAt',
+          'passwordHash'
+        ])
+        // El `authUid` es INMUTABLE una vez vinculado. Sólo se admite la
+        // vinculación inicial explícita: el perfil no tenía authUid, se vincula
+        // al UID que está autenticado y su email coincide con el verificado por
+        // Firebase. Nunca se puede reasignar la identidad a otra cuenta.
+        && (
+          !incoming().diff(existing()).affectedKeys().hasAny(['authUid'])
+          || (
+            !('authUid' in existing())
+            && incoming().authUid == request.auth.uid
+            && incoming().email == authEmail()
+          )
+        )
       );
-      allow delete: if isMasterAdmin();
+
+      allow delete: if isStaff();
     }
 
     // =========================================================================
     // 12. PROFESIONALES Y EMPRESAS DE MANTENIMIENTO
+    // Catálogo legible durante el registro público; la escritura es interna.
     // =========================================================================
     match /profesionales/{profesionalId} {
-      allow read: if true;
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin();
+      // get público: el registro por enlace resuelve la ficha del profesional
+      // invitado (residual documentado, sin canje de token en servidor).
+      allow get: if true;
+
+      // list: administración y propietarios (directorio que ya usaban); un
+      // profesional SÓLO su propia ficha, nunca el directorio completo.
+      allow list: if isStaff()
+        || (isSignedIn() && !esProfesionalAutenticado())
+        || (esProfesionalAutenticado() && (
+             profesionalId == myProfId()
+             || ('usuarioId' in resource.data && resource.data.usuarioId == request.auth.uid)
+           ));
+
+      // El técnico sólo puede crear/actualizar su propia ficha. El propietario
+      // mantiene sus profesionales privados (asignación de viviendas) sin poder
+      // cambiar la identidad de la ficha.
+      allow create: if isStaff()
+        || (esProfesionalAutenticado() && profesionalId == myProfId())
+        || isPropietarioRole();
+
+      allow update: if isStaff()
+        || (esProfesionalAutenticado() && profesionalId == myProfId())
+        || (isPropietarioRole() && (
+             !incoming().diff(existing()).affectedKeys().hasAny([
+               'usuarioId', 'tokenInvitacion', 'profesionalId', 'propietarioId', 'profesionalIdVinculado'
+             ])
+           ));
+
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 13. ENLACES DE REGISTRO E INVITACIONES CONFIGURABLES
+    // 13. ENLACES DE REGISTRO (lectura pública para validar el token)
     // =========================================================================
     match /enlaces_registro/{enlaceId} {
-      // Read is public so invited guests can validate tokens before registration
+      // get/list públicos: el alta por enlace resuelve su token (residual
+      // documentado). La ESCRITURA es exclusiva de la administración: antes
+      // cualquier usuario con sesión (incluido un propietario o un profesional)
+      // podía crear, modificar o borrar enlaces de registro, y con ello emitir
+      // invitaciones de alta con roles.
       allow read: if true;
-      allow create, update, delete: if isSignedIn();
+      allow create, update, delete: if isStaff();
     }
 
     // =========================================================================
-    // 14. CATÁLOGO ADMINISTRABLE DE ESPECIALIDADES
+    // 14. CATÁLOGO DE ESPECIALIDADES (lectura pública en el registro)
     // =========================================================================
     match /especialidades/{especialidadId} {
+      // Catálogo público (lo consulta el alta por enlace); la edición del
+      // catálogo es interna: antes cualquier sesión podía modificarlo.
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if isStaff();
     }
 
     // =========================================================================
-    // 15. REGISTROS DE AUDITORÍA (INMUTABLE - SÓLO INSERCIÓN)
+    // 15. REGISTROS DE AUDITORÍA (INMUTABLE - SÓLO INSERCIÓN POR USUARIOS INTERNOS)
     // =========================================================================
     match /audit_logs/{auditId} {
-      allow read: if isSignedIn();
-      allow create: if true;
+      allow read: if isStaff();
+
+      // Inserción controlada: la administración registra cualquier acción; el
+      // resto de usuarios autenticados SÓLO los eventos propios de su sesión
+      // (login/logout/alta por invitación), sin poder fabricar acciones
+      // administrativas ni campos de autorización. update/delete: DENEGADOS
+      // (registro inmutable).
+      allow create: if isSignedIn()
+        && incoming().keys().hasAll(['accion', 'resultado', 'usuarioId', 'fechaHora'])
+        && (isStaff() || (
+             incoming().accion in [
+               'LOGIN_EXITOSO', 'LOGOUT', 'REGISTRO_USUARIO_INVITACION',
+               'USUARIO_AUTHUID_VINCULADO', 'LOGIN_FALLIDO'
+             ]
+             && !incoming().keys().hasAny(['tipoPerfil', 'roles', 'permisos', 'estadoSolicitado'])
+           ));
       allow update, delete: if false;
     }
 
     // =========================================================================
-    // 16. BLOQUE 4: INCIDENCIAS, MANTENIMIENTO Y TRABAJOS PROFESIONALES
+    // 16. INCIDENCIAS Y MANTENIMIENTO (BLOQUE 4)
+    // Cada propietario accede ÚNICAMENTE a sus incidencias; el profesional, a
+    // las que tiene asignadas. El administrador principal, a todas.
+    // Los profesionales NO pueden crear incidencias ni eliminar registros.
     // =========================================================================
     match /incidencias/{incidenciaId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin();
+      allow get: if isStaff()
+        || recursoPropietarioVisible(existing())
+        || profIdAsignado(existing());
+
+      // list: propietario -> where('propietarioId','==', myPropId())
+      //       profesional -> where('profesionalId','==', myProfId())
+      allow list: if isStaff()
+        || recursoPropietarioListable(resource.data)
+        || recursoProfesionalListable(resource.data);
+
+      allow create: if isStaff() || propietarioCreaOk();
+
+      allow update: if isStaff()
+        || propietarioMantieneDueno()
+        || profesionalActualizaAsignado();
+
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 17. BLOQUE 4: PÓLIZAS DE SEGURO (HOGAR, ARRENDADOR, COMUNIDAD, RC)
+    // 17. PÓLIZAS DE SEGURO (BLOQUE 4)
+    // Documentación económica privada del propietario. Los profesionales no
+    // tienen ningún acceso (ni lectura) a las pólizas.
     // =========================================================================
     match /polizas_seguros/{polizaId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin();
+      allow get: if isStaff() || recursoPropietarioVisible(existing());
+      allow list: if isStaff() || recursoPropietarioListable(resource.data);
+
+      allow create: if isStaff() || propietarioCreaOk();
+      allow update: if isStaff() || propietarioMantieneDueno();
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 18. BLOQUE 4: SINIESTROS VINCULADOS A INCIDENCIAS
+    // 18. SINIESTROS (BLOQUE 4)
+    // Heredan el ámbito de la incidencia/póliza de origen mediante el
+    // propietarioId denormalizado en la escritura. Profesionales sin acceso.
     // =========================================================================
     match /siniestros/{siniestroId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin();
+      allow get: if isStaff() || recursoPropietarioVisible(existing());
+      allow list: if isStaff() || recursoPropietarioListable(resource.data);
+
+      allow create: if isStaff() || propietarioCreaOk();
+      allow update: if isStaff() || propietarioMantieneDueno();
+      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 19. BLOQUE 5: TRABAJOS PROFESIONALES (REPARACIONES, REFORMAS, MANTENIMIENTO)
+    // 19. ÓRDENES DE TRABAJO PROFESIONAL (BLOQUE 5)
+    // Propietario: las de sus inmuebles. Profesional: únicamente las asignadas;
+    // puede progresar el estado pero no cambiar de propietario ni reasignarse.
     // =========================================================================
     match /trabajos_profesionales/{trabajoId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin();
+      allow get: if isStaff()
+        || recursoPropietarioVisible(existing())
+        || profIdAsignado(existing());
+
+      allow list: if isStaff()
+        || recursoPropietarioListable(resource.data)
+        || recursoProfesionalListable(resource.data);
+
+      allow create: if isStaff() || propietarioCreaOk();
+
+      allow update: if isStaff()
+        || propietarioMantieneDueno()
+        || profesionalActualizaAsignado();
+
+      allow delete: if isStaff()
+        || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId());
     }
 
     // =========================================================================
-    // 20. BLOQUE 5: PRESUPUESTOS DE PROFESIONALES
+    // 20. PRESUPUESTOS PROFESIONALES (BLOQUE 5)
+    // Propietario: los de sus inmuebles. Profesional: los que emitió él mismo
+    // (y sólo puede emitir contra una orden que tenga asignada).
     // =========================================================================
     match /presupuestos_profesionales/{presupuestoId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin();
+      allow get: if isStaff()
+        || recursoPropietarioVisible(existing())
+        || profIdAsignado(existing());
+
+      allow list: if isStaff()
+        || recursoPropietarioListable(resource.data)
+        || recursoProfesionalListable(resource.data);
+
+      allow create: if isStaff()
+        || propietarioCreaOk()
+        || (isProfesionalRole()
+            && 'profesionalId' in incoming() && incoming().profesionalId == myProfId()
+            && 'propietarioId' in incoming() && incoming().propietarioId is string && incoming().propietarioId.size() > 0
+            && 'trabajoId' in incoming() && incoming().trabajoId is string
+            && get(/databases/$(database)/documents/trabajos_profesionales/$(incoming().trabajoId)).data.profesionalId == myProfId());
+
+      allow update: if isStaff()
+        || propietarioMantieneDueno()
+        || (profIdAsignado(existing())
+            && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+            && 'profesionalId' in incoming() && incoming().profesionalId == existing().profesionalId);
+
+      allow delete: if isStaff()
+        || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId());
     }
 
     // =========================================================================
-    // 21. BLOQUE 5: VALORACIONES Y EVALUACIONES DE PROFESIONALES
+    // 21. VALORACIONES DE PROFESIONALES (BLOQUE 5)
+    // Las emite el propietario (o el administrador) sobre un trabajo suyo. El
+    // profesional sólo puede LEER las recibidas: nunca editarlas ni borrarlas.
     // =========================================================================
     match /valoraciones_profesionales/{valoracionId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin();
+      allow get: if isStaff()
+        || recursoPropietarioVisible(existing())
+        || profIdAsignado(existing());
+
+      allow list: if isStaff()
+        || recursoPropietarioListable(resource.data)
+        || recursoProfesionalListable(resource.data);
+
+      allow create: if isStaff() || propietarioCreaOk();
+      allow update: if isStaff() || propietarioMantieneDueno();
+      allow delete: if isStaff()
+        || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId());
     }
 
     // =========================================================================
-    // GLOBAL DEFAULT DENY CATCH-ALL
+    // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)
     // =========================================================================
     match /{document=**} {
       allow read, write: if false;

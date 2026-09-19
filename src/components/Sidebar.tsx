@@ -1,5 +1,6 @@
 import React from 'react';
 import { SectionType, Candidato, UsuarioApp } from '../types';
+import { perfilAutorizado, seccionesPermitidas } from '../lib/authService';
 import {
   Home,
   Building2,
@@ -19,7 +20,10 @@ import {
   User,
   LogOut,
   Receipt,
+  TrendingDown,
+  RefreshCw,
   AlertTriangle,
+  Inbox,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -60,7 +64,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pendingReviewCount = candidatos.filter((c) => c.estado === 'nuevo').length;
   const pendingDocCount = candidatos.filter((c) => c.estado === 'pendiente_doc').length;
 
-  const perfil = currentUser?.tipoPerfil || 'ADMINISTRADOR';
+  // Autorización centralizada (deny by default): sin usuario autenticado, sin
+  // estado ACTIVO o sin tipoPerfil reconocido NO hay secciones autorizadas.
+  // El menú refleja la autorización; NO es el mecanismo de seguridad.
+  const perfil = perfilAutorizado(currentUser);
+  const seccionesAutorizadas = seccionesPermitidas(currentUser);
 
   // Role-scoped navigation items
   let navItems: {
@@ -74,9 +82,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     navItems = [
       { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck },
       { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount },
-      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
+      { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
+      { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
+      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
       { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
@@ -85,17 +95,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
       { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
       { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'profesionales', label: 'Mis Obras y Presupuestos', icon: Wrench, badge: trabajosActivosCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
-  } else {
+  } else if (perfil === 'ADMINISTRADOR') {
     // ADMINISTRADOR
     navItems = [
+      { id: 'inicio', label: 'Panel de Inicio', icon: Home },
       { id: 'administracion', label: 'Centro de Control', icon: Shield },
       { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
+      { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
+      { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw },
       { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
       { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'solicitudes', label: 'Solicitudes Públicas', icon: Inbox, badge: solicitudesCount },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },
@@ -104,6 +119,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'configuracion', label: 'Configuración', icon: Settings },
     ];
   }
+
+  // Coherencia del menú con la autorización central (deny by default).
+  navItems = navItems.filter((item) => seccionesAutorizadas.includes(item.id));
 
   return (
     <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-slate-300 border-r border-slate-800 min-h-screen sticky top-0 shrink-0 select-none">

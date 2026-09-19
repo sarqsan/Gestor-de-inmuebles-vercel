@@ -5,6 +5,7 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
   setDoc,
   deleteDoc,
   deleteField,
@@ -669,8 +670,19 @@ export function subscribeContratos(callback: (contratos: ContratoFormalizacion[]
  */
 export async function saveContratoFirestore(contrato: ContratoFormalizacion) {
   try {
+    const refC = doc(db, 'contratos_formalizacion', contrato.id);
+    const existing = await getDoc(refC);
+    if (existing.exists()) {
+      const prev = existing.data() as ContratoFormalizacion;
+      if (prev.habitacionId && contrato.habitacionId && prev.habitacionId !== contrato.habitacionId) {
+        throw new Error('No se puede reasignar habitacionId de un contrato activo.');
+      }
+      if (prev.inmuebleId && contrato.inmuebleId && prev.inmuebleId !== contrato.inmuebleId) {
+        throw new Error('No se puede reasignar inmuebleId de un contrato.');
+      }
+    }
     const cleanContrato = sanitizeObjectForFirestore(contrato);
-    await setDoc(doc(db, 'contratos_formalizacion', contrato.id), cleanContrato, { merge: true });
+    await setDoc(refC, cleanContrato, { merge: true });
   } catch (err) {
     console.error('Error saving contrato formalizacion to Firestore:', err);
   }
@@ -2027,8 +2039,16 @@ export function subscribeHabitacionesInmueble(
 }
 
 export async function saveHabitacionFirestore(habitacion: HabitacionInmueble): Promise<void> {
+  const refH = doc(db, 'habitaciones_inmueble', habitacion.id);
+  const existing = await getDoc(refH);
+  if (existing.exists()) {
+    const prev = existing.data() as HabitacionInmueble;
+    if (prev.inmuebleId && prev.inmuebleId !== habitacion.inmuebleId) {
+      throw new Error('No se puede reasignar inmuebleId de una habitación.');
+    }
+  }
   const clean = sanitizeObjectForFirestore(habitacion);
-  await setDoc(doc(db, 'habitaciones_inmueble', habitacion.id), clean, { merge: true });
+  await setDoc(refH, clean, { merge: true });
 }
 
 export {

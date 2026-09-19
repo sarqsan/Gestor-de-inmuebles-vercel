@@ -117,7 +117,12 @@ service cloud.firestore {
     // 7. CONTRATOS DE FORMALIZACIÓN, LAU Y ENTREGA DE LLAVES
     // =========================================================================
     match /contratos_formalizacion/{contratoId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read, create, delete: if isSignedIn();
+      allow update: if isSignedIn()
+        && (!('habitacionId' in resource.data)
+          || !('habitacionId' in incoming())
+          || incoming().habitacionId == resource.data.habitacionId)
+        && incoming().inmuebleId == resource.data.inmuebleId;
     }
 
     // =========================================================================

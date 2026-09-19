@@ -375,6 +375,7 @@ export interface Candidato {
   // Campos preparados para puntuación / IA posterior
   scoreEstimado?: number; // 0 - 100
   ratioSolvencia?: number; // % sobre el alquiler del inmueble
+  habitacionId?: string;
 }
 
 export interface InmuebleImage {
@@ -584,11 +585,31 @@ export interface ElementoInventario {
   habitacionId?: string;
 }
 
-export type EstadoHabitacion = 'DISPONIBLE' | 'RESERVADA' | 'ALQUILADA' | 'BLOQUEADA';
+export type EstadoHabitacion =
+  | 'DISPONIBLE'
+  | 'RESERVADA'
+  | 'EN_PROCESO'
+  | 'OCUPADA'
+  | 'ALQUILADA'
+  | 'NO_DISPONIBLE'
+  | 'BLOQUEADA'
+  | 'INACTIVA';
+
+export interface HistorialHabitacionItem {
+  id: string;
+  fecha: string;
+  usuarioNombre: string;
+  accion: string;
+  estadoAnterior?: EstadoHabitacion;
+  estadoNuevo?: EstadoHabitacion;
+  detalle?: string;
+  contratoId?: string;
+}
 
 export interface HabitacionInmueble {
   id: string;
   inmuebleId: string;
+  propietarioId?: string;
   nombre: string;
   descripcion?: string;
   estado: EstadoHabitacion;
@@ -600,6 +621,10 @@ export interface HabitacionInmueble {
   fechaModificacion: string;
   creadoPor: string;
   actualizadoPor: string;
+  historial?: HistorialHabitacionItem[];
+  contratoId?: string;
+  motivoBloqueo?: string;
+  fianza?: number;
 }
 
 export interface UserProfile {
@@ -631,6 +656,7 @@ export interface VisitSlot {
   reservaCandidateId?: string;
   reservaCandidateNombre?: string;
   reservaInvitationId?: string;
+  habitacionId?: string;
 }
 
 export interface InvitacionVisita {
@@ -655,6 +681,7 @@ export interface InvitacionVisita {
   openedAt?: string; // ISO string
   bookedAt?: string; // ISO string
   canceledAt?: string; // ISO string
+  habitacionId?: string;
   
   reserva?: {
     slotId: string;
@@ -899,6 +926,7 @@ export interface ContratoFormalizacion {
   esVigente?: boolean; // Indica si es el contrato actualmente activo/en vigor para el inmueble
   modalidadAlquiler?: 'completo' | 'habitaciones';
   habitacionIdentificador?: string;
+  habitacionId?: string;
   duracionAnios: number; // 1 año prorrogable
   diaLimitePagoMes: number; // 1 al 5
   
@@ -989,6 +1017,7 @@ export interface CobroPeriodo {
   contratoId: string;
   inquilinoId: string;
   propietarioId: string;
+  habitacionId?: string;
 
   // Desnormalización informativa para listados ágiles y offline
   inmuebleDireccion?: string;

@@ -2164,6 +2164,9 @@ export interface AnalisisIaIncidencia {
   motor?: 'ia' | 'heuristico';
   fecha?: string;
   evaluacionUrgencia?: string;
+  urgenciaEstimada?: PrioridadIncidencia | string;
+  posiblesCausas?: Array<string | { causa?: string; probabilidad?: string }>;
+  informacionFaltante?: string[];
   recomendacionResponsabilidad?: string;
   fundamentoResponsabilidad?: string;
   estimacionCoberturaSeguro?: string;

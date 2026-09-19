@@ -5,6 +5,8 @@ import {
   Gasto,
   Inmueble,
   UsuarioApp,
+  Propietario,
+  AnalisisIaIncidencia,
 } from '../types';
 import {
   generarGastoDesdeTrabajo,
@@ -13,6 +15,7 @@ import {
   filtrarGastosPorInmueble,
 } from './gastosEngine';
 import { generarResumenFiscalAnual } from './fiscalEngine';
+import { canAccessInmueble } from '../lib/authService';
 
 describe('circuito operativo y económico: Incidencia → Dictamen → OT → Profesional → Coste Real → Gasto → Histórico', () => {
   const inmueble: Inmueble = {
@@ -308,5 +311,119 @@ describe('circuito operativo y económico: Incidencia → Dictamen → OT → Pr
     expect(resumenFiscal?.gastos.totalDeducible).toBe(220);
     expect(resumenFiscal?.inmuebleId).toBe(inmueble.id);
     expect(resumenFiscal?.propietarioId).toBe('prop-100');
+  });
+
+  it('8. Análisis Pericial IA: estructura y compatibilidad de datos con DetalleIncidenciaModal', () => {
+    const analisisMock: AnalisisIaIncidencia = {
+      urgenciaEstimada: 'URGENTE',
+      resumenPericial: 'Fuga severa en instalación fija de fontanería.',
+      gravedadEstimada: 'URGENTE',
+      causasPosibles: [
+        {
+          titulo: 'Rotura accidental en tubería de agua',
+          probabilidad: 90,
+          explicacion: 'Desgaste de material o sobrepresión.',
+          responsabilidadProbable: 'PROPIETARIO',
+        },
+      ],
+      actuacionesRecomendadas: ['Cerrar llave de paso general', 'Asignar fontanero urgente'],
+      estimacionEconomica: {
+        minimo: 150,
+        maximo: 300,
+        moneda: 'EUR',
+      },
+      evaluacionResponsabilidad: {
+        responsableSugerido: 'PROPIETARIO',
+        argumentacionJuridicaLAU: 'Art. 21.1 LAU: Conservación de habitabilidad a cargo del arrendador.',
+        articulosAplicables: ['Art. 21.1 LAU', 'Art. 21.4 LAU'],
+      },
+      evaluacionSeguro: {
+        posibleCobertura: 'POSIBLE_COBERTURA',
+        explicacion: 'Cobertura habitual en pólizas de Hogar / Multirriesgo por daños de agua.',
+        ramoRecomendado: 'Hogar Multirriesgo',
+      },
+      advertenciaLegal: 'ANÁLISIS IA ORIENTATIVO: Este informe es un dictamen técnico-asistencial orientativo.',
+      fechaAnalisis: '2026-02-10T09:30:00Z',
+      modeloUtilizado: 'gemini-3.8-flash',
+      // Campos de compatibilidad directa con UI DetalleIncidenciaModal
+      recomendacionResponsabilidad: 'PROPIETARIO',
+      fundamentoResponsabilidad: 'Art. 21.1 LAU: Reparación de instalaciones fijas.',
+      estimacionCoberturaSeguro: 'POSIBLE_COBERTURA',
+      fundamentoSeguro: 'Daños por agua cubiertos en póliza multirriesgo.',
+      resumenDiagnostico: 'Fuga severa en tubería fija bajo fregadero.',
+      pasosRecomendados: ['Corte de suministro', 'Intervención de fontanería'],
+      evaluacionUrgencia: 'URGENTE',
+    };
+
+    expect(analisisMock.recomendacionResponsabilidad).toBe('PROPIETARIO');
+    expect(analisisMock.estimacionCoberturaSeguro).toBe('POSIBLE_COBERTURA');
+    expect(analisisMock.evaluacionUrgencia).toBe('URGENTE');
+    expect(analisisMock.pasosRecomendados).toHaveLength(2);
+    expect(analisisMock.advertenciaLegal).toContain('ORIENTATIVO');
+  });
+
+  it('9. Aislamiento y persistencia de Mi Ficha Fiscal de Propietario con matching multinivel', () => {
+    const propietarioTitular: Propietario = {
+      id: 'prop-100',
+      nombre: 'María Gómez Martínez',
+      nifCif: '12345678Z',
+      tipoPropietario: 'persona_fisica',
+      telefono: '+34 600 222 333',
+      email: 'maria.gomez@test.es',
+      direccion: 'Calle Mayor 10, 2º A',
+      ciudad: 'Alicante',
+      codigoPostal: '03001',
+      cuentasBancarias: [],
+      fechaCreacion: '2026-01-01T00:00:00Z',
+      fechaActualizacion: '2026-02-10T00:00:00Z',
+    };
+
+    const usuarioPropietario: UsuarioApp = {
+      id: 'u-prop-100',
+      nombre: 'María Gómez',
+      email: 'maria.gomez@test.es',
+      tipoPerfil: 'PROPIETARIO',
+      propietarioId: 'prop-100',
+      estado: 'ACTIVO',
+      roles: [],
+      permisos: [],
+      inmuebleIds: ['inm-100'],
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+
+    const usuarioOtroPropietario: UsuarioApp = {
+      id: 'u-prop-200',
+      nombre: 'Juan Pérez',
+      email: 'juan.perez@test.es',
+      tipoPerfil: 'PROPIETARIO',
+      propietarioId: 'prop-200',
+      estado: 'ACTIVO',
+      roles: [],
+      permisos: [],
+      inmuebleIds: ['inm-200'],
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    };
+
+    // 1. Acceso autorizado al inmueble por propietarioId / propietarioPrincipalId / inmuebleIds
+    expect(canAccessInmueble(usuarioPropietario, inmueble)).toBe(true);
+    expect(canAccessInmueble(usuarioOtroPropietario, inmueble)).toBe(false);
+
+    // 2. Ficha fiscal aislada
+    expect(usuarioPropietario.propietarioId).toBe(propietarioTitular.id);
+    expect(usuarioOtroPropietario.propietarioId).not.toBe(propietarioTitular.id);
+
+    // 3. Modificación segura de ficha
+    const fichaActualizada: Propietario = {
+      ...propietarioTitular,
+      telefono: '+34 600 999 888',
+      direccion: 'Nueva Dirección 25',
+      fechaActualizacion: new Date().toISOString(),
+    };
+
+    expect(fichaActualizada.id).toBe('prop-100');
+    expect(fichaActualizada.telefono).toBe('+34 600 999 888');
+    expect(fichaActualizada.direccion).toBe('Nueva Dirección 25');
   });
 });

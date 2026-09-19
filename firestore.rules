@@ -535,7 +535,7 @@ service cloud.firestore {
 
     // =========================================================================
     // 2K. INVENTARIO Y HABITACIONES DEL INMUEBLE (ARENA C)
-    // Aislados por inmueble/propietario.
+    // Aislados estrictamente por inmueble/propietario.
     // =========================================================================
     match /inventario_inmuebles/{inventarioId} {
       allow get: if isMasterAdmin() || (isPropietarioRole() && (
@@ -543,14 +543,46 @@ service cloud.firestore {
         ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
       ));
       allow list: if isMasterAdmin() || isPropietarioRole();
-      allow create: if isMasterAdmin() || (isPropietarioRole() && incoming().keys().hasAll(['inmuebleId', 'nombre', 'categoria', 'estado']));
-      allow update: if isMasterAdmin() || (isPropietarioRole() && incoming().inmuebleId == existing().inmuebleId);
-      allow delete: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && incoming().keys().hasAll(['inmuebleId', 'nombre', 'categoria', 'estado'])
+        && (
+          myInmuebleIds().hasAny([incoming().inmuebleId]) ||
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+        )
+      );
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+        && incoming().inmuebleId == existing().inmuebleId
+        && (!('propietarioId' in incoming()) || !('propietarioId' in existing()) || incoming().propietarioId == existing().propietarioId)
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+      );
     }
 
     match /inventario_historial/{histId} {
-      allow read: if isMasterAdmin() || isPropietarioRole();
-      allow create: if isMasterAdmin() || (isPropietarioRole() && 'inmuebleId' in incoming());
+      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+      ));
+      allow list: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'inmuebleId' in incoming()
+        && (
+          myInmuebleIds().hasAny([incoming().inmuebleId]) ||
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+        )
+      );
       allow update, delete: if false;
     }
 
@@ -560,9 +592,30 @@ service cloud.firestore {
         ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
       ));
       allow list: if isMasterAdmin() || isPropietarioRole();
-      allow create: if isMasterAdmin() || (isPropietarioRole() && incoming().keys().hasAll(['inmuebleId', 'nombre', 'estado']));
-      allow update: if isMasterAdmin() || (isPropietarioRole() && incoming().inmuebleId == existing().inmuebleId);
-      allow delete: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && incoming().keys().hasAll(['inmuebleId', 'nombre', 'estado'])
+        && (
+          myInmuebleIds().hasAny([incoming().inmuebleId]) ||
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+        )
+      );
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+        && incoming().inmuebleId == existing().inmuebleId
+        && (!('propietarioId' in incoming()) || !('propietarioId' in existing()) || incoming().propietarioId == existing().propietarioId)
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+      );
     }
 
     // =========================================================================

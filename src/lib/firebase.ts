@@ -2682,6 +2682,34 @@ export async function registrarHistorialInventarioFirestore(entry: {
   );
 }
 
+export function subscribeHistorialInventario(
+  inmuebleId: string,
+  callback: (items: any[]) => void
+) {
+  if (!inmuebleId) {
+    callback([]);
+    return () => undefined;
+  }
+  const qHist = query(INVENTARIO_HISTORIAL_COL, where('inmuebleId', '==', inmuebleId));
+  return onSnapshot(
+    qHist,
+    (snapshot) => {
+      const items: any[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      items.sort(
+        (a, b) => new Date(b.fecha || b.timestamp || 0).getTime() - new Date(a.fecha || a.timestamp || 0).getTime()
+      );
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore historial inventario snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
 export async function uploadInventarioAdjuntoStorage(
   inmuebleId: string,
   inventarioId: string,

@@ -10,6 +10,7 @@ import {
 import {
   saveElementoInventarioFirestore,
   subscribeInventarioInmueble,
+  subscribeHistorialInventario,
   uploadInventarioAdjuntoStorage,
   registrarHistorialInventarioFirestore,
 } from '../lib/firebase';
@@ -22,6 +23,10 @@ import {
   canAccessInventarioInmueble,
   canMutateInventario,
   filtrarInventarioPorCategoria,
+  crearElementoInventario,
+  modificarElementoInventario,
+  calcularCompletitudFichaTecnica,
+  obtenerResumenInventario,
 } from '../utils/inventarioEngine';
 import {
   ClipboardList,
@@ -33,6 +38,10 @@ import {
   Upload,
   History,
   Filter,
+  CheckCircle2,
+  Clock,
+  Layers,
+  FileText,
 } from 'lucide-react';
 
 interface Props {
@@ -51,8 +60,9 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
   const canView = canAccessInventarioInmueble(currentUser, inmueble, profesional);
   const canEdit = canMutateInventario(currentUser, inmueble, profesional);
 
-  const [tab, setTab] = useState<'ficha' | 'inventario'>('ficha');
+  const [tab, setTab] = useState<'ficha' | 'inventario' | 'historial'>('ficha');
   const [items, setItems] = useState<ElementoInventario[]>([]);
+  const [historialGlobal, setHistorialGlobal] = useState<any[]>([]);
   const [categoriaFiltro, setCategoriaFiltro] = useState<CategoriaInventario | 'TODAS'>('TODAS');
   const [busqueda, setBusqueda] = useState('');
   const [savingFicha, setSavingFicha] = useState(false);
@@ -109,10 +119,15 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
   useEffect(() => {
     if (!canView) {
       setItems([]);
+      setHistorialGlobal([]);
       return;
     }
-    const unsub = subscribeInventarioInmueble(inmueble.id, setItems);
-    return () => unsub();
+    const unsubInv = subscribeInventarioInmueble(inmueble.id, setItems);
+    const unsubHist = subscribeHistorialInventario(inmueble.id, setHistorialGlobal);
+    return () => {
+      unsubInv();
+      unsubHist();
+    };
   }, [inmueble.id, canView]);
 
   const filtrados = useMemo(() => {
@@ -126,6 +141,14 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
         (i.descripcion || '').toLowerCase().includes(q)
     );
   }, [items, categoriaFiltro, busqueda]);
+
+  const completitudFicha = useMemo(() => {
+    return calcularCompletitudFichaTecnica(inmueble);
+  }, [inmueble]);
+
+  const resumenInventario = useMemo(() => {
+    return obtenerResumenInventario(items);
+  }, [items]);
 
   if (!canView) {
     return (
@@ -170,7 +193,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
       usuarioNombre: actor,
       accion: 'FICHA_TECNICA_ACTUALIZADA',
       elementoAfectado: inmueble.id,
-      cambios: 'Actualización de ficha técnica',
+      cambios: `Actualización de ficha técnica (${completitudFicha.porcentaje}% completada)`,
     });
     setFichaMsg('Ficha técnica guardada');
     setSavingFicha(false);
@@ -192,10 +215,10 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
   const openEdit = (item: ElementoInventario) => {
     setEditItem(item);
     setNombre(item.nombre);
-    setCategoria(item.categoria);
+    setCategoria((item.categoria as CategoriaInventario) || 'OTROS');
     setDescripcion(item.descripcion || '');
-    setCantidad(item.cantidad);
-    setEstado(item.estado);
+    setCantidad(item.cantidad || 1);
+    setEstado((item.estado as EstadoInventario) || 'BUEN_ESTADO');
     setUbicacion(item.ubicacion || '');
     setObservaciones(item.observaciones || '');
     setFormOpen(true);
@@ -203,58 +226,76 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
 
   const handleSaveItem = async () => {
     if (!canEdit || !nombre.trim()) return;
-    const now = new Date().toISOString();
-    const id = editItem?.id || `inv_${inmueble.id}_${Date.now()}`;
-    const histEntry = {
-      id: `hist_${Date.now()}`,
-      fecha: now,
-      usuarioId: currentUser?.id,
-      usuarioNombre: actor,
-      accion: editItem ? (editItem.estado !== estado ? 'CAMBIO_ESTADO' : 'MODIFICACION') : 'CREACION',
-      elementoAfectado: id,
-      estadoAnterior: editItem?.estado,
-      estadoNuevo: estado,
-      cambios: `${nombre.trim()} · ${CATEGORIA_LABELS[categoria]}`,
-    };
-    const item: ElementoInventario = {
-      id,
-      inmuebleId: inmueble.id,
-      nombre: nombre.trim(),
-      categoria,
-      descripcion: descripcion.trim() || undefined,
-      cantidad,
-      estado,
-      ubicacion: ubicacion.trim() || undefined,
-      observaciones: observaciones.trim() || undefined,
-      fechaAlta: editItem?.fechaAlta || now,
-      fechaModificacion: now,
-      creadoPor: editItem?.creadoPor || actor,
-      actualizadoPor: actor,
-      activo: estado !== 'BAJA',
-      documentos: editItem?.documentos || [],
-      historial: [histEntry, ...(editItem?.historial || [])],
-    };
-    await saveElementoInventarioFirestore(item);
-    await registrarHistorialInventarioFirestore({
-      ...histEntry,
-      inmuebleId: inmueble.id,
-      inventarioId: id,
-    });
+    
+    if (editItem) {
+      const updated = modificarElementoInventario(
+        editItem,
+        {
+          nombre: nombre.trim(),
+          categoria,
+          descripcion: descripcion.trim() || undefined,
+          cantidad,
+          estado,
+          ubicacion: ubicacion.trim() || undefined,
+          observaciones: observaciones.trim() || undefined,
+        },
+        actor,
+        currentUser?.id
+      );
+      await saveElementoInventarioFirestore(updated);
+      await registrarHistorialInventarioFirestore({
+        inmuebleId: inmueble.id,
+        inventarioId: updated.id,
+        fecha: new Date().toISOString(),
+        usuarioId: currentUser?.id,
+        usuarioNombre: actor,
+        accion: editItem.estado !== estado ? 'CAMBIO_ESTADO' : 'MODIFICACION',
+        elementoAfectado: updated.id,
+        cambios: `${nombre.trim()} (${CATEGORIA_LABELS[categoria]})`,
+      });
+    } else {
+      const nuevo = crearElementoInventario(
+        inmueble.id,
+        {
+          nombre: nombre.trim(),
+          categoria,
+          descripcion: descripcion.trim() || undefined,
+          cantidad,
+          estado,
+          ubicacion: ubicacion.trim() || undefined,
+          observaciones: observaciones.trim() || undefined,
+        },
+        actor,
+        currentUser?.id
+      );
+      await saveElementoInventarioFirestore(nuevo);
+      await registrarHistorialInventarioFirestore({
+        inmuebleId: inmueble.id,
+        inventarioId: nuevo.id,
+        fecha: new Date().toISOString(),
+        usuarioId: currentUser?.id,
+        usuarioNombre: actor,
+        accion: 'CREACION',
+        elementoAfectado: nuevo.id,
+        cambios: `${nombre.trim()} (${CATEGORIA_LABELS[categoria]})`,
+      });
+    }
     setFormOpen(false);
   };
 
   const handleBaja = async (item: ElementoInventario) => {
     if (!canEdit) return;
-    const updated = aplicarBajaLogica(item, actor);
+    const updated = aplicarBajaLogica(item, actor, currentUser?.id);
     await saveElementoInventarioFirestore(updated);
     await registrarHistorialInventarioFirestore({
       inmuebleId: inmueble.id,
       inventarioId: item.id,
-      fecha: updated.fechaModificacion,
+      fecha: updated.fechaModificacion || new Date().toISOString(),
       usuarioId: currentUser?.id,
       usuarioNombre: actor,
       accion: 'BAJA_LOGICA',
       elementoAfectado: item.id,
+      cambios: `Baja lógica de ${item.nombre}`,
     });
   };
 
@@ -282,10 +323,11 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
         {
           id: `hist_${Date.now()}`,
           fecha: new Date().toISOString(),
+          usuarioId: currentUser?.id,
           usuarioNombre: actor,
-          accion: 'DOCUMENTACION_ANADIDA',
+          accion: 'ADJUNTO_SUBIDO',
           elementoAfectado: item.id,
-          cambios: file.name,
+          cambios: `Adjunto: ${file.name}`,
         },
         ...(item.historial || []),
       ],
@@ -297,121 +339,113 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
       fecha: new Date().toISOString(),
       usuarioId: currentUser?.id,
       usuarioNombre: actor,
-      accion: 'DOCUMENTACION_ANADIDA',
+      accion: 'ADJUNTO_SUBIDO',
       elementoAfectado: item.id,
-      cambios: file.name,
+      cambios: `Adjunto: ${file.name}`,
     });
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
-      <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-        <button
-          type="button"
-          onClick={() => setTab('ficha')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 ${
-            tab === 'ficha' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4" />
-          Ficha técnica
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('inventario')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 ${
-            tab === 'inventario' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          Inventario ({items.filter((i) => i.activo !== false && i.estado !== 'BAJA').length})
-        </button>
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-4 shadow-2xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3">
+        <div className="flex items-center gap-2">
+          <ClipboardList className="w-5 h-5 text-blue-600" />
+          <div>
+            <h3 className="font-bold text-slate-900 text-sm sm:text-base">Ficha Técnica & Inventario</h3>
+            <p className="text-[11px] text-slate-500">
+              Datos constructivos, equipamiento e inventario por estancia de {inmueble.direccion}
+            </p>
+          </div>
+        </div>
+        <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setTab('ficha')}
+            className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
+              tab === 'ficha' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            Ficha Técnica ({completitudFicha.porcentaje}%)
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('inventario')}
+            className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
+              tab === 'inventario' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Package className="w-3.5 h-3.5" />
+            Inventario ({items.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('historial')}
+            className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
+              tab === 'historial' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            Historial ({historialGlobal.length})
+          </button>
+        </div>
       </div>
 
       {tab === 'ficha' && (
         <div className="space-y-4 text-xs">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
             <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">ID</span>
-              <span className="font-mono font-bold">{inmueble.id}</span>
+              <span className="font-bold text-slate-800">Completitud de la Ficha Técnica: {completitudFicha.porcentaje}%</span>
+              <p className="text-[11px] text-slate-500">{completitudFicha.camposCompletados} de {completitudFicha.totalCampos} campos registrados</p>
             </div>
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Referencia</span>
-              <span className="font-mono">{inmueble.referenciaCatastral || '—'}</span>
-            </div>
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Dirección</span>
-              <span className="font-semibold">{inmueble.direccion}</span>
-            </div>
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Estado</span>
-              <span className="font-semibold">{inmueble.estado}</span>
+            <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${completitudFicha.porcentaje}%` }} />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Localidad</label>
-              <input disabled value={inmueble.ciudad} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             <div>
               <label className="block font-semibold mb-1">Provincia</label>
-              <input
-                disabled={!canEdit}
-                value={provincia}
-                onChange={(e) => setProvincia(e.target.value)}
-                className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
-              />
+              <input disabled={!canEdit} value={provincia} onChange={(e) => setProvincia(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
             </div>
             <div>
-              <label className="block font-semibold mb-1">Código postal</label>
-              <input disabled value={inmueble.codigoPostal || ''} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label className="block font-semibold mb-1">Planta / Puerta</label>
+              <input disabled={!canEdit} value={planta} onChange={(e) => setPlanta(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
             </div>
             <div>
-              <label className="block font-semibold mb-1">Tipo</label>
-              <select
-                disabled={!canEdit}
-                value={tipoInmueble}
-                onChange={(e) => setTipoInmueble(e.target.value as Inmueble['tipoInmueble'])}
-                className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
-              >
-                <option value="piso">Piso</option>
-                <option value="casa">Casa</option>
-                <option value="chalet">Chalet</option>
-                <option value="estudio">Estudio</option>
-                <option value="atico">Ático</option>
-                <option value="duplex">Dúplex</option>
-                <option value="habitacion">Habitación</option>
-                <option value="local">Local</option>
+              <label className="block font-semibold mb-1">Orientación</label>
+              <input disabled={!canEdit} value={orientacion} onChange={(e) => setOrientacion(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Año construcción</label>
+              <input type="number" disabled={!canEdit} value={anioConstruccion || ''} onChange={(e) => setAnioConstruccion(Number(e.target.value))} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Tipo de inmueble</label>
+              <input disabled={!canEdit} value={tipoInmueble} onChange={(e) => setTipoInmueble(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Estado conservación</label>
+              <input disabled={!canEdit} value={estadoConservacion} onChange={(e) => setEstadoConservacion(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Tipo de ventanas</label>
+              <input disabled={!canEdit} value={tipoVentanas} onChange={(e) => setTipoVentanas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Tipo de persianas</label>
+              <input disabled={!canEdit} value={tipoPersianas} onChange={(e) => setTipoPersianas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Distribución</label>
+              <select disabled={!canEdit} value={interiorExterior} onChange={(e) => setInteriorExterior(e.target.value as any)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg">
+                <option value="exterior">Exterior</option>
+                <option value="interior">Interior</option>
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Superficie m²</label>
-              <input disabled value={inmueble.superficie} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Habitaciones</label>
-              <input disabled value={inmueble.habitaciones} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Baños</label>
-              <input disabled value={inmueble.banos} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Planta</label>
-              <input
-                disabled={!canEdit}
-                value={planta}
-                onChange={(e) => setPlanta(e.target.value)}
-                className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 pt-2">
             <label className="flex items-center gap-2">
               <input type="checkbox" disabled={!canEdit} checked={ascensor} onChange={(e) => setAscensor(e.target.checked)} />
               Ascensor
@@ -424,61 +458,9 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
               <input type="checkbox" disabled={!canEdit} checked={balcon} onChange={(e) => setBalcon(e.target.checked)} />
               Balcón
             </label>
-            <div>
-              <label className="block font-semibold mb-1">Exterior / interior</label>
-              <select
-                disabled={!canEdit}
-                value={interiorExterior}
-                onChange={(e) => setInteriorExterior(e.target.value as 'exterior' | 'interior' | 'mixto')}
-                className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
-              >
-                <option value="exterior">Exterior</option>
-                <option value="interior">Interior</option>
-                <option value="mixto">Mixto</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Orientación</label>
-              <input disabled={!canEdit} value={orientacion} onChange={(e) => setOrientacion(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Año construcción</label>
-              <input
-                type="number"
-                disabled={!canEdit}
-                value={anioConstruccion || ''}
-                onChange={(e) => setAnioConstruccion(Number(e.target.value))}
-                className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Conservación</label>
-              <select
-                disabled={!canEdit}
-                value={estadoConservacion}
-                onChange={(e) => setEstadoConservacion(e.target.value as Inmueble['estadoConservacion'])}
-                className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
-              >
-                <option value="nuevo">Nuevo</option>
-                <option value="muy_bueno">Muy bueno</option>
-                <option value="bueno">Bueno</option>
-                <option value="a_reformar">A reformar</option>
-                <option value="en_obras">En obras</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Ventanas</label>
-              <input disabled={!canEdit} value={tipoVentanas} onChange={(e) => setTipoVentanas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <label className="flex items-center gap-2">
               <input type="checkbox" disabled={!canEdit} checked={aireAcondicionado} onChange={(e) => setAireAcondicionado(e.target.checked)} />
-              Aire acondicionado
+              Aire acond.
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" disabled={!canEdit} checked={calefaccion} onChange={(e) => setCalefaccion(e.target.checked)} />
@@ -486,7 +468,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" disabled={!canEdit} checked={cocinaEquipada} onChange={(e) => setCocinaEquipada(e.target.checked)} />
-              Cocina equipada
+              Cocina equip.
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" disabled={!canEdit} checked={electrodomesticosIncluidos} onChange={(e) => setElectrodomesticosIncluidos(e.target.checked)} />
@@ -494,15 +476,11 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" disabled={!canEdit} checked={armariosEmpotrados} onChange={(e) => setArmariosEmpotrados(e.target.checked)} />
-              Armarios
+              Armarios emp.
             </label>
-            <div>
-              <label className="block font-semibold mb-1">Persianas</label>
-              <input disabled={!canEdit} value={tipoPersianas} onChange={(e) => setTipoPersianas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
-            </div>
           </div>
 
-          <div className="flex items-center justify-between pt-2 border-t">
+          <div className="flex items-center justify-between pt-3 border-t">
             <span className="text-[11px] text-slate-500">
               Última actualización: {inmueble.fechaActualizacionFicha ? new Date(inmueble.fechaActualizacionFicha).toLocaleString('es-ES') : 'sin registrar'}
               {inmueble.actualizadoPorFicha ? ` · ${inmueble.actualizadoPorFicha}` : ''}
@@ -512,7 +490,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
                 type="button"
                 onClick={handleSaveFicha}
                 disabled={savingFicha}
-                className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold flex items-center gap-1.5"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-1.5 transition-colors"
               >
                 <Save className="w-4 h-4" />
                 Guardar ficha
@@ -525,14 +503,34 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
 
       {tab === 'inventario' && (
         <div className="space-y-3 text-xs">
+          {/* Métricas rápidas de inventario */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Total Elementos</span>
+              <p className="text-base font-bold text-slate-900">{resumenInventario.totalElementos} ({resumenInventario.totalUnidades} uds.)</p>
+            </div>
+            <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+              <span className="text-[10px] uppercase font-bold text-emerald-700">Activos</span>
+              <p className="text-base font-bold text-emerald-900">{resumenInventario.activos}</p>
+            </div>
+            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+              <span className="text-[10px] uppercase font-bold text-amber-700">A Reparar</span>
+              <p className="text-base font-bold text-amber-900">{resumenInventario.paraReparar}</p>
+            </div>
+            <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Bajas</span>
+              <p className="text-base font-bold text-slate-700">{resumenInventario.bajas}</p>
+            </div>
+          </div>
+
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar elemento..."
-                className="w-full pl-8 pr-3 py-2 bg-slate-50 border rounded-xl"
+                placeholder="Buscar por nombre, zona o descripción..."
+                className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
               />
             </div>
             <div className="flex items-center gap-1.5">
@@ -540,7 +538,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
               <select
                 value={categoriaFiltro}
                 onChange={(e) => setCategoriaFiltro(e.target.value as CategoriaInventario | 'TODAS')}
-                className="px-2 py-2 bg-slate-50 border rounded-xl"
+                className="px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl"
               >
                 <option value="TODAS">Todas las categorías</option>
                 {CATEGORIAS_INVENTARIO.map((c) => (
@@ -551,9 +549,9 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
               </select>
             </div>
             {canEdit && (
-              <button type="button" onClick={openNew} className="px-3 py-2 bg-blue-600 text-white rounded-xl font-bold flex items-center gap-1">
+              <button type="button" onClick={openNew} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-1 transition-colors">
                 <Plus className="w-4 h-4" />
-                Alta
+                Alta Elemento
               </button>
             )}
           </div>
@@ -561,24 +559,24 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
           {filtrados.length === 0 ? (
             <p className="text-center py-6 text-slate-500">Sin elementos de inventario para este inmueble.</p>
           ) : (
-            <div className="divide-y border rounded-xl overflow-hidden">
+            <div className="divide-y border border-slate-200 rounded-xl overflow-hidden">
               {filtrados.map((item) => (
-                <div key={item.id} className="p-3 bg-white space-y-2">
+                <div key={item.id} className="p-3 bg-white space-y-2 hover:bg-slate-50/50 transition-colors">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <strong className="text-slate-900">{item.nombre}</strong>
-                      <p className="text-[11px] text-slate-500">
-                        {CATEGORIA_LABELS[item.categoria]} · {ESTADO_INVENTARIO_LABELS[item.estado]} · x{item.cantidad}
-                        {item.ubicacion ? ` · ${item.ubicacion}` : ''}
+                      <strong className="text-slate-900 text-sm">{item.nombre}</strong>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        <span className="font-semibold text-slate-700">{CATEGORIA_LABELS[item.categoria as CategoriaInventario] || item.categoria}</span> · <span className="text-blue-700 font-semibold">{ESTADO_INVENTARIO_LABELS[item.estado as EstadoInventario] || item.estado}</span> · x{item.cantidad || 1}
+                        {item.ubicacion ? ` · 📍 ${item.ubicacion}` : ''}
                       </p>
                     </div>
                     {canEdit && (
                       <div className="flex gap-1">
-                        <button type="button" onClick={() => openEdit(item)} className="px-2 py-1 bg-slate-100 rounded-lg font-semibold">
+                        <button type="button" onClick={() => openEdit(item)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition-colors">
                           Editar
                         </button>
                         {item.estado !== 'BAJA' && (
-                          <button type="button" onClick={() => handleBaja(item)} className="px-2 py-1 bg-rose-50 text-rose-700 rounded-lg">
+                          <button type="button" onClick={() => handleBaja(item)} className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors" title="Dar de baja">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         )}
@@ -587,18 +585,18 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
                   </div>
                   {item.descripcion && <p className="text-slate-600">{item.descripcion}</p>}
                   {(item.documentos || []).length > 0 && (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1.5 pt-1">
                       {item.documentos!.map((d) => (
-                        <a key={d.id} href={d.url} target="_blank" rel="noreferrer" className="text-blue-700 underline text-[11px]">
-                          {d.nombre}
+                        <a key={d.id} href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[11px] hover:underline">
+                          <FileText className="w-3 h-3" /> {d.nombre}
                         </a>
                       ))}
                     </div>
                   )}
                   {canEdit && (
-                    <label className="inline-flex items-center gap-1 text-blue-700 cursor-pointer">
+                    <label className="inline-flex items-center gap-1 text-blue-700 cursor-pointer pt-1 font-medium hover:underline">
                       <Upload className="w-3.5 h-3.5" />
-                      Foto / documento
+                      Adjuntar factura / foto
                       <input
                         type="file"
                         accept="image/*,.pdf"
@@ -611,14 +609,14 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
                     </label>
                   )}
                   {item.historial && item.historial.length > 0 && (
-                    <details className="text-[11px] text-slate-500">
-                      <summary className="cursor-pointer flex items-center gap-1">
-                        <History className="w-3 h-3" /> Histórico
+                    <details className="text-[11px] text-slate-500 pt-1">
+                      <summary className="cursor-pointer flex items-center gap-1 font-medium text-slate-600">
+                        <History className="w-3 h-3" /> Ver historial ({item.historial.length})
                       </summary>
-                      <ul className="mt-1 space-y-0.5">
+                      <ul className="mt-1 space-y-0.5 pl-4 border-l-2 border-slate-200">
                         {item.historial.slice(0, 8).map((h) => (
                           <li key={h.id}>
-                            {new Date(h.fecha).toLocaleString('es-ES')} · {h.usuarioNombre} · {h.accion}
+                            <span className="font-semibold text-slate-700">{new Date(h.fecha).toLocaleString('es-ES')}</span> · {h.usuarioNombre} · <span className="italic">{h.accion}</span> {h.cambios ? `(${h.cambios})` : ''}
                           </li>
                         ))}
                       </ul>
@@ -631,36 +629,83 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
         </div>
       )}
 
+      {tab === 'historial' && (
+        <div className="space-y-3 text-xs">
+          <div className="flex items-center gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+            <Clock className="w-4 h-4 text-blue-600" />
+            <span className="font-bold text-slate-800">Trazabilidad Inmutable de Inventario y Ficha Técnica</span>
+          </div>
+
+          {historialGlobal.length === 0 ? (
+            <p className="text-center py-6 text-slate-500">Sin eventos registrados para este inmueble.</p>
+          ) : (
+            <div className="divide-y border border-slate-200 rounded-xl overflow-hidden">
+              {historialGlobal.map((h) => (
+                <div key={h.id} className="p-3 bg-white space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-slate-800">{h.accion}</span>
+                    <span className="text-slate-400">{new Date(h.fecha || h.timestamp || 0).toLocaleString('es-ES')}</span>
+                  </div>
+                  <p className="text-slate-600">{h.cambios || 'Evento de inventario'}</p>
+                  <p className="text-[10px] text-slate-400">Registrado por: {h.usuarioNombre || 'Sistema'}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {formOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3 text-xs">
-            <h4 className="font-bold text-sm">{editItem ? 'Editar elemento' : 'Nuevo elemento de inventario'}</h4>
-            <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre *" className="w-full px-3 py-2 border rounded-xl" />
-            <select value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaInventario)} className="w-full px-3 py-2 border rounded-xl">
-              {CATEGORIAS_INVENTARIO.map((c) => (
-                <option key={c} value={c}>
-                  {CATEGORIA_LABELS[c]}
-                </option>
-              ))}
-            </select>
-            <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Descripción" className="w-full px-3 py-2 border rounded-xl" />
-            <div className="grid grid-cols-2 gap-2">
-              <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(Number(e.target.value))} className="px-3 py-2 border rounded-xl" />
-              <select value={estado} onChange={(e) => setEstado(e.target.value as EstadoInventario)} className="px-3 py-2 border rounded-xl">
-                {ESTADOS_INVENTARIO.map((s) => (
-                  <option key={s} value={s}>
-                    {ESTADO_INVENTARIO_LABELS[s]}
+          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3 text-xs shadow-xl">
+            <h4 className="font-bold text-sm text-slate-900">{editItem ? 'Editar elemento de inventario' : 'Nuevo elemento de inventario'}</h4>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Nombre *</label>
+              <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Frigorífico combi, Sofá 3 plazas..." className="w-full px-3 py-2 border rounded-xl" />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Categoría</label>
+              <select value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaInventario)} className="w-full px-3 py-2 border rounded-xl">
+                {CATEGORIAS_INVENTARIO.map((c) => (
+                  <option key={c} value={c}>
+                    {CATEGORIA_LABELS[c]}
                   </option>
                 ))}
               </select>
             </div>
-            <input value={ubicacion} onChange={(e) => setUbicacion(e.target.value)} placeholder="Ubicación / zona" className="w-full px-3 py-2 border rounded-xl" />
-            <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Observaciones" className="w-full px-3 py-2 border rounded-xl" />
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setFormOpen(false)} className="px-3 py-2 bg-slate-100 rounded-xl">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Descripción</label>
+              <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Marca, modelo, número de serie..." className="w-full px-3 py-2 border rounded-xl" rows={2} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Cantidad</label>
+                <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(Number(e.target.value))} className="w-full px-3 py-2 border rounded-xl" />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Estado</label>
+                <select value={estado} onChange={(e) => setEstado(e.target.value as EstadoInventario)} className="w-full px-3 py-2 border rounded-xl">
+                  {ESTADOS_INVENTARIO.map((s) => (
+                    <option key={s} value={s}>
+                      {ESTADO_INVENTARIO_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Ubicación / Estancia</label>
+              <input value={ubicacion} onChange={(e) => setUbicacion(e.target.value)} placeholder="Ej: Habitación 1, Cocina, Salón principal..." className="w-full px-3 py-2 border rounded-xl" />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Observaciones</label>
+              <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Notas de uso, mantenimiento o garantías..." className="w-full px-3 py-2 border rounded-xl" rows={2} />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button type="button" onClick={() => setFormOpen(false)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors">
                 Cancelar
               </button>
-              <button type="button" onClick={() => void handleSaveItem()} className="px-3 py-2 bg-blue-600 text-white rounded-xl font-bold">
+              <button type="button" onClick={() => void handleSaveItem()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors">
                 Guardar
               </button>
             </div>

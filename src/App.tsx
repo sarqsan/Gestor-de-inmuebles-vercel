@@ -178,6 +178,7 @@ import { PolizasSegurosSection } from './components/sections/PolizasSegurosSecti
 import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
 import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
+import { IncidenciasSection } from './components/sections/IncidenciasSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
 import { AdministracionSection } from './components/sections/AdministracionSection';
@@ -395,7 +396,18 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'cobros', 'gastos', 'recomercializacion', 'configuracion'];
+      const allowedSections: SectionType[] = [
+        'propietarios',
+        'inmuebles',
+        'formalizacion',
+        'cobros',
+        'gastos',
+        'fiscal',
+        'polizas',
+        'incidencias',
+        'recomercializacion',
+        'configuracion',
+      ];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
@@ -3062,6 +3074,16 @@ export default function App() {
               onGuardarPropuesta={handleSavePropuestaInmobiliaria}
               onGuardarLead={handleSaveLeadInmobiliario}
               onCerrarCiclo={handleCerrarExpedienteRecomerc}
+            />
+          )}
+
+          {activeSection === 'incidencias' && (
+            <IncidenciasSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              contratos={scopedContratos}
+              profesionales={scopedProfesionales}
+              currentUser={currentUser}
             />
           )}
 

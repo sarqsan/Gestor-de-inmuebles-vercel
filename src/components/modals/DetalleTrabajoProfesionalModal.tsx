@@ -22,6 +22,10 @@ import {
   Phone,
   Mail,
   Edit,
+  Receipt,
+  Scale,
+  FileCheck,
+  Loader2,
 } from 'lucide-react';
 import {
   TrabajoProfesional,
@@ -75,6 +79,14 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   const [isUpdating, setIsUpdating] = useState(false);
   const [localTrabajo, setLocalTrabajo] = useState<TrabajoProfesional>(trabajo);
 
+  // Estados para Modal de Liquidación y Cierre con Coste Real
+  const [showFinalizarModal, setShowFinalizarModal] = useState(false);
+  const [costeRealInput, setCosteRealInput] = useState<string>('');
+  const [facturaNumeroInput, setFacturaNumeroInput] = useState<string>('');
+  const [fechaFinalizacionInput, setFechaFinalizacionInput] = useState<string>('');
+  const [observacionesCierreInput, setObservacionesCierreInput] = useState<string>('');
+  const [errorLiquidacion, setErrorLiquidacion] = useState<string>('');
+
   React.useEffect(() => {
     setLocalTrabajo(trabajo);
   }, [trabajo]);
@@ -88,6 +100,125 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   const inmueble = inmuebles.find((i) => i.id === localTrabajo.inmuebleId);
   const incidenciaVinculada = incidencias.find((inc) => inc.id === localTrabajo.incidenciaId);
   const presupuestosDelTrabajo = presupuestos.filter((p) => p.trabajoId === localTrabajo.id);
+
+  // Abrir diálogo de liquidación técnica y coste real
+  const handleAbrirLiquidacion = () => {
+    setCosteRealInput(
+      localTrabajo.importeFinal !== undefined
+        ? localTrabajo.importeFinal.toString()
+        : localTrabajo.importeEstimado !== undefined
+        ? localTrabajo.importeEstimado.toString()
+        : ''
+    );
+    setFacturaNumeroInput(localTrabajo.facturaNumero || '');
+    setFechaFinalizacionInput(
+      localTrabajo.fechaFinalizacion
+        ? localTrabajo.fechaFinalizacion.slice(0, 10)
+        : new Date().toISOString().slice(0, 10)
+    );
+    setObservacionesCierreInput(
+      localTrabajo.observaciones || 'Trabajo finalizado y comprobado técnicamente'
+    );
+    setErrorLiquidacion('');
+    setShowFinalizarModal(true);
+  };
+
+  // Confirmar liquidación con coste real efectivo
+  const handleConfirmarLiquidacion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const numCoste = parseFloat(costeRealInput);
+    if (isNaN(numCoste) || numCoste < 0) {
+      setErrorLiquidacion('Por favor indica un coste real producido válido (mínimo 0 €).');
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+      setErrorLiquidacion('');
+      const usuarioNombre = currentUser?.nombre
+        ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+        : 'Administrador';
+
+      const fechaFinIso = fechaFinalizacionInput
+        ? new Date(fechaFinalizacionInput).toISOString()
+        : new Date().toISOString();
+
+      const numFactura = facturaNumeroInput.trim() || undefined;
+
+      const nuevoHistorial = [
+        ...(localTrabajo.historial || []),
+        crearItemHistorialTrabajo(
+          'ESTADO_MODIFICADO',
+          usuarioNombre,
+          localTrabajo.estado,
+          'FINALIZADO',
+          `Liquidación y cierre técnico: Coste Real ${numCoste.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}${numFactura ? ` (Factura: ${numFactura})` : ''}. ${observacionesCierreInput.trim()}`
+        ),
+      ];
+
+      const trabajoActualizado: TrabajoProfesional = {
+        ...localTrabajo,
+        estado: 'FINALIZADO',
+        importeFinal: numCoste,
+        facturaNumero: numFactura,
+        fechaFinalizacion: fechaFinIso,
+        observaciones: observacionesCierreInput.trim() || localTrabajo.observaciones,
+        historial: nuevoHistorial,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setLocalTrabajo(trabajoActualizado);
+      await saveTrabajoProfesionalFirestore(trabajoActualizado);
+
+      // Sincronizar con la incidencia vinculada cerrando el circuito
+      if (incidenciaVinculada) {
+        const incActualizada: Incidencia = {
+          ...incidenciaVinculada,
+          estado: 'RESUELTA',
+          fechaCierre: fechaFinIso,
+          trabajoProfesional: incidenciaVinculada.trabajoProfesional
+            ? {
+                ...incidenciaVinculada.trabajoProfesional,
+                estadoTrabajo: 'FINALIZADO',
+                costeReal: numCoste,
+                facturaNumero: numFactura,
+                fechaFinalizacion: fechaFinIso,
+              }
+            : {
+                profesionalId: localTrabajo.profesionalId || '',
+                profesionalNombre: localTrabajo.profesionalNombre || 'Profesional',
+                servicio: localTrabajo.categoria || 'Mantenimiento',
+                fechaAsignacion: localTrabajo.fechaAsignacion || new Date().toISOString(),
+                estadoTrabajo: 'FINALIZADO',
+                costeReal: numCoste,
+                facturaNumero: numFactura,
+                fechaFinalizacion: fechaFinIso,
+              },
+          historial: [
+            ...(incidenciaVinculada.historial || []),
+            {
+              id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              fecha: new Date().toISOString(),
+              usuario: usuarioNombre,
+              accion: 'INCIDENCIA_RESUELTA_LIQUIDACION',
+              valorAnterior: incidenciaVinculada.estado,
+              valorNuevo: 'RESUELTA',
+              observacion: `Orden de trabajo liquidada con éxito. Coste Real: ${numCoste.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}${numFactura ? ` (Factura: ${numFactura})` : ''}`,
+            },
+          ],
+          updatedAt: new Date().toISOString(),
+        };
+        await saveIncidenciaFirestore(incActualizada);
+      }
+
+      setShowFinalizarModal(false);
+    } catch (err) {
+      console.error('Error liquidando orden de trabajo:', err);
+      setErrorLiquidacion('Error al guardar la liquidación de la orden de trabajo.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   // Transition state helper
   const handleCambiarEstado = async (nuevoEstado: EstadoTrabajoProfesional, observacion?: string) => {
@@ -349,10 +480,11 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   </button>
                   <button
                     disabled={isUpdating}
-                    onClick={() => handleCambiarEstado('FINALIZADO', 'Trabajo finalizado y comprobado')}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                    onClick={handleAbrirLiquidacion}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer flex items-center space-x-1"
                   >
-                    ✓ Marcar Finalizado
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>✓ Finalizar y Liquidar Coste Real</span>
                   </button>
                 </>
               )}
@@ -364,6 +496,17 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
                   Reanudar Ejecución
+                </button>
+              )}
+
+              {(localTrabajo.estado === 'FINALIZADO' || localTrabajo.estado === 'FINALIZADA') && (
+                <button
+                  disabled={isUpdating}
+                  onClick={handleAbrirLiquidacion}
+                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg border border-emerald-300 transition-colors cursor-pointer flex items-center space-x-1"
+                >
+                  <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Modificar Liquidación / Factura</span>
                 </button>
               )}
 
@@ -399,12 +542,17 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
             <select
               value={localTrabajo.estado}
               disabled={isUpdating}
-              onChange={(e) =>
-                handleCambiarEstado(
-                  e.target.value as EstadoTrabajoProfesional,
-                  `Cambio manual de estado a ${ESTADO_TRABAJO_LABELS[e.target.value as EstadoTrabajoProfesional]?.label || e.target.value}`
-                )
-              }
+              onChange={(e) => {
+                const val = e.target.value as EstadoTrabajoProfesional;
+                if (val === 'FINALIZADO' || val === 'FINALIZADA') {
+                  handleAbrirLiquidacion();
+                } else {
+                  handleCambiarEstado(
+                    val,
+                    `Cambio manual de estado a ${ESTADO_TRABAJO_LABELS[val]?.label || val}`
+                  );
+                }
+              }}
               className="bg-white border border-slate-300 text-slate-800 text-xs rounded-md px-2 py-1 font-semibold outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
             >
               {Object.entries(ESTADO_TRABAJO_LABELS).map(([k, val]) => (
@@ -604,6 +752,32 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   </div>
                 </div>
 
+                {/* Detalle de Facturación y Liquidación */}
+                {localTrabajo.importeFinal !== undefined && (
+                  <div className="pt-2.5 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-emerald-50/70 p-3 rounded-lg border border-emerald-200">
+                    <div>
+                      <span className="text-emerald-800 font-semibold block">Factura / Ref. Liquidación:</span>
+                      <span className="font-bold text-slate-800">
+                        {localTrabajo.facturaNumero || 'Sin número de factura registrado'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-800 font-semibold block">Fecha de Cierre:</span>
+                      <span className="font-bold text-slate-800">
+                        {localTrabajo.fechaFinalizacion
+                          ? new Date(localTrabajo.fechaFinalizacion).toLocaleDateString('es-ES')
+                          : 'Completado'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-800 font-semibold block">Coste Real Efectivo:</span>
+                      <span className="font-extrabold text-emerald-700 text-sm">
+                        {localTrabajo.importeFinal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Quick Budget Status Link */}
                 <div className="pt-2.5 border-t border-slate-200 flex items-center justify-between flex-wrap gap-2 text-xs">
                   <div className="flex items-center space-x-2">
@@ -638,6 +812,101 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                         + Crear Presupuesto
                       </button>
                     ) : null}
+                  </div>
+                </div>
+              </div>
+
+              {/* Card de Repercusión Económica y Gasto del Inmueble */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Receipt className="w-4 h-4 text-emerald-600" />
+                    <span>Repercusión Económica y Gasto del Inmueble</span>
+                  </h4>
+                  <span className="text-[11px] font-semibold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    Circuito Económico
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg space-y-1">
+                    <span className="text-slate-500 text-[11px] font-medium block">Imputación del Gasto:</span>
+                    {incidenciaVinculada?.responsabilidad === 'PROPIETARIO' ? (
+                      <div>
+                        <span className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-xs">
+                          <Scale className="w-3.5 h-3.5" />
+                          Gasto Asumido por el Propietario
+                        </span>
+                        <p className="text-[11px] text-slate-600 mt-1">
+                          Conservación del inmueble (Art. 21.1 LAU). Gasto deducible del rendimiento del capital inmobiliario.
+                        </p>
+                      </div>
+                    ) : incidenciaVinculada?.responsabilidad === 'INQUILINO' ? (
+                      <div>
+                        <span className="inline-flex items-center gap-1 font-bold text-purple-800 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 text-xs">
+                          <Scale className="w-3.5 h-3.5" />
+                          Gasto Repercutible a Inquilino
+                        </span>
+                        <p className="text-[11px] text-slate-600 mt-1">
+                          Pequeña reparación / desgaste ordinario / negligencia (Art. 21.4 LAU). A liquidar contra fianza o abono directo.
+                        </p>
+                      </div>
+                    ) : incidenciaVinculada?.responsabilidad === 'SEGURO' ? (
+                      <div>
+                        <span className="inline-flex items-center gap-1 font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 text-xs">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          Coste Cubierto por Seguro
+                        </span>
+                        <p className="text-[11px] text-slate-600 mt-1">
+                          Siniestro indemnizado o asistido directamente por la póliza aseguradora vinculada.
+                        </p>
+                      </div>
+                    ) : incidenciaVinculada?.responsabilidad === 'GARANTIA' || incidenciaVinculada?.responsabilidad === 'COMUNIDAD' ? (
+                      <div>
+                        <span className="inline-flex items-center gap-1 font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-xs">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Sin Coste para la Propiedad
+                        </span>
+                        <p className="text-[11px] text-slate-600 mt-1">
+                          Subsanado bajo cobertura de garantía oficial o reclamado a la comunidad de copropietarios.
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="inline-flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-xs">
+                          Mantenimiento Directo del Inmueble
+                        </span>
+                        <p className="text-[11px] text-slate-600 mt-1">
+                          Orden de trabajo registrada para conservación patrimonial de la vivienda.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg space-y-1">
+                    <span className="text-slate-500 text-[11px] font-medium block">Estado en Historial del Inmueble:</span>
+                    {localTrabajo.estado === 'FINALIZADO' || localTrabajo.estado === 'FINALIZADA' ? (
+                      <div className="space-y-1">
+                        <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-xs">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Coste Liquidado y Registrado en Histórico
+                        </span>
+                        <p className="text-[11px] text-slate-600">
+                          Coste Real efectivo: <strong>{localTrabajo.importeFinal?.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' }) || '0,00 €'}</strong>
+                          {localTrabajo.facturaNumero && ` (Factura: ${localTrabajo.facturaNumero})`}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <span className="inline-flex items-center gap-1 font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-xs">
+                          <Clock className="w-3.5 h-3.5" />
+                          Pendiente de Liquidación Final
+                        </span>
+                        <p className="text-[11px] text-slate-500">
+                          Se consolidará en el libro de gastos e histórico del inmueble una vez marcada como finalizada con su coste real facturado.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -831,6 +1100,155 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
           )}
         </div>
       </div>
+
+      {/* MODAL DE LIQUIDACIÓN Y COSTE REAL */}
+      {showFinalizarModal && (
+        <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h3 className="font-bold text-sm">Liquidación Técnica y Coste Real</h3>
+                  <p className="text-slate-400 text-xs">Cierre de Orden de Trabajo #{localTrabajo.id.slice(0, 8)}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFinalizarModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmarLiquidacion} className="p-5 space-y-4">
+              {errorLiquidacion && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{errorLiquidacion}</span>
+                </div>
+              )}
+
+              {/* Informative notice on real cost */}
+              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <FileCheck className="w-4 h-4 text-blue-600" />
+                  <span>Cierre Económico Efectivo</span>
+                </p>
+                <p className="text-[11px] text-blue-700 leading-relaxed">
+                  Introduce el coste efectivamente facturado/producido por el profesional. Este importe se consolidará en el expediente de la incidencia, el libro de gastos y el historial del inmueble.
+                </p>
+              </div>
+
+              {/* Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Coste Real Liquidado (€) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={costeRealInput}
+                      onChange={(e) => setCosteRealInput(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 pr-8"
+                    />
+                    <span className="absolute right-3 top-2.5 text-xs font-bold text-slate-400">€</span>
+                  </div>
+                  {localTrabajo.importeEstimado !== undefined && (
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Presupuesto estimado: {localTrabajo.importeEstimado.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nº Factura / Justificante
+                  </label>
+                  <input
+                    type="text"
+                    value={facturaNumeroInput}
+                    onChange={(e) => setFacturaNumeroInput(e.target.value)}
+                    placeholder="Ej. FAC-2025/112"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Identificador de la factura o albarán oficial
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Fecha de Finalización / Liquidación
+                </label>
+                <input
+                  type="date"
+                  value={fechaFinalizacionInput}
+                  onChange={(e) => setFechaFinalizacionInput(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Dictamen Técnico y Conformidad de Cierre
+                </label>
+                <textarea
+                  rows={2}
+                  value={observacionesCierreInput}
+                  onChange={(e) => setObservacionesCierreInput(e.target.value)}
+                  placeholder="Detalles sobre los trabajos efectuados, pruebas realizadas o materiales sustituidos..."
+                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Economic impact badge */}
+              {incidenciaVinculada && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Imputación Económica Automática:
+                  </span>
+                  <p className="font-semibold text-slate-800">
+                    {incidenciaVinculada.responsabilidad === 'PROPIETARIO'
+                      ? 'Gasto de Conservación asignado a la Propiedad (Deducible)'
+                      : incidenciaVinculada.responsabilidad === 'INQUILINO'
+                      ? 'Gasto Repercutible al Arrendatario (Uso / Desgaste)'
+                      : incidenciaVinculada.responsabilidad === 'SEGURO'
+                      ? 'Coste Tramitado con Aseguradora'
+                      : 'Sin coste directo para la propiedad'}
+                  </p>
+                </div>
+              )}
+
+              {/* Buttons */}
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFinalizarModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdating}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  <span>Registrar Liquidación y Cerrar</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -63,7 +63,9 @@ service cloud.firestore {
     // Public listings are readable for candidate application links
     // =========================================================================
     match /inmuebles/{inmuebleId} {
-      allow get, list: if true;
+      // Lectura puntual para enlaces públicos de solicitud/cuestionario; listado restringido a usuarios autenticados
+      allow get: if isSignedIn() || (isValidId(inmuebleId) && resource.data.estado in ['disponible', 'alquilado']);
+      allow list: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isMasterAdmin() || (isSignedIn() && (
         resource.data.propietarioId == request.auth.uid ||
@@ -108,7 +110,8 @@ service cloud.firestore {
     // 4. INVITACIONES DE VISITA (Lectura por token para confirmación de reserva)
     // =========================================================================
     match /invitaciones/{invitacionId} {
-      allow get: if true;
+      // Lectura puntual para el enlace de invitación de visita
+      allow get: if isSignedIn() || (isValidId(invitacionId) && resource.data.status in ['PENDIENTE', 'CONFIRMADA', 'COMPLETADA', 'CANCELADA']);
       allow list: if isSignedIn();
       allow create: if isSignedIn();
       allow update: if isSignedIn() || (
@@ -121,7 +124,9 @@ service cloud.firestore {
     // 5. TURNOS / SLOTS DE VISITA (Lectura pública de calendario, reserva atómica)
     // =========================================================================
     match /slots_visita/{slotId} {
-      allow read: if true;
+      // Lectura de turnos para consulta y reserva atómica
+      allow get: if isSignedIn() || (isValidId(slotId) && resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
+      allow list: if isSignedIn() || (resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
       allow create, delete: if isSignedIn();
       allow update: if isSignedIn() || (
         incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'candidateId', 'candidateNombre', 'candidateTelefono', 'candidateEmail', 'invitacionId', 'bookedAt'])
@@ -191,7 +196,12 @@ service cloud.firestore {
     // 11. USUARIOS Y CONTROL DE ACCESO (PROTECCIÓN ESTRICTA CONTRA ELEVACIÓN)
     // =========================================================================
     match /usuarios/{usuarioId} {
-      allow get: if true;
+      allow get: if isSignedIn() && (
+        isMasterAdmin() ||
+        request.auth.uid == usuarioId ||
+        resource.data.authUid == request.auth.uid ||
+        resource.data.tipoPerfil in ['PROFESIONAL', 'PROPIETARIO', 'ADMINISTRADOR']
+      );
       allow list: if isSignedIn();
       allow create: if isMasterAdmin() || (
         isSignedIn() &&
@@ -213,7 +223,7 @@ service cloud.firestore {
     // 12. PROFESIONALES Y EMPRESAS DE MANTENIMIENTO
     // =========================================================================
     match /profesionales/{profesionalId} {
-      allow read: if true;
+      allow read: if isSignedIn();
       allow create, update: if isSignedIn();
       allow delete: if isMasterAdmin();
     }
@@ -222,7 +232,8 @@ service cloud.firestore {
     // 13. ENLACES DE REGISTRO E INVITACIONES CONFIGURABLES
     // =========================================================================
     match /enlaces_registro/{enlaceId} {
-      allow read: if true;
+      allow get: if isSignedIn() || (isValidId(enlaceId) && resource.data.activo == true);
+      allow list: if isSignedIn();
       allow create, update, delete: if isSignedIn();
     }
 
@@ -230,7 +241,8 @@ service cloud.firestore {
     // 14. CATÁLOGO ADMINISTRABLE DE ESPECIALIDADES
     // =========================================================================
     match /especialidades/{especialidadId} {
-      allow read: if true;
+      allow get: if isSignedIn() || isValidId(especialidadId);
+      allow list: if isSignedIn() || (resource.data.activo == true || !('activo' in resource.data));
       allow write: if isSignedIn();
     }
 
@@ -239,7 +251,11 @@ service cloud.firestore {
     // =========================================================================
     match /audit_logs/{auditId} {
       allow read: if isSignedIn();
-      allow create: if true;
+      allow create: if isSignedIn() || (
+        incoming().keys().hasAll(['id', 'action', 'timestamp']) &&
+        incoming().action is string &&
+        incoming().timestamp is string
+      );
       allow update, delete: if false;
     }
 
@@ -247,7 +263,12 @@ service cloud.firestore {
     // 16. BLOQUE 4: INCIDENCIAS, MANTENIMIENTO Y TRABAJOS PROFESIONALES
     // =========================================================================
     match /incidencias/{incidenciaId} {
-      allow read: if isSignedIn();
+      allow get: if isMasterAdmin() || (isSignedIn() && (
+        resource.data.propietarioId == request.auth.uid ||
+        isOwnerOfInmueble(resource.data.inmuebleId) ||
+        (resource.data.trabajoProfesional != null && resource.data.trabajoProfesional.profesionalId == request.auth.uid)
+      ));
+      allow list: if isSignedIn();
       allow create, update: if isSignedIn();
       allow delete: if isMasterAdmin();
     }
@@ -274,7 +295,12 @@ service cloud.firestore {
     // 19. BLOQUE 5: TRABAJOS PROFESIONALES
     // =========================================================================
     match /trabajos_profesionales/{trabajoId} {
-      allow read: if isSignedIn();
+      allow get: if isMasterAdmin() || (isSignedIn() && (
+        resource.data.propietarioId == request.auth.uid ||
+        isOwnerOfInmueble(resource.data.inmuebleId) ||
+        resource.data.profesionalId == request.auth.uid
+      ));
+      allow list: if isSignedIn();
       allow create, update: if isSignedIn();
       allow delete: if isMasterAdmin();
     }

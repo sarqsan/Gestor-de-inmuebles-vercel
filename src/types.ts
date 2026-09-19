@@ -1843,6 +1843,7 @@ export interface TrabajoProfesional {
   presupuestoId?: string;
   importeEstimado?: number;
   importeFinal?: number;
+  facturaNumero?: string;
   observaciones?: string;
   creadoPor: string;
   actualizadoPor: string;

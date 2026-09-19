@@ -720,81 +720,106 @@ export function tramitarSolicitudSeguroImpago(
 // =========================================================================
 
 export function registrarDictamenAseguradora(
-  solicitudSeguro: SolicitudSeguroImpago,
-  candidato: Candidato,
-  dictamen: DictamenAseguradora,
-  detalles: {
-    importeMaximo?: number;
-    condiciones?: string[];
-    documentosExtra?: string[];
-    comentario?: string;
-  },
+  arg1: SolicitudSeguroImpago | Candidato,
+  arg2: Candidato | SolicitudSeguroImpago,
+  dictamen: DictamenAseguradora | 'APROBADA' | 'RECHAZADA' | 'CONDICIONADA',
+  detalles:
+    | string
+    | {
+        importeMaximo?: number;
+        condiciones?: string[] | string;
+        documentosExtra?: string[];
+        comentario?: string;
+      } = {},
   solicitudDoc?: SolicitudDocumentacion | null
 ): {
   solicitudSeguroActualizada: SolicitudSeguroImpago;
+  solicitudActualizada: SolicitudSeguroImpago;
   candidatoActualizado: Candidato;
   solicitudDocActualizada?: SolicitudDocumentacion;
 } {
+  // Detect parameter order
+  const isArg1Candidato = 'nombre' in arg1 && ('ingresosNetos' in arg1 || 'estado' in arg1 || 'email' in arg1);
+  const candidato = (isArg1Candidato ? arg1 : arg2) as Candidato;
+  const solicitudSeguro = (isArg1Candidato ? arg2 : arg1) as SolicitudSeguroImpago;
+
   const nowIso = new Date().toISOString();
   const nowLegible = new Date().toLocaleString('es-ES');
+  const detallesObj = typeof detalles === 'string' ? { comentario: detalles } : detalles || {};
+
+  const estadoSeguro: string =
+    dictamen === 'APROBADA' || dictamen === 'FAVORABLE'
+      ? 'APROBADA'
+      : dictamen === 'RECHAZADA' || dictamen === 'DESFAVORABLE'
+      ? 'RECHAZADA'
+      : 'RESPUESTA_PROCESADA';
 
   const seguroActualizado: SolicitudSeguroImpago = {
     ...solicitudSeguro,
-    estado: 'RESPUESTA_PROCESADA',
-    dictamenAseguradora: dictamen,
+    estado: estadoSeguro as any,
+    dictamenAseguradora: dictamen as any,
     fechaRecepcionRespuesta: nowIso,
-    importeMaximoAsegurable: detalles.importeMaximo,
-    condicionesEstipuladas: detalles.condiciones,
-    documentosSolicitadosExtra: detalles.documentosExtra,
-    comentariosAseguradora: detalles.comentario,
+    importeMaximoAsegurable: detallesObj.importeMaximo,
+    condicionesEstipuladas: Array.isArray(detallesObj.condiciones)
+      ? detallesObj.condiciones
+      : detallesObj.condiciones
+      ? [detallesObj.condiciones]
+      : undefined,
+    documentosSolicitadosExtra: detallesObj.documentosExtra,
+    comentariosAseguradora: detallesObj.comentario,
     fechaActualizacion: nowIso,
     historial: [
-      ...solicitudSeguro.historial,
+      ...(solicitudSeguro?.historial || []),
       {
         id: `h_${Date.now()}`,
         fecha: nowLegible,
         autor: 'aseguradora',
         accion: `Dictamen recibido: ${dictamen}`,
-        detalle: detalles.comentario || `Resolución de la aseguradora: ${dictamen}.`,
+        detalle: detallesObj.comentario || `Resolución de la aseguradora: ${dictamen}.`,
       },
     ],
   };
 
   // Determinar nuevo estado del candidato
   let nuevoEstadoCandidato: Candidato['estado'] = candidato.estado;
-  if (dictamen === 'FAVORABLE' || dictamen === 'FAVORABLE_CONDICIONADO') {
+  if (dictamen === 'FAVORABLE' || dictamen === 'FAVORABLE_CONDICIONADO' || dictamen === 'APROBADA') {
     nuevoEstadoCandidato = 'aprobado_seguro';
-  } else if (dictamen === 'DESFAVORABLE') {
+  } else if (dictamen === 'DESFAVORABLE' || dictamen === 'RECHAZADA') {
     nuevoEstadoCandidato = 'rechazado_seguro';
-  } else if (dictamen === 'DOCUMENTACION_REQUERIDA') {
+  } else if (dictamen === 'DOCUMENTACION_REQUERIDA' || dictamen === 'CONDICIONADA') {
     nuevoEstadoCandidato = 'decision_pendiente';
   }
 
   let candActualizado: Candidato = {
     ...candidato,
     estado: nuevoEstadoCandidato,
-    seguroDictamen: dictamen,
+    seguroDictamen: dictamen as any,
   };
 
   candActualizado = agregarHistorialCandidato(candActualizado, {
     autor: 'aseguradora',
     fase: 'seguro',
     accion: `Resolución de aseguradora: ${dictamen}`,
-    detalle: detalles.comentario || `La aseguradora emitió dictamen ${dictamen} para la renta de ${solicitudSeguro.rentaMensual} €/mes.`,
+    detalle: detallesObj.comentario || `La aseguradora emitió dictamen ${dictamen}.`,
     estadoAnterior: candidato.estado,
     estadoNuevo: nuevoEstadoCandidato,
     metadatos: {
       dictamen,
-      importeMaximo: detalles.importeMaximo,
-      condiciones: detalles.condiciones,
-      documentosExtra: detalles.documentosExtra,
+      importeMaximo: detallesObj.importeMaximo,
+      condiciones: detallesObj.condiciones,
+      documentosExtra: detallesObj.documentosExtra,
     },
   });
 
   // Si la aseguradora solicita documentación extra, actualizar la solicitud documental si se proporciona
   let solDocActualizada: SolicitudDocumentacion | undefined = undefined;
-  if (dictamen === 'DOCUMENTACION_REQUERIDA' && solicitudDoc && detalles.documentosExtra && detalles.documentosExtra.length > 0) {
-    const nuevosItems: ItemDocumentoSolicitado[] = detalles.documentosExtra.map((nombreDoc, idx) => ({
+  if (
+    dictamen === 'DOCUMENTACION_REQUERIDA' &&
+    solicitudDoc &&
+    detallesObj.documentosExtra &&
+    detallesObj.documentosExtra.length > 0
+  ) {
+    const nuevosItems: ItemDocumentoSolicitado[] = detallesObj.documentosExtra.map((nombreDoc, idx) => ({
       id: `req-extra-${Date.now()}-${idx}`,
       tipo: 'otro',
       nombre: `[Aseguradora Requerido] ${nombreDoc}`,
@@ -823,6 +848,7 @@ export function registrarDictamenAseguradora(
 
   return {
     solicitudSeguroActualizada: seguroActualizado,
+    solicitudActualizada: seguroActualizado,
     candidatoActualizado: candActualizado,
     solicitudDocActualizada: solDocActualizada,
   };
@@ -954,3 +980,224 @@ export function sanearSolicitudParaPortalPublico(
     fechaEnvioCandidato: solicitud.fechaEnvioCandidato,
   };
 }
+
+// =========================================================================
+// 12. HELPER OPERATIVOS Y VERIFICACIÓN DE TRANSICIONES DEL CIRCUITO
+// =========================================================================
+
+export function evaluarPreseleccionCandidato(
+  candidato: Candidato,
+  property: Inmueble
+): { candidatoActualizado: Candidato; pasaPreseleccion: boolean; motivo?: string } {
+  // Idempotencia: Si ya está preseleccionado, no modificar historial
+  if (candidato.estado === 'preseleccionado') {
+    return { candidatoActualizado: candidato, pasaPreseleccion: true };
+  }
+
+  const ingresos = candidato.ingresosNetos || 0;
+  const renta = property.precio || 0;
+  const ratio = renta > 0 ? ingresos / renta : 0;
+
+  const pasa = ratio >= 2.5;
+
+  if (pasa) {
+    const nuevoHistorial: CandidatoHistorialItem[] = [
+      ...(candidato.historial || []),
+      {
+        id: `h_pre_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        fecha: new Date().toISOString().split('T')[0],
+        autor: 'sistema_ia',
+        fase: 'preseleccion',
+        accion: 'Preselección automática',
+        detalle: 'Aprobada',
+      },
+    ];
+
+    const candidatoActualizado: Candidato = {
+      ...candidato,
+      estado: 'preseleccionado',
+      inmuebleId: candidato.inmuebleId || property.id,
+      inmuebleNombre: candidato.inmuebleNombre || getInmuebleDisplayName(property),
+      historial: nuevoHistorial,
+    };
+
+    return { candidatoActualizado, pasaPreseleccion: true };
+  }
+
+  return {
+    candidatoActualizado: candidato,
+    pasaPreseleccion: false,
+    motivo: 'Ratio de ingresos respecto al alquiler insuficiente (< 2.5x).',
+  };
+}
+
+export function generarSolicitudDocumentacionParaCandidato(
+  candidato: Candidato,
+  property: Inmueble
+): SolicitudDocumentacion {
+  const solId = `doc-${candidato.id}-${property.id}`;
+  const solToken = `tok_${candidato.id}_${property.id}`;
+  const nowIso = new Date().toISOString();
+
+  const documentosBase: ItemDocumentoSolicitado[] = [
+    {
+      id: `doc_dni_${candidato.id}`,
+      tipo: 'dni_nie',
+      nombre: 'DNI / NIE / Pasaporte en vigor',
+      descripcion: 'Documento de identidad oficial vigente por ambas caras.',
+      obligatorio: true,
+      estado: 'pendiente',
+      archivos: [],
+    },
+    {
+      id: `doc_nominas_${candidato.id}`,
+      tipo: 'nomina',
+      nombre: 'Últimas 3 nóminas',
+      descripcion: 'Justificante de ingresos regulares mensuales.',
+      obligatorio: true,
+      estado: 'pendiente',
+      archivos: [],
+    },
+    {
+      id: `doc_contrato_${candidato.id}`,
+      tipo: 'contrato',
+      nombre: 'Contrato de trabajo laboral',
+      descripcion: 'Contrato firmado o vida laboral actualizada.',
+      obligatorio: true,
+      estado: 'pendiente',
+      archivos: [],
+    },
+  ];
+
+  return {
+    id: solId,
+    token: solToken,
+    candidatoId: candidato.id,
+    candidatoNombre: candidato.nombre,
+    candidatoTelefono: candidato.telefono,
+    candidatoEmail: candidato.email,
+    inmuebleId: property.id,
+    inmuebleNombre: getInmuebleDisplayName(property),
+    inmuebleDireccion: property.direccion,
+    inmuebleCiudad: property.ciudad,
+    ownerId: property.propietarioId,
+    estado: 'SOLICITADA',
+    documentos: documentosBase,
+    fechaCreacion: nowIso,
+    fechaSolicitud: nowIso,
+    historial: [
+      {
+        id: `h_${Date.now()}`,
+        fecha: nowIso,
+        autor: 'propietario',
+        accion: 'Solicitud de documentación generada',
+        detalle: 'Requisitos documentales iniciales enviados al candidato.',
+      },
+    ],
+  };
+}
+
+export function generarSolicitudSeguroParaCandidato(
+  candidato: Candidato,
+  property: Inmueble,
+  aseguradoraNombre: string = 'SEAG'
+): SolicitudSeguroImpago {
+  const id = `seg_${candidato.id}-${property.id}`;
+  const ref = `REF-${candidato.id}-${property.id}`;
+  const nowIso = new Date().toISOString();
+
+  return {
+    id,
+    referenciaUnica: ref,
+    candidatoId: candidato.id,
+    inmuebleId: property.id,
+    inmuebleNombre: getInmuebleDisplayName(property),
+    inmuebleDireccion: property.direccion,
+    inmuebleCiudad: property.ciudad,
+    propietarioId: property.propietarioId,
+    aseguradoraId: aseguradoraNombre.toLowerCase(),
+    aseguradoraNombre,
+    aseguradoraEmail: 'tramitacion@aseguradora.com',
+    rentaMensual: property.precio || 0,
+    numTitulares: 1,
+    titular1: {
+      nombre: candidato.nombre,
+      telefono: candidato.telefono,
+      email: candidato.email,
+      tipoEmpleo: candidato.tipoEmpleo || 'cuenta_ajena',
+      tipoContrato: 'indefinido',
+      antiguedadLaboral: 'Más de 1 año',
+      ingresosNetosMensuales: candidato.ingresosNetos || 0,
+    },
+    tieneAvalista: false,
+    ingresosTotalesConjuntos: candidato.ingresosNetos || 0,
+    ratioEsfuerzoCalculado: property.precio && candidato.ingresosNetos ? Math.round((property.precio / candidato.ingresosNetos) * 100) : 0,
+    documentosAdjuntos: [],
+    documentacionCompletaSegunAseguradora: true,
+    resumenSolvenciaIA: 'Evaluación preliminar favorable para seguro de impago.',
+    scoreSolvenciaIA: candidato.scoreEstimado || 75,
+    alertasDetectadasIA: [],
+    nivelRiesgoIA: 'Bajo',
+    estado: 'SOLICITUD_PENDIENTE',
+    metodoEnvio: 'MANUAL',
+    dictamenAseguradora: 'EN_ESTUDIO',
+    procesadoConIA: false,
+    decisionFinalPropietario: 'PENDIENTE',
+    fechaCreacion: nowIso,
+    fechaActualizacion: nowIso,
+    fechaEnvio: nowIso,
+    historial: [
+      {
+        id: `h_seg_${Date.now()}`,
+        fecha: nowIso,
+        autor: 'propietario',
+        accion: 'Solicitud enviada a la aseguradora',
+        detalle: `Expediente generado con referencia ${ref}`,
+      },
+    ],
+  };
+}
+
+export function evaluarCapacidadAnalisisIA(candidato: Candidato): {
+  puedeAnalizar: boolean;
+  motivo?: string;
+} {
+  const tieneDocs =
+    candidato.estado === 'doc_recibida' ||
+    (Array.isArray(candidato.documentosAnalizados) && candidato.documentosAnalizados.length > 0);
+
+  return {
+    puedeAnalizar: Boolean(tieneDocs),
+    motivo: tieneDocs ? undefined : 'Falta documentación recibida para procesar análisis IA.',
+  };
+}
+
+export function puedoEjecutarDecisionFinal(candidato: Candidato): boolean {
+  return Boolean(
+    candidato.estado === 'aprobado_seguro' ||
+      candidato.seguroDictamen !== undefined ||
+      candidato.estado === 'analizado' ||
+      candidato.scoreEstimado !== undefined
+  );
+}
+
+export function avanzarFaseCircuito(
+  candidato: Candidato,
+  nuevaFase: string
+): { valido: boolean; candidatoActualizado?: Candidato; mensaje?: string } {
+  if (candidato.estado === 'rechazado_final' && nuevaFase === 'aceptado_final') {
+    return {
+      valido: false,
+      mensaje: 'Candidato rechazado definitivamente no puede ser aceptado por avance ordinario',
+    };
+  }
+
+  return {
+    valido: true,
+    candidatoActualizado: {
+      ...candidato,
+      estado: nuevaFase as any,
+    },
+  };
+}
+

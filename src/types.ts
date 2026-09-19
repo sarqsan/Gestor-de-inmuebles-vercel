@@ -370,6 +370,7 @@ export interface Candidato {
   ultimoInforme?: InformeInteligente;
   cuestionarioToken?: string; // Token único seguro para el enlace público e.g. "q-a8f3d1"
   cuestionarioIncidencias?: CuestionarioIncidenciasData;
+  habitacionId?: string;
   // Campos para 1 o 2 titulares y notas privadas del propietario
   numTitularesContrato?: 1 | 2;
   cotitular?: CotitularData;
@@ -606,11 +607,31 @@ export interface ElementoInventario {
   updatedAt?: string;
 }
 
-export type EstadoHabitacion = 'DISPONIBLE' | 'RESERVADA' | 'ALQUILADA' | 'BLOQUEADA';
+export type EstadoHabitacion =
+  | 'DISPONIBLE'
+  | 'RESERVADA'
+  | 'EN_PROCESO'
+  | 'OCUPADA'
+  | 'ALQUILADA'
+  | 'NO_DISPONIBLE'
+  | 'BLOQUEADA'
+  | 'INACTIVA';
+
+export interface HistorialHabitacionItem {
+  id: string;
+  fecha: string;
+  usuarioNombre: string;
+  accion: string;
+  estadoAnterior?: EstadoHabitacion;
+  estadoNuevo?: EstadoHabitacion;
+  detalle?: string;
+  contratoId?: string;
+}
 
 export interface HabitacionInmueble {
   id: string;
   inmuebleId: string;
+  propietarioId?: string;
   nombre: string;
   descripcion?: string;
   estado: EstadoHabitacion;
@@ -622,6 +643,11 @@ export interface HabitacionInmueble {
   fechaModificacion: string;
   creadoPor: string;
   actualizadoPor: string;
+  historial?: HistorialHabitacionItem[];
+  contratoId?: string;
+  motivoBloqueo?: string;
+  fianza?: number;
+  selectedCandidatoId?: string;
 }
 
 export interface UserProfile {
@@ -645,6 +671,7 @@ export type InvitationStatus =
 export interface VisitSlot {
   id: string; // e.g. "slot-inm-1-1"
   inmuebleId: string;
+  habitacionId?: string;
   fecha: string; // YYYY-MM-DD
   horaInicio: string; // e.g. "10:15"
   horaFin: string; // e.g. "10:45"
@@ -663,6 +690,7 @@ export interface InvitacionVisita {
   candidateTelefono: string;
   candidateEmail?: string;
   inmuebleId: string;
+  habitacionId?: string;
   inmuebleNombre: string;
   inmueblePrecio: number;
   inmuebleCiudad?: string;
@@ -858,6 +886,7 @@ export interface ContratoFormalizacion {
   token?: string; // Enlace privado si se comparte
   candidatoId: string;
   inmuebleId: string;
+  habitacionId?: string;
   propietarioId?: string; // ID directo del Propietario arrendador asociado
   solicitudDocId?: string; // Vinculación opcional con solicitud de doc
   
@@ -1016,6 +1045,7 @@ export interface CobroPeriodo {
   id: string; // "cobro_{contratoId}_{anio}_{mes}"
   inmuebleId: string;
   contratoId: string;
+  habitacionId?: string;
   inquilinoId: string;
   propietarioId: string;
 

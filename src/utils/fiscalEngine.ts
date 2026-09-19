@@ -400,7 +400,7 @@ export function calcularIngresosEjercicio(
 
 export function calcularGastosEjercicio(gastos: Gasto[], ejercicio: number): GastosEjercicio {
   const gastosEj = gastos.filter((g) => {
-    const fecha = parseDateSafe(g.fecha);
+    const fecha = parseDateSafe(g.fechaDevengo || g.fechaPago || g.fecha || g.createdAt);
     if (!fecha) return false;
     if (g.ejercicioFiscal) return g.ejercicioFiscal === ejercicio;
     return fecha.getFullYear() === ejercicio;

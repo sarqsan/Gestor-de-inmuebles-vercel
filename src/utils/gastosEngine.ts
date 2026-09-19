@@ -15,6 +15,7 @@ import type {
   FrecuenciaRecurrente,
   Gasto,
   GastoRecurrente,
+  Inmueble,
   TipoGasto,
   TrabajoProfesional,
 } from '../types';
@@ -582,10 +583,11 @@ export function proximoPeriodoRecurrente(r: GastoRecurrente, ref: Date = new Dat
  * para generar un apunte de gasto de reparación en la contabilidad del inmueble:
  * 1. Debe estar en estado finalizado (FINALIZADO, FINALIZADA o COMPLETADO).
  * 2. Debe tener un coste real liquidado válido (importeFinal > 0).
- * 3. Debe tener asignado un inmuebleId y propietarioId válidos.
+ * 3. Debe tener asignado un inmuebleId y propietarioId válidos (o localizables por inmueble).
  */
 export function puedeGenerarGastoDesdeTrabajo(
-  trabajo?: Partial<TrabajoProfesional> | null
+  trabajo?: Partial<TrabajoProfesional> | null,
+  inmuebles?: Inmueble[]
 ): { valido: boolean; motivo?: string } {
   if (!trabajo) {
     return { valido: false, motivo: 'No se ha proporcionado la orden de trabajo' };
@@ -610,7 +612,11 @@ export function puedeGenerarGastoDesdeTrabajo(
   if (!trabajo.inmuebleId) {
     return { valido: false, motivo: 'La orden de trabajo no tiene un inmueble asociado' };
   }
-  if (!trabajo.propietarioId) {
+  const propId =
+    trabajo.propietarioId ||
+    inmuebles?.find((i) => i.id === trabajo.inmuebleId)?.propietarioId ||
+    inmuebles?.find((i) => i.id === trabajo.inmuebleId)?.propietarioPrincipalId;
+  if (!propId) {
     return { valido: false, motivo: 'La orden de trabajo no tiene un propietario asociado' };
   }
   return { valido: true };
@@ -640,15 +646,16 @@ export function buscarGastoDeTrabajo(
  */
 export function generarGastoDesdeTrabajo(params: {
   trabajo: TrabajoProfesional;
+  inmuebles?: Inmueble[];
   gastosExistentes?: Gasto[];
   usuarioNombre?: string;
   usuarioId?: string;
   estadoGasto?: EstadoGasto;
 }): { gasto?: Gasto; yaExiste: boolean; error?: string } {
-  const { trabajo, gastosExistentes = [], usuarioNombre, usuarioId, estadoGasto = 'PAGADO' } = params;
+  const { trabajo, inmuebles = [], gastosExistentes = [], usuarioNombre, usuarioId, estadoGasto = 'PAGADO' } = params;
 
   // 1. Comprobar condiciones de elegibilidad
-  const check = puedeGenerarGastoDesdeTrabajo(trabajo);
+  const check = puedeGenerarGastoDesdeTrabajo(trabajo, inmuebles);
   if (!check.valido) {
     return { yaExiste: false, error: check.motivo };
   }
@@ -672,10 +679,16 @@ export function generarGastoDesdeTrabajo(params: {
   const now = new Date().toISOString();
   const concepto = `Reparación: ${trabajo.titulo}${trabajo.profesionalNombre ? ` - ${trabajo.profesionalNombre}` : ''}`;
 
+  const resolvedPropId =
+    trabajo.propietarioId ||
+    inmuebles.find((i) => i.id === trabajo.inmuebleId)?.propietarioId ||
+    inmuebles.find((i) => i.id === trabajo.inmuebleId)?.propietarioPrincipalId ||
+    '';
+
   const nuevoGasto: Gasto = {
     id: nuevoGastoId(trabajo.inmuebleId),
     inmuebleId: trabajo.inmuebleId,
-    propietarioId: trabajo.propietarioId,
+    propietarioId: resolvedPropId,
     tipo: 'EXPLOTACION',
     categoria: categoriaGasto,
     concepto,
@@ -734,8 +747,31 @@ export function sincronizarGastoDesdeTrabajo(params: {
     ordenTrabajoId: trabajo.id,
     incidenciaId: trabajo.incidenciaId || gastoExistente.incidenciaId,
     profesionalId: trabajo.profesionalId || gastoExistente.profesionalId,
-    presupuestoId: trabajo.presupuestoId || gastoExistente.presupuestoId,
+    presupuestoId: trabajo.presupuestoId || gastoExistente?.presupuestoId,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export function filtrarGastosPorInmueble(gastos: Gasto[], inmuebleId: string): Gasto[] {
+  return gastos.filter((g) => g.inmuebleId === inmuebleId);
+}
+
+export function calcularTotalesGastos(gastos: Gasto[]): {
+  totalDeducible: number;
+  totalPagado: number;
+  porCategoria: Record<string, number>;
+} {
+  let totalDeducible = 0;
+  let totalPagado = 0;
+  const porCategoria: Record<string, number> = {};
+
+  for (const g of gastos) {
+    const imp = Number(g.importe) || 0;
+    if (g.deducible) totalDeducible += imp;
+    if (g.estado === 'PAGADO') totalPagado += imp;
+    porCategoria[g.categoria] = (porCategoria[g.categoria] || 0) + imp;
+  }
+
+  return { totalDeducible, totalPagado, porCategoria };
 }
 

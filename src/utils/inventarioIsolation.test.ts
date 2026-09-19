@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import {
   aplicarBajaLogica,
   asegurarInventarioDelInmueble,
@@ -6,10 +7,6 @@ import {
   filtrarInventarioPorCategoria,
 } from './inventarioEngine';
 import { ElementoInventario, Inmueble, UsuarioApp } from '../types';
-
-function assert(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
-}
 
 const inmA: Inmueble = {
   id: 'inm-A',
@@ -80,38 +77,40 @@ const itemA: ElementoInventario = {
 
 const itemB: ElementoInventario = { ...itemA, id: 'inv2', inmuebleId: 'inm-B', categoria: 'SALON', nombre: 'Sofá' };
 
-function run() {
-  // TEST 4 association
-  const onlyA = asegurarInventarioDelInmueble([itemA, itemB], 'inm-A');
-  assert(onlyA.length === 1 && onlyA[0].inmuebleId === 'inm-A', 'TEST4 asociación inmuebleId');
+describe('aislamiento e integridad de inventario', () => {
+  it('TEST4 asociación inmuebleId', () => {
+    const onlyA = asegurarInventarioDelInmueble([itemA, itemB], 'inm-A');
+    expect(onlyA.length).toBe(1);
+    expect(onlyA[0].inmuebleId).toBe('inm-A');
+  });
 
-  // TEST 7 filter
-  const filtered = filtrarInventarioPorCategoria([itemA, { ...itemA, id: 'x', categoria: 'BANO' }], 'COCINA');
-  assert(filtered.every((i) => i.categoria === 'COCINA'), 'TEST7 filtro categoría');
+  it('TEST7 filtro categoría', () => {
+    const filtered = filtrarInventarioPorCategoria([itemA, { ...itemA, id: 'x', categoria: 'BANO' }], 'COCINA');
+    expect(filtered.every((i) => i.categoria === 'COCINA')).toBe(true);
+  });
 
-  // TEST 6 estado / baja
-  const baja = aplicarBajaLogica(itemA, 'Admin');
-  assert(baja.estado === 'BAJA' && baja.activo === false, 'TEST6 cambio estado baja');
+  it('TEST6 cambio estado baja', () => {
+    const baja = aplicarBajaLogica(itemA, 'Admin');
+    expect(baja.estado).toBe('BAJA');
+    expect(baja.activo).toBe(false);
+  });
 
-  // TEST 9 isolation A vs B
-  assert(canAccessInventarioInmueble(propA, inmA) === true, 'propA accede A');
-  assert(canAccessInventarioInmueble(propA, inmB) === false, 'TEST10 propA denegado B');
-  assert(canAccessInventarioInmueble(propB, inmA) === false, 'TEST10 propB denegado A');
+  it('TEST9 y TEST10 aislamiento propietario A vs B', () => {
+    expect(canAccessInventarioInmueble(propA, inmA)).toBe(true);
+    expect(canAccessInventarioInmueble(propA, inmB)).toBe(false);
+    expect(canAccessInventarioInmueble(propB, inmA)).toBe(false);
+  });
 
-  // TEST 11 profesional no asignado
-  assert(canAccessInventarioInmueble(prof, inmA, { id: 'prof-1', inmuebleIdsAsignados: [] } as never) === false, 'TEST11 profesional denegado');
-  assert(
-    canAccessInventarioInmueble(prof, inmA, {
-      id: 'prof-1',
-      inmuebleIdsAsignados: ['inm-A'],
-    } as never) === true,
-    'profesional asignado OK'
-  );
-  assert(canMutateInventario(prof, inmA, { id: 'prof-1', inmuebleIdsAsignados: ['inm-A'] } as never) === false, 'profesional no muta');
-  assert(canAccessInventarioInmueble(admin, inmA) === true, 'admin global');
-  assert(canMutateInventario(propA, inmA) === true, 'propietario muta');
-
-  console.log('inventarioIsolation tests OK');
-}
-
-run();
+  it('TEST11 control de acceso profesional y admin', () => {
+    expect(canAccessInventarioInmueble(prof, inmA, { id: 'prof-1', inmuebleIdsAsignados: [] } as never)).toBe(false);
+    expect(
+      canAccessInventarioInmueble(prof, inmA, {
+        id: 'prof-1',
+        inmuebleIdsAsignados: ['inm-A'],
+      } as never)
+    ).toBe(true);
+    expect(canMutateInventario(prof, inmA, { id: 'prof-1', inmuebleIdsAsignados: ['inm-A'] } as never)).toBe(false);
+    expect(canAccessInventarioInmueble(admin, inmA)).toBe(true);
+    expect(canMutateInventario(propA, inmA)).toBe(true);
+  });
+});

@@ -1670,6 +1670,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             inmueble={selectedInmueble}
             currentUser={currentUser}
             profesional={null}
+            contratos={contratos}
             onUpdateInmueble={onUpdateInmueble}
           />
         )}

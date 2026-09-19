@@ -48,6 +48,8 @@ import {
   ValoracionProfesionalTrabajo,
   NecesidadReforma,
   ProyectoReforma,
+  ElementoInventario,
+  HabitacionInmueble,
   PolizaSeguro,
   Siniestro,
   ConfiguracionAseguradora,
@@ -114,6 +116,9 @@ export const PRESUPUESTOS_PROFESIONALES_COL = collection(db, 'presupuestos_profe
 export const VALORACIONES_PROFESIONALES_COL = collection(db, 'valoraciones_profesionales');
 export const NECESIDADES_REFORMA_COL = collection(db, 'necesidades_reforma');
 export const PROYECTOS_REFORMA_COL = collection(db, 'proyectos_reforma');
+export const INVENTARIO_COL = collection(db, 'inventario_inmuebles');
+export const INVENTARIO_HISTORIAL_COL = collection(db, 'inventario_historial');
+export const HABITACIONES_COL = collection(db, 'habitaciones_inmueble');
 
 // Colecciones estructurales de usuarios, perfiles, permisos y profesionales
 export const USUARIOS_COL = collection(db, 'usuarios');
@@ -2325,6 +2330,9 @@ export function subscribePolizas(callback: (items: PolizaSeguro[]) => void): Uns
   );
 }
 
+export const subscribePolizasSeguras = subscribePolizas;
+export const subscribeGastosSeguros = subscribeGastos;
+
 export async function savePolizaFirestore(poliza: PolizaSeguro): Promise<void> {
   try {
     const cleanPol = sanitizeObjectForFirestore({ ...poliza, updatedAt: new Date().toISOString() });
@@ -2598,6 +2606,122 @@ export async function uploadTrabajoAdjuntoStorage(
       reader.readAsDataURL(file);
     });
   }
+}
+
+// =========================================================================
+// INVENTARIO Y HABITACIONES (ARENA C)
+// =========================================================================
+
+export function subscribeInventarioInmueble(
+  inmuebleId: string,
+  callback: (items: ElementoInventario[]) => void
+) {
+  if (!inmuebleId) {
+    callback([]);
+    return () => undefined;
+  }
+  const qInv = query(INVENTARIO_COL, where('inmuebleId', '==', inmuebleId));
+  return onSnapshot(
+    qInv,
+    (snapshot) => {
+      const items: ElementoInventario[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as ElementoInventario);
+      });
+      items.sort(
+        (a, b) => new Date(b.fechaModificacion).getTime() - new Date(a.fechaModificacion).getTime()
+      );
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore inventario snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export async function saveElementoInventarioFirestore(item: ElementoInventario): Promise<void> {
+  const clean = sanitizeObjectForFirestore(item);
+  await setDoc(doc(db, 'inventario_inmuebles', item.id), clean, { merge: true });
+}
+
+export async function deleteElementoInventarioFirestore(inventarioId: string): Promise<void> {
+  await deleteDoc(doc(db, 'inventario_inmuebles', inventarioId));
+}
+
+export async function registrarHistorialInventarioFirestore(entry: {
+  id?: string;
+  inmuebleId: string;
+  inventarioId?: string;
+  fecha: string;
+  usuarioId?: string;
+  usuarioNombre: string;
+  accion: string;
+  elementoAfectado: string;
+  cambios?: string;
+}): Promise<void> {
+  const id = entry.id || `invh_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  await setDoc(
+    doc(db, 'inventario_historial', id),
+    sanitizeObjectForFirestore({ ...entry, id }),
+    { merge: false }
+  );
+}
+
+export async function uploadInventarioAdjuntoStorage(
+  inmuebleId: string,
+  inventarioId: string,
+  file: File | Blob,
+  nombreArchivo: string
+): Promise<{ downloadURL: string; storagePath: string }> {
+  const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `inmuebles/${inmuebleId}/inventario/${inventarioId}/${Date.now()}_${sanitizedName}`;
+  const fileRef = ref(storage, storagePath);
+  try {
+    await uploadBytes(fileRef, file, { contentType: file.type || 'image/jpeg' });
+    const downloadURL = await getDownloadURL(fileRef);
+    return { downloadURL, storagePath };
+  } catch (err) {
+    console.warn('Storage inventario fallback:', err);
+    const downloadURL = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+    return { downloadURL, storagePath };
+  }
+}
+
+export function subscribeHabitacionesInmueble(
+  inmuebleId: string,
+  callback: (items: HabitacionInmueble[]) => void
+) {
+  if (!inmuebleId) {
+    callback([]);
+    return () => undefined;
+  }
+  const qHab = query(HABITACIONES_COL, where('inmuebleId', '==', inmuebleId));
+  return onSnapshot(
+    qHab,
+    (snapshot) => {
+      const items: HabitacionInmueble[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as HabitacionInmueble);
+      });
+      items.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore habitaciones snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export async function saveHabitacionFirestore(habitacion: HabitacionInmueble): Promise<void> {
+  const clean = sanitizeObjectForFirestore(habitacion);
+  await setDoc(doc(db, 'habitaciones_inmueble', habitacion.id), clean, { merge: true });
 }
 
 export {

@@ -534,6 +534,64 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 2K. INVENTARIO Y HABITACIONES DEL INMUEBLE (ARENA C)
+    // Aislados por inmueble/propietario.
+    // =========================================================================
+    match /inventario_inmuebles/{inventarioId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+      ));
+      allow list: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (isPropietarioRole() && incoming().keys().hasAll(['inmuebleId', 'nombre', 'categoria', 'estado']));
+      allow update: if isMasterAdmin() || (isPropietarioRole() && incoming().inmuebleId == existing().inmuebleId);
+      allow delete: if isMasterAdmin() || isPropietarioRole();
+    }
+
+    match /inventario_historial/{histId} {
+      allow read: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (isPropietarioRole() && 'inmuebleId' in incoming());
+      allow update, delete: if false;
+    }
+
+    match /habitaciones_inmueble/{habitacionId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+      ));
+      allow list: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (isPropietarioRole() && incoming().keys().hasAll(['inmuebleId', 'nombre', 'estado']));
+      allow update: if isMasterAdmin() || (isPropietarioRole() && incoming().inmuebleId == existing().inmuebleId);
+      allow delete: if isMasterAdmin() || isPropietarioRole();
+    }
+
+    // =========================================================================
+    // 2L. PÓLIZAS DE SEGURO Y SINIESTROS (ARENA D)
+    // Aislados por propietarioId.
+    // =========================================================================
+    match /polizas_seguros/{polizaId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /siniestros/{siniestroId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
     // 3. CANDIDATOS (expedientes y cuestionarios)
     // El listado y la gestión requieren cuenta interna. Se conserva el enlace
     // público de cuestionario (autoservicio del candidato por token), que sólo

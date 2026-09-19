@@ -17,6 +17,8 @@ import {
 } from '../../types';
 import { MantenimientoInmueblePanel } from '../mantenimiento/MantenimientoInmueblePanel';
 import { ReformasInmueblePanel } from '../reformas/ReformasInmueblePanel';
+import { FichaTecnicaInventarioPanel } from '../FichaTecnicaInventarioPanel';
+import { HabitacionesInmueblePanel } from '../HabitacionesInmueblePanel';
 import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
@@ -1650,6 +1652,26 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               currentUser={currentUser || undefined}
             />
           </div>
+        )}
+
+        {/* ARENA C: Ficha Técnica e Inventario del Inmueble */}
+        {selectedInmueble && (
+          <FichaTecnicaInventarioPanel
+            inmueble={selectedInmueble}
+            currentUser={currentUser}
+            profesional={null}
+            onUpdateInmueble={onUpdateInmueble}
+          />
+        )}
+
+        {/* ARENA C: Gestión de Habitaciones */}
+        {selectedInmueble && (
+          <HabitacionesInmueblePanel
+            inmueble={selectedInmueble}
+            currentUser={currentUser}
+            profesional={null}
+            onUpdateInmueble={onUpdateInmueble}
+          />
         )}
 
         {/* Candidates Interested in this Property */}

@@ -4,6 +4,8 @@ export type SectionType =
   | 'propietarios'
   | 'cobros'
   | 'gastos'
+  | 'fiscal'
+  | 'polizas'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'
@@ -509,6 +511,117 @@ export interface Inmueble {
   rentaMensual?: number;
   createdAt?: string;
   updatedAt?: string;
+
+  // Ficha técnica (campos opcionales: inmuebles antiguos siguen válidos)
+  planta?: string;
+  ascensor?: boolean;
+  terraza?: boolean;
+  balcon?: boolean;
+  interiorExterior?: 'exterior' | 'interior' | 'mixto';
+  orientacion?: string;
+  anioConstruccion?: number;
+  estadoConservacion?: 'nuevo' | 'muy_bueno' | 'bueno' | 'a_reformar' | 'en_obras';
+  aireAcondicionado?: boolean;
+  calefaccion?: boolean;
+  cocinaEquipada?: boolean;
+  electrodomesticosIncluidos?: boolean;
+  armariosEmpotrados?: boolean;
+  tipoVentanas?: string;
+  tipoPersianas?: string;
+  fechaActualizacionFicha?: string;
+  actualizadoPorFicha?: string;
+}
+
+export type CategoriaInventario =
+  | 'COCINA'
+  | 'SALON'
+  | 'DORMITORIO'
+  | 'BANO'
+  | 'TERRAZA'
+  | 'EXTERIOR'
+  | 'ELECTRODOMESTICOS'
+  | 'MOBILIARIO'
+  | 'ILUMINACION'
+  | 'CLIMATIZACION'
+  | 'OTROS';
+
+export type EstadoInventario =
+  | 'NUEVO'
+  | 'BUEN_ESTADO'
+  | 'USADO'
+  | 'DETERIORADO'
+  | 'REPARAR'
+  | 'BAJA';
+
+export interface DocumentoInventario {
+  id: string;
+  inventarioId: string;
+  inmuebleId: string;
+  nombre: string;
+  mimeType?: string;
+  url: string;
+  storagePath: string;
+  tamanoBytes?: number;
+  fechaSubida: string;
+  subidoPor?: string;
+}
+
+export interface HistorialInventarioItem {
+  id: string;
+  fecha: string;
+  usuarioId?: string;
+  usuarioNombre: string;
+  accion: string;
+  elementoAfectado: string;
+  cambios?: string;
+  estadoAnterior?: EstadoInventario;
+  estadoNuevo?: EstadoInventario;
+}
+
+export interface ElementoInventario {
+  id: string;
+  inmuebleId: string;
+  nombre: string;
+  categoria?: CategoriaInventario | string;
+  descripcion?: string;
+  cantidad?: number;
+  estado?: EstadoInventario | string;
+  ubicacion?: string;
+  estancia?: string;
+  estadoUso?: string;
+  marca?: string;
+  modelo?: string;
+  numeroSerie?: string;
+  garantiaHasta?: string;
+  observaciones?: string;
+  fechaAlta?: string;
+  fechaModificacion?: string;
+  creadoPor?: string;
+  actualizadoPor?: string;
+  activo?: boolean;
+  documentos?: DocumentoInventario[];
+  historial?: HistorialInventarioItem[];
+  habitacionId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type EstadoHabitacion = 'DISPONIBLE' | 'RESERVADA' | 'ALQUILADA' | 'BLOQUEADA';
+
+export interface HabitacionInmueble {
+  id: string;
+  inmuebleId: string;
+  nombre: string;
+  descripcion?: string;
+  estado: EstadoHabitacion;
+  superficie?: number;
+  precioObjetivo?: number;
+  caracteristicas?: string;
+  activo: boolean;
+  fechaAlta: string;
+  fechaModificacion: string;
+  creadoPor: string;
+  actualizadoPor: string;
 }
 
 export interface UserProfile {
@@ -862,15 +975,22 @@ export interface ContratoFormalizacion {
 
 export type EstadoCobroAlquiler =
   | 'PENDIENTE'
+  | 'PAGADO'
+  | 'PAGADO_PARCIAL'
+  | 'IMPAGADO'
+  | 'ANULADO'
   | 'RECIBIDO'
   | 'VERIFICADO'
   | 'RETRASADO'
+  | 'RECLAMADO'
+  | 'DEVUELTO'
   | 'INCIDENCIA';
 
 export interface JustificanteCobro {
   id: string;
   nombreArchivo: string;
   url?: string;
+  downloadURL?: string;
   storagePath?: string;
   tipoMime?: string;
   tamanoBytes?: number;
@@ -962,19 +1082,26 @@ export type CategoriaGasto =
   | 'COMUNIDAD'
   | 'IBI'
   | 'SEGURO_HOGAR'
+  | 'SEGUROS'
   | 'SUMINISTROS'
   | 'MANTENIMIENTO'
   | 'REPARACION'
   | 'MANTENIMIENTO_REPARACION'
   | 'ADMINISTRACION'
+  | 'GESTION'
   | 'LIMPIEZA'
+  | 'IMPUESTOS_TASAS'
+  | 'ELECTRODOMESTICOS'
+  | 'MOBILIARIO'
+  | 'REFORMAS'
+  | 'OTRO'
   | 'OTRO_EXPLOTACION'
   // --- Financiación ---
   | 'CUOTA_HIPOTECARIA'
   | 'INTERESES_PRESTAMO'
   | 'OTRO_FINANCIACION';
 
-export type EstadoGasto = 'PENDIENTE' | 'PAGADO' | 'ANULADO';
+export type EstadoGasto = 'PENDIENTE' | 'PAGADO' | 'ANULADO' | 'EN_REVISION';
 
 export interface Gasto {
   id: string; // "gas_{inmuebleId}_{timestamp}"
@@ -1020,6 +1147,12 @@ export interface Gasto {
   presupuestoId?: string; // ID del Presupuesto previo asociado si existió
   fecha?: string; // Alias de conveniencia
   pagado?: boolean; // Alias de conveniencia
+  esDeducible?: boolean; // Alias fiscal
+  tipoDeducible?: 'DEDUCIBLE' | 'NO_DEDUCIBLE';
+  ejercicioFiscal?: number;
+  documento?: { id: string; nombre: string; url: string; storagePath?: string };
+  documentos?: { id: string; nombre: string; url: string; storagePath?: string }[];
+  inmuebleDireccion?: string;
 
   // Trazabilidad
   creadoPor?: string;
@@ -2155,6 +2288,7 @@ export type TipoPolizaSeguro =
   | 'IMPAGO_ALQUILER'
   | 'RESPONSABILIDAD_CIVIL'
   | 'COMUNIDAD'
+  | 'ELECTRODOMESTICOS'
   | 'OTRO';
 
 export type EstadoPolizaSeguro =
@@ -2163,6 +2297,25 @@ export type EstadoPolizaSeguro =
   | 'CANCELADA'
   | 'EN_TRAMITE';
 
+export type EstadoRenovacionPoliza =
+  | 'VIGENTE'
+  | 'PENDIENTE'
+  | 'PENDIENTE_RENOVACION'
+  | 'RENOVACION_SOLICITADA'
+  | 'RENOVACION_RECIBIDA'
+  | 'RENOVADA'
+  | 'NO_RENOVADA'
+  | 'SUSTITUIDA'
+  | 'CANCELADA';
+
+export type TipoDocumentoPoliza =
+  | 'POLIZA_ORIGINAL'
+  | 'POLIZA_RENOVACION'
+  | 'CARTA_RENOVACION'
+  | 'CONDICIONES_PARTICULARES'
+  | 'RECIBO_PRIMA'
+  | 'OTRO';
+
 export interface DocumentoPoliza {
   id: string;
   nombre: string;
@@ -2170,6 +2323,111 @@ export interface DocumentoPoliza {
   storagePath?: string;
   tipo?: string;
   fechaSubida: string;
+}
+
+export interface DocumentoRenovacionPoliza {
+  id: string;
+  nombre: string;
+  tipo: TipoDocumentoPoliza;
+  url: string;
+  storagePath?: string;
+  fechaRecepcion: string; // YYYY-MM-DD fecha en que se recibió físicamente
+  fechaSubida: string; // ISO
+  subidoPor?: string;
+  subidoPorId?: string;
+  tamanoBytes?: number;
+  mimeType?: string;
+  observaciones?: string;
+}
+
+export interface HistorialPolizaItem {
+  id: string;
+  fecha: string; // ISO
+  usuario: string; // nombre visible
+  usuarioId?: string;
+  accion:
+    | 'CREACION'
+    | 'COMPROBACION_RENOVACION'
+    | 'RENOVACION_SOLICITADA'
+    | 'RENOVACION_RECIBIDA'
+    | 'RENOVACION_CONFIRMADA'
+    | 'MODIFICACION'
+    | 'SUSTITUCION'
+    | 'CANCELACION'
+    | 'NO_RENOVACION'
+    | 'DOCUMENTO_ADJUNTADO'
+    | 'COMPARACION_REALIZADA'
+    | 'ESTADO_MODIFICADO'
+    | 'ALERTA_GENERADA';
+  detalle?: string;
+  resultado?: string;
+  observaciones?: string;
+  estadoAnterior?: string;
+  estadoNuevo?: string;
+  datosAnteriores?: Partial<PolizaSeguro>;
+  datosNuevos?: Partial<PolizaSeguro>;
+}
+
+export interface DatosExtraidosRenovacion {
+  aseguradora?: string;
+  numeroPoliza?: string;
+  fechaInicio?: string;
+  fechaVencimiento?: string;
+  primaAnual?: number;
+  coberturas?: string[];
+  franquicia?: number;
+  limites?: string;
+  cambiosRelevantes?: string[];
+  confianza: 'ALTA' | 'MEDIA' | 'BAJA';
+  fechaExtraccion: string;
+  confirmadoUsuario: boolean;
+  confirmadoPor?: string;
+  fechaConfirmacion?: string;
+  observaciones?: string;
+}
+
+export interface ComparacionPoliza {
+  id: string;
+  polizaAnteriorId: string;
+  polizaNuevaId: string;
+  primaAnterior?: number;
+  primaNueva?: number;
+  diferenciaAbsoluta?: number;
+  variacionPorcentual?: number;
+  fechaInicioAnterior?: string;
+  fechaInicioNueva?: string;
+  fechaVencimientoAnterior?: string;
+  fechaVencimientoNueva?: string;
+  coberturasAnadidas: string[];
+  coberturasEliminadas: string[];
+  coberturasComunes: string[];
+  franquiciaAnterior?: number;
+  franquiciaNueva?: number;
+  diferenciaFranquicia?: number;
+  aumentoPrima: boolean;
+  reduccionCobertura: boolean;
+  aumentoFranquicia: boolean;
+  modificacionLimites: boolean;
+  observaciones?: string;
+  fechaComparacion: string;
+  generadoPor?: string;
+  generadoPorId?: string;
+}
+
+export interface AlertaRenovacionPoliza {
+  polizaId: string;
+  polizaNumero: string;
+  aseguradora: string;
+  inmuebleId?: string;
+  inmuebleDireccion?: string;
+  propietarioId: string;
+  fechaVencimiento: string;
+  diasRestantes: number;
+  nivelProximidad: 60 | 45 | 30 | 15 | 0 | -1; // 0 hoy, -1 vencida
+  estadoRenovacion: EstadoRenovacionPoliza;
+  tipoPoliza: TipoPolizaSeguro;
+  primaAnual?: number;
+  ultimaComprobacion?: string;
 }
 
 export interface PolizaSeguro {
@@ -2195,6 +2453,27 @@ export interface PolizaSeguro {
   observaciones?: string;
   createdAt: string;
   updatedAt: string;
+
+  // --- CIRCUITO DE RENOVACIÓN ARENA D ---
+  estadoRenovacion?: EstadoRenovacionPoliza;
+  fechaUltimaComprobacion?: string; // ISO
+  usuarioUltimaComprobacion?: string;
+  usuarioUltimaComprobacionId?: string;
+  resultadoUltimaComprobacion?: string;
+  observacionesRenovacion?: string;
+  polizaAnteriorId?: string;
+  polizaSiguienteId?: string;
+  historial?: HistorialPolizaItem[];
+  documentosRenovacion?: DocumentoRenovacionPoliza[];
+  datosExtraidosRenovacion?: DatosExtraidosRenovacion;
+  comparacionUltima?: ComparacionPoliza;
+  comparacionesHistorial?: ComparacionPoliza[];
+  fechaRecepcionRenovacion?: string; // YYYY-MM-DD
+  primaAnterior?: number;
+  alertaGenerada?: boolean;
+  fechaAlertaGenerada?: string;
+  nivelAlertaActual?: 60 | 45 | 30 | 15 | 0 | -1;
+  diasRestantes?: number;
 }
 
 // -------------------------------------------------------------------------
@@ -2682,22 +2961,6 @@ export interface GarantiaReparacion {
   creadoPor?: string;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface ElementoInventario {
-  id: string;
-  inmuebleId: string;
-  nombre: string;
-  categoria?: string;
-  estancia?: string;
-  estadoUso?: string;
-  marca?: string;
-  modelo?: string;
-  numeroSerie?: string;
-  garantiaHasta?: string;
-  observaciones?: string;
-  createdAt?: string;
-  updatedAt?: string;
 }
 
 // =========================================================================

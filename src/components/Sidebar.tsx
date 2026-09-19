@@ -22,6 +22,7 @@ import {
   TrendingDown,
   RefreshCw,
   LifeBuoy,
+  Calculator,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -77,6 +78,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
+      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
+      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
       { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
       { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
@@ -95,6 +98,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
+      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
+      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },

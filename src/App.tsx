@@ -173,6 +173,8 @@ import { PreseleccionadosSection } from './components/sections/PreseleccionadosS
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
 import { GastosSection } from './components/sections/GastosSection';
+import { FiscalidadSection } from './components/sections/FiscalidadSection';
+import { PolizasSegurosSection } from './components/sections/PolizasSegurosSection';
 import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
 import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
@@ -3017,6 +3019,25 @@ export default function App() {
               onDeleteRecurrente={handleDeleteRecurrente}
               onSavePrestamo={handleSavePrestamo}
               onDeletePrestamo={handleDeletePrestamo}
+            />
+          )}
+
+          {activeSection === 'fiscal' && (
+            <FiscalidadSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={scopedGastos}
+              currentUser={currentUser}
+              onNavigateToInmueble={() => setActiveSection('inmuebles')}
+            />
+          )}
+
+          {activeSection === 'polizas' && (
+            <PolizasSegurosSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser || undefined}
+              modo={currentUser?.tipoPerfil === 'PROPIETARIO' ? 'PROPIETARIO' : 'ADMIN'}
             />
           )}
 

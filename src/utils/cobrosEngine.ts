@@ -102,6 +102,22 @@ export function actualizarEstadosVencimiento(
   };
 }
 
+export function calcularDiasRetraso(fechaVencimiento: string, fechaReferencia?: string): number {
+  const venc = new Date(fechaVencimiento);
+  if (isNaN(venc.getTime())) return 0;
+  const ref = fechaReferencia ? new Date(fechaReferencia) : new Date();
+  const diffMs = ref.getTime() - venc.getTime();
+  const diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return diffDias > 0 ? diffDias : 0;
+}
+
+export function estaVencido(fechaVencimiento: string, fechaReferencia?: string): boolean {
+  const venc = new Date(fechaVencimiento);
+  if (isNaN(venc.getTime())) return false;
+  const ref = fechaReferencia ? new Date(fechaReferencia) : new Date();
+  return ref > venc;
+}
+
 export type TipoAvisoCobro = 'vence_pronto' | 'en_plazo_gracia' | 'vencida' | 'incidencia';
 export type NivelAvisoCobro = 'info' | 'advertencia' | 'critico';
 

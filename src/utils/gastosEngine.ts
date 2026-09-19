@@ -28,6 +28,19 @@ export interface CategoriaGastoDef {
   aCargoDePorDefecto: 'arrendador' | 'arrendatario';
 }
 
+export function calcularTotalesPorCategoria(gastos: Gasto[]): Record<CategoriaGasto, number> {
+  const totales = {} as Record<CategoriaGasto, number>;
+  for (const g of gastos) {
+    if (g.estado === 'ANULADO') continue;
+    totales[g.categoria] = (totales[g.categoria] || 0) + (g.importe || 0);
+  }
+  return totales;
+}
+
+export function calcularTotalGastos(gastos: Gasto[]): number {
+  return gastos.filter((g) => g.estado !== 'ANULADO').reduce((sum, g) => sum + (g.importe || 0), 0);
+}
+
 export const CATEGORIAS_GASTO: CategoriaGastoDef[] = [
   // --- Explotación -----------------------------------------------------
   {
@@ -165,6 +178,7 @@ export const ESTADO_GASTO_LABEL: Record<EstadoGasto, string> = {
   PENDIENTE: 'Pendiente',
   PAGADO: 'Pagado',
   ANULADO: 'Anulado',
+  EN_REVISION: 'En revisión',
 };
 
 export function etiquetaMesAnio(periodoMesAnio?: string): string {

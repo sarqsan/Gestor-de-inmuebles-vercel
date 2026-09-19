@@ -28,6 +28,8 @@ import { detectarPosibleGarantiaIncidencia } from '../../utils/mantenimientoEngi
 import {
   ESTADO_TRABAJO_LABELS,
   PRIORIDAD_TRABAJO_LABELS,
+  buscarProfesionalesCompatibles,
+  evaluarCompatibilidadProfesional,
 } from '../../utils/profesionalesEngine';
 import {
   subscribeTrabajosProfesionales,
@@ -199,6 +201,25 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
   // Evaluar cobertura con las pólizas vigentes
   const evaluacionSeguro = evaluarCoberturaPolizas(incidencia, polizas);
   const deteccionGarantia = detectarPosibleGarantiaIncidencia(incidencia, garantias);
+  const inmuebleActual = inmuebles.find((i) => i.id === incidencia.inmuebleId);
+  const candidatosCompatibles = inmuebleActual
+    ? buscarProfesionalesCompatibles({
+        inmueble: inmuebleActual,
+        profesionales,
+        categoria: incidencia.categoria,
+        servicioRequerido: incidencia.titulo,
+        incluirNoCompatibles: true,
+      })
+    : profesionales.map((p) => ({
+        profesional: p,
+        nivel: 'COMPATIBLE_CON_RESERVA' as const,
+        cumpleEspecialidad: true,
+        cumpleZona: false,
+        cumpleEstado: true,
+        estadoZona: 'ZONA_NO_DETERMINADA' as const,
+        motivo: 'Sin inmueble de referencia',
+        detalles: { especialidad: '', zona: '', estado: '' },
+      }));
   // Buscar siniestro vinculado a esta incidencia si existe
   const siniestroVinculado = siniestros.find((s) => s.incidenciaId === incidencia.id);
   // Pólizas asociadas a este inmueble
@@ -1830,11 +1851,21 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
                     >
                       <option value="">Sin profesional asignado</option>
-                      {profesionales.map((prof) => (
-                        <option key={prof.id} value={prof.id}>
-                          {prof.nombreEmpresa || prof.nombreContacto} ({prof.especialidadPrincipal})
-                        </option>
-                      ))}
+                      {candidatosCompatibles.map((res) => {
+                        const prof = res.profesional;
+                        const nombre = prof.nombreComercial || prof.nombre || prof.contactoNombre;
+                        const badgeTxt =
+                          res.nivel === 'COMPATIBLE'
+                            ? '✅ Compatible'
+                            : res.nivel === 'COMPATIBLE_CON_RESERVA'
+                            ? '⚠️ Con Reserva'
+                            : '❌ No Compatible';
+                        return (
+                          <option key={prof.id} value={prof.id}>
+                            {badgeTxt} — {nombre} ({prof.especialidades?.join(', ') || 'General'})
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

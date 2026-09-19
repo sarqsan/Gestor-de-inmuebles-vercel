@@ -41,6 +41,9 @@ import {
   PRIORIDAD_TRABAJO_LABELS,
   ESTADO_PRESUPUESTO_LABELS,
   crearItemHistorialTrabajo,
+  buscarProfesionalesCompatibles,
+  asignarProfesionalATrabajo,
+  cambiarProfesionalDeTrabajo,
 } from '../../utils/profesionalesEngine';
 import {
   puedeGenerarGastoDesdeTrabajo,
@@ -112,6 +115,12 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   const [editandoCosteReal, setEditandoCosteReal] = useState(false);
   const [costeRealModificado, setCosteRealModificado] = useState<string>('');
 
+  // Diálogo para asignar / cambiar profesional
+  const [dialogCambiarProfOpen, setDialogCambiarProfOpen] = useState(false);
+  const [profesionalSeleccionadoId, setProfesionalSeleccionadoId] = useState<string>('');
+  const [motivoCambioProf, setMotivoCambioProf] = useState<string>('');
+  const [errorCambioProf, setErrorCambioProf] = useState<string>('');
+
   useEffect(() => {
     setLocalTrabajo(trabajo);
   }, [trabajo]);
@@ -149,6 +158,91 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
 
   const esFinalizado = localTrabajo.estado === 'FINALIZADO' || localTrabajo.estado === 'FINALIZADA';
   const esProfesional = currentUser?.tipoPerfil === 'PROFESIONAL';
+
+  // Candidatos evaluados por el motor puro de compatibilidad
+  const candidatosCompatibles = inmueble
+    ? buscarProfesionalesCompatibles({
+        inmueble,
+        profesionales,
+        categoria: localTrabajo.categoria,
+        servicioRequerido: localTrabajo.titulo,
+        incluirNoCompatibles: true,
+      })
+    : profesionales.map((p) => ({
+        profesional: p,
+        nivel: 'COMPATIBLE_CON_RESERVA' as const,
+        cumpleEspecialidad: true,
+        cumpleZona: false,
+        cumpleEstado: true,
+        estadoZona: 'ZONA_NO_DETERMINADA' as const,
+        motivo: 'Sin inmueble de referencia',
+        detalles: { especialidad: '', zona: '', estado: '' },
+      }));
+
+  const handleConfirmarAsignacionOReasignacion = async () => {
+    setErrorCambioProf('');
+    if (!profesionalSeleccionadoId) {
+      setErrorCambioProf('Debe seleccionar un profesional.');
+      return;
+    }
+
+    const nuevoProf = profesionales.find((p) => p.id === profesionalSeleccionadoId);
+    if (!nuevoProf) {
+      setErrorCambioProf('Profesional no encontrado.');
+      return;
+    }
+
+    const esReasignacion = Boolean(localTrabajo.profesionalId && localTrabajo.profesionalId !== nuevoProf.id);
+    if (esReasignacion && !motivoCambioProf.trim()) {
+      setErrorCambioProf('Indique el motivo del cambio de profesional.');
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+      const usuarioNombre = currentUser?.nombre
+        ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+        : 'Gestor Patrimonial';
+
+      const result = esReasignacion
+        ? cambiarProfesionalDeTrabajo({
+            trabajo: localTrabajo,
+            profesionalNuevo: nuevoProf,
+            usuarioNombre,
+            usuarioId: currentUser?.id,
+            motivo: motivoCambioProf.trim(),
+            incidencia: incidenciaVinculada,
+          })
+        : asignarProfesionalATrabajo({
+            trabajo: localTrabajo,
+            profesional: nuevoProf,
+            usuarioNombre,
+            usuarioId: currentUser?.id,
+            motivo: motivoCambioProf.trim() || undefined,
+            incidencia: incidenciaVinculada,
+          });
+
+      if (result.error) {
+        setErrorCambioProf(result.error);
+        return;
+      }
+
+      setLocalTrabajo(result.trabajoActualizado);
+      await saveTrabajoProfesionalFirestore(result.trabajoActualizado);
+
+      if (result.incidenciaActualizada) {
+        await saveIncidenciaFirestore(result.incidenciaActualizada);
+      }
+
+      setDialogCambiarProfOpen(false);
+      setMotivoCambioProf('');
+    } catch (err: any) {
+      console.error('Error al asignar/cambiar profesional:', err);
+      setErrorCambioProf(err?.message || 'Error al guardar la asignación.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   // Handler para confirmar finalización con coste real y gasto automático
   const handleConfirmarFinalizacion = async () => {
@@ -796,6 +890,20 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                       <Wrench className="w-4 h-4 text-amber-600" />
                       <span>Profesional Asignado</span>
                     </h4>
+                    {!esProfesional && !esFinalizado && localTrabajo.estado !== 'CANCELADO' && localTrabajo.estado !== 'CANCELADA' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfesionalSeleccionadoId(localTrabajo.profesionalId || '');
+                          setMotivoCambioProf('');
+                          setErrorCambioProf('');
+                          setDialogCambiarProfOpen(true);
+                        }}
+                        className="text-[11px] text-blue-600 hover:text-blue-800 font-bold hover:underline"
+                      >
+                        {profesionalAsignado ? 'Cambiar Profesional' : '+ Asignar Profesional'}
+                      </button>
+                    )}
                   </div>
 
                   {profesionalAsignado ? (
@@ -1420,6 +1528,130 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
                   {isUpdating ? 'Actualizando...' : 'Guardar y Sincronizar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SUB-DIALOG: ASIGNAR / CAMBIAR PROFESIONAL (MOTOR DE COMPATIBILIDAD) */}
+        {dialogCambiarProfOpen && (
+          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2 text-blue-700">
+                  <Wrench className="w-5 h-5" />
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    {localTrabajo.profesionalId ? 'Cambiar Profesional Asignado' : 'Asignar Profesional Operativo'}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setDialogCambiarProfOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Seleccionar Profesional (Clasificado por Compatibilidad)
+                  </label>
+                  <select
+                    value={profesionalSeleccionadoId}
+                    onChange={(e) => setProfesionalSeleccionadoId(e.target.value)}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 font-medium text-slate-900 bg-slate-50"
+                  >
+                    <option value="">-- Seleccionar candidato --</option>
+                    {candidatosCompatibles.map((res) => {
+                      const prof = res.profesional;
+                      const nom = prof.nombreComercial || prof.nombre || prof.contactoNombre;
+                      const badgeTag =
+                        res.nivel === 'COMPATIBLE'
+                          ? '✅ Compatible'
+                          : res.nivel === 'COMPATIBLE_CON_RESERVA'
+                          ? '⚠️ Con Reserva'
+                          : '❌ No Compatible';
+                      return (
+                        <option key={prof.id} value={prof.id}>
+                          {badgeTag} — {nom} ({prof.especialidades?.join(', ') || 'General'})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Resumen del profesional seleccionado */}
+                {profesionalSeleccionadoId && (
+                  (() => {
+                    const selEval = candidatosCompatibles.find((c) => c.profesional.id === profesionalSeleccionadoId);
+                    if (!selEval) return null;
+                    return (
+                      <div className={`p-3 rounded-xl border text-xs space-y-1 ${
+                        selEval.nivel === 'COMPATIBLE'
+                          ? 'bg-emerald-50/60 border-emerald-200 text-emerald-950'
+                          : selEval.nivel === 'COMPATIBLE_CON_RESERVA'
+                          ? 'bg-amber-50/60 border-amber-200 text-amber-950'
+                          : 'bg-rose-50/60 border-rose-200 text-rose-950'
+                      }`}>
+                        <div className="flex items-center justify-between font-bold">
+                          <span>{selEval.profesional.nombreComercial}</span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-white/80 border">
+                            {selEval.nivel.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed">{selEval.motivo}</p>
+                        {selEval.profesional.telefono && (
+                          <span className="text-[10px] block opacity-80">
+                            Tel: {selEval.profesional.telefono} • Email: {selEval.profesional.email || '—'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()
+                )}
+
+                {/* Motivo de cambio obligatorio si ya había un profesional asignado */}
+                {Boolean(localTrabajo.profesionalId && localTrabajo.profesionalId !== profesionalSeleccionadoId) && (
+                  <div>
+                    <label className="font-bold text-slate-800 block mb-1">
+                      Motivo de Reasignación <span className="text-rose-500">*</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={motivoCambioProf}
+                      onChange={(e) => setMotivoCambioProf(e.target.value)}
+                      placeholder="Indique el motivo por el cual se cambia de profesional (indisponibilidad, ajuste de plazos, especialidad requerida...)"
+                      className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-slate-900 text-xs"
+                      required
+                    />
+                  </div>
+                )}
+
+                {errorCambioProf && (
+                  <p className="text-xs text-rose-600 font-semibold bg-rose-50 p-2 rounded-lg border border-rose-200">
+                    {errorCambioProf}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100 text-xs">
+                <button
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={() => setDialogCambiarProfOpen(false)}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={handleConfirmarAsignacionOReasignacion}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center space-x-1"
+                >
+                  {isUpdating ? <span>Guardando...</span> : <span>Confirmar Asignación</span>}
                 </button>
               </div>
             </div>

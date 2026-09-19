@@ -98,11 +98,13 @@ export const ESTADOS_INCIDENCIA_LABELS: Record<
   { label: string; badgeClass: string; stepOrder: number }
 > = {
   ABIERTA: { label: 'Abierta', badgeClass: 'bg-sky-100 text-sky-800 border-sky-300', stepOrder: 1 },
+  REGISTRADA: { label: 'Registrada', badgeClass: 'bg-sky-100 text-sky-800 border-sky-300', stepOrder: 1 },
   REPORTADA: { label: 'Reportada', badgeClass: 'bg-sky-100 text-sky-800 border-sky-300', stepOrder: 1 },
   EN_VALORACION: { label: 'En Valoración', badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-300', stepOrder: 2 },
   PRESUPUESTOS: { label: 'En Presupuestos', badgeClass: 'bg-amber-100 text-amber-800 border-amber-300', stepOrder: 3 },
   ASIGNADA: { label: 'Asignada a Profesional', badgeClass: 'bg-blue-100 text-blue-800 border-blue-300', stepOrder: 4 },
   EN_REPARACION: { label: 'En Reparación', badgeClass: 'bg-blue-100 text-blue-800 border-blue-300', stepOrder: 5 },
+  EN_CURSO: { label: 'En Curso', badgeClass: 'bg-blue-100 text-blue-800 border-blue-300', stepOrder: 5 },
   RESUELTA: { label: 'Resuelta', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300', stepOrder: 6 },
   CERRADA: { label: 'Cerrada / Archivada', badgeClass: 'bg-slate-100 text-slate-700 border-slate-300', stepOrder: 7 },
   CANCELADA: { label: 'Cancelada', badgeClass: 'bg-rose-100 text-rose-700 border-rose-300', stepOrder: 0 },
@@ -114,11 +116,13 @@ export const ESTADO_INCIDENCIA_META: Record<
   { label: string; descripcion: string; badgeClass: string }
 > = {
   ABIERTA: { label: 'Abierta', descripcion: 'Registrada recientemente', badgeClass: 'bg-sky-100 text-sky-800 border-sky-200' },
+  REGISTRADA: { label: 'Registrada', descripcion: 'Registrada recientemente en el sistema', badgeClass: 'bg-sky-100 text-sky-800 border-sky-200' },
   REPORTADA: { label: 'Reportada', descripcion: 'Reportada y pendiente de triaje inicial', badgeClass: 'bg-sky-100 text-sky-800 border-sky-200' },
   EN_VALORACION: { label: 'En valoración', descripcion: 'Revisión técnica o análisis pericial', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
   PRESUPUESTOS: { label: 'Presupuestos', descripcion: 'Solicitando y comparando ofertas de profesionales', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200' },
   ASIGNADA: { label: 'Asignada', descripcion: 'Orden de trabajo emitida al profesional', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200' },
   EN_REPARACION: { label: 'En reparación', descripcion: 'Profesional trabajando en el inmueble', badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+  EN_CURSO: { label: 'En curso', descripcion: 'Intervención técnica en ejecución', badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
   RESUELTA: { label: 'Resuelta', descripcion: 'Trabajo finalizado, pendiente de confirmación', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   CERRADA: { label: 'Cerrada', descripcion: 'Confirmada, liquidada y archivada', badgeClass: 'bg-slate-100 text-slate-700 border-slate-200' },
   CANCELADA: { label: 'Cancelada', descripcion: 'Cancelada sin intervención', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200' },

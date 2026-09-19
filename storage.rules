@@ -129,6 +129,29 @@ service firebase.storage {
     }
 
     // -------------------------------------------------------------------------
+    // DOCUMENTOS Y FOTOGRAFÍAS DE REFORMAS (CIRCUITO DE REFORMAS)
+    // Rutas PRIVADAS por propietario y proyecto:
+    //   reformas_documentos/{propietarioId}/{proyectoId}/{archivo}
+    //   reformas_fotos/{propietarioId}/{proyectoId}/{archivo}
+    // Documentación contractual, planos, presupuestos y certificados técnicos.
+    // -------------------------------------------------------------------------
+    match /reformas_documentos/{propietarioId}/{proyectoId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    match /reformas_fotos/{propietarioId}/{proyectoId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isImage();
+      allow update, delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
     // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
     // -------------------------------------------------------------------------
     match /{allPaths=**} {

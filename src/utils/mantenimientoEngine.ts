@@ -22,6 +22,7 @@ export const TIPO_MANTENIMIENTO_LABELS: Record<TipoMantenimiento, string> = {
   REVISION: 'Revisión Oficial',
   GARANTIA: 'Garantía',
   LEGAL_OBLIGATORIO: 'Legal / Obligatorio',
+  INSTALACIONES_CLIMA: 'Instalaciones y Climatización',
   OTRO: 'Otro Mantenimiento',
 };
 

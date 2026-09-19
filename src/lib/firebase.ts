@@ -46,6 +46,8 @@ import {
   TrabajoProfesional,
   PresupuestoProfesional,
   ValoracionProfesionalTrabajo,
+  NecesidadReforma,
+  ProyectoReforma,
   PolizaSeguro,
   Siniestro,
   ConfiguracionAseguradora,
@@ -110,6 +112,8 @@ export const SINIESTROS_COL = collection(db, 'siniestros');
 export const TRABAJOS_PROFESIONALES_COL = collection(db, 'trabajos_profesionales');
 export const PRESUPUESTOS_PROFESIONALES_COL = collection(db, 'presupuestos_profesionales');
 export const VALORACIONES_PROFESIONALES_COL = collection(db, 'valoraciones_profesionales');
+export const NECESIDADES_REFORMA_COL = collection(db, 'necesidades_reforma');
+export const PROYECTOS_REFORMA_COL = collection(db, 'proyectos_reforma');
 
 // Colecciones estructurales de usuarios, perfiles, permisos y profesionales
 export const USUARIOS_COL = collection(db, 'usuarios');
@@ -1233,6 +1237,111 @@ export async function deleteGarantiaReparacionFirestore(id: string) {
   } catch (err) {
     console.error('Error deleting garantia reparacion:', err);
   }
+}
+
+// =========================================================================
+// REFORMAS: NECESIDADES Y PROYECTOS DE REFORMA
+// =========================================================================
+
+export function subscribeNecesidadesReforma(
+  callback: (items: NecesidadReforma[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<NecesidadReforma>(
+    NECESIDADES_REFORMA_COL,
+    callback,
+    scope,
+    'necesidades_reforma'
+  );
+}
+
+export async function saveNecesidadReformaFirestore(item: NecesidadReforma) {
+  try {
+    await setDoc(doc(db, 'necesidades_reforma', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving necesidad de reforma:', err);
+    throw err;
+  }
+}
+
+export async function deleteNecesidadReformaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'necesidades_reforma', id));
+  } catch (err) {
+    console.error('Error deleting necesidad de reforma:', err);
+    throw err;
+  }
+}
+
+export function subscribeProyectosReforma(
+  callback: (items: ProyectoReforma[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<ProyectoReforma>(
+    PROYECTOS_REFORMA_COL,
+    callback,
+    scope,
+    'proyectos_reforma'
+  );
+}
+
+export async function saveProyectoReformaFirestore(item: ProyectoReforma) {
+  try {
+    await setDoc(doc(db, 'proyectos_reforma', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving proyecto de reforma:', err);
+    throw err;
+  }
+}
+
+export async function deleteProyectoReformaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'proyectos_reforma', id));
+  } catch (err) {
+    console.error('Error deleting proyecto de reforma:', err);
+    throw err;
+  }
+}
+
+export async function uploadReformaAdjuntoStorage(
+  proyectoId: string,
+  file: File | Blob,
+  fileName: string,
+  propietarioId?: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `reformas_documentos/${ownerSeg}/${proyectoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+  } catch (err) {
+    console.warn('Storage upload error / timeout, using fallback data URL:', err);
+  }
+
+  // Fallback seguro a data URL local
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ url: reader.result as string, storagePath });
+    reader.onerror = () => resolve({ url: '', storagePath });
+    reader.readAsDataURL(file);
+  });
 }
 
 // ============================================================

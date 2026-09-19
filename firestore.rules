@@ -448,6 +448,92 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 2H. ÓRDENES DE TRABAJO PROFESIONAL (FASE 4 - EJECUCIÓN TÉCNICA)
+    // El propietario gestiona sus inmuebles. El profesional solo accede a sus
+    // trabajos asignados (profesionalId == myProfId()). Inmutabilidad de propietarioId e inmuebleId.
+    // =========================================================================
+    match /trabajos_profesionales/{trabajoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin()
+        || (aisladoUpdateOk())
+        || (isProfesionalRole()
+          && 'profesionalId' in existing() && existing().profesionalId == myProfId()
+          && 'profesionalId' in incoming() && incoming().profesionalId == myProfId()
+          && (!('propietarioId' in existing()) || ('propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId))
+          && (!('inmuebleId' in existing()) || ('inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId)));
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2I. PRESUPUESTOS DE PROFESIONALES (FASE 4 - COMPARATIVA Y ADJUDICACIÓN)
+    // =========================================================================
+    match /presupuestos_profesionales/{presupuestoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk() || (isProfesionalRole() && 'profesionalId' in incoming() && incoming().profesionalId == myProfId());
+      allow update: if isMasterAdmin() || aisladoUpdateOk() || (
+        isProfesionalRole()
+        && 'profesionalId' in existing() && existing().profesionalId == myProfId()
+        && 'profesionalId' in incoming() && incoming().profesionalId == myProfId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2J. REFORMAS: NECESIDADES Y PROYECTOS DE REFORMA
+    // Datos patrimoniales del propietario, aislados por propietarioId. El
+    // profesional asignado accede únicamente a su proyecto de reforma asignado.
+    // Inmutabilidad estricta de propietarioId e inmuebleId.
+    // =========================================================================
+    match /necesidades_reforma/{necesidadId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /proyectos_reforma/{proyectoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalPrincipalId' in existing() && existing().profesionalPrincipalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalPrincipalId' in resource.data && resource.data.profesionalPrincipalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin()
+        || (aisladoUpdateOk())
+        || (isProfesionalRole()
+          && 'profesionalPrincipalId' in existing() && existing().profesionalPrincipalId == myProfId()
+          && 'profesionalPrincipalId' in incoming() && incoming().profesionalPrincipalId == myProfId()
+          && (!('propietarioId' in existing()) || ('propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId))
+          && (!('inmuebleId' in existing()) || ('inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId)));
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
     // 3. CANDIDATOS (expedientes y cuestionarios)
     // El listado y la gestión requieren cuenta interna. Se conserva el enlace
     // público de cuestionario (autoservicio del candidato por token), que sólo

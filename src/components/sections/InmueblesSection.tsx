@@ -16,6 +16,7 @@ import {
   Profesional,
 } from '../../types';
 import { MantenimientoInmueblePanel } from '../mantenimiento/MantenimientoInmueblePanel';
+import { ReformasInmueblePanel } from '../reformas/ReformasInmueblePanel';
 import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
@@ -1634,6 +1635,17 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             <MantenimientoInmueblePanel
               inmueble={selectedInmueble}
               propietarios={propietarios}
+              profesionales={profesionales}
+              currentUser={currentUser || undefined}
+            />
+          </div>
+        )}
+
+        {/* FASE 4.5: Circuito Operativo de Reformas y Revalorización */}
+        {selectedInmueble && (
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
+            <ReformasInmueblePanel
+              inmueble={selectedInmueble}
               profesionales={profesionales}
               currentUser={currentUser || undefined}
             />

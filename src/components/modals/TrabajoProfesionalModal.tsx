@@ -34,6 +34,7 @@ import {
   ESTADO_TRABAJO_LABELS,
   coincideUbicacion,
   crearItemHistorialTrabajo,
+  buscarProfesionalesCompatibles,
 } from '../../utils/profesionalesEngine';
 import {
   saveTrabajoProfesionalFirestore,
@@ -133,16 +134,25 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   // Filter incidents for selected property
   const incidenciasDelInmueble = incidencias.filter((inc) => inc.inmuebleId === inmuebleId);
 
-  // Filter professionals suitable for this specialty and location
-  const profesionalesRecomendados = profesionales.filter((prof) => {
-    const isActivo = prof.estado ? prof.estado === 'ACTIVO' : prof.activo !== false;
-    if (!isActivo) return false;
-    const matchEsp = prof.especialidades.some((e) =>
-      e.toLowerCase().includes(categoria.toLowerCase()) || categoria.toLowerCase().includes(e.toLowerCase())
-    );
-    const matchLoc = coincideUbicacion(prof, inmuebleSeleccionado);
-    return matchEsp || matchLoc;
-  });
+  // Candidatos evaluados por el motor puro de compatibilidad
+  const candidatosCompatibles = inmuebleSeleccionado
+    ? buscarProfesionalesCompatibles({
+        inmueble: inmuebleSeleccionado,
+        profesionales,
+        categoria,
+        servicioRequerido: titulo,
+        incluirNoCompatibles: true,
+      })
+    : profesionales.map((p) => ({
+        profesional: p,
+        nivel: 'COMPATIBLE_CON_RESERVA' as const,
+        cumpleEspecialidad: true,
+        cumpleZona: false,
+        cumpleEstado: true,
+        estadoZona: 'ZONA_NO_DETERMINADA' as const,
+        motivo: 'Sin inmueble de referencia',
+        detalles: { especialidad: '', zona: '', estado: '' },
+      }));
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -538,11 +548,17 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                   className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
                 >
                   <option value="">Sin profesional asignado (Buscando presupuesto)</option>
-                  {profesionales.map((prof) => {
-                    const matchLoc = coincideUbicacion(prof, inmuebleSeleccionado);
+                  {candidatosCompatibles.map((res) => {
+                    const prof = res.profesional;
+                    const badgeTxt =
+                      res.nivel === 'COMPATIBLE'
+                        ? '✅ Compatible'
+                        : res.nivel === 'COMPATIBLE_CON_RESERVA'
+                        ? '⚠️ Con Reserva'
+                        : '❌ No Compatible';
                     return (
                       <option key={prof.id} value={prof.id}>
-                        {prof.nombreComercial} ({prof.tipo}) {matchLoc ? '✓ Zona compatible' : ''}
+                        {badgeTxt} — {prof.nombreComercial} ({prof.tipo})
                       </option>
                     );
                   })}

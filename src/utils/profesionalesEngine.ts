@@ -5,6 +5,8 @@ import {
   PartidaPresupuesto,
   ValoracionProfesionalTrabajo,
   Inmueble,
+  Incidencia,
+  CategoriaIncidencia,
   EspecialidadCodigo,
   EstadoTrabajoProfesional,
   EstadoPresupuestoProfesional,
@@ -15,6 +17,9 @@ import {
   EstadoProfesional,
   PrioridadIncidencia,
   HistorialTrabajoItem,
+  NivelCompatibilidad,
+  EstadoZonaCompatibilidad,
+  ResultadoCompatibilidadProfesional,
 } from '../types';
 
 export interface EspecialidadCatalogoItem {
@@ -59,6 +64,7 @@ export const TIPO_PROFESIONAL_LABELS: Record<TipoProfesional, { label: string; b
 export const ESTADO_PROFESIONAL_LABELS: Record<EstadoProfesional, { label: string; badgeClass: string }> = {
   ACTIVO: { label: 'Activo', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   INACTIVO: { label: 'Inactivo', badgeClass: 'bg-slate-100 text-slate-600 border-slate-200' },
+  PAUSADO: { label: 'Pausado', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
   PENDIENTE_VALIDACION: { label: 'Pendiente Validación', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
   BLOQUEADO: { label: 'Bloqueado', badgeClass: 'bg-rose-100 text-rose-800 border-rose-200' },
 };
@@ -207,11 +213,25 @@ export function validarRechazoPresupuesto(motivo?: string): { valido: boolean; e
  * Constructor de evento de auditoría/historial de presupuesto.
  */
 export function crearItemHistorialPresupuesto(
-  accion: AccionHistorialPresupuesto,
-  usuario: string,
-  estadoAnterior: EstadoPresupuestoProfesional,
-  estadoNuevo: EstadoPresupuestoProfesional,
-  opciones?: {
+  arg1:
+    | AccionHistorialPresupuesto
+    | {
+        accion: AccionHistorialPresupuesto;
+        usuario: string;
+        estadoAnterior: EstadoPresupuestoProfesional;
+        estadoNuevo: EstadoPresupuestoProfesional;
+        motivo?: string;
+        categoriaMotivo?: CategoriaMotivoAjuste | string;
+        observaciones?: string;
+        version?: number;
+        importeTotal?: number;
+        partidasSnapshot?: PartidaPresupuesto[];
+        usuarioId?: string;
+      },
+  usuarioArg?: string,
+  estadoAnteriorArg?: EstadoPresupuestoProfesional,
+  estadoNuevoArg?: EstadoPresupuestoProfesional,
+  opcionesArg?: {
     motivo?: string;
     categoriaMotivo?: CategoriaMotivoAjuste | string;
     observaciones?: string;
@@ -221,6 +241,34 @@ export function crearItemHistorialPresupuesto(
     usuarioId?: string;
   }
 ): HistorialDecisionPresupuesto {
+  let accion: AccionHistorialPresupuesto;
+  let usuario: string;
+  let estadoAnterior: EstadoPresupuestoProfesional;
+  let estadoNuevo: EstadoPresupuestoProfesional;
+  let opciones: {
+    motivo?: string;
+    categoriaMotivo?: CategoriaMotivoAjuste | string;
+    observaciones?: string;
+    version?: number;
+    importeTotal?: number;
+    partidasSnapshot?: PartidaPresupuesto[];
+    usuarioId?: string;
+  } | undefined;
+
+  if (typeof arg1 === 'object' && 'accion' in arg1) {
+    accion = arg1.accion;
+    usuario = arg1.usuario;
+    estadoAnterior = arg1.estadoAnterior;
+    estadoNuevo = arg1.estadoNuevo;
+    opciones = arg1;
+  } else {
+    accion = arg1 as AccionHistorialPresupuesto;
+    usuario = usuarioArg || 'Gestor Operativo';
+    estadoAnterior = estadoAnteriorArg || 'RECIBIDO';
+    estadoNuevo = estadoNuevoArg || 'RECIBIDO';
+    opciones = opcionesArg;
+  }
+
   return {
     id: `hdec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     fecha: new Date().toISOString(),
@@ -305,6 +353,9 @@ export function buscarProfesionales(
     if (filtros.servicio && filtros.servicio.trim()) {
       const targetServ = filtros.servicio.toLowerCase().trim();
       const hasServ = prof.servicios?.some((s) => {
+        if (typeof s === 'string') {
+          return s.toLowerCase().includes(targetServ);
+        }
         return (
           s.nombre.toLowerCase().includes(targetServ) ||
           s.descripcion?.toLowerCase().includes(targetServ) ||
@@ -536,3 +587,752 @@ export function crearItemHistorialTrabajo(
     observacion,
   };
 }
+
+/**
+ * Normaliza un texto para comparaciones operativas inmunes a tildes, mayúsculas y espacios.
+ */
+export function normalizarTexto(str?: string): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+/**
+ * Mapeo canónico de servicios técnicos habituales hacia códigos de Especialidad oficial.
+ */
+export const SERVICIOS_ESPECIALIDADES_MAP: Record<string, EspecialidadCodigo> = {
+  // Fontanería y saneamiento
+  fontaneria: 'FONTANERIA',
+  fontanero: 'FONTANERIA',
+  'fuga de agua': 'FONTANERIA',
+  'fuga agua': 'FONTANERIA',
+  fuga: 'FONTANERIA',
+  grifo: 'FONTANERIA',
+  griferia: 'FONTANERIA',
+  desatasco: 'FONTANERIA',
+  desatascos: 'FONTANERIA',
+  tuberia: 'FONTANERIA',
+  termo: 'FONTANERIA',
+  inodoro: 'FONTANERIA',
+  cisterna: 'FONTANERIA',
+  sanitarios: 'FONTANERIA',
+  bajante: 'FONTANERIA',
+  sifon: 'FONTANERIA',
+  desague: 'FONTANERIA',
+  humedad: 'FONTANERIA',
+
+  // Electricidad
+  electricidad: 'ELECTRICIDAD',
+  electricista: 'ELECTRICIDAD',
+  'cuadro electrico': 'ELECTRICIDAD',
+  enchufe: 'ELECTRICIDAD',
+  enchufes: 'ELECTRICIDAD',
+  luz: 'ELECTRICIDAD',
+  iluminacion: 'ELECTRICIDAD',
+  diferencial: 'ELECTRICIDAD',
+  cortocircuito: 'ELECTRICIDAD',
+  boletin: 'ELECTRICIDAD',
+  cableado: 'ELECTRICIDAD',
+  interruptor: 'ELECTRICIDAD',
+
+  // Climatización & Calefacción
+  climatizacion: 'CLIMATIZACION',
+  'aire acondicionado': 'CLIMATIZACION',
+  split: 'CLIMATIZACION',
+  'bomba de calor': 'CLIMATIZACION',
+  clima: 'CLIMATIZACION',
+  calefaccion: 'CALEFACCION',
+  caldera: 'CALEFACCION',
+  radiador: 'CALEFACCION',
+  radiadores: 'CALEFACCION',
+  termostato: 'CALEFACCION',
+  gas: 'CALEFACCION',
+
+  // Cerrajería
+  cerrajeria: 'CERRAJERIA',
+  cerrajero: 'CERRAJERIA',
+  cerradura: 'CERRAJERIA',
+  bombin: 'CERRAJERIA',
+  'puerta bloqueada': 'CERRAJERIA',
+  llaves: 'CERRAJERIA',
+  apertura: 'CERRAJERIA',
+
+  // Albañilería
+  albanileria: 'ALBANILERIA',
+  albanil: 'ALBANILERIA',
+  alicatado: 'ALBANILERIA',
+  solado: 'ALBANILERIA',
+  tabique: 'ALBANILERIA',
+  grieta: 'ALBANILERIA',
+  yeso: 'ALBANILERIA',
+  escayola: 'ALBANILERIA',
+
+  // Pintura
+  pintura: 'PINTURA',
+  pintor: 'PINTURA',
+  pintar: 'PINTURA',
+  gotele: 'PINTURA',
+  alisado: 'PINTURA',
+  fachada: 'PINTURA',
+
+  // Carpintería
+  carpinteria: 'CARPINTERIA',
+  carpintero: 'CARPINTERIA',
+  puerta: 'CARPINTERIA',
+  puertas: 'CARPINTERIA',
+  parquet: 'CARPINTERIA',
+  tarima: 'CARPINTERIA',
+  persiana: 'CARPINTERIA',
+  persianas: 'CARPINTERIA',
+  aluminio: 'CARPINTERIA',
+  ventana: 'CARPINTERIA',
+
+  // Cristalería
+  cristaleria: 'CRISTALERIA',
+  cristalero: 'CRISTALERIA',
+  vidrio: 'CRISTALERIA',
+  climalit: 'CRISTALERIA',
+  espejo: 'CRISTALERIA',
+  mampara: 'CRISTALERIA',
+
+  // Electrodomésticos
+  electrodomesticos: 'ELECTRODOMESTICOS',
+  lavadora: 'ELECTRODOMESTICOS',
+  frigorifico: 'ELECTRODOMESTICOS',
+  horno: 'ELECTRODOMESTICOS',
+  lavavajillas: 'ELECTRODOMESTICOS',
+  vitroceramica: 'ELECTRODOMESTICOS',
+  campana: 'ELECTRODOMESTICOS',
+  microondas: 'ELECTRODOMESTICOS',
+
+  // Limpieza
+  limpieza: 'LIMPIEZA',
+  desinfeccion: 'LIMPIEZA',
+  'fin de obra': 'LIMPIEZA',
+
+  // Plagas
+  plagas: 'PLAGAS',
+  desinsectacion: 'PLAGAS',
+  desratizacion: 'PLAGAS',
+
+  // Telecomunicaciones
+  telecomunicaciones: 'TELECOMUNICACIONES',
+  antena: 'TELECOMUNICACIONES',
+  portero: 'TELECOMUNICACIONES',
+  videoportero: 'TELECOMUNICACIONES',
+  interfono: 'TELECOMUNICACIONES',
+  wifi: 'TELECOMUNICACIONES',
+
+  // Reformas y Técnico
+  reformas: 'REFORMAS',
+  reforma: 'REFORMAS',
+  'reforma integral': 'REFORMAS',
+  tecnico: 'TECNICO',
+  mantenimiento: 'TECNICO',
+  'mantenimiento preventivo': 'TECNICO',
+  revision: 'TECNICO',
+};
+
+/**
+ * Deduce de forma determinista la especialidad requerida a partir del servicio o categoría.
+ */
+export function mapearServicioAEspecialidad(
+  servicio?: string,
+  categoria?: string
+): EspecialidadCodigo | undefined {
+  // 1. Coincidencia directa por código de especialidad
+  if (categoria) {
+    const catNorm = normalizarTexto(categoria).toUpperCase();
+    const matchCod = ESPECIALIDADES_CATALOGO.find((e) => e.codigo === catNorm);
+    if (matchCod) return matchCod.codigo;
+
+    // Categorías específicas de incidencia
+    if (catNorm === 'CALEFACCION_ACS') return 'CALEFACCION';
+    if (catNorm === 'PLAGAS_SANEAMIENTO') return 'PLAGAS';
+    if (catNorm === 'DESATASCO') return 'FONTANERIA';
+  }
+
+  // 2. Coincidencia por nombre de servicio en el diccionario
+  if (servicio) {
+    const servNorm = normalizarTexto(servicio);
+    if (SERVICIOS_ESPECIALIDADES_MAP[servNorm]) {
+      return SERVICIOS_ESPECIALIDADES_MAP[servNorm];
+    }
+
+    // Comprobación por tokens o subcadenas clave
+    for (const [clave, espCod] of Object.entries(SERVICIOS_ESPECIALIDADES_MAP)) {
+      if (servNorm.includes(clave) || clave.includes(servNorm)) {
+        return espCod;
+      }
+    }
+  }
+
+  // 3. Comprobación en el catálogo por nombre
+  if (categoria) {
+    const catNorm = normalizarTexto(categoria);
+    const matchCat = ESPECIALIDADES_CATALOGO.find((e) => normalizarTexto(e.nombre) === catNorm);
+    if (matchCat) return matchCat.codigo;
+  }
+
+  return undefined;
+}
+
+/**
+ * Evalúa la compatibilidad geográfica entre la ubicación del inmueble y el área de servicio del profesional.
+ * Prioridad estricta:
+ * 1. Municipio / Ciudad / Localidad o Código Postal exacto.
+ * 2. Provincia.
+ * 3. ZONA_NO_DETERMINADA si falta información geográfica.
+ * 4. FUERA_DE_ZONA si el profesional opera exclusivamente en otra zona.
+ */
+export function evaluarZonaProfesional(
+  inmueble: Partial<Inmueble> | undefined,
+  profesional: Profesional
+): {
+  compatible: boolean;
+  estadoZona: EstadoZonaCompatibilidad;
+  detalle: string;
+} {
+  if (!inmueble) {
+    return {
+      compatible: false,
+      estadoZona: 'ZONA_NO_DETERMINADA',
+      detalle: 'No se ha especificado el inmueble de referencia.',
+    };
+  }
+
+  const inmMunicipio = normalizarTexto(
+    inmueble.ciudad || (inmueble as any).municipio || (inmueble as any).localidad
+  );
+  const inmProvincia = normalizarTexto(
+    (inmueble.datosFiscales as any)?.provincia || (inmueble as any).provincia || ''
+  );
+  const inmCP = (
+    (inmueble.datosFiscales as any)?.codigoPostal ||
+    (inmueble as any).codigoPostal ||
+    ''
+  ).trim();
+
+  // Si el inmueble no tiene datos de ubicación
+  if (!inmMunicipio && !inmProvincia && !inmCP) {
+    return {
+      compatible: false,
+      estadoZona: 'ZONA_NO_DETERMINADA',
+      detalle: 'El inmueble no dispone de datos de ubicación geográfica suficientes.',
+    };
+  }
+
+  // Si el profesional no tiene zonas configuradas
+  if (!profesional.zonasServicio || profesional.zonasServicio.length === 0) {
+    return {
+      compatible: false,
+      estadoZona: 'ZONA_NO_DETERMINADA',
+      detalle: 'El profesional no tiene registradas zonas geográficas de servicio.',
+    };
+  }
+
+  let coincidenciaMunicipio = false;
+  let coincidenciaCP = false;
+  let coincidenciaProvincia = false;
+
+  for (const zona of profesional.zonasServicio) {
+    const zonaMunicipio = normalizarTexto(zona.municipio || zona.localidad);
+    const zonaProvincia = normalizarTexto(zona.provincia);
+    const zonaMunicipios = Array.isArray((zona as any).municipios)
+      ? (zona as any).municipios.map((m: string) => normalizarTexto(m))
+      : [];
+
+    // 1. Código postal exacto
+    if (zona.codigosPostales && inmCP && (zona.codigosPostales.includes(inmCP) || zona.codigosPostales.some((cp) => cp.trim() === inmCP))) {
+      coincidenciaCP = true;
+      break;
+    }
+
+    // 2. Municipio / Ciudad
+    if (inmMunicipio) {
+      if (
+        (zonaMunicipio && (zonaMunicipio === inmMunicipio || zonaMunicipio.includes(inmMunicipio) || inmMunicipio.includes(zonaMunicipio))) ||
+        zonaMunicipios.some((m: string) => m === inmMunicipio || m.includes(inmMunicipio) || inmMunicipio.includes(m))
+      ) {
+        coincidenciaMunicipio = true;
+        break;
+      }
+    }
+
+    // 3. Cobertura provincial
+    if (zonaProvincia && (inmProvincia || inmMunicipio)) {
+      if (
+        (inmProvincia && (zonaProvincia === inmProvincia || zonaProvincia.includes(inmProvincia) || inmProvincia.includes(zonaProvincia))) ||
+        (inmMunicipio && (zonaProvincia === inmMunicipio || zonaProvincia.includes(inmMunicipio) || inmMunicipio.includes(zonaProvincia)))
+      ) {
+        coincidenciaProvincia = true;
+      }
+    }
+  }
+
+  if (coincidenciaCP || coincidenciaMunicipio) {
+    return {
+      compatible: true,
+      estadoZona: 'MUNICIPIO_O_CP_EXACTO',
+      detalle: `Cobertura municipal confirmada para ${inmMunicipio || inmCP}.`,
+    };
+  }
+
+  if (coincidenciaProvincia) {
+    return {
+      compatible: true,
+      estadoZona: 'PROVINCIAL',
+      detalle: `Cobertura provincial confirmada para ${inmProvincia || inmMunicipio}.`,
+    };
+  }
+
+  return {
+    compatible: false,
+    estadoZona: 'FUERA_DE_ZONA',
+    detalle: `Inmueble fuera del área geográfica de cobertura del profesional (${profesional.zonasServicio.map((z: any) => z.municipios ? z.municipios.join(', ') : (z.municipio || z.provincia)).filter(Boolean).join(', ')}).`,
+  };
+}
+
+/**
+ * Obtiene todas las especialidades posibles mapeadas a partir de un texto o descripción de servicio.
+ */
+export function obtenerEspecialidadesParaServicio(servicioOTexto?: string): EspecialidadCodigo[] {
+  if (!servicioOTexto) return [];
+  const norm = normalizarTexto(servicioOTexto);
+  const resultado = new Set<EspecialidadCodigo>();
+
+  for (const [clave, esp] of Object.entries(SERVICIOS_ESPECIALIDADES_MAP)) {
+    if (norm.includes(normalizarTexto(clave)) || normalizarTexto(clave).includes(norm)) {
+      resultado.add(esp);
+    }
+  }
+
+  if (resultado.size === 0) {
+    const espDirecta = mapearServicioAEspecialidad(servicioOTexto);
+    if (espDirecta) resultado.add(espDirecta);
+  }
+
+  return Array.from(resultado);
+}
+
+/**
+ * Evalúa la compatibilidad operativa total de un profesional con una necesidad técnica e inmueble.
+ */
+export function evaluarCompatibilidadProfesional(
+  arg1:
+    | {
+        inmueble?: Inmueble;
+        profesional: Profesional;
+        servicioRequerido?: string;
+        especialidadRequerida?: EspecialidadCodigo | string;
+        categoria?: string;
+      }
+    | Profesional,
+  arg2?: Inmueble,
+  arg3?: {
+    categoria?: string;
+    servicioRequerido?: string;
+    especialidadRequerida?: EspecialidadCodigo | string;
+  }
+): ResultadoCompatibilidadProfesional {
+  let profesional: Profesional;
+  let inmueble: Inmueble | undefined;
+  let servicioRequerido: string | undefined;
+  let especialidadRequerida: EspecialidadCodigo | string | undefined;
+  let categoria: string | undefined;
+
+  if ('profesional' in (arg1 as any)) {
+    const params = arg1 as {
+      inmueble?: Inmueble;
+      profesional: Profesional;
+      servicioRequerido?: string;
+      especialidadRequerida?: EspecialidadCodigo | string;
+      categoria?: string;
+    };
+    profesional = params.profesional;
+    inmueble = params.inmueble;
+    servicioRequerido = params.servicioRequerido;
+    especialidadRequerida = params.especialidadRequerida;
+    categoria = params.categoria;
+  } else {
+    profesional = arg1 as Profesional;
+    inmueble = arg2;
+    categoria = arg3?.categoria;
+    servicioRequerido = arg3?.servicioRequerido;
+    especialidadRequerida = arg3?.especialidadRequerida;
+  }
+
+  // 1. Estado operativo del profesional
+  const cumpleEstado =
+    profesional.activo !== false &&
+    profesional.disponible !== false &&
+    profesional.estado !== 'INACTIVO' &&
+    profesional.estado !== 'PAUSADO' &&
+    profesional.estado !== 'BLOQUEADO';
+
+  // 2. Especialidad requerida
+  const especialidadObjetivo =
+    especialidadRequerida || mapearServicioAEspecialidad(servicioRequerido, categoria);
+
+  let cumpleEspecialidad = false;
+  if (!especialidadObjetivo && !categoria && !servicioRequerido) {
+    cumpleEspecialidad = true;
+  } else {
+    const espNorm = normalizarTexto(especialidadObjetivo || categoria || servicioRequerido);
+
+    // Comprobación en especialidades del profesional
+    if (profesional.especialidades && profesional.especialidades.length > 0) {
+      cumpleEspecialidad = profesional.especialidades.some((e) => {
+        const norm = normalizarTexto(e);
+        return (
+          norm === espNorm ||
+          norm.includes(espNorm) ||
+          espNorm.includes(norm) ||
+          mapearServicioAEspecialidad(e) === especialidadObjetivo
+        );
+      });
+    }
+
+    // Comprobación en servicios ofrecidos
+    if (!cumpleEspecialidad && profesional.servicios && profesional.servicios.length > 0) {
+      cumpleEspecialidad = profesional.servicios.some((s: any) => {
+        const sNom = typeof s === 'string' ? s : s.nombre || '';
+        const sEsp = typeof s === 'object' && s.especialidad ? s.especialidad : '';
+        const normEsp = normalizarTexto(sEsp);
+        const normNom = normalizarTexto(sNom);
+        return (
+          normEsp === espNorm ||
+          normEsp.includes(espNorm) ||
+          normNom.includes(espNorm) ||
+          (especialidadObjetivo && mapearServicioAEspecialidad(sNom) === especialidadObjetivo) ||
+          (servicioRequerido && normNom.includes(normalizarTexto(servicioRequerido)))
+        );
+      });
+    }
+  }
+
+  // 3. Zona geográfica
+  const evaluacionZona = evaluarZonaProfesional(inmueble, profesional);
+  const cumpleZona = evaluacionZona.compatible;
+
+  // 4. Determinación de Nivel
+  let nivel: NivelCompatibilidad = 'NO_COMPATIBLE';
+  let motivo = '';
+
+  if (!cumpleEstado) {
+    nivel = 'NO_COMPATIBLE';
+    motivo = 'Profesional inactivo, pausado o no disponible operativamente.';
+  } else if (!cumpleEspecialidad) {
+    nivel = 'NO_COMPATIBLE';
+    motivo = `El profesional no dispone de la especialidad técnica requerida (${especialidadObjetivo || categoria || 'solicitada'}).`;
+  } else if (evaluacionZona.estadoZona === 'FUERA_DE_ZONA') {
+    nivel = 'NO_COMPATIBLE';
+    motivo = evaluacionZona.detalle;
+  } else if (evaluacionZona.estadoZona === 'PROVINCIAL' || evaluacionZona.estadoZona === 'ZONA_NO_DETERMINADA') {
+    nivel = 'COMPATIBLE_CON_RESERVA';
+    motivo =
+      evaluacionZona.estadoZona === 'PROVINCIAL'
+        ? `Especialidad confirmada con cobertura en toda la provincia (${evaluacionZona.detalle}).`
+        : 'Cumple la especialidad requerida, pero la cobertura geográfica requiere confirmación operativa.';
+  } else {
+    nivel = 'COMPATIBLE';
+    motivo = `Profesional compatible: especialidad confirmada y cobertura geográfica verificada (${evaluacionZona.detalle}).`;
+  }
+
+  return {
+    profesional,
+    nivel,
+    cumpleEspecialidad,
+    cumpleZona,
+    cumpleEstado,
+    estadoZona: evaluacionZona.estadoZona,
+    especialidadEvaluada: especialidadObjetivo,
+    servicioEvaluado: servicioRequerido,
+    motivo,
+    detalles: {
+      especialidad: cumpleEspecialidad ? 'Especialidad válida' : 'Sin especialidad requerida',
+      zona: evaluacionZona.detalle,
+      estado: cumpleEstado ? 'Activo y disponible' : 'No disponible',
+    },
+  };
+}
+
+/**
+ * Busca y clasifica todos los profesionales disponibles para un inmueble y servicio.
+ */
+export function buscarProfesionalesCompatibles(params: {
+  inmueble?: Inmueble;
+  profesionales: Profesional[];
+  servicioRequerido?: string;
+  especialidadRequerida?: EspecialidadCodigo | string;
+  categoria?: string;
+  incluirNoCompatibles?: boolean;
+}): ResultadoCompatibilidadProfesional[] {
+  const {
+    inmueble,
+    profesionales = [],
+    servicioRequerido,
+    especialidadRequerida,
+    categoria,
+    incluirNoCompatibles = false,
+  } = params;
+
+  const resultados: ResultadoCompatibilidadProfesional[] = profesionales.map((prof) =>
+    evaluarCompatibilidadProfesional({
+      inmueble,
+      profesional: prof,
+      servicioRequerido,
+      especialidadRequerida,
+      categoria,
+    })
+  );
+
+  // Ordenación determinista y pura:
+  // 1. COMPATIBLE (MUNICIPIO_O_CP_EXACTO > PROVINCIAL)
+  // 2. COMPATIBLE_CON_RESERVA
+  // 3. NO_COMPATIBLE
+  resultados.sort((a, b) => {
+    const ordenNivel: Record<NivelCompatibilidad, number> = {
+      COMPATIBLE: 1,
+      COMPATIBLE_CON_RESERVA: 2,
+      NO_COMPATIBLE: 3,
+    };
+    const diffNivel = ordenNivel[a.nivel] - ordenNivel[b.nivel];
+    if (diffNivel !== 0) return diffNivel;
+
+    if (a.nivel === 'COMPATIBLE' && b.nivel === 'COMPATIBLE') {
+      if (a.estadoZona === 'MUNICIPIO_O_CP_EXACTO' && b.estadoZona !== 'MUNICIPIO_O_CP_EXACTO') return -1;
+      if (b.estadoZona === 'MUNICIPIO_O_CP_EXACTO' && a.estadoZona !== 'MUNICIPIO_O_CP_EXACTO') return 1;
+    }
+
+    return (a.profesional.nombreComercial || a.profesional.nombre || '').localeCompare(
+      b.profesional.nombreComercial || b.profesional.nombre || ''
+    );
+  });
+
+  if (incluirNoCompatibles) {
+    return resultados;
+  }
+
+  return resultados.filter((r) => r.nivel !== 'NO_COMPATIBLE');
+}
+
+/**
+ * Asigna de forma determinista un profesional a una incidencia.
+ */
+export function asignarProfesionalAIncidencia(params: {
+  incidencia: Incidencia;
+  profesional: Profesional;
+  usuarioNombre?: string;
+  usuarioId?: string;
+  motivo?: string;
+}): Incidencia {
+  const { incidencia, profesional, usuarioNombre = 'Gestor Patrimonial', motivo } = params;
+  const now = new Date().toISOString();
+  const profNombre = profesional.nombreComercial || profesional.nombre || profesional.contactoNombre || 'Profesional Asignado';
+
+  const obsHistorial = `Profesional asignado a la incidencia: ${profNombre}.${motivo ? ` Motivo: ${motivo}` : ''}`;
+
+  return {
+    ...incidencia,
+    profesionalId: profesional.id,
+    profesionalAsignadoId: profesional.id,
+    profesionalAsignadoNombre: profNombre,
+    estado: 'ASIGNADA',
+    trabajoProfesional: incidencia.trabajoProfesional
+      ? {
+          ...incidencia.trabajoProfesional,
+          profesionalId: profesional.id,
+          profesionalNombre: profNombre,
+          profesionalTelefono: profesional.telefono,
+          profesionalEmail: profesional.email,
+          fechaAsignacion: now,
+          estadoTrabajo: 'ASIGNADO',
+        }
+      : {
+          profesionalId: profesional.id,
+          profesionalNombre: profNombre,
+          profesionalTelefono: profesional.telefono,
+          profesionalEmail: profesional.email,
+          servicio: incidencia.categoria || 'Mantenimiento',
+          fechaAsignacion: now,
+          estadoTrabajo: 'ASIGNADO',
+        },
+    historial: [
+      ...(incidencia.historial || []),
+      {
+        id: `hist_inc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        fecha: now,
+        usuario: usuarioNombre,
+        accion: 'ASIGNACION_PROFESIONAL',
+        valorAnterior: incidencia.estado,
+        valorNuevo: 'ASIGNADA',
+        observacion: obsHistorial,
+      },
+    ],
+    updatedAt: now,
+  };
+}
+
+/**
+ * Asigna de forma determinista y con trazabilidad inmutable un profesional a un trabajo u orden técnica.
+ */
+export function asignarProfesionalATrabajo(params: {
+  trabajo: TrabajoProfesional;
+  profesional: Profesional;
+  usuarioNombre?: string;
+  usuarioId?: string;
+  motivo?: string;
+  incidencia?: Incidencia;
+}): TrabajoProfesional & {
+  trabajoActualizado: TrabajoProfesional;
+  incidenciaActualizada?: Incidencia;
+  error?: string;
+} {
+  const { trabajo, profesional, usuarioNombre = 'Gestor Patrimonial', motivo, incidencia } = params;
+
+  // Validación estricta: OTs finalizadas o canceladas no pueden reasignarse arbitrariamente
+  if (
+    trabajo.estado === 'FINALIZADO' ||
+    trabajo.estado === 'FINALIZADA' ||
+    trabajo.estado === 'CANCELADO' ||
+    trabajo.estado === 'CANCELADA'
+  ) {
+    throw new Error('No se puede reasignar un profesional a una orden de trabajo finalizada o cancelada.');
+  }
+
+  const now = new Date().toISOString();
+  const profNombre = profesional.nombreComercial || profesional.nombre || profesional.contactoNombre || 'Profesional Asignado';
+
+  const estadoAnterior = trabajo.estado;
+  let estadoNuevo: EstadoTrabajoProfesional = trabajo.estado;
+  if (
+    trabajo.estado === 'PENDIENTE' ||
+    trabajo.estado === 'BUSCANDO_PROFESIONAL' ||
+    trabajo.estado === 'PROFESIONAL_PROPUESTO'
+  ) {
+    estadoNuevo = 'ASIGNADO';
+  }
+
+  const esCambio = Boolean(trabajo.profesionalId && trabajo.profesionalId !== profesional.id);
+  const accionHistorial = esCambio ? 'PROFESIONAL_CAMBIADO' : 'PROFESIONAL_ASIGNADO';
+  const obsHistorial = esCambio
+    ? `Cambio de profesional: ${trabajo.profesionalNombre || trabajo.profesionalId} → ${profNombre}.${motivo ? ` Motivo: ${motivo}` : ''}`
+    : `Profesional asignado para ejecución técnica: ${profNombre} (${profesional.telefono || profesional.email || 'Contacto registrado'}).${motivo ? ` Detalle: ${motivo}` : ''}`;
+
+  const nuevoItemHistorial: HistorialTrabajoItem = {
+    id: `hist_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    fecha: now,
+    usuario: usuarioNombre,
+    accion: accionHistorial,
+    estadoAnterior,
+    estadoNuevo,
+    profesionalAnteriorId: esCambio ? trabajo.profesionalId : undefined,
+    profesionalNuevoId: profesional.id,
+    motivo: motivo || undefined,
+    observacion: obsHistorial,
+  };
+
+  const trabajoActualizado: TrabajoProfesional = {
+    ...trabajo,
+    // Inmutabilidad de claves primarias
+    id: trabajo.id,
+    inmuebleId: trabajo.inmuebleId,
+    propietarioId: trabajo.propietarioId,
+    // Asignación operativa
+    profesionalId: profesional.id,
+    profesionalNombre: profNombre,
+    profesionalTelefono: profesional.telefono,
+    profesionalEmail: profesional.email,
+    fechaAsignacion: now,
+    estado: estadoNuevo,
+    historial: [...(trabajo.historial || []), nuevoItemHistorial],
+    updatedAt: now,
+  };
+
+  let incidenciaActualizada: Incidencia | undefined = undefined;
+  if (incidencia) {
+    incidenciaActualizada = {
+      ...incidencia,
+      profesionalId: profesional.id,
+      profesionalAsignadoId: profesional.id,
+      profesionalAsignadoNombre: profNombre,
+      trabajoProfesional: incidencia.trabajoProfesional
+        ? {
+            ...incidencia.trabajoProfesional,
+            profesionalId: profesional.id,
+            profesionalNombre: profNombre,
+            profesionalTelefono: profesional.telefono,
+            profesionalEmail: profesional.email,
+            fechaAsignacion: now,
+            estadoTrabajo: 'ASIGNADO',
+          }
+        : {
+            profesionalId: profesional.id,
+            profesionalNombre: profNombre,
+            profesionalTelefono: profesional.telefono,
+            profesionalEmail: profesional.email,
+            servicio: trabajo.categoria || 'Mantenimiento',
+            fechaAsignacion: now,
+            estadoTrabajo: 'ASIGNADO',
+          },
+      historial: [
+        ...(incidencia.historial || []),
+        {
+          id: `hist_inc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          fecha: now,
+          usuario: usuarioNombre,
+          accion: 'ASIGNACION',
+          valorAnterior: incidencia.estado,
+          valorNuevo: incidencia.estado,
+          observacion: obsHistorial,
+        },
+      ],
+      updatedAt: now,
+    };
+  }
+
+  return Object.assign({}, trabajoActualizado, {
+    trabajoActualizado,
+    incidenciaActualizada,
+  });
+}
+
+/**
+ * Reasigna un trabajo a un nuevo profesional requiriendo motivo justificado e historial inmutable.
+ */
+export function reasignarProfesionalTrabajo(params: {
+  trabajo: TrabajoProfesional;
+  nuevoProfesional?: Profesional;
+  profesionalNuevo?: Profesional;
+  usuarioNombre?: string;
+  usuarioId?: string;
+  motivo: string;
+  incidencia?: Incidencia;
+}): TrabajoProfesional & {
+  trabajoActualizado: TrabajoProfesional;
+  incidenciaActualizada?: Incidencia;
+  error?: string;
+} {
+  const profesionalTarget = params.nuevoProfesional || params.profesionalNuevo;
+  if (!profesionalTarget) {
+    throw new Error('Debe indicarse un profesional de destino para la reasignación.');
+  }
+  if (!params.motivo || !params.motivo.trim()) {
+    throw new Error('Debe especificarse obligatoriamente un motivo para el cambio de profesional.');
+  }
+
+  return asignarProfesionalATrabajo({
+    trabajo: params.trabajo,
+    profesional: profesionalTarget,
+    usuarioNombre: params.usuarioNombre || 'Gestor Patrimonial',
+    usuarioId: params.usuarioId,
+    motivo: params.motivo.trim(),
+    incidencia: params.incidencia,
+  });
+}
+
+export const cambiarProfesionalDeTrabajo = reasignarProfesionalTrabajo;

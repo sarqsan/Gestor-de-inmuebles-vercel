@@ -7,6 +7,7 @@ export type SectionType =
   | 'financiacion'
   | 'fiscal'
   | 'informes'
+  | 'conciliacion'
   | 'polizas'
   | 'preseleccionados'
   | 'seguro_impago'

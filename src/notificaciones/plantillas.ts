@@ -173,6 +173,50 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+
+  // =======================================================================
+  // CONCILIACIÓN BANCARIA (GAP 6) — reutiliza dispatcher GAP 1
+  // =======================================================================
+  'conciliacion.importacion_nueva': {
+    id: 'conciliacion.importacion_nueva',
+    asunto: 'Nueva importación bancaria — {origen} {totalMovimientos} movimientos',
+    cuerpo:
+      'Se ha importado un extracto {origen} con {totalMovimientos} movimientos ({nuevos} nuevos, {duplicados} duplicados) para la cuenta {cuentaIban}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'conciliacion.pendientes': {
+    id: 'conciliacion.pendientes',
+    asunto: 'Conciliaciones pendientes — {pendientes} movimientos por revisar',
+    cuerpo:
+      'Quedan {pendientes} movimientos bancarios pendientes de conciliación ({altaConfianza} alta confianza, {mediaConfianza} media, {bajaConfianza} baja, {sinMatch} sin match).',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'conciliacion.discrepancia': {
+    id: 'conciliacion.discrepancia',
+    asunto: 'Discrepancia en conciliación — movimiento {movimientoId}',
+    cuerpo:
+      'El movimiento {movimientoId} ({importeMovimiento}€) presenta discrepancia con {tipoCandidato} {candidatoId} ({importeCandidato}€) diff {diferencia}€.',
+    canalesPermitidos: ['EMAIL', 'INAPP', 'WEBHOOK'],
+    inicio: 'IMMEDIATE',
+  },
+  'conciliacion.error_importacion': {
+    id: 'conciliacion.error_importacion',
+    asunto: 'Error en importación bancaria — {origen}',
+    cuerpo:
+      'La importación {origen} ha generado errores: {errores}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'conciliacion.realizada': {
+    id: 'conciliacion.realizada',
+    asunto: 'Conciliación realizada — {movimientoId} → {candidatoId}',
+    cuerpo:
+      'El movimiento {movimientoId} se ha conciliado con {tipoCandidato} {candidatoId} con confianza {confianza} ({puntuacion}pts).',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
 };
 
 /** Lista plana de claves de plantilla registradas. */

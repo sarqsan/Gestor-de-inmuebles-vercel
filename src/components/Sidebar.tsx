@@ -25,6 +25,7 @@ import {
   Calculator,
   BarChart3,
   Landmark,
+  Banknote,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -81,6 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
       { id: 'financiacion', label: 'Financiación', icon: Landmark },
+      { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
       { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
       { id: 'informes', label: 'Informes & Export', icon: BarChart3 },
       { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
@@ -103,6 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
       { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark },
+      { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
       { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
       { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3 },
       { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },

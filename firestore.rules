@@ -891,6 +891,109 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 24. CONCILIACIÓN BANCARIA AUTOMÁTICA (GAP 6) — aislamiento estricto propietario
+    // - propietario inmutable
+    // - no acceso cruzado
+    // - no almacenamiento credenciales bancarias
+    // - trazabilidad: propietario, inmueble, usuario/actor, estado
+    // =========================================================================
+    match /movimientos_bancarios/{movimientoId} {
+      function movimientoEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function movimientoVisible(d) {
+        return movimientoEsMio(d) || ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+      }
+      function sinSecretosBancarios() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'ibanSecreto' in incoming() ||
+          'tokenBancario' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'clave' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && movimientoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && movimientoEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'idMovimiento' in incoming() && incoming().idMovimiento is string
+        && 'hashIdempotencia' in incoming()
+      ) && sinSecretosBancarios();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
+      allow delete: if isMasterAdmin();
+    }
+
+    match /conciliaciones_bancarias/{conciliacionId} {
+      function conciliacionEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosBancarios() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'ibanSecreto' in incoming() ||
+          'tokenBancario' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'movimientoId' in incoming() && incoming().movimientoId is string
+      ) && sinSecretosBancarios();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
+      allow delete: if isMasterAdmin();
+    }
+
+    match /importaciones_bancarias/{importacionId} {
+      function importacionEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosBancarios() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'tokenBancario' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)
     // =========================================================================
     match /{document=**} {

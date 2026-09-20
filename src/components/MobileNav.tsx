@@ -79,6 +79,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
+          { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Receipt, description: 'Liquidaciones y estado de cuenta' },
           { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías y mantenimiento' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
@@ -94,6 +95,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
+          { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Receipt, description: 'Liquidaciones, gastos y SEPA' },
           { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías, peritajes IA y siniestros' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },

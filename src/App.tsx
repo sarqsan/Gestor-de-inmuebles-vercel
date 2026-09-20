@@ -28,6 +28,7 @@ import {
   AuditLog,
   ModulosConfig,
   RolDefinicion,
+  TrabajoProfesional,
 } from './types';
 import {
   INITIAL_CANDIDATOS,
@@ -132,6 +133,28 @@ import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
+import { TesoreriaSection } from './components/sections/TesoreriaSection';
+import {
+  deleteGastoFirestore,
+  saveFicheroSepaFirestore,
+  saveGastoFirestore,
+  saveLiquidacionFirestore,
+  saveMandatoSepaFirestore,
+  saveOrdenPagoFirestore,
+  subscribeFicherosSepa,
+  subscribeGastos,
+  subscribeLiquidaciones,
+  subscribeMandatosSepa,
+  subscribeOrdenesPago,
+} from './lib/tesoreriaFirestore';
+import { configurarAuditWriter } from './tesoreria/notificaciones';
+import type {
+  FicheroSEPA,
+  GastoInmueble,
+  LiquidacionPropietario,
+  MandatoSEPA,
+  OrdenPago,
+} from './tesoreria/tipos';
 import { IncidenciasSection } from './components/sections/IncidenciasSection';
 import { ProfesionalesSection } from './components/sections/ProfesionalesSection';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
@@ -296,6 +319,13 @@ export default function App() {
   const [especialidades, setEspecialidades] = useState<Especialidad[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [modulosConfig, setModulosConfig] = useState<ModulosConfig | null>(null);
+  // BLOQUE B — Tesorería
+  const [liquidaciones, setLiquidaciones] = useState<LiquidacionPropietario[]>([]);
+  const [gastos, setGastos] = useState<GastoInmueble[]>([]);
+  const [ordenesPago, setOrdenesPago] = useState<OrdenPago[]>([]);
+  const [ficherosSepa, setFicherosSepa] = useState<FicheroSEPA[]>([]);
+  const [mandatosSepa, setMandatosSepa] = useState<MandatoSEPA[]>([]);
+  const [trabajosProfesionales, setTrabajosProfesionales] = useState<TrabajoProfesional[]>([]);
 
   // Sesión y autenticación real con Firebase Authentication
   const [currentUser, setCurrentUser] = useState<UsuarioApp | null>(null);
@@ -405,6 +435,16 @@ export default function App() {
     }
     return [];
   }, [currentUser, contratos, scopedInmuebles]);
+
+  // BLOQUE B — Liquidaciones con aislamiento por propietario
+  const scopedLiquidaciones = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return liquidaciones;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      return liquidaciones.filter((l) => l.propietarioId === currentUser.propietarioId);
+    }
+    return [];
+  }, [currentUser, liquidaciones]);
 
   const scopedCandidatos = useMemo(() => {
     if (!currentUser) return [];
@@ -666,8 +706,29 @@ export default function App() {
       if (data) {
         const activos = data.filter((t) => t.estado !== 'FINALIZADO' && t.estado !== 'CANCELADO').length;
         setTrabajosActivosCount(activos);
+        setTrabajosProfesionales(data);
       }
     });
+
+    // BLOQUE B — Tesorería: suscripciones de liquidaciones, gastos, órdenes, SEPA y mandatos
+    configurarAuditWriter((accion, descripcion, detalles) => {
+      saveAuditLogFirestore({
+        usuarioId: currentUser.id,
+        usuarioEmail: currentUser.email,
+        usuarioNombre: currentUser.nombre,
+        accion,
+        descripcion,
+        entidadAfectada: 'modulo',
+        idAfectado: String(detalles.entidadId || 'tesoreria'),
+        resultado: 'EXITO',
+        detalles,
+      });
+    });
+    const unsubscribeLiq = subscribeLiquidaciones((data) => setLiquidaciones(data || []));
+    const unsubscribeGastos = subscribeGastos((data) => setGastos(data || []));
+    const unsubscribeOrdenes = subscribeOrdenesPago((data) => setOrdenesPago(data || []));
+    const unsubscribeFicheros = subscribeFicherosSepa((data) => setFicherosSepa(data || []));
+    const unsubscribeMandatos = subscribeMandatosSepa((data) => setMandatosSepa(data || []));
 
     let unsubscribeAseguradoras: (() => void) | undefined;
     let unsubscribeGmail: (() => void) | undefined;
@@ -713,6 +774,12 @@ export default function App() {
       unsubscribeSolicitudesSeguro();
       unsubscribeIncidenciasHook();
       unsubscribeTrabajosHook();
+      unsubscribeLiq();
+      unsubscribeGastos();
+      unsubscribeOrdenes();
+      unsubscribeFicheros();
+      unsubscribeMandatos();
+      configurarAuditWriter(null);
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
       if (unsubscribeGmail) unsubscribeGmail();
       if (unsubscribeUsuariosHook) unsubscribeUsuariosHook();
@@ -1961,6 +2028,59 @@ export default function App() {
     await deleteContratoFirestore(contratoId);
   };
 
+  // BLOQUE B — Handlers de Tesorería (aditivos; no alteran otros flujos)
+  const handleSaveLiquidacion = async (liq: LiquidacionPropietario) => {
+    setLiquidaciones((prev) => {
+      const exists = prev.some((l) => l.id === liq.id);
+      return exists ? prev.map((l) => (l.id === liq.id ? liq : l)) : [liq, ...prev];
+    });
+    await saveLiquidacionFirestore(liq);
+  };
+
+  const handleSaveGasto = async (gasto: GastoInmueble) => {
+    setGastos((prev) => {
+      const exists = prev.some((g) => g.id === gasto.id);
+      return exists ? prev.map((g) => (g.id === gasto.id ? gasto : g)) : [gasto, ...prev];
+    });
+    await saveGastoFirestore(gasto);
+  };
+
+  const handleDeleteGasto = async (gastoId: string) => {
+    setGastos((prev) => prev.filter((g) => g.id !== gastoId));
+    await deleteGastoFirestore(gastoId);
+  };
+
+  const handleSaveOrdenPago = async (orden: OrdenPago) => {
+    setOrdenesPago((prev) => {
+      const exists = prev.some((o) => o.id === orden.id);
+      return exists ? prev.map((o) => (o.id === orden.id ? orden : o)) : [orden, ...prev];
+    });
+    await saveOrdenPagoFirestore(orden);
+  };
+
+  const handleSaveFicheroSepa = async (fichero: FicheroSEPA) => {
+    setFicherosSepa((prev) => {
+      const exists = prev.some((f) => f.id === fichero.id);
+      return exists ? prev.map((f) => (f.id === fichero.id ? fichero : f)) : [fichero, ...prev];
+    });
+    await saveFicheroSepaFirestore(fichero);
+  };
+
+  const handleSaveMandatoSepa = async (mandato: MandatoSEPA) => {
+    setMandatosSepa((prev) => {
+      const exists = prev.some((m) => m.id === mandato.id);
+      return exists ? prev.map((m) => (m.id === mandato.id ? mandato : m)) : [mandato, ...prev];
+    });
+    await saveMandatoSepaFirestore(mandato);
+  };
+
+  const handleSaveContratosBatch = async (lista: ContratoFormalizacion[]) => {
+    setContratos(lista);
+    for (const c of lista) {
+      await saveContratoFirestore(c);
+    }
+  };
+
   // Handlers for Propietarios y Cuentas Bancarias
   const handleSavePropietario = async (propietario: Propietario) => {
     setPropietarios((prev) => {
@@ -2590,6 +2710,7 @@ export default function App() {
                 contratos={scopedContratos}
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
+                liquidaciones={scopedLiquidaciones}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -2669,6 +2790,46 @@ export default function App() {
                 setActiveSection('inmuebles');
               }}
             />
+          )}
+
+          {activeSection === 'tesoreria' && (
+            currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
+              <TesoreriaSection
+                contratos={contratos}
+                inmuebles={scopedInmuebles}
+                propietarios={scopedPropietarios}
+                liquidaciones={liquidaciones}
+                gastos={gastos}
+                ordenes={ordenesPago}
+                ficheros={ficherosSepa}
+                mandatos={mandatosSepa}
+                trabajos={trabajosProfesionales}
+                currentUser={currentUser}
+                onSaveLiquidacion={handleSaveLiquidacion}
+                onSaveGasto={handleSaveGasto}
+                onDeleteGasto={handleDeleteGasto}
+                onSaveOrdenPago={handleSaveOrdenPago}
+                onSaveFicheroSepa={handleSaveFicheroSepa}
+                onSaveMandato={handleSaveMandatoSepa}
+                onSaveContratos={handleSaveContratosBatch}
+              />
+            ) : currentUser.tipoPerfil === 'PROPIETARIO' ? (
+              <PropietarioPortalSection
+                currentUser={currentUser}
+                inmuebles={scopedInmuebles}
+                profesionales={scopedProfesionales}
+                contratos={scopedContratos}
+                especialidades={especialidades}
+                propietarios={scopedPropietarios}
+                liquidaciones={scopedLiquidaciones}
+                onOpenCrearProfesionalModal={(prof) => {
+                  setSelectedProfForEdit(prof);
+                  setShowCrearProfesionalModal(true);
+                }}
+                onSaveProfesional={handleSaveProfesional}
+                onNavigateToInmueble={() => setActiveSection('inmuebles')}
+              />
+            ) : null
           )}
 
           {activeSection === 'incidencias' && (
@@ -2801,6 +2962,7 @@ export default function App() {
                 contratos={scopedContratos}
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
+                liquidaciones={scopedLiquidaciones}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);

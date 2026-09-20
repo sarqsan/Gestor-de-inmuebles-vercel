@@ -3,6 +3,7 @@ export type SectionType =
   | 'inmuebles'
   | 'propietarios'
   | 'cobros'
+  | 'tesoreria'
   | 'incidencias'
   | 'profesionales'
   | 'preseleccionados'
@@ -1298,7 +1299,7 @@ export interface AuditLog {
 export interface PermisoDefinicion {
   codigo: string;
   nombre: string;
-  categoria: 'inmuebles' | 'propietarios' | 'profesionales' | 'contratos' | 'candidatos' | 'seguros' | 'administracion';
+  categoria: 'inmuebles' | 'propietarios' | 'profesionales' | 'contratos' | 'candidatos' | 'seguros' | 'administracion' | 'tesoreria';
   descripcion: string;
 }
 
@@ -1336,6 +1337,11 @@ export const PERMISOS_SISTEMA: PermisoDefinicion[] = [
   { codigo: 'administracion.permisos', nombre: 'Gestión de Permisos', categoria: 'administracion', descripcion: 'Asignar roles y permisos granulares' },
   { codigo: 'administracion.configuracion', nombre: 'Configuración y Módulos', categoria: 'administracion', descripcion: 'Activar y desactivar módulos y enlaces' },
   { codigo: 'administracion.auditoria', nombre: 'Ver Auditoría', categoria: 'administracion', descripcion: 'Consultar logs de auditoría del sistema' },
+
+  { codigo: 'tesoreria.ver', nombre: 'Ver Tesorería', categoria: 'tesoreria', descripcion: 'Consultar liquidaciones, gastos y movimientos' },
+  { codigo: 'tesoreria.liquidar', nombre: 'Generar Liquidaciones', categoria: 'tesoreria', descripcion: 'Generar y recalcular borradores de liquidación' },
+  { codigo: 'tesoreria.aprobar', nombre: 'Aprobar y Pagar', categoria: 'tesoreria', descripcion: 'Aprobar liquidaciones y registrar pagos' },
+  { codigo: 'tesoreria.sepa', nombre: 'Generar SEPA', categoria: 'tesoreria', descripcion: 'Generar ficheros pain.008 y pain.001' },
 ];
 
 export interface RolDefinicion {
@@ -1407,6 +1413,7 @@ export interface ModulosConfig {
   profesionales: boolean;
   gastos: boolean;
   cobros: boolean;
+  tesoreria?: boolean;
   hipotecas: boolean;
   patrimonio: boolean;
   incidencias: boolean;
@@ -1422,6 +1429,7 @@ export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   profesionales: true,
   gastos: false,
   cobros: false,
+  tesoreria: true,
   hipotecas: false,
   patrimonio: false,
   incidencias: true,

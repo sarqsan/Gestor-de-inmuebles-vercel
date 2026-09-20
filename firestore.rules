@@ -324,6 +324,68 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 22. BLOQUE B: LIQUIDACIONES DE PROPIETARIOS (sin borrado físico; anular/reversar)
+    // Aislamiento: el propietario solo lee sus propias liquidaciones.
+    // =========================================================================
+    match /liquidaciones_propietarios/{liquidacionId} {
+      allow get: if isMasterAdmin() || (isSignedIn() && (
+        resource.data.propietarioId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == resource.data.propietarioId)
+      ));
+      allow list: if isSignedIn();
+      allow create, update: if isSignedIn() && (
+        (!('historial' in resource.data) || !('historial' in incoming()) || incoming().historial.size() >= resource.data.historial.size())
+      );
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 23. BLOQUE B: GASTOS DE INMUEBLES
+    // =========================================================================
+    match /gastos_inmuebles/{gastoId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin() || (isSignedIn() && resource.data.estado == 'pendiente');
+    }
+
+    // =========================================================================
+    // 24. BLOQUE B: ÓRDENES DE PAGO (origen trazable obligatorio a nivel de app)
+    // =========================================================================
+    match /ordenes_pago/{ordenId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && incoming().origenId is string && incoming().origenTipo is string;
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 25. BLOQUE B: FICHEROS SEPA (generar→validar→preparar; sin envío automático)
+    // =========================================================================
+    match /ficheros_sepa/{ficheroId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && incoming().msgId is string && incoming().hashContenido is string;
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 26. BLOQUE B: MANDATOS SEPA
+    // =========================================================================
+    match /mandatos_sepa/{mandatoId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 27. BLOQUE B: CONFIGURACIÓN DE LIQUIDACIÓN POR PROPIETARIO
+    // =========================================================================
+    match /config_liquidacion/{propietarioId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // GLOBAL DEFAULT DENY CATCH-ALL
     // =========================================================================
     match /{document=**} {

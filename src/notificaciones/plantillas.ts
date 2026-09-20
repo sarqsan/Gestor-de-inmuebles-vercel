@@ -261,6 +261,68 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+
+  // =======================================================================
+  // FACTURA ELECTRÓNICA B2B (GAP 8, RD 238/2026) — mismo dispatcher GAP 1
+  // =======================================================================
+  'facturacion.b2b_preparada': {
+    id: 'facturacion.b2b_preparada',
+    asunto: 'Factura electrónica B2B preparada — {numeroFactura}',
+    cuerpo:
+      'La representación electrónica B2B de la factura {numeroFactura} en formato {formato} está dispuesta para envío. El envío efectivo requiere plataforma de intercambio habilitada.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.b2b_enviada': {
+    id: 'facturacion.b2b_enviada',
+    asunto: 'Factura electrónica B2B enviada — {numeroFactura}',
+    cuerpo:
+      'La factura electrónica B2B {numeroFactura} ha sido enviada a través de {plataforma}. Identificador externo: {externalId}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.b2b_recibida': {
+    id: 'facturacion.b2b_recibida',
+    asunto: 'Factura electrónica B2B recibida por el destinatario — {numeroFactura}',
+    cuerpo: 'El destinatario ha recibido la factura electrónica B2B {numeroFactura}. Pendiente de aceptación/rechazo.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.b2b_aceptada': {
+    id: 'facturacion.b2b_aceptada',
+    asunto: 'Factura electrónica B2B aceptada — {numeroFactura}',
+    cuerpo: 'El destinatario ha aceptado la factura electrónica B2B {numeroFactura}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.b2b_rechazada': {
+    id: 'facturacion.b2b_rechazada',
+    asunto: 'Factura electrónica B2B rechazada — {numeroFactura}',
+    cuerpo: 'El destinatario ha rechazado la factura electrónica B2B {numeroFactura}. Motivo: {motivo}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.b2b_error': {
+    id: 'facturacion.b2b_error',
+    asunto: 'Error en factura electrónica B2B — {numeroFactura}',
+    cuerpo: 'Se ha producido un error en el intercambio B2B de la factura {numeroFactura}: {descripcionError}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.b2b_pago': {
+    id: 'facturacion.b2b_pago',
+    asunto: 'Pago comunicado — factura electrónica B2B {numeroFactura}',
+    cuerpo: 'Estado de pago de la factura electrónica B2B {numeroFactura}: {estadoPago}. Importe pagado: {importePagado}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.b2b_incidencia': {
+    id: 'facturacion.b2b_incidencia',
+    asunto: 'Incidencia factura electrónica B2B — {numeroFactura}',
+    cuerpo: 'Incidencia en la factura electrónica B2B {numeroFactura}: {descripcionError}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
 };
 
 /** Lista plana de claves de plantilla registradas. */

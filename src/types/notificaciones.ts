@@ -63,6 +63,7 @@ export type OrigenNotificacion =
   | 'INCIDENCIA'
   | 'SEGURO'
   | 'FINANCIACION'
+  | 'CONCILIACION_BANCARIA'
   | 'SISTEMA'
   | 'PRUEBA';
 

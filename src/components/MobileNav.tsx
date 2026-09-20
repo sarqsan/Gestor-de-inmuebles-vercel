@@ -26,6 +26,7 @@ import {
   Calculator,
   BarChart3,
   Landmark,
+  Banknote,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -80,6 +81,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
           { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
           { id: 'financiacion', label: 'Financiación', icon: Landmark, description: 'Hipotecas y amortización' },
+          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos y conciliar cobros/gastos' },
           { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
           { id: 'informes', label: 'Informes & Export', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
           { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
@@ -99,6 +101,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
           { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
           { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },
+          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos CSV/OFX/MT940/Norma43 y conciliar' },
           { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
           { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
           { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },

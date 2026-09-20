@@ -4,6 +4,7 @@ export type SectionType =
   | 'propietarios'
   | 'cobros'
   | 'gastos'
+  | 'conciliacion'
   | 'financiacion'
   | 'fiscal'
   | 'informes'

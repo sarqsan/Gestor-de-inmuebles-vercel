@@ -3680,3 +3680,114 @@ export interface HistorialInformeGenerado {
   numInmuebles?: number;
   eventoExtension?: 'INFORME_GENERADO' | 'EXPORTACION_GENERADA';
 }
+
+// ==========================================
+// GAP 5: SINDICACIÓN Y PUBLICACIÓN MULTICANAL DE INMUEBLES
+// Capa desacoplada: DATOS ERP → MODELO NORMALIZADO → VALIDADOR → GENERADOR → FEED
+// ==========================================
+
+export type PortalInmobiliario = 'IDEALISTA' | 'FOTOCASA' | 'HABITACLIA' | 'KYERO';
+
+export type FormatoFeedPublicacion = 'XML_GENERICO' | 'XML_KYLERO' | 'JSON_NORMALIZADO' | 'JSON_LD';
+
+/**
+ * Estado de publicación POR PORTAL. Independiente del estado interno del inmueble
+ * ('disponible' | 'alquilado'): un inmueble puede estar publicado en un portal y no en otro.
+ */
+export type EstadoPublicacionPortal =
+  | 'BORRADOR'
+  | 'VALIDADO'
+  | 'LISTO_PARA_PUBLICAR'
+  | 'PUBLICADO'
+  | 'ACTUALIZADO'
+  | 'DESPUBLICADO'
+  | 'ERROR';
+
+/** Imagen normalizada para publicación (URL de Firebase Storage; nunca base64 en Firestore). */
+export interface ImagenPublicacion {
+  url: string;
+  orden: number;
+  portada: boolean;
+  estadoPublicacion?: 'PENDIENTE' | 'PUBLICADA' | 'RECHAZADA';
+}
+
+/** Habitación publicable dentro de un inmueble en modalidad habitaciones (solo lectura del circuito). */
+export interface HabitacionPublicacion {
+  habitacionId: string;
+  nombre: string;
+  descripcion?: string;
+  superficieM2?: number;
+  precioMensual?: number;
+  disponible: boolean;
+}
+
+/** Modelo normalizado de publicación: única fuente para validadores, generadores y adaptadores. */
+export interface PublicacionInmueble {
+  // Identificación
+  inmuebleId: string;
+  idPublico: string; // identificador público estable del inmueble
+  referenciaInterna: string; // referencia interna del ERP
+  propietarioId?: string;
+  // Ubicación
+  direccion: string;
+  municipio: string;
+  provincia?: string;
+  codigoPostal?: string;
+  coordenadas?: { latitud: number; longitud: number };
+  // Características
+  tipoInmueble?: string;
+  modalidadAlquiler: 'completo' | 'habitaciones';
+  superficieM2?: number;
+  habitaciones?: number;
+  banos?: number;
+  planta?: string;
+  ascensor?: boolean;
+  terraza?: boolean;
+  balcon?: boolean;
+  garaje?: boolean;
+  trastero?: boolean;
+  aireAcondicionado?: boolean;
+  calefaccion?: boolean;
+  // Económico
+  precioMensual: number;
+  fianzaMeses?: number;
+  tipoOperacion: 'ALQUILER';
+  // Descripción
+  titulo: string;
+  descripcion?: string;
+  caracteristicas: string[];
+  // Imágenes (Storage URLs, orden y portada)
+  imagenes: ImagenPublicacion[];
+  // Habitaciones (solo modalidad 'habitaciones'; no altera el circuito actual)
+  habitacionesPublicables?: HabitacionPublicacion[];
+  // Generación (determinista: mismo dato → mismo resultado)
+  generadoEn?: string; // ISO opcional, solo si el llamador lo aporta explícitamente
+}
+
+export interface ValidacionPublicacion {
+  valido: boolean; // true si no hay errores bloqueantes (puede haber advertencias)
+  erroresBloqueantes: string[];
+  advertencias: string[];
+}
+
+/** Identidad estable por inmueble + portal (idempotencia: actualizar no duplica anuncios). */
+export interface EstadoSindicacionPortal {
+  portal: PortalInmobiliario;
+  externalId: string; // derivado determinista de inmuebleId + portal
+  estado: EstadoPublicacionPortal;
+  ultimaSincronizacion?: string; // ISO
+  ultimoError?: string;
+}
+
+/** Trazabilidad de generación/exportación (sin credenciales ni secretos). */
+export interface RegistroTrazabilidadPublicacion {
+  inmuebleId: string;
+  idPublico: string;
+  portal: PortalInmobiliario | 'EXPORTACION_DIRECTA';
+  formato: FormatoFeedPublicacion;
+  fecha: string; // ISO
+  externalId?: string;
+  resultado: 'OK' | 'ERROR';
+  errores: string[];
+  advertencias: string[];
+}

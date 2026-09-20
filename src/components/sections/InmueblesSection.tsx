@@ -19,6 +19,7 @@ import { MantenimientoInmueblePanel } from '../mantenimiento/MantenimientoInmueb
 import { ReformasInmueblePanel } from '../reformas/ReformasInmueblePanel';
 import { FichaTecnicaInventarioPanel } from '../FichaTecnicaInventarioPanel';
 import { HabitacionesInmueblePanel } from '../HabitacionesInmueblePanel';
+import { PublicacionInmueblesPanel } from '../PublicacionInmueblesPanel';
 import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
@@ -1674,6 +1675,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             onUpdateInmueble={onUpdateInmueble}
           />
         )}
+
+        {/* GAP 5: SINDICACIÓN Y PUBLICACIÓN MULTICANAL (capa desacoplada, solo exporta) */}
+        <PublicacionInmueblesPanel inmueble={selectedInmueble} currentUser={currentUser} />
 
         {/* Candidates Interested in this Property */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">

@@ -19,7 +19,12 @@ import {
   User,
   LogOut,
   Receipt,
-  AlertTriangle,
+  TrendingDown,
+  RefreshCw,
+  LifeBuoy,
+  Calculator,
+  BarChart3,
+  Landmark,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -33,8 +38,7 @@ interface SidebarProps {
   contratosCount?: number;
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
-  incidenciasCount?: number;
-  trabajosActivosCount?: number;
+  incidenciasAbiertasCount?: number;
   currentUser?: UsuarioApp;
   onOpenAuthModal?: () => void;
   onLogout?: () => void;
@@ -51,8 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   contratosCount = 0,
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
-  incidenciasCount = 0,
-  trabajosActivosCount = 0,
+  incidenciasAbiertasCount = 0,
   currentUser,
   onOpenAuthModal,
   onLogout,
@@ -74,17 +77,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     navItems = [
       { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck },
       { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount },
-      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
-      { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
+      { id: 'financiacion', label: 'Financiación', icon: Landmark },
+      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
+      { id: 'informes', label: 'Informes & Export', icon: BarChart3 },
+      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
+      { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
+      { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
   } else if (perfil === 'PROFESIONAL') {
     navItems = [
       { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
       { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
-      { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
   } else {
@@ -94,11 +101,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
-      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
-      { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
+      { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark },
+      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
+      { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3 },
+      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },
+      { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw },
+      { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
       { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length },
       { id: 'analisis', label: 'Análisis IA', icon: Sparkles },
       { id: 'configuracion', label: 'Configuración', icon: Settings },

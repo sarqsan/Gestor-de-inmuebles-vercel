@@ -12,6 +12,9 @@ import {
   Loader2,
   Wrench,
   Percent,
+  AlertCircle,
+  Send,
+  Save,
 } from 'lucide-react';
 import {
   PresupuestoProfesional,
@@ -21,8 +24,14 @@ import {
   Inmueble,
   UsuarioApp,
   EstadoPresupuestoProfesional,
+  HistorialDecisionPresupuesto,
 } from '../../types';
-import { ESTADO_PRESUPUESTO_LABELS, calcularTotalesPresupuesto } from '../../utils/profesionalesEngine';
+import {
+  ESTADO_PRESUPUESTO_LABELS,
+  calcularTotalesPresupuesto,
+  crearItemHistorialPresupuesto,
+  crearItemHistorialTrabajo,
+} from '../../utils/profesionalesEngine';
 import {
   savePresupuestoProfesionalFirestore,
   uploadPresupuestoDocumentoStorage,
@@ -73,7 +82,9 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
     presupuestoParaEditar?.numeroPresupuesto || `PRE-${Date.now().toString().slice(-6)}`
   );
   const [fecha, setFecha] = useState<string>(
-    presupuestoParaEditar?.fecha ? presupuestoParaEditar.fecha.slice(0, 10) : new Date().toISOString().slice(0, 10)
+    presupuestoParaEditar?.fecha
+      ? presupuestoParaEditar.fecha.slice(0, 10)
+      : new Date().toISOString().slice(0, 10)
   );
   const [validez, setValidez] = useState<string>(
     presupuestoParaEditar?.validez || '30 días'
@@ -86,32 +97,38 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
     presupuestoParaEditar?.estado || 'RECIBIDO'
   );
   const [porcentajeIva, setPorcentajeIva] = useState<number>(
-    presupuestoParaEditar?.iva !== undefined && presupuestoParaEditar?.importeBase
+    presupuestoParaEditar?.porcentajeIva !== undefined
+      ? presupuestoParaEditar.porcentajeIva
+      : presupuestoParaEditar?.iva !== undefined && presupuestoParaEditar?.importeBase
       ? Math.round((presupuestoParaEditar.iva / presupuestoParaEditar.importeBase) * 100)
       : 21
   );
 
   // Line items
   const [partidas, setPartidas] = useState<PartidaPresupuesto[]>(
-    presupuestoParaEditar?.partidas || [
-      {
-        id: 'p1',
-        concepto: 'Mano de obra especializada e intervención',
-        cantidad: 1,
-        precioUnitario: 120,
-        importe: 120,
-      },
-      {
-        id: 'p2',
-        concepto: 'Materiales, repuestos y consumibles',
-        cantidad: 1,
-        precioUnitario: 45,
-        importe: 45,
-      },
-    ]
+    presupuestoParaEditar?.partidas && presupuestoParaEditar.partidas.length > 0
+      ? JSON.parse(JSON.stringify(presupuestoParaEditar.partidas))
+      : [
+          {
+            id: 'p1',
+            concepto: 'Mano de obra especializada e intervención',
+            cantidad: 1,
+            precioUnitario: 120,
+            importe: 120,
+          },
+          {
+            id: 'p2',
+            concepto: 'Materiales, repuestos y consumibles',
+            cantidad: 1,
+            precioUnitario: 45,
+            importe: 45,
+          },
+        ]
   );
 
-  const [documentoUrl, setDocumentoUrl] = useState<string>(presupuestoParaEditar?.documentoUrl || '');
+  const [documentoUrl, setDocumentoUrl] = useState<string>(
+    presupuestoParaEditar?.documentoUrl || ''
+  );
   const [nombreArchivo, setNombreArchivo] = useState<string>('');
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -120,12 +137,21 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
   if (!isOpen) return null;
 
   const profesionalSeleccionado = profesionales.find((p) => p.id === profesionalId);
-  const inmuebleSeleccionado = inmuebles.find((i) => i.id === trabajoActual?.inmuebleId);
+  const inmuebleSeleccionado = inmuebles.find(
+    (i) => i.id === (trabajoActual?.inmuebleId || presupuestoParaEditar?.inmuebleId)
+  );
 
   // Calculations
-  const { importeBase, iva, importeTotal } = calcularTotalesPresupuesto(partidas, porcentajeIva);
+  const { importeBase, iva, importeTotal } = calcularTotalesPresupuesto(
+    partidas,
+    porcentajeIva
+  );
 
-  const handleUpdatePartida = (index: number, campo: keyof PartidaPresupuesto, valor: any) => {
+  const handleUpdatePartida = (
+    index: number,
+    campo: keyof PartidaPresupuesto,
+    valor: any
+  ) => {
     const updated = [...partidas];
     const item = { ...updated[index], [campo]: valor };
     if (campo === 'cantidad' || campo === 'precioUnitario') {
@@ -139,7 +165,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
 
   const handleAddPartida = () => {
     const nueva: PartidaPresupuesto = {
-      id: `p_${Date.now()}`,
+      id: `p_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       concepto: 'Nueva partida de trabajo o material',
       cantidad: 1,
       precioUnitario: 50,
@@ -161,8 +187,8 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
       setUploadingDoc(true);
       setErrorMsg('');
       const tempPresId = presupuestoParaEditar?.id || `pres_${Date.now()}`;
-      const downloadUrl = await uploadPresupuestoDocumentoStorage(tempPresId, file, file.name);
-      setDocumentoUrl(downloadUrl);
+      const res = await uploadPresupuestoDocumentoStorage(tempPresId, file, file.name);
+      setDocumentoUrl(res.downloadUrl);
       setNombreArchivo(file.name);
     } catch (err: any) {
       console.error('Error uploading presupuesto doc:', err);
@@ -172,15 +198,17 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!trabajoId) {
+  const executeSave = async (isReenvio: boolean = false) => {
+    if (!trabajoId && !presupuestoParaEditar?.trabajoId) {
       setErrorMsg('Por favor selecciona la orden de trabajo correspondiente.');
       return;
     }
     if (!profesionalId) {
       setErrorMsg('Por favor selecciona el profesional emisor del presupuesto.');
+      return;
+    }
+    if (partidas.length === 0) {
+      setErrorMsg('Debe incluir al menos una partida en el presupuesto.');
       return;
     }
 
@@ -189,16 +217,103 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
       setErrorMsg('');
 
       const presId =
-        presupuestoParaEditar?.id || `pres_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        presupuestoParaEditar?.id ||
+        `pres_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      const usuarioNombre = currentUser?.nombre
+        ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+        : 'Usuario';
+
+      const versionActual = presupuestoParaEditar?.version || 1;
+      const nuevaVersion = isReenvio ? versionActual + 1 : versionActual;
+
+      const nuevoEstado: EstadoPresupuestoProfesional = isReenvio
+        ? 'EN_REVISION'
+        : estado;
+
+      const historialDecision = presupuestoParaEditar?.historialDecision
+        ? [...presupuestoParaEditar.historialDecision]
+        : [];
+
+      if (!isEditing) {
+        // Evento de creación
+        historialDecision.push(
+          crearItemHistorialPresupuesto(
+            'CREACION',
+            usuarioNombre,
+            'BORRADOR',
+            nuevoEstado,
+            {
+              observaciones: `Presupuesto registrado inicialmente por ${importeTotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}`,
+              version: 1,
+              importeTotal,
+              partidasSnapshot: partidas,
+              usuarioId: currentUser?.id,
+            }
+          )
+        );
+      } else if (isReenvio) {
+        // Evento de reenvío explícito
+        historialDecision.push(
+          crearItemHistorialPresupuesto(
+            'REENVIO',
+            usuarioNombre,
+            presupuestoParaEditar.estado,
+            'EN_REVISION',
+            {
+              observaciones: `Presupuesto modificado y reenviado para revisión (Versión ${nuevaVersion})`,
+              version: nuevaVersion,
+              importeTotal,
+              partidasSnapshot: partidas,
+              usuarioId: currentUser?.id,
+            }
+          )
+        );
+      } else {
+        // Evento de modificación guardada sin reenvío
+        historialDecision.push(
+          crearItemHistorialPresupuesto(
+            'MODIFICACION',
+            usuarioNombre,
+            presupuestoParaEditar.estado,
+            nuevoEstado,
+            {
+              observaciones: `Cambios guardados en partidas / importes (${importeTotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})`,
+              version: versionActual,
+              importeTotal,
+              partidasSnapshot: partidas,
+              usuarioId: currentUser?.id,
+            }
+          )
+        );
+      }
 
       const presupuestoFinal: PresupuestoProfesional = {
         id: presId,
-        trabajoId,
+        trabajoId: trabajoId || presupuestoParaEditar?.trabajoId || '',
         profesionalId,
-        profesionalNombre: profesionalSeleccionado?.nombreComercial || 'Profesional',
-        propietarioId: trabajoActual?.propietarioId || currentUser?.propietarioId || 'prop_default',
-        inmuebleId: trabajoActual?.inmuebleId || '',
-        inmuebleDireccion: trabajoActual?.inmuebleDireccion || inmuebleSeleccionado?.direccion,
+        profesionalNombre:
+          profesionalSeleccionado?.nombreComercial ||
+          presupuestoParaEditar?.profesionalNombre ||
+          'Profesional',
+        propietarioId:
+          trabajoActual?.propietarioId ||
+          presupuestoParaEditar?.propietarioId ||
+          currentUser?.propietarioId ||
+          'prop_default',
+        inmuebleId:
+          trabajoActual?.inmuebleId ||
+          presupuestoParaEditar?.inmuebleId ||
+          inmuebleSeleccionado?.id ||
+          '',
+        inmuebleDireccion:
+          trabajoActual?.inmuebleDireccion ||
+          presupuestoParaEditar?.inmuebleDireccion ||
+          inmuebleSeleccionado?.direccion,
+        incidenciaId:
+          trabajoActual?.incidenciaId ||
+          presupuestoParaEditar?.incidenciaId ||
+          undefined,
         numeroPresupuesto: numeroPresupuesto.trim(),
         fecha: new Date(fecha).toISOString(),
         validez: validez.trim(),
@@ -206,29 +321,71 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
         partidas,
         importeBase,
         iva,
+        porcentajeIva,
         importeTotal,
         documentoUrl: documentoUrl || undefined,
-        estado,
+        estado: nuevoEstado,
+        version: nuevaVersion,
+        // Si se reenvía, se limpian indicadores temporales de solicitud de ajuste
+        categoriaAjuste: isReenvio ? undefined : presupuestoParaEditar?.categoriaAjuste,
+        motivoAjuste: isReenvio ? undefined : presupuestoParaEditar?.motivoAjuste,
+        fechaSolicitudAjuste: isReenvio
+          ? undefined
+          : presupuestoParaEditar?.fechaSolicitudAjuste,
+        solicitadoAjustePor: isReenvio
+          ? undefined
+          : presupuestoParaEditar?.solicitadoAjustePor,
+        fechaDecision: isReenvio ? undefined : presupuestoParaEditar?.fechaDecision,
+        decididoPor: isReenvio ? undefined : presupuestoParaEditar?.decididoPor,
+        motivoRechazo: isReenvio ? undefined : presupuestoParaEditar?.motivoRechazo,
+        historialDecision: historialDecision.length > 0 ? historialDecision : undefined,
+        creadoPor: presupuestoParaEditar?.creadoPor || usuarioNombre,
+        actualizadoPor: usuarioNombre,
         createdAt: presupuestoParaEditar?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       await savePresupuestoProfesionalFirestore(presupuestoFinal);
 
-      // If budget is accepted, update work order status to ACEPTADO and set budget ID
+      // Sync linked work order
       if (trabajoActual) {
-        let trabajoActualizado: TrabajoProfesional = {
+        let nuevoEstadoTrabajo = trabajoActual.estado;
+        if (
+          nuevoEstado === 'ACEPTADO' &&
+          trabajoActual.estado !== 'ACEPTADO' &&
+          trabajoActual.estado !== 'PROGRAMADO' &&
+          trabajoActual.estado !== 'EN_EJECUCION' &&
+          trabajoActual.estado !== 'FINALIZADO'
+        ) {
+          nuevoEstadoTrabajo = 'ACEPTADO';
+        } else if (
+          trabajoActual.estado === 'PENDIENTE' ||
+          trabajoActual.estado === 'BUSCANDO_PROFESIONAL' ||
+          trabajoActual.estado === 'PRESUPUESTO_SOLICITADO'
+        ) {
+          nuevoEstadoTrabajo = 'PRESUPUESTO_RECIBIDO';
+        }
+
+        const nuevoHistorialTrab = [
+          ...(trabajoActual.historial || []),
+          crearItemHistorialTrabajo(
+            isReenvio ? 'PRESUPUESTO_RECIBIDO' : 'ESTADO_MODIFICADO',
+            usuarioNombre,
+            trabajoActual.estado,
+            nuevoEstadoTrabajo,
+            `Presupuesto ${presupuestoFinal.numeroPresupuesto || presId} ${isReenvio ? `reenviado (v${nuevaVersion})` : 'actualizado'} (${importeTotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})`
+          ),
+        ];
+
+        const trabajoActualizado: TrabajoProfesional = {
           ...trabajoActual,
+          estado: nuevoEstadoTrabajo,
           presupuestoId: presId,
           importeEstimado: importeTotal,
+          historial: nuevoHistorialTrab,
+          actualizadoPor: usuarioNombre,
           updatedAt: new Date().toISOString(),
         };
-
-        if (estado === 'ACEPTADO' && trabajoActual.estado !== 'ACEPTADO' && trabajoActual.estado !== 'PROGRAMADO' && trabajoActual.estado !== 'EN_EJECUCION' && trabajoActual.estado !== 'FINALIZADO') {
-          trabajoActualizado.estado = 'ACEPTADO';
-        } else if (trabajoActual.estado === 'PENDIENTE' || trabajoActual.estado === 'BUSCANDO_PROFESIONAL' || trabajoActual.estado === 'PRESUPUESTO_SOLICITADO') {
-          trabajoActualizado.estado = 'PRESUPUESTO_RECIBIDO';
-        }
 
         await saveTrabajoProfesionalFirestore(trabajoActualizado);
       }
@@ -243,12 +400,17 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
     }
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    executeSave(false);
+  };
+
   return (
     <div
       id="presupuesto-profesional-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-8 overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -256,56 +418,81 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900">
-                {isEditing ? 'Modificar Presupuesto Profesional' : 'Registro de Presupuesto de Profesional'}
-              </h3>
-              <p className="text-xs text-slate-500">
-                Desglose de partidas, cálculo de base imponible, IVA y vinculación directa con la orden técnica
+              <div className="flex items-center space-x-2">
+                <h2 className="text-lg font-bold text-slate-900">
+                  {isEditing ? 'Modificar Presupuesto Profesional' : 'Registrar Nuevo Presupuesto'}
+                </h2>
+                {isEditing && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-200 text-slate-700 font-mono">
+                    v{presupuestoParaEditar.version || 1}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {isEditing
+                  ? 'Actualiza el desglose de partidas, importe o documentación adjunta'
+                  : 'Asocia el presupuesto detallado de un técnico a una orden de trabajo'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
+            className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/60 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content Form */}
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6 flex-1">
+        {/* Form Body */}
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-5">
           {errorMsg && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium">
-              {errorMsg}
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center space-x-2 text-xs text-rose-700">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
             </div>
           )}
 
-          {/* Section 1: Trabajo y Profesional Vinculado */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Negotiating notice if in EN_NEGOCIACION */}
+          {presupuestoParaEditar?.estado === 'EN_NEGOCIACION' && (
+            <div className="p-3.5 bg-orange-50 border border-orange-200 rounded-xl text-xs space-y-1.5 text-orange-950">
+              <div className="font-bold flex items-center space-x-1.5 text-orange-900">
+                <AlertCircle className="w-4 h-4 text-orange-600" />
+                <span>Presupuesto en estado EN_NEGOCIACION</span>
+              </div>
+              {presupuestoParaEditar.motivoAjuste && (
+                <p className="text-orange-800">
+                  <strong>Requerimiento solicitado:</strong> {presupuestoParaEditar.motivoAjuste}
+                </p>
+              )}
+              <p className="text-orange-700 text-[11px]">
+                Puedes <strong>Guardar Cambios</strong> para mantener el borrador en negociación o pulsar{' '}
+                <strong>Guardar y Reenviar a Revisión</strong> para emitir la versión v
+                {(presupuestoParaEditar.version || 1) + 1}.
+              </p>
+            </div>
+          )}
+
+          {/* Section 1: Trabajo y Profesional */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">
-                Orden de Trabajo Vinculada <span className="text-red-500">*</span>
+                Orden de Trabajo / Asignación <span className="text-rose-500">*</span>
               </label>
               <select
-                value={trabajoId}
-                onChange={(e) => {
-                  const tid = e.target.value;
-                  setTrabajoId(tid);
-                  const trab = trabajos.find((t) => t.id === tid);
-                  if (trab?.profesionalId) {
-                    setProfesionalId(trab.profesionalId);
-                  }
-                  if (trab && !descripcion) {
-                    setDescripcion(`Presupuesto para: ${trab.titulo}`);
-                  }
-                }}
                 required
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
+                disabled={isEditing || !!trabajoPreseleccionado}
+                value={trabajoId}
+                onChange={(e) => setTrabajoId(e.target.value)}
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-medium disabled:bg-slate-100"
               >
-                <option value="">Selecciona orden de trabajo...</option>
-                {trabajos.map((trab) => (
-                  <option key={trab.id} value={trab.id}>
-                    [{trab.categoria}] {trab.titulo} - {trab.inmuebleDireccion || 'Inmueble'}
+                {trabajoPreseleccionado && !trabajos.some((t) => t.id === trabajoPreseleccionado.id) && (
+                  <option value={trabajoPreseleccionado.id}>
+                    {trabajoPreseleccionado.titulo} ({trabajoPreseleccionado.id.slice(-6)})
+                  </option>
+                )}
+                {trabajos.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.titulo} • {t.inmuebleDireccion || 'Sin dir'} ({t.id.slice(-6)})
                   </option>
                 ))}
               </select>
@@ -313,61 +500,67 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
 
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">
-                Profesional o Empresa Emisora <span className="text-red-500">*</span>
+                Profesional Emisor <span className="text-rose-500">*</span>
               </label>
               <select
+                required
                 value={profesionalId}
                 onChange={(e) => setProfesionalId(e.target.value)}
-                required
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-medium"
               >
-                <option value="">Selecciona profesional...</option>
-                {profesionales.map((prof) => (
-                  <option key={prof.id} value={prof.id}>
-                    {prof.nombreComercial} ({prof.tipo})
+                {profesionales.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombreComercial || p.nombre || 'Profesional'} {p.cifNif ? `(${p.cifNif})` : ''}
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Section 2: Metadata del Presupuesto */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Section 2: Número, Fecha y Validez */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Nº Referencia / Presupuesto</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">
+                Nº de Presupuesto / Referencia
+              </label>
               <input
                 type="text"
                 required
                 value={numeroPresupuesto}
                 onChange={(e) => setNumeroPresupuesto(e.target.value)}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-mono"
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-mono font-medium"
               />
             </div>
+
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Fecha Emisión</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Fecha de Emisión</label>
               <input
                 type="date"
                 required
                 value={fecha}
                 onChange={(e) => setFecha(e.target.value)}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl"
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-medium"
               />
             </div>
+
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Plazo de Validez</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Validez de la Oferta</label>
               <input
                 type="text"
+                required
                 value={validez}
                 onChange={(e) => setValidez(e.target.value)}
-                placeholder="Ej: 30 días, hasta 31/12"
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl"
+                placeholder="Ej: 30 días, Hasta 31/12/2026..."
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-medium"
               />
             </div>
           </div>
 
-          {/* Section 3: Descripción General */}
+          {/* Section 3: Objeto / Resumen */}
           <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">Objeto / Resumen del Presupuesto</label>
+            <label className="text-xs font-bold text-slate-700 block mb-1">
+              Objeto / Resumen del Presupuesto
+            </label>
             <input
               type="text"
               required
@@ -386,7 +579,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
               <button
                 type="button"
                 onClick={handleAddPartida}
-                className="inline-flex items-center space-x-1 text-xs font-bold text-blue-600 hover:text-blue-800"
+                className="inline-flex items-center space-x-1 text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Añadir Partida</span>
@@ -419,7 +612,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                       <td className="p-2 text-center">
                         <input
                           type="number"
-                          step="0.1"
+                          step="0.01"
                           min="0.01"
                           required
                           value={p.cantidad}
@@ -438,7 +631,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                           className="w-full p-1.5 border border-slate-200 rounded-lg text-xs text-right"
                         />
                       </td>
-                      <td className="p-2 text-right font-bold text-slate-800 pr-3">
+                      <td className="p-2 text-right font-bold text-slate-800 pr-3 font-mono">
                         {p.importe.toFixed(2)} €
                       </td>
                       <td className="p-2 text-center">
@@ -446,7 +639,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                           <button
                             type="button"
                             onClick={() => handleRemovePartida(idx)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -469,7 +662,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                     key={tipo}
                     type="button"
                     onClick={() => setPorcentajeIva(tipo)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
                       porcentajeIva === tipo
                         ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
@@ -484,15 +677,15 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
             <div className="w-full sm:w-64 space-y-1.5 text-xs text-slate-700">
               <div className="flex justify-between">
                 <span>Base Imponible:</span>
-                <span className="font-semibold">{importeBase.toFixed(2)} €</span>
+                <span className="font-semibold font-mono">{importeBase.toFixed(2)} €</span>
               </div>
               <div className="flex justify-between">
                 <span>IVA ({porcentajeIva}%):</span>
-                <span className="font-semibold">{iva.toFixed(2)} €</span>
+                <span className="font-semibold font-mono">{iva.toFixed(2)} €</span>
               </div>
               <div className="flex justify-between pt-1.5 border-t border-slate-200 text-sm font-bold text-slate-900">
                 <span>Total Presupuesto:</span>
-                <span className="text-base text-emerald-700">{importeTotal.toFixed(2)} €</span>
+                <span className="text-base text-emerald-700 font-mono">{importeTotal.toFixed(2)} €</span>
               </div>
             </div>
           </div>
@@ -533,52 +726,92 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                 </a>
               </div>
             ) : (
-              <p className="text-xs text-slate-400">Opcional. Puedes adjuntar el PDF original enviado por el profesional.</p>
+              <p className="text-xs text-slate-400">
+                Opcional. Puedes adjuntar el documento original remitido por el técnico.
+              </p>
             )}
           </div>
 
-          {/* Section 7: Estado Inicial */}
-          <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">Estado de Aprobación</label>
-            <select
-              value={estado}
-              onChange={(e) => setEstado(e.target.value as any)}
-              className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-medium"
-            >
-              {Object.entries(ESTADO_PRESUPUESTO_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Section 7: Estado Inicial (si no está en negociación) */}
+          {presupuestoParaEditar?.estado !== 'EN_NEGOCIACION' && (
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Estado de Aprobación</label>
+              <select
+                value={estado}
+                onChange={(e) => setEstado(e.target.value as EstadoPresupuestoProfesional)}
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-medium"
+              >
+                {Object.entries(ESTADO_PRESUPUESTO_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Footer Buttons */}
-          <div className="pt-4 border-t border-slate-200 flex items-center justify-end space-x-3">
+          <div className="pt-4 border-t border-slate-200 flex items-center justify-end space-x-3 flex-wrap gap-y-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               Cancelar
             </button>
-            <button
-              type="submit"
-              disabled={guardando || uploadingDoc}
-              className="inline-flex items-center space-x-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors disabled:opacity-50"
-            >
-              {guardando ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Guardando...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{isEditing ? 'Guardar Cambios' : 'Registrar Presupuesto'}</span>
-                </>
-              )}
-            </button>
+
+            {/* If in EN_NEGOCIACION: allow saving draft or resubmitting directly */}
+            {presupuestoParaEditar?.estado === 'EN_NEGOCIACION' ? (
+              <>
+                <button
+                  type="submit"
+                  disabled={guardando || uploadingDoc}
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                  title="Guarda los cambios en el presupuesto manteniéndolo en negociación"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Guardar Modificación</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={guardando || uploadingDoc}
+                  onClick={() => executeSave(true)}
+                  className="inline-flex items-center space-x-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                  title="Guarda e incrementa versión reenviando a revisión"
+                >
+                  {guardando ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Reenviando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Guardar y Reenviar a Revisión (v{(presupuestoParaEditar.version || 1) + 1})</span>
+                    </>
+                  )}
+                </button>
+              </>
+            ) : (
+              <button
+                type="submit"
+                disabled={guardando || uploadingDoc}
+                className="inline-flex items-center space-x-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {guardando ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Guardando...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{isEditing ? 'Guardar Cambios' : 'Registrar Presupuesto'}</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </form>
       </div>

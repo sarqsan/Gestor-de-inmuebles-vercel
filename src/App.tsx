@@ -16,6 +16,13 @@ import {
   ItemDocumentoSolicitado,
   SolicitudDocPublicData,
   ContratoFormalizacion,
+  Gasto,
+  GastoRecurrente,
+  Prestamo,
+  ExpedienteRecomercializacion,
+  InmobiliariaDirectorio,
+  PropuestaInmobiliaria,
+  LeadInmobiliario,
   DocumentoAnalizado,
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
@@ -45,6 +52,21 @@ import {
 } from './data/mockData';
 import { generarInformeInteligente } from './utils/reportGenerator';
 import {
+  obtenerTodosCobros,
+  generarPeriodosParaContrato,
+  actualizarEstadosVencimiento,
+} from './utils/cobrosEngine';
+import {
+  crearGastoRecurrente,
+  generarGastosRecurrentes,
+  normalizarRecurrente,
+} from './utils/gastosEngine';
+import {
+  calcularCuotaConstante,
+  cuotaDelPeriodo,
+  generarTablaAmortizacion,
+} from './utils/prestamosEngine';
+import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
   subscribeCandidatos,
@@ -54,6 +76,13 @@ import {
   subscribeVisitSlots,
   subscribeSolicitudesDoc,
   subscribeContratos,
+  subscribeGastos,
+  subscribeGastosRecurrentes,
+  subscribePrestamos,
+  subscribeExpedientesRecomercializacion,
+  subscribeInmobiliarias,
+  subscribePropuestasInmobiliaria,
+  subscribeLeadsInmobiliarios,
   subscribeAseguradoras,
   subscribeSolicitudesSeguro,
   subscribeGmailConfig,
@@ -63,8 +92,6 @@ import {
   subscribeEspecialidades,
   subscribeAuditLogs,
   subscribeModulosConfig,
-  subscribeIncidencias,
-  subscribeTrabajosProfesionales,
   saveInmuebleFirestore,
   deleteInmuebleFirestore,
   saveCandidatoFirestore,
@@ -83,6 +110,19 @@ import {
   deleteSolicitudDocFirestore,
   saveContratoFirestore,
   deleteContratoFirestore,
+  saveGastoFirestore,
+  deleteGastoFirestore,
+  saveGastoRecurrenteFirestore,
+  deleteGastoRecurrenteFirestore,
+  savePrestamoFirestore,
+  deletePrestamoFirestore,
+  saveExpedienteRecomercializacionFirestore,
+  deleteExpedienteRecomercializacionFirestore,
+  saveInmobiliariaFirestore,
+  deleteInmobiliariaFirestore,
+  savePropuestaInmobiliariaFirestore,
+  saveLeadInmobiliarioFirestore,
+  deleteFotoInspeccionStorage,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
   saveSolicitudSeguroFirestore,
@@ -132,9 +172,15 @@ import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
-import { IncidenciasSection } from './components/sections/IncidenciasSection';
-import { ProfesionalesSection } from './components/sections/ProfesionalesSection';
+import { FinanciacionSection } from './components/sections/FinanciacionSection';
+import { GastosSection } from './components/sections/GastosSection';
+import { FiscalidadSection } from './components/sections/FiscalidadSection';
+import { InformesSection } from './components/sections/InformesSection';
+import { PolizasSegurosSection } from './components/sections/PolizasSegurosSection';
+import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
+import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
+import { IncidenciasSection } from './components/sections/IncidenciasSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
 import { AdministracionSection } from './components/sections/AdministracionSection';
@@ -152,6 +198,7 @@ import {
   canAccessInmueble,
   canAccessContrato,
   canAccessCandidato,
+  syncAuthIndex,
 } from './lib/authService';
 import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
@@ -160,8 +207,6 @@ import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistr
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
-  const [incidenciasCount, setIncidenciasCount] = useState<number>(0);
-  const [trabajosActivosCount, setTrabajosActivosCount] = useState<number>(0);
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -218,6 +263,19 @@ export default function App() {
     } catch (e) {}
     return INITIAL_CONTRATOS;
   });
+  // FASE 2.0: gastos (explotación vs financiación). Colección nueva, sin caché local.
+  const [gastos, setGastos] = useState<Gasto[]>([]);
+  // FASE 2.2: plantillas de gastos recurrentes.
+  const [gastosRecurrentes, setGastosRecurrentes] = useState<GastoRecurrente[]>([]);
+  // FASE 2.3: préstamos / hipotecas.
+  const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
+  // FASE 3.0/3.1: expedientes de recomercialización y contexto de alta.
+  const [expedientesRecomerc, setExpedientesRecomerc] = useState<ExpedienteRecomercializacion[]>([]);
+  // FASE 3.6: bolsa de inmobiliarias, RFPs (propuestas) y leads.
+  const [inmobiliariasDirectorio, setInmobiliariasDirectorio] = useState<InmobiliariaDirectorio[]>([]);
+  const [propuestasInmobiliaria, setPropuestasInmobiliaria] = useState<PropuestaInmobiliaria[]>([]);
+  const [leadsInmobiliarios, setLeadsInmobiliarios] = useState<LeadInmobiliario[]>([]);
+  const [nuevoExpedienteCtx, setNuevoExpedienteCtx] = useState<ContextoNuevoExpediente | null>(null);
   const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
     try {
@@ -340,7 +398,20 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'configuracion'];
+      const allowedSections: SectionType[] = [
+        'propietarios',
+        'inmuebles',
+        'formalizacion',
+        'cobros',
+        'gastos',
+        'financiacion',
+        'fiscal',
+        'informes',
+        'polizas',
+        'incidencias',
+        'recomercializacion',
+        'configuracion',
+      ];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
@@ -397,6 +468,85 @@ export default function App() {
     }
     return [];
   }, [currentUser, contratos, scopedInmuebles]);
+
+  // FASE 2.0: gastos visibles. La suscripción ya viene acotada para el propietario;
+  // aquí se refuerza el filtro (defensa en profundidad) y se entrega todo al admin.
+  const scopedGastos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return gastos;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return gastos.filter(
+        (g) =>
+          (currentUser.propietarioId && g.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(g.inmuebleId)
+      );
+    }
+    return []; // Los profesionales no acceden a datos económicos.
+  }, [currentUser, gastos, scopedInmuebles]);
+
+  // FASE 2.2: plantillas recurrentes visibles (la suscripción ya viene acotada).
+  const scopedRecurrentes = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return gastosRecurrentes;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return gastosRecurrentes.filter(
+        (r) =>
+          (currentUser.propietarioId && r.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(r.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, gastosRecurrentes, scopedInmuebles]);
+
+  // FASE 2.3: préstamos visibles (la suscripción ya viene acotada por propietario).
+  const scopedPrestamos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return prestamos;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return prestamos.filter(
+        (p) =>
+          (currentUser.propietarioId && p.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(p.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, prestamos, scopedInmuebles]);
+
+  // FASE 3.0: expedientes de recomercialización visibles (la suscripción ya
+  // viene acotada por propietarioId; aquí se refuerza por inmueble asignado).
+  const scopedExpedientesRecomerc = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return expedientesRecomerc;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return expedientesRecomerc.filter(
+        (e) =>
+          (currentUser.propietarioId && e.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(e.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, expedientesRecomerc, scopedInmuebles]);
+
+  // Cobros derivados de los contratos visibles para el usuario (con su histórico por inmuebleId).
+  // El motor genera los periodos al vuelo cuando un contrato aún no los tiene persistidos.
+  const scopedCobros = useMemo(() => obtenerTodosCobros(scopedContratos), [scopedContratos]);
+
+  // Número de mensualidades que requieren atención: ya vencidas y no cobradas o en incidencia.
+  const cobrosPendientesCount = useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(23, 59, 59, 999);
+    return scopedCobros.filter((c) => {
+      if (c.estado === 'RETRASADO' || c.estado === 'INCIDENCIA') return true;
+      if (c.estado === 'PENDIENTE' && c.fechaVencimiento) {
+        return new Date(`${c.fechaVencimiento}T23:59:59`) <= hoy;
+      }
+      return false;
+    }).length;
+  }, [scopedCobros]);
 
   const scopedCandidatos = useMemo(() => {
     if (!currentUser) return [];
@@ -600,6 +750,15 @@ export default function App() {
       seedInitialDataIfEmpty();
     }
 
+    // FASE 1.4: ámbito de datos para que las escuchas nunca soliciten la
+    // colección completa a un propietario (defensa en profundidad; la UI ya
+    // filtraba, pero ahora la propia consulta queda acotada en origen).
+    const dataScope = {
+      tipoPerfil: currentUser.tipoPerfil,
+      propietarioId: currentUser.propietarioId,
+      inmuebleIds: currentUser.inmuebleIds || [],
+    };
+
     const unsubscribeCand = subscribeCandidatos((data) => {
       if (data && data.length > 0) {
         setCandidatos(data);
@@ -620,7 +779,7 @@ export default function App() {
         setPropietarios(data);
         try { localStorage.setItem('rentselect_propietarios', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }, dataScope);
 
     const unsubscribeSol = subscribeSolicitudes((data) => {
       if (data && data.length > 0) {
@@ -634,7 +793,38 @@ export default function App() {
         setContratos(data);
         try { localStorage.setItem('rentselect_contratos', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }, dataScope);
+
+    // FASE 2.0: gastos acotados por propietario (profesionales no reciben nada).
+    const unsubscribeGastos = subscribeGastos((data) => {
+      setGastos(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 2.2: plantillas recurrentes con el mismo ámbito.
+    const unsubscribeRecurrentes = subscribeGastosRecurrentes((data) => {
+      setGastosRecurrentes(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 2.3: préstamos/hipotecas con el mismo ámbito.
+    const unsubscribePrestamos = subscribePrestamos((data) => {
+      setPrestamos(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 3.0: expedientes de recomercialización con el mismo ámbito.
+    const unsubscribeExpedientes = subscribeExpedientesRecomercializacion((data) => {
+      setExpedientesRecomerc(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 3.6: directorio de inmobiliarias (bolsa común) con RFPs y leads acotados por propietario.
+    const unsubscribeInmobiliarias = subscribeInmobiliarias((data) => {
+      setInmobiliariasDirectorio(Array.isArray(data) ? data : []);
+    }, dataScope);
+    const unsubscribePropuestas = subscribePropuestasInmobiliaria((data) => {
+      setPropuestasInmobiliaria(Array.isArray(data) ? data : []);
+    }, dataScope);
+    const unsubscribeLeads = subscribeLeadsInmobiliarios((data) => {
+      setLeadsInmobiliarios(Array.isArray(data) ? data : []);
+    }, dataScope);
 
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
@@ -644,20 +834,6 @@ export default function App() {
       if (data && data.length > 0) {
         setSolicitudesSeguro(data);
         try { localStorage.setItem('rentselect_solicitudes_seguro', JSON.stringify(data)); } catch (e) {}
-      }
-    });
-
-    const unsubscribeIncidenciasHook = subscribeIncidencias((data) => {
-      if (data) {
-        const abiertas = data.filter((i) => i.estado !== 'RESUELTA' && i.estado !== 'CANCELADA').length;
-        setIncidenciasCount(abiertas);
-      }
-    });
-
-    const unsubscribeTrabajosHook = subscribeTrabajosProfesionales((data) => {
-      if (data) {
-        const activos = data.filter((t) => t.estado !== 'FINALIZADO' && t.estado !== 'CANCELADO').length;
-        setTrabajosActivosCount(activos);
       }
     });
 
@@ -701,10 +877,15 @@ export default function App() {
       unsubscribeProp();
       unsubscribeSol();
       unsubscribeContratos();
+      unsubscribeGastos();
+      unsubscribeRecurrentes();
+      unsubscribePrestamos();
+      unsubscribeExpedientes();
+      unsubscribeInmobiliarias();
+      unsubscribePropuestas();
+      unsubscribeLeads();
       unsubscribeProfesionalesHook();
       unsubscribeSolicitudesSeguro();
-      unsubscribeIncidenciasHook();
-      unsubscribeTrabajosHook();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
       if (unsubscribeGmail) unsubscribeGmail();
       if (unsubscribeUsuariosHook) unsubscribeUsuariosHook();
@@ -714,6 +895,110 @@ export default function App() {
 
   // Ref to track candidate questionnaires currently being auto-analyzed
   const autoAnalyzingSetRef = React.useRef<Set<string>>(new Set());
+
+  // Ref para evitar reescrituras innecesarias al materializar el calendario de cobros.
+  // Clave: contrato.id -> firma (día actual + nº periodos + nº retrasados + último periodo).
+  const cobrosEnsureRef = React.useRef<Map<string, string>>(new Map());
+
+  // Fases 1.1 y 1.3 — Materializa el calendario de cobros y sincroniza estados por fecha.
+  // Para cada contrato visible: se generan los periodos que falten y se pasa a RETRASADO
+  // de forma automática (con trazabilidad) toda mensualidad PENDIENTE vencida más el margen
+  // de cortesía. No se tocan RECIBIDO/VERIFICADO/INCIDENCIA ni los datos ya registrados.
+  useEffect(() => {
+    if (!currentUser) return;
+    const hoy = new Date();
+
+    scopedContratos.forEach((contrato) => {
+      const sincro = actualizarEstadosVencimiento(contrato, hoy);
+      if (sincro.periodos.length === 0) return;
+
+      const retrasados = sincro.periodos.filter((p) => p.estado === 'RETRASADO').length;
+      const firma = `${hoy.toISOString().slice(0, 10)}|${sincro.periodos.length}|${retrasados}|${sincro.periodos[sincro.periodos.length - 1].periodoMesAnio}`;
+      if (cobrosEnsureRef.current.get(contrato.id) === firma) return;
+      cobrosEnsureRef.current.set(contrato.id, firma);
+
+      if (sincro.necesitaGuardado) {
+        saveContratoFirestore(sincro.contratoActualizado);
+        setContratos((prev) =>
+          prev.map((c) => (c.id === sincro.contratoActualizado.id ? sincro.contratoActualizado : c))
+        );
+      }
+    });
+  }, [currentUser, scopedContratos]);
+
+  // FASE 2.2 — Materializa automáticamente los apuntes pendientes de las
+  // plantillas recurrentes (hasta el mes en curso). Es idempotente: los IDs son
+  // deterministas y nunca se pisan pagos/ediciones de apuntes ya existentes.
+  const recurrentesGenRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || scopedRecurrentes.length === 0) return;
+    const firma = scopedRecurrentes
+      .map((r) => `${r.id}:${r.activo ? 1 : 0}:${r.ultimoPeriodoGenerado || ''}`)
+      .sort()
+      .join('|');
+    if (recurrentesGenRef.current.has(firma)) return;
+
+    const { gastos: nuevos, plantillasActualizadas } = generarGastosRecurrentes(
+      scopedRecurrentes,
+      scopedGastos
+    );
+    if (nuevos.length === 0) {
+      recurrentesGenRef.current.add(firma);
+      return;
+    }
+    recurrentesGenRef.current.add(firma);
+
+    (async () => {
+      for (const g of nuevos) {
+        setGastos((prev) => (prev.some((x) => x.id === g.id) ? prev : [g, ...prev]));
+        await saveGastoFirestore(g);
+      }
+      for (const r of plantillasActualizadas) {
+        setGastosRecurrentes((prev) => prev.map((x) => (x.id === r.id ? r : x)));
+        await saveGastoRecurrenteFirestore(r);
+      }
+    })();
+  }, [currentUser, scopedRecurrentes, scopedGastos]);
+
+  // FASE 2.3 — Cuando un recibo de CUOTA_HIPOTECARIA procede de la plantilla
+  // vinculada a un préstamo, desglosa automáticamente capital e intereses según
+  // su cuadro de amortización. Solo rellena recibos sin desglose (no pisa
+  // ediciones manuales).
+  const prestamosSplitRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || scopedPrestamos.length === 0) return;
+    const pendientes: Gasto[] = [];
+    scopedPrestamos.forEach((p) => {
+      if (!p.gastoRecurrenteId || !p.activo) return;
+      scopedGastos.forEach((g) => {
+        if (
+          g.creadoPorId === p.gastoRecurrenteId &&
+          g.tipo === 'FINANCIACION' &&
+          g.periodoMesAnio &&
+          g.intereses === undefined &&
+          g.capitalAmortizado === undefined &&
+          !prestamosSplitRef.current.has(g.id)
+        ) {
+          const split = cuotaDelPeriodo(p, g.periodoMesAnio);
+          if (split) {
+            prestamosSplitRef.current.add(g.id);
+            // El importe del recibo se ajusta al cuadro (carencia: sólo intereses;
+            // mes con amortización anticipada: incluye esa salida de caja).
+            pendientes.push({
+              ...g,
+              importe: split.cuota,
+              capitalAmortizado: split.capital,
+              intereses: split.intereses,
+            });
+          }
+        }
+      });
+    });
+    pendientes.forEach((g) => {
+      setGastos((prev) => prev.map((x) => (x.id === g.id ? g : x)));
+      saveGastoFirestore(g);
+    });
+  }, [currentUser, scopedPrestamos, scopedGastos]);
 
   // Auto-analyze any candidate questionnaire that is completed but missing AI analysis
   useEffect(() => {
@@ -1725,14 +2010,33 @@ export default function App() {
     savedContrato: ContratoFormalizacion,
     marcarInmuebleAlquilado?: boolean
   ) => {
+    // FASE 1.4: si quien formaliza es un propietario, el contrato debe llevar
+    // SIEMPRE su propietarioId (clave de aislamiento y de las reglas de acceso),
+    // aunque el inmueble aún no lo tuviera informado.
+    let contratoAsegurado = savedContrato;
+    if (
+      currentUser?.tipoPerfil === 'PROPIETARIO' &&
+      currentUser.propietarioId &&
+      !savedContrato.propietarioId
+    ) {
+      contratoAsegurado = { ...savedContrato, propietarioId: currentUser.propietarioId };
+    }
+
+    // Garantiza que el contrato nazca ya con su calendario de cobros materializado,
+    // conservando cualquier periodo ya existente (pagos/justificantes no se tocan).
+    const contratoConCobros: ContratoFormalizacion =
+      contratoAsegurado.registroCobros && contratoAsegurado.registroCobros.length > 0
+        ? contratoAsegurado
+        : { ...contratoAsegurado, registroCobros: generarPeriodosParaContrato(contratoAsegurado) };
+
     setContratos((prev) => {
-      const exists = prev.some((c) => c.id === savedContrato.id);
+      const exists = prev.some((c) => c.id === contratoConCobros.id);
       if (exists) {
-        return prev.map((c) => (c.id === savedContrato.id ? savedContrato : c));
+        return prev.map((c) => (c.id === contratoConCobros.id ? contratoConCobros : c));
       }
-      return [savedContrato, ...prev];
+      return [contratoConCobros, ...prev];
     });
-    await saveContratoFirestore(savedContrato);
+    await saveContratoFirestore(contratoConCobros);
 
     if (marcarInmuebleAlquilado && savedContrato.inmuebleId) {
       setInmuebles((prev) =>
@@ -1803,6 +2107,236 @@ export default function App() {
   const handleDeleteContrato = async (contratoId: string) => {
     setContratos((prev) => prev.filter((c) => c.id !== contratoId));
     await deleteContratoFirestore(contratoId);
+  };
+
+  // FASE 2.0 — Handlers de gastos. Se garantiza SIEMPRE propietarioId (clave de
+  // aislamiento), resolviéndolo desde el inmueble o el propietario autenticado.
+  // Devuelve el documento final (lo necesita la subida de factura del modal).
+  const resolvePropietarioId = (inmuebleId: string, previo?: string): string => {
+    if (previo) return previo;
+    const inm = inmuebles.find((i) => i.id === inmuebleId);
+    return (
+      inm?.propietarioId ||
+      inm?.propietarioPrincipalId ||
+      (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId || '' : '') ||
+      ''
+    );
+  };
+
+  const handleSaveGasto = async (gasto: Gasto): Promise<Gasto> => {
+    const finalGasto: Gasto = {
+      ...gasto,
+      propietarioId: resolvePropietarioId(gasto.inmuebleId, gasto.propietarioId),
+    };
+
+    setGastos((prev) => {
+      const exists = prev.some((g) => g.id === finalGasto.id);
+      return exists
+        ? prev.map((g) => (g.id === finalGasto.id ? finalGasto : g))
+        : [finalGasto, ...prev];
+    });
+    await saveGastoFirestore(finalGasto);
+    return finalGasto;
+  };
+
+  const handleDeleteGasto = async (gastoId: string) => {
+    setGastos((prev) => prev.filter((g) => g.id !== gastoId));
+    await deleteGastoFirestore(gastoId);
+  };
+
+  // FASE 2.2 — Plantillas de gastos recurrentes.
+  const handleSaveRecurrente = async (plantilla: GastoRecurrente): Promise<void> => {
+    const finalPlantilla: GastoRecurrente = {
+      ...plantilla,
+      propietarioId: resolvePropietarioId(plantilla.inmuebleId, plantilla.propietarioId),
+    };
+    setGastosRecurrentes((prev) => {
+      const exists = prev.some((r) => r.id === finalPlantilla.id);
+      return exists
+        ? prev.map((r) => (r.id === finalPlantilla.id ? finalPlantilla : r))
+        : [finalPlantilla, ...prev];
+    });
+    await saveGastoRecurrenteFirestore(finalPlantilla);
+  };
+
+  const handleDeleteRecurrente = async (plantillaId: string) => {
+    // Los apuntes ya materializados se conservan (histórico).
+    setGastosRecurrentes((prev) => prev.filter((r) => r.id !== plantillaId));
+    await deleteGastoRecurrenteFirestore(plantillaId);
+  };
+
+  // FASE 2.3 — Préstamos. Al guardar se crea/actualiza la plantilla recurrente
+  // de la cuota (importe = cuota constante francesa); al eliminar se desactiva
+  // esa plantilla, conservando los recibos ya generados.
+  const handleSavePrestamo = async (prestamo: Prestamo): Promise<void> => {
+    const propietarioId = resolvePropietarioId(prestamo.inmuebleId, prestamo.propietarioId);
+    const inm = inmuebles.find((i) => i.id === prestamo.inmuebleId);
+
+    // FASE 2.4: con carencia/tipo variable, la primera cuota debida y el mes de
+    // inicio de la plantilla se derivan del cuadro; en el caso simple coinciden
+    // con la cuota constante francesa y el mes de inicio del préstamo.
+    const tabla = generarTablaAmortizacion(prestamo);
+    const primeraConCuota = tabla.find((f) => f.cuota > 0);
+    const cuotaNominal =
+      primeraConCuota?.cuota ||
+      calcularCuotaConstante(prestamo.capitalInicial, prestamo.tasaInteresAnual, prestamo.plazoMeses);
+    const inicioPlantilla = primeraConCuota?.periodo || prestamo.fechaInicio;
+
+    const concepto = `Cuota ${prestamo.tipo === 'HIPOTECARIO' ? 'hipotecaria' : 'de préstamo'}${
+      inm ? ` · ${inm.direccion}` : ''
+    }`;
+
+    const recurrenteId = prestamo.gastoRecurrenteId;
+    const existente = recurrenteId
+      ? gastosRecurrentes.find((r) => r.id === recurrenteId)
+      : undefined;
+
+    const base = crearGastoRecurrente({
+      inmuebleId: prestamo.inmuebleId,
+      propietarioId,
+      categoria: 'CUOTA_HIPOTECARIA',
+      concepto,
+      importe: cuotaNominal,
+      frecuencia: 'MENSUAL',
+      diaVencimiento: prestamo.diaVencimiento,
+      fechaInicio: inicioPlantilla,
+      creadoPor: currentUser?.nombre,
+      creadoPorId: currentUser?.id,
+    });
+    const plantilla: GastoRecurrente = normalizarRecurrente({
+      ...base,
+      ...(recurrenteId ? { id: recurrenteId } : {}),
+      proveedor: prestamo.entidad?.trim() || undefined,
+      concepto,
+      importe: cuotaNominal,
+      aCargoDe: 'arrendador',
+      deducible: false,
+      metodoPago: 'domiciliacion',
+      notas: prestamo.descripcion?.trim() || undefined,
+      activo: prestamo.activo,
+      ...(existente
+        ? { ultimoPeriodoGenerado: existente.ultimoPeriodoGenerado, createdAt: existente.createdAt }
+        : {}),
+    });
+    await handleSaveRecurrente(plantilla);
+
+    const finalPrestamo: Prestamo = {
+      ...prestamo,
+      propietarioId,
+      gastoRecurrenteId: plantilla.id,
+      updatedAt: new Date().toISOString(),
+    };
+    setPrestamos((prev) => {
+      const exists = prev.some((p) => p.id === finalPrestamo.id);
+      return exists
+        ? prev.map((p) => (p.id === finalPrestamo.id ? finalPrestamo : p))
+        : [finalPrestamo, ...prev];
+    });
+    await savePrestamoFirestore(finalPrestamo);
+  };
+
+  const handleDeletePrestamo = async (prestamoId: string) => {
+    const prestamo = prestamos.find((p) => p.id === prestamoId);
+    if (prestamo?.gastoRecurrenteId) {
+      const plantilla = gastosRecurrentes.find((r) => r.id === prestamo.gastoRecurrenteId);
+      // Se desactiva la plantilla vinculada; los recibos históricos se conservan.
+      if (plantilla && plantilla.activo) {
+        await handleSaveRecurrente({
+          ...plantilla,
+          activo: false,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+    setPrestamos((prev) => prev.filter((p) => p.id !== prestamoId));
+    await deletePrestamoFirestore(prestamoId);
+  };
+
+  // FASE 3.1 — Expedientes de recomercialización.
+  const handleSaveExpedienteRecomerc = async (expediente: ExpedienteRecomercializacion) => {
+    const propietarioId = resolvePropietarioId(expediente.inmuebleId, expediente.propietarioId);
+    const finalExp: ExpedienteRecomercializacion = { ...expediente, propietarioId };
+    setExpedientesRecomerc((prev) => {
+      const exists = prev.some((e) => e.id === finalExp.id);
+      return exists
+        ? prev.map((e) => (e.id === finalExp.id ? finalExp : e))
+        : [finalExp, ...prev];
+    });
+    await saveExpedienteRecomercializacionFirestore(finalExp);
+  };
+  const handleDeleteExpedienteRecomerc = async (id: string) => {
+    // FASE 3.2: limpia también las fotos de inspección de Storage (best-effort).
+    const expediente = expedientesRecomerc.find((e) => e.id === id);
+    const fotos = expediente?.revisionFotografica?.fotografias ?? [];
+    await Promise.all(fotos.map((f) => deleteFotoInspeccionStorage(f.storagePath)));
+    setExpedientesRecomerc((prev) => prev.filter((e) => e.id !== id));
+    await deleteExpedienteRecomercializacionFirestore(id);
+  };
+  // Puntos de entrada desde la ficha del inmueble / el contrato.
+  const handleRecomercializarInmueble = (inmuebleId: string, contratoAnteriorId?: string) => {
+    setNuevoExpedienteCtx({ inmuebleId, contratoAnteriorId });
+    setActiveSection('recomercializacion');
+  };
+
+  // FASE 3.6 — directorio de inmobiliarias, propuestas (RFP) y leads.
+  const handleSaveInmobiliaria = async (agencia: InmobiliariaDirectorio) => {
+    setInmobiliariasDirectorio((prev) => {
+      const exists = prev.some((a) => a.id === agencia.id);
+      return exists ? prev.map((a) => (a.id === agencia.id ? agencia : a)) : [agencia, ...prev];
+    });
+    await saveInmobiliariaFirestore(agencia);
+  };
+  const handleDeleteInmobiliaria = async (id: string) => {
+    setInmobiliariasDirectorio((prev) => prev.filter((a) => a.id !== id));
+    await deleteInmobiliariaFirestore(id);
+  };
+  const handleSavePropuestaInmobiliaria = async (propuesta: PropuestaInmobiliaria) => {
+    setPropuestasInmobiliaria((prev) => {
+      const exists = prev.some((p) => p.id === propuesta.id);
+      return exists ? prev.map((p) => (p.id === propuesta.id ? propuesta : p)) : [propuesta, ...prev];
+    });
+    await savePropuestaInmobiliariaFirestore(propuesta);
+  };
+  const handleSaveLeadInmobiliario = async (lead: LeadInmobiliario) => {
+    setLeadsInmobiliarios((prev) => {
+      const exists = prev.some((l) => l.id === lead.id);
+      return exists ? prev.map((l) => (l.id === lead.id ? lead : l)) : [lead, ...prev];
+    });
+    await saveLeadInmobiliarioFirestore(lead);
+  };
+
+  // FASE 3.6 — cierre del ciclo: garantiza que el contrato anterior queda
+  // FINALIZADO y el inmueble liberado (disponible) para un nuevo anuncio o
+  // contrato, SIEMPRE sobre la misma ficha (mismo inmuebleId).
+  const handleCerrarExpedienteRecomerc = async (
+    expediente: ExpedienteRecomercializacion,
+    _resultado: 'REARRENDADO' | 'VENDIDO'
+  ) => {
+    await handleSaveExpedienteRecomerc(expediente);
+
+    const contratoVinculado =
+      (expediente.contratoAnteriorId && contratos.find((c) => c.id === expediente.contratoAnteriorId)) ||
+      contratos
+        .filter((c) => c.inmuebleId === expediente.inmuebleId && c.estado !== 'FINALIZADO')
+        .sort((a, b) => (b.fechaInicioContrato || '').localeCompare(a.fechaInicioContrato || ''))[0];
+
+    if (contratoVinculado && contratoVinculado.estado !== 'FINALIZADO') {
+      // Reutiliza el flujo oficial: finaliza el contrato y libera el inmueble.
+      await handleFinalizarContrato(contratoVinculado.id);
+    } else {
+      const inm = inmuebles.find((i) => i.id === expediente.inmuebleId);
+      if (inm && (inm.estado !== 'disponible' || inm.contratoActivoId || inm.inquilinoActualId)) {
+        const libre: Inmueble = {
+          ...inm,
+          estado: 'disponible',
+          inquilinoActualId: undefined,
+          inquilinoActualNombre: undefined,
+          contratoActivoId: undefined,
+        };
+        setInmuebles((prev) => prev.map((i) => (i.id === libre.id ? libre : i)));
+        await saveInmuebleFirestore(libre);
+      }
+    }
   };
 
   // Handlers for Propietarios y Cuentas Bancarias
@@ -2078,6 +2612,11 @@ export default function App() {
     await saveUsuarioFirestore(nuevoUsuario);
     setUsuarios((prev) => [nuevoUsuario, ...prev]);
 
+    // FASE 1.4: crear el espejo de identidad usuarios_auth/{uid} ANTES de la
+    // ficha de propietario/profesional, porque las reglas de escritura de esas
+    // colecciones resuelven el rol/propietarioId a través de ese documento.
+    await syncAuthIndex(nuevoUsuario);
+
     if (propietarioData && nuevoUsuario.propietarioId) {
       const nuevoProp: Propietario = {
         id: nuevoUsuario.propietarioId,
@@ -2332,18 +2871,6 @@ export default function App() {
     );
   }
 
-  const cobrosPendientesCount = useMemo(() => {
-    let count = 0;
-    scopedContratos.forEach((c) => {
-      c.registroCobros?.forEach((cobro) => {
-        if (cobro.estado === 'PENDIENTE' || cobro.estado === 'RETRASADO' || cobro.estado === 'INCIDENCIA') {
-          count++;
-        }
-      });
-    });
-    return count;
-  }, [scopedContratos]);
-
   return (
     <div className="min-h-screen bg-slate-100/70 font-sans text-slate-800 flex flex-col md:flex-row pb-16 md:pb-0 antialiased">
       {/* Desktop Sidebar Navigation */}
@@ -2358,8 +2885,6 @@ export default function App() {
         contratosCount={scopedContratos.length}
         solicitudesSeguroCount={solicitudesSeguro.length}
         cobrosPendientesCount={cobrosPendientesCount}
-        incidenciasCount={incidenciasCount}
-        trabajosActivosCount={trabajosActivosCount}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
@@ -2379,8 +2904,6 @@ export default function App() {
           contratosCount={scopedContratos.length}
           solicitudesSeguroCount={solicitudesSeguro.length}
           cobrosPendientesCount={cobrosPendientesCount}
-          incidenciasCount={incidenciasCount}
-          trabajosActivosCount={trabajosActivosCount}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -2423,6 +2946,7 @@ export default function App() {
                   setShowCrearProfesionalModal(true);
                 }}
                 onSaveProfesional={handleSaveProfesional}
+                onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
               />
             ) : (
@@ -2481,8 +3005,11 @@ export default function App() {
               candidatos={scopedCandidatos}
               solicitudesDoc={solicitudesDoc}
               userProfile={userProfile}
+              currentUser={currentUser}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onDeleteContrato={handleDeleteContrato}
+              onRecomercializarContrato={(c) => handleRecomercializarInmueble(c.inmuebleId, c.id)}
+              onSaveContrato={async (c) => { await saveContratoFirestore(c); }}
             />
           )}
 
@@ -2493,9 +3020,83 @@ export default function App() {
               propietarios={scopedPropietarios}
               currentUser={currentUser}
               onSaveContrato={handleSaveContrato}
-              onNavigateToInmueble={(inmId) => {
-                setActiveSection('inmuebles');
-              }}
+              onNavigateToInmueble={() => setActiveSection('inmuebles')}
+            />
+          )}
+
+          {activeSection === 'gastos' && (
+            <GastosSection
+              gastos={scopedGastos}
+              cobros={scopedCobros}
+              recurrentes={scopedRecurrentes}
+              prestamos={scopedPrestamos}
+              inmuebles={scopedInmuebles}
+              currentUser={currentUser}
+              onSaveGasto={handleSaveGasto}
+              onDeleteGasto={handleDeleteGasto}
+              onSaveRecurrente={handleSaveRecurrente}
+              onDeleteRecurrente={handleDeleteRecurrente}
+              onSavePrestamo={handleSavePrestamo}
+              onDeletePrestamo={handleDeletePrestamo}
+            />
+          )}
+
+          {activeSection === 'financiacion' && (
+            <FinanciacionSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'fiscal' && (
+            <FiscalidadSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={scopedGastos}
+              currentUser={currentUser}
+              onNavigateToInmueble={() => setActiveSection('inmuebles')}
+            />
+          )}
+
+          {activeSection === 'informes' && (
+            <InformesSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={scopedGastos}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'polizas' && (
+            <PolizasSegurosSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser || undefined}
+              modo={currentUser?.tipoPerfil === 'PROPIETARIO' ? 'PROPIETARIO' : 'ADMIN'}
+            />
+          )}
+
+          {activeSection === 'recomercializacion' && (
+            <RecomercializacionSection
+              expedientes={scopedExpedientesRecomerc}
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              profesionales={scopedProfesionales}
+              currentUser={currentUser}
+              inmobiliarias={inmobiliariasDirectorio}
+              propuestas={propuestasInmobiliaria}
+              leads={leadsInmobiliarios}
+              contextoNuevo={nuevoExpedienteCtx}
+              onConsumirContexto={() => setNuevoExpedienteCtx(null)}
+              onCreate={handleSaveExpedienteRecomerc}
+              onGuardar={handleSaveExpedienteRecomerc}
+              onEliminar={handleDeleteExpedienteRecomerc}
+              onGuardarInmobiliaria={handleSaveInmobiliaria}
+              onEliminarInmobiliaria={handleDeleteInmobiliaria}
+              onGuardarPropuesta={handleSavePropuestaInmobiliaria}
+              onGuardarLead={handleSaveLeadInmobiliario}
+              onCerrarCiclo={handleCerrarExpedienteRecomerc}
             />
           )}
 
@@ -2506,16 +3107,6 @@ export default function App() {
               contratos={scopedContratos}
               profesionales={scopedProfesionales}
               currentUser={currentUser}
-            />
-          )}
-
-          {activeSection === 'profesionales' && (
-            <ProfesionalesSection
-              inmuebles={scopedInmuebles}
-              propietarios={scopedPropietarios}
-              currentUser={currentUser}
-              especialidadesDisponibles={especialidades}
-              onNavigateToIncidencias={() => setActiveSection('incidencias')}
             />
           )}
 
@@ -2540,10 +3131,13 @@ export default function App() {
               onUpdateSlot={handleUpdateSlot}
               onNavigateToPropietarios={() => setActiveSection('propietarios')}
               contratos={scopedContratos}
+              profesionales={scopedProfesionales}
               currentUser={currentUser}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onFinalizarContrato={handleFinalizarContrato}
-              onSaveContrato={handleSaveContrato}
+              onRecomercializarInmueble={(inmuebleId, contratoAnteriorId) =>
+                handleRecomercializarInmueble(inmuebleId, contratoAnteriorId)
+              }
             />
           )}
 
@@ -2634,6 +3228,7 @@ export default function App() {
                   setShowCrearProfesionalModal(true);
                 }}
                 onSaveProfesional={handleSaveProfesional}
+                onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
               />
             )

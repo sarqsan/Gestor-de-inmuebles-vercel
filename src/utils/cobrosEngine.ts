@@ -23,6 +23,207 @@ export const MESES_NOMBRES = [
   'Diciembre',
 ];
 
+// Días de aviso previo al vencimiento y margen de cortesía antes de marcar RETRASADO.
+export const DIAS_AVISO_VENCIMIENTO = 5;
+export const DIAS_GRACIA_RETRASO = 2;
+
+/**
+ * Compara por fecha de calendario (sin horas).
+ * Devuelve el nº de días entre hoy y la fecha indicada:
+ *  negativo = ya pasó; 0 = hoy; positivo = faltan esos días.
+ */
+export function diasHastaFecha(fechaISO: string, fechaRef: Date = new Date()): number | null {
+  if (!fechaISO) return null;
+  const objetivo = new Date(`${fechaISO}T00:00:00`);
+  if (isNaN(objetivo.getTime())) return null;
+  const ref = new Date(fechaRef.getFullYear(), fechaRef.getMonth(), fechaRef.getDate());
+  const ms = objetivo.getTime() - ref.getTime();
+  return Math.round(ms / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Fase 1.3 — Sincroniza el estado derivado de las mensualidades con el calendario.
+ * ÚNICA transición automática: PENDIENTE → RETRASADO cuando se supera el vencimiento
+ * más el margen de cortesía. No toca nunca RECIBIDO, VERIFICADO ni INCIDENCIA (la
+ * incidencia es siempre manual) y registra el cambio en la trazabilidad una sola vez.
+ * También se asegura de que existan todos los periodos previsibles del contrato.
+ */
+export function actualizarEstadosVencimiento(
+  contrato: ContratoFormalizacion,
+  fechaRef: Date = new Date(),
+  diasGracia: number = DIAS_GRACIA_RETRASO
+): {
+  contratoActualizado: ContratoFormalizacion;
+  periodos: CobroPeriodo[];
+  periodosNuevos: number;
+  cambiosEstado: number;
+  necesitaGuardado: boolean;
+} {
+  const periodos = generarPeriodosParaContrato(contrato);
+  const periodosPrevios = contrato.registroCobros?.length || 0;
+  let cambiosEstado = 0;
+
+  const actualizados = periodos.map((p) => {
+    const dias = diasHastaFecha(p.fechaVencimiento, fechaRef);
+    const estaImpagado = (p.importeRecibido || 0) < (p.importePrevisto || 0);
+    if (p.estado === 'PENDIENTE' && estaImpagado && dias !== null && dias < -diasGracia) {
+      cambiosEstado += 1;
+      const cambioItem: HistorialCobroItem = {
+        id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        fecha: fechaRef.toISOString(),
+        usuarioNombre: 'Sistema',
+        accion: 'Vencimiento superado sin pago registrado',
+        estadoAnterior: 'PENDIENTE',
+        estadoNuevo: 'RETRASADO',
+        detalles: `El periodo ${p.nombreMes} superó el vencimiento (${p.fechaVencimiento}) más ${diasGracia} días de cortesía sin registrarse el cobro.`,
+      };
+      return {
+        ...p,
+        estado: 'RETRASADO' as EstadoCobroAlquiler,
+        ultimaModificacion: fechaRef.toISOString(),
+        historialCambios: [cambioItem, ...(p.historialCambios || [])],
+      };
+    }
+    return p;
+  });
+
+  const necesitaGuardado = actualizados.length !== periodosPrevios || cambiosEstado > 0;
+
+  return {
+    contratoActualizado: {
+      ...contrato,
+      registroCobros: actualizados,
+      fechaActualizacion: cambiosEstado > 0 ? fechaRef.toISOString() : contrato.fechaActualizacion,
+    },
+    periodos: actualizados,
+    periodosNuevos: Math.max(0, actualizados.length - periodosPrevios),
+    cambiosEstado,
+    necesitaGuardado,
+  };
+}
+
+export function calcularDiasRetraso(fechaVencimiento: string, fechaReferencia?: string): number {
+  const venc = new Date(fechaVencimiento);
+  if (isNaN(venc.getTime())) return 0;
+  const ref = fechaReferencia ? new Date(fechaReferencia) : new Date();
+  const diffMs = ref.getTime() - venc.getTime();
+  const diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return diffDias > 0 ? diffDias : 0;
+}
+
+export function estaVencido(fechaVencimiento: string, fechaReferencia?: string): boolean {
+  const venc = new Date(fechaVencimiento);
+  if (isNaN(venc.getTime())) return false;
+  const ref = fechaReferencia ? new Date(fechaReferencia) : new Date();
+  return ref > venc;
+}
+
+export type TipoAvisoCobro = 'vence_pronto' | 'en_plazo_gracia' | 'vencida' | 'incidencia';
+export type NivelAvisoCobro = 'info' | 'advertencia' | 'critico';
+
+export interface AvisoCobro {
+  id: string;
+  tipo: TipoAvisoCobro;
+  nivel: NivelAvisoCobro;
+  titulo: string;
+  detalle: string;
+  dias: number | null;
+  cobro: CobroPeriodo;
+}
+
+/**
+ * Calcula los avisos de seguimiento de una lista de mensualidades.
+ * - incidencia: existe una INCIDENCIA manual con importe pendiente.
+ * - vencida: RETRASADO o PENDIENTE fuera del margen de cortesía sin pagar.
+ * - en_plazo_gracia: venció hace pocos días (dentro del margen de cortesía).
+ * - vence_pronto: vence dentro de los próximos días (aviso proactivo de pago).
+ */
+export function calcularAvisosCobros(
+  cobros: CobroPeriodo[],
+  fechaRef: Date = new Date(),
+  diasAviso: number = DIAS_AVISO_VENCIMIENTO,
+  diasGracia: number = DIAS_GRACIA_RETRASO
+): AvisoCobro[] {
+  const avisos: AvisoCobro[] = [];
+
+  for (const c of cobros) {
+    const impagado = (c.importeRecibido || 0) < (c.importePrevisto || 0);
+    const pendiente =
+      (c.importePrevisto || 0) - (c.importeRecibido || 0);
+    const dias = diasHastaFecha(c.fechaVencimiento, fechaRef);
+    const refInmueble = `${c.inmuebleDireccion || 'Inmueble'} · ${c.inquilinoNombre || 'Inquilino'} · ${c.nombreMes}`;
+
+    if (c.estado === 'INCIDENCIA' && impagado) {
+      avisos.push({
+        id: `aviso_inc_${c.id}`,
+        tipo: 'incidencia',
+        nivel: 'critico',
+        titulo: 'Incidencia de cobro abierta',
+        detalle: `${refInmueble}. Pendiente ${pendiente.toFixed(2)} €.${c.motivoIncidencia ? ` ${c.motivoIncidencia}` : ''}`,
+        dias,
+        cobro: c,
+      });
+      continue;
+    }
+
+    if ((c.estado === 'RETRASADO') && impagado) {
+      avisos.push({
+        id: `aviso_retr_${c.id}`,
+        tipo: 'vencida',
+        nivel: 'critico',
+        titulo: 'Renta vencida sin cobrar',
+        detalle: `${refInmueble}. Venció el ${c.fechaVencimiento}; pendiente ${pendiente.toFixed(2)} €.`,
+        dias,
+        cobro: c,
+      });
+      continue;
+    }
+
+    // Solo se evalúan fechas las mensualidades aún en PENDIENTE.
+    if (c.estado === 'PENDIENTE' && impagado && dias !== null) {
+      if (dias < -diasGracia) {
+        avisos.push({
+          id: `aviso_pendretr_${c.id}`,
+          tipo: 'vencida',
+          nivel: 'critico',
+          titulo: 'Renta vencida sin cobrar',
+          detalle: `${refInmueble}. Venció el ${c.fechaVencimiento}; pendiente ${pendiente.toFixed(2)} €.`,
+          dias,
+          cobro: c,
+        });
+      } else if (dias < 0) {
+        avisos.push({
+          id: `aviso_gracia_${c.id}`,
+          tipo: 'en_plazo_gracia',
+          nivel: 'advertencia',
+          titulo: 'Vencimiento en plazo de cortesía',
+          detalle: `${refInmueble}. Venció el ${c.fechaVencimiento} (margen de ${diasGracia} días).`,
+          dias,
+          cobro: c,
+        });
+      } else if (dias <= diasAviso) {
+        avisos.push({
+          id: `aviso_pronto_${c.id}`,
+          tipo: 'vence_pronto',
+          nivel: 'info',
+          titulo: dias === 0 ? 'La renta vence hoy' : `La renta vence en ${dias} día${dias === 1 ? '' : 's'}`,
+          detalle: `${refInmueble}. Importe previsto ${c.importePrevisto.toFixed(2)} €.`,
+          dias,
+          cobro: c,
+        });
+      }
+    }
+  }
+
+  const ordenNivel: Record<NivelAvisoCobro, number> = { critico: 0, advertencia: 1, info: 2 };
+  return avisos.sort((a, b) => {
+    if (ordenNivel[a.nivel] !== ordenNivel[b.nivel]) return ordenNivel[a.nivel] - ordenNivel[b.nivel];
+    const da = a.dias === null ? 9999 : a.dias;
+    const db = b.dias === null ? 9999 : b.dias;
+    return da - db;
+  });
+}
+
 export interface ResumenFiscalInmuebleAnual {
   inmuebleId: string;
   inmuebleDireccion: string;
@@ -124,8 +325,11 @@ export function generarPeriodosParaContrato(
     const existing = existingMap.get(periodoKey);
 
     if (existing) {
-      // Si ya existía, conservar intacto
-      result.push(existing);
+      // Si ya existía, conservar intacto asegurando habitacionId si aplica
+      result.push({
+        ...existing,
+        habitacionId: existing.habitacionId || contrato.habitacionId,
+      });
     } else {
       // Crear nuevo periodo con los importes contratados
       const fechaVencimiento = `${y}-${String(m).padStart(2, '0')}-${String(diaLimite).padStart(2, '0')}`;
@@ -138,6 +342,7 @@ export function generarPeriodosParaContrato(
         contratoId: contrato.id,
         inquilinoId: contrato.candidatoId,
         propietarioId: contrato.propietarioId || '',
+        habitacionId: contrato.habitacionId,
 
         inmuebleDireccion: contrato.inmuebleDireccion,
         inmuebleCiudad: contrato.inmuebleCiudad,
@@ -367,7 +572,7 @@ export function calcularResumenCobros(cobros: CobroPeriodo[]) {
     totalPrevisto += c.importePrevisto || 0;
     totalRecibido += c.importeRecibido || 0;
 
-    if (c.estado === 'RECIBIDO' || c.estado === 'VERIFICADO') {
+    if (c.estado === 'RECIBIDO' || c.estado === 'VERIFICADO' || (c.estado as any) === 'PAGADO') {
       countCobrados++;
     } else if (c.estado === 'RETRASADO') {
       countRetrasados++;
@@ -499,4 +704,96 @@ export function generarResumenFiscalInmueble(
     contratosPeriodos,
     justificantesCount,
   };
+}
+
+/** Contratos que alimentan ingresos actuales según modalidad (sin mezclar modelos). */
+export function contratosIngresosSegunModalidad(
+  inmueble: Inmueble,
+  contratos: ContratoFormalizacion[]
+): ContratoFormalizacion[] {
+  const delInmueble = contratos.filter((c) => c.inmuebleId === inmueble.id);
+  if (inmueble.modalidadAlquiler === 'habitaciones') {
+    return delInmueble.filter((c) => !!c.habitacionId);
+  }
+  return delInmueble.filter((c) => !c.habitacionId);
+}
+
+export function cobrosPorHabitacion(
+  cobros: CobroPeriodo[],
+  habitacionId: string
+): CobroPeriodo[] {
+  return cobros.filter((c) => c.habitacionId === habitacionId);
+}
+
+export function claveIdempotenteCobro(contratoId: string, periodoMesAnio: string): string {
+  const [y, m] = periodoMesAnio.split('-');
+  return `cobro_${contratoId}_${y}_${m}`;
+}
+
+export function generarPeriodosIdempotente(contrato: ContratoFormalizacion): CobroPeriodo[] {
+  const primera = generarPeriodosParaContrato(contrato);
+  return generarPeriodosParaContrato({ ...contrato, registroCobros: primera });
+}
+
+export function ingresosInmuebleDesdeCircuito(
+  inmueble: Inmueble,
+  contratos: ContratoFormalizacion[]
+) {
+  const vigentes = contratosIngresosSegunModalidad(inmueble, contratos);
+  const cobros = obtenerTodosCobros(vigentes);
+  const resumen = calcularResumenCobros(cobros);
+  return {
+    ingresoPrevisto: resumen.totalPrevisto,
+    ingresoCobrado: resumen.totalRecibido,
+    ingresoPendiente: resumen.totalPendiente,
+    ingresoVencido: resumen.totalRetrasado + resumen.totalIncidencias,
+    cobros,
+  };
+}
+
+export function rentabilidadInmuebleDesdeCircuito(
+  inmueble: Inmueble,
+  contratos: ContratoFormalizacion[]
+): { base: number; ingresosCobrados: number; rentabilidadPct: number | null } {
+  const { ingresoCobrado } = ingresosInmuebleDesdeCircuito(inmueble, contratos);
+  const base = Number(inmueble.valorAdquisicion) || 0;
+  if (!base) return { base: 0, ingresosCobrados: ingresoCobrado, rentabilidadPct: null };
+  return {
+    base,
+    ingresosCobrados: ingresoCobrado,
+    rentabilidadPct: Math.round((ingresoCobrado / base) * 10000) / 100,
+  };
+}
+
+export function historialEconomicoHabitacion(
+  habitacionId: string,
+  contratos: ContratoFormalizacion[]
+) {
+  const contratosHab = contratos.filter((c) => c.habitacionId === habitacionId);
+  const cobros = obtenerTodosCobros(contratosHab);
+  return { contratos: contratosHab, cobros, resumen: calcularResumenCobros(cobros) };
+}
+
+export function impagoAisladoEntreHabitaciones(
+  cobrosA: CobroPeriodo[],
+  cobrosB: CobroPeriodo[]
+): boolean {
+  const aImpago = cobrosA.some((c) => c.estado === 'RETRASADO' || c.estado === 'INCIDENCIA');
+  const bSano = cobrosB.every((c) => c.estado !== 'RETRASADO' && c.estado !== 'INCIDENCIA');
+  return aImpago && bSano;
+}
+
+export function payloadEconomicoIdsCruzadosDenegado(
+  incoming: { inmuebleId: string; contratoId?: string; habitacionId?: string; propietarioId?: string },
+  contrato: ContratoFormalizacion
+): boolean {
+  if (incoming.inmuebleId !== contrato.inmuebleId) return true;
+  if (incoming.contratoId && incoming.contratoId !== contrato.id) return true;
+  if (incoming.habitacionId && contrato.habitacionId && incoming.habitacionId !== contrato.habitacionId) {
+    return true;
+  }
+  if (incoming.propietarioId && contrato.propietarioId && incoming.propietarioId !== contrato.propietarioId) {
+    return true;
+  }
+  return false;
 }

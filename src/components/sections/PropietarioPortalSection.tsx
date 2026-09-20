@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Home,
   Wrench,
@@ -16,6 +16,7 @@ import {
   Building,
   ArrowRight,
   ShieldAlert,
+  Save,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -35,6 +36,7 @@ interface PropietarioPortalSectionProps {
   propietarios: Propietario[];
   onOpenCrearProfesionalModal: (profesional?: Profesional) => void;
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
+  onSavePropietario?: (propietario: Propietario) => Promise<void>;
   onNavigateToInmueble?: (inmuebleId: string) => void;
 }
 
@@ -47,6 +49,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   propietarios,
   onOpenCrearProfesionalModal,
   onSaveProfesional,
+  onSavePropietario,
   onNavigateToInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
@@ -57,14 +60,23 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEspecialidad, setSelectedEspecialidad] = useState<string>('TODAS');
   const [copiedLinkProfId, setCopiedLinkProfId] = useState<string | null>(null);
+  const [formFicha, setFormFicha] = useState<{
+    nombre: string;
+    nifCif: string;
+    telefono: string;
+    email: string;
+    direccion: string;
+    ciudad: string;
+    codigoPostal: string;
+  } | null>(null);
+  const [guardandoFicha, setGuardandoFicha] = useState<boolean>(false);
+  const [mensajeFicha, setMensajeFicha] = useState<string | null>(null);
 
   // Security check: Only filter properties that belong to this owner
   const misViviendas = inmuebles.filter((inm) => {
-    const isOwnerByPropietarioId =
-      currentUser.propietarioId && inm.propietarioPrincipalId === currentUser.propietarioId;
-    const isOwnerByInmuebleIds =
-      currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
-    // If user has no specific filter but is a demo owner, show their associated properties
+    const pid = currentUser.propietarioId;
+    const isOwnerByPropietarioId = !!pid && (inm.propietarioId === pid || inm.propietarioPrincipalId === pid);
+    const isOwnerByInmuebleIds = !!currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
     return isOwnerByPropietarioId || isOwnerByInmuebleIds;
   });
 
@@ -83,6 +95,65 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
 
   // Associated Propietario record
   const miFichaPropietario = propietarios.find((p) => p.id === currentUser.propietarioId);
+
+  useEffect(() => {
+    setFormFicha({
+      nombre: miFichaPropietario?.nombre || `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim(),
+      nifCif: miFichaPropietario?.nifCif || '',
+      telefono: miFichaPropietario?.telefono || currentUser.telefono || '',
+      email: miFichaPropietario?.email || currentUser.email || '',
+      direccion: miFichaPropietario?.direccion || '',
+      ciudad: miFichaPropietario?.ciudad || '',
+      codigoPostal: miFichaPropietario?.codigoPostal || '',
+    });
+  }, [miFichaPropietario, currentUser]);
+
+  const puedeEditarFicha = !!onSavePropietario && !!currentUser.propietarioId;
+
+  const handleGuardarFicha = async () => {
+    if (!onSavePropietario || !currentUser.propietarioId || !formFicha) return;
+    setGuardandoFicha(true);
+    setMensajeFicha(null);
+    try {
+      const base: Propietario =
+        miFichaPropietario ||
+        ({
+          id: currentUser.propietarioId,
+          nombre: formFicha.nombre,
+          nifCif: formFicha.nifCif,
+          tipoPropietario: 'persona_fisica',
+          telefono: formFicha.telefono,
+          email: formFicha.email,
+          direccion: formFicha.direccion,
+          ciudad: formFicha.ciudad,
+          codigoPostal: formFicha.codigoPostal,
+          cuentasBancarias: [],
+          fechaCreacion: new Date().toISOString(),
+          fechaActualizacion: new Date().toISOString(),
+        } as Propietario);
+
+      const actualizada: Propietario = {
+        ...base,
+        id: currentUser.propietarioId,
+        nombre: formFicha.nombre.trim() || base.nombre,
+        nifCif: formFicha.nifCif.trim() || base.nifCif,
+        telefono: formFicha.telefono.trim() || base.telefono,
+        email: formFicha.email.trim() || base.email,
+        direccion: formFicha.direccion.trim() || base.direccion,
+        ciudad: formFicha.ciudad.trim() || base.ciudad,
+        codigoPostal: formFicha.codigoPostal.trim() || base.codigoPostal,
+        fechaActualizacion: new Date().toISOString(),
+      };
+
+      await onSavePropietario(actualizada);
+      setMensajeFicha('Ficha fiscal guardada correctamente.');
+      setTimeout(() => setMensajeFicha(null), 3000);
+    } catch (e: any) {
+      setMensajeFicha(`Error al guardar: ${e?.message || 'Revisa los campos.'}`);
+    } finally {
+      setGuardandoFicha(false);
+    }
+  };
 
   const handleCopyInvitacion = (prof: Profesional) => {
     const token = prof.tokenInvitacion || `inv_${prof.id}`;
@@ -636,6 +707,97 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                   <span className="font-bold text-blue-700">{misViviendas.length} viviendas</span>
                 </div>
               </div>
+
+              {puedeEditarFicha && formFicha && (
+                <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">Mi Ficha Fiscal</h4>
+                    <p className="text-xs text-slate-500">
+                      Estos datos se guardan en tu ficha de propietario y se conservan al recargar.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Nombre y apellidos / Razón social</span>
+                      <input
+                        type="text"
+                        value={formFicha.nombre}
+                        onChange={(e) => setFormFicha({ ...formFicha, nombre: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">NIF / CIF / NIE</span>
+                      <input
+                        type="text"
+                        value={formFicha.nifCif}
+                        onChange={(e) => setFormFicha({ ...formFicha, nifCif: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Teléfono</span>
+                      <input
+                        type="tel"
+                        value={formFicha.telefono}
+                        onChange={(e) => setFormFicha({ ...formFicha, telefono: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Email de contacto</span>
+                      <input
+                        type="email"
+                        value={formFicha.email}
+                        onChange={(e) => setFormFicha({ ...formFicha, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Domicilio a efectos de notificaciones</span>
+                      <input
+                        type="text"
+                        value={formFicha.direccion}
+                        onChange={(e) => setFormFicha({ ...formFicha, direccion: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Ciudad</span>
+                      <input
+                        type="text"
+                        value={formFicha.ciudad}
+                        onChange={(e) => setFormFicha({ ...formFicha, ciudad: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Código postal</span>
+                      <input
+                        type="text"
+                        value={formFicha.codigoPostal}
+                        onChange={(e) => setFormFicha({ ...formFicha, codigoPostal: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={handleGuardarFicha}
+                      disabled={guardandoFicha}
+                      className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>{guardandoFicha ? 'Guardando…' : 'Guardar Mi Ficha'}</span>
+                    </button>
+                    {mensajeFicha && (
+                      <span className="text-xs font-semibold text-slate-600">{mensajeFicha}</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

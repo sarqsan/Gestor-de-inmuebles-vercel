@@ -34,6 +34,7 @@ import {
   ESTADO_TRABAJO_LABELS,
   coincideUbicacion,
   crearItemHistorialTrabajo,
+  buscarProfesionalesCompatibles,
 } from '../../utils/profesionalesEngine';
 import {
   saveTrabajoProfesionalFirestore,
@@ -101,6 +102,9 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   const [importeEstimado, setImporteEstimado] = useState<string>(
     trabajoParaEditar?.importeEstimado !== undefined ? trabajoParaEditar.importeEstimado.toString() : ''
   );
+  const [importeFinal, setImporteFinal] = useState<string>(
+    trabajoParaEditar?.importeFinal !== undefined ? trabajoParaEditar.importeFinal.toString() : ''
+  );
   const [fechaInicio, setFechaInicio] = useState<string>(
     trabajoParaEditar?.fechaInicio ? trabajoParaEditar.fechaInicio.slice(0, 10) : ''
   );
@@ -109,7 +113,15 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   );
   const [observaciones, setObservaciones] = useState<string>(trabajoParaEditar?.observaciones || '');
 
-  const [documentos, setDocumentos] = useState<AdjuntoIncidencia[]>(trabajoParaEditar?.documentos || []);
+  const [documentos, setDocumentos] = useState<AdjuntoIncidencia[]>(
+    trabajoParaEditar?.documentos ||
+      (incidenciaPreseleccionada
+        ? [
+            ...(incidenciaPreseleccionada.fotografias || []),
+            ...(incidenciaPreseleccionada.documentos || []),
+          ]
+        : [])
+  );
   const [uploadingFile, setUploadingFile] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -122,16 +134,25 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   // Filter incidents for selected property
   const incidenciasDelInmueble = incidencias.filter((inc) => inc.inmuebleId === inmuebleId);
 
-  // Filter professionals suitable for this specialty and location
-  const profesionalesRecomendados = profesionales.filter((prof) => {
-    const isActivo = prof.estado ? prof.estado === 'ACTIVO' : prof.activo !== false;
-    if (!isActivo) return false;
-    const matchEsp = prof.especialidades.some((e) =>
-      e.toLowerCase().includes(categoria.toLowerCase()) || categoria.toLowerCase().includes(e.toLowerCase())
-    );
-    const matchLoc = coincideUbicacion(prof, inmuebleSeleccionado);
-    return matchEsp || matchLoc;
-  });
+  // Candidatos evaluados por el motor puro de compatibilidad
+  const candidatosCompatibles = inmuebleSeleccionado
+    ? buscarProfesionalesCompatibles({
+        inmueble: inmuebleSeleccionado,
+        profesionales,
+        categoria,
+        servicioRequerido: titulo,
+        incluirNoCompatibles: true,
+      })
+    : profesionales.map((p) => ({
+        profesional: p,
+        nivel: 'COMPATIBLE_CON_RESERVA' as const,
+        cumpleEspecialidad: true,
+        cumpleZona: false,
+        cumpleEstado: true,
+        estadoZona: 'ZONA_NO_DETERMINADA' as const,
+        motivo: 'Sin inmueble de referencia',
+        detalles: { especialidad: '', zona: '', estado: '' },
+      }));
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -239,7 +260,8 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
         fechaInicio: fechaInicio ? new Date(fechaInicio).toISOString() : undefined,
         fechaFinalizacion: fechaFinalizacion ? new Date(fechaFinalizacion).toISOString() : undefined,
         importeEstimado: importeEstimado ? parseFloat(importeEstimado) : undefined,
-        importeFinal: trabajoParaEditar?.importeFinal,
+        importeFinal: importeFinal ? parseFloat(importeFinal) : undefined,
+        gastoId: trabajoParaEditar?.gastoId,
         observaciones: observaciones.trim() || undefined,
         creadoPor: trabajoParaEditar?.creadoPor || usuarioNombre,
         actualizadoPor: usuarioNombre,
@@ -256,18 +278,54 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
       if (incidenciaId) {
         const incTarget = incidencias.find((i) => i.id === incidenciaId);
         if (incTarget) {
+          const mappedEstadoTrabajo: 'ASIGNADO' | 'PRESUPUESTADO' | 'ACEPTADO' | 'EN_CURSO' | 'FINALIZADO' | 'CANCELADO' =
+            (estado === 'FINALIZADO' || estado === 'FINALIZADA')
+              ? 'FINALIZADO'
+              : (estado === 'EN_EJECUCION' || estado === 'EN_CURSO')
+              ? 'EN_CURSO'
+              : (estado === 'CANCELADO' || estado === 'CANCELADA')
+              ? 'CANCELADO'
+              : 'ASIGNADO';
+
+          const nuevoEstadoInc =
+            (estado === 'FINALIZADO' || estado === 'FINALIZADA')
+              ? 'RESUELTA'
+              : (estado === 'EN_EJECUCION' || estado === 'EN_CURSO')
+              ? 'EN_REPARACION'
+              : incTarget.estado;
+
+          const costeRealFinal = importeFinal ? parseFloat(importeFinal) : (trabajoParaEditar?.importeFinal || incTarget.trabajoProfesional?.costeReal);
+
           const incActualizada: Incidencia = {
             ...incTarget,
-            trabajoProfesional: {
-              profesionalId: profesionalId || incTarget.trabajoProfesional?.profesionalId,
-              profesionalNombre: profesionalSeleccionado?.nombreComercial || incTarget.trabajoProfesional?.profesionalNombre,
-              profesionalTelefono: profesionalSeleccionado?.telefono || incTarget.trabajoProfesional?.profesionalTelefono,
-              fechaAsignacion: profesionalId ? new Date().toISOString() : incTarget.trabajoProfesional?.fechaAsignacion,
-              presupuestoEstimado: importeEstimado ? parseFloat(importeEstimado) : incTarget.trabajoProfesional?.presupuestoEstimado,
-              costeReal: trabajoParaEditar?.importeFinal || incTarget.trabajoProfesional?.costeReal,
-              estado: estado === 'FINALIZADO' ? 'COMPLETADO' : estado === 'EN_EJECUCION' ? 'EN_CURSO' : 'ASIGNADO',
-            },
+            estado: nuevoEstadoInc,
             viaActuacion: 'PROFESIONAL',
+            profesionalId: profesionalId || incTarget.profesionalId,
+            trabajoProfesional: {
+              profesionalId: profesionalId || incTarget.trabajoProfesional?.profesionalId || '',
+              profesionalNombre: profesionalSeleccionado?.nombreComercial || incTarget.trabajoProfesional?.profesionalNombre || 'Profesional',
+              profesionalTelefono: profesionalSeleccionado?.telefono || incTarget.trabajoProfesional?.profesionalTelefono,
+              profesionalEmail: profesionalSeleccionado?.email || incTarget.trabajoProfesional?.profesionalEmail,
+              especialidad: categoria,
+              servicio: categoria,
+              fechaAsignacion: profesionalId ? (incTarget.trabajoProfesional?.fechaAsignacion || new Date().toISOString()) : new Date().toISOString(),
+              presupuestoEstimado: importeEstimado ? parseFloat(importeEstimado) : incTarget.trabajoProfesional?.presupuestoEstimado,
+              costeReal: costeRealFinal,
+              gastoId: trabajoParaEditar?.gastoId || incTarget.trabajoProfesional?.gastoId,
+              estadoTrabajo: mappedEstadoTrabajo,
+              fechaFinalizacion: (estado === 'FINALIZADO' || estado === 'FINALIZADA') ? new Date().toISOString() : incTarget.trabajoProfesional?.fechaFinalizacion,
+            },
+            historial: [
+              ...(incTarget.historial || []),
+              {
+                id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                fecha: new Date().toISOString(),
+                usuario: usuarioNombre,
+                accion: trabajoParaEditar ? 'ORDEN_TRABAJO_MODIFICADA' : 'ORDEN_TRABAJO_CREADA',
+                valorNuevo: ESTADO_TRABAJO_LABELS[estado]?.label || estado,
+                observacion: `Orden de trabajo "${titulo}": ${ESTADO_TRABAJO_LABELS[estado]?.label || estado}${profesionalSeleccionado ? ` (Asignado a ${profesionalSeleccionado.nombreComercial})` : ''}`,
+              },
+            ],
             updatedAt: new Date().toISOString(),
           };
           await saveIncidenciaFirestore(incActualizada);
@@ -490,11 +548,17 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                   className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
                 >
                   <option value="">Sin profesional asignado (Buscando presupuesto)</option>
-                  {profesionales.map((prof) => {
-                    const matchLoc = coincideUbicacion(prof, inmuebleSeleccionado);
+                  {candidatosCompatibles.map((res) => {
+                    const prof = res.profesional;
+                    const badgeTxt =
+                      res.nivel === 'COMPATIBLE'
+                        ? '✅ Compatible'
+                        : res.nivel === 'COMPATIBLE_CON_RESERVA'
+                        ? '⚠️ Con Reserva'
+                        : '❌ No Compatible';
                     return (
                       <option key={prof.id} value={prof.id}>
-                        {prof.nombreComercial} ({prof.tipo}) {matchLoc ? '✓ Zona compatible' : ''}
+                        {badgeTxt} — {prof.nombreComercial} ({prof.tipo})
                       </option>
                     );
                   })}
@@ -502,21 +566,79 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
               </div>
 
               <div>
-                <div className="flex items-center space-x-2">
-                  <div className="relative flex-1">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-400 text-xs">
-                      €
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="Importe estimado (ej: 180.00)"
-                      value={importeEstimado}
-                      onChange={(e) => setImporteEstimado(e.target.value)}
-                      className="w-full text-xs pl-7 p-2.5 border border-slate-300 rounded-xl bg-white"
-                    />
-                  </div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Importe Estimado (€)</label>
+                <div className="relative flex-1">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-400 text-xs">
+                    €
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Importe estimado (ej: 180.00)"
+                    value={importeEstimado}
+                    onChange={(e) => setImporteEstimado(e.target.value)}
+                    className="w-full text-xs pl-7 p-2.5 border border-slate-300 rounded-xl bg-white"
+                  />
                 </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-slate-200/80">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 block">Coste Real Liquidado (€)</label>
+                  {importeEstimado && !importeFinal && (
+                    <button
+                      type="button"
+                      onClick={() => setImporteFinal(importeEstimado)}
+                      className="text-[11px] text-blue-600 hover:underline font-semibold"
+                    >
+                      Copiar estimado
+                    </button>
+                  )}
+                </div>
+                <div className="relative flex-1">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-400 text-xs">
+                    €
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Coste real final (ej: 175.50)"
+                    value={importeFinal}
+                    onChange={(e) => setImporteFinal(e.target.value)}
+                    className="w-full text-xs pl-7 p-2.5 border border-emerald-300 bg-emerald-50/30 rounded-xl focus:ring-2 focus:ring-emerald-500 font-semibold text-emerald-900"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Importe que se utilizará para registrar el gasto de reparación contable al finalizar.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Estado de la Orden</label>
+                <select
+                  value={estado}
+                  onChange={(e) => {
+                    const nuevo = e.target.value as EstadoTrabajoProfesional;
+                    setEstado(nuevo);
+                    if ((nuevo === 'FINALIZADO' || nuevo === 'FINALIZADA') && !fechaFinalizacion) {
+                      setFechaFinalizacion(new Date().toISOString().slice(0, 10));
+                    }
+                  }}
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-semibold"
+                >
+                  <option value="PENDIENTE">PENDIENTE</option>
+                  <option value="BUSCANDO_PROFESIONAL">BUSCANDO PROFESIONAL</option>
+                  <option value="ASIGNADO">ASIGNADO</option>
+                  <option value="PRESUPUESTO_SOLICITADO">PRESUPUESTO SOLICITADO</option>
+                  <option value="ACEPTADO">ACEPTADO</option>
+                  <option value="PROGRAMADO">PROGRAMADO</option>
+                  <option value="EN_EJECUCION">EN EJECUCIÓN</option>
+                  <option value="PENDIENTE_MATERIAL">PENDIENTE MATERIAL</option>
+                  <option value="FINALIZADO">✓ FINALIZADO</option>
+                  <option value="CANCELADO">CANCELADO</option>
+                </select>
               </div>
             </div>
 

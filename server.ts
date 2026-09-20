@@ -2,10 +2,85 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
-// Nota: Vite se importa de forma dinámica dentro de startServer() (solo modo desarrollo)
-// para que el bundle de la función serverless de Vercel no incluya Vite.
+
+// GAP 1 — Sistema transaccional de notificaciones (dispatcher + canales + resolver auth)
+import { DispatcherNotificaciones } from './src/notificaciones/dispatcher';
+import type { EnviadorCanal, RepositorioNotificaciones } from './src/notificaciones/dispatcher';
+import { CanalEmail, CanalInApp, CanalWebhook, EmailProviderSafeMode } from './src/notificaciones/canales';
+import type { TransporteWebhook } from './src/notificaciones/canales';
+import { resolverAutorizacion } from './src/notificaciones/autorizacion';
+import { idempotenciaDeEvento } from './src/types/notificaciones';
+import type {
+  ContextoAutorizacion,
+  EnviarNotificacionPayload,
+  Notificacion,
+} from './src/types/notificaciones';
 
 dotenv.config();
+
+// ---------------------------------------------------------------------------
+// Repositorio de notificaciones en memoria (producción: Firestore "notificaciones").
+// Conserva la notificación por id e idempotencyKey para anti-duplicados.
+// ---------------------------------------------------------------------------
+const notificacionesStore = new Map<string, Notificacion>();
+const notificacionesRepo: RepositorioNotificaciones = {
+  async buscarPorId(id) {
+    return notificacionesStore.get(id) ?? null;
+  },
+  async buscarPorIdempotencia(idempotencyKey) {
+    for (const n of notificacionesStore.values()) {
+      if (n.idempotencyKey === idempotencyKey) return n;
+    }
+    return null;
+  },
+  async guardar(notificacion) {
+    notificacionesStore.set(notificacion.id, notificacion);
+  },
+};
+
+// Canales configurados desde entorno. Sin proveedor real → EmailProviderSafeMode desactivado.
+const emailProvider = new EmailProviderSafeMode({
+  activo: process.env.ENABLE_EMAIL === 'true',
+  smtpUrl: process.env.SMTP_URL,
+  from: process.env.EMAIL_FROM,
+});
+
+const transporteWebhook: TransporteWebhook = {
+  post: async (url, body) => {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) return { ok: false, error: `webhook_http_${res.status}` };
+      return { ok: true, externalId: `wh_${Date.now().toString(36)}` };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'webhook_error' };
+    }
+  },
+};
+
+function resolverContextoDeRequest(req: express.Request): Promise<ContextoAutorizacion> {
+  const authHeader = req.headers.authorization;
+  const noVerificador = undefined;
+  const noFuente = undefined;
+  return resolverAutorizacion(authHeader, noVerificador, noFuente);
+}
+
+function construirDispatcher(ctx: ContextoAutorizacion): DispatcherNotificaciones {
+  const canales: Record<'EMAIL' | 'INAPP' | 'WEBHOOK' | 'WHATSAPP', EnviadorCanal | null | undefined> = {
+    EMAIL: new CanalEmail(emailProvider),
+    INAPP: new CanalInApp(),
+    WEBHOOK: new CanalWebhook(transporteWebhook),
+    WHATSAPP: null,
+  };
+  return new DispatcherNotificaciones({
+    autorizacion: ctx,
+    repositorio: notificacionesRepo,
+    canales,
+  });
+}
 
 const app = express();
 const PORT = 3000;
@@ -2445,6 +2520,46 @@ Responde ÚNICAMENTE en formato JSON con la siguiente estructura:
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY });
+});
+
+// ---------------------------------------------------------------------------
+// GAP 1 — Endpoint transaccional de notificaciones.
+// Autenticación/autorización del lado servidor (deny-by-default). El cliente
+// NUNCA decide titularidad: el propietarioId del actor se deriva del token.
+// ---------------------------------------------------------------------------
+app.post('/api/notificaciones/enviar', async (req, res) => {
+  try {
+    const contexto = await resolverContextoDeRequest(req);
+    const dispatcher = construirDispatcher(contexto);
+
+    const payload: EnviarNotificacionPayload = {
+      origen: req.body?.origen,
+      tipoEvento: req.body?.tipoEvento,
+      entidadId: req.body?.entidadId,
+      idempotencyKey: req.body?.idempotencyKey || undefined,
+      inmuebleId: req.body?.inmuebleId || undefined,
+      propietarioId: req.body?.propietarioId || undefined,
+      canal: req.body?.canal,
+      datos: req.body?.datos,
+      destinatario: req.body?.destinatario,
+      programarPara: req.body?.programarPara,
+    };
+
+    // Derivar idempotencyKey si el cliente no la envía.
+    if (!payload.idempotencyKey) {
+      if (!payload.origen || !payload.tipoEvento || !payload.entidadId) {
+        res.status(400).json({ ok: false, error: 'payload_invalido', motivoDenegacion: 'origen, tipoEvento y entidadId son obligatorios sin idempotencyKey' });
+        return;
+      }
+      (payload as any).idempotencyKey = idempotenciaDeEvento(payload.origen, payload.tipoEvento, payload.entidadId);
+    }
+
+    const resultado = await dispatcher.dispatch(payload);
+    const status = resultado.ok || resultado.duplicada ? 200 : 403;
+    res.status(status).json(resultado);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'error_interno', motivoDenegacion: err instanceof Error ? err.message : 'Error inesperado' });
+  }
 });
 
 // SPA fallback for direct public links (/solicitud/*, /visita/*)

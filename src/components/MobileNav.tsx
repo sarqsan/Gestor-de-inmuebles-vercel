@@ -24,6 +24,8 @@ import {
   TrendingDown,
   RefreshCw,
   Calculator,
+  BarChart3,
+  Landmark,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -77,7 +79,9 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
           { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
+          { id: 'financiacion', label: 'Financiación', icon: Landmark, description: 'Hipotecas y amortización' },
           { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
+          { id: 'informes', label: 'Informes & Export', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
           { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
           { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
@@ -94,7 +98,9 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
           { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
+          { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },
           { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
+          { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
           { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },

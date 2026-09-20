@@ -172,8 +172,10 @@ import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
+import { FinanciacionSection } from './components/sections/FinanciacionSection';
 import { GastosSection } from './components/sections/GastosSection';
 import { FiscalidadSection } from './components/sections/FiscalidadSection';
+import { InformesSection } from './components/sections/InformesSection';
 import { PolizasSegurosSection } from './components/sections/PolizasSegurosSection';
 import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
 import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
@@ -402,7 +404,9 @@ export default function App() {
         'formalizacion',
         'cobros',
         'gastos',
+        'financiacion',
         'fiscal',
+        'informes',
         'polizas',
         'incidencias',
         'recomercializacion',
@@ -3001,9 +3005,11 @@ export default function App() {
               candidatos={scopedCandidatos}
               solicitudesDoc={solicitudesDoc}
               userProfile={userProfile}
+              currentUser={currentUser}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onDeleteContrato={handleDeleteContrato}
               onRecomercializarContrato={(c) => handleRecomercializarInmueble(c.inmuebleId, c.id)}
+              onSaveContrato={async (c) => { await saveContratoFirestore(c); }}
             />
           )}
 
@@ -3035,6 +3041,14 @@ export default function App() {
             />
           )}
 
+          {activeSection === 'financiacion' && (
+            <FinanciacionSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+            />
+          )}
+
           {activeSection === 'fiscal' && (
             <FiscalidadSection
               inmuebles={scopedInmuebles}
@@ -3042,6 +3056,15 @@ export default function App() {
               gastos={scopedGastos}
               currentUser={currentUser}
               onNavigateToInmueble={() => setActiveSection('inmuebles')}
+            />
+          )}
+
+          {activeSection === 'informes' && (
+            <InformesSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={scopedGastos}
+              currentUser={currentUser}
             />
           )}
 

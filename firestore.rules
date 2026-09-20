@@ -827,6 +827,70 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 22. NOTIFICACIONES TRANSACCIONALES (GAP 1) — aislamiento por propietario.
+    // =========================================================================
+    match /notificaciones/{notificacionId} {
+      function notifDelUsuario() {
+        return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && (
+          (get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == resource.data.propietarioId) ||
+          resource.data.inmuebleId in get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.inmuebleIds
+        );
+      }
+      function notifDelUsuarioIncoming() {
+        return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && (
+          (get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == incoming().propietarioId) ||
+          incoming().inmuebleId in get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.inmuebleIds
+        );
+      }
+      allow get: if isSignedIn() && (isMasterAdmin() || notifDelUsuario());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isMasterAdmin() || notifDelUsuarioIncoming());
+      allow update: if isSignedIn() && (isMasterAdmin() || (
+        notifDelUsuario() &&
+        incoming().propietarioId == resource.data.propietarioId &&
+        incoming().inmuebleId == resource.data.inmuebleId
+      ));
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 23. FINANCIACIÓN HIPOTECARIA (GAP 4) — aislamiento por propietario.
+    // =========================================================================
+    match /financiaciones/{financiacionId} {
+      function sinSecretos() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'ibanSecreto' in incoming() ||
+          'tokenBancario' in incoming()
+        );
+      }
+      allow get: if isSignedIn() && (
+        isMasterAdmin() ||
+        resource.data.propietarioId == request.auth.uid
+      );
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (
+        isMasterAdmin() ||
+        (
+          incoming().propietarioId == request.auth.uid &&
+          incoming().inmuebleId is string &&
+          isValidId(incoming().inmuebleId)
+        )
+      ) && sinSecretos();
+      allow update: if isSignedIn() && (
+        isMasterAdmin() || (
+          resource.data.propietarioId == request.auth.uid &&
+          incoming().propietarioId == resource.data.propietarioId &&
+          incoming().inmuebleId == resource.data.inmuebleId
+        )
+      ) && sinSecretos();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)
     // =========================================================================
     match /{document=**} {

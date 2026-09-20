@@ -4,7 +4,9 @@ export type SectionType =
   | 'propietarios'
   | 'cobros'
   | 'gastos'
+  | 'financiacion'
   | 'fiscal'
+  | 'informes'
   | 'polizas'
   | 'preseleccionados'
   | 'seguro_impago'
@@ -814,7 +816,153 @@ export type EstadoFormalizacion =
   | 'FIANZA_DEPOSITADA'
   | 'FORMALIZADO_ACTIVO'
   | 'FINALIZADO'
+  | 'RESCINDIDO'
   | 'CANCELADO';
+
+// ==========================================
+// GAP 2: MODALIDADES CONTRACTUALES, ANEXOS, RESCISIÓN Y FINIQUITO
+// ==========================================
+
+/**
+ * Modalidad jurídica/funcional del contrato. Extensible.
+ * - VIVIENDA_HABITUAL: arrendamiento LAU de vivienda permanente (modelo actual).
+ * - TEMPORADA: uso distinto de vivienda por temporada (Art. 3.2 LAU).
+ * - LOCAL_USO_DISTINTO: local comercial / uso distinto de vivienda (Art. 3.1 LAU).
+ * - HABITACION: alquiler de una habitación concreta dentro de un inmueble en modo habitaciones.
+ */
+export type ModalidadContractual =
+  | 'VIVIENDA_HABITUAL'
+  | 'TEMPORADA'
+  | 'LOCAL_USO_DISTINTO'
+  | 'HABITACION';
+
+/** Motivo/tipo por el que un contrato alcanza un estado terminal. */
+export type TipoFinalizacionContrato =
+  | 'FINALIZACION_NATURAL'
+  | 'RESCISION_ANTICIPADA'
+  | 'MUTUO_ACUERDO'
+  | 'CANCELACION_EXPEDIENTE';
+
+/** Datos formales de la finalización/rescisión/cancelación de un contrato. */
+export interface FinalizacionContrato {
+  tipo: TipoFinalizacionContrato;
+  fechaEfectiva: string; // YYYY-MM-DD
+  motivo?: string;
+  observaciones?: string;
+  ejecutadoPor: string; // nombre del usuario que ejecuta la operación
+  ejecutadoPorId?: string;
+  fechaOperacion: string; // ISO
+}
+
+export type TipoAnexoContractual =
+  | 'MODIFICACION_CONTRACTUAL'
+  | 'PRORROGA'
+  | 'INVENTARIO'
+  | 'GARANTIA_ADICIONAL'
+  | 'CONDICIONES_PARTICULARES'
+  | 'OTRO';
+
+export type EstadoAnexoContractual = 'BORRADOR' | 'CONFIRMADO' | 'SUPERSEDIDO';
+
+/**
+ * Anexo contractual versionado.
+ * REGLA: un anexo CONFIRMADO no se modifica; si necesita corrección se crea una
+ * nueva versión (nuevo anexo con version+1 y anexoOriginalId) y el anterior pasa
+ * a SUPERSEDIDO, conservándose el histórico completo.
+ */
+export interface AnexoContractual {
+  id: string; // anexoId
+  contratoId: string;
+  propietarioId?: string;
+  inmuebleId: string;
+  habitacionId?: string;
+  tipo: TipoAnexoContractual;
+  titulo: string;
+  descripcion?: string;
+  fecha: string; // YYYY-MM-DD fecha del anexo
+  contenido: string; // texto o datos estructurados serializados
+  version: number;
+  estado: EstadoAnexoContractual;
+  anexoOriginalId?: string; // si es una nueva versión de un anexo anterior
+  referenciaDocumental?: string; // p.ej. ruta Storage o URL del documento
+  fechaCreacion: string; // ISO
+  fechaConfirmacion?: string; // ISO
+  creadoPor: string;
+  creadoPorId?: string;
+}
+
+/** Concepto económico del finiquito. favoreceA indica a quién beneficia el importe. */
+export type TipoConceptoFiniquito =
+  | 'RENTA_PENDIENTE'
+  | 'SUMINISTROS_PENDIENTES'
+  | 'DANOS'
+  | 'OTROS_CARGOS_PROPIETARIO'
+  | 'DEVOLUCION_FIANZA'
+  | 'GARANTIAS_A_DEVOLVER'
+  | 'SALDOS_A_FAVOR_INQUILINO';
+
+export type EstadoConceptoFiniquito = 'PENDIENTE' | 'PARCIAL' | 'LIQUIDADO';
+
+export interface ConceptoFiniquito {
+  id: string;
+  tipo: TipoConceptoFiniquito;
+  favoreceA: 'PROPIETARIO' | 'INQUILINO';
+  concepto: string;
+  periodoRelacionado?: string; // p.ej. "2026-05" si deriva de un cobro concreto (solo referencia)
+  importeReclamado: number;
+  importePendiente: number;
+  importePagado: number; // pagado por el inquilino (cargos del propietario)
+  importeDevuelto: number; // devuelto al inquilino (conceptos a su favor)
+  estado: EstadoConceptoFiniquito;
+  fechaCreacion: string; // ISO
+  creadoPor: string;
+}
+
+export type EstadoFiniquito = 'ABIERTO' | 'CERRADO';
+
+/**
+ * Finiquito económico de cierre del contrato.
+ * saldoFinal > 0: el inquilino debe pagar al propietario.
+ * saldoFinal < 0: el propietario debe devolver al inquilino.
+ * Nunca modifica retroactivamente los cobros históricos (registroCobros).
+ */
+export interface FiniquitoContrato {
+  contratoId: string;
+  inmuebleId: string;
+  habitacionId?: string;
+  propietarioId?: string;
+  estado: EstadoFiniquito;
+  conceptos: ConceptoFiniquito[];
+  saldoFinal: number;
+  fechaGeneracion: string; // ISO
+  generadoPor: string;
+  fechaCierre?: string; // ISO
+  cerradoPor?: string;
+  observaciones?: string;
+}
+
+/**
+ * Eventos del ciclo contractual para el sistema de notificaciones (Arena B, GAP 1).
+ * C solo define el contrato de eventos y los puntos de emisión; el dispatcher es de B.
+ */
+export type TipoEventoContrato =
+  | 'CONTRATO_CREADO'
+  | 'CONTRATO_FORMALIZADO'
+  | 'ANEXO_CREADO'
+  | 'CONTRATO_PROXIMO_A_FINALIZAR'
+  | 'CONTRATO_FINALIZADO'
+  | 'FINIQUITO_GENERADO'
+  | 'FINIQUITO_CERRADO';
+
+export interface EventoContrato {
+  tipo: TipoEventoContrato;
+  contratoId: string;
+  inmuebleId: string;
+  habitacionId?: string;
+  propietarioId?: string;
+  fecha: string; // ISO
+  detalle?: string;
+}
 
 export type DictamenAsegurabilidad =
   | 'APTO_RECOMENDADO'
@@ -966,6 +1114,32 @@ export interface ContratoFormalizacion {
   
   // Cláusulas adicionales editables
   clausulasPersonalizadas: ClausulaPersonalizada[];
+
+  // ---- GAP 2: MODALIDAD CONTRACTUAL Y CICLO DE VIDA ----
+  /** Modalidad jurídica del contrato (ver ModalidadContractual). Si no existe, se infiere del resto de datos. */
+  modalidadContractual?: ModalidadContractual;
+  /** Finalidad o uso pactado (actividad en locales, uso concreto en temporada/habitación). */
+  finalidadUso?: string;
+  /** TEMPORADA: causa/motivo declarado de la temporalidad (dato aportado por el usuario). */
+  motivoTemporalidad?: string;
+  /** Duración pactada en meses (temporada/locales), complementaria a duracionAnios. */
+  duracionMeses?: number;
+  /** Relación histórica: contrato precedente (prórroga/renovación/novación). */
+  contratoOrigenId?: string;
+  /** Relación histórica: contrato que sustituye a este. */
+  contratoDerivadoId?: string;
+  /** IDs de contratos que se derivaron de este (historial hacia delante). */
+  contratosDerivadosIds?: string[];
+  /** Tipo de relación con el contratoOrigenId. */
+  relacionHistoricaTipo?: 'RENOVACION' | 'PRORROGA' | 'SUBROGACION' | 'ORIGINAL';
+  /** Versión dentro de la cadena origen→derivado (1 = contrato inicial). */
+  version?: number;
+  /** Datos formales cuando el contrato alcanza un estado terminal (FINALIZADO / RESCINDIDO / CANCELADO). */
+  finalizacion?: FinalizacionContrato;
+  /** Anexos versionados asociados a este contrato (adendas, prórrogas, inventario, etc.). */
+  anexos?: AnexoContractual[];
+  /** Finiquito económico de cierre (cargos pendientes, fianza a devolver, saldo neto final). */
+  finiquito?: FiniquitoContrato;
 
   // Estado del Expediente
   estado: EstadoFormalizacion;
@@ -3235,4 +3409,274 @@ export interface ProyectoReforma {
   actualizadoPor?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// =========================================================================
+// BLOQUE 9: REPORTING EJECUTIVO - INFORMES CARTERA, INMUEBLE, RENTABILIDAD, FISCAL, EVOLUCIÓN, EXPORTACIÓN
+// Capa de lectura/agregación que consume motores existentes (cobros, gastos, fiscal, contratos, incidencias, seguros)
+// NO crea segundo motor económico, NO segundo cálculo de rentabilidad, NO segundo motor fiscal
+// =========================================================================
+
+export type PeriodoInforme = 'MENSUAL' | 'TRIMESTRAL' | 'ANUAL' | 'PERSONALIZADO';
+export type FormatoExportacion = 'CSV' | 'JSON' | 'PDF';
+
+export interface RangoFechas {
+  fechaInicio: string; // YYYY-MM-DD explícito, evita errores zona horaria
+  fechaFin: string; // YYYY-MM-DD explícito
+  periodo: PeriodoInforme;
+  ejercicio?: number;
+  trimestre?: number; // 1-4
+  mes?: number; // 1-12
+}
+
+export interface FiltrosInforme {
+  propietarioId?: string;
+  inmuebleId?: string;
+  habitacionId?: string;
+  rango: RangoFechas;
+  incluirHabitaciones?: boolean;
+  categoriaGasto?: string;
+  estadoContrato?: string;
+}
+
+export interface InformePatrimonio {
+  numeroInmuebles: number;
+  numeroHabitaciones: number;
+  inmueblesOcupados: number;
+  inmueblesVacios: number;
+  inmueblesParcialmenteOcupados: number;
+  contratosActivos: number;
+  contratosProximosFinalizar: number; // próximos 60 días
+  superficieTotal: number;
+  valorAdquisicionTotal: number;
+  valoracionEstimadaTotal: number;
+}
+
+export interface InformeEconomia {
+  ingresosTotales: number; // cobrados
+  ingresosPrevistos: number; // contractuales
+  ingresosPendientes: number;
+  gastosTotales: number;
+  gastosDeducibles: number;
+  resultado: number; // ingresos - gastos deducibles
+  rentabilidadBruta?: number; // % si se puede calcular con datos existentes
+  rentabilidadNeta?: number;
+  rentabilidadEstimada?: number; // reutiliza definición existente
+  cobrosRealizados: number;
+  cobrosPendientes: number;
+  cobrosVencidos: number;
+  cobrosImpagados: number;
+  deudaPendiente: number;
+  formulaRentabilidad: string; // documenta fórmula usada
+}
+
+export interface InformeOperativa {
+  incidenciasAbiertas: number;
+  incidenciasCerradas: number;
+  incidenciasUrgentes: number;
+  siniestrosAbiertos: number;
+  siniestrosCerrados: number;
+  polizasActivas: number;
+  polizasProximasVencer: number;
+  trabajosPendientes: number;
+  trabajosEnCurso: number;
+}
+
+export interface InformeOcupacion {
+  diasAlquilados: number;
+  diasVacios: number;
+  porcentajeOcupacion: number; // 0-100
+  mesesOcupados: number;
+  mesesVacios: number;
+  numInquilinosUnicos: number;
+  numContratos: number;
+  definicionOcupacion: string; // reutiliza definición módulos actuales
+}
+
+export interface EvolucionTemporalItem {
+  periodo: string; // ej "2025-01", "2025-T1", "2025"
+  fechaInicio: string;
+  fechaFin: string;
+  ingresos: number;
+  gastos: number;
+  resultado: number;
+  ocupacion: number;
+  numContratos: number;
+}
+
+export interface InformeCartera {
+  id: string;
+  propietarioId: string;
+  propietarioNombre?: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string; // ej "1.0.0"
+  patrimonio: InformePatrimonio;
+  economia: InformeEconomia;
+  operativa: InformeOperativa;
+  ocupacion: InformeOcupacion;
+  evolucion: EvolucionTemporalItem[];
+  // Para extensión notificaciones GAP 1
+  eventoExtension?: 'INFORME_GENERADO';
+}
+
+export interface InformeContratoDetalle {
+  contratoId: string;
+  inmuebleId: string;
+  inquilinoNombre: string;
+  modalidad: string; // vivienda habitual, temporada, local, habitación
+  estado: EstadoFormalizacion;
+  fechaInicio: string;
+  fechaFin?: string;
+  rentaMensual: number;
+  diasOcupadosPeriodo: number;
+  ingresosPeriodo: number;
+  esProximoFinalizar: boolean;
+  habitacionId?: string;
+}
+
+export interface InformeInmueble {
+  id: string;
+  propietarioId: string;
+  inmuebleId: string;
+  inmuebleDireccion: string;
+  inmuebleCiudad: string;
+  tipoInmueble?: string;
+  modalidadAlquiler?: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string;
+  datosBasicos: {
+    direccion: string;
+    ciudad: string;
+    superficie: number;
+    habitaciones: number;
+    banos: number;
+    valorAdquisicion?: number;
+    fechaAdquisicion?: string;
+  };
+  contratos: InformeContratoDetalle[];
+  ocupacion: InformeOcupacion;
+  economia: InformeEconomia;
+  incidencias: {
+    abiertas: number;
+    cerradas: number;
+    lista: { id: string; titulo: string; estado: string; categoria: string; fecha: string }[];
+  };
+  seguros: {
+    polizasActivas: number;
+    lista: { id: string; aseguradora: string; numeroPoliza: string; tipo: string; vencimiento: string }[];
+  };
+  gastos: {
+    total: number;
+    porCategoria: Record<string, number>;
+    lista: { id: string; fecha: string; concepto: string; importe: number; categoria: string }[];
+  };
+  ingresos: {
+    totalCobrado: number;
+    totalPrevisto: number;
+    lista: { periodo: string; previsto: number; cobrado: number; estado: string }[];
+  };
+  habitaciones?: {
+    id: string;
+    identificador: string;
+    ocupada: boolean;
+    ingresos: number;
+  }[];
+  inventario?: string;
+  periodosPendientes: { periodo: string; importe: number; estado: string }[];
+}
+
+export interface InformeRentabilidad {
+  id: string;
+  propietarioId: string;
+  inmuebleId?: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string;
+  ingresos: number;
+  gastos: number;
+  resultado: number;
+  rentabilidadBruta?: number;
+  rentabilidadNeta?: number;
+  rentabilidadEstimada: number;
+  formula: string; // documenta fórmula exacta reutilizada
+  definicionesDisponibles: string[]; // si existen varias definiciones legítimas
+  detallePorInmueble?: { inmuebleId: string; direccion: string; ingresos: number; gastos: number; resultado: number; rentabilidad: number }[];
+}
+
+export interface InformeFiscal {
+  id: string;
+  propietarioId: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string;
+  ejercicio: number;
+  agrupacion: 'PROPIETARIO' | 'INMUEBLE' | 'EJERCICIO' | 'CONCEPTO';
+  totalIngresos: number;
+  totalGastos: number;
+  totalGastosDeducibles: number;
+  totalResultado: number;
+  porInmueble: {
+    inmuebleId: string;
+    direccion: string;
+    ingresos: number;
+    gastos: number;
+    gastosDeducibles: number;
+    resultado: number;
+    categorias: Record<string, number>;
+  }[];
+  porCategoria?: Record<string, number>;
+  categoriasFiscalesConservadas: boolean;
+  notaAEAT: string; // "Exportación fiscal estructurada compatible con procesos posteriores..."
+}
+
+export interface ExportacionFiscalItem {
+  propietarioId: string;
+  propietarioNombre?: string;
+  inmuebleId: string;
+  inmuebleDireccion: string;
+  ejercicio: number;
+  periodo: string; // YYYY-MM o YYYY
+  concepto: string;
+  fecha: string; // YYYY-MM-DD
+  importe: number;
+  categoria: string;
+  tipo: 'INGRESO' | 'GASTO' | 'AMORTIZACION' | 'INTERES';
+  referenciaId: string; // id cobro, gasto, etc.
+  origen: string; // 'COBRO' | 'GASTO' | 'FISCAL' | etc.
+  moneda: 'EUR';
+  ejercicioFiscal?: number;
+  esDeducible?: boolean;
+}
+
+export interface ExportacionFiscalEstructurada {
+  id: string;
+  propietarioId: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  versionEsquema: string;
+  formato: FormatoExportacion;
+  items: ExportacionFiscalItem[];
+  nota: string; // Exportación fiscal estructurada compatible...
+  totalIngresos: number;
+  totalGastos: number;
+  totalResultado: number;
+}
+
+export interface HistorialInformeGenerado {
+  id: string;
+  propietarioId: string;
+  tipo: 'CARTERA' | 'INMUEBLE' | 'RENTABILIDAD' | 'FISCAL' | 'EXPORTACION';
+  formato?: FormatoExportacion;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  generadoPor: string;
+  inmuebleId?: string;
+  numInmuebles?: number;
+  eventoExtension?: 'INFORME_GENERADO' | 'EXPORTACION_GENERADA';
 }

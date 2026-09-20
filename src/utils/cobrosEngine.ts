@@ -572,7 +572,7 @@ export function calcularResumenCobros(cobros: CobroPeriodo[]) {
     totalPrevisto += c.importePrevisto || 0;
     totalRecibido += c.importeRecibido || 0;
 
-    if (c.estado === 'RECIBIDO' || c.estado === 'VERIFICADO') {
+    if (c.estado === 'RECIBIDO' || c.estado === 'VERIFICADO' || (c.estado as any) === 'PAGADO') {
       countCobrados++;
     } else if (c.estado === 'RETRASADO') {
       countRetrasados++;

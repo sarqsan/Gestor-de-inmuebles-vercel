@@ -65,6 +65,7 @@ import {
   DEFAULT_MODULOS_CONFIG,
   PERMISOS_SISTEMA,
 } from '../types';
+import type { Financiacion } from '../types/financiacion';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -120,6 +121,7 @@ export const PROYECTOS_REFORMA_COL = collection(db, 'proyectos_reforma');
 export const INVENTARIO_COL = collection(db, 'inventario_inmuebles');
 export const INVENTARIO_HISTORIAL_COL = collection(db, 'inventario_historial');
 export const HABITACIONES_COL = collection(db, 'habitaciones_inmueble');
+export const FINANCIACIONES_COL = collection(db, 'financiaciones');
 
 // Colecciones estructurales de usuarios, perfiles, permisos y profesionales
 export const USUARIOS_COL = collection(db, 'usuarios');
@@ -2797,6 +2799,62 @@ export async function asignarCandidatoHabitacionFirestore(
     transaction.set(refH, sanitizeObjectForFirestore(next), { merge: true });
     return next;
   });
+}
+
+// =========================================================================
+// GAP4 — FINANCIACIÓN HIPOTECARIA AVANZADA
+// =========================================================================
+
+/**
+ * Suscripción en tiempo real de financiaciones.
+ * La autorización/aislamiento real la aplica Firestore rules; aquí se devuelve
+ * la lista y el ámbito (scoping) lo decide la UI igual que el resto de módulos.
+ */
+export function subscribeFinanciaciones(callback: (financiaciones: Financiacion[]) => void) {
+  return onSnapshot(
+    FINANCIACIONES_COL,
+    (snapshot) => {
+      const items: Financiacion[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Financiacion);
+      });
+      items.sort((a, b) => (b.fechaFormalizacion || '').localeCompare(a.fechaFormalizacion || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore financiaciones snapshot error:', err);
+    }
+  );
+}
+
+/**
+ * Guarda o actualiza una Financiación. Sin secretos: `sanitizeObjectForFirestore`
+ * elimina undefined y el modelo Financiacion no contempla credenciales.
+ */
+export async function saveFinanciacionFirestore(financiacion: Financiacion): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...financiacion,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'financiaciones', financiacion.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving financiacion to Firestore:', err);
+    throw err;
+  }
+}
+
+/**
+ * Elimina una financiación. La cancelación lógica (estado CANCELADA) es la vía
+ * habitual; el borrado físico queda restringido por reglas a administrador.
+ */
+export async function deleteFinanciacionFirestore(financiacionId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'financiaciones', financiacionId));
+  } catch (err) {
+    console.error('Error deleting financiacion from Firestore:', err);
+    throw err;
+  }
 }
 
 export {

@@ -351,6 +351,10 @@ export function crearBorradorContrato(
     // Estado
     estado: 'BORRADOR_CONTRATO',
 
+    // GAP 2: modalidad contractual y versión de la cadena histórica
+    modalidadContractual: (inmueble.modalidadAlquiler || (candidato.habitacionId ? 'habitaciones' : 'completo')) === 'habitaciones' ? 'HABITACION' : 'VIVIENDA_HABITUAL',
+    version: 1,
+
     // Evaluación
     evaluacionAsegurabilidad: evaluacion,
 
@@ -704,6 +708,12 @@ export function getFormalizacionEstadoInfo(estado: EstadoFormalizacion): {
         label: 'Finalizado (Histórico)',
         badgeClass: 'bg-slate-200 text-slate-700 border-slate-300',
         iconName: 'Archive',
+      };
+    case 'RESCINDIDO':
+      return {
+        label: 'Rescindido',
+        badgeClass: 'bg-orange-100 text-orange-700 border-orange-200',
+        iconName: 'AlertTriangle',
       };
     case 'CANCELADO':
       return {

@@ -5,6 +5,7 @@ export type SectionType =
   | 'cobros'
   | 'gastos'
   | 'conciliacion'
+  | 'facturacion'
   | 'financiacion'
   | 'fiscal'
   | 'informes'

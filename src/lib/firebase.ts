@@ -66,6 +66,12 @@ import {
   PERMISOS_SISTEMA,
 } from '../types';
 import type { Financiacion } from '../types/financiacion';
+import type {
+  Factura,
+  RegistroFacturacion,
+  EnvioVerifactu,
+  SerieFacturacion,
+} from '../types/facturacion';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -2853,6 +2859,157 @@ export async function deleteFinanciacionFirestore(financiacionId: string): Promi
     await deleteDoc(doc(db, 'financiaciones', financiacionId));
   } catch (err) {
     console.error('Error deleting financiacion from Firestore:', err);
+    throw err;
+  }
+}
+
+// =========================================================================
+// GAP7 — FACTURACIÓN Y VERI*FACTU (aislamiento por propietario; sin secretos)
+// =========================================================================
+
+export const FACTURAS_COL = collection(db, 'facturas');
+export const REGISTROS_FACTURACION_COL = collection(db, 'registros_facturacion');
+export const ENVIOS_VERIFACTU_COL = collection(db, 'envios_verifactu');
+export const SERIES_FACTURACION_COL = collection(db, 'series_facturacion');
+
+/**
+ * Suscripción en tiempo real de facturas. La autorización/aislamiento real la
+ * aplica Firestore rules; la UI aplica el ámbito igual que el resto de módulos.
+ */
+export function subscribeFacturas(callback: (facturas: Factura[]) => void) {
+  return onSnapshot(
+    FACTURAS_COL,
+    (snapshot) => {
+      const items: Factura[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Factura);
+      });
+      items.sort((a, b) => (b.fechaExpedicionUtc || '').localeCompare(a.fechaExpedicionUtc || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore facturas snapshot error:', err);
+    }
+  );
+}
+
+/** Guarda una factura. Sin secretos: modelo Factura no contempla credenciales. */
+export async function saveFacturaFirestore(factura: Factura): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...factura,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'facturas', factura.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving factura to Firestore:', err);
+    throw err;
+  }
+}
+
+export async function deleteFacturaFirestore(facturaId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'facturas', facturaId));
+  } catch (err) {
+    console.error('Error deleting factura from Firestore:', err);
+    throw err;
+  }
+}
+
+/** Suscripción en tiempo real de registros de facturación (RRSIF). */
+export function subscribeRegistrosFacturacion(callback: (registros: RegistroFacturacion[]) => void) {
+  return onSnapshot(
+    REGISTROS_FACTURACION_COL,
+    (snapshot) => {
+      const items: RegistroFacturacion[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as RegistroFacturacion);
+      });
+      items.sort((a, b) => a.fechaHoraHusoGenRegistro.localeCompare(b.fechaHoraHusoGenRegistro));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore registros_facturacion snapshot error:', err);
+    }
+  );
+}
+
+/**
+ * Guarda un registro de facturación. El registro es INALTERABLE: una vez
+ * existente, no se sobrescribe (merge: false) salvo que el documento no exista.
+ */
+export async function createRegistroFacturacionFirestore(registro: RegistroFacturacion): Promise<void> {
+  try {
+    const refReg = doc(db, 'registros_facturacion', registro.id);
+    const existente = await getDoc(refReg);
+    if (existente.exists()) {
+      throw new Error('El registro de facturación ya existe y es inalterable.');
+    }
+    const clean = sanitizeObjectForFirestore(registro);
+    await setDoc(refReg, clean, { merge: false });
+  } catch (err) {
+    console.error('Error creating registro_facturacion in Firestore:', err);
+    throw err;
+  }
+}
+
+/** Suscripción en tiempo real de envíos VERI*FACTU. */
+export function subscribeEnviosVerifactu(callback: (envios: EnvioVerifactu[]) => void) {
+  return onSnapshot(
+    ENVIOS_VERIFACTU_COL,
+    (snapshot) => {
+      const items: EnvioVerifactu[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as EnvioVerifactu);
+      });
+      items.sort((a, b) => (b.fechaCreacion || '').localeCompare(a.fechaCreacion || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore envios_verifactu snapshot error:', err);
+    }
+  );
+}
+
+/** Crea o actualiza un envío VERI*FACTU conservando su identidad idempotente. */
+export async function saveEnvioVerifactuFirestore(envio: EnvioVerifactu): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore(envio);
+    await setDoc(doc(db, 'envios_verifactu', envio.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving envio_verifactu to Firestore:', err);
+    throw err;
+  }
+}
+
+/** Suscripción en tiempo real de series de facturación. */
+export function subscribeSeriesFacturacion(callback: (series: SerieFacturacion[]) => void) {
+  return onSnapshot(
+    SERIES_FACTURACION_COL,
+    (snapshot) => {
+      const items: SerieFacturacion[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as SerieFacturacion);
+      });
+      items.sort((a, b) => `${b.ejercicio}-${b.codigo}`.localeCompare(`${a.ejercicio}-${a.codigo}`));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore series_facturacion snapshot error:', err);
+    }
+  );
+}
+
+/** Guarda o actualiza una serie de facturación (avanza la correlación). */
+export async function saveSerieFacturacionFirestore(serie: SerieFacturacion): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...serie,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'series_facturacion', serie.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving serie_facturacion to Firestore:', err);
     throw err;
   }
 }

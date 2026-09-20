@@ -27,6 +27,7 @@ import {
   Landmark,
   Banknote,
   Wallet,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -41,6 +42,8 @@ interface SidebarProps {
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
   incidenciasAbiertasCount?: number;
+  /** BLOQUE C: nº de expedientes de morosidad con saldo pendiente. */
+  morosidadAbiertaCount?: number;
   currentUser?: UsuarioApp;
   onOpenAuthModal?: () => void;
   onLogout?: () => void;
@@ -58,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
   incidenciasAbiertasCount = 0,
+  morosidadAbiertaCount = 0,
   currentUser,
   onOpenAuthModal,
   onLogout,
@@ -110,6 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
       { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark },
       { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
+      { id: 'morosidad', label: 'Morosidad y Recobro', icon: ShieldAlert, badge: morosidadAbiertaCount },
       { id: 'facturacion', label: 'Facturación & VERI*FACTU', icon: FileText },
       { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
       { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3 },

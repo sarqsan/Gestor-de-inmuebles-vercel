@@ -118,3 +118,23 @@ Un bloque NO se considera terminado hasta que **todo** lo siguiente consta:
 - Versión 1.0 — 2026-09-20 (paquete de continuidad sobre consolidado `91da820`).
 - Aplicable a todas las sesiones de Arena A/B/C/D sobre este repositorio desde
   su creación, y a las posteriores salvo cambio documentado.
+
+---
+
+## 8. ANEXO — CONSTANCIA DE ENTREGAS (informativo; no crea ni modifica reglas)
+
+| Fecha | Bloque | Rama de entrega | BASE | Estado | Verificación declarada |
+|---|---|---|---|---|---|
+| 2026-09-20 | **BLOQUE C** — Morosidad + recobro + expediente legal | `arena/01a0c03d-gestor-de-inmuebles-vercel` | `5ff8448` | **ENTREGADO EN RAMA · NO INTEGRADO** (decide Arena A) | `test:bloque-c` 82 PASS · vitest 409/409 · `test:bloque-b` 92/92 (sin regresión) · `tsc --noEmit` 0 · build OK. Docs: `docs/BLOQUE-C-*.md` |
+
+Notas de aplicación a esta entrega (conforme a §5 y §6; no son reglas nuevas):
+
+- El BLOQUE C **no** ha modificado motores ajenos (cobros, tesorería, dispatcher GAP 1, conciliación):
+  la diferencia en los ficheros compartidos es aditiva. Cualquier ajuste que Arena A considere
+  necesario se hace **en la canónica**, no reescribiendo la rama de C.
+- El bloque consume GAP 1 para las comunicaciones (10 plantillas aditivas `morosidad.*` + origen
+  `MOROSIDAD`) y rellena el hueco del `RepositorioNotificaciones` persistente: **Arena A decide** si
+  esa implementación pasa a ser canónica de GAP 1 o queda como adaptador del módulo de morosidad.
+- Reglas Firestore numeradas **§32–§37** (no reutilizan numeración de otros bloques) y `notificaciones`
+  no re-regulado: sin conflicto con §22 (GAP 1) ni con §26–§31 (BLOQUE B).
+- **BLOQUE D no iniciado** desde esta rama (tampoco el portal del inquilino, que es BLOQUE E).

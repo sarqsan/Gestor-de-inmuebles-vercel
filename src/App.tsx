@@ -193,6 +193,30 @@ import {
   subscribeOrdenesPago,
 } from './lib/tesoreriaFirestore';
 import { configurarAuditWriter } from './tesoreria/notificaciones';
+// BLOQUE C — Morosidad avanzada (recobro + expediente): orquestador, repositorio Firestore y GAP 1
+import { MorosidadSection } from './components/sections/MorosidadSection';
+import {
+  cambiarEstado as cambiarEstadoMorosidad,
+  detectarYGestionar as detectarMorosidad,
+  escalar as escalarMorosidad,
+  registrarComunicacion as registrarComunicacionMorosidad,
+  registrarCompromiso as registrarCompromisoMorosidad,
+  registrarPago as registrarPagoMorosidad,
+  recalcularConceptosJuridicos as recalcularJuridicoMorosidad,
+  type ContextoCaso,
+} from './utils/morosidad/morosidadStore';
+import {
+  crearRepositorioMorosidadFirestore,
+  escritorNotificacionesGAP1,
+  savePoliticaMorosidadFirestore,
+  subscribeCompromisosMorosidad,
+  subscribeExpedientesMorosidad,
+  subscribePoliticasMorosidad,
+  subscribeResumenMorosidadPropietario,
+} from './lib/morosidadFirestore';
+import { contextoAutorizacionDesdeUsuario, repositorioNotificacionesFirestore } from './utils/morosidad/puenteGAP1';
+import { revisarCompromisosVigentes } from './utils/morosidad/morosidadStore';
+import type { CompromisoPago, ExpedienteMorosidad, PoliticaMorosidad, ResumenMorosidadPropietario } from './types/morosidad';
 import { suscribirMovimientosSesion } from './lib/conciliacionSession';
 import type { SesionConciliacion } from './lib/conciliacionSession';
 import type {
@@ -387,6 +411,11 @@ export default function App() {
   const [tesoreriaTrabajos, setTesoreriaTrabajos] = useState<TrabajoProfesional[]>([]);
   // Espejo de sesión GAP 6 (movimientos + propuestas importados en Conciliación)
   const [tesoreriaSesionConciliacion, setTesoreriaSesionConciliacion] = useState<SesionConciliacion>({ movimientos: [], propuestas: [] });
+  // BLOQUE C — Morosidad: expedientes, compromisos, política vigente y espejo del propietario
+  const [morosidadExpedientes, setMorosidadExpedientes] = useState<ExpedienteMorosidad[]>([]);
+  const [morosidadCompromisos, setMorosidadCompromisos] = useState<CompromisoPago[]>([]);
+  const [morosidadPoliticas, setMorosidadPoliticas] = useState<PoliticaMorosidad[]>([]);
+  const [morosidadResumenPropietario, setMorosidadResumenPropietario] = useState<ResumenMorosidadPropietario[]>([]);
 
   // Sesión y autenticación real con Firebase Authentication
   const [currentUser, setCurrentUser] = useState<UsuarioApp | null>(null);
@@ -515,6 +544,73 @@ export default function App() {
   }, [currentUser, contratos, scopedInmuebles]);
 
   // BLOQUE B — Liquidaciones con aislamiento por propietario (admin: todas)
+  // BLOQUE C — Contexto de caso del orquestador de morosidad (repositorio Firestore
+  // + dispatcher GAP 1). La UI nunca escribe colecciones directamente ni calcula importes.
+  const morosidadContexto = useMemo<ContextoCaso>(() => {
+    const repositorio = crearRepositorioMorosidadFirestore({
+      leerContratos: () => contratos,
+      guardarContrato: async (c) => {
+        await saveContratoFirestore(c);
+      },
+      audit: async (accion, descripcion, detalles) => {
+        if (!currentUser) return;
+        await saveAuditLogFirestore({
+          usuarioId: currentUser.id,
+          usuarioEmail: currentUser.email,
+          usuarioNombre: currentUser.nombre,
+          accion,
+          descripcion,
+          entidadAfectada: 'modulo',
+          idAfectado: String(detalles.expedienteId || detalles.contratoId || 'morosidad'),
+          resultado: 'EXITO',
+          detalles,
+        });
+      },
+      actor: currentUser ? { id: currentUser.id, nombre: currentUser.nombre, email: currentUser.email } : null,
+    });
+    return {
+      repositorio,
+      actor: currentUser ? { id: currentUser.id, nombre: currentUser.nombre, email: currentUser.email } : null,
+      dispatcher: {
+        autorizacion: contextoAutorizacionDesdeUsuario(currentUser),
+        repositorio: repositorioNotificacionesFirestore(escritorNotificacionesGAP1),
+        // Sin proveedor de email declarado ⇒ GAP 1 registra la comunicación pero
+        // NUNCA afirma entrega real (safe-mode). Lo mismo aplica a burofax/WhatsApp.
+        emailProvider: null,
+      },
+      destinatarios: {
+        propietario: null,
+        usuarioIdPropietario: currentUser?.id,
+      },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, contratos]);
+
+  const scopedMorosidad = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return morosidadExpedientes;
+    return []; // el propietario no lee `expedientes_morosidad`: usa el espejo recortado
+  }, [currentUser, morosidadExpedientes]);
+
+  const scopedMorosidadCompromisos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return morosidadCompromisos;
+    return [];
+  }, [currentUser, morosidadCompromisos]);
+
+  const morosidadAbiertaCount = useMemo(
+    () => scopedMorosidad.filter((e) => e.saldoPendiente > 0.009 && e.estado !== 'CERRADA').length,
+    [scopedMorosidad],
+  );
+
+  const handleSaveMorosidadPolitica = async (pol: PoliticaMorosidad) => {
+    setMorosidadPoliticas((prev) => {
+      const exists = prev.some((p) => p.id === pol.id);
+      return exists ? prev.map((p) => (p.id === pol.id ? pol : p)) : [pol, ...prev];
+    });
+    await savePoliticaMorosidadFirestore(pol);
+  };
+
   const scopedLiquidaciones = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') return tesoreriaLiquidaciones;
@@ -887,6 +983,11 @@ export default function App() {
       setProfesionales(data);
     });
 
+    let unsubscribeMorosidadExp: (() => void) | undefined;
+    let unsubscribeMorosidadCmp: (() => void) | undefined;
+    let unsubscribeMorosidadPol: (() => void) | undefined;
+    let unsubscribeMorosidadResumen: (() => void) | undefined;
+
     // BLOQUE B — Tesorería (2026-09-20): liquidaciones, gastos de tesorería,
     // órdenes de pago, ficheros SEPA, mandatos y trabajos (importación de gastos).
     // La auditoría de tesorería se escribe en audit_logs (canal de auditoría
@@ -915,6 +1016,18 @@ export default function App() {
     const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []));
     // Puente GAP 6 → Tesorería: espejo de sesión de movimientos y propuestas
     const unsubscribeTesoreriaMovSesion = suscribirMovimientosSesion((data) => setTesoreriaSesionConciliacion(data));
+
+    // BLOQUE C — Morosidad: el admin ve todos los expedientes; el propietario solo
+    // el espejo recortado (`morosidad_resumen_propietario`), nunca el expediente completo.
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') {
+      unsubscribeMorosidadExp = subscribeExpedientesMorosidad((data) => setMorosidadExpedientes(data || []));
+      unsubscribeMorosidadCmp = subscribeCompromisosMorosidad((data) => setMorosidadCompromisos(data || []));
+      unsubscribeMorosidadPol = subscribePoliticasMorosidad((data) => setMorosidadPoliticas(data || []));
+    } else if (currentUser.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId) {
+      unsubscribeMorosidadResumen = subscribeResumenMorosidadPropietario(currentUser.propietarioId, (data) =>
+        setMorosidadResumenPropietario(data || []),
+      );
+    }
 
     const unsubscribeSolicitudesSeguro = subscribeSolicitudesSeguro((data) => {
       if (data && data.length > 0) {
@@ -984,6 +1097,10 @@ export default function App() {
       if (unsubscribeGmail) unsubscribeGmail();
       if (unsubscribeUsuariosHook) unsubscribeUsuariosHook();
       if (unsubscribeAuditHook) unsubscribeAuditHook();
+      if (unsubscribeMorosidadExp) unsubscribeMorosidadExp();
+      if (unsubscribeMorosidadCmp) unsubscribeMorosidadCmp();
+      if (unsubscribeMorosidadPol) unsubscribeMorosidadPol();
+      if (unsubscribeMorosidadResumen) unsubscribeMorosidadResumen();
     };
   }, [currentUser?.id, currentUser?.tipoPerfil]);
 
@@ -3032,6 +3149,7 @@ export default function App() {
         contratosCount={scopedContratos.length}
         solicitudesSeguroCount={solicitudesSeguro.length}
         cobrosPendientesCount={cobrosPendientesCount}
+        morosidadAbiertaCount={morosidadAbiertaCount}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
@@ -3051,6 +3169,7 @@ export default function App() {
           contratosCount={scopedContratos.length}
           solicitudesSeguroCount={solicitudesSeguro.length}
           cobrosPendientesCount={cobrosPendientesCount}
+          morosidadAbiertaCount={morosidadAbiertaCount}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -3089,6 +3208,7 @@ export default function App() {
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
+                resumenMorosidad={morosidadResumenPropietario}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -3172,6 +3292,24 @@ export default function App() {
             />
           )}
 
+          {/* BLOQUE C — Morosidad: recobro y expediente (solo administración; el propietario
+              ve el resumen mínimo en su portal). */}
+          {activeSection === 'morosidad' && currentUser.tipoPerfil === 'ADMINISTRADOR' && (
+            <MorosidadSection
+              expedientes={scopedMorosidad}
+              compromisos={scopedMorosidadCompromisos}
+              politicas={morosidadPoliticas}
+              contratos={contratos}
+              inmuebles={scopedInmuebles}
+              propietarios={propietarios}
+              currentUser={currentUser}
+              contexto={morosidadContexto}
+              onSavePolitica={handleSaveMorosidadPolitica}
+              esAdmin
+              resumenPropietario={morosidadResumenPropietario}
+            />
+          )}
+
           {/* BLOQUE B — Tesorería: administración completa / portal propietario */}
           {activeSection === 'tesoreria' && (
             currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
@@ -3206,6 +3344,7 @@ export default function App() {
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
+                resumenMorosidad={morosidadResumenPropietario}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -3436,6 +3575,7 @@ export default function App() {
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
+                resumenMorosidad={morosidadResumenPropietario}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);

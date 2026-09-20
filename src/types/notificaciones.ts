@@ -68,7 +68,11 @@ export type OrigenNotificacion =
   | 'SISTEMA'
   | 'PRUEBA'
   // BLOQUE B (integración canónica 2026-09-20): liquidaciones, pagos, SEPA, incidencias de pago
-  | 'TESORERIA';
+  | 'TESORERIA'
+  // BLOQUE C (2026-09-20): morosidad, recobro y expediente de recuperación.
+  // ADITIVO: reutiliza el dispatcher GAP1; no se crea un segundo sistema de
+  // notificaciones (plantillas y canales canónicos, id idempotencia canónica).
+  | 'MOROSIDAD';
 
 export interface EventoNotificacion {
   origen: OrigenNotificacion;

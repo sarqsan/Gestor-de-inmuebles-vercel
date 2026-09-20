@@ -103,7 +103,7 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 | 9 | Pólizas y Siniestros | Pólizas multirramo, vencimientos, siniestros con comunicaciones e indemnización; flujo Gmail con aseguradoras (OAuth) | `segurosEngine.ts`, `PolizasSegurosSection.tsx`, `gmailClient.ts`, `googleAuth.ts`, `system/gmail_config` | `FUNCIONAL_CON_MEJORAS` | indirectos | Gmail es la única integración transaccional real E2E de la base |
 | 10 | Inventario + Ficha técnica | Inventario físico por inmueble, baja lógica, adjuntos, histórico append-only | `inventarioEngine.ts`, `FichaTecnicaInventarioPanel.tsx`, `inventario_inmuebles`/`inventario_historial` | `FUNCIONAL_CON_MEJORAS` | 12 | Portado de Arena D con reglas reforzadas en A (FASE integrada) |
 | 11 | Recomercialización | Salida de inquilino, inspección por estancias + IA, reformas/ROI, pricing (catastro/OVC), estrategia/comercialización, kit de publicación, cierre que libera el inmueble | `recomercializacionEngine.ts`, `reformasEngine.ts`, `pricingRecomerc.ts`, `kitPublicacionIa.ts`, `RecomercializacionSection.tsx`, docs `arquitectura/FASE_3.*` | `FUNCIONAL_CON_MEJORAS` | indirectos | Documentado en `docs/arquitectura/` (14 ficheros) — enlazar, no duplicar |
-| 12 | Notificaciones transaccionales (GAP1) | Dispatcher de eventos de negocio: plantilla, canal, momento, reintentos, auditoría, idempotencia | `src/notificaciones/*` (6 módulos), `types/notificaciones.ts`, reglas §22 `notificaciones`, endpoint `/api/notificaciones/enviar` | Motor `COMPLETO`; transporte `DEPENDENCIA_EXTERNA` | 26 | Sin implementación Firestore del `RepositorioNotificaciones` (interface); EMAIL en safe-mode (sin proveedor real); WHATSAPP preparado-no implementado; sin bandeja UI |
+| 12 | Notificaciones transaccionales (GAP1) | Dispatcher de eventos de negocio: plantilla, canal, momento, reintentos, auditoría, idempotencia | `src/notificaciones/*` (6 módulos), `types/notificaciones.ts`, reglas §22 `notificaciones`, endpoint `/api/notificaciones/enviar` | Motor `COMPLETO`; transporte `DEPENDENCIA_EXTERNA` | 26 | Sin implementación Firestore del `RepositorioNotificaciones` (interface) **en la canónica** — el BLOQUE C en rama aporta `repositorioNotificacionesFirestore`/`escritorNotificacionesGAP1`, pendiente de integración; EMAIL en safe-mode (sin proveedor real); WHATSAPP preparado-no implementado; sin bandeja UI |
 | 13 | Contratos especiales (GAP2) | Modalidades (temporada/local/habitación), anexos versionados inmutables, finalización/rescisión irreversible, finiquito, derivados/prórrogas, eventos de ciclo | `contratoCicloEngine.ts`, `CicloContractualPanel.tsx`, `types.ts` (bloque GAP2) | `COMPLETO` | 44 | Eventos de ciclo emitidos hacia GAP1 (dispatcher aún sin transporte real); sin UI de creación directa desde cero (flujo real: sobre borrador LAU) |
 | 14 | Reporting (GAP3) | Capa de agregación/lectura sobre cobros/fiscal/gastos; PDF (jsPDF); informes de inversor/rentabilidad | `reportingEngine.ts` (1.116 l.), `pdfExportEngine.ts`, `InformesSection.tsx` | `COMPLETO` | 1 (cobertura fina; ver límite) | Capa de SOLO LECTURA: no escribe en cobros/gastos. Sin gráficos (tarjetas HTML) |
 | 15 | Sindicación (GAP5) | Publicación multicanal de inmuebles/habitaciones: modelo normalizado → validador → adaptadores (XML/JSON/portales), trazabilidad | `publicacionEngine.ts`, `publicacionXml.ts`, `publicacionJson.ts`, `publicacionPortales.ts`, `PublicacionInmueblesPanel.tsx` | `COMPLETO` (generación) | 35 | Publicación REAL a portales = `PENDIENTE` (sin credenciales; se generan feed/export, no se envían) |
@@ -113,6 +113,7 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 | 19 | Backend IA (Express) | 16 endpoints: análisis de documentos/cuestionario/incidencia/inspección, correo aseguradora, cláusula, pricing, kit publicación, catastro, notificaciones, upload | `server.ts` (2.605 l.), `api/index.ts`, `vercel.json` | `FUNCIONAL_CON_MEJORAS` | — | Residual P2: `documentsStore` en memoria (ver #3). Sin rate-limit (documentado en diagnóstico) |
 | 20 | Seguridad perimetral | Reglas Firestore por colección (aislamiento por `propietarioId`, deny-by-default catch-all), reglas Storage por ruta, RBAC en cliente | `firestore.rules` (1.347 l., ~50 bloques), `storage.rules` (161 l.), `firebase.json` | `FUNCIONAL_CON_MEJORAS` | — | Residuales documentados en `FASE_1.4_SEGURIDAD_PERMISOS.md` §5 (ficha pública con datos fiscales; Storage sin claims) |
 | 21 | **Tesorería + Liquidaciones + SEPA (BLOQUE B)** | **INTEGRADO EN ARENA A (2026-09-20)** — cierre del ciclo inmueble→propietario: liquidación mensual determinista, gastos imputables, órdenes de pago, SEPA PAIN.008/001 (preparación, sin envío real), portal propietario, conciliación evidencia | `src/tesoreria/*` (9 módulos), `TesoreriaSection.tsx`, `lib/tesoreriaFirestore.ts`, `lib/conciliacionSession.ts`, colección `liquidaciones_propietarios`/`gastos_inmuebles`/`ordenes_pago`/`ficheros_sepa`/`mandatos_sepa`/`config_liquidacion`, reglas §26–31 | `COMPLETO` (motor + integración) | 92 (batería `test:bloque-b`) | **Preparación** de ficheros SEPA: NO hay envío bancario real (sin APIs/EBICS/certificados inventados). Evidencia de pago requiere movimiento GAP6 conciliado en sesión. Ver §4 BLOQUE B |
+| 22 | **Morosidad + recobro + expediente legal (BLOQUE C)** | **DESARROLLADO EN RAMA `arena/01a0c03d-gestor-de-inmuebles-vercel` (cierre 2026-09-20) — NO INTEGRADO en la rama canónica**: pendiente de auditoría e integración selectiva por Arena A. Detección de deuda desde `registroCobros`, máquina de estados con histórico append-only, política de recobro configurable (D+3/D+10/D+20/D+30) versionada, plan de recobro, comunicaciones **solo por GAP1**, evidencias, compromisos cubiertos con cobros reales, expedientes de aseguradora y jurídico con requisito de procedibilidad LO 1/2025, espejo de mínimo privilegio para el propietario | `src/types/morosidad.ts`, `src/utils/morosidad/*` (8 módulos), `src/lib/morosidadFirestore.ts`, `MorosidadSection.tsx`, `MorosidadDetalleModal.tsx`, colecciones `expedientes_morosidad`/`_hist`/`evidencias_morosidad`/`compromisos_morosidad`/`politicas_morosidad`/`morosidad_resumen_propietario`, reglas §32–§37 | `DESARROLLADO_EN_RAMA` (motor + UI + reglas + 79 tests) | 79 (vitest) + 82 (batería `test:bloque-c`) | Comunicaciones externas = `DEPENDENCIA_EXTERNA` (email en safe-mode = `PENDIENTE_ENVIO`/`FALLIDA`, nunca `ENVIADA`); burofax/notaría/aseguradora/tribunal = registro manual con evidencia; intereses sin tipo fijado por el ERP; reglas verificadas textualmente (sin emulator). Ver §4 BLOQUE C y `docs/BLOQUE-C-*.md` |
 
 ### 2.2 Colecciones Firestore (estado canónico)
 
@@ -279,11 +280,19 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
   la evidencia de pago opera sobre la sesión de conciliación).
 - Transporte real del dispatcher GAP1 (común a todos los orígenes).
 
-### BLOQUE C — Morosidad + recobro + expediente de recuperación
+### BLOQUE C — Morosidad + recobro + expediente de recuperación — **DESARROLLADO EN RAMA (NO INTEGRADO), 2026-09-20**
 
 Objetivo: detectar deuda, comunicarla y gestionar su recobro con expediente.
 
-Ámbito a documentar/planificar (no implementar ahora):
+> **Estado real:** el bloque está implementado, verificado y versionado en la rama de sesión
+> `arena/01a0c03d-gestor-de-inmuebles-vercel` (commit de cierre
+> `feat(morosidad): cerrar bloque C de recobro y expediente`), sobre la base canónica `5ff8448`.
+> **No está integrado en la rama canónica**: la integración selectiva corresponde a Arena A.
+> Detalle: `docs/BLOQUE-C-IMPLEMENTACION.md` (qué se construyó y qué no),
+> `docs/BLOQUE-C-VERIFICACION.md` (resultados exactos de tests/tsc/build y sus límites) y
+> `docs/BLOQUE-C-NORMATIVA.md` (fuentes, criterios y lo que el ERP no afirma).
+
+Ámbito previsto en el plan (texto original de esta sección; hoy IMPLEMENTADO EN RAMA salvo lo que se indica en cada punto):
 - Detección de deuda (base existente: `cobrosEngine` ya marca retrasos/incidencias
   de periodo — commit base "avisos y retrasos automáticos").
 - Estados de la deuda (nueva máquina de estados; **NO reutilizar los estados de
@@ -294,11 +303,16 @@ Objetivo: detectar deuda, comunicarla y gestionar su recobro con expediente.
 - Documentación/evidencias y expediente de recuperación (patrón append-only de
   `audit_logs`/históricos).
 - Posible comunicación con seguro de impago (base existente: `segurosEngine`,
-  `solicitudes_seguro_impago`, flujo Gmail).
+  `solicitudes_seguro_impago`, flujo Gmail). **En la rama:** expediente de aseguradora
+  `PREPARADO` con evidencia del comprobante; **no** se automatiza el envío (reutilizar el flujo
+  Gmail sería una integración nueva: queda `PENDIENTE`).
 - Trazabilidad completa.
 
 **Reglas temporales:** se tratan como **configurables**, NO como plazos legales,
-salvo verificación documental expresa.
+salvo verificación documental expresa. **Comprobado en la rama:** D+3/D+10/D+20/D+30 son
+`diasOffset` de la política del propietario
+(`fechaObjetivo = vencimiento + diasOffset + diasGracia`) y cambiar la política no reescribe el
+histórico ni los planes ya generados (`versionarPolitica`).
 
 ### BLOQUE D — Entrada/salida + actas + evidencias + firma digital
 
@@ -497,7 +511,7 @@ presentan como cinco órdenes pequeñas:
 | Fase | Capacidad | Tamaño / nota |
 |---|---|---|
 | **B** | Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001) | **IMPLEMENTADO (2026-09-20)** — ver §4 BLOQUE B (pendientes: envío bancario real, camt.053) |
-| **C** | Morosidad + recobro + expediente de recuperación | Bloque grande |
+| **C** | Morosidad + recobro + expediente de recuperación | **DESARROLLADO EN RAMA `arena/01a0c03d-…` (2026-09-20), NO INTEGRADO** — ver §4 BLOQUE C (pendientes: transporte real de comunicaciones, emulator de reglas, programador de detección, adjuntos en Storage) |
 | **D** | Entrada/salida + actas + evidencias + firma digital | Bloque grande |
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | Bloque grande |
 | **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | Capa transversal; crece y se profundiza con cada bloque estabilizado |
@@ -623,6 +637,9 @@ endurecimiento final — §7)
 | `docs/BLOQUE-B-FASE0-VERIFICACION.md` | Verificación pre-integración del bloque B (rama B) |
 | `docs/BLOQUE-B-IMPLEMENTACION.md` | Informe de implementación del bloque B (rama B) |
 | `docs/BLOQUE-B-NORMATIVA-Y-AUDITORIA.md` | Decisiones fiscales/bancarias del bloque B (fuentes y «a verificar») |
+| `docs/BLOQUE-C-IMPLEMENTACION.md` | BLOQUE C (rama `arena/01a0c03d-…`): qué se construyó, qué se reutilizó, etiquetas IMPLEMENTADO/PREPARADO/SIMULADO/EXTERNO/PENDIENTE |
+| `docs/BLOQUE-C-VERIFICACION.md` | BLOQUE C: resultados exactos (tests, tsc, build), límites de la verificación e inventario de cambios para la auditoría de Arena A |
+| `docs/BLOQUE-C-NORMATIVA.md` | BLOQUE C: fuentes legales utilizadas, qué se codificó, qué NO afirma el ERP y pendientes de verificación jurídica |
 | `docs/informe-GAP2-contratos-especiales.md` | Informe completo GAP2 (Arena C) |
 | `docs/informe-GAP8-factura-electronica-b2b.md` | Informe completo GAP8 (Arena C) |
 | `docs/informe-auditoria-C-vs-A-2026-09-19.md` | Auditoría comparativa C→A (2026-09-19) |

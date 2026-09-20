@@ -28,6 +28,7 @@ import {
   Landmark,
   Banknote,
   Wallet,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -41,6 +42,8 @@ interface MobileNavProps {
   contratosCount?: number;
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
+  /** BLOQUE C: expedientes de morosidad con saldo pendiente. */
+  morosidadAbiertaCount?: number;
   currentUser?: UsuarioApp;
   onOpenAddCandidateModal?: () => void;
   onOpenAuthModal?: () => void;
@@ -57,6 +60,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   contratosCount = 0,
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
+  morosidadAbiertaCount = 0,
   currentUser,
   onOpenAddCandidateModal,
   onOpenAuthModal,
@@ -106,6 +110,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
           { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },
           { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos CSV/OFX/MT940/Norma43 y conciliar' },
+          { id: 'morosidad', label: 'Morosidad y Recobro', icon: ShieldAlert, badge: morosidadAbiertaCount, description: 'Detección de deuda, recobro, compromisos y expediente legal' },
           { id: 'facturacion', label: 'Facturación & VERI*FACTU', icon: FileText, description: 'Facturas y registro de facturación AEAT' },
           { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
           { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },

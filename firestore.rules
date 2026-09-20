@@ -56,6 +56,26 @@ service cloud.firestore {
       return request.resource.data;
     }
 
+    // --- BLOQUE C (morosidad) ------------------------------------------------
+        // BLOQUE C — mismo control de secretos para las colecciones de morosidad.
+    // Un expediente referencia comunicaciones y evidencias: nunca admite
+    // credenciales, tokens ni adjuntos en base64 dentro del documento.
+    function sinSecretosMorosidad() {
+      return !(
+        'credentials' in incoming() ||
+        'apiKey' in incoming() ||
+        'accessToken' in incoming() ||
+        'refreshToken' in incoming() ||
+        'privateKey' in incoming() ||
+        'password' in incoming() ||
+        'secret' in incoming() ||
+        'token' in incoming() ||
+        'base64Data' in incoming() ||
+        'adjuntoBase64' in incoming()
+      );
+    }
+
+
     function existing() {
       return resource.data;
     }
@@ -1336,6 +1356,136 @@ service cloud.firestore {
       allow update: if isMasterAdmin() && sinSecretosTesoreria();
       allow delete: if isMasterAdmin();
     }
+
+
+    // =========================================================================
+    // BLOQUE C — MOROSIDAD, RECOBRO Y EXPEDIENTE LEGAL (2026-09-20)
+    // Criterios comunes a 32–37:
+    //  · deny-by-default: todo lo no listado queda denegado por el catch-all final
+    //  · escritura SOLO de la administración (isMasterAdmin)
+    //  · el propietario NUNCA lee expedientes/histórico/evidencias/comunicaciones:
+    //    solo el espejo recortado (§37), sin datos del inquilino ni de estrategia
+    //  · invariante de id: request.resource.data.id == {docId} (sin duplicados por escritura)
+    //  · histórico y evidencias son append-only: create sí, update/delete no
+    //  · sin credenciales, tokens, adjuntos en base64 ni secretos (sinSecretosMorosidad)
+    // =========================================================================
+
+    // 32. EXPEDIENTES DE MOROSIDAD — agregado de recobro por contrato.
+    match /expedientes_morosidad/{expedienteId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(expedienteId)
+        && incoming().id == expedienteId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && incoming().contratoId is string
+        && incoming().contratoId.size() > 0
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.propietarioId == existing().propietarioId
+        && request.resource.data.contratoId == existing().contratoId
+        && sinSecretosMorosidad();
+      // Sin borrado ordinario: un expediente es memoria de recobro y trazabilidad.
+      allow delete: if false;
+    }
+
+    // 33. HISTÓRICO DE ESTADO (append-only). Nadie actualiza ni borra una transición.
+    match /expedientes_morosidad_hist/{transicionId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(transicionId)
+        && incoming().id == transicionId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && incoming().expedienteId is string
+        && incoming().expedienteId.size() > 0
+        && sinSecretosMorosidad();
+      allow update, delete: if false;
+    }
+
+    // 34. EVIDENCIAS DEL EXPEDIENTE (append-only, metadatos: el archivo vive en Storage).
+    //     No se guardan importes como fuente de verdad (vienen de la fuente canónica de cobros).
+    match /evidencias_morosidad/{evidenciaId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(evidenciaId)
+        && incoming().id == evidenciaId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && sinSecretosMorosidad();
+      // Append-only en la práctica: solo se corrige el contenido, jamás la identidad
+      // del registro (id, expediente, propietario y tipo quedan anclados).
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.expedienteId == existing().expedienteId
+        && request.resource.data.propietarioId == existing().propietarioId
+        && request.resource.data.tipo == existing().tipo
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // 35. COMPROMISOS DE PAGO — calendario declarado; las cuotas solo se cubren
+    //     con cobros ya existentes en la fuente contable (el ERP no inventa pagos).
+    //     El propietario puede leer los compromisos de su propia cartera.
+    match /compromisos_morosidad/{compromisoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && resource.data.propietarioId == myPropId());
+      // `list` se evalúa por documento: un propietario solo obtiene filas cuyo
+      // propietarioId coincide con el suyo (la consulta ya filtra por ese campo).
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && resource.data.propietarioId == myPropId());
+      allow create: if isMasterAdmin()
+        && isValidId(compromisoId)
+        && incoming().id == compromisoId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.propietarioId == existing().propietarioId
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // 36. POLÍTICA DE RECOBRO Y SU VERSIONADO. Los plazos (D+3/D+10/D+20/D+30) son
+    //     offsets de negocio configurables, NO plazos legales. Cambiar la política no
+    //     reescribe la historia: cada paso del plan guarda la versión vigente.
+    match /politicas_morosidad/{politicaId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(politicaId)
+        && incoming().id == politicaId
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // 37. RESUMEN DE MOROSIDAD ENVIADO AL PROPIETARIO: espejo recortado e
+    //     invariable por propietarioId. Escrito por la administración al guardar el
+    //     expediente (§32); el propietario solo lee la suya. Sin campos sensibles:
+    //     el recorte lo hace `recortarResumenPropietario` (lista blanca de campos).
+    match /morosidad_resumen_propietario/{docId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && resource.data.propietarioId == myPropId());
+      allow list: if isPropietarioRole() && resource.data.propietarioId == myPropId();
+      allow create: if isMasterAdmin()
+        && isValidId(docId)
+        && incoming().id == docId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.propietarioId == existing().propietarioId
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // (las notificaciones de recobro se rigen por §22 — GAP 1 — y no duplican reglas:
+    //  la bandeja del propietario sigue aislada por propietarioId/inmuebleId)
 
     // =========================================================================
     // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)

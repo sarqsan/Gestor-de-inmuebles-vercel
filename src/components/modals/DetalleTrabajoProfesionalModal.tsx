@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Briefcase,
@@ -23,11 +23,11 @@ import {
   Mail,
   Edit,
   Receipt,
-  Scale,
-  FileCheck,
-  Loader2,
+  TrendingDown,
+  Check,
 } from 'lucide-react';
 import {
+  Gasto,
   TrabajoProfesional,
   PresupuestoProfesional,
   Profesional,
@@ -41,8 +41,24 @@ import {
   PRIORIDAD_TRABAJO_LABELS,
   ESTADO_PRESUPUESTO_LABELS,
   crearItemHistorialTrabajo,
+  buscarProfesionalesCompatibles,
+  asignarProfesionalATrabajo,
+  cambiarProfesionalDeTrabajo,
 } from '../../utils/profesionalesEngine';
-import { saveTrabajoProfesionalFirestore, saveIncidenciaFirestore } from '../../lib/firebase';
+import {
+  puedeGenerarGastoDesdeTrabajo,
+  buscarGastoDeTrabajo,
+  generarGastoDesdeTrabajo,
+  sincronizarGastoDesdeTrabajo,
+} from '../../utils/gastosEngine';
+import {
+  saveTrabajoProfesionalFirestore,
+  saveIncidenciaFirestore,
+  saveGastoFirestore,
+  saveGarantiaReparacionFirestore,
+  subscribeGastos,
+} from '../../lib/firebase';
+import { registrarGarantiaDesdeTrabajo } from '../../utils/mantenimientoEngine';
 
 interface DetalleTrabajoProfesionalModalProps {
   isOpen: boolean;
@@ -52,12 +68,15 @@ interface DetalleTrabajoProfesionalModalProps {
   profesionales: Profesional[];
   inmuebles: Inmueble[];
   incidencias: Incidencia[];
+  gastos?: Gasto[];
   currentUser?: UsuarioApp;
   onEditarTrabajo?: (trabajo: TrabajoProfesional) => void;
   onCrearPresupuesto?: (trabajo: TrabajoProfesional) => void;
   onVerPresupuesto?: (presupuesto: PresupuestoProfesional) => void;
   onValorarProfesional?: (trabajo: TrabajoProfesional) => void;
   onVerIncidencia?: (incidencia: Incidencia) => void;
+  onGastoGenerado?: (gasto: Gasto) => void;
+  onVerGasto?: (gasto: Gasto) => void;
 }
 
 export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalModalProps> = ({
@@ -68,28 +87,59 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   profesionales,
   inmuebles,
   incidencias,
+  gastos,
   currentUser,
   onEditarTrabajo,
   onCrearPresupuesto,
   onVerPresupuesto,
   onValorarProfesional,
   onVerIncidencia,
+  onGastoGenerado,
+  onVerGasto,
 }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'presupuestos' | 'historial' | 'adjuntos'>('general');
   const [isUpdating, setIsUpdating] = useState(false);
   const [localTrabajo, setLocalTrabajo] = useState<TrabajoProfesional>(trabajo);
+  const [localGastos, setLocalGastos] = useState<Gasto[]>(gastos || []);
 
-  // Estados para Modal de Liquidación y Cierre con Coste Real
-  const [showFinalizarModal, setShowFinalizarModal] = useState(false);
+  // Diálogo para finalizar y liquidar coste real
+  const [dialogFinalizarOpen, setDialogFinalizarOpen] = useState(false);
   const [costeRealInput, setCosteRealInput] = useState<string>('');
-  const [facturaNumeroInput, setFacturaNumeroInput] = useState<string>('');
-  const [fechaFinalizacionInput, setFechaFinalizacionInput] = useState<string>('');
-  const [observacionesCierreInput, setObservacionesCierreInput] = useState<string>('');
-  const [errorLiquidacion, setErrorLiquidacion] = useState<string>('');
+  const [generarGastoAuto, setGenerarGastoAuto] = useState<boolean>(true);
+  const [generarGarantiaAuto, setGenerarGarantiaAuto] = useState<boolean>(true);
+  const [mesesGarantiaAuto, setMesesGarantiaAuto] = useState<number>(6);
+  const [generandoGasto, setGenerandoGasto] = useState(false);
+  const [errorGasto, setErrorGasto] = useState<string>('');
 
-  React.useEffect(() => {
+  // Edición directa de coste real en OT finalizada
+  const [editandoCosteReal, setEditandoCosteReal] = useState(false);
+  const [costeRealModificado, setCosteRealModificado] = useState<string>('');
+
+  // Diálogo para asignar / cambiar profesional
+  const [dialogCambiarProfOpen, setDialogCambiarProfOpen] = useState(false);
+  const [profesionalSeleccionadoId, setProfesionalSeleccionadoId] = useState<string>('');
+  const [motivoCambioProf, setMotivoCambioProf] = useState<string>('');
+  const [errorCambioProf, setErrorCambioProf] = useState<string>('');
+
+  useEffect(() => {
     setLocalTrabajo(trabajo);
   }, [trabajo]);
+
+  useEffect(() => {
+    if (gastos) {
+      setLocalGastos(gastos);
+    }
+  }, [gastos]);
+
+  // Suscripción reactiva si no se pasan gastos como prop (solo para propietarios/administradores)
+  useEffect(() => {
+    if (!gastos && currentUser?.tipoPerfil !== 'PROFESIONAL') {
+      const unsub = subscribeGastos((data) => {
+        setLocalGastos(data);
+      });
+      return () => unsub();
+    }
+  }, [gastos, currentUser]);
 
   if (!isOpen) return null;
 
@@ -101,49 +151,112 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   const incidenciaVinculada = incidencias.find((inc) => inc.id === localTrabajo.incidenciaId);
   const presupuestosDelTrabajo = presupuestos.filter((p) => p.trabajoId === localTrabajo.id);
 
-  // Abrir diálogo de liquidación técnica y coste real
-  const handleAbrirLiquidacion = () => {
-    setCosteRealInput(
-      localTrabajo.importeFinal !== undefined
-        ? localTrabajo.importeFinal.toString()
-        : localTrabajo.importeEstimado !== undefined
-        ? localTrabajo.importeEstimado.toString()
-        : ''
-    );
-    setFacturaNumeroInput(localTrabajo.facturaNumero || '');
-    setFechaFinalizacionInput(
-      localTrabajo.fechaFinalizacion
-        ? localTrabajo.fechaFinalizacion.slice(0, 10)
-        : new Date().toISOString().slice(0, 10)
-    );
-    setObservacionesCierreInput(
-      localTrabajo.observaciones || 'Trabajo finalizado y comprobado técnicamente'
-    );
-    setErrorLiquidacion('');
-    setShowFinalizarModal(true);
-  };
+  // Localizar gasto contable asociado (por trabajoId, ordenTrabajoId o gastoId)
+  const gastoAsociado =
+    buscarGastoDeTrabajo(localTrabajo.id, localGastos) ||
+    (localTrabajo.gastoId ? localGastos.find((g) => g.id === localTrabajo.gastoId) : undefined);
 
-  // Confirmar liquidación con coste real efectivo
-  const handleConfirmarLiquidacion = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const numCoste = parseFloat(costeRealInput);
-    if (isNaN(numCoste) || numCoste < 0) {
-      setErrorLiquidacion('Por favor indica un coste real producido válido (mínimo 0 €).');
+  const esFinalizado = localTrabajo.estado === 'FINALIZADO' || localTrabajo.estado === 'FINALIZADA';
+  const esProfesional = currentUser?.tipoPerfil === 'PROFESIONAL';
+
+  // Candidatos evaluados por el motor puro de compatibilidad
+  const candidatosCompatibles = inmueble
+    ? buscarProfesionalesCompatibles({
+        inmueble,
+        profesionales,
+        categoria: localTrabajo.categoria,
+        servicioRequerido: localTrabajo.titulo,
+        incluirNoCompatibles: true,
+      })
+    : profesionales.map((p) => ({
+        profesional: p,
+        nivel: 'COMPATIBLE_CON_RESERVA' as const,
+        cumpleEspecialidad: true,
+        cumpleZona: false,
+        cumpleEstado: true,
+        estadoZona: 'ZONA_NO_DETERMINADA' as const,
+        motivo: 'Sin inmueble de referencia',
+        detalles: { especialidad: '', zona: '', estado: '' },
+      }));
+
+  const handleConfirmarAsignacionOReasignacion = async () => {
+    setErrorCambioProf('');
+    if (!profesionalSeleccionadoId) {
+      setErrorCambioProf('Debe seleccionar un profesional.');
+      return;
+    }
+
+    const nuevoProf = profesionales.find((p) => p.id === profesionalSeleccionadoId);
+    if (!nuevoProf) {
+      setErrorCambioProf('Profesional no encontrado.');
+      return;
+    }
+
+    const esReasignacion = Boolean(localTrabajo.profesionalId && localTrabajo.profesionalId !== nuevoProf.id);
+    if (esReasignacion && !motivoCambioProf.trim()) {
+      setErrorCambioProf('Indique el motivo del cambio de profesional.');
       return;
     }
 
     try {
       setIsUpdating(true);
-      setErrorLiquidacion('');
+      const usuarioNombre = currentUser?.nombre
+        ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+        : 'Gestor Patrimonial';
+
+      const result = esReasignacion
+        ? cambiarProfesionalDeTrabajo({
+            trabajo: localTrabajo,
+            profesionalNuevo: nuevoProf,
+            usuarioNombre,
+            usuarioId: currentUser?.id,
+            motivo: motivoCambioProf.trim(),
+            incidencia: incidenciaVinculada,
+          })
+        : asignarProfesionalATrabajo({
+            trabajo: localTrabajo,
+            profesional: nuevoProf,
+            usuarioNombre,
+            usuarioId: currentUser?.id,
+            motivo: motivoCambioProf.trim() || undefined,
+            incidencia: incidenciaVinculada,
+          });
+
+      if (result.error) {
+        setErrorCambioProf(result.error);
+        return;
+      }
+
+      setLocalTrabajo(result.trabajoActualizado);
+      await saveTrabajoProfesionalFirestore(result.trabajoActualizado);
+
+      if (result.incidenciaActualizada) {
+        await saveIncidenciaFirestore(result.incidenciaActualizada);
+      }
+
+      setDialogCambiarProfOpen(false);
+      setMotivoCambioProf('');
+    } catch (err: any) {
+      console.error('Error al asignar/cambiar profesional:', err);
+      setErrorCambioProf(err?.message || 'Error al guardar la asignación.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Handler para confirmar finalización con coste real y gasto automático
+  const handleConfirmarFinalizacion = async () => {
+    try {
+      setIsUpdating(true);
+      setErrorGasto('');
       const usuarioNombre = currentUser?.nombre
         ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
         : 'Administrador';
 
-      const fechaFinIso = fechaFinalizacionInput
-        ? new Date(fechaFinalizacionInput).toISOString()
-        : new Date().toISOString();
+      const costeRealNum = costeRealInput ? parseFloat(costeRealInput) : localTrabajo.importeFinal;
+      const fechaFin = new Date().toISOString();
 
-      const numFactura = facturaNumeroInput.trim() || undefined;
+      let gastoGeneradoId = localTrabajo.gastoId;
 
       const nuevoHistorial = [
         ...(localTrabajo.historial || []),
@@ -152,69 +265,212 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
           usuarioNombre,
           localTrabajo.estado,
           'FINALIZADO',
-          `Liquidación y cierre técnico: Coste Real ${numCoste.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}${numFactura ? ` (Factura: ${numFactura})` : ''}. ${observacionesCierreInput.trim()}`
+          `Trabajo finalizado y liquidado con coste real de ${
+            typeof costeRealNum === 'number' && !isNaN(costeRealNum)
+              ? costeRealNum.toFixed(2)
+              : '0.00'
+          } €`
         ),
       ];
 
       const trabajoActualizado: TrabajoProfesional = {
         ...localTrabajo,
         estado: 'FINALIZADO',
-        importeFinal: numCoste,
-        facturaNumero: numFactura,
-        fechaFinalizacion: fechaFinIso,
-        observaciones: observacionesCierreInput.trim() || localTrabajo.observaciones,
+        importeFinal: typeof costeRealNum === 'number' && !isNaN(costeRealNum) ? costeRealNum : undefined,
+        fechaFinalizacion: fechaFin,
         historial: nuevoHistorial,
-        updatedAt: new Date().toISOString(),
+        updatedAt: fechaFin,
       };
+
+      // Si se marcó generar gasto y el usuario tiene permisos (no profesional externo), materializar gasto contable
+      if (
+        generarGastoAuto &&
+        typeof costeRealNum === 'number' &&
+        costeRealNum > 0 &&
+        !esProfesional
+      ) {
+        const genResult = generarGastoDesdeTrabajo({
+          trabajo: trabajoActualizado,
+          gastosExistentes: localGastos,
+          usuarioNombre,
+          usuarioId: currentUser?.id,
+        });
+
+        if (genResult.gasto) {
+          if (!genResult.yaExiste) {
+            await saveGastoFirestore(genResult.gasto);
+          }
+          gastoGeneradoId = genResult.gasto.id;
+          trabajoActualizado.gastoId = gastoGeneradoId;
+          onGastoGenerado?.(genResult.gasto);
+        }
+      }
+
+      // Si se marcó registrar garantía post-reparación
+      if (generarGarantiaAuto && !esProfesional) {
+        try {
+          const resGar = registrarGarantiaDesdeTrabajo({
+            trabajo: trabajoActualizado,
+            duracionMeses: mesesGarantiaAuto,
+            cobertura: `Cobertura de mano de obra y piezas por ${mesesGarantiaAuto} meses tras orden ${trabajoActualizado.id}.`,
+            usuarioNombre,
+          });
+          if (resGar.garantia && !resGar.yaExiste) {
+            await saveGarantiaReparacionFirestore(resGar.garantia);
+          }
+        } catch (errGar) {
+          console.warn('Advertencia al registrar garantía automática:', errGar);
+        }
+      }
 
       setLocalTrabajo(trabajoActualizado);
       await saveTrabajoProfesionalFirestore(trabajoActualizado);
 
-      // Sincronizar con la incidencia vinculada cerrando el circuito
+      // Sincronizar incidencia si existe
       if (incidenciaVinculada) {
         const incActualizada: Incidencia = {
           ...incidenciaVinculada,
           estado: 'RESUELTA',
-          fechaCierre: fechaFinIso,
           trabajoProfesional: incidenciaVinculada.trabajoProfesional
             ? {
                 ...incidenciaVinculada.trabajoProfesional,
                 estadoTrabajo: 'FINALIZADO',
-                costeReal: numCoste,
-                facturaNumero: numFactura,
-                fechaFinalizacion: fechaFinIso,
+                costeReal: typeof costeRealNum === 'number' && !isNaN(costeRealNum) ? costeRealNum : undefined,
+                gastoId: gastoGeneradoId || incidenciaVinculada.trabajoProfesional.gastoId,
+                fechaFinalizacion: fechaFin,
               }
             : {
                 profesionalId: localTrabajo.profesionalId || '',
                 profesionalNombre: localTrabajo.profesionalNombre || 'Profesional',
                 servicio: localTrabajo.categoria || 'Mantenimiento',
-                fechaAsignacion: localTrabajo.fechaAsignacion || new Date().toISOString(),
+                fechaAsignacion: localTrabajo.fechaAsignacion || fechaFin,
+                costeReal: typeof costeRealNum === 'number' && !isNaN(costeRealNum) ? costeRealNum : undefined,
+                gastoId: gastoGeneradoId,
+                fechaFinalizacion: fechaFin,
                 estadoTrabajo: 'FINALIZADO',
-                costeReal: numCoste,
-                facturaNumero: numFactura,
-                fechaFinalizacion: fechaFinIso,
               },
           historial: [
             ...(incidenciaVinculada.historial || []),
             {
               id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-              fecha: new Date().toISOString(),
+              fecha: fechaFin,
               usuario: usuarioNombre,
-              accion: 'INCIDENCIA_RESUELTA_LIQUIDACION',
-              valorAnterior: incidenciaVinculada.estado,
+              accion: 'TRABAJO_FINALIZADO',
               valorNuevo: 'RESUELTA',
-              observacion: `Orden de trabajo liquidada con éxito. Coste Real: ${numCoste.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}${numFactura ? ` (Factura: ${numFactura})` : ''}`,
+              observacion: `Trabajo finalizado con coste real de ${
+                typeof costeRealNum === 'number' && !isNaN(costeRealNum)
+                  ? costeRealNum.toFixed(2)
+                  : '0.00'
+              } €${gastoGeneradoId ? ' (Gasto contable de reparación generado)' : ''}`,
             },
           ],
+          updatedAt: fechaFin,
+        };
+        await saveIncidenciaFirestore(incActualizada);
+      }
+
+      setDialogFinalizarOpen(false);
+    } catch (err: any) {
+      console.error('Error al finalizar trabajo:', err);
+      setErrorGasto(err?.message || 'Error al guardar la finalización del trabajo');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Handler para generar gasto manualmente en una OT ya finalizada
+  const handleGenerarGastoManual = async () => {
+    try {
+      setGenerandoGasto(true);
+      setErrorGasto('');
+      const usuarioNombre = currentUser?.nombre
+        ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+        : 'Administrador';
+
+      const genResult = generarGastoDesdeTrabajo({
+        trabajo: localTrabajo,
+        gastosExistentes: localGastos,
+        usuarioNombre,
+        usuarioId: currentUser?.id,
+      });
+
+      if (genResult.error) {
+        setErrorGasto(genResult.error);
+        return;
+      }
+
+      if (genResult.gasto) {
+        if (!genResult.yaExiste) {
+          await saveGastoFirestore(genResult.gasto);
+        }
+        const updated: TrabajoProfesional = {
+          ...localTrabajo,
+          gastoId: genResult.gasto.id,
+          updatedAt: new Date().toISOString(),
+        };
+        setLocalTrabajo(updated);
+        await saveTrabajoProfesionalFirestore(updated);
+        onGastoGenerado?.(genResult.gasto);
+      }
+    } catch (err: any) {
+      console.error('Error al generar apunte de gasto:', err);
+      setErrorGasto(err?.message || 'Error al generar apunte de gasto');
+    } finally {
+      setGenerandoGasto(false);
+    }
+  };
+
+  // Handler para actualizar coste real posteriormente y sincronizar con el gasto asociado
+  const handleGuardarCosteRealModificado = async () => {
+    try {
+      setIsUpdating(true);
+      setErrorGasto('');
+      const nuevoImporte = parseFloat(costeRealModificado);
+      if (isNaN(nuevoImporte) || nuevoImporte < 0) {
+        setErrorGasto('Introduce un importe numérico válido.');
+        return;
+      }
+
+      const usuarioNombre = currentUser?.nombre
+        ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
+        : 'Administrador';
+
+      const trabajoActualizado: TrabajoProfesional = {
+        ...localTrabajo,
+        importeFinal: nuevoImporte,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Si existe gasto asociado, sincronizar el importe sin crear un duplicado
+      if (gastoAsociado) {
+        const gastoSincronizado = sincronizarGastoDesdeTrabajo({
+          trabajo: trabajoActualizado,
+          gastoExistente: gastoAsociado,
+          usuarioNombre,
+        });
+        await saveGastoFirestore(gastoSincronizado);
+      }
+
+      setLocalTrabajo(trabajoActualizado);
+      await saveTrabajoProfesionalFirestore(trabajoActualizado);
+
+      // Sincronizar incidencia si existe
+      if (incidenciaVinculada && incidenciaVinculada.trabajoProfesional) {
+        const incActualizada: Incidencia = {
+          ...incidenciaVinculada,
+          trabajoProfesional: {
+            ...incidenciaVinculada.trabajoProfesional,
+            costeReal: nuevoImporte,
+          },
           updatedAt: new Date().toISOString(),
         };
         await saveIncidenciaFirestore(incActualizada);
       }
 
-      setShowFinalizarModal(false);
-    } catch (err) {
-      console.error('Error liquidando orden de trabajo:', err);
-      setErrorLiquidacion('Error al guardar la liquidación de la orden de trabajo.');
+      setEditandoCosteReal(false);
+    } catch (err: any) {
+      console.error('Error al actualizar coste real:', err);
+      setErrorGasto(err?.message || 'Error al actualizar coste real');
     } finally {
       setIsUpdating(false);
     }
@@ -480,11 +736,17 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   </button>
                   <button
                     disabled={isUpdating}
-                    onClick={handleAbrirLiquidacion}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer flex items-center space-x-1"
+                    onClick={() => {
+                      setCosteRealInput(
+                        localTrabajo.importeFinal?.toString() ||
+                        localTrabajo.importeEstimado?.toString() ||
+                        ''
+                      );
+                      setDialogFinalizarOpen(true);
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>✓ Finalizar y Liquidar Coste Real</span>
+                    ✓ Marcar Finalizado
                   </button>
                 </>
               )}
@@ -496,17 +758,6 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
                   Reanudar Ejecución
-                </button>
-              )}
-
-              {(localTrabajo.estado === 'FINALIZADO' || localTrabajo.estado === 'FINALIZADA') && (
-                <button
-                  disabled={isUpdating}
-                  onClick={handleAbrirLiquidacion}
-                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg border border-emerald-300 transition-colors cursor-pointer flex items-center space-x-1"
-                >
-                  <Receipt className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Modificar Liquidación / Factura</span>
                 </button>
               )}
 
@@ -543,13 +794,18 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
               value={localTrabajo.estado}
               disabled={isUpdating}
               onChange={(e) => {
-                const val = e.target.value as EstadoTrabajoProfesional;
-                if (val === 'FINALIZADO' || val === 'FINALIZADA') {
-                  handleAbrirLiquidacion();
+                const targetState = e.target.value as EstadoTrabajoProfesional;
+                if (targetState === 'FINALIZADO' || targetState === 'FINALIZADA') {
+                  setCosteRealInput(
+                    localTrabajo.importeFinal?.toString() ||
+                    localTrabajo.importeEstimado?.toString() ||
+                    ''
+                  );
+                  setDialogFinalizarOpen(true);
                 } else {
                   handleCambiarEstado(
-                    val,
-                    `Cambio manual de estado a ${ESTADO_TRABAJO_LABELS[val]?.label || val}`
+                    targetState,
+                    `Cambio manual de estado a ${ESTADO_TRABAJO_LABELS[targetState]?.label || targetState}`
                   );
                 }
               }}
@@ -634,6 +890,20 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                       <Wrench className="w-4 h-4 text-amber-600" />
                       <span>Profesional Asignado</span>
                     </h4>
+                    {!esProfesional && !esFinalizado && localTrabajo.estado !== 'CANCELADO' && localTrabajo.estado !== 'CANCELADA' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfesionalSeleccionadoId(localTrabajo.profesionalId || '');
+                          setMotivoCambioProf('');
+                          setErrorCambioProf('');
+                          setDialogCambiarProfOpen(true);
+                        }}
+                        className="text-[11px] text-blue-600 hover:text-blue-800 font-bold hover:underline"
+                      >
+                        {profesionalAsignado ? 'Cambiar Profesional' : '+ Asignar Profesional'}
+                      </button>
+                    )}
                   </div>
 
                   {profesionalAsignado ? (
@@ -743,40 +1013,27 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block font-medium">Importe Final</span>
-                    <span className="font-bold text-emerald-600">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 block font-medium">Coste Real</span>
+                      {esFinalizado && !esProfesional && (
+                        <button
+                          onClick={() => {
+                            setCosteRealModificado(localTrabajo.importeFinal?.toString() || '');
+                            setEditandoCosteReal(true);
+                          }}
+                          className="text-[10px] text-blue-600 hover:underline font-semibold"
+                        >
+                          Modificar
+                        </button>
+                      )}
+                    </div>
+                    <span className="font-bold text-emerald-600 text-sm block">
                       {localTrabajo.importeFinal !== undefined
                         ? localTrabajo.importeFinal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })
                         : 'No liquidado'}
                     </span>
                   </div>
                 </div>
-
-                {/* Detalle de Facturación y Liquidación */}
-                {localTrabajo.importeFinal !== undefined && (
-                  <div className="pt-2.5 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-emerald-50/70 p-3 rounded-lg border border-emerald-200">
-                    <div>
-                      <span className="text-emerald-800 font-semibold block">Factura / Ref. Liquidación:</span>
-                      <span className="font-bold text-slate-800">
-                        {localTrabajo.facturaNumero || 'Sin número de factura registrado'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-emerald-800 font-semibold block">Fecha de Cierre:</span>
-                      <span className="font-bold text-slate-800">
-                        {localTrabajo.fechaFinalizacion
-                          ? new Date(localTrabajo.fechaFinalizacion).toLocaleDateString('es-ES')
-                          : 'Completado'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-emerald-800 font-semibold block">Coste Real Efectivo:</span>
-                      <span className="font-extrabold text-emerald-700 text-sm">
-                        {localTrabajo.importeFinal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
-                      </span>
-                    </div>
-                  </div>
-                )}
 
                 {/* Quick Budget Status Link */}
                 <div className="pt-2.5 border-t border-slate-200 flex items-center justify-between flex-wrap gap-2 text-xs">
@@ -816,100 +1073,101 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                 </div>
               </div>
 
-              {/* Card de Repercusión Económica y Gasto del Inmueble */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Receipt className="w-4 h-4 text-emerald-600" />
-                    <span>Repercusión Económica y Gasto del Inmueble</span>
-                  </h4>
-                  <span className="text-[11px] font-semibold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                    Circuito Económico
-                  </span>
+              {/* PUENTE A GASTOS: Estado de Gasto de Reparación Contable */}
+              {esFinalizado && (
+                <div className="space-y-2">
+                  {gastoAsociado ? (
+                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <Receipt className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span className="font-bold text-emerald-950">Gasto Contable de Reparación Registrado</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            {gastoAsociado.estado}
+                          </span>
+                        </div>
+                        <span className="font-mono font-bold text-emerald-800 text-sm">
+                          {gastoAsociado.importe.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                        </span>
+                      </div>
+                      <div className="text-slate-600 text-[11px] grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1.5 border-t border-emerald-200/60">
+                        <div>
+                          <span className="text-slate-400">Concepto:</span>{' '}
+                          <span className="font-medium text-slate-800">{gastoAsociado.concepto}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Fecha devengo:</span>{' '}
+                          <span className="font-medium text-slate-800">{gastoAsociado.fechaDevengo || 'N/D'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Categoría contable:</span>{' '}
+                          <span className="font-medium text-slate-800">{gastoAsociado.categoria} (Explotación)</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">ID Gasto:</span>{' '}
+                          <span className="font-mono text-slate-700">{gastoAsociado.id}</span>
+                        </div>
+                      </div>
+                      {onVerGasto && (
+                        <div className="pt-1">
+                          <button
+                            onClick={() => onVerGasto(gastoAsociado)}
+                            className="text-emerald-700 hover:text-emerald-900 font-semibold underline text-[11px] inline-flex items-center space-x-1 cursor-pointer"
+                          >
+                            <span>Ver en módulo de Gastos</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : typeof localTrabajo.importeFinal === 'number' && localTrabajo.importeFinal > 0 ? (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between flex-wrap gap-3 text-xs">
+                      <div className="flex items-start space-x-2.5">
+                        <Receipt className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="font-bold text-amber-950 block">Pendiente de contabilizar en Gastos</span>
+                          <span className="text-slate-600 text-[11px]">
+                            El trabajo está finalizado con coste real liquidado de{' '}
+                            <strong>
+                              {localTrabajo.importeFinal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                            </strong>
+                            . Puedes registrar el gasto contable en la contabilidad del inmueble.
+                          </span>
+                        </div>
+                      </div>
+                      {!esProfesional && (
+                        <button
+                          disabled={generandoGasto}
+                          onClick={handleGenerarGastoManual}
+                          className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer shrink-0"
+                        >
+                          {generandoGasto ? 'Registrando...' : '💰 Registrar Gasto de Reparación'}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-3.5 bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+                      <span className="text-slate-600">
+                        Trabajo finalizado sin coste real liquidado. Indica el importe final para poder contabilizar el gasto de reparación.
+                      </span>
+                      {!esProfesional && (
+                        <button
+                          onClick={() => {
+                            setCosteRealModificado(localTrabajo.importeEstimado?.toString() || '');
+                            setEditandoCosteReal(true);
+                          }}
+                          className="px-2.5 py-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 font-semibold rounded-lg text-xs cursor-pointer shadow-xs"
+                        >
+                          Liquidar Coste Real
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {errorGasto && (
+                    <p className="text-xs text-rose-600 font-semibold">{errorGasto}</p>
+                  )}
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="p-3 bg-white border border-slate-200 rounded-lg space-y-1">
-                    <span className="text-slate-500 text-[11px] font-medium block">Imputación del Gasto:</span>
-                    {incidenciaVinculada?.responsabilidad === 'PROPIETARIO' ? (
-                      <div>
-                        <span className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-xs">
-                          <Scale className="w-3.5 h-3.5" />
-                          Gasto Asumido por el Propietario
-                        </span>
-                        <p className="text-[11px] text-slate-600 mt-1">
-                          Conservación del inmueble (Art. 21.1 LAU). Gasto deducible del rendimiento del capital inmobiliario.
-                        </p>
-                      </div>
-                    ) : incidenciaVinculada?.responsabilidad === 'INQUILINO' ? (
-                      <div>
-                        <span className="inline-flex items-center gap-1 font-bold text-purple-800 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 text-xs">
-                          <Scale className="w-3.5 h-3.5" />
-                          Gasto Repercutible a Inquilino
-                        </span>
-                        <p className="text-[11px] text-slate-600 mt-1">
-                          Pequeña reparación / desgaste ordinario / negligencia (Art. 21.4 LAU). A liquidar contra fianza o abono directo.
-                        </p>
-                      </div>
-                    ) : incidenciaVinculada?.responsabilidad === 'SEGURO' ? (
-                      <div>
-                        <span className="inline-flex items-center gap-1 font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 text-xs">
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          Coste Cubierto por Seguro
-                        </span>
-                        <p className="text-[11px] text-slate-600 mt-1">
-                          Siniestro indemnizado o asistido directamente por la póliza aseguradora vinculada.
-                        </p>
-                      </div>
-                    ) : incidenciaVinculada?.responsabilidad === 'GARANTIA' || incidenciaVinculada?.responsabilidad === 'COMUNIDAD' ? (
-                      <div>
-                        <span className="inline-flex items-center gap-1 font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-xs">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Sin Coste para la Propiedad
-                        </span>
-                        <p className="text-[11px] text-slate-600 mt-1">
-                          Subsanado bajo cobertura de garantía oficial o reclamado a la comunidad de copropietarios.
-                        </p>
-                      </div>
-                    ) : (
-                      <div>
-                        <span className="inline-flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-xs">
-                          Mantenimiento Directo del Inmueble
-                        </span>
-                        <p className="text-[11px] text-slate-600 mt-1">
-                          Orden de trabajo registrada para conservación patrimonial de la vivienda.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-3 bg-white border border-slate-200 rounded-lg space-y-1">
-                    <span className="text-slate-500 text-[11px] font-medium block">Estado en Historial del Inmueble:</span>
-                    {localTrabajo.estado === 'FINALIZADO' || localTrabajo.estado === 'FINALIZADA' ? (
-                      <div className="space-y-1">
-                        <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-xs">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Coste Liquidado y Registrado en Histórico
-                        </span>
-                        <p className="text-[11px] text-slate-600">
-                          Coste Real efectivo: <strong>{localTrabajo.importeFinal?.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' }) || '0,00 €'}</strong>
-                          {localTrabajo.facturaNumero && ` (Factura: ${localTrabajo.facturaNumero})`}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        <span className="inline-flex items-center gap-1 font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-xs">
-                          <Clock className="w-3.5 h-3.5" />
-                          Pendiente de Liquidación Final
-                        </span>
-                        <p className="text-[11px] text-slate-500">
-                          Se consolidará en el libro de gastos e histórico del inmueble una vez marcada como finalizada con su coste real facturado.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              )}
 
               {/* Valoración post-intervención si existe */}
               {localTrabajo.valoracion && (
@@ -1099,156 +1357,307 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
             </div>
           )}
         </div>
-      </div>
 
-      {/* MODAL DE LIQUIDACIÓN Y COSTE REAL */}
-      {showFinalizarModal && (
-        <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-emerald-400" />
-                <div>
-                  <h3 className="font-bold text-sm">Liquidación Técnica y Coste Real</h3>
-                  <p className="text-slate-400 text-xs">Cierre de Orden de Trabajo #{localTrabajo.id.slice(0, 8)}</p>
+        {/* SUB-DIALOG: FINALIZAR Y LIQUIDAR TRABAJO */}
+        {dialogFinalizarOpen && (
+          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2 text-emerald-700">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <h3 className="font-bold text-slate-900 text-sm">Finalizar Orden de Trabajo</h3>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowFinalizarModal(false)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleConfirmarLiquidacion} className="p-5 space-y-4">
-              {errorLiquidacion && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{errorLiquidacion}</span>
-                </div>
-              )}
-
-              {/* Informative notice on real cost */}
-              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 space-y-1">
-                <p className="font-bold flex items-center gap-1.5">
-                  <FileCheck className="w-4 h-4 text-blue-600" />
-                  <span>Cierre Económico Efectivo</span>
-                </p>
-                <p className="text-[11px] text-blue-700 leading-relaxed">
-                  Introduce el coste efectivamente facturado/producido por el profesional. Este importe se consolidará en el expediente de la incidencia, el libro de gastos y el historial del inmueble.
-                </p>
+                <button
+                  onClick={() => setDialogFinalizarOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              {/* Inputs */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-3 text-xs">
+                <p className="text-slate-600 leading-relaxed">
+                  Confirma el cierre de la orden <strong>"{localTrabajo.titulo}"</strong> e introduce el coste real final liquidado.
+                </p>
+
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Coste Real Liquidado (€) <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-800 block">Coste Real Liquidado (€)</label>
+                    {localTrabajo.importeEstimado !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() => setCosteRealInput(localTrabajo.importeEstimado!.toString())}
+                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                      >
+                        Copiar estimado ({localTrabajo.importeEstimado} €)
+                      </button>
+                    )}
+                  </div>
                   <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                      €
+                    </span>
                     <input
                       type="number"
                       step="0.01"
-                      min="0"
-                      required
+                      placeholder="Ej: 175.50"
                       value={costeRealInput}
                       onChange={(e) => setCosteRealInput(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 pr-8"
+                      className="w-full pl-8 p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold text-slate-900"
                     />
-                    <span className="absolute right-3 top-2.5 text-xs font-bold text-slate-400">€</span>
                   </div>
-                  {localTrabajo.importeEstimado !== undefined && (
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Presupuesto estimado: {localTrabajo.importeEstimado.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Nº Factura / Justificante
-                  </label>
-                  <input
-                    type="text"
-                    value={facturaNumeroInput}
-                    onChange={(e) => setFacturaNumeroInput(e.target.value)}
-                    placeholder="Ej. FAC-2025/112"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Identificador de la factura o albarán oficial
+                    Si no indicas un importe, no se generará automáticamente el apunte de gasto contable.
                   </p>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Fecha de Finalización / Liquidación
-                </label>
-                <input
-                  type="date"
-                  value={fechaFinalizacionInput}
-                  onChange={(e) => setFechaFinalizacionInput(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+                {!esProfesional && (
+                  <>
+                    <label className="flex items-start space-x-2 p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={generarGastoAuto}
+                        onChange={(e) => setGenerarGastoAuto(e.target.checked)}
+                        className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div className="text-[11px] leading-tight">
+                        <span className="font-bold text-emerald-950 block">Registrar apunte en módulo de Gastos</span>
+                        <span className="text-emerald-800/80">
+                          Genera automáticamente un gasto de explotación (categoría Reparación/Mantenimiento) asociado a esta orden.
+                        </span>
+                      </div>
+                    </label>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Dictamen Técnico y Conformidad de Cierre
-                </label>
-                <textarea
-                  rows={2}
-                  value={observacionesCierreInput}
-                  onChange={(e) => setObservacionesCierreInput(e.target.value)}
-                  placeholder="Detalles sobre los trabajos efectuados, pruebas realizadas o materiales sustituidos..."
-                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+                    <label className="flex items-start space-x-2 p-3 bg-blue-50/60 border border-blue-200 rounded-xl cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={generarGarantiaAuto}
+                        onChange={(e) => setGenerarGarantiaAuto(e.target.checked)}
+                        className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="text-[11px] leading-tight">
+                        <span className="font-bold text-blue-950 block">Registrar Garantía Post-Reparación</span>
+                        <span className="text-blue-800/80">
+                          Protege el inmueble registrando una garantía de {mesesGarantiaAuto} meses con el profesional para detección de reincidencias.
+                        </span>
+                      </div>
+                    </label>
+                  </>
+                )}
 
-              {/* Economic impact badge */}
-              {incidenciaVinculada && (
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                    Imputación Económica Automática:
-                  </span>
-                  <p className="font-semibold text-slate-800">
-                    {incidenciaVinculada.responsabilidad === 'PROPIETARIO'
-                      ? 'Gasto de Conservación asignado a la Propiedad (Deducible)'
-                      : incidenciaVinculada.responsabilidad === 'INQUILINO'
-                      ? 'Gasto Repercutible al Arrendatario (Uso / Desgaste)'
-                      : incidenciaVinculada.responsabilidad === 'SEGURO'
-                      ? 'Coste Tramitado con Aseguradora'
-                      : 'Sin coste directo para la propiedad'}
+                {errorGasto && (
+                  <p className="text-xs text-rose-600 font-semibold bg-rose-50 p-2 rounded-lg border border-rose-200">
+                    {errorGasto}
                   </p>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-2">
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100 text-xs">
                 <button
                   type="button"
-                  onClick={() => setShowFinalizarModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                  disabled={isUpdating}
+                  onClick={() => setDialogFinalizarOpen(false)}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   disabled={isUpdating}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  onClick={handleConfirmarFinalizacion}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  <span>Registrar Liquidación y Cerrar</span>
+                  {isUpdating ? 'Guardando...' : '✓ Confirmar Finalización'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* SUB-DIALOG: EDITAR COSTE REAL POSTERIORMENTE */}
+        {editandoCosteReal && (
+          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-5 space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <h3 className="font-bold text-slate-900 text-sm">Modificar Coste Real</h3>
+                <button
+                  onClick={() => setEditandoCosteReal(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5 text-xs">
+                <label className="font-bold text-slate-800 block">Nuevo Coste Real (€)</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                    €
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={costeRealModificado}
+                    onChange={(e) => setCosteRealModificado(e.target.value)}
+                    className="w-full pl-8 p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 font-bold text-slate-900"
+                  />
+                </div>
+                {gastoAsociado && (
+                  <p className="text-[11px] text-emerald-700 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                    ℹ️ El gasto vinculado (<strong>{gastoAsociado.id}</strong>) se sincronizará automáticamente con el nuevo importe sin duplicar registros.
+                  </p>
+                )}
+                {errorGasto && (
+                  <p className="text-xs text-rose-600 font-semibold">{errorGasto}</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100 text-xs">
+                <button
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={() => setEditandoCosteReal(false)}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={handleGuardarCosteRealModificado}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
+                >
+                  {isUpdating ? 'Actualizando...' : 'Guardar y Sincronizar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SUB-DIALOG: ASIGNAR / CAMBIAR PROFESIONAL (MOTOR DE COMPATIBILIDAD) */}
+        {dialogCambiarProfOpen && (
+          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2 text-blue-700">
+                  <Wrench className="w-5 h-5" />
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    {localTrabajo.profesionalId ? 'Cambiar Profesional Asignado' : 'Asignar Profesional Operativo'}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setDialogCambiarProfOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1">
+                    Seleccionar Profesional (Clasificado por Compatibilidad)
+                  </label>
+                  <select
+                    value={profesionalSeleccionadoId}
+                    onChange={(e) => setProfesionalSeleccionadoId(e.target.value)}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 font-medium text-slate-900 bg-slate-50"
+                  >
+                    <option value="">-- Seleccionar candidato --</option>
+                    {candidatosCompatibles.map((res) => {
+                      const prof = res.profesional;
+                      const nom = prof.nombreComercial || prof.nombre || prof.contactoNombre;
+                      const badgeTag =
+                        res.nivel === 'COMPATIBLE'
+                          ? '✅ Compatible'
+                          : res.nivel === 'COMPATIBLE_CON_RESERVA'
+                          ? '⚠️ Con Reserva'
+                          : '❌ No Compatible';
+                      return (
+                        <option key={prof.id} value={prof.id}>
+                          {badgeTag} — {nom} ({prof.especialidades?.join(', ') || 'General'})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Resumen del profesional seleccionado */}
+                {profesionalSeleccionadoId && (
+                  (() => {
+                    const selEval = candidatosCompatibles.find((c) => c.profesional.id === profesionalSeleccionadoId);
+                    if (!selEval) return null;
+                    return (
+                      <div className={`p-3 rounded-xl border text-xs space-y-1 ${
+                        selEval.nivel === 'COMPATIBLE'
+                          ? 'bg-emerald-50/60 border-emerald-200 text-emerald-950'
+                          : selEval.nivel === 'COMPATIBLE_CON_RESERVA'
+                          ? 'bg-amber-50/60 border-amber-200 text-amber-950'
+                          : 'bg-rose-50/60 border-rose-200 text-rose-950'
+                      }`}>
+                        <div className="flex items-center justify-between font-bold">
+                          <span>{selEval.profesional.nombreComercial}</span>
+                          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-white/80 border">
+                            {selEval.nivel.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed">{selEval.motivo}</p>
+                        {selEval.profesional.telefono && (
+                          <span className="text-[10px] block opacity-80">
+                            Tel: {selEval.profesional.telefono} • Email: {selEval.profesional.email || '—'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()
+                )}
+
+                {/* Motivo de cambio obligatorio si ya había un profesional asignado */}
+                {Boolean(localTrabajo.profesionalId && localTrabajo.profesionalId !== profesionalSeleccionadoId) && (
+                  <div>
+                    <label className="font-bold text-slate-800 block mb-1">
+                      Motivo de Reasignación <span className="text-rose-500">*</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={motivoCambioProf}
+                      onChange={(e) => setMotivoCambioProf(e.target.value)}
+                      placeholder="Indique el motivo por el cual se cambia de profesional (indisponibilidad, ajuste de plazos, especialidad requerida...)"
+                      className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-slate-900 text-xs"
+                      required
+                    />
+                  </div>
+                )}
+
+                {errorCambioProf && (
+                  <p className="text-xs text-rose-600 font-semibold bg-rose-50 p-2 rounded-lg border border-rose-200">
+                    {errorCambioProf}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100 text-xs">
+                <button
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={() => setDialogCambiarProfOpen(false)}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={handleConfirmarAsignacionOReasignacion}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center space-x-1"
+                >
+                  {isUpdating ? <span>Guardando...</span> : <span>Confirmar Asignación</span>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

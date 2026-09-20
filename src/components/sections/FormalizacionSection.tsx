@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ContratoFormalizacion,
   Inmueble,
@@ -6,9 +6,13 @@ import {
   SolicitudDocumentacion,
   UserProfile,
   EstadoFormalizacion,
+  HabitacionInmueble,
+  UsuarioApp,
 } from '../../types';
 import { getFormalizacionEstadoInfo, imprimirContratoPDF, generarTextoActaEntrega } from '../../utils/contratoEngine';
 import { formatEuro, formatDate } from '../../utils/formatters';
+import { subscribeHabitacionesInmueble, saveHabitacionFirestore, saveContratoFirestore } from '../../lib/firebase';
+import { CicloContractualPanel } from '../CicloContractualPanel';
 import {
   FileText,
   Key,
@@ -28,6 +32,7 @@ import {
   ExternalLink,
   Trash2,
   Edit3,
+  RefreshCw,
 } from 'lucide-react';
 
 interface FormalizacionSectionProps {
@@ -36,8 +41,12 @@ interface FormalizacionSectionProps {
   candidatos: Candidato[];
   solicitudesDoc: SolicitudDocumentacion[];
   userProfile?: UserProfile;
+  currentUser?: UsuarioApp | null;
   onOpenFormalizarModal: (candidato: Candidato, inmueble?: Inmueble, contrato?: ContratoFormalizacion) => void;
   onDeleteContrato: (contratoId: string) => Promise<void>;
+  // FASE 3.1: «el inquilino me ha comunicado que se va».
+  onRecomercializarContrato?: (contrato: ContratoFormalizacion) => void;
+  onSaveContrato?: (contrato: ContratoFormalizacion) => Promise<void> | void;
 }
 
 export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
@@ -46,13 +55,37 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
   candidatos,
   solicitudesDoc,
   userProfile,
+  currentUser,
   onOpenFormalizarModal,
   onDeleteContrato,
+  onRecomercializarContrato,
+  onSaveContrato,
 }) => {
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState<string>('todos');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('todos');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showNewContractSelector, setShowNewContractSelector] = useState<boolean>(false);
+
+  // GAP 2: habitaciones de los inmuebles con contratos de habitación (solo las necesarias)
+  const [habitaciones, setHabitaciones] = useState<HabitacionInmueble[]>([]);
+  const inmueblesConHabitaciones: string[] = [];
+  contratos.forEach((c) => {
+    if (c.habitacionId && !inmueblesConHabitaciones.includes(c.inmuebleId)) {
+      inmueblesConHabitaciones.push(c.inmuebleId);
+    }
+  });
+  useEffect(() => {
+    if (inmueblesConHabitaciones.length === 0) return;
+    const porInmueble = new Map<string, HabitacionInmueble[]>();
+    const unsubs = inmueblesConHabitaciones.map((inmuebleId) =>
+      subscribeHabitacionesInmueble(inmuebleId, (items) => {
+        porInmueble.set(inmuebleId, items);
+        setHabitaciones(Array.from(porInmueble.values()).flat());
+      })
+    );
+    return () => unsubs.forEach((u) => u && u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inmueblesConHabitaciones.join(',')]);
 
   // KPIs
   const totalContratos = contratos.length;
@@ -60,7 +93,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
     (c) => c.estado === 'FIRMADO' || c.estado === 'FIANZA_DEPOSITADA' || c.estado === 'FORMALIZADO_ACTIVO'
   ).length;
   const totalRentaMensual = contratos
-    .filter((c) => c.estado !== 'CANCELADO')
+    .filter((c) => c.estado !== 'CANCELADO' && c.estado !== 'FINALIZADO' && c.estado !== 'RESCINDIDO')
     .reduce((acc, curr) => acc + curr.rentaMensual, 0);
   const aptosSeguro = contratos.filter((c) => c.evaluacionAsegurabilidad.dictamen === 'APTO_RECOMENDADO').length;
 
@@ -193,6 +226,8 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
             <option value="FIRMADO">Contrato Firmado</option>
             <option value="FIANZA_DEPOSITADA">Fianza Recibida</option>
             <option value="FORMALIZADO_ACTIVO">Formalizado (Activo)</option>
+            <option value="FINALIZADO">Finalizado (Histórico)</option>
+            <option value="RESCINDIDO">Rescindido</option>
             <option value="CANCELADO">Cancelado</option>
           </select>
         </div>
@@ -360,6 +395,15 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                   </div>
                 </div>
 
+                {/* GAP 2: Ciclo contractual (modalidad, anexos, finalización, finiquito) */}
+                <CicloContractualPanel
+                  contrato={contrato}
+                  currentUser={currentUser}
+                  habitaciones={habitaciones}
+                  onSaveContrato={onSaveContrato ?? (async (c) => { await saveContratoFirestore(c); })}
+                  onUpdateHabitacion={async (h) => { await saveHabitacionFirestore(h); }}
+                />
+
                 {/* Acciones del Contrato */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
@@ -370,6 +414,15 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                     >
                       <Printer className="w-4 h-4" />
                     </button>
+                    {onRecomercializarContrato && contrato.estado !== 'CANCELADO' && (
+                      <button
+                        onClick={() => onRecomercializarContrato(contrato)}
+                        title="El inquilino se va: iniciar recomercialización"
+                        className="p-2 text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-xl transition-colors"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       onClick={async () => {
                         if (confirm(`¿Eliminar el expediente de ${contrato.candidatoNombre}?`)) {

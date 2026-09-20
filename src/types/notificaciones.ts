@@ -66,7 +66,9 @@ export type OrigenNotificacion =
   | 'CONCILIACION_BANCARIA'
   | 'FACTURACION'
   | 'SISTEMA'
-  | 'PRUEBA';
+  | 'PRUEBA'
+  // BLOQUE B (integración canónica 2026-09-20): liquidaciones, pagos, SEPA, incidencias de pago
+  | 'TESORERIA';
 
 export interface EventoNotificacion {
   origen: OrigenNotificacion;

@@ -323,6 +323,61 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+
+  // =======================================================================
+  // TESORERIA (BLOQUE B — integración canónica 2026-09-20)
+  // Los textos provienen de las fábricas de eventos de `src/tesoreria/notificaciones.ts`
+  // (props {titulo}/{mensaje} ya formateadas con importes en céntimos).
+  // =======================================================================
+  'tesoreria.liquidacion_generada': {
+    id: 'tesoreria.liquidacion_generada',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Gestión de tesorería SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'tesoreria.liquidacion_aprobada': {
+    id: 'tesoreria.liquidacion_aprobada',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Gestión de tesorería SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'tesoreria.liquidacion_pagada': {
+    id: 'tesoreria.liquidacion_pagada',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Gestión de tesorería SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'tesoreria.liquidacion_anulada': {
+    id: 'tesoreria.liquidacion_anulada',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Gestión de tesorería SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'tesoreria.pago_incidencia': {
+    id: 'tesoreria.pago_incidencia',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Gestión de tesorería SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'tesoreria.sepa_preparado': {
+    id: 'tesoreria.sepa_preparado',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Gestión de tesorería SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'tesoreria.sepa_error': {
+    id: 'tesoreria.sepa_error',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Gestión de tesorería SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
 };
 
 /** Lista plana de claves de plantilla registradas. */

@@ -497,3 +497,53 @@ export function enriquecerEventoConInmueble(
     datos,
   };
 }
+
+// ---------------------------------------------------------------------------
+// TESORERIA (BLOQUE B — integración canónica 2026-09-20)
+// ---------------------------------------------------------------------------
+// Pasa los eventos de tesorería (BLOQUE B, `src/tesoreria/notificaciones.ts`)
+// al modelo canónico de notificación GAP 1. Función PURA: no envía nada y no
+// modifica liquidaciones/órdenes. El envío efectivo lo hará el dispatcher GAP 1
+// cuando exista repositorio/proveedor (misma dependencia externa que el resto de
+// orígenes). `audit_logs` se conserva como auditoría, no como sustituto.
+
+import type { NotificacionTesoreria } from '../tesoreria/tipos';
+
+const TIPO_EVENTO_TESORERIA: Record<NotificacionTesoreria['evento'], string> = {
+  'liquidacion.generada': 'tesoreria.liquidacion_generada',
+  'liquidacion.aprobada': 'tesoreria.liquidacion_aprobada',
+  'liquidacion.pagada': 'tesoreria.liquidacion_pagada',
+  'liquidacion.anulada': 'tesoreria.liquidacion_anulada',
+  'pago.incidencia': 'tesoreria.pago_incidencia',
+  'sepa.preparado': 'tesoreria.sepa_preparado',
+  'sepa.error_validacion': 'tesoreria.sepa_error',
+};
+
+export function eventoTesoreriaAEventoNotificacion(
+  n: NotificacionTesoreria,
+  propietario?: { email?: string; nombre?: string } | null,
+): EventoNotificacion {
+  const tipo = TIPO_EVENTO_TESORERIA[n.evento];
+  const sufijo = tipo.split('.')[1] || tipo;
+  return {
+    origen: 'TESORERIA',
+    tipoEvento: tipo,
+    entidadId: n.entidadId,
+    idempotencyKey: idempotenciaDeEvento('TESORERIA', sufijo, n.entidadId),
+    propietarioId: n.propietarioId,
+    datos: {
+      id: n.id,
+      evento: n.evento,
+      entidadTipo: n.entidadTipo,
+      titulo: n.titulo,
+      mensaje: n.mensaje,
+      propietarioId: n.propietarioId ?? null,
+      actorNombre: n.actorNombre ?? null,
+      fecha: n.fecha,
+    },
+    destinatario:
+      n.propietarioId && propietario
+        ? { email: propietario.email, nombre: propietario.nombre }
+        : undefined,
+  };
+}

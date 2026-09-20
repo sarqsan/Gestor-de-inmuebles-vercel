@@ -27,6 +27,7 @@ import {
   BarChart3,
   Landmark,
   Banknote,
+  Wallet,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -79,6 +80,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
+          { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet, description: 'Estado de cuenta mensual y neto transferido' },
           { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
           { id: 'financiacion', label: 'Financiación', icon: Landmark, description: 'Hipotecas y amortización' },
           { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos y conciliar cobros/gastos' },
@@ -100,6 +102,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
+          { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet, description: 'Liquidaciones, gastos, SEPA PAIN.008/001 y movimientos' },
           { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
           { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },
           { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos CSV/OFX/MT940/Norma43 y conciliar' },

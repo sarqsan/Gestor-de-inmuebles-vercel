@@ -17,6 +17,7 @@ import {
   ArrowRight,
   ShieldAlert,
   Save,
+  Wallet,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -26,6 +27,9 @@ import {
   Especialidad,
   Propietario,
 } from '../../types';
+import type { LiquidacionPropietario } from '../../tesoreria/tipos';
+import { formatoImporteSepa } from '../../tesoreria/sepaUtils';
+import { imprimirLiquidacionPDF } from '../../tesoreria/liquidacionPdf';
 
 interface PropietarioPortalSectionProps {
   currentUser: UsuarioApp;
@@ -34,6 +38,8 @@ interface PropietarioPortalSectionProps {
   contratos: ContratoFormalizacion[];
   especialidades: Especialidad[];
   propietarios: Propietario[];
+  /** BLOQUE B — liquidaciones (ya acotadas por propietario desde el App). */
+  liquidaciones?: LiquidacionPropietario[];
   onOpenCrearProfesionalModal: (profesional?: Profesional) => void;
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
   onSavePropietario?: (propietario: Propietario) => Promise<void>;
@@ -47,14 +53,17 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   contratos,
   especialidades,
   propietarios,
+  liquidaciones = [],
   onOpenCrearProfesionalModal,
   onSaveProfesional,
   onSavePropietario,
   onNavigateToInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'viviendas' | 'profesionales' | 'contratos' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
+    'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
   >('viviendas');
+  // BLOQUE B: detalle de liquidación seleccionado
+  const [liqDetalleId, setLiqDetalleId] = useState<string | null>(null);
 
   const [profesionalTab, setProfesionalTab] = useState<'catalogo' | 'privados'>('catalogo');
   const [searchTerm, setSearchTerm] = useState('');
@@ -95,6 +104,12 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
 
   // Associated Propietario record
   const miFichaPropietario = propietarios.find((p) => p.id === currentUser.propietarioId);
+
+  // BLOQUE B: liquidaciones del propietario (aislamiento estricto por propietarioId)
+  const misLiquidaciones = liquidaciones
+    .filter((l) => l.propietarioId && l.propietarioId === currentUser.propietarioId && l.estado !== 'ANULADA' && l.estado !== 'REVERSADA')
+    .sort((a, b) => (a.periodo < b.periodo ? 1 : -1));
+  const liqDetalle = misLiquidaciones.find((l) => l.id === liqDetalleId) || null;
 
   useEffect(() => {
     setFormFicha({
@@ -220,6 +235,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
               count: misProfesionalesPrivados.length,
             },
             { id: 'contratos', label: 'Mis Contratos', icon: FileCheck, count: misContratos.length },
+            { id: 'liquidaciones', label: 'Mis Liquidaciones', icon: Wallet, count: misLiquidaciones.length },
             { id: 'gastos', label: 'Gastos', icon: TrendingDown, badge: 'Próximamente' },
             { id: 'cobros', label: 'Cobros', icon: DollarSign, badge: 'Próximamente' },
             { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, badge: 'Próximamente' },
@@ -610,6 +626,75 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SUBTAB: MIS LIQUIDACIONES (BLOQUE B — 2026-09-20) */}
+          {activeSubTab === 'liquidaciones' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Mis Liquidaciones Mensuales ({misLiquidaciones.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Estado de cuenta: ingresos cobrados, deducciones y neto transferido. Solo se liquida lo efectivamente cobrado.
+                </p>
+              </div>
+
+              {misLiquidaciones.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
+                  <DollarSign className="w-8 h-8 text-slate-400 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">Aún no tienes liquidaciones</div>
+                  <p className="text-xs text-slate-500">
+                    La administración genera tu liquidación mensual cuando existen cobros registrados.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {misLiquidaciones.map((l) => (
+                    <div key={l.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                      <div className="flex items-start justify-between flex-wrap gap-2">
+                        <div>
+                          <div className="font-bold text-sm text-slate-900">Periodo {l.periodo}</div>
+                          <div className="text-[11px] text-slate-500">
+                            Bruto {formatoImporteSepa(l.totalBrutoCobrado)} € · Deducciones −{formatoImporteSepa(l.totalDeducciones)} €
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-mono font-bold text-emerald-700 text-base">{formatoImporteSepa(l.netoPropietario)} €</div>
+                          <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-700 rounded-md">{l.estado}</span>
+                        </div>
+                      </div>
+                      {(l.fechaPago || l.referenciaBancariaPago) && (
+                        <div className="text-[11px] text-slate-600">
+                          Pagada el {l.fechaPago}{l.referenciaBancariaPago ? ` · ref. ${l.referenciaBancariaPago}` : ''}
+                        </div>
+                      )}
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={() => setLiqDetalleId(liqDetalleId === l.id ? null : l.id)} className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold">
+                          {liqDetalleId === l.id ? 'Ocultar detalle' : 'Ver detalle'}
+                        </button>
+                        <button onClick={() => imprimirLiquidacionPDF(l)} className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold">
+                          Descargar PDF
+                        </button>
+                      </div>
+                      {liqDetalleId === l.id && liqDetalle && liqDetalle.id === l.id && (
+                        <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                          {liqDetalle.lineas.map((x) => (
+                            <div key={x.id} className="flex justify-between gap-2 text-[11px]">
+                              <span className="text-slate-600"><span className="font-mono text-[10px] bg-slate-100 px-1 rounded mr-1">{x.naturaleza}</span>{x.concepto}{x.detalle ? ` — ${x.detalle}` : ''}</span>
+                              <span className={`font-mono font-bold whitespace-nowrap ${x.importe < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatoImporteSepa(x.importe)} €</span>
+                            </div>
+                          ))}
+                          <div className="text-[11px] text-slate-500 pt-1">
+                            Cuenta de abono: <span className="font-mono">{liqDetalle.cuentaAbonoIban}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

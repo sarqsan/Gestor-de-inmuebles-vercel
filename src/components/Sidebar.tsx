@@ -26,6 +26,7 @@ import {
   BarChart3,
   Landmark,
   Banknote,
+  Wallet,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -80,6 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount },
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
+      { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet },
       { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
       { id: 'financiacion', label: 'Financiación', icon: Landmark },
       { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
@@ -104,6 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
+      { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet },
       { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
       { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark },
       { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },

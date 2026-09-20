@@ -3,6 +3,8 @@ export type SectionType =
   | 'inmuebles'
   | 'propietarios'
   | 'cobros'
+  // BLOQUE B (integración canónica 2026-09-20): tesorería y liquidaciones de propietarios
+  | 'tesoreria'
   | 'gastos'
   | 'conciliacion'
   | 'facturacion'
@@ -1803,7 +1805,7 @@ export interface AuditLog {
 export interface PermisoDefinicion {
   codigo: string;
   nombre: string;
-  categoria: 'inmuebles' | 'propietarios' | 'profesionales' | 'contratos' | 'candidatos' | 'seguros' | 'administracion';
+  categoria: 'inmuebles' | 'propietarios' | 'profesionales' | 'contratos' | 'candidatos' | 'seguros' | 'administracion' | 'tesoreria';
   descripcion: string;
 }
 
@@ -1836,6 +1838,11 @@ export const PERMISOS_SISTEMA: PermisoDefinicion[] = [
   { codigo: 'seguros.ver', nombre: 'Ver Seguros de Impago', categoria: 'seguros', descripcion: 'Consultar expedientes de pólizas' },
   { codigo: 'seguros.crear', nombre: 'Crear Solicitudes de Seguro', categoria: 'seguros', descripcion: 'Iniciar trámites de asegurabilidad' },
   { codigo: 'seguros.tramitar', nombre: 'Tramitar con Aseguradoras', categoria: 'seguros', descripcion: 'Enviar expedientes vía Gmail API' },
+
+  { codigo: 'tesoreria.ver', nombre: 'Ver Tesorería', categoria: 'tesoreria', descripcion: 'Consultar liquidaciones, gastos de tesorería y movimientos (BLOQUE B)' },
+  { codigo: 'tesoreria.liquidar', nombre: 'Generar y Aprobar Liquidaciones', categoria: 'tesoreria', descripcion: 'Crear borradores de liquidación y aprobarlas para pago' },
+  { codigo: 'tesoreria.pagar', nombre: 'Pagar y Reversar Liquidaciones', categoria: 'tesoreria', descripcion: 'Registrar pago con evidencia y reversión con motivo (trazable)' },
+  { codigo: 'tesoreria.sepa', nombre: 'Ficheros SEPA (PAIN.008/001)', categoria: 'tesoreria', descripcion: 'Preparar y validar ficheros SEPA. Solo preparación: sin envío bancario' },
 
   { codigo: 'administracion.usuarios', nombre: 'Gestión de Usuarios', categoria: 'administracion', descripcion: 'Crear, editar, activar y bloquear usuarios' },
   { codigo: 'administracion.permisos', nombre: 'Gestión de Permisos', categoria: 'administracion', descripcion: 'Asignar roles y permisos granulares' },
@@ -1915,6 +1922,8 @@ export interface ModulosConfig {
   hipotecas: boolean;
   patrimonio: boolean;
   incidencias: boolean;
+  // BLOQUE B (integración canónica 2026-09-20)
+  tesoreria: boolean;
 }
 
 export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
@@ -1930,6 +1939,7 @@ export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   hipotecas: false,
   patrimonio: false,
   incidencias: false,
+  tesoreria: true,
 };
 
 

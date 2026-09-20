@@ -111,7 +111,8 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 | 17 | Facturación / RRSIF / VERI*FACTU (GAP7) | Series/numeración, líneas/IVA/retenciones, registro de facturación con hash SHA-256 encadenado (spec AEAT v0.1.2), reporte RRSIF, máquina VERI*FACTU con transporte desacoplado | `facturacionEngine.ts`, `facturacionReporte.ts`, `verifactuTransport.ts`, `sha256.ts`, `FacturacionSection.tsx`, colecciones `facturas`/`registros_facturacion`/`envios_verifactu`/`series_facturacion` | Motor `COMPLETO`; remisión `DEPENDENCIA_EXTERNA` | 39 | NO hay remisión real a AEAT/SII (sin endpoints inventados, sin certificados en código); RRSIF se genera, no se transmite |
 | 18 | Factura electrónica B2B (GAP8) | **INTEGRADO EN ARENA A** — integración commit `91da820`. Modelo B2B separado, validador bloqueante, CII/UBL 2.1/Facturae 3.2.2, máquina de estados, idempotencia, reglas deny-by-default, panel UI | `types/facturaElectronicaB2B.ts`, `facturaElectronicaB2BEngine.ts`, `facturaElectronicaB2BService.ts`, `generadores/*` (3), `intercambioB2B/adaptadoresB2B.ts`, `notificacionesB2B.ts`, `FacturaElectronicaB2BPanel.tsx`, colección `facturas_electronicas_b2b` | Generación `COMPLETO`; envío real `DEPENDENCIA_EXTERNA` | 40 | Ver §3 (GAP8). EDIFACT `PENDIENTE-ESPECIFICACIÓN`; SPFE/plataforma privada `PENDIENTE`; B2G/FACe fuera de alcance |
 | 19 | Backend IA (Express) | 16 endpoints: análisis de documentos/cuestionario/incidencia/inspección, correo aseguradora, cláusula, pricing, kit publicación, catastro, notificaciones, upload | `server.ts` (2.605 l.), `api/index.ts`, `vercel.json` | `FUNCIONAL_CON_MEJORAS` | — | Residual P2: `documentsStore` en memoria (ver #3). Sin rate-limit (documentado en diagnóstico) |
-| 20 | Seguridad perimetral | Reglas Firestore por colección (aislamiento por `propietarioId`, deny-by-default catch-all), reglas Storage por ruta, RBAC en cliente | `firestore.rules` (1.218 l., ~44 bloques), `storage.rules` (161 l.), `firebase.json` | `FUNCIONAL_CON_MEJORAS` | — | Residuales documentados en `FASE_1.4_SEGURIDAD_PERMISOS.md` §5 (ficha pública con datos fiscales; Storage sin claims) |
+| 20 | Seguridad perimetral | Reglas Firestore por colección (aislamiento por `propietarioId`, deny-by-default catch-all), reglas Storage por ruta, RBAC en cliente | `firestore.rules` (1.347 l., ~50 bloques), `storage.rules` (161 l.), `firebase.json` | `FUNCIONAL_CON_MEJORAS` | — | Residuales documentados en `FASE_1.4_SEGURIDAD_PERMISOS.md` §5 (ficha pública con datos fiscales; Storage sin claims) |
+| 21 | **Tesorería + Liquidaciones + SEPA (BLOQUE B)** | **INTEGRADO EN ARENA A (2026-09-20)** — cierre del ciclo inmueble→propietario: liquidación mensual determinista, gastos imputables, órdenes de pago, SEPA PAIN.008/001 (preparación, sin envío real), portal propietario, conciliación evidencia | `src/tesoreria/*` (9 módulos), `TesoreriaSection.tsx`, `lib/tesoreriaFirestore.ts`, `lib/conciliacionSession.ts`, colección `liquidaciones_propietarios`/`gastos_inmuebles`/`ordenes_pago`/`ficheros_sepa`/`mandatos_sepa`/`config_liquidacion`, reglas §26–31 | `COMPLETO` (motor + integración) | 92 (batería `test:bloque-b`) | **Preparación** de ficheros SEPA: NO hay envío bancario real (sin APIs/EBICS/certificados inventados). Evidencia de pago requiere movimiento GAP6 conciliado en sesión. Ver §4 BLOQUE B |
 
 ### 2.2 Colecciones Firestore (estado canónico)
 
@@ -127,7 +128,9 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 `profesionales`, `system` (incl. `gmail_config`), `notificaciones`,
 `movimientos_bancarios`, `conciliaciones_bancarias`, `importaciones_bancarias`,
 `facturas`, `registros_facturacion`, `envios_verifactu`, `series_facturacion`,
-`facturas_electronicas_b2b`.
+`facturas_electronicas_b2b`,
+`liquidaciones_propietarios`, `gastos_inmuebles`, `ordenes_pago`,
+`ficheros_sepa`, `mandatos_sepa`, `config_liquidacion` (BLOQUE B).
 
 Storage (rutas con reglas): `cobros_justificantes/`, `gastos_facturas/`,
 `documentos_solicitados/`, `inmuebles/`, `incidencias/`, `profesionales/`,
@@ -142,7 +145,7 @@ Los ocho GAP del ERP están **consolidados en la rama canónica** (commits
 y `docs/informe-GAP8-*` (enlazados, no duplicados).
 
 ### GAP1 — Notificaciones transaccionales
-- **Qué existe:** dispatcher completo (`src/notificaciones/`: `dispatcher.ts`, `plantillas.ts`, `canales.ts`, `resolucion.ts`, `autorizacion.ts`, `adaptadores.ts`), tipos (`src/types/notificaciones.ts`), reglas Firestore §22 (aislamiento por propietario), endpoint `/api/notificaciones/enviar`, plantillas de negocio (incl. bloques `facturacion.*` y `facturacion.b2b_*` añadidos por GAP7/8).
+- **Qué existe:** dispatcher completo (`src/notificaciones/`: `dispatcher.ts`, `plantillas.ts`, `canales.ts`, `resolucion.ts`, `autorizacion.ts`, `adaptadores.ts`), tipos (`src/types/notificaciones.ts`), reglas Firestore §22 (aislamiento por propietario), endpoint `/api/notificaciones/enviar`, plantillas de negocio (incl. bloques `facturacion.*` y `facturacion.b2b_*` añadidos por GAP7/8). **BLOQUE B (2026-09-20):** nuevo origen `TESORERIA` + 7 plantillas `tesoreria.*` + adaptador `eventoTesoreriaAEventoNotificacion` (aditivo; el envío efectivo sigue pendiente del repositorio, como el resto de orígenes).
 - **Probado:** 26 tests (`notificaciones.test.ts` 20 + `notificaciones-plantillas.test.ts` 6): resolución, plantillas, idempotencia, reintentos, autorización, canales mock.
 - **Limitaciones reales:** (a) el `RepositorioNotificaciones` es una **interface sin implementación Firestore** en `src/lib/firebase.ts` — la bandeja INAPP no se persiste aún; (b) canal EMAIL en **safe-mode** (sin proveedor SMTP/Resend/SendGrid real); (c) canal WHATSAPP preparado pero sin implementar (requiere API externa); (d) no hay bandeja UI que consume el dispatcher (lo consumen hoy las fábricas de eventos de GAP2/7/8).
 - **Dependencias externas:** proveedor de email + secretos en backend (NUNCA en Firestore); WhatsApp Business API.
@@ -177,7 +180,7 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 - **NO modificar accidentalmente:** la lectura del circuito de habitaciones (publica **leído**, nunca modifica contratos/disponibilidad); la idempotencia por `inmuebleId + portal`; que el modelo interno no dependa de ningún portal concreto.
 
 ### GAP6 — Conciliación bancaria
-- **Qué existe:** `src/utils/conciliacion/` — parsers `mt940Parser`/`ofxParser`/`norma43Parser`/`csvParser`, `normalizador`, `matchingEngine` (config de tolerancias), `importEngine` (idempotencia de importaciones), `conciliacionEngine` (Detecta→Propuesta→Validada→Aplicada con histórico append-only), `idempotencia.ts`; UI `ConciliacionBancariaSection.tsx`; colecciones `movimientos_bancarios`/`conciliaciones_bancarias`/`importaciones_bancarias` + reglas.
+- **Qué existe:** `src/utils/conciliacion/` — parsers `mt940Parser`/`ofxParser`/`norma43Parser`/`csvParser`, `normalizador`, `matchingEngine` (config de tolerancias), `importEngine` (idempotencia de importaciones), `conciliacionEngine` (Detecta→Propuesta→Validada→Aplicada con histórico append-only), `idempotencia.ts`; UI `ConciliacionBancariaSection.tsx`; colecciones `movimientos_bancarios`/`conciliaciones_bancarias`/`importaciones_bancarias` + reglas. **BLOQUE B (2026-09-20):** espejo de sesión aditivo (`lib/conciliacionSession.ts`, 2 líneas en la sección) que expone movimientos/propuestas al selector de evidencia de pago de Tesorería. **Lógica de conciliación intacta.**
 - **Probado:** 23/23 (`conciliacion.test.ts`): parsers, matching, aplicación, idempotencia, trazabilidad.
 - **Limitaciones reales:** sin feed bancario en tiempo real (importación manual de archivos); la aplicación de una conciliación sobre un cobro pasa **exclusivamente** por `registrarPagoPeriodo` de `cobrosEngine` (única vía de escritura sobre la operación contable, nunca silenciosa).
 - **Dependencias externas:** archivos bancarios (hoy) / futura API bancaria.
@@ -211,31 +214,70 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 > Experiencia/Ayuda/Tutoriales/IA** (§6, sin numeración GAP) · **Roadmap de
 > evolución** (§7) · dependencias entre bloques (§8).
 
-### BLOQUE B — Tesorería + liquidaciones de propietarios + SEPA
+### BLOQUE B — Tesorería + liquidaciones de propietarios + SEPA — **IMPLEMENTADO (2026-09-20)**
 
-Objetivo: cerrar el ciclo económico **inmueble → propietario** (hoy el ERP
-conoce los cobros y gastos, pero no liquida ni paga al propietario).
+> Estado real del código (integración selectiva de `arena/01a0bfd3` @ `87aed9a`
+> sobre la base canónica; sin merge ciego). Informe de comparación:
+> `docs/integracion-BLOQUE-B-2026-09-20.md`. Informes del bloque B:
+> `docs/BLOQUE-B-FASE0-VERIFICACION.md`, `docs/BLOQUE-B-IMPLEMENTACION.md`,
+> `docs/BLOQUE-B-NORMATIVA-Y-AUDITORIA.md`.
 
-Ámbito a documentar/planificar (no implementar ahora):
-- Liquidación mensual por propietario (agregado de cobros por contrato/habitación).
-- Cálculo económico de la liquidación: honorarios/gestión, IVA cuando corresponda,
-  retenciones cuando corresponda (reglas a **verificar normativamente**, no asumir).
-- Gastos anticipados (ya existen en `gastos` con cargo arrendador/arrendatario y deducible IRPF).
-- Neto propietario; histórico de liquidaciones; justificante de liquidación (PDF).
-- Portal propietario (base existente: `PropietarioPortalSection.tsx`).
-- Ordenes de transferencia **PAIN.008** (emisión) y recepción/validación **PAIN.001**
-  (bancaria) — hoy **NO existe** ningún generador/validador SEPA en el repo.
-- Trazabilidad e idempotencia (patrones ya existentes: `idempotencia.ts` de GAP6,
-  históricos append-only).
-- Integración con cobros (`cobrosEngine`) y conciliación (`movimientos_bancarios`,
-  `importEngine`): la liquidación paga contra lo conciliado.
+**IMPLEMENTADO:**
+- **Liquidación mensual determinista** (`src/tesoreria/liquidacionEngine.ts`):
+  solo cobra liquida lo efectivamente cobrado (RECIBIDO/VERIFICADO); lo pendiente
+  es informativo (no suma al neto); honorarios/IVA parametrizables; retenciones
+  **solo si procede y con fuente/motivo obligatorios**; gastos imputables;
+  redondeo a céntimos y descuadre > 0,01 € bloquea; id `liq_{prop}_{YYYY-MM}`
+  idempotente + `hashCalculo`; estados `BORRADOR→APROBADA→PAGADA→ANULADA/REVERSADA`
+  con histórico append-only; trazabilidad cobro↔línea. **No existe segundo motor
+  de cobros**: lee `contrato.registroCobros` del cobrosEngine canónico.
+- **Gastos de tesorería** (`gastosEngine.ts` + colección `gastos_inmuebles`):
+  proyección de liquidación (imputableA/pagadoPor/estado) con importación
+  **unidireccional** desde el modelo oficial `gastos` (canónico, intacto) y
+  desde trabajos finalizados; guard anti doble registro si el trabajo ya tiene
+  `gastoId` canónico.
+- **Órdenes de pago** (`sepaPain001.ts` + `ordenes_pago`): origen trazable
+  obligatorio (nunca importe libre), solo liquidaciones APROBADAS, idempotente
+  `op_liq_{id}`.
+- **SEPA PAIN.008** (`sepaPain008.ts`) y **PAIN.001** (`sepaPain001.ts`):
+  generadores validados (IBAN mod-97, BIC, Creditor Identifier EPC, charset,
+  EndToEndId, CtrlSum/NbOfTxs, idempotencia por hash) + ficheros descargables.
+  **SOLO PREPARACIÓN DE FICHEROS: no hay ejecución bancaria real** (no se
+  inventan APIs bancarias, EBICS, certificados ni endpoints).
+- **PDF de liquidación** (`liquidacionPdf.ts`, patrón `window.print` canónico).
+- **Tesorería en la navegación canónica** (`TesoreriaSection.tsx`, 5 tabs) y
+  **«Mis Liquidaciones» en el Portal Propietario** (`PropietarioPortalSection.tsx`):
+  aislamiento por `propietarioId`, detalle de líneas, referencia de pago, estados.
+- **GAP 1**: origen `TESORERIA` + 7 plantillas `tesoreria.*` + adaptador
+  `eventoTesoreriaAEventoNotificacion` (idempotencia canónica) en
+  `src/notificaciones/*`. El envío efectivo sigue `DEPENDENCIA_EXTERNA` del
+  dispatcher GAP1 (sin repositorio Firestore del dispatcher), igual que los
+  demás orígenes. Auditoría de tesorería → `audit_logs` (auditoría, no sustituto).
+- **GAP 6 (conector no destructivo)**: evidencia de pago de liquidación desde
+  movimientos con propuesta **CONFIRMADA** (`movimientosBancariosParaLiquidacion`,
+  `evidenciaPagoDesdeMovimientoBancario`) + espejo de sesión
+  (`lib/conciliacionSession.ts`, 2 líneas aditivas en la sección de conciliación).
+  Cadena completa: propietario→liquidación→orden→PAIN.001→evidencia→conciliación.
+  **No se inventa conciliación automática.**
+- **Seguridad** (`firestore.rules` §26–31, numeración canónica): propietario solo
+  sus liquidaciones/gastos/config; órdenes/ficheros/mandatos (IBANs) solo
+  administrador principal; invariante `propietarioId`; histórico append-only;
+  sin borrado ordinario (anulación/reversión); `sinSecretosTesoreria()`.
+  El «bloques 22–27» de la rama B **se descartó** (choque de numeración con
+  canónico y aislamiento más débil).
 
-**Interfaces existentes que debe respetar:** `cobrosEngine` (`generarPeriodosParaContrato`,
-`calcularResumenCobros`, `registrarPagoPeriodo`), `fiscalEngine`, `gastosEngine`,
-colecciones `propietarios` (IBANs múltiples) y `movimientos_bancarios`.
-
-**Dependencias externas:** entidad/proveedor SEPA para emisión/recepción real de
-transferencias; verificación normativa de honorarios/IVA/retenciones.
+**PENDIENTE / DEPENDENCIA EXTERNA (no resuelto por esta integración):**
+- Emisión/recepción bancaria real de PAIN.008/001 (entidad/proveedor SEPA).
+- Recepción/validación de **camt.053** (extractos SEPA) — `sugerirConciliacion`
+  queda como interfaz documentada para esa futura integración.
+- Sin XSD oficial SEPA (validación estructural + reglas EPC); XML sin `PstlAdr`
+  (obligatorio SEPA a partir de 15/11/2026, **a verificar**).
+- Parámetros fiscales (honorarios/IVA/retención) configurables y trazados,
+  **sin asesoramiento fiscal**; la obligación legal de retención es del usuario
+  (marcado «a verificar» en `BLOQUE-B-NORMATIVA-Y-AUDITORIA.md`).
+- Persistencia de movimientos GAP6 en Firestore (el GAP6 actual es por sesión;
+  la evidencia de pago opera sobre la sesión de conciliación).
+- Transporte real del dispatcher GAP1 (común a todos los orígenes).
 
 ### BLOQUE C — Morosidad + recobro + expediente de recuperación
 
@@ -454,7 +496,7 @@ presentan como cinco órdenes pequeñas:
 
 | Fase | Capacidad | Tamaño / nota |
 |---|---|---|
-| **B** | Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001) | Bloque grande |
+| **B** | Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001) | **IMPLEMENTADO (2026-09-20)** — ver §4 BLOQUE B (pendientes: envío bancario real, camt.053) |
 | **C** | Morosidad + recobro + expediente de recuperación | Bloque grande |
 | **D** | Entrada/salida + actas + evidencias + firma digital | Bloque grande |
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | Bloque grande |
@@ -577,6 +619,10 @@ endurecimiento final — §7)
 | `docs/CONTINUIDAD-ARENA.md` | Manual operativo para nuevas sesiones de Arena |
 | `docs/CONTRATO-INTEGRACION-ARENAS.md` | Reglas permanentes de trabajo multi-Arena |
 | `docs/ESTADO-GIT-ERP.md` | Registro de estado Git (rama, HEAD, tests, build) |
+| `docs/integracion-BLOQUE-B-2026-09-20.md` | Informe de comparación A↔B e integración selectiva del BLOQUE B (2026-09-20) |
+| `docs/BLOQUE-B-FASE0-VERIFICACION.md` | Verificación pre-integración del bloque B (rama B) |
+| `docs/BLOQUE-B-IMPLEMENTACION.md` | Informe de implementación del bloque B (rama B) |
+| `docs/BLOQUE-B-NORMATIVA-Y-AUDITORIA.md` | Decisiones fiscales/bancarias del bloque B (fuentes y «a verificar») |
 | `docs/informe-GAP2-contratos-especiales.md` | Informe completo GAP2 (Arena C) |
 | `docs/informe-GAP8-factura-electronica-b2b.md` | Informe completo GAP8 (Arena C) |
 | `docs/informe-auditoria-C-vs-A-2026-09-19.md` | Auditoría comparativa C→A (2026-09-19) |

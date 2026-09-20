@@ -34,6 +34,24 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
+    // BLOQUE B — verificación de secretos compartida por las colecciones de
+    // tesorería (26–31). Ningún campo de credencial bancaria/certificado entra.
+    function sinSecretosTesoreria() {
+      return !(
+        'credentials' in incoming() ||
+        'apiKey' in incoming() ||
+        'accessToken' in incoming() ||
+        'psd2' in incoming() ||
+        'certificado' in incoming() ||
+        'privateKey' in incoming() ||
+        'ibanSecreto' in incoming() ||
+        'tokenBancario' in incoming() ||
+        'password' in incoming() ||
+        'secret' in incoming() ||
+        'token' in incoming()
+      );
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -1205,6 +1223,117 @@ service cloud.firestore {
         && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size()
         && representacionInmovil()
       ) && sinSecretosB2B();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 26. LIQUIDACIONES DE PROPIETARIOS (BLOQUE B — tesorería, 2026-09-20)
+    // - el propietario SOLO lee sus liquidaciones (aislamiento por propietarioId)
+    // - crea/edita SOLO la administración (isMasterAdmin): el motor es
+    //   determinista e idempotente (claveIdempotencia inmutable)
+    // - historial append-only: nunca se elimina ni reescribe lo trazado
+    // - NO hay borrado ordinario: la anulación/reversión (ANULADA/REVERSADA) es
+    //   la vía; el delete queda reservado al administrador principal
+    // - sin secretos en ningún campo
+    // =========================================================================
+    match /liquidaciones_propietarios/{liqId} {
+      function liqEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && liqEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && liqEsMia(resource.data));
+      allow create: if isMasterAdmin() && (
+        isValidId(incoming().id) && incoming().id == liqId
+        && 'propietarioId' in incoming() && incoming().propietarioId is string
+        && 'claveIdempotencia' in incoming() && incoming().claveIdempotencia is string
+        && incoming().estado == 'BORRADOR'
+      ) && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && (
+        incoming().id == existing().id
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && 'claveIdempotencia' in incoming() && incoming().claveIdempotencia == existing().claveIdempotencia
+        && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size()
+      ) && sinSecretosTesoreria();
+      // Sin borrado ordinario: se anula/reversa. Excepción puntual del
+      // administrador principal (vía de emergencia, queda en audit_logs).
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 27. GASTOS DE TESORERÍA (BLOQUE B — proyección de liquidación, 2026-09-20)
+    // - el propietario SOLO lee los gastos imputados a su nombre
+    // - crea/edita SOLO la administración (importación desde el modelo oficial
+    //   `gastos` o alta manual); la contabilidad oficial vive en `gastos`
+    // - sin secretos
+    // =========================================================================
+    match /gastos_inmuebles/{gastoId} {
+      function gastoEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data));
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == gastoId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && (
+        incoming().id == existing().id
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+      ) && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 28. ÓRDENES DE PAGO (BLOQUE B — 2026-09-20)
+    // - contienen IBAN de beneficiario: SOLO la administración
+    // - historial append-only (trazabilidad del origen: liquidación→orden)
+    // - sin envío bancario real: preparar ≠ ejecutar
+    // =========================================================================
+    match /ordenes_pago/{opId} {
+      allow get: if isMasterAdmin();
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == opId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && (
+        incoming().id == existing().id
+        && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size()
+      ) && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 29. FICHEROS SEPA PAIN.008/001 (BLOQUE B — 2026-09-20)
+    // - contienen XML con IBAN, BIC y Creditor Identifier: SOLO la
+    //   administración; nunca visibles para propietarios ni profesionales
+    // - sin secretos (el fichero SEPA en sí NO es una credencial)
+    // =========================================================================
+    match /ficheros_sepa/{ficheroId} {
+      allow get: if isMasterAdmin();
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == ficheroId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && incoming().id == existing().id && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 30. MANDATOS SEPA (BLOQUE B — 2026-09-20)
+    // - contienen IBAN de deudor y MndtId: SOLO la administración
+    // =========================================================================
+    match /mandatos_sepa/{mandatoId} {
+      allow get: if isMasterAdmin();
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == mandatoId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && incoming().id == existing().id && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 31. CONFIGURACIÓN FISCAL DE LIQUIDACIÓN (BLOQUE B — 2026-09-20)
+    // - documento por propietario (id de documento = propietarioId)
+    // - el propietario puede leer la suya; crea/edita SOLO la administración
+    // - sin secretos
+    // =========================================================================
+    match /config_liquidacion/{propietarioId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && propietarioId == myPropId());
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && propietarioId is string && propietarioId.size() > 0 && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && sinSecretosTesoreria();
       allow delete: if isMasterAdmin();
     }
 

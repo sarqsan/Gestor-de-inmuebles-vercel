@@ -29,8 +29,9 @@ mantiene/integra **Arena A**. Si tu sesión se ancló a `main`, **no asumas** qu
 - Canónico: **`91da820`** (`feat(integracion): integrar GAP 8 de factura
   electronica B2B`) — GAP 1–8 consolidados.
 - La rama de sesión de 2026-09-20 (`arena/01a0bfbe-gestor-de-inmuebles-vercel`)
-  contiene el merge de alineación `d24ab1f` (árbol ≡ `91da820`) + el commit de
-  este paquete de continuidad.
+  contiene el merge de alineación `d24ab1f` (árbol ≡ `91da820`) + el paquete de
+  continuidad + **la integración selectiva del BLOQUE B** (commit
+  `feat(tesoreria): integrar bloque B en ERP canonico`, 2026-09-20).
 - Estado completo y actualizado: `docs/ESTADO-GIT-ERP.md`.
 
 ## 4. ¿Cómo comprobar el estado al llegar? (FASE 0, 5 minutos)
@@ -85,8 +86,12 @@ Reglas de la FASE 0 (permanentes):
   330 tests** (vitest 5).
 - Comando oficial: **`npx vitest run`** (el `package.json` canónico no define
   script `test`).
+- Batería BLOQUE B: **`npm run test:bloque-b`** (`scripts/test-bloque-b.ts`,
+  92 asserts: liquidaciones, gastos, SEPA, conciliación, notificaciones,
+  puentes GAP1/GAP6 y circuito e2e).
 - Umbral de cierre: suite completa en verde (≥330 + nuevos, 0 fallos) +
-  `npx tsc --noEmit` (0 errores) + `npm run build` (OK).
+  `npm run test:bloque-b` (0 fallos) + `npx tsc --noEmit` (0 errores) +
+  `npm run build` (OK).
 
 ## 8. ¿Qué bloques están cerrados?
 
@@ -95,13 +100,18 @@ Reglas de la FASE 0 (permanentes):
   contratos especiales (motor+UI), reporting (motor), financiación (motor),
   sindicación (generación), conciliación bancaria (motor+UI), facturación/
   RRSIF/VERI*FACTU (motor), factura electrónica B2B (generación).
+- **BLOQUE B — Tesorería + liquidaciones + SEPA: INTEGRADO (2026-09-20)** —
+  motor de liquidaciones determinista, SEPA PAIN.008/001 (preparación de
+  ficheros, **sin envío bancario real**), Tesorería en navegación canónica +
+  «Mis Liquidaciones» en portal propietario, reglas §26–31, origen GAP1
+  `TESORERIA`, conector GAP6 de evidencia de pago. Pendientes externos: envío
+  bancario real, camt.053, XSD oficial (mapa maestro §4 BLOQUE B).
 - Bloques base cerrados: auth/roles, inmuebles+habitaciones (circuito 72/72),
   cobros, gastos/préstamos/rentabilidad, incidencias/mantenimiento/profesionales,
   pólizas/siniestros+Gmail, inventario, recomercialización, deploy Vercel.
 
 ## 9. ¿Qué bloques están pendientes?
 
-- **BLOQUE B** — Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001).
 - **BLOQUE C** — Morosidad + recobro + expediente de recuperación.
 - **BLOQUE D** — Entrada/salida + actas + evidencias + firma digital.
 - **BLOQUE E — Portal del Inquilino + suministros** — PLANIFICADO ≠

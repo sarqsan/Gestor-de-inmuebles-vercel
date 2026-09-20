@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MovimientoBancario, PropuestaConciliacion, ImportacionBancaria, ResumenConciliacion, TipoClasificacionNoConciliado, DEFAULT_CONFIG_MATCHING } from '../../types/conciliacion';
 import { CobroPeriodo, Gasto, Inmueble, ContratoFormalizacion, UsuarioApp } from '../../types';
+import { registrarMovimientosSesion, registrarPropuestasSesion } from '../../lib/conciliacionSession';
 import { importarDesdeCSV, importarDesdeOFX, importarDesdeMT940, importarDesdeNorma43, detectarFormato } from '../../utils/conciliacion/importEngine';
 import { crearPropuestasParaMovimientos, confirmarPropuesta, rechazarPropuesta, marcarNoConciliable, aplicarConciliacion, calcularResumenConciliacion } from '../../utils/conciliacion/conciliacionEngine';
 import { buscarCandidatos } from '../../utils/conciliacion/matchingEngine';
@@ -42,6 +43,14 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
     return todos;
   }, [cobros, contratos]);
 
+  // BLOQUE B (puente aditivo, 2026-09-20): espeja las propuestas en el
+  // estado de sesión para que Tesorería ofrezca la evidencia de pago de
+  // liquidaciones desde movimientos con propuesta CONFIRMADA.
+  // NO altera la lógica de conciliación del GAP 6.
+  useEffect(() => {
+    registrarPropuestasSesion(propuestas);
+  }, [propuestas]);
+
   const propietarioId = useMemo(() => {
     if (currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId) return currentUser.propietarioId;
     return inmuebles[0]?.propietarioId || inmuebles[0]?.propietarioPrincipalId || 'prop_demo';
@@ -70,6 +79,10 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
       }
 
       setMovimientos(prev => [...prev, ...resultado.nuevos]);
+      // BLOQUE B (puente aditivo, 2026-09-20): espejo de sesión para que la
+      // sección de Tesorería ofrezca la evidencia de pago desde estos
+      // movimientos. NO altera la lógica de conciliación del GAP 6.
+      registrarMovimientosSesion(resultado.nuevos);
       setImportaciones(prev => [...prev, resultado.importacion]);
 
       // Generar propuestas

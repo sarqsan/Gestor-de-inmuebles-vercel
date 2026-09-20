@@ -994,6 +994,154 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 25. FACTURACIÓN Y VERI*FACTU (GAP 7) — aislamiento estricto por propietario
+    // - propietario inmutable en facturas, registros y envíos
+    // - registros de facturación (RRSIF) NO editables arbitrariamente: huella,
+    //   importe/número/fecha/receptor protegidos tras la emisión
+    // - sin secretos (certificados y credenciales AEAT jamás en Firestore)
+    // - factura emitida y su registro protegidos más que el borrador
+    // =========================================================================
+    match /facturas/{facturaId} {
+      function facturaEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function facturaVisible(d) {
+        return facturaEsMia(d) || ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+      }
+      function sinSecretosFacturacion() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && facturaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && facturaEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'id' in incoming() && incoming().id is string
+      ) && sinSecretosFacturacion();
+      // Una factura EMITIDA no puede renumerarse ni alterarse silenciosamente:
+      // número/serie/ejercicio/fecha/propietario e importes quedan inmutables.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && facturaEsMia(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && (
+          !('estado' in existing()) || existing().estado != 'EMITIDA' || (
+            incoming().numero == existing().numero
+            && incoming().serie == existing().serie
+            && incoming().ejercicio == existing().ejercicio
+            && incoming().fechaExpedicion == existing().fechaExpedicion
+            && incoming().importeTotal == existing().importeTotal
+          )
+        )
+      ) && sinSecretosFacturacion();
+      allow delete: if isMasterAdmin();
+    }
+
+    match /registros_facturacion/{registroId} {
+      function registroEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosFacturacion() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && registroEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && registroEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'facturaId' in incoming() && incoming().facturaId is string
+        && 'huella' in incoming() && incoming().huella is string
+      ) && sinSecretosFacturacion();
+      // Inalterabilidad RRSIF: la huella y los campos hasheados jamás se tocan.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && registroEsMio(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().huella == existing().huella
+        && incoming().numSerieFactura == existing().numSerieFactura
+        && incoming().fechaExpedicionFactura == existing().fechaExpedicionFactura
+        && incoming().importeTotal == existing().importeTotal
+        && incoming().idEmisorFactura == existing().idEmisorFactura
+        && incoming().fechaHoraHusoGenRegistro == existing().fechaHoraHusoGenRegistro
+      ) && sinSecretosFacturacion();
+      allow delete: if isMasterAdmin();
+    }
+
+    match /envios_verifactu/{envioId} {
+      function envioEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosFacturacion() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'token' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && envioEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && envioEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'registroFacturacionId' in incoming() && incoming().registroFacturacionId is string
+        && 'idempotencyKey' in incoming() && incoming().idempotencyKey is string
+      ) && sinSecretosFacturacion();
+      // Trazabilidad de envío: propietario y registro de facturación inmutables.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && envioEsMio(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().registroFacturacionId == existing().registroFacturacionId
+      ) && sinSecretosFacturacion();
+      allow delete: if isMasterAdmin();
+    }
+
+    match /series_facturacion/{serieId} {
+      function serieEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && serieEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && serieEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'codigo' in incoming() && incoming().codigo is string
+        && 'ejercicio' in incoming() && incoming().ejercicio is int
+      );
+      // La correlación avanza solo hacia adelante (último número nunca decrece).
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && serieEsMia(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().codigo == existing().codigo
+        && incoming().ejercicio == existing().ejercicio
+        && (incoming().ultimoNumero is int) && incoming().ultimoNumero >= existing().ultimoNumero
+      );
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)
     // =========================================================================
     match /{document=**} {

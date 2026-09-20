@@ -349,6 +349,121 @@ export function eventoFinanciacionCancelada(fin: {
 }
 
 // ---------------------------------------------------------------------------
+// FACTURACIÓN (GAP 7) — adaptadores puros → EventoNotificacion.
+// Reutilizan el dispatcher de GAP 1; NO crean otro dispatcher ni tocan cobros.
+// ---------------------------------------------------------------------------
+
+export function eventoFacturaEmitida(factura: {
+  id: string;
+  propietarioId: string;
+  inmuebleId?: string;
+  numeroFactura: string;
+  importeTotal: number;
+  estado?: string;
+}): EventoNotificacion {
+  return {
+    origen: 'FACTURACION',
+    tipoEvento: 'facturacion.emitida',
+    entidadId: factura.id,
+    idempotencyKey: idempotenciaDeEvento('FACTURACION', 'emitida', factura.id),
+    inmuebleId: factura.inmuebleId,
+    propietarioId: factura.propietarioId,
+    canal: 'INAPP',
+    datos: {
+      numeroFactura: factura.numeroFactura,
+      importeTotal: factura.importeTotal,
+      estadoFactura: factura.estado || 'EMITIDA',
+    },
+  };
+}
+
+export function eventoFacturaErrorRemision(factura: {
+  id: string;
+  propietarioId: string;
+  numeroFactura: string;
+  codigoError: string;
+  descripcionError?: string;
+}): EventoNotificacion {
+  return {
+    origen: 'FACTURACION',
+    tipoEvento: 'facturacion.error_remision',
+    entidadId: factura.id,
+    idempotencyKey: idempotenciaDeEvento('FACTURACION', `error_remision:${factura.codigoError}`, factura.id),
+    propietarioId: factura.propietarioId,
+    canal: 'INAPP',
+    datos: {
+      numeroFactura: factura.numeroFactura,
+      codigoError: factura.codigoError,
+      descripcionError: factura.descripcionError || '',
+    },
+  };
+}
+
+export function eventoFacturaAceptada(factura: {
+  id: string;
+  propietarioId: string;
+  numeroFactura: string;
+  csv?: string;
+}): EventoNotificacion {
+  return {
+    origen: 'FACTURACION',
+    tipoEvento: 'facturacion.aceptada',
+    entidadId: factura.id,
+    idempotencyKey: idempotenciaDeEvento('FACTURACION', 'aceptada', factura.id),
+    propietarioId: factura.propietarioId,
+    canal: 'INAPP',
+    datos: {
+      numeroFactura: factura.numeroFactura,
+      csv: factura.csv || '—',
+    },
+  };
+}
+
+export function eventoFacturaRechazada(factura: {
+  id: string;
+  propietarioId: string;
+  numeroFactura: string;
+  codigoError: string;
+  descripcionError?: string;
+}): EventoNotificacion {
+  return {
+    origen: 'FACTURACION',
+    tipoEvento: 'facturacion.rechazada',
+    entidadId: factura.id,
+    idempotencyKey: idempotenciaDeEvento('FACTURACION', `rechazada:${factura.codigoError}`, factura.id),
+    propietarioId: factura.propietarioId,
+    canal: 'INAPP',
+    datos: {
+      numeroFactura: factura.numeroFactura,
+      codigoError: factura.codigoError,
+      descripcionError: factura.descripcionError || '',
+    },
+  };
+}
+
+export function eventoFacturaRectificada(factura: {
+  id: string;
+  propietarioId: string;
+  numeroFactura: string;
+  facturaOriginal?: string;
+  motivo?: string;
+}): EventoNotificacion {
+  return {
+    origen: 'FACTURACION',
+    tipoEvento: 'facturacion.rectificada',
+    entidadId: factura.id,
+    idempotencyKey: idempotenciaDeEvento('FACTURACION', 'rectificada', factura.id),
+    propietarioId: factura.propietarioId,
+    canal: 'INAPP',
+    datos: {
+      numeroFactura: factura.numeroFactura,
+      facturaOriginal: factura.facturaOriginal || '—',
+      motivo: factura.motivo || '—',
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Helper de datos comunes (para inyección por la integración A)
 // ---------------------------------------------------------------------------
 

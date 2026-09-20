@@ -217,6 +217,50 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+
+  // =======================================================================
+  // FACTURACIÓN (GAP 7) — reutiliza dispatcher GAP 1; NO crea otro dispatcher
+  // =======================================================================
+  'facturacion.emitida': {
+    id: 'facturacion.emitida',
+    asunto: 'Factura emitida — {numeroFactura}',
+    cuerpo:
+      'Se ha emitido la factura {numeroFactura} por importe de {importeTotal}. Estado: {estadoFactura}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.error_remision': {
+    id: 'facturacion.error_remision',
+    asunto: 'Error en la remisión VERI*FACTU — {numeroFactura}',
+    cuerpo:
+      'La remisión VERI*FACTU de la factura {numeroFactura} ha fallado con código {codigoError}: {descripcionError}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.aceptada': {
+    id: 'facturacion.aceptada',
+    asunto: 'Factura aceptada por la AEAT — {numeroFactura}',
+    cuerpo:
+      'La factura {numeroFactura} consta como aceptada. Código seguro de verificación: {csv}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.rechazada': {
+    id: 'facturacion.rechazada',
+    asunto: 'Factura rechazada por la AEAT — {numeroFactura}',
+    cuerpo:
+      'La factura {numeroFactura} ha sido rechazada con código {codigoError}: {descripcionError}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'facturacion.rectificada': {
+    id: 'facturacion.rectificada',
+    asunto: 'Factura rectificativa emitida — {numeroFactura}',
+    cuerpo:
+      'Se ha emitido una factura rectificativa {numeroFactura} que corrige la factura {facturaOriginal}. Motivo: {motivo}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
 };
 
 /** Lista plana de claves de plantilla registradas. */

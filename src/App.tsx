@@ -177,6 +177,7 @@ import { GastosSection } from './components/sections/GastosSection';
 import { FiscalidadSection } from './components/sections/FiscalidadSection';
 import { InformesSection } from './components/sections/InformesSection';
 import { ConciliacionBancariaSection } from './components/sections/ConciliacionBancariaSection';
+import { FacturacionSection } from './components/sections/FacturacionSection';
 import { PolizasSegurosSection } from './components/sections/PolizasSegurosSection';
 import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
 import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
@@ -3076,6 +3077,15 @@ export default function App() {
               contratos={scopedContratos}
               gastos={scopedGastos}
               cobros={scopedCobros}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'facturacion' && (
+            <FacturacionSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              propietarios={scopedPropietarios}
               currentUser={currentUser}
             />
           )}

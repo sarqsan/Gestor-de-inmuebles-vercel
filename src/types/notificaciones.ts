@@ -65,7 +65,8 @@ export type OrigenNotificacion =
   | 'FINANCIACION'
   | 'CONCILIACION_BANCARIA'
   | 'SISTEMA'
-  | 'PRUEBA';
+  | 'PRUEBA'
+  | 'FACTURACION';
 
 export interface EventoNotificacion {
   origen: OrigenNotificacion;

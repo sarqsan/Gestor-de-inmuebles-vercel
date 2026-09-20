@@ -6,6 +6,7 @@ export type SectionType =
   | 'gastos'
   | 'conciliacion'
   | 'financiacion'
+  | 'facturacion'
   | 'fiscal'
   | 'informes'
   | 'polizas'

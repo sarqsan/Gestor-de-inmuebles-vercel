@@ -6,8 +6,12 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: 2026-09-20 (paquete de continuidad, rama
-> `arena/01a0bfbe-gestor-de-inmuebles-vercel`, sobre el consolidado canónico `91da820`).
+> Última actualización: 2026-09-20 — 2.ª actualización: decisiones de producto
+> (Portal del Inquilino consolidado como **BLOQUE E** con dependencias B/C/D y
+> **Capa Transversal de Experiencia, Ayuda, Tutoriales e IA Asistente**, sin
+> numeración GAP). 1.ª actualización: paquete de continuidad.
+> Rama `arena/01a0bfbe-gestor-de-inmuebles-vercel`, sobre el consolidado
+> canónico `91da820`.
 
 ---
 
@@ -18,7 +22,7 @@
 | Repositorio canónico | `github.com/sarqsan/Gestor-de-inmuebles-vercel` |
 | Rama canónica | `arena/01a0a413-gestor-de-inmuebles-vercel` @ `91da820` (GAP 1–8 consolidados) |
 | Rama de sesión actual | `arena/01a0bfbe-gestor-de-inmuebles-vercel` — merge `d24ab1f` (árbol **byte-idéntico** a `91da820`) + este paquete de continuidad |
-| `main` | `4d420bd` — línea paralela (mantenimiento/candidatos/seguros por AI Studio). **No es la base del ERP**; su aportado sigue preservado (ver §7) |
+| `main` | `4d420bd` — línea paralela (mantenimiento/candidatos/seguros por AI Studio). **No es la base del ERP**; su aportado sigue preservado (ver §9) |
 | Deploy | Vercel (`vercel.json`: build → `dist`, función serverless `api/index.ts` → Express, rewrites SPA) |
 | Firebase | Proyecto `startup-sanctuary-sln7n` · Firestore `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` · Storage `startup-sanctuary-sln7n.firebasestorage.app` |
 | Base de datos | Firestore (~45 colecciones, ver §2.2) + Storage (rutas declaradas en `storage.rules`) |
@@ -202,6 +206,10 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 > **Regla de oro de esta sección:** no se inventan reglas fiscales, bancarias ni
 > jurídicas. Toda cuestión normativa se **verifica documentalmente antes de
 > implementarse**. Nada de lo siguiente está implementado en esta orden.
+>
+> Navegación: BLOQUE B/C/D aquí (§4) · **BLOQUE E** (§5) · **Capa Transversal
+> Experiencia/Ayuda/Tutoriales/IA** (§6, sin numeración GAP) · **Roadmap de
+> evolución** (§7) · dependencias entre bloques (§8).
 
 ### BLOQUE B — Tesorería + liquidaciones de propietarios + SEPA
 
@@ -273,35 +281,199 @@ los DNI/adjuntos del funnel público ya son un residual documentado — no ampli
 
 ---
 
-## 5. BLOQUE E / SIGUIENTE OLEADA (documentado, no desarrollado)
+## 5. BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS
 
-### BLOQUE E — Portal de inquilino + suministros
+> **GRAN CAPACIDAD PENDIENTE. PLANIFICADO ≠ IMPLEMENTADO.**
+> No existe hoy portal de inquilino ni rol INQUILINO en auth (`INQUILINO` solo
+> aparece como concepto en finiquito/incidencias). Todo lo descrito aquí son
+> **decisiones de producto aprobadas (2026-09-20)**, sujetas a posterior
+> implementación y validación en una orden futura. Nada de este bloque se
+> implementa en la orden de 2026-09-20.
 
-Futuro bloque grande. Hoy **no existe rol INQUININO en auth** (`INQUILINO` solo
-aparece como concepto en finiquito/incidencias) ni portal inquilino.
+### 5.1 Naturaleza conceptual
 
-Ámbito a documentar:
-- Portal autenticado para inquilino (nuevo rol + reglas Firestore propias).
-- Acceso a: su contrato, documentos, recibos, pagos (con `cobrosEngine` como fuente
-  de la realidad económica — nunca duplicarla), incidencias (declaradas por
-  inquilino, patrón existente en cuestionario).
-- Suministros: CUPS, contador, lecturas, titularidad, tarifas; reparto por
-  habitaciones cuando corresponda (base: modo `habitaciones` del inmueble y
-  `habitacionesEngine`).
+Acceso **independiente y simplificado para el arrendatario**, centrado en su
+vivienda y en sus obligaciones/derechos. El inquilino **NO accede al ERP
+interno** ni a datos de otros actores: portal de superficie mínima que se
+construye **sobre** la realidad económica, contractual y de incidencias que ya
+existe en el ERP (se **lee y muestra**, nunca se duplica ni se recalcula).
 
-**No desarrollarlo en la oleada actual.** Requiere decisión previa de
-arquitectura (nuevo rol RBAC + reglas + portal) y verificación de requisitos de
-los datos de suministro.
+### 5.2 Dependencias principales
+
+| De | Qué aporta al Portal del Inquilino |
+|---|---|
+| **B — Tesorería / liquidaciones / SEPA** | Pagos, recibos e información económica del inquilino |
+| **C — Morosidad / recobro** | Estados de deuda y comunicaciones hacia el inquilino |
+| **D — Entrada/salida / actas / firma** | Check-in/out, actas, inventario, fotografías, firma de documentos |
+
+### 5.3 Funcionalidades previstas (sujetas a implementación y validación)
+
+- **Acceso autenticado del inquilino** (nuevo rol en RBAC + reglas Firestore
+  propias, patrón de aislamiento de las colecciones existentes).
+- **Vivienda y contrato**; **contrato y anexos** (lectura sobre
+  `contratos_formalizacion`, incluidos anexos versionados GAP2).
+- **Recibos** y **pagos** (fuente única: `cobrosEngine`/`registroCobros` —
+  nunca duplicar la realidad económica).
+- **Documentos** del expediente del inquilino.
+- **Incidencias** (declaración y seguimiento; base: patrón existente de
+  incidencias declaradas por inquilino en cuestionario).
+- **Fotografías** (Storage; patrones existentes de inspección/
+  `GestionImagenesModal`).
+- **Comunicaciones** (consumir el dispatcher de **GAP1** — no crear segundo
+  canal).
+- **Seguimiento de actuaciones de profesionales** (lectura de
+  `trabajos_profesionales`/incidencias asignadas a su vivienda).
+- **Suministros** (ver §5.4).
+- **Entrada/salida** (interfaz del inquilino sobre el flujo de BLOQUE D).
+- **Firma de documentos cuando exista el sistema correspondiente** (enganche
+  existente: `referenciaDocumental` de anexos GAP2 + proveedor de firma
+  electrónica pendiente como `DEPENDENCIA_EXTERNA`).
+- **Notificaciones** (canales INAPP/EMAIL de GAP1 dirigidos al inquilino).
+- **Historial de actividad** (append-only, patrón de `audit_logs`/históricos).
+
+### 5.4 Suministros (dentro de BLOQUE E)
+
+Gestión futura de:
+- **CUPS**; **contador/lecturas**; **titularidad**;
+- **comercializadora/distribuidora**; **tarifa**; **potencia**;
+- **cambios de titular**;
+- **posibles repartos cuando proceda en alquiler por habitaciones** (base:
+  modo `habitaciones` del inmueble + `habitacionesEngine`).
+
+**Requisito previo de una orden futura:** decisión de arquitectura (nuevo rol
+RBAC + reglas + portal) y verificación de requisitos de los datos de suministro
+(ninguna regla regulatoria se asume: se verifica documentalmente antes de
+implementar).
 
 ---
 
-## 6. DEPENDENCIAS ENTRE BLOQUES
+## 6. CAPA TRANSVERSAL — EXPERIENCIA, AYUDA, TUTORIALES E IA ASISTENTE
+
+> **Decisión de producto (2026-09-20). Fuera de la numeración GAP** —
+> explícitamente **NO** es un GAP9/10/11 ni equivalente. Se gestiona dentro de
+> la estructura de este mapa. Estado global: **PREVISTA/FUTURA** (nada
+> implementado; hoy no existe Ayuda integrada ni asistente de IA en la app).
+>
+> **Finalidad:** que la complejidad interna del ERP **no obligue al usuario a
+> conocer su arquitectura**. El usuario describe su necesidad en lenguaje
+> natural y la capa lo orienta sobre los procesos reales de la aplicación.
+
+### 6.1 Centro de Ayuda y Tutoriales (capacidad futura)
+
+No se plantea como manual externo, sino como **Centro de Ayuda integrado
+dentro de la propia aplicación**:
+
+- botón de **Ayuda** global; **ayuda contextual** por pantalla;
+- explicación de cada pantalla y sección; bloque «**Cómo funciona**» por
+  proceso;
+- **tutoriales paso a paso** y **recorridos guiados** (onboarding y
+  reactivación);
+- **progreso del usuario** por pantalla/tutorial; posibilidad de **saltar y
+  reanudar** tutoriales.
+
+**Ayuda por tipo de usuario** (contenidos específicos a prever):
+propietario · administrador · profesional/gremio · **inquilino** · usuarios
+financieros · usuarios de cobros · usuarios de contratos · usuarios de
+incidencias · usuarios de informes/fiscalidad.
+
+Los **contenidos concretos** se desarrollarán **cuando las funcionalidades
+estén estabilizadas** (no se redacta ayuda sobre bloques aún en desarrollo:
+B/C/D/E).
+
+### 6.2 IA Asistente del ERP (decisión de producto)
+
+No se plantea un chatbot genérico: se plantea una **IA asistente integrada con
+el ERP**, capaz de comprender el lenguaje natural del usuario y **orientarlo
+sobre los procesos reales de la aplicación**. Ejemplos conceptuales del
+comportamiento esperado:
+
+**Problema de uso** — Usuario: *«No me aparece el recibo de este mes del piso
+de Alicante.»* → La IA debería: (1) comprender la pregunta; (2) identificar el
+inmueble; (3) identificar el contrato; (4) localizar el periodo; (5) comprobar
+el flujo correspondiente (cobros → justificación → estado del periodo);
+(6) detectar dónde puede estar el problema; (7) explicarlo de forma
+comprensible; (8) llevar al usuario al módulo/pantalla correspondiente;
+(9) indicar qué acción puede realizar.
+
+**Petición funcional** — Usuario: *«Tengo una avería y no sé qué tengo que
+hacer.»* → La IA debería guiar por el flujo real existente:
+Incidencia → inmueble → descripción → fotografías → prioridad → profesional →
+actuación → presupuesto → reparación → factura → gasto → rentabilidad.
+
+En ambos casos **el usuario NO necesita conocer la arquitectura interna**: la
+capa la traduce a pasos y a la navegación adecuada.
+
+### 6.3 Requisitos arquitectónicos para la futura IA (vigen para B/C/D/E y módulos existentes)
+
+Los futuros bloques **B/C/D/E** (y los existentes) deberán construirse de
+manera que después sean **interpretables** por esta capa. En particular,
+preservar de forma explícita y legible:
+
+- **estados** y **transiciones** (máquinas de estados nombradas, no flags
+  sueltos);
+- **relaciones entre entidades** (contrato ↔ cobro ↔ factura ↔ movimiento);
+- **permisos** (qué puede ver/hacer cada perfil en cada estado);
+- **eventos** (emisión por el dispatcher de GAP1 u equivalente);
+- **identificadores** (IDs estables y legibles);
+- **trazabilidad** e **historial** (append-only);
+- **errores** (causas explícitas, no silenciosas);
+- **acciones disponibles** (en cada pantalla/estado, qué puede hacer el
+  usuario y qué queda deshabilitado);
+- **dependencias entre módulos** (ver §8).
+
+**Límites ineludibles de la IA** (requisito permanente): opera **siempre
+dentro de los permisos del usuario**. Queda prohibido cualquier diseño que
+permita que la IA:
+
+1. acceda a información no autorizada;
+2. invente estados;
+3. invente acciones realizadas;
+4. marque procesos como completados sin confirmación real;
+5. modifique información sensible sin autorización;
+6. sustituya los controles de seguridad del ERP.
+
+### 6.4 Filosofía — IA como capa de guiado, NO como sustituto del ERP
+
+El ERP **sigue teniendo sus motores, reglas y controles deterministas**. La IA
+actúa como: intérprete del lenguaje natural · asistente · diagnóstico
+orientativo · guía de navegación · explicador · **interfaz conversacional
+sobre las funciones reales del ERP**.
+
+La IA **NO** debe convertirse en una segunda lógica empresarial paralela que
+contradiga a los motores oficiales. Cuando una operación requiere una regla de
+negocio, **se apoya en el motor correspondiente del ERP** (p. ej. cálculos
+económicos → `cobrosEngine`/`facturacionEngine`; estados → las máquinas de
+estado existentes; permisos → `authService` + reglas).
+
+---
+
+## 7. EVOLUCIÓN DEL ERP — ROADMAP (capacidades, no «órdenes pequeñas»)
+
+Estas fases son **capacidades funcionales de distinto tamaño** — no se
+presentan como cinco órdenes pequeñas:
+
+| Fase | Capacidad | Tamaño / nota |
+|---|---|---|
+| **B** | Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001) | Bloque grande |
+| **C** | Morosidad + recobro + expediente de recuperación | Bloque grande |
+| **D** | Entrada/salida + actas + evidencias + firma digital | Bloque grande |
+| **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | Bloque grande |
+| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | Capa transversal; crece y se profundiza con cada bloque estabilizado |
+| **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
+
+Dependencias entre fases: §8.
+
+---
+
+## 8. DEPENDENCIAS ENTRE BLOQUES
 
 Basado en el código real (imports y reglas), no en supuestos. Extiende y corrige
 el esquema de trabajo de la orden:
 
 ```
 AUTH (authService + RBAC + scoping propietarioId)   ← transversal a TODO
+CAPA TRANSVERSAL — Ayuda/Tutoriales/IA asistente (PREVISTA, sin numeración GAP — §6)
+    ← interpreta estados/eventos/acciones de TODOS los bloques (requisitos §6.3)
     │
 CONTRATOS (contratoEngine + contratoCicloEngine GAP2)
     │
@@ -336,6 +508,15 @@ NOTIFICACIONES (GAP1) — consumidor: eventos GAP2, GAP7, GAP8
 
 INCIDENCIAS (incidenciasEngine) + MANTENIMIENTO + PROFESIONALES + SEGUROS
     └── BLOQUE C — detección de deuda, recobro, expediente, seguro impago
+
+BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS (PLANIFICADO — §5)
+    ├── BLOQUE B (pagos / recibos / liquidación)
+    ├── BLOQUE C (deuda / comunicaciones al inquilino)
+    └── BLOQUE D (entrada/salida, actas, firma)
+    (lee contratos/cobros/incidencias/profesionales; NUNCA duplica la realidad del ERP)
+
+DESPUÉS — INTEGRACIÓN GLOBAL (end-to-end, UX, seguridad, rendimiento,
+endurecimiento final — §7)
 ```
 
 **Lo que esto significa para futuras Arenas:**
@@ -348,10 +529,11 @@ INCIDENCIAS (incidenciasEngine) + MANTENIMIENTO + PROFESIONALES + SEGUROS
 | `server.ts` (endpoints) | El contrato de `api/index.ts` + `vercel.json`; no guardar secretos |
 | Plantillas de notificación (aditivo) | El dispatcher y el formato de registro `plantillas.ts` |
 | Nuevas colecciones | Patrón de reglas con aislamiento por `propietarioId` + `sinSecretos()` donde aplique |
+| Nuevos bloques (B/C/D/E) y la capa transversal | Sus interfaces de dependencia (§8) y los requisitos de interpretabilidad para la capa de Ayuda/IA (§6.3): estados/transiciones/permisos/eventos/acciones/errores legibles |
 
 ---
 
-## 7. LÍNEAS PARALELAS Y MATERIA PRESERVADA (contexto Git)
+## 9. LÍNEAS PARALELAS Y MATERIA PRESERVADA (contexto Git)
 
 - **`main` @ `4d420bd`** contiene una línea paralela (AI Studio): mantenimiento/
   profesionales, circuito de **candidato** (`candidateCircuitEngine.ts`,
@@ -367,7 +549,7 @@ INCIDENCIAS (incidenciasEngine) + MANTENIMIENTO + PROFESIONALES + SEGUROS
   ramas de sesión anteriores (`01a0ab19`, `01a0ab97`, `01a0ab9d`, `01a0b91c`)
   conservan el trabajo histórico de cada Arena; `refs/pull/1` también.
 
-## 8. DEUDA TÉCNICA / RESIDUALES CONOCIDOS (no corregidos en esta orden)
+## 10. DEUDA TÉCNICA / RESIDUALES CONOCIDOS (no corregidos en esta orden)
 
 1. `documentsStore` = `Map` en memoria en `server.ts` (línea ~93): los documentos
    subidos se pierden con cada reinicio de la función serverless. **P2** — migrar a
@@ -387,7 +569,7 @@ INCIDENCIAS (incidenciasEngine) + MANTENIMIENTO + PROFESIONALES + SEGUROS
 8. Despliegue de reglas: `firestore.rules`/`storage.rules` se publican **manualmente**
    por el usuario con Firebase CLI (no desde el sandbox).
 
-## 9. ÍNDICE DE DOCUMENTACIÓN (enlazar, no duplicar)
+## 11. ÍNDICE DE DOCUMENTACIÓN (enlazar, no duplicar)
 
 | Documento | Contenido |
 |---|---|

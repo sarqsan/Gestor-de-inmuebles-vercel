@@ -16,7 +16,8 @@
 | GAP 1–8 | **CONSOLIDADOS** (commits `b1d45aa` → `91da820`) |
 | RAMA DE SESIÓN ACTUAL | `arena/01a0bfbe-gestor-de-inmuebles-vercel` |
 | — merge de alineación | `d24ab1f` — merge de la canónica `91da820` en la rama de sesión (antes: rama basada en `main` `4d420bd`, árbol **sin** GAP 1–8). Árbol resultante byte-idéntico a `91da820` (verificado: `git diff --cached 91da820` = ∅) |
-| — commit de este paquete | `docs: crear paquete de continuidad y mapa maestro ERP` (primer commit de docs tras `d24ab1f`; SHA: `git log -1` de la rama) |
+| — commit de este paquete | `docs: crear paquete de continuidad y mapa maestro ERP` (primer commit de docs tras `d24ab1f`) |
+| — 2.º commit de docs | `docs: actualizar mapa maestro con portal inquilino y capa IA` (Portal del Inquilino consolidado como BLOQUE E con dependencias B/C/D + Capa Transversal Experiencia/Ayuda/Tutoriales/IA, sin numeración GAP; solo documentación) |
 | Tests | **330/330** (16 ficheros vitest) — verificados 2026-09-20 en la rama de sesión |
 | TypeScript | `npx tsc --noEmit` → **0 errores** — verificado 2026-09-20 |
 | Build | `npm run build` → **OK** (warning conocido de chunk >500 kB) — verificado 2026-09-20 |
@@ -39,6 +40,7 @@
 
 | Fecha | Evento | HEAD canónico | Tests / TSC / Build |
 |---|---|---|---|
+| 2026-09-20 | 2.ª actualización del mapa maestro: Portal del Inquilino como BLOQUE E (dependencias B/C/D, PLANIFICADO ≠ IMPLEMENTADO) + Capa Transversal Experiencia/Ayuda/Tutoriales/IA (sin numeración GAP) + roadmap de evolución. Solo documentación; sin cambios funcionales | `91da820` | 330/330 · 0 · OK |
 | 2026-09-20 | Paquete de continuidad (mapa maestro, contrato de integración, estado Git, manual de continuidad). Merge de alineación `d24ab1f` en rama de sesión (árbol ≡ `91da820`) | `91da820` | 330/330 · 0 · OK |
 | 2026-09-20 | GAP8 integrado (commit `91da820`) | `91da820` | 330/330 · 0 · OK |
 | 2026-09-19/20 | GAP7 (`8d72c01`), GAP6 (`58c5454`), GAP5 (`f76ae05`), GAP1–4 (`b1d45aa`) consolidados | `8d72c01` → … | en verde en cada consolidado (ver informes) |

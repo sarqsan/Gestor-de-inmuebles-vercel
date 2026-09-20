@@ -11,7 +11,7 @@
 
 ## 1. ROL DE CADA ARENA
 
-| Arena | Mandato | Ámbito (ver `MAPA-MAESTRO-ERP-ACTUAL.md` §4-5) |
+| Arena | Mandato | Ámbito (ver `MAPA-MAESTRO-ERP-ACTUAL.md` §4-7) |
 |---|---|---|
 | **Arena A** | Rama canónica, integración, QA global, revisión de conflictos | Todo el ERP; decide qué se integra y en qué orden |
 | **Arena B** | Tesorería + liquidaciones de propietarios + SEPA | **BLOQUE B** (PAIN.008 / PAIN.001, neto propietario, histórico) |
@@ -45,7 +45,7 @@ se divide o se delega — no se «roba» trabajo de otra Arena.
 2. **No se hacen merges ciegos.** Todo merge exige: diff revisado, tests en
    verde tras el merge, y nota de la política de resolución.
 3. El trabajo de una Arena que no se integra **no se borra**: permanece en su
-   rama de sesión/historial y se documenta en el mapa maestro (§7 de este repo).
+   rama de sesión/historial y se documenta en el mapa maestro (§9 de este repo).
 4. **Arena A es la única que integra en la rama canónica.** B/C/D entregan
    rama de sesión + informe; A integra (o reencuadra) y actualiza la
    documentación canónica en el mismo commit de integración.
@@ -90,10 +90,17 @@ Un bloque NO se considera terminado hasta que **todo** lo siguiente consta:
 7. **Normativa:** no se codifican reglas fiscales/bancarias/jurídicas sin
    verificación documental. Los temporales son configurables, no «plazos
    legales», salvo verificación expresa.
-8. **Interfaces entre bloques** (ver mapa maestro §6): B2B copia (no
+8. **Interfaces entre bloques** (ver mapa maestro §8): B2B copia (no
    recalcula) importes de GAP7; GAP6 escribe en cobros solo vía
    `registrarPagoPeriodo`; GAP5 lee habitaciones sin modificar el circuito;
    GAP3 es solo lectura; los eventos de GAP2/7/8 usan el dispatcher de GAP1.
+9. **Capa Transversal de Experiencia/Ayuda/Tutoriales/IA** (mapa maestro §6,
+   **sin numeración GAP**): cuando se implemente, la IA opera siempre dentro
+   de los permisos del usuario; no inventa estados ni acciones, no marca
+   procesos completados sin confirmación real ni sustituye los controles del
+   ERP; la lógica de negocio vive siempre en los motores oficiales. Todo
+   bloque (B/C/D/E) debe exponer estados/transiciones/permisos/eventos/
+   acciones interpretables (mapa maestro §6.3).
 
 ## 6. CONFLICTOS TÍPICOS Y CÓMO RESOLVERLOS
 

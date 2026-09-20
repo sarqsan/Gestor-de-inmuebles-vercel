@@ -22,7 +22,7 @@ auth/roles, IA (Gemini) y deploy en Vercel.
 (`arena/<id>-gestor-de-inmuebles-vercel`) y entrega ahí; la rama canónica la
 mantiene/integra **Arena A**. Si tu sesión se ancló a `main`, **no asumas** que
 `main` contiene el ERP: `main` es una línea paralela (ver
-`MAPA-MAESTRO-ERP-ACTUAL.md` §7). Verifica siempre el árbol (FASE 0 de abajo).
+`MAPA-MAESTRO-ERP-ACTUAL.md` §9). Verifica siempre el árbol (FASE 0 de abajo).
 
 ## 3. ¿Cuál es el HEAD conocido?
 
@@ -104,12 +104,22 @@ Reglas de la FASE 0 (permanentes):
 - **BLOQUE B** — Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001).
 - **BLOQUE C** — Morosidad + recobro + expediente de recuperación.
 - **BLOQUE D** — Entrada/salida + actas + evidencias + firma digital.
-- **BLOQUE E / siguiente oleada** — Portal de inquilino + suministros (CUPS,
-  contadores, reparto).
+- **BLOQUE E — Portal del Inquilino + suministros** — PLANIFICADO ≠
+  IMPLEMENTADO. Gran capacidad pendiente que depende de B, C y D; acceso
+  independiente y simplificado del arrendatario (sin acceso al ERP interno);
+  suministros: CUPS, contador/lecturas, titularidad, comercializadora/
+  distribuidora, tarifa, potencia, cambios de titular, reparto por habitaciones
+  (detalles: mapa maestro §5).
+- **Capa transversal — Experiencia, Ayuda, Tutoriales e IA Asistente** — sin
+  numeración GAP (no es GAP9/10/11): centro de ayuda in-app + tutoriales por
+  tipo de usuario + IA de guiado sobre los motores reales del ERP (mapa
+  maestro §6).
+- **Después: Integración global** — pruebas end-to-end de circuitos completos,
+  UX, seguridad, rendimiento y endurecimiento final (mapa maestro §7).
 - Pendientes externos (no son trabajo de código): transporte real de
   notificaciones, remisión AEAT/SII, envío B2B real (SPFE/plataforma),
   publicación a portales, proveedor SEPA, firma electrónica.
-- Deuda técnica conocida: `MAPA-MAESTRO-ERP-ACTUAL.md` §8 (documentsStore en
+- Deuda técnica conocida: `MAPA-MAESTRO-ERP-ACTUAL.md` §10 (documentsStore en
   memoria, claims de Storage, ficha pública con datos fiscales, …).
 
 ## 10. ¿Qué reglas no deben romperse?
@@ -124,10 +134,15 @@ Reglas de la FASE 0 (permanentes):
 5. Sin secretos en código/Firestore/Storage/commits.
 6. Nada se simula como producción (adaptadores `PENDIENTE` declarados).
 7. Sin reglas fiscales/bancarias/jurídicas sin verificación documental.
-8. Interfaces entre bloques (mapa maestro §6): B2B copia importes de GAP7;
+8. Interfaces entre bloques (mapa maestro §8): B2B copia importes de GAP7;
    GAP6 escribe en cobros solo vía `registrarPagoPeriodo`; GAP5 lee
    habitaciones sin modificar el circuito; GAP3 solo lectura; eventos de
    GAP2/7/8 usan el dispatcher de GAP1.
+9. La futura IA asistente (mapa maestro §6, sin numeración GAP) opera dentro
+   de los permisos del usuario: no inventa estados/acciones, no marca
+   procesos completados sin confirmación real ni sustituye los controles del
+   ERP; cada bloque expone estados/transiciones/permisos/eventos/acciones
+   interpretables (§6.3).
 
 ## 11. ¿Cómo debe trabajar una Arena?
 

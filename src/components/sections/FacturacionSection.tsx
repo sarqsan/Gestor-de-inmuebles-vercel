@@ -44,6 +44,7 @@ import {
 import {
   crearEnvioPendiente,
 } from '../../utils/verifactuTransport';
+import { FacturaElectronicaB2BPanel } from './FacturaElectronicaB2BPanel';
 import {
   QrCode,
   FileText,
@@ -286,6 +287,7 @@ export const FacturacionSection: React.FC<FacturacionSectionProps> = ({
           onClose={() => setSelectedId(null)}
           onActualizar={async (f) => { await saveFacturaFirestore(f); }}
           onEmitir={persistirEmision}
+          currentUser={currentUser}
         />
       )}
     </div>
@@ -550,6 +552,7 @@ function DetalleFactura({
   onClose,
   onActualizar,
   onEmitir,
+  currentUser,
 }: {
   factura: Factura | null;
   registros: RegistroFacturacion[];
@@ -557,6 +560,7 @@ function DetalleFactura({
   onClose: () => void;
   onActualizar: (f: Factura) => Promise<void>;
   onEmitir: (f: Factura, reg: RegistroFacturacion, env: EnvioVerifactu) => Promise<void>;
+  currentUser?: UsuarioApp | null;
 }) {
   const [qrData, setQrData] = useState<string | null>(null);
   const [errorOp, setErrorOp] = useState<string | null>(null);
@@ -841,6 +845,9 @@ function DetalleFactura({
           />
           {errorOp && <div className="text-rose-600 text-sm font-medium">{errorOp}</div>}
         </div>
+
+        {/* GAP 8 — Factura electrónica B2B (bloque separado de RRSIF/VERI*FACTU) */}
+        <FacturaElectronicaB2BPanel factura={factura} currentUser={currentUser ?? null} />
 
         <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5" />

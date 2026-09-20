@@ -1142,6 +1142,73 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // GAP 8 — FACTURA ELECTRÓNICA B2B (RD 238/2026)
+    // Colección propia y separada de facturas / registros_facturacion /
+    // envios_verifactu: aislamiento total, deny-by-default global.
+    // - propietarioId e id inmutables; facturaId e idempotencyKey inmutables
+    // - tras el intercambio (ENVIADA+) la representación económica/documental
+    //   queda inmovilizada: sin modificaciones silenciosas
+    // - historial append-only (nunca se pierden eventos ya registrados)
+    // - sin secretos: certificados/credenciales de plataformas jamás en Firestore
+    // =========================================================================
+    match /facturas_electronicas_b2b/{febId} {
+      function febEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosB2B() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'token' in incoming()
+        );
+      }
+      function estadoIntercambiado(d) {
+        return ('estado' in d)
+          && ['ENVIADA','RECIBIDA','ACEPTADA','RECHAZADA','PAGADA','PARCIALMENTE_PAGADA','ANULADA','RECTIFICADA'].hasAny([d.estado]);
+      }
+      function representacionInmovil() {
+        return !estadoIntercambiado(existing()) || (
+          incoming().baseImponible == existing().baseImponible
+          && incoming().cuotaIva == existing().cuotaIva
+          && incoming().cuotaRetencion == existing().cuotaRetencion
+          && incoming().importeTotal == existing().importeTotal
+          && incoming().numeroCompleto == existing().numeroCompleto
+          && incoming().serie == existing().serie
+          && incoming().numero == existing().numero
+          && incoming().ejercicio == existing().ejercicio
+          && incoming().formato == existing().formato
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && febEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && febEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'id' in incoming() && incoming().id is string && incoming().id == febId
+        && 'facturaId' in incoming() && incoming().facturaId is string
+        && 'idempotencyKey' in incoming() && incoming().idempotencyKey is string
+        && 'estado' in incoming() && incoming().estado == 'GENERADA'
+      ) && sinSecretosB2B();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && febEsMia(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().id == existing().id
+        && incoming().facturaId == existing().facturaId
+        && incoming().idempotencyKey == existing().idempotencyKey
+        // historial append-only: nunca se elimina ni reescribe lo trazado
+        && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size()
+        && representacionInmovil()
+      ) && sinSecretosB2B();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)
     // =========================================================================
     match /{document=**} {

@@ -72,6 +72,7 @@ import type {
   EnvioVerifactu,
   SerieFacturacion,
 } from '../types/facturacion';
+import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -3010,6 +3011,50 @@ export async function saveSerieFacturacionFirestore(serie: SerieFacturacion): Pr
     await setDoc(doc(db, 'series_facturacion', serie.id), clean, { merge: true });
   } catch (err) {
     console.error('Error saving serie_facturacion to Firestore:', err);
+    throw err;
+  }
+}
+
+// =========================================================================
+// GAP8 — FACTURA ELECTRÓNICA B2B (RD 238/2026). Colección propia y aislada de
+// facturas / registros_facturacion / envios_verifactu. Sin secretos: el modelo
+// FacturaElectronicaB2B no contempla credenciales ni certificados.
+// =========================================================================
+
+export const FACTURAS_ELECTRONICAS_B2B_COL = collection(db, 'facturas_electronicas_b2b');
+
+/** Suscripción en tiempo real de representaciones electrónicas B2B. */
+export function subscribeFacturasElectronicasB2B(callback: (items: FacturaElectronicaB2B[]) => void) {
+  return onSnapshot(
+    FACTURAS_ELECTRONICAS_B2B_COL,
+    (snapshot) => {
+      const items: FacturaElectronicaB2B[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as FacturaElectronicaB2B);
+      });
+      items.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore facturas_electronicas_b2b snapshot error:', err);
+    }
+  );
+}
+
+/**
+ * Crea o actualiza una factura electrónica B2B. Idempotencia por id determinista
+ * (mismo factura+formato+versión ⇒ mismo id ⇒ no duplica documentos).
+ * El historial es append-only a nivel de motor; Firestore rules lo garantizan.
+ */
+export async function saveFacturaElectronicaB2BFirestore(feb: FacturaElectronicaB2B): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...feb,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'facturas_electronicas_b2b', feb.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving factura_electronica_b2b to Firestore:', err);
     throw err;
   }
 }

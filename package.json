@@ -11,7 +11,8 @@
     "test": "tsx scripts/test-candidate-circuit.ts",
     "test:bloque-b": "tsx scripts/test-bloque-b.ts",
     "test:all": "tsx scripts/test-candidate-circuit.ts && tsx scripts/test-bloque-b.ts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:bloque-e": "tsx scripts/test-bloque-e.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

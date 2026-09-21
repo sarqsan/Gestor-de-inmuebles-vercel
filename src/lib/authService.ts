@@ -17,6 +17,12 @@ import {
 } from 'firebase/firestore';
 import { auth, db, USUARIOS_COL, ENLACES_REGISTRO_COL, saveAuditLogFirestore } from './firebase';
 import {
+  contratosDelInquilino,
+  puedeAccederContrato,
+  puedeAccederInmueble,
+  resolverAlcance,
+} from '../inquilino/scope';
+import {
   UsuarioApp,
   Inmueble,
   ContratoFormalizacion,
@@ -667,10 +673,11 @@ export function getContratosDelInquilino(
   usuario: UsuarioApp | null | undefined,
   allContratos: ContratoFormalizacion[]
 ): ContratoFormalizacion[] {
-  if (!usuario || !isInquilino(usuario)) return [];
-  const ids = new Set(usuario.contratoIds || []);
-  if (ids.size === 0) return [];
-  return allContratos.filter((c) => ids.has(c.id));
+  if (!usuario) return [];
+  return contratosDelInquilino(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    allContratos
+  );
 }
 
 /** ¿Puede el inquilino acceder a este contrato? (pertenencia estricta). */
@@ -678,8 +685,11 @@ export function canTenantAccessContrato(
   usuario: UsuarioApp | null | undefined,
   contratoId: string
 ): boolean {
-  if (!usuario || !isInquilino(usuario)) return false;
-  return (usuario.contratoIds || []).includes(contratoId);
+  if (!usuario) return false;
+  return puedeAccederContrato(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    contratoId
+  );
 }
 
 /**
@@ -691,10 +701,12 @@ export function canTenantAccessInmueble(
   inmuebleId: string,
   allContratos: ContratoFormalizacion[]
 ): boolean {
-  if (!usuario || !isInquilino(usuario)) return false;
-  const ids = new Set(usuario.contratoIds || []);
-  if (ids.size === 0) return false;
-  return allContratos.some((c) => ids.has(c.id) && c.inmuebleId === inmuebleId);
+  if (!usuario) return false;
+  return puedeAccederInmueble(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    inmuebleId,
+    allContratos
+  );
 }
 
 export interface TenantScope {
@@ -707,9 +719,11 @@ export function resolveTenantScope(
   usuario: UsuarioApp | null | undefined,
   allContratos: ContratoFormalizacion[]
 ): TenantScope {
-  const contratos = getContratosDelInquilino(usuario, allContratos);
-  const inmuebleIds = Array.from(new Set(contratos.map((c) => c.inmuebleId).filter(Boolean)));
-  return { contratos, inmuebleIds };
+  if (!usuario) return { contratos: [], inmuebleIds: [] };
+  return resolverAlcance(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    allContratos
+  );
 }
 
 /**

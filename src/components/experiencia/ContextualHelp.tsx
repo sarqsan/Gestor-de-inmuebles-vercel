@@ -8,7 +8,7 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { HelpCircle, X, BookOpen, ChevronRight } from 'lucide-react';
 import type { SectionType, UsuarioApp } from '../../types';
-import type { ExperienceContext, HelpEntry } from '../../experiencia';
+import type { ExperienceContext, HelpEntry, HostExperiencia } from '../../experiencia';
 import { ayudaParaContexto, contextoDesdeUsuario, obtenerTutorial, tutorialesDisponibles } from '../../experiencia';
 
 interface ContextualHelpProps {
@@ -16,6 +16,12 @@ interface ContextualHelpProps {
   usuario?: Pick<UsuarioApp, 'tipoPerfil' | 'roles' | 'permisos'> | null;
   /** Sección/pantalla actual. */
   section: SectionType | string;
+  /** Anfitrión ('ERP' por defecto; el portal del inquilino usa 'PORTAL_INQUILINO'). */
+  host?: HostExperiencia;
+  /** Entidad/estado actuales si la pantalla los conoce (contexto §6; no alteran el filtrado RBAC). */
+  entityType?: string;
+  entityId?: string;
+  state?: string;
   /** Contexto ya resuelto (si el host lo tiene); tiene prioridad sobre usuario+section. */
   contexto?: ExperienceContext;
   /** Abrir el Centro de Ayuda (opcional; si no se aporta, no se muestra el enlace). */
@@ -24,11 +30,29 @@ interface ContextualHelpProps {
   onIniciarTutorial?: (tutorialId: string) => void;
   /** Variante compacta (solo icono) o con texto. */
   variante?: 'icono' | 'texto';
+  /** Tema del botón según el fondo donde se coloca. */
+  tema?: 'claro' | 'oscuro';
   className?: string;
 }
 
-export const ContextualHelp: React.FC<ContextualHelpProps> = ({ usuario, section, contexto, onAbrirCentro, onIniciarTutorial, variante = 'icono', className = '' }) => {
-  const ctx = useMemo(() => contexto ?? contextoDesdeUsuario(usuario, section), [contexto, usuario, section]);
+export const ContextualHelp: React.FC<ContextualHelpProps> = ({
+  usuario,
+  section,
+  host = 'ERP' as HostExperiencia,
+  entityType,
+  entityId,
+  state,
+  contexto,
+  onAbrirCentro,
+  onIniciarTutorial,
+  variante = 'icono',
+  tema = 'claro',
+  className = '',
+}) => {
+  const ctx = useMemo(
+    () => contexto ?? contextoDesdeUsuario(usuario, section, { host, entityType, entityId, state }),
+    [contexto, usuario, section, host, entityType, entityId, state]
+  );
   const entradas = useMemo(() => ayudaParaContexto(ctx), [ctx]);
   const tutorialesVisibles = useMemo(() => new Set(tutorialesDisponibles(ctx).map((t) => t.id)), [ctx]);
   const [abierto, setAbierto] = useState(false);
@@ -61,9 +85,9 @@ export const ContextualHelp: React.FC<ContextualHelpProps> = ({ usuario, section
         aria-expanded={abierto}
         aria-controls={panelId}
         title="Ayuda de esta pantalla"
-        className={`inline-flex items-center gap-1.5 rounded-xl text-slate-500 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer ${
-          variante === 'texto' ? 'px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white' : 'p-1.5'
-        }`}
+        className={`inline-flex items-center gap-1.5 rounded-xl transition-colors cursor-pointer ${
+          tema === 'oscuro' ? 'text-white/90 hover:bg-white/10 rounded-full p-2' : 'text-slate-500 hover:text-blue-700 hover:bg-blue-50'
+        } ${variante === 'texto' ? 'px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white' : tema === 'claro' ? 'p-1.5' : ''}`}
       >
         <HelpCircle className="w-4 h-4" />
         {variante === 'texto' && <span>Ayuda</span>}
@@ -75,7 +99,7 @@ export const ContextualHelp: React.FC<ContextualHelpProps> = ({ usuario, section
           role="dialog"
           aria-modal="false"
           aria-label={`Ayuda contextual: ${principal.title}`}
-          className="absolute right-0 z-40 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-xl text-left"
+          className="absolute right-0 z-40 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-xl text-left text-slate-900"
         >
           <header className="flex items-start justify-between gap-2 p-4 border-b border-slate-100">
             <div className="min-w-0">

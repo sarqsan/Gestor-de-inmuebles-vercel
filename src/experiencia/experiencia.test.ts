@@ -8,6 +8,7 @@ import {
   AYUDA_REGISTRO,
   CAPACIDADES_ERP,
   MODULO_POR_SECCION,
+  PANTALLAS_PORTAL,
   TUTORIALES_REGISTRO,
   TUTORIAL_LIQUIDACION,
   avanzar,
@@ -99,7 +100,8 @@ describe('§6 · Ayuda', () => {
     expect(new Set(ids).size).toBe(ids.length);
     const codigos = new Set(PERMISOS_SISTEMA.map((p) => p.codigo));
     for (const e of AYUDA_REGISTRO) {
-      expect(e.section === 'ayuda' || e.section in MODULO_POR_SECCION).toBe(true);
+      const seccionValida = (e.host ?? 'ERP') === 'PORTAL_INQUILINO' ? PANTALLAS_PORTAL.includes(e.section) : e.section === 'ayuda' || e.section in MODULO_POR_SECCION;
+      expect(seccionValida).toBe(true);
       for (const p of e.permissions ?? []) expect(codigos.has(p)).toBe(true);
       for (const t of e.relatedTutorials ?? []) expect(TUTORIALES_REGISTRO.some((x) => x.id === t)).toBe(true);
     }
@@ -141,7 +143,9 @@ describe('§6 · Ayuda', () => {
     expect(buscarAyuda(ctxAdmin, 'zzzz-nada')).toEqual([]);
     expect(buscarAyuda(ctxAdmin, '')).toHaveLength(ayudaDisponible(ctxAdmin).length);
     // El propietario buscando "liquidación" solo encuentra su versión
-    expect(buscarAyuda(contextoDesdeUsuario(propietario, 'inicio'), 'liquidación').map((e) => e.id)).toEqual(['ayuda.tesoreria.mis-liquidaciones']);
+    const rProp = buscarAyuda(contextoDesdeUsuario(propietario, 'inicio'), 'liquidación').map((e) => e.id);
+    expect(rProp[0]).toBe('ayuda.tesoreria.mis-liquidaciones');
+    expect(rProp).not.toContain('ayuda.tesoreria.liquidaciones');
     // El inquilino no encuentra nada de tesorería ni de gestión de inquilinos
     const rInq = buscarAyuda(contextoDesdeUsuario(inquilino, 'inicio'), 'liquidación invitación');
     expect(rInq.map((e) => e.module)).not.toContain('tesoreria');
@@ -244,9 +248,11 @@ describe('§6 · Tutoriales', () => {
   });
 
   it('tutoriales disponibles por rol: admin sí; propietario e inquilino no ven el de liquidaciones', () => {
-    expect(tutorialesDisponibles(contextoDesdeUsuario(admin, 'inicio')).map((x) => x.id)).toEqual([t.id]);
+    expect(tutorialesDisponibles(contextoDesdeUsuario(admin, 'inicio')).map((x) => x.id)).toEqual([t.id, 'recorrido.inquilinos.invitar']);
     expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio'))).toEqual([]);
+    // El inquilino en el ERP (host por defecto) no ve nada; en su portal ve su recorrido (F2)
     expect(tutorialesDisponibles(contextoDesdeUsuario(inquilino, 'inicio'))).toEqual([]);
+    expect(tutorialesDisponibles(contextoDesdeUsuario(inquilino, 'inicio', { host: 'PORTAL_INQUILINO' })).map((x) => x.id)).toEqual(['recorrido.portal.primeros-pasos']);
   });
 });
 
@@ -303,7 +309,7 @@ describe('§6 · Contrato de intención (sin IA)', () => {
 
   it('un gestor sin tesorería obtiene NO_AUTORIZADO sin filtrar contenido; consultas vacías o sin match → NO_RESUELTO', async () => {
     const ctx = contextoDesdeUsuario(gestor, 'inicio');
-    const res = await resolverIntencionLocal(construirIntentRequest('liquidaciones de tesoreria', ctx));
+    const res = await resolverIntencionLocal(construirIntentRequest('ficheros sepa del banco', ctx));
     expect(res.kind).toBe('NO_AUTORIZADO');
     expect(res.helpEntryId).toBeUndefined();
     expect(res.route).toBeUndefined();

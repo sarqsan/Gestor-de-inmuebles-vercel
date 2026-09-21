@@ -96,6 +96,173 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
       'Una incidencia describe una avería o necesidad en un inmueble, con prioridad y responsabilidad. Puede asignarse a un profesional, recibir presupuesto, ejecutarse y cerrarse con factura, que genera el gasto correspondiente.\n\nLas incidencias notificadas por inquilinos desde su portal aparecen con origen INQUILINO y quedan acotadas a su contrato.',
     keywords: ['incidencia', 'avería', 'reparación', 'profesional', 'presupuesto', 'factura'],
   },
+  // ---------------------------------------------------------------- ERP · base y C/D
+  {
+    id: 'ayuda.cobros.gestion',
+    module: 'cobros',
+    section: 'cobros',
+    title: 'Gestión de cobros',
+    summary: 'Recibos mensuales por contrato: estados, justificantes y verificación.',
+    content:
+      'Cada contrato genera un recibo por periodo. Estados principales: PENDIENTE (aún no cobrado), RECIBIDO (pago comunicado o justificado), VERIFICADO (conciliado por gestión), RETRASADO (vencido sin pago), INCIDENCIA (pago con discrepancia), DEVUELTO/RECLAMADO (pagos fallidos o reclamados).\n\nDesde aquí se registran pagos y justificantes; los cobros verificados son los únicos que entran en la liquidación del propietario (Tesorería) y los impagados alimentan los expedientes de Morosidad. El recibo que ve el inquilino en su portal es este mismo dato, sin duplicar.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['cobro', 'recibo', 'pago', 'justificante', 'verificado', 'retrasado', 'impago', 'alquiler'],
+  },
+  {
+    id: 'ayuda.contratos.formalizacion',
+    module: 'contratos',
+    section: 'formalizacion',
+    title: 'Formalización de contratos',
+    summary: 'Contratos LAU: datos, renta, fianza, garantías, vigencia y estado.',
+    content:
+      'Un contrato une inmueble, arrendador e inquilino con renta, día de pago, fianza legal, garantías adicionales, duración y reparto de gastos (comunidad, suministros).\n\nEl contrato es la referencia del resto del ERP: de él dependen los recibos, la liquidación al propietario, las actas de entrada/salida, los expedientes de morosidad y el acceso del inquilino a su portal. En el portal, el inquilino ve una versión saneada (renta, IBAN de pago, fianza, vigencia, firmas), nunca los datos privados del arrendador.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['contrato', 'lau', 'fianza', 'renta', 'vigencia', 'garantía', 'formalización'],
+  },
+  {
+    id: 'ayuda.morosidad.estados',
+    module: 'morosidad',
+    section: 'morosidad',
+    title: 'Estados de un expediente de morosidad',
+    summary: 'De DETECTADA a CERRADA: qué significa cada fase y qué transiciones exigen motivo.',
+    content:
+      'DETECTADA: impago identificado a partir de los cobros. PENDIENTE_CONTACTO / RECLAMACION_INICIADA / EN_RECOBRO: gestión amistosa con comunicaciones registradas. COMPROMISO_PAGO y PAGO_PARCIAL: acuerdo con el inquilino; si no se cumple pasa a COMPROMISO_INCUMPLIDO. ESCALADA y JURIDICA: vía formal/legal. PAGADA y CERRADA son terminales; reabrir exige motivo y deja histórico.\n\nNingún cambio de estado es silencioso: las transiciones sensibles requieren motivo y quedan en el historial del expediente.',
+    roles: ['ADMINISTRADOR'],
+    keywords: ['morosidad', 'estado', 'expediente', 'compromiso', 'jurídica', 'escalada', 'reabrir'],
+  },
+  {
+    id: 'ayuda.actas.estados-firma',
+    module: 'actas',
+    section: 'actas',
+    title: 'Estados y firma de un acta',
+    summary: 'BORRADOR → EN_REVISION → PENDIENTE_FIRMA → FIRMADA → CERRADA; qué se puede editar en cada uno.',
+    content:
+      'BORRADOR: acta editable (inventario, lecturas, fotos). EN_REVISION: validación previa. PENDIENTE_FIRMA: se generan códigos OTP por participante (uso único, caducidad corta, intentos limitados). FIRMADA: inmutable; se genera el PDF y se guarda su referencia. CERRADA: archivada. CANCELADA/ERROR: trazadas con motivo.\n\nSi hay que corregir un acta firmada se crea una nueva versión enlazada a la anterior; la firmada nunca se modifica. El inquilino ve las actas FIRMADAS/CERRADAS de su contrato en su portal, sin DNI ni notas internas.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['acta', 'estado', 'firma', 'otp', 'versión', 'inmutable', 'pdf'],
+  },
+  {
+    id: 'ayuda.incidencias.estados',
+    module: 'incidencias',
+    section: 'incidencias',
+    title: 'Estados de una incidencia',
+    summary: 'ABIERTA → EN_VALORACION/PRESUPUESTOS → ASIGNADA → EN_REPARACION → RESUELTA → CERRADA.',
+    content:
+      'ABIERTA/REGISTRADA: recibida (las del inquilino llegan con origen INQUILINO). EN_VALORACION y PRESUPUESTOS: se determina responsabilidad y coste. ASIGNADA: hay profesional. EN_REPARACION/EN_CURSO: trabajo en marcha. RESUELTA: terminada, pendiente de cierre. CERRADA: cerrada con factura/gasto si procede. CANCELADA/RECHAZADA: no prosperan, con motivo.\n\nEl inquilino ve en su portal el estado, el profesional asignado y las fechas; no ve teléfonos, costes ni facturas.',
+    keywords: ['incidencia', 'estado', 'asignada', 'reparación', 'resuelta', 'cerrada', 'profesional'],
+  },
+  // ---------------------------------------------------------------- PORTAL DEL INQUILINO (BLOQUE E)
+  {
+    id: 'ayuda.portal.inicio',
+    host: 'PORTAL_INQUILINO',
+    module: 'inicio',
+    section: 'inicio',
+    title: 'Tu portal',
+    summary: 'Tu vivienda, la renta, el recibo de este mes y accesos rápidos.',
+    content:
+      'Este es tu portal como inquilino. Aquí ves solo la información de tu contrato: la vivienda, la renta mensual, el recibo del mes en curso y accesos directos a avisar de una avería, dar una lectura o escribir a gestión.\n\nSi tienes más de un contrato, puedes cambiar entre ellos desde la cabecera. El botón de actualizar recarga los datos; cerrar sesión te devuelve a la pantalla de acceso.',
+    roles: ['INQUILINO'],
+    keywords: ['portal', 'inicio', 'hogar', 'vivienda', 'renta'],
+    relatedTutorials: ['recorrido.portal.primeros-pasos'],
+  },
+  {
+    id: 'ayuda.portal.contrato',
+    host: 'PORTAL_INQUILINO',
+    module: 'contratos',
+    section: 'contrato',
+    title: 'Mi contrato',
+    summary: 'Condiciones de tu alquiler: renta, IBAN de pago, fianza, vigencia y firmas.',
+    content:
+      'Aquí consultas las condiciones esenciales de tu contrato: renta y día de pago, cuenta (IBAN) donde ingresar, fianza legal y garantías, quién paga comunidad y suministros, fechas de inicio/fin y duración, y el estado de las firmas.\n\nEs una vista de solo lectura. Si detectas un error, escribe a gestión desde «Mensajes». Puedes copiar el IBAN con un toque.',
+    roles: ['INQUILINO'],
+    keywords: ['contrato', 'renta', 'iban', 'fianza', 'vigencia', 'firma', 'duración'],
+  },
+  {
+    id: 'ayuda.portal.recibos',
+    host: 'PORTAL_INQUILINO',
+    module: 'cobros',
+    section: 'recibos',
+    title: 'Recibos y pagos',
+    summary: 'Cada mes con su estado y los justificantes publicados por gestión.',
+    content:
+      'La lista muestra el recibo de cada periodo. Pendiente: aún no consta el pago. Retrasado: venció sin pago. En revisión: hay una incidencia con el pago que gestión está comprobando. Pagado: gestión ha recibido o verificado el importe. El total pendiente suma lo que está por pagar.\n\nSi gestión ha publicado justificantes, puedes abrirlos desde el recibo. Si has pagado y sigue en Pendiente, avisa por «Mensajes» para que lo verifiquen; desde el portal no se marcan pagos.',
+    roles: ['INQUILINO'],
+    keywords: ['recibo', 'pago', 'pendiente', 'retrasado', 'justificante', 'total'],
+  },
+  {
+    id: 'ayuda.portal.incidencias',
+    host: 'PORTAL_INQUILINO',
+    module: 'incidencias',
+    section: 'incidencias',
+    title: 'Averías e incidencias',
+    summary: 'Cómo avisar de una avería y qué significa cada estado.',
+    content:
+      'Pulsa el botón «+» para notificar una avería: un título breve, qué ocurre, dónde y desde cuándo, y fotos si ayudan. La incidencia queda ABIERTA y vinculada a tu contrato.\n\nDespués verás su evolución: Asignada (hay profesional), En reparación, Resuelta y Cerrada. Aparece el nombre del profesional asignado y las fechas; los presupuestos y costes los gestiona la administración.',
+    roles: ['INQUILINO'],
+    keywords: ['avería', 'incidencia', 'reparación', 'profesional', 'fotos', 'notificar'],
+    relatedTutorials: ['recorrido.portal.primeros-pasos'],
+  },
+  {
+    id: 'ayuda.portal.suministros',
+    host: 'PORTAL_INQUILINO',
+    module: 'suministros',
+    section: 'suministros',
+    title: 'Suministros, lecturas y cambio de titular',
+    summary: 'Tus suministros, cómo dar una lectura y cómo solicitar un cambio de titular.',
+    content:
+      'Cada tarjeta es un suministro de tu vivienda (luz, agua, gas…) con su comercializadora y la última lectura. Ábrela para ver el histórico.\n\n«Dar lectura»: introduce el valor del contador; debe ser igual o superior a la última lectura. Una lectura guardada no se edita: si te equivocas, registra otra que la corrija. «Cambio de titular»: solicitas poner el suministro a tu nombre indicando los datos del nuevo titular y la fecha de efecto; el estado pasa de Solicitado a Confirmado o Rechazado (con motivo) según lo resuelva gestión.',
+    roles: ['INQUILINO'],
+    keywords: ['suministro', 'lectura', 'contador', 'luz', 'agua', 'gas', 'titular', 'cambio de titular'],
+    relatedTutorials: ['recorrido.portal.primeros-pasos'],
+  },
+  {
+    id: 'ayuda.portal.mensajes',
+    host: 'PORTAL_INQUILINO',
+    module: 'inquilinos',
+    section: 'mensajes',
+    title: 'Mensajes con gestión',
+    summary: 'Un hilo por contrato para hablar directamente con la administración.',
+    content:
+      'Escribe tu mensaje y pulsa enviar: llega a gestión vinculado a tu contrato. Las respuestas aparecen en el mismo hilo y, mientras no las abras, se marcan como no leídas en «Más».\n\nUsa este canal para dudas del contrato, pagos o cualquier gestión que no sea una avería (para averías usa «Averías», así queda registrada y asignada).',
+    roles: ['INQUILINO'],
+    keywords: ['mensaje', 'gestión', 'contacto', 'hilo', 'responder'],
+  },
+  {
+    id: 'ayuda.portal.documentos',
+    host: 'PORTAL_INQUILINO',
+    module: 'actas',
+    section: 'documentos',
+    title: 'Documentos',
+    summary: 'Actas de entrada/salida, justificantes de recibos y evidencias de tus incidencias.',
+    content:
+      'Aquí se agrupan los documentos de tu contrato: las actas de entrada/salida que gestión ha firmado y publicado (puedes abrir el PDF), los justificantes de pago publicados y las fotos/evidencias de tus incidencias y lecturas.\n\nSi un acta no aparece es porque todavía no está firmada o publicada. Todo es de solo lectura.',
+    roles: ['INQUILINO'],
+    keywords: ['documento', 'acta', 'pdf', 'justificante', 'evidencia', 'foto'],
+  },
+  {
+    id: 'ayuda.portal.historial',
+    host: 'PORTAL_INQUILINO',
+    module: 'inquilinos',
+    section: 'historial',
+    title: 'Historial',
+    summary: 'Cronología de tu actividad: contrato, incidencias, mensajes, lecturas y cambios de titular.',
+    content:
+      'El historial ordena por fecha todo lo relevante de tu contrato: inicio y firma del contrato, incidencias y sus cambios de estado, mensajes enviados y recibidos, lecturas registradas y solicitudes de cambio de titular.\n\nSirve para comprobar cuándo hiciste cada gestión y en qué estado quedó.',
+    roles: ['INQUILINO'],
+    keywords: ['historial', 'actividad', 'cronología', 'fecha'],
+  },
+  {
+    id: 'ayuda.portal.cuenta',
+    host: 'PORTAL_INQUILINO',
+    module: 'administracion',
+    section: 'cuenta',
+    title: 'Mi cuenta',
+    summary: 'Tus datos de acceso, los contratos vinculados y el cierre de sesión.',
+    content:
+      'Muestra el correo con el que accedes, tus contratos vinculados y tu último acceso. Desde aquí cierras sesión.\n\nTu acceso nació de una invitación de gestión ligada a tu contrato; si cambias de vivienda o de contrato, gestión debe vincularte el nuevo.',
+    roles: ['INQUILINO'],
+    keywords: ['cuenta', 'acceso', 'correo', 'cerrar sesión', 'contratos vinculados'],
+  },
   {
     id: 'ayuda.centro.uso',
     module: 'ayuda',
@@ -121,6 +288,7 @@ function normalizar(texto: string): string {
 
 /** ¿La entrada es visible para el contexto? (rol y permisos requeridos; solo lectura del RBAC). */
 export function ayudaVisibleEn(entrada: HelpEntry, ctx: ExperienceContext): boolean {
+  if ((entrada.host ?? 'ERP') !== ctx.host) return false;
   if (!contextoCumpleRoles(ctx, entrada.roles)) return false;
   if (entrada.permissions && entrada.permissions.length > 0) {
     // Si los permisos del usuario son desconocidos, el contenido condicionado no se muestra.

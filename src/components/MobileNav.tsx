@@ -197,6 +197,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                   return (
                     <button
                       key={item.id}
+                      data-tour={`nav-${item.id}`}
                       onClick={() => handleSelect(item.id)}
                       className={`w-full flex items-center justify-between p-2 rounded-xl text-xs transition-colors cursor-pointer ${
                         isSelected ? 'bg-blue-600 text-white font-bold shadow-xs' : 'hover:bg-slate-800/80 text-slate-300'

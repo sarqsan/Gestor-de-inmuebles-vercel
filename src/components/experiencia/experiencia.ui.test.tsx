@@ -84,8 +84,9 @@ describe('§6 · Centro de Ayuda', () => {
     expect(within(contenidos).getAllByRole('button').length).toBeGreaterThanOrEqual(8);
     // filtro por módulo
     fireEvent.click(screen.getByRole('button', { name: 'Morosidad' }));
-    expect(within(contenidos).getAllByRole('button')).toHaveLength(1);
+    expect(within(contenidos).getAllByRole('button')).toHaveLength(2);
     expect(within(contenidos).getByText('Morosidad y recobro')).toBeTruthy();
+    expect(within(contenidos).getByText('Estados de un expediente de morosidad')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Todos' }));
     // búsqueda
     fireEvent.change(screen.getByPlaceholderText(/Buscar ayuda/), { target: { value: 'invitación' } });
@@ -116,11 +117,14 @@ describe('§6 · Centro de Ayuda', () => {
     const tut = screen.getByLabelText('Tutoriales');
     expect(within(tut).getByText('Liquidar a un propietario paso a paso')).toBeTruthy();
     expect(within(tut).queryByText(/requieren otro permiso/)).toBeNull();
-    fireEvent.click(within(tut).getByText('Iniciar'));
+    expect(within(tut).getByText('Dar acceso a un inquilino a su portal')).toBeTruthy();
+    fireEvent.click(within(tut).getAllByText('Iniciar')[0]);
     expect(iniciar).toHaveBeenCalledWith(TUTORIAL_LIQUIDACION.id);
     cleanup();
     render(<CentroAyudaSection usuario={gestor} onIniciarTutorial={iniciar} />);
-    expect(within(screen.getByLabelText('Tutoriales')).getByText(/5 paso\(s\) requieren otro permiso/)).toBeTruthy();
+    const tutG = screen.getByLabelText('Tutoriales');
+    expect(within(tutG).getByText(/5 paso\(s\) requieren otro permiso/)).toBeTruthy(); // liquidaciones
+    expect(within(tutG).getAllByText(/requieren otro permiso/)).toHaveLength(1); // invitar inquilinos: el gestor sí puede
   });
 });
 

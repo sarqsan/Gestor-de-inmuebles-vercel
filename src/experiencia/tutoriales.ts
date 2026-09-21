@@ -4,11 +4,18 @@
  * La sesión es un valor inmutable: `iniciar` → `avanzar`/`retroceder` → `finalizar`/`cancelar`.
  * Cada paso se evalúa contra el contexto REAL (permisos/rutas); el tutorial explica, nunca habilita.
  */
-import type { ExperienceContext, EvaluacionPaso, MotivoBloqueoPaso, SesionTutorial, Tutorial, TutorialStep } from './tipos';
-import { contextoCumpleRoles, contextoTienePermiso, MODULO_POR_SECCION } from './contexto';
+import type { ExperienceContext, EvaluacionPaso, HostExperiencia, MotivoBloqueoPaso, SesionTutorial, Tutorial, TutorialStep } from './tipos';
+import { contextoCumpleRoles, contextoTienePermiso, MODULO_POR_SECCION, PANTALLAS_PORTAL } from './contexto';
+import { selectorTour } from './targets';
 
 /** Secciones válidas del ERP (fuente: `SectionType` vía el mapa de módulos). */
 const SECCIONES_ERP = new Set<string>(Object.keys(MODULO_POR_SECCION));
+/** Pantallas válidas del portal del inquilino (BLOQUE E). */
+const PANTALLAS_PORTAL_SET = new Set<string>(PANTALLAS_PORTAL);
+
+function rutasDeHost(host: HostExperiencia): Set<string> {
+  return host === 'PORTAL_INQUILINO' ? PANTALLAS_PORTAL_SET : SECCIONES_ERP;
+}
 
 // ---------------------------------------------------------------------------
 // Tutorial real nº 1 — BLOQUE B: generar, aprobar y pagar una liquidación
@@ -19,6 +26,7 @@ export const TUTORIAL_LIQUIDACION: Tutorial = {
   description:
     'Recorre el ciclo real de una liquidación mensual en Tesorería: generar el borrador, revisar sus líneas, aprobarla y registrar el pago con evidencia.',
   module: 'tesoreria',
+  host: 'ERP',
   roles: ['ADMINISTRADOR'],
   minutes: 4,
   steps: [
@@ -27,6 +35,7 @@ export const TUTORIAL_LIQUIDACION: Tutorial = {
       title: 'Abre Tesorería & SEPA',
       description: 'En el menú principal entra en «Tesorería & SEPA». La pestaña «Liquidaciones» muestra las existentes con su estado y el filtro por propietario.',
       route: 'tesoreria',
+      target: selectorTour('nav-tesoreria'),
       requiredPermission: 'tesoreria.ver',
     },
     {
@@ -63,7 +72,111 @@ export const TUTORIAL_LIQUIDACION: Tutorial = {
   ],
 };
 
-export const TUTORIALES_REGISTRO: Tutorial[] = [TUTORIAL_LIQUIDACION];
+// ---------------------------------------------------------------------------
+// Recorrido real nº 2 — PORTAL DEL INQUILINO (BLOQUE E): primeros pasos
+// ---------------------------------------------------------------------------
+export const RECORRIDO_PORTAL_INQUILINO: Tutorial = {
+  id: 'recorrido.portal.primeros-pasos',
+  title: 'Conoce tu portal',
+  description: 'Un recorrido por las pantallas de tu portal: dónde ver tu contrato y recibos, cómo avisar de una avería, dar una lectura y escribir a gestión.',
+  module: 'inquilinos',
+  host: 'PORTAL_INQUILINO',
+  roles: ['INQUILINO'],
+  minutes: 3,
+  steps: [
+    {
+      id: 'inicio',
+      title: 'Tu hogar de un vistazo',
+      description: 'En «Inicio» ves tu vivienda, la renta mensual, el estado del recibo de este mes y accesos rápidos a las acciones más habituales.',
+      route: 'inicio',
+      target: selectorTour('portal-tab-inicio'),
+    },
+    {
+      id: 'recibos',
+      title: 'Recibos y pagos',
+      description: 'En «Recibos» encuentras cada mes con su estado: Pendiente, Pagado o En revisión. Si hay justificantes publicados por gestión, puedes abrirlos desde aquí.',
+      route: 'recibos',
+      target: selectorTour('portal-tab-recibos'),
+    },
+    {
+      id: 'averias',
+      title: 'Avisar de una avería',
+      description: 'En «Averías» pulsa el botón «+» para notificar una incidencia: título, descripción y fotos opcionales. Quedará ABIERTA y gestión la asignará a un profesional.',
+      route: 'incidencias',
+      target: selectorTour('portal-nueva-averia'),
+    },
+    {
+      id: 'lecturas',
+      title: 'Dar una lectura de contador',
+      description: 'En «Luz/Agua» abre un suministro y pulsa «Dar lectura». La lectura debe ser igual o superior a la anterior; una vez guardada no se puede editar, solo corregir con otra lectura.',
+      route: 'suministros',
+      target: selectorTour('portal-tab-suministros'),
+    },
+    {
+      id: 'mensajes',
+      title: 'Hablar con gestión',
+      description: 'En «Más» → «Mensajes» tienes un hilo directo con gestión para este contrato. Los mensajes no leídos aparecen marcados en «Más».',
+      route: 'mas',
+      target: selectorTour('portal-mas-mensajes'),
+    },
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Recorrido real nº 3 — ERP · BLOQUE E: invitar a un inquilino al portal
+// ---------------------------------------------------------------------------
+export const RECORRIDO_INVITAR_INQUILINO: Tutorial = {
+  id: 'recorrido.inquilinos.invitar',
+  title: 'Dar acceso a un inquilino a su portal',
+  description: 'Genera una invitación vinculada a un contrato, compártela y revisa después el acceso creado y el hilo de mensajes.',
+  module: 'inquilinos',
+  host: 'ERP',
+  roles: ['ADMINISTRADOR'],
+  minutes: 3,
+  steps: [
+    {
+      id: 'abrir-portal-inquilinos',
+      title: 'Abre «Portal Inquilinos»',
+      description: 'En el menú principal entra en «Portal Inquilinos». Verás cuatro pestañas: Accesos, Invitaciones, Mensajes y Vinculación.',
+      route: 'inquilinos',
+      target: selectorTour('nav-inquilinos'),
+      requiredPermission: 'inquilinos.ver',
+    },
+    {
+      id: 'nueva-invitacion',
+      title: 'Crea la invitación',
+      description: 'En la pestaña «Invitaciones» elige el contrato, la caducidad y los usos máximos y pulsa «Crear invitación». La invitación queda ligada solo a ese contrato.',
+      route: 'inquilinos',
+      target: selectorTour('inquilinos-tab-invitaciones'),
+      requiredPermission: 'inquilinos.gestionar',
+    },
+    {
+      id: 'compartir-enlace',
+      title: 'Comparte el enlace',
+      description: 'Copia el enlace generado y envíaselo al inquilino por el canal que uses. Al registrarse, su cuenta nace vinculada al contrato; no hay alta manual.',
+      route: 'inquilinos',
+      requiredPermission: 'inquilinos.gestionar',
+    },
+    {
+      id: 'revisar-acceso',
+      title: 'Revisa el acceso',
+      description: 'En «Accesos» aparece el inquilino con sus contratos vinculados. Desde aquí puedes desvincular un contrato si deja de corresponder.',
+      route: 'inquilinos',
+      target: selectorTour('inquilinos-tab-accesos'),
+      requiredPermission: 'inquilinos.ver',
+    },
+    {
+      id: 'mensajes',
+      title: 'Atiende sus mensajes',
+      description: 'En «Mensajes» respondes al hilo por contrato. Los mensajes que el inquilino no ha leído se marcan hasta que los abre en su portal.',
+      route: 'inquilinos',
+      target: selectorTour('inquilinos-tab-mensajes'),
+      requiredPermission: 'inquilinos.ver',
+    },
+  ],
+};
+
+export const TUTORIALES_REGISTRO: Tutorial[] = [TUTORIAL_LIQUIDACION, RECORRIDO_INVITAR_INQUILINO, RECORRIDO_PORTAL_INQUILINO];
 
 export interface OpcionesTutoriales {
   registro?: Tutorial[];
@@ -79,7 +192,7 @@ export function obtenerTutorial(id: string, opciones: OpcionesTutoriales = {}): 
 
 /** Tutoriales visibles para el contexto (por rol). Los pasos se evalúan aparte. */
 export function tutorialesDisponibles(ctx: ExperienceContext, opciones: OpcionesTutoriales = {}): Tutorial[] {
-  return (opciones.registro ?? TUTORIALES_REGISTRO).filter((t) => contextoCumpleRoles(ctx, t.roles));
+  return (opciones.registro ?? TUTORIALES_REGISTRO).filter((t) => contextoCumpleRoles(ctx, t.roles) && (t.host ?? 'ERP') === ctx.host);
 }
 
 export function tutorialesDeModulo(ctx: ExperienceContext, modulo: string, opciones: OpcionesTutoriales = {}): Tutorial[] {
@@ -88,7 +201,7 @@ export function tutorialesDeModulo(ctx: ExperienceContext, modulo: string, opcio
 
 /** Evalúa un paso frente al contexto. Nunca modifica permisos; solo informa. */
 export function evaluarPaso(paso: TutorialStep, indice: number, total: number, ctx: ExperienceContext, opciones: OpcionesTutoriales = {}): EvaluacionPaso {
-  const existentes = opciones.seccionesExistentes instanceof Set ? opciones.seccionesExistentes : new Set(opciones.seccionesExistentes ?? Array.from(SECCIONES_ERP));
+  const existentes = opciones.seccionesExistentes instanceof Set ? opciones.seccionesExistentes : new Set(opciones.seccionesExistentes ?? Array.from(rutasDeHost(ctx.host)));
   const motivos: MotivoBloqueoPaso[] = [];
 
   const puedeEjecutar = contextoTienePermiso(ctx, paso.requiredPermission) && !(paso.requiredPermission && ctx.missing.includes('permissions'));
@@ -142,6 +255,15 @@ export function avanzar(sesion: SesionTutorial, tutorial: Tutorial): SesionTutor
   if (sesion.estado !== 'EN_CURSO') return sesion;
   if (esUltimoPaso(sesion, tutorial)) return sesion;
   return { ...sesion, indice: sesion.indice + 1 };
+}
+
+/** Salta el paso actual (queda anotado) y avanza; en el último paso, finaliza el tutorial. */
+export function saltar(sesion: SesionTutorial, tutorial: Tutorial, ahora: () => string = () => new Date().toISOString()): SesionTutorial {
+  if (sesion.estado !== 'EN_CURSO') return sesion;
+  const id = pasoActual(sesion, tutorial).id;
+  const saltados = Array.from(new Set([...(sesion.saltados ?? []), id]));
+  if (esUltimoPaso(sesion, tutorial)) return { ...sesion, saltados, estado: 'COMPLETADO', finalizadoEn: ahora() };
+  return { ...sesion, saltados, indice: sesion.indice + 1 };
 }
 
 export function retroceder(sesion: SesionTutorial): SesionTutorial {

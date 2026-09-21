@@ -133,6 +133,7 @@ export const PortalIncidencias: React.FC<Props> = ({ usuario, contrato, inmueble
       ))}
 
       <button
+        data-tour="portal-nueva-averia"
         onClick={() => setModalAbierto(true)}
         className="fixed bottom-20 right-1/2 translate-x-[calc(224px-2rem)] sm:translate-x-[calc(224px-2rem)] w-14 h-14 bg-indigo-700 hover:bg-indigo-800 text-white rounded-full shadow-xl flex items-center justify-center cursor-pointer z-10"
         aria-label="Notificar avería"

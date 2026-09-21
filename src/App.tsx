@@ -3888,7 +3888,7 @@ export default function App() {
           sesion={sesionTutorial}
           contexto={contextoDesdeUsuario(currentUser, activeSection, { accessibleSections: seccionesAccesibles })}
           onCambio={setSesionTutorial}
-          onNavegar={setActiveSection}
+          onNavegar={(r) => setActiveSection(r as SectionType)}
           onCerrar={() => setSesionTutorial(null)}
         />
       )}

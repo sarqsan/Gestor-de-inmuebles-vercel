@@ -580,7 +580,7 @@ verla), `TutorialPlayer` (panel flotante no bloqueante; navega vía
 sección `ayuda` integrada en Sidebar/MobileNav/Header de los tres perfiles ERP
 (sin menú paralelo). `App.tsx`: sección `ayuda` en los route guards (extraídos a
 `SECCIONES_PROPIETARIO`/`SECCIONES_PROFESIONAL`, misma lista) y sesión de
-tutorial en memoria. El portal del inquilino (E) **no** incorpora todavía ayuda.
+tutorial en memoria. El portal del inquilino (E) no incorporaba ayuda en F1 (ver §6.6).
 
 **Tests**: `src/experiencia/experiencia.test.ts` (25: contexto, ayuda,
 tutoriales, seguridad RBAC, contrato de intención) +
@@ -589,9 +589,100 @@ contextual, Centro de Ayuda, reproductor con el tutorial real, navegación).
 Suite global **571/571** (533 + 38) · B 92 · C 82 · D 51 · E 64 · batería E 73 ·
 tsc 0 · build OK.
 
-**NO implementado (siguientes fases, en este orden):** (F2) ayuda contextual en
-el portal del inquilino y ampliación del registro de contenidos por pantalla/
-perfil; recorridos guiados con resaltado de `target` en DOM; (F3) progreso de
+### 6.6 Estado real — FASE 2 implementada (2026-09-21)
+
+**Alcance F2**: ayuda contextual en el Portal del Inquilino, ampliación del
+registro de contenidos y recorridos guiados con resaltado real de `target`.
+Ningún segundo sistema: se reutilizan `ContextualHelp`, `TutorialPlayer` y el
+motor `src/experiencia/`. Sin persistencia, sin IA, sin cambios funcionales en
+B/C/D/E ni en reglas Firebase.
+
+**Motor**
+- `tipos.ts` — nuevo concepto **`HostExperiencia`** (`'ERP'` | `'PORTAL_INQUILINO'`)
+  en `ExperienceContext`, `HelpEntry` y `Tutorial`: el inquilino solo ve
+  contenido del portal y el staff solo el del ERP. `SesionTutorial.saltados[]`.
+- `contexto.ts` — `host` en el contexto (por defecto ERP); `PANTALLAS_PORTAL`
+  (las 10 pantallas reales del shell del portal) y módulo derivado de la
+  pantalla cuando `host === 'PORTAL_INQUILINO'`.
+- `targets.ts` (**nuevo, transversal, sin dependencias**) — convención
+  `data-tour="<id>"` + `selectorTour(id)`, `localizarTarget`, `esVisible`/
+  `targetVisible` (hidden, `display:none`, `visibility:hidden`, ancestros,
+  desconectado), `resaltarTarget(selector)` → `RESALTADO | NO_ENCONTRADO |
+  NO_VISIBLE` con un **overlay `position:fixed; pointer-events:none`** que
+  se reposiciona en scroll/resize (no bloquea la app ni altera el nodo
+  destino), `limpiarResaltado()` idempotente, `hayResaltadoActivo()`.
+- `tutoriales.ts` — rutas validadas según el host del tutorial;
+  `tutorialesDisponibles` filtra por host; `saltar()` (registra el paso en
+  `saltados`, completa si es el último). Registro = **3 tutoriales**.
+- `ayuda.ts` — registro **23 entradas** (9 F1 + 14 F2), todas sobre funciones
+  reales y con «qué es / qué puedo hacer / qué necesito / qué significa cada
+  estado»: ERP → `ayuda.cobros.gestion`, `ayuda.contratos.formalizacion`,
+  `ayuda.morosidad.estados` (máquina de estados C), `ayuda.actas.estados-firma`
+  (D, incl. inmutabilidad de actas firmadas y OTP externo), `ayuda.incidencias.estados`;
+  Portal (host `PORTAL_INQUILINO`, rol INQUILINO) → `ayuda.portal.{inicio,
+  contrato, recibos, incidencias, suministros (lecturas + cambio de titular),
+  mensajes, documentos, historial, cuenta}`. `ayudaVisibleEn` filtra por host.
+
+**Recorridos guiados reales (§6 F2 · 2)**
+- `recorrido.portal.primeros-pasos` — Portal del Inquilino (host PORTAL,
+  rol INQUILINO, sin permisos de gestión): inicio → recibos → averías
+  (`portal-nueva-averia`, el FAB real) → lecturas → «Más» › mensajes
+  (`portal-mas-mensajes`). Se inicia desde la ayuda de «Inicio».
+- `recorrido.inquilinos.invitar` — ERP (BLOQUE E, rol ADMINISTRADOR, permisos
+  `inquilinos.ver` / `inquilinos.gestionar`): menú «Portal Inquilinos»
+  (`nav-inquilinos`) → pestaña Invitaciones → compartir enlace → Accesos →
+  Mensajes. Disponible en el Centro de Ayuda y desde la ayuda de la sección.
+- `tutorial.tesoreria.liquidacion` (F1) ahora resalta `nav-tesoreria`.
+
+**Marcadores `data-tour`** (atributos inertes; sin cambio de lógica):
+`Sidebar`/`MobileNav` → `nav-<SectionType>`; `InquilinosSection` →
+`inquilinos-tab-<accesos|invitaciones|mensajes|vinculacion>`;
+`InquilinoPortalShell` → `portal-tab-<inicio|recibos|incidencias|suministros|mas>`,
+`portal-mas-<contrato|mensajes|documentos|historial|cuenta>`;
+`PortalIncidencias` → `portal-nueva-averia`.
+
+**UI**
+- `ContextualHelp` — props `host`, `entityType/entityId/state`, `tema`
+  (`claro`/`oscuro`). En el **portal** se monta en la cabecera del shell junto
+  a «Actualizar», **solo si hay `contratoActivo`** (sin contrato/sin vínculos/
+  error → no se muestra, la pantalla no se rompe); usa la pantalla actual y el
+  contrato como contexto; no enlaza al Centro de Ayuda del ERP.
+- `TutorialPlayer` — botón «Saltar», resaltado real por `useEffect` (reintento
+  breve tras el cambio de sección; limpieza al cambiar de paso, cancelar,
+  finalizar y desmontar), `targetVisible` solo se evalúa cuando el host está en
+  la ruta del paso; `onNavegar(route)` → el host decide (route guard intacto);
+  prop `posicion` (`abajo-derecha` ERP · `abajo-centro` portal, sobre la nav).
+- `InquilinoPortalShell` — sesión de tutorial en memoria + `<TutorialPlayer>`;
+  la navegación de los pasos usa `ir()` del propio shell.
+
+**Seguridad (§6 F2 · 7)**: la capa sigue leyendo rol/permisos de `UsuarioApp`;
+un recorrido nunca ejecuta acciones (solo resalta y explica), nunca navega por
+sí mismo (delega en el host y sus guards), y los pasos sin permiso/ruta quedan
+`PERMISO_INSUFICIENTE`/`RUTA_INACCESIBLE`/`RUTA_INEXISTENTE` con explicación.
+Tests comprueban que los permisos del usuario no cambian y que no se crean
+invitaciones/enlaces al recorrer el tutorial ERP.
+
+**Tests F2 (18 nuevos)**: `src/experiencia/targets.test.ts` (9: visible /
+inexistente / oculto / sustitución / cambio de sección; registro de 3
+recorridos con rutas, permisos y targets reales; recorridos portal y ERP con
+saltar/finalizar/cancelar; seguridad RBAC y guards) +
+`src/components/experiencia/experiencia.f2.ui.test.tsx` (9, jsdom con el
+arnés de E: ayuda en las 9 pantallas reales del portal, ausencia sin contrato o
+con contrato inexistente, sin contenido de gestión ni datos ajenos, recorrido
+del portal de extremo a extremo con resaltado, ciclo de vida del resaltado en
+`TutorialPlayer`, permiso insuficiente, desmontaje, recorrido ERP sobre
+`Sidebar` + `InquilinosSection` reales). Tests F1 ajustados al registro
+ampliado (38 → siguen 38). Suite global **589/589** (571 + 18) · B 92 · C 82 ·
+D 51 · E 64 · batería E 73 · tsc 0 · build OK.
+
+**Limitaciones F2**: el resaltado se verifica en jsdom (sin layout real; en
+navegador el overlay se posiciona con `getBoundingClientRect`); no hay
+recorridos para C (morosidad) ni D (actas) todavía — solo ayuda de estados;
+la ayuda del portal no cubre pantallas que no existen (p. ej. actas del
+inquilino no tiene vista propia en el portal); sin persistencia del progreso
+(al recargar se pierde la sesión).
+
+**NO implementado (siguientes fases, en este orden):** (F3) progreso de
 tutoriales persistido por usuario (colección canónica a definir; sin duplicar
 auditoría); (F4) IA asistente: implementación de `ResolveUserIntent` con Gemini
 sobre `capacidadesDisponibles` (límites §6.3), sin chatbot vacío previo.
@@ -609,7 +700,7 @@ presentan como cinco órdenes pequeñas:
 | **C** | Morosidad + recobro + expediente de recuperación | **INTEGRADO (2026-09-21, Arena A — merge `5293c3c`)** — ver §4 BLOQUE C (pendientes: transporte real de comunicaciones GAP1, emulator de reglas, programador de detección, adjuntos en Storage) |
 | **D** | Entrada/salida + actas + evidencias + firma digital | **INTEGRADO (2026-09-21, Arena A)** — ver §4 BLOQUE D (pendiente externo: transporte real OTP SMS/email) |
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | **INTEGRADO (2026-09-21, Arena A — `10f07b3`; validación automatizada `7dcb3ea`, 73/73)** — ver §5 (NV: reglas reales sin emulador) |
-| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASE 1 IMPLEMENTADA (2026-09-21)**: motor de contexto + ayuda contextual + Centro de Ayuda + modelo de tutoriales + 1 tutorial real (§6.5). Pendiente: F2 contenidos/portal inquilino, F3 progreso persistido, F4 IA |
+| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASES 1 y 2 IMPLEMENTADAS (2026-09-21)**: motor de contexto + ayuda contextual (ERP y Portal del Inquilino) + Centro de Ayuda + 23 contenidos + recorridos guiados con resaltado real (3 tutoriales) (§6.5–6.6). Pendiente: F3 progreso persistido, F4 IA |
 | **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
 
 Dependencias entre fases: §8.

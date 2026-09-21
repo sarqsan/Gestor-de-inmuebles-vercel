@@ -28,8 +28,13 @@ export type ModuloERP =
   | 'ayuda'
   | 'desconocido';
 
+/** Aplicación anfitriona: ERP (secciones `SectionType`) o portal del inquilino (pantallas del portal). */
+export type HostExperiencia = 'ERP' | 'PORTAL_INQUILINO';
+
 /** Entrada mínima que cualquier pantalla puede aportar para resolver el contexto. */
 export interface ExperienceContextInput {
+  /** Anfitrión actual (ERP por defecto). */
+  host?: HostExperiencia;
   module?: ModuloERP;
   section?: SectionType | string;
   route?: string;
@@ -45,6 +50,7 @@ export interface ExperienceContextInput {
 
 /** Contexto resuelto. `module` y `section` siempre existen (con 'desconocido'/'' si no se pudo resolver). */
 export interface ExperienceContext {
+  host: HostExperiencia;
   module: ModuloERP;
   section: string;
   route: string;
@@ -61,6 +67,8 @@ export interface ExperienceContext {
 
 export interface HelpEntry {
   id: string;
+  /** Anfitrión al que pertenece la pantalla ('ERP' por defecto). */
+  host?: HostExperiencia;
   module: ModuloERP;
   section: SectionType | string;
   title: string;
@@ -92,6 +100,8 @@ export interface Tutorial {
   title: string;
   description: string;
   module?: ModuloERP;
+  /** Anfitrión cuyas rutas usa el recorrido. Por defecto 'ERP'. */
+  host?: HostExperiencia;
   roles?: TipoPerfilUsuario[];
   /** Duración orientativa en minutos. */
   minutes?: number;
@@ -107,6 +117,8 @@ export interface SesionTutorial {
   estado: EstadoSesionTutorial;
   iniciadoEn: string;
   finalizadoEn?: string;
+  /** Ids de pasos que el usuario decidió saltar (F2). */
+  saltados?: string[];
 }
 
 export type MotivoBloqueoPaso = 'PERMISO_INSUFICIENTE' | 'RUTA_INEXISTENTE' | 'RUTA_INACCESIBLE' | 'TARGET_NO_VISIBLE';

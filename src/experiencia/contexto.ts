@@ -58,7 +58,11 @@ export const MODULO_POR_VISTA_PORTAL: Record<string, ModuloERP> = {
   suministros: 'suministros',
   historial: 'inquilinos',
   cuenta: 'administracion',
+  mas: 'inicio',
 };
+
+/** Pantallas reales del portal del inquilino (BLOQUE E, `InquilinoPortalShell`). */
+export const PANTALLAS_PORTAL: readonly string[] = ['inicio', 'recibos', 'incidencias', 'suministros', 'mas', 'contrato', 'mensajes', 'documentos', 'historial', 'cuenta'];
 
 export function moduloDeSeccion(section?: string): ModuloERP {
   if (!section) return 'desconocido';
@@ -89,6 +93,7 @@ export function getExperienceContext(input: ExperienceContextInput = {}): Experi
   if (!input.state) missing.push('state');
 
   return {
+    host: input.host ?? 'ERP',
     module,
     section,
     route: input.route ?? (section ? `#${section}` : ''),
@@ -111,6 +116,8 @@ export function contextoDesdeUsuario(
 ): ExperienceContext {
   return getExperienceContext({
     ...extra,
+    // En el portal del inquilino el módulo se deriva de la pantalla del portal, no de `SectionType`.
+    module: extra.module ?? (extra.host === 'PORTAL_INQUILINO' && section ? MODULO_POR_VISTA_PORTAL[section] ?? 'desconocido' : undefined),
     section,
     role: usuario?.tipoPerfil,
     roles: usuario?.roles,

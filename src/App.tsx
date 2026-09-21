@@ -171,6 +171,11 @@ import { NuevoCandidatoSection } from './components/sections/NuevoCandidatoSecti
 import { CuestionarioSection } from './components/sections/CuestionarioSection';
 import { AnalisisSection } from './components/sections/AnalisisSection';
 import { ConfiguracionSection } from './components/sections/ConfiguracionSection';
+// CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda, ayuda contextual y tutoriales
+import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
+import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
+import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial } from './experiencia';
+import type { SesionTutorial } from './experiencia';
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
@@ -266,6 +271,32 @@ import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
 import { CrearProfesionalModal } from './components/modals/CrearProfesionalModal';
 import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistroModal';
+
+// Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
+const SECCIONES_PROPIETARIO: SectionType[] = [
+  'propietarios',
+  'inmuebles',
+  'formalizacion',
+  'cobros',
+  // BLOQUE B — "Mis Liquidaciones" en el portal del propietario
+  'tesoreria',
+  'gastos',
+  'financiacion',
+  'conciliacion',
+  'facturacion',
+  'fiscal',
+  'informes',
+  'polizas',
+  'actas',
+  'incidencias',
+  'recomercializacion',
+  // BLOQUE E (reconciliado): el propietario consulta los suministros de sus inmuebles
+  'suministros',
+  'configuracion',
+  // CAPA TRANSVERSAL §6: Centro de Ayuda (solo lectura)
+  'ayuda',
+];
+const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'configuracion', 'ayuda'];
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
@@ -474,32 +505,12 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = [
-        'propietarios',
-        'inmuebles',
-        'formalizacion',
-        'cobros',
-        // BLOQUE B — "Mis Liquidaciones" en el portal del propietario
-        'tesoreria',
-        'gastos',
-        'financiacion',
-        'conciliacion',
-        'facturacion',
-        'fiscal',
-        'informes',
-        'polizas',
-        'actas',
-        'incidencias',
-        'recomercializacion',
-        // BLOQUE E (reconciliado): el propietario consulta los suministros de sus inmuebles
-        'suministros',
-        'configuracion',
-      ];
+      const allowedSections = SECCIONES_PROPIETARIO;
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
     } else if (perfil === 'PROFESIONAL') {
-      const allowedSections: SectionType[] = ['administracion', 'inmuebles', 'configuracion'];
+      const allowedSections = SECCIONES_PROFESIONAL;
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('administracion');
       }
@@ -731,6 +742,14 @@ export default function App() {
 
   // Modales de administración
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  // CAPA TRANSVERSAL §6 (Fase 1): sesión de tutorial en memoria (sin persistencia)
+  const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
+  const seccionesAccesibles = useMemo<SectionType[] | undefined>(() => {
+    if (currentUser?.tipoPerfil === 'PROPIETARIO') return SECCIONES_PROPIETARIO;
+    if (currentUser?.tipoPerfil === 'PROFESIONAL') return SECCIONES_PROFESIONAL;
+    return undefined; // ADMINISTRADOR: sin restricción de secciones
+  }, [currentUser?.tipoPerfil]);
+  const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
   const [showCrearUsuarioModal, setShowCrearUsuarioModal] = useState<boolean>(false);
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<UsuarioApp | undefined>(undefined);
   const [showCrearProfesionalModal, setShowCrearProfesionalModal] = useState<boolean>(false);
@@ -3222,6 +3241,10 @@ export default function App() {
           activeSection={activeSection}
           userProfile={userProfile}
           onSelectSection={setActiveSection}
+          onIniciarTutorial={(id) => {
+            const t = obtenerTutorial(id);
+            if (t) setSesionTutorial(iniciarTutorial(t));
+          }}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -3591,6 +3614,18 @@ export default function App() {
             />
           )}
 
+          {activeSection === 'ayuda' && (
+            <CentroAyudaSection
+              usuario={currentUser}
+              accessibleSections={seccionesAccesibles}
+              onIniciarTutorial={(id) => {
+                const t = obtenerTutorial(id);
+                if (t) setSesionTutorial(iniciarTutorial(t));
+              }}
+              onSelectSection={setActiveSection}
+            />
+          )}
+
           {activeSection === 'administracion' && (
             currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
               <AdminControlCenter
@@ -3843,6 +3878,18 @@ export default function App() {
           onSaveInvitacion={(newInv) => {
             handleSaveInvitacion(newInv);
           }}
+        />
+      )}
+
+      {/* CAPA TRANSVERSAL §6 (Fase 1): reproductor de tutorial (no bloquea la pantalla) */}
+      {sesionTutorial && tutorialActivo && currentUser && (
+        <TutorialPlayer
+          tutorial={tutorialActivo}
+          sesion={sesionTutorial}
+          contexto={contextoDesdeUsuario(currentUser, activeSection, { accessibleSections: seccionesAccesibles })}
+          onCambio={setSesionTutorial}
+          onNavegar={setActiveSection}
+          onCerrar={() => setSesionTutorial(null)}
         />
       )}
 

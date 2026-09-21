@@ -447,8 +447,9 @@ implementar).
 
 > **Decisión de producto (2026-09-20). Fuera de la numeración GAP** —
 > explícitamente **NO** es un GAP9/10/11 ni equivalente. Se gestiona dentro de
-> la estructura de este mapa. Estado global: **PREVISTA/FUTURA** (nada
-> implementado; hoy no existe Ayuda integrada ni asistente de IA en la app).
+> la estructura de este mapa. Estado global: **INICIADA — FASE 1 IMPLEMENTADA
+> (2026-09-21, Arena A)**; IA asistente todavía NO implementada (solo contrato
+> de tipos). Ver §6.5.
 >
 > **Finalidad:** que la complejidad interna del ERP **no obligue al usuario a
 > conocer su arquitectura**. El usuario describe su necesidad en lenguaje
@@ -541,6 +542,60 @@ negocio, **se apoya en el motor correspondiente del ERP** (p. ej. cálculos
 económicos → `cobrosEngine`/`facturacionEngine`; estados → las máquinas de
 estado existentes; permisos → `authService` + reglas).
 
+### 6.5 Estado real — FASE 1 implementada (2026-09-21)
+
+**Motor transversal** `src/experiencia/` (puro, sin Firebase, sin persistencia,
+sin auditoría propia):
+
+- `tipos.ts` — `ExperienceContextInput`/`ExperienceContext` (module, section,
+  route, role, roles, permissions, entity, state, `missing[]`), `HelpEntry`,
+  `Tutorial`/`TutorialStep`, `SesionTutorial`, `EvaluacionPaso` y el **contrato
+  para la futura IA**: `CapacidadERP`, `IntentRequest`, `IntentResolution`,
+  `ResolveUserIntent` (solo tipos; sin llamadas a Gemini).
+- `contexto.ts` — `getExperienceContext()` / `contextoDesdeUsuario()`: resuelve
+  módulo por sección (`MODULO_POR_SECCION`, todas las `SectionType`), tolera
+  contexto incompleto; **rol y permisos se leen de `UsuarioApp`** (RBAC
+  canónico; nunca se amplían).
+- `ayuda.ts` — registro tipado `AYUDA_REGISTRO` (9 entradas iniciales sobre
+  funciones reales: inicio, tesorería admin/propietario, morosidad, actas,
+  portal inquilinos, suministros, incidencias, centro) + `ayudaParaContexto`,
+  `buscarAyuda` (texto/keywords, sin acentos, stopwords), filtrado por rol y
+  por permisos requeridos, `modulosConAyuda`.
+- `tutoriales.ts` — modelo + sesión inmutable (`iniciar/avanzar/retroceder/
+  finalizar/cancelar/reanudar/progreso`) + `evaluarPaso` (PERMISO_INSUFICIENTE,
+  RUTA_INEXISTENTE, RUTA_INACCESIBLE, TARGET_NO_VISIBLE, con explicación).
+  **Tutorial real nº 1**: `tutorial.tesoreria.liquidacion` (BLOQUE B, 5 pasos:
+  abrir Tesorería → generar borrador → revisar líneas → aprobar → registrar
+  pago; permisos `tesoreria.ver/liquidar/pagar`).
+- `intenciones.ts` — `CAPACIDADES_ERP`, `capacidadesDisponibles(ctx)` (filtra
+  por permisos reales), `construirIntentRequest`, `resolverIntencionLocal`
+  (determinista, referencia/fallback para el futuro resolutor IA; devuelve
+  `NO_AUTORIZADO` sin exponer contenido).
+
+**UI** (`src/components/experiencia/*`, `src/components/sections/CentroAyudaSection.tsx`):
+`ContextualHelp` (botón «?» accesible en el `Header` junto al título de cada
+pantalla; no renderiza nada si la pantalla no tiene ayuda o el usuario no puede
+verla), `TutorialPlayer` (panel flotante no bloqueante; navega vía
+`setActiveSection` del host respetando el route guard), Centro de Ayuda como
+sección `ayuda` integrada en Sidebar/MobileNav/Header de los tres perfiles ERP
+(sin menú paralelo). `App.tsx`: sección `ayuda` en los route guards (extraídos a
+`SECCIONES_PROPIETARIO`/`SECCIONES_PROFESIONAL`, misma lista) y sesión de
+tutorial en memoria. El portal del inquilino (E) **no** incorpora todavía ayuda.
+
+**Tests**: `src/experiencia/experiencia.test.ts` (25: contexto, ayuda,
+tutoriales, seguridad RBAC, contrato de intención) +
+`src/components/experiencia/experiencia.ui.test.tsx` (13, jsdom: ayuda
+contextual, Centro de Ayuda, reproductor con el tutorial real, navegación).
+Suite global **571/571** (533 + 38) · B 92 · C 82 · D 51 · E 64 · batería E 73 ·
+tsc 0 · build OK.
+
+**NO implementado (siguientes fases, en este orden):** (F2) ayuda contextual en
+el portal del inquilino y ampliación del registro de contenidos por pantalla/
+perfil; recorridos guiados con resaltado de `target` en DOM; (F3) progreso de
+tutoriales persistido por usuario (colección canónica a definir; sin duplicar
+auditoría); (F4) IA asistente: implementación de `ResolveUserIntent` con Gemini
+sobre `capacidadesDisponibles` (límites §6.3), sin chatbot vacío previo.
+
 ---
 
 ## 7. EVOLUCIÓN DEL ERP — ROADMAP (capacidades, no «órdenes pequeñas»)
@@ -554,7 +609,7 @@ presentan como cinco órdenes pequeñas:
 | **C** | Morosidad + recobro + expediente de recuperación | **INTEGRADO (2026-09-21, Arena A — merge `5293c3c`)** — ver §4 BLOQUE C (pendientes: transporte real de comunicaciones GAP1, emulator de reglas, programador de detección, adjuntos en Storage) |
 | **D** | Entrada/salida + actas + evidencias + firma digital | **INTEGRADO (2026-09-21, Arena A)** — ver §4 BLOQUE D (pendiente externo: transporte real OTP SMS/email) |
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | **INTEGRADO (2026-09-21, Arena A — `10f07b3`; validación automatizada `7dcb3ea`, 73/73)** — ver §5 (NV: reglas reales sin emulador) |
-| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | Capa transversal; crece y se profundiza con cada bloque estabilizado |
+| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASE 1 IMPLEMENTADA (2026-09-21)**: motor de contexto + ayuda contextual + Centro de Ayuda + modelo de tutoriales + 1 tutorial real (§6.5). Pendiente: F2 contenidos/portal inquilino, F3 progreso persistido, F4 IA |
 | **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
 
 Dependencias entre fases: §8.

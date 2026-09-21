@@ -100,12 +100,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
       { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   } else if (perfil === 'PROFESIONAL') {
     navItems = [
       { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
       { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   } else {
     // ADMINISTRADOR
@@ -134,6 +136,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length },
       { id: 'analisis', label: 'Análisis IA', icon: Sparkles },
       { id: 'configuracion', label: 'Configuración', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   }
 

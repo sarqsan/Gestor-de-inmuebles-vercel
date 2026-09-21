@@ -35,7 +35,9 @@ export type SectionType =
   | 'mis_servicios'
   | 'mis_zonas'
   | 'mis_asignaciones'
-  | 'mi_perfil';
+  | 'mi_perfil'
+  // CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda
+  | 'ayuda';
 
 export type CandidateStatus =
   | 'nuevo'

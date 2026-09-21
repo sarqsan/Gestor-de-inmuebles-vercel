@@ -118,7 +118,9 @@ describe('E · Enrutado de entrada (App.tsx real, verificación estática)', () 
     expect(sum).toContain("currentUser.tipoPerfil === 'PROPIETARIO' ? (");
     expect(sum).toContain('<SuministrosSection currentUser={currentUser} inmuebles={scopedInmuebles} />');
     // El propietario tiene 'suministros' en su lista de secciones permitidas, pero no 'inquilinos'
-    const allowed = APP.slice(APP.indexOf('const allowedSections'), APP.indexOf('if (!allowedSections.includes(activeSection))'));
+    // Lista del route guard del propietario (constante única `SECCIONES_PROPIETARIO`, reutilizada por §6)
+    const inicioLista = APP.indexOf('const SECCIONES_PROPIETARIO');
+    const allowed = APP.slice(inicioLista, APP.indexOf('];', inicioLista));
     expect(allowed).toContain("'suministros'");
     expect(allowed).not.toContain("'inquilinos'");
     // Sin duplicidad del bloque de tesorería (exclusión aplicada en la integración)

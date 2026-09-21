@@ -1,6 +1,8 @@
 import React from 'react';
 import { SectionType, UserProfile, GmailIntegracionConfig, UsuarioApp, EnlaceRegistro } from '../types';
 import { Plus, Database, User, ShieldCheck, Mail, LogOut, CheckCircle2, Shield, Home, Wrench, Link2, Copy, Check } from 'lucide-react';
+// CAPA TRANSVERSAL §6 (Fase 1): ayuda contextual de la pantalla activa
+import { ContextualHelp } from './experiencia/ContextualHelp';
 
 interface HeaderProps {
   activeSection: SectionType;
@@ -14,6 +16,8 @@ interface HeaderProps {
   onLogout?: () => void;
   onConnectGoogle?: () => void;
   onDisconnectGoogle?: () => void;
+  /** CAPA TRANSVERSAL §6: iniciar un tutorial desde la ayuda contextual. */
+  onIniciarTutorial?: (tutorialId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,6 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onConnectGoogle,
   onDisconnectGoogle,
+  onIniciarTutorial,
 }) => {
   const [copiedLink, setCopiedLink] = React.useState(false);
 
@@ -61,6 +66,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Actas de Entrada y Salida — BLOQUE D', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };
       case 'configuracion':
         return { title: 'Configuración del Sistema', subtitle: 'Preferencias, aseguradoras y conexión Google Workspace' };
+      case 'ayuda':
+        return { title: 'Centro de Ayuda', subtitle: 'Explicaciones por pantalla y tutoriales guiados según tu perfil' };
       default:
         return { title: 'Gestión de Alquileres', subtitle: 'Preselección de candidatos' };
     }
@@ -84,7 +91,17 @@ export const Header: React.FC<HeaderProps> = ({
           <span>/</span>
           <span className="text-slate-600 capitalize">{activeSection.replace('_', ' ')}</span>
         </div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h2>
+          {currentUser && (
+            <ContextualHelp
+              usuario={currentUser}
+              section={activeSection}
+              onAbrirCentro={() => onSelectSection('ayuda')}
+              onIniciarTutorial={onIniciarTutorial}
+            />
+          )}
+        </div>
         <p className="text-xs text-slate-500">{subtitle}</p>
       </div>
 

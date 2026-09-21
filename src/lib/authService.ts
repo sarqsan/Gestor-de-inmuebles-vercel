@@ -425,7 +425,15 @@ export async function registerWithInvitationLink(params: {
       : r.id === 'PROFESIONAL_MANTENIMIENTO'
   );
 
-  const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  // BLOQUE E: el inquilino usa su Auth UID como ID de documento, porque las reglas
+  // resuelven el alcance vía usuarios/{uid}. Sin Firebase Auth no hay aislamiento.
+  if (tipoPerfil === 'INQUILINO' && !firebaseUser) {
+    throw new Error('El registro de inquilino requiere Firebase Authentication (proveedor Email/Contraseña).');
+  }
+  const userId =
+    tipoPerfil === 'INQUILINO' && firebaseUser
+      ? firebaseUser.uid
+      : `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const pHash = await hashPassword(password);
 
   const nuevoUsuario: UsuarioApp = {
@@ -440,7 +448,7 @@ export async function registerWithInvitationLink(params: {
     roles: rolDef ? [rolDef.id] : [],
     permisos: rolDef ? rolDef.permisos : [],
     ...(tipoPerfil === 'INQUILINO' && enlace.contratoIdVinculado
-      ? { contratoIds: [enlace.contratoIdVinculado] }
+      ? { contratoIds: [enlace.contratoIdVinculado], enlaceRegistroId: enlace.id }
       : {}),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

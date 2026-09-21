@@ -209,6 +209,8 @@ export async function eliminarSuministro(id: string, inmuebleId: string): Promis
 // ---------------------------------------------------------------------------
 
 export interface DatosNuevaLectura {
+  /** ID prefijado (para subir la foto antes de crear la lectura inmutable). */
+  id?: string;
   suministroId: string;
   inmuebleId: string;
   contratoId: string;
@@ -226,7 +228,7 @@ export interface DatosNuevaLectura {
 
 export async function registrarLectura(d: DatosNuevaLectura): Promise<LecturaSuministro> {
   const lectura: LecturaSuministro = {
-    id: uid('lec'),
+    id: d.id || uid('lec'),
     suministroId: d.suministroId,
     inmuebleId: d.inmuebleId,
     contratoId: d.contratoId,

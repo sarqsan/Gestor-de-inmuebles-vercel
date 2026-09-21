@@ -164,6 +164,8 @@ import { AdministracionSection } from './components/sections/AdministracionSecti
 import { PropietarioPortalSection } from './components/sections/PropietarioPortalSection';
 import { ProfesionalPortalSection } from './components/sections/ProfesionalPortalSection';
 import { PortalRegistroView } from './components/PortalRegistroView';
+import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPortalShell';
+import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
 import { LoginView } from './components/LoginView';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
 import {
@@ -476,6 +478,7 @@ export default function App() {
 
   // Token de registro público (por enlace o invitación)
   const [activePublicRegistroToken, setActivePublicRegistroToken] = useState<string | null>(null);
+  const [activePublicRegistroInqId, setActivePublicRegistroInqId] = useState<string | null>(null); // BLOQUE E
 
   // Public subscriptions and URL token checking
   useEffect(() => {
@@ -493,6 +496,12 @@ export default function App() {
       }
       if (regToken) {
         setActivePublicRegistroToken(regToken);
+      }
+
+      // BLOQUE E: invitación de inquilino (?registroInq={enlaceId})
+      const regInq = params.get('registroInq');
+      if (regInq) {
+        setActivePublicRegistroInqId(regInq);
       }
 
       // Check Visita Public Token
@@ -2457,11 +2466,37 @@ export default function App() {
     );
   };
 
+  // BLOQUE E: tras el registro por invitación, el inquilino entra en su portal
+  const handleCompleteInquilinoRegistration = (usuario: UsuarioApp) => {
+    setActivePublicRegistroInqId(null);
+    window.history.pushState({}, '', window.location.pathname);
+    setCurrentUser(usuario);
+  };
+
   const handleLogout = async () => {
     await logoutUser();
     setCurrentUser(null);
     setShowAuthModal(false);
   };
+
+  // BLOQUE E: el perfil INQUILINO solo ve su portal (nunca el ERP)
+  if (currentUser?.tipoPerfil === 'INQUILINO') {
+    return <InquilinoPortalShell usuario={currentUser} onLogout={handleLogout} />;
+  }
+
+  // BLOQUE E: registro público de inquilino por invitación (?registroInq=)
+  if (activePublicRegistroInqId) {
+    return (
+      <RegistroInquilinoView
+        enlaceId={activePublicRegistroInqId}
+        onComplete={handleCompleteInquilinoRegistration}
+        onCancel={() => {
+          setActivePublicRegistroInqId(null);
+          window.history.pushState({}, '', window.location.pathname);
+        }}
+      />
+    );
+  }
 
   // Standalone Registration Portal View (Public Link or Token)
   if (activePublicRegistroToken) {

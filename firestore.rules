@@ -107,6 +107,14 @@ service cloud.firestore {
           incoming()[campo].size() <= existing()[campo].size() + 5);
     }
 
+    // Una lista de evidencias solo puede crecer (aportar fotos/docs sin borrar).
+    function listaSoloCrece(campo) {
+      return (!(campo in existing()) && !(campo in incoming())) ||
+        (!(campo in existing()) && (campo in incoming()) && incoming()[campo] is list) ||
+        ((campo in existing()) && (campo in incoming()) && existing()[campo] is list &&
+          incoming()[campo] is list && incoming()[campo].size() >= existing()[campo].size());
+    }
+
     // Un campo opcional debe permanecer idéntico (ausente-ausente o igual-igual).
     function mismoCampoOpcional(campo) {
       return (!(campo in existing()) && !(campo in incoming())) ||
@@ -400,7 +408,12 @@ service cloud.firestore {
         incoming().descripcion is string && incoming().descripcion.size() >= 10 &&
         (!('contratoIdsVisibles' in incoming()) || incoming().contratoIdsVisibles == [incoming().contratoId])
       );
-      allow update: if isStaff();
+      // El inquilino solo aporta evidencias a sus incidencias (las listas solo crecen).
+      allow update: if isStaff() || (isTenant() &&
+        (('contratoId' in existing()) && tenantTieneContrato(existing().contratoId)) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['fotografias', 'documentos', 'fechaActualizacion']) &&
+        listaSoloCrece('fotografias') &&
+        listaSoloCrece('documentos'));
       allow delete: if isMasterAdmin();
     }
 

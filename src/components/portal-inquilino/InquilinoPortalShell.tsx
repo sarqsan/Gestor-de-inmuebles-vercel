@@ -32,9 +32,10 @@ import { PortalCuenta } from './PortalCuenta';
 // CAPA TRANSVERSAL §6 (Fase 2): ayuda contextual y recorridos guiados (misma infraestructura que el ERP)
 import { ContextualHelp } from '../experiencia/ContextualHelp';
 import { TutorialPlayer } from '../experiencia/TutorialPlayer';
+import { AsistentePanel } from '../experiencia/AsistentePanel';
 import { servicioProgresoTutoriales } from '../../lib/progresoTutorialesFirestore';
-import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, PANTALLAS_PORTAL } from '../../experiencia';
-import type { SesionTutorial } from '../../experiencia';
+import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, PANTALLAS_PORTAL, crearProveedorGeminiRemoto } from '../../experiencia';
+import type { AccionHost, SesionTutorial } from '../../experiencia';
 
 type PantallaPortal =
   | 'inicio'
@@ -76,6 +77,12 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
   const iniciarRecorrido = (id: string) => {
     const t = obtenerTutorial(id);
     if (t) setSesionTutorial(iniciarTutorial(t));
+  };
+  // §6 F4: asistente del portal (host PORTAL_INQUILINO; solo capacidades del portal). Ejecuta con `ir()`.
+  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  const ejecutarAccionAsistente = (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => {
+    if (accion.tipo === 'NAVEGAR' || (accion.tipo === 'EXPLICAR' && accion.route)) ir(accion.route as PantallaPortal);
+    else if (accion.tipo === 'TUTORIAL') iniciarRecorrido(accion.tutorialId);
   };
 
   const contratos = portal.contratos;
@@ -133,6 +140,18 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
                   state={contratoActivo.estado}
                   onIniciarTutorial={iniciarRecorrido}
                   tema="oscuro"
+                />
+              )}
+              {contratoActivo && (
+                <AsistentePanel
+                  usuario={usuario}
+                  host="PORTAL_INQUILINO"
+                  section={pantalla}
+                  accessibleSections={[...PANTALLAS_PORTAL]}
+                  proveedor={proveedorIA}
+                  onAccion={ejecutarAccionAsistente}
+                  tema="oscuro"
+                  posicion="centro"
                 />
               )}
               <button

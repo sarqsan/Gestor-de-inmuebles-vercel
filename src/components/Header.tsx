@@ -3,6 +3,8 @@ import { SectionType, UserProfile, GmailIntegracionConfig, UsuarioApp, EnlaceReg
 import { Plus, Database, User, ShieldCheck, Mail, LogOut, CheckCircle2, Shield, Home, Wrench, Link2, Copy, Check } from 'lucide-react';
 // CAPA TRANSVERSAL §6 (Fase 1): ayuda contextual de la pantalla activa
 import { ContextualHelp } from './experiencia/ContextualHelp';
+import { AsistentePanel } from './experiencia/AsistentePanel';
+import type { AccionHost, ProveedorIA } from '../experiencia';
 
 interface HeaderProps {
   activeSection: SectionType;
@@ -18,6 +20,11 @@ interface HeaderProps {
   onDisconnectGoogle?: () => void;
   /** CAPA TRANSVERSAL §6: iniciar un tutorial desde la ayuda contextual. */
   onIniciarTutorial?: (tutorialId: string) => void;
+  /** §6 F4: el host ejecuta la acción validada del asistente (navegar/tutorial). */
+  onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
+  proveedorIA?: ProveedorIA;
+  /** Secciones accesibles (route guard del host) para el asistente. */
+  accessibleSections?: SectionType[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,6 +40,9 @@ export const Header: React.FC<HeaderProps> = ({
   onConnectGoogle,
   onDisconnectGoogle,
   onIniciarTutorial,
+  onAccionAsistente,
+  proveedorIA,
+  accessibleSections,
 }) => {
   const [copiedLink, setCopiedLink] = React.useState(false);
 
@@ -100,6 +110,9 @@ export const Header: React.FC<HeaderProps> = ({
               onAbrirCentro={() => onSelectSection('ayuda')}
               onIniciarTutorial={onIniciarTutorial}
             />
+          )}
+          {currentUser && onAccionAsistente && (
+            <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} />
           )}
         </div>
         <p className="text-xs text-slate-500">{subtitle}</p>

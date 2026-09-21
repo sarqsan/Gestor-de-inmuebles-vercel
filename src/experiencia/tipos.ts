@@ -138,8 +138,28 @@ export interface EvaluacionPaso {
 }
 
 // ---------------------------------------------------------------------------
-// Contrato para la futura IA asistente (§6.2) — SOLO TIPOS en esta fase.
+// Contrato de la IA asistente (§6.2) — F1: tipos base · F4: resolución IA real.
 // ---------------------------------------------------------------------------
+
+/**
+ * Clase de capacidad (F4). Determina si la IA puede resolverla directamente o si exige
+ * confirmación explícita del usuario:
+ * - CONSULTA / NAVEGACION / AYUDA → sin efectos: se resuelven directamente.
+ * - ESCRITURA → modifica datos: siempre `REQUIERE_CONFIRMACION`; y en F4 la IA NUNCA ejecuta la
+ *   operación: tras confirmar, solo abre la pantalla real del ERP donde el usuario la realiza con
+ *   las validaciones del propio módulo.
+ */
+export type TipoCapacidad = 'CONSULTA' | 'NAVEGACION' | 'AYUDA' | 'ESCRITURA';
+
+/** Esquema mínimo de un parámetro estructurado que la IA puede proponer para una capacidad. */
+export interface EsquemaParametro {
+  tipo: 'string' | 'number' | 'boolean';
+  requerido?: boolean;
+  /** Valores admitidos (enumeración cerrada) si procede. */
+  valores?: readonly string[];
+  /** Validación semántica adicional resuelta por el validador determinista (F4). */
+  semantica?: 'RUTA_HOST' | 'HELP_ENTRY_VISIBLE' | 'TUTORIAL_DISPONIBLE';
+}
 
 /** Capacidad segura del ERP que la capa puede ofrecer/explicar. Deriva de permisos reales. */
 export interface CapacidadERP {
@@ -148,6 +168,88 @@ export interface CapacidadERP {
   module: ModuloERP;
   route?: SectionType | string;
   requiredPermission?: string;
+  /** Anfitrión en el que existe (sin valor = disponible en ambos). */
+  host?: HostExperiencia;
+  /** Roles que pueden usarla (además del permiso). Sin valor = cualquier rol con el permiso. */
+  roles?: TipoPerfilUsuario[];
+  /** Clase (F4). Por compatibilidad, ausente = 'CONSULTA'. */
+  tipo?: TipoCapacidad;
+  /** Operación sensible: siempre exige confirmación aunque no sea escritura. */
+  sensible?: boolean;
+  /** Parámetros estructurados admitidos (cerrado: cualquier otro se rechaza). */
+  parametros?: Record<string, EsquemaParametro>;
+  /** Palabras clave para el resolutor local determinista. */
+  keywords?: string[];
+}
+
+export type EstadoResolucionIA = 'RESUELTA' | 'REQUIERE_CONFIRMACION' | 'AMBIGUA' | 'SIN_CAPACIDAD' | 'SIN_PERMISO' | 'NO_SOPORTADA' | 'ERROR';
+
+export type IntencionIA = 'NAVEGAR' | 'EXPLICAR' | 'TUTORIAL' | 'CONSULTAR' | 'EJECUTAR' | 'NINGUNA';
+
+export type ValorParametroIA = string | number | boolean;
+
+/** Petición completa que recibe el intérprete IA (nunca incluye códigos de permiso). */
+export interface AIIntentRequest {
+  input: string;
+  context: ExperienceContext;
+  host: HostExperiencia;
+  module?: ModuloERP;
+  section?: SectionType | string;
+  role?: string;
+  /** Capacidades YA filtradas por RBAC/host/rol. La IA solo puede elegir entre estas. */
+  capabilities: CapacidadERP[];
+  /** Contenidos de ayuda visibles (id + título) para que la IA pueda proponer EXPLICAR. */
+  helpEntries: Array<{ id: string; title: string }>;
+  /** Tutoriales disponibles (id + título) para que la IA pueda proponer TUTORIAL. */
+  tutorials: Array<{ id: string; title: string }>;
+  /** Rutas del host a las que el usuario puede navegar. */
+  routes: string[];
+}
+
+/**
+ * Propuesta CRUDA de un proveedor (IA o local). NO es de confianza: siempre pasa por
+ * `validarResolucionIA` antes de mostrarse o ejecutarse.
+ */
+export interface PropuestaIA {
+  intencion?: IntencionIA | string;
+  capabilityId?: string;
+  helpEntryId?: string;
+  tutorialId?: string;
+  parametros?: Record<string, unknown>;
+  confianza?: number;
+  explicacion?: string;
+  /** Ids de capacidades alternativas cuando la petición es ambigua. */
+  alternativas?: string[];
+}
+
+export interface AIIntentResolution {
+  estado: EstadoResolucionIA;
+  intencion: IntencionIA;
+  /** Solo puede ser un id presente en `capacidadesDisponibles(ctx)`. */
+  capabilityId?: string;
+  helpEntryId?: string;
+  tutorialId?: string;
+  route?: SectionType | string;
+  parametros: Record<string, ValorParametroIA>;
+  confianza: number;
+  explicacion: string;
+  requiereConfirmacion: boolean;
+  /** `true` solo tras `confirmarResolucion()` (confirmación explícita del usuario). */
+  confirmada?: boolean;
+  /** Capacidades entre las que elegir cuando `estado === 'AMBIGUA'` (todas permitidas). */
+  alternativas?: Array<{ capabilityId: string; descripcion: string }>;
+  errores: string[];
+  /** Quién produjo la propuesta validada. */
+  origen: 'IA' | 'LOCAL' | 'VALIDADOR';
+  proveedor?: string;
+  /** Avisos no bloqueantes (p. ej. «proveedor IA no disponible; resolutor local»). */
+  avisos?: string[];
+}
+
+/** Proveedor de interpretación (Gemini vía servidor, local determinista, mock de tests). */
+export interface ProveedorIA {
+  nombre: string;
+  interpretar(request: AIIntentRequest): Promise<PropuestaIA>;
 }
 
 export interface IntentRequest {

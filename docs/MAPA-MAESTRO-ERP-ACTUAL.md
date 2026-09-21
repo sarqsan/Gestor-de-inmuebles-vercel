@@ -764,10 +764,127 @@ arnés E. La regla real (`usuarios_auth/{uid}/progreso_tutoriales`) queda **NO
 VALIDADA** contra Firebase hasta publicarla (publicación manual de reglas
 pendiente, como el resto). No se han creado datos en Firestore real.
 
-**NO implementado (siguiente fase):** (F4) IA asistente: implementación de
-`ResolveUserIntent` con Gemini sobre `capacidadesDisponibles` (límites §6.3),
-sin chatbot vacío previo. Posible mejora menor posterior (no F4): vista
-«Mis tutoriales» en el Centro de Ayuda a partir del progreso persistido.
+**Posible mejora menor posterior (no F4):** vista «Mis tutoriales» en el
+Centro de Ayuda a partir del progreso persistido. La F4 (IA asistente) se
+describe en §6.8.
+
+### 6.8 Estado real — FASE 4 implementada (2026-09-21): IA asistente transversal (primera implementación controlada)
+
+**Principio aplicado**: la IA es **solo una capa de interpretación** sobre
+capacidades REALES; la autoridad sigue siendo el ERP («Usuario → rol →
+permisos → contexto → capacidad permitida → ejecución»). La IA nunca decide
+permisos, nunca toca Firestore, nunca ejecuta nada por sí misma.
+
+**Circuito real (probado en tests, sin proveedor real)**: petición en lenguaje
+natural → `ExperienceContext` (§6.5) → `capacidadesDisponibles(ctx)` (RBAC
+real) → **interpretación** (proveedor IA o local) → `AIIntentRequest` →
+**`validarResolucionIA`** (determinista) → `AIIntentResolution` →
+**confirmación** si procede → **ejecución por el host** (route guard propio,
+tutoriales F2, ayuda F1). El host conserva la última palabra: el asistente
+solo le entrega una `AccionHost` validada (`NAVEGAR` / `TUTORIAL` /
+`EXPLICAR`).
+
+**Contrato (`src/experiencia/tipos.ts`)**: `AIIntentRequest` (texto, host,
+módulo/sección, perfil y rol, **capacidades disponibles** — nunca códigos de
+permiso — y rutas navegables del host), `PropuestaIA` (lo que devuelve el
+proveedor: intención, capacidad propuesta, parámetros, confianza, explicación,
+alternativas), `AIIntentResolution` (estado `RESUELTA | REQUIERE_CONFIRMACION |
+AMBIGUA | SIN_CAPACIDAD | SIN_PERMISO | NO_SOPORTADA | ERROR`, capacidad,
+parámetros, `requiereConfirmacion`, `confirmada`, `errores`, `avisos`,
+`origen` IA|LOCAL|VALIDADOR, `proveedor`). Trazabilidad **dentro de la
+resolución** (sin `audit_logs` ni colección nueva).
+
+**Catálogo de capacidades (`src/experiencia/intenciones.ts`, 28)**: 3
+transversales sin host (`cap.ayuda.explicar`, `cap.ayuda.tutorial`,
+`cap.navegacion.ir` — revalidan sus parámetros contra ayuda/tutoriales/rutas
+del contexto) + `cap.ayuda.consultar` (ERP) + 10 **consulta ERP** (inmuebles,
+propietarios, contratos, cobros, tesorería, morosidad —solo ADMINISTRADOR—,
+actas, incidencias, inquilinos, suministros; cada una ligada al permiso real
+`PERMISOS_SISTEMA`) + 5 **escritura ERP** heredadas de F1 (liquidar, pagar,
+SEPA, invitar inquilino, gestionar suministros: en F4 su ejecución es
+**únicamente abrir la pantalla real tras confirmación explícita**; ninguna
+operación de negocio se dispara desde el asistente) + 9 **Portal**
+(`host = PORTAL_INQUILINO`, solo perfil INQUILINO: inicio, contrato, recibos,
+incidencias, suministros, mensajes, documentos, historial, cuenta).
+**No hay capacidades nuevas de negocio**; `resolverIntencionLocal` (F1) se
+mantiene como último recurso.
+
+**Validación determinista (`validarResolucionIA`, `src/experiencia/asistente.ts`)**:
+capacidad existe en el catálogo → está en `capacidadesDisponibles(ctx)` →
+host coincide → parámetros según esquema (`helpEntryId` en la ayuda visible,
+`tutorialId` en los tutoriales del contexto, `route` en las rutas navegables
+del host) → `ESCRITURA` o `sensible` ⇒ `REQUIERE_CONFIRMACION` → nunca amplía
+permisos (una capacidad no permitida da `SIN_PERMISO` sin exponer contenido).
+Funciona aunque el proveedor devuelva basura (`ERROR`/`NO_SOPORTADA`).
+`confirmarResolucion` **revalida** y marca `confirmada`; `ejecutarResolucion`
+**nunca** produce acción sin `confirmada` cuando la requiere, y revalida de
+nuevo contra el contexto en el momento de ejecutar.
+
+**Confirmaciones**: consulta, navegación y ayuda = directas; escritura =
+confirmación explícita previa («¿Quieres continuar?» → «Sí, continuar» /
+«Cancelar»). Nada sensible está en el primer conjunto (no hay capacidad que
+firme, apruebe, envíe SEPA o modifique reglas).
+
+**Proveedor IA — qué es real y qué no**:
+- **Adaptador servidor** `POST /api/asistente/interpretar` (`server.ts`):
+  reutiliza `getGeminiClient()` / `generateGeminiWithRetry()` y el modelo
+  canónico `gemini-3.7-flash`, la misma `GEMINI_API_KEY`, **sin segunda
+  configuración ni secretos nuevos**. Recibe solo el `AIIntentRequest` (sin
+  permisos, sin datos de negocio), devuelve una `PropuestaIA` en JSON; sin
+  clave responde `{ disponible: false }`. **No ejecuta nada ni accede a
+  Firestore.**
+- **Proveedor cliente** `crearProveedorGeminiRemoto()`
+  (`src/experiencia/proveedorGemini.ts`): llama al endpoint anterior con
+  tiempo máximo; si no está disponible o falla, el asistente **cae al modo
+  local con aviso visible** («modo local»).
+- **Proveedor local determinista** `proveedorLocal` (`asistente.ts`):
+  interpretación por patrones y palabras clave sobre las capacidades
+  permitidas + `buscarAyuda` + `tutorialesDisponibles`; es la referencia de
+  los tests y la garantía de funcionamiento sin red.
+- **NV — Gemini real NO VALIDADO**: el sandbox no tiene red hacia Google;
+  ninguna llamada real a Gemini se ha realizado. La ruta de código está
+  escrita y tipada, pero su validación con la API real queda **PENDIENTE**
+  (requiere `GEMINI_API_KEY` en el entorno del servidor y una prueba manual).
+  No se afirma lo contrario.
+
+**UI (`src/components/experiencia/AsistentePanel.tsx`)**: botón «Asistente»
++ panel ligero (no chat): petición, estado «Interpretando…», interpretación
+con explicación/contenido de ayuda, alternativas ante ambigüedad, confirmación
+explícita, errores claros (sin permiso / no soportada / proveedor caído), aviso
+de modo local. Accesibilidad: `role=dialog` con nombre, `aria-expanded` /
+`aria-controls`, foco al abrir, Escape cierra, `role=status` en carga,
+`data-testid="asistente-resolucion"` + `data-estado`. Hosts: `Header.tsx`
+(escritorio), `MobileNav.tsx` (móvil, tema oscuro), ambos desde `App.tsx`
+(`ejecutarAccionAsistente` → `setActiveSection` con las `seccionesAccesibles`
+del ERP / `iniciarTutorial` F2), y `InquilinoPortalShell.tsx` con
+`host = PORTAL_INQUILINO` y solo las pantallas del portal. El portal **nunca
+deriva** a Tesorería/Morosidad/Actas/inmuebles: una petición de ese tipo se
+responde «no está disponible en el portal del inquilino».
+
+**Tests F4 (28 nuevos)**: `src/experiencia/asistente.test.ts` (19: contrato
+—válida, ambigua, no soportada, sin capacidad, sin permiso—; seguridad
+—permitida aceptada, no permitida rechazada, ampliación de permisos
+rechazada, ERP nunca capacidad Portal, Portal nunca capacidad ERP, petición
+IA sin códigos de permiso—; confirmación —lectura/navegación no, escritura
+sí, sin confirmar no ejecuta, confirmada ejecuta—; proveedor —respuesta
+válida, mal formada, capacidad inexistente, parámetros inválidos, proveedor
+no disponible → fallback local—) + `src/components/experiencia/experiencia.f4.ui.test.tsx`
+(9, jsdom: visible en Header/MobileNav y accesibilidad, navegación,
+loading + interpretación, ambigüedad, confirmación/cancelación con Firestore
+en memoria intacto, errores y modo local, Portal real con contrato y sin
+contrato, tutorial y ayuda del portal, host con `accessibleSections` que
+conserva la última palabra). Ajuste justificado en F1: el test de «contexto
+vacío» de `capacidadesDisponibles` admite ahora las capacidades
+transversales sin host/permiso (no conceden nada por sí mismas: revalidan
+parámetros contra el contexto). Suite global **637/637** (609 + 28) · B 92 ·
+C 82 · D 51 · E 64 · batería E 73 · tsc 0 · build OK.
+
+**PENDIENTE (no implementado, no marcar como hecho)**: validación real con
+Gemini (llamada real y ajuste del prompt); capacidades futuras (diagnóstico
+guiado del §6.2 sobre datos del usuario, acciones de negocio con parámetros
+reales, sensibles con doble confirmación); publicación externa del endpoint
+(despliegue en Vercel con `GEMINI_API_KEY`); métricas de uso. Reglas
+Firestore/Storage **sin cambios** en F4.
 
 ---
 
@@ -782,7 +899,7 @@ presentan como cinco órdenes pequeñas:
 | **C** | Morosidad + recobro + expediente de recuperación | **INTEGRADO (2026-09-21, Arena A — merge `5293c3c`)** — ver §4 BLOQUE C (pendientes: transporte real de comunicaciones GAP1, emulator de reglas, programador de detección, adjuntos en Storage) |
 | **D** | Entrada/salida + actas + evidencias + firma digital | **INTEGRADO (2026-09-21, Arena A)** — ver §4 BLOQUE D (pendiente externo: transporte real OTP SMS/email) |
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | **INTEGRADO (2026-09-21, Arena A — `10f07b3`; validación automatizada `7dcb3ea`, 73/73)** — ver §5 (NV: reglas reales sin emulador) |
-| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASES 1, 2 y 3 IMPLEMENTADAS (2026-09-21)**: motor de contexto + ayuda contextual (ERP y Portal del Inquilino) + Centro de Ayuda + 23 contenidos + recorridos guiados con resaltado real (3 tutoriales) + progreso persistido por usuario en `usuarios_auth/{uid}/progreso_tutoriales` (§6.5–6.7; regla real NV). Pendiente: F4 IA |
+| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASES 1, 2, 3 y 4 IMPLEMENTADAS (2026-09-21)**: motor de contexto + ayuda contextual (ERP y Portal del Inquilino) + Centro de Ayuda + 23 contenidos + recorridos guiados con resaltado real (3 tutoriales) + progreso persistido por usuario en `usuarios_auth/{uid}/progreso_tutoriales` (regla real NV) + **asistente IA transversal controlado** (28 capacidades reales, validación determinista RBAC, confirmación previa en escritura, adaptador Gemini canónico + proveedor local; §6.5–6.8). Pendiente: **validación real de Gemini** (NV), capacidades futuras, publicación externa |
 | **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
 
 Dependencias entre fases: §8.

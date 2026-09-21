@@ -33,6 +33,9 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 
+import { AsistentePanel } from './experiencia/AsistentePanel';
+import type { AccionHost, ProveedorIA } from '../experiencia';
+
 interface MobileNavProps {
   activeSection: SectionType;
   onSelectSection: (section: SectionType) => void;
@@ -49,6 +52,10 @@ interface MobileNavProps {
   currentUser?: UsuarioApp;
   onOpenAddCandidateModal?: () => void;
   onOpenAuthModal?: () => void;
+  /** §6 F4: asistente transversal (misma acción que el Header). */
+  onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
+  proveedorIA?: ProveedorIA;
+  accessibleSections?: SectionType[];
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -66,6 +73,9 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   currentUser,
   onOpenAddCandidateModal,
   onOpenAuthModal,
+  onAccionAsistente,
+  proveedorIA,
+  accessibleSections,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -240,6 +250,11 @@ export const MobileNav: React.FC<MobileNavProps> = ({
             </div>
           )}
         </div>
+
+        {/* §6 F4: asistente (móvil) */}
+        {currentUser && onAccionAsistente && (
+          <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} tema="oscuro" />
+        )}
 
         {/* User Profile on Mobile */}
         {onOpenAuthModal && (

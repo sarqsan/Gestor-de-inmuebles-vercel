@@ -10,6 +10,8 @@ import { CanalEmail, CanalInApp, CanalWebhook, EmailProviderSafeMode } from './s
 import type { TransporteWebhook } from './src/notificaciones/canales';
 import { resolverAutorizacion } from './src/notificaciones/autorizacion';
 import { idempotenciaDeEvento } from './src/types/notificaciones';
+import { construirPromptAsistente, parsearRespuestaModelo } from './src/experiencia/proveedorGemini';
+import type { CuerpoInterpretar } from './src/experiencia/proveedorGemini';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -784,6 +786,53 @@ Responde ÚNICAMENTE en JSON válido con este formato:
   } catch (err: any) {
     console.error('Error analizando respuesta de aseguradora:', err);
     return res.status(500).json({ error: 'Error analizando respuesta de la aseguradora.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CAPA TRANSVERSAL §6 — FASE 4 · Asistente: interpretación de intención con Gemini.
+// Reutiliza el cliente y el modelo canónicos (getGeminiClient / gemini-3.7-flash).
+// El servidor NO conoce permisos ni ejecuta nada: recibe la lista de capacidades YA
+// filtradas por el cliente y devuelve una propuesta que el cliente valida
+// deterministamente (validarResolucionIA). Sin clave → { disponible: false } y el
+// cliente usa el resolutor local. Sin escrituras en Firestore ni auditoría.
+// ---------------------------------------------------------------------------
+const MODELO_ASISTENTE = 'gemini-3.7-flash';
+app.post('/api/asistente/interpretar', async (req, res) => {
+  try {
+    const cuerpo = req.body as Partial<CuerpoInterpretar> | undefined;
+    if (!cuerpo || typeof cuerpo.input !== 'string' || !cuerpo.input.trim() || !Array.isArray(cuerpo.capabilities)) {
+      return res.status(400).json({ disponible: true, error: 'Petición inválida: se requiere input y capabilities.' });
+    }
+    if (cuerpo.input.length > 500 || cuerpo.capabilities.length > 100) {
+      return res.status(400).json({ disponible: true, error: 'Petición demasiado grande.' });
+    }
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json({ disponible: false, proveedor: 'gemini', modelo: MODELO_ASISTENTE });
+    }
+    const prompt = construirPromptAsistente({
+      input: cuerpo.input,
+      host: typeof cuerpo.host === 'string' ? cuerpo.host : 'ERP',
+      module: typeof cuerpo.module === 'string' ? cuerpo.module : undefined,
+      section: typeof cuerpo.section === 'string' ? cuerpo.section : undefined,
+      role: typeof cuerpo.role === 'string' ? cuerpo.role : undefined,
+      capabilities: cuerpo.capabilities,
+      helpEntries: Array.isArray(cuerpo.helpEntries) ? cuerpo.helpEntries : [],
+      tutorials: Array.isArray(cuerpo.tutorials) ? cuerpo.tutorials : [],
+      routes: Array.isArray(cuerpo.routes) ? cuerpo.routes : [],
+    });
+    const response = await generateGeminiWithRetry(ai, {
+      model: MODELO_ASISTENTE,
+      contents: prompt,
+      config: { responseMimeType: 'application/json', temperature: 0.1 },
+    });
+    const propuesta = parsearRespuestaModelo(response?.text);
+    if (!propuesta) return res.json({ disponible: true, proveedor: 'gemini', modelo: MODELO_ASISTENTE, propuesta: null, error: 'RESPUESTA_NO_PARSEABLE' });
+    return res.json({ disponible: true, proveedor: 'gemini', modelo: MODELO_ASISTENTE, propuesta });
+  } catch (err: any) {
+    console.warn('Asistente §6 F4: error consultando Gemini, el cliente usará el resolutor local.', err?.message || err);
+    return res.status(502).json({ disponible: true, proveedor: 'gemini', error: 'PROVEEDOR_ERROR' });
   }
 });
 

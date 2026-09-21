@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { UserPlus, X } from 'lucide-react';
 import {
   SectionType,
@@ -175,7 +175,7 @@ import { ConfiguracionSection } from './components/sections/ConfiguracionSection
 import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
 import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
 import { servicioProgresoTutoriales } from './lib/progresoTutorialesFirestore';
-import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial } from './experiencia';
+import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, crearProveedorGeminiRemoto, type AccionHost } from './experiencia';
 import type { SesionTutorial } from './experiencia';
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
@@ -751,6 +751,17 @@ export default function App() {
     return undefined; // ADMINISTRADOR: sin restricción de secciones
   }, [currentUser?.tipoPerfil]);
   const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
+  // §6 F4: proveedor IA (Gemini vía servidor; sin clave → el motor cae al resolutor local) y
+  // ejecución de acciones validadas del asistente con los medios del host (route guard intacto).
+  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  const ejecutarAccionAsistente = useCallback((accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => {
+    if (accion.tipo === 'NAVEGAR' || (accion.tipo === 'EXPLICAR' && accion.route)) {
+      setActiveSection(accion.route as SectionType);
+    } else if (accion.tipo === 'TUTORIAL') {
+      const t = obtenerTutorial(accion.tutorialId);
+      if (t) setSesionTutorial(iniciarTutorial(t));
+    }
+  }, []);
   const [showCrearUsuarioModal, setShowCrearUsuarioModal] = useState<boolean>(false);
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<UsuarioApp | undefined>(undefined);
   const [showCrearProfesionalModal, setShowCrearProfesionalModal] = useState<boolean>(false);
@@ -3232,6 +3243,9 @@ export default function App() {
           solicitudesSeguroCount={solicitudesSeguro.length}
           cobrosPendientesCount={cobrosPendientesCount}
           morosidadAbiertaCount={morosidadAbiertaCount}
+          onAccionAsistente={ejecutarAccionAsistente}
+          proveedorIA={proveedorIA}
+          accessibleSections={seccionesAccesibles}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -3250,6 +3264,9 @@ export default function App() {
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
           onLogout={handleLogout}
+          onAccionAsistente={ejecutarAccionAsistente}
+          proveedorIA={proveedorIA}
+          accessibleSections={seccionesAccesibles}
         />
 
         {/* Dynamic Section Renderer */}

@@ -40,3 +40,19 @@ export {
 } from './progreso';
 export type { TutorialProgress, MotivoProgreso, ResultadoProgreso, ServicioProgresoTutoriales } from './progreso';
 export { CAPACIDADES_ERP, capacidadesDisponibles, construirIntentRequest, resolverIntencionLocal } from './intenciones';
+export {
+  INTENCIONES_IA,
+  MAX_LONGITUD_PETICION,
+  tipoDe,
+  rutasNavegables,
+  construirAIIntentRequest,
+  validarResolucionIA,
+  proveedorLocal,
+  resolverPeticion,
+  elegirAlternativa,
+  confirmarResolucion,
+  ejecutarResolucion,
+} from './asistente';
+export type { OpcionesAsistente, AccionHost } from './asistente';
+export { RUTA_API_ASISTENTE, cuerpoDesdeRequest, construirPromptAsistente, parsearRespuestaModelo, crearProveedorGeminiRemoto } from './proveedorGemini';
+export type { CuerpoInterpretar, RespuestaInterpretar } from './proveedorGemini';

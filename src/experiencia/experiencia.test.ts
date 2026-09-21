@@ -266,7 +266,8 @@ describe('§6 · Seguridad / RBAC', () => {
     expect(caps.map((c) => c.id)).toContain('cap.inquilinos.invitar');
     expect(caps.map((c) => c.id)).not.toContain('cap.tesoreria.liquidar');
     // Permisos desconocidos → solo capacidades sin permiso (ayuda)
-    expect(capacidadesDisponibles(getExperienceContext({})).map((c) => c.id)).toEqual(['cap.ayuda.consultar']);
+    // (F4: además de la ayuda, las capacidades transversales sin permiso: explicar, tutorial, navegar —cada una revalida sus parámetros contra el contexto)
+    expect(capacidadesDisponibles(getExperienceContext({})).map((c) => c.id)).toEqual(['cap.ayuda.consultar', 'cap.ayuda.explicar', 'cap.ayuda.tutorial', 'cap.navegacion.ir']);
   });
 
   it('el usuario y su rol permanecen intactos tras consultar ayuda, tutoriales y capacidades', () => {

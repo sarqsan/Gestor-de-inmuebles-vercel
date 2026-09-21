@@ -233,6 +233,7 @@ import { InformesSection } from './components/sections/InformesSection';
 import { ConciliacionBancariaSection } from './components/sections/ConciliacionBancariaSection';
 import { FacturacionSection } from './components/sections/FacturacionSection';
 import { PolizasSegurosSection } from './components/sections/PolizasSegurosSection';
+import { ActasSection } from './components/sections/ActasSection';
 import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
 import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
@@ -482,6 +483,7 @@ export default function App() {
         'fiscal',
         'informes',
         'polizas',
+        'actas',
         'incidencias',
         'recomercializacion',
         'configuracion',
@@ -3425,6 +3427,14 @@ export default function App() {
               propietarios={scopedPropietarios}
               currentUser={currentUser || undefined}
               modo={currentUser?.tipoPerfil === 'PROPIETARIO' ? 'PROPIETARIO' : 'ADMIN'}
+            />
+          )}
+
+          {activeSection === 'actas' && (
+            <ActasSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              currentUser={currentUser || undefined}
             />
           )}
 

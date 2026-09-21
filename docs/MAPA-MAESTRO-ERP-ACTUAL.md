@@ -113,6 +113,7 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 | 19 | Backend IA (Express) | 16 endpoints: análisis de documentos/cuestionario/incidencia/inspección, correo aseguradora, cláusula, pricing, kit publicación, catastro, notificaciones, upload | `server.ts` (2.605 l.), `api/index.ts`, `vercel.json` | `FUNCIONAL_CON_MEJORAS` | — | Residual P2: `documentsStore` en memoria (ver #3). Sin rate-limit (documentado en diagnóstico) |
 | 20 | Seguridad perimetral | Reglas Firestore por colección (aislamiento por `propietarioId`, deny-by-default catch-all), reglas Storage por ruta, RBAC en cliente | `firestore.rules` (1.347 l., ~50 bloques), `storage.rules` (161 l.), `firebase.json` | `FUNCIONAL_CON_MEJORAS` | — | Residuales documentados en `FASE_1.4_SEGURIDAD_PERMISOS.md` §5 (ficha pública con datos fiscales; Storage sin claims) |
 | 21 | **Tesorería + Liquidaciones + SEPA (BLOQUE B)** | **INTEGRADO EN ARENA A (2026-09-20)** — cierre del ciclo inmueble→propietario: liquidación mensual determinista, gastos imputables, órdenes de pago, SEPA PAIN.008/001 (preparación, sin envío real), portal propietario, conciliación evidencia | `src/tesoreria/*` (9 módulos), `TesoreriaSection.tsx`, `lib/tesoreriaFirestore.ts`, `lib/conciliacionSession.ts`, colección `liquidaciones_propietarios`/`gastos_inmuebles`/`ordenes_pago`/`ficheros_sepa`/`mandatos_sepa`/`config_liquidacion`, reglas §26–31 | `COMPLETO` (motor + integración) | 92 (batería `test:bloque-b`) | **Preparación** de ficheros SEPA: NO hay envío bancario real (sin APIs/EBICS/certificados inventados). Evidencia de pago requiere movimiento GAP6 conciliado en sesión. Ver §4 BLOQUE B |
+| 23 | **Actas de entrada/salida + firma OTP + PDF (BLOQUE D)** | **INTEGRADO EN LA RAMA CANÓNICA (Arena A, 2026-09-21)** — origen: rama `arena/01a0ab9d-gestor-de-inmuebles-vercel` (commits `698e9e6`+`672b7ee`, excluido su `feat(gap6)` que duplicaba el GAP6 canónico), tras auditoría selectiva 20/20 ficheros. Acta ENTRADA/SALIDA con inventario por elementos (estados expresivos con nivel 0–6), lecturas de contadores, evidencias en Storage (sin base64), incidencias propias de acta, comparación entrada↔salida determinista (sin IA, matching id-first), máquina de estados con histórico, firma vinculada a versión, OTP (SHA-256, 15 min, 5 intentos, uso único, contexto; transporte `PENDIENTE_PROVEEDOR`), PDF jsPDF persistido en Storage con referencia/versión/fecha en Firestore, versionado inmutable de actas firmadas (nuevo documento + `actaAnteriorId` + cadena) protegido en reglas | `src/types/actas.ts`, `src/utils/actas/*` (7 módulos + 51 tests), `src/lib/firebaseActas.ts`, `ActasSection.tsx`, colecciones `actas`/`actas_evidencias`/`actas_incidencias`/`actas_otp`, reglas §38 + storage `actas_fotos`/`actas_pdfs`, `firestore.indexes.json` | `COMPLETO` (motor + UI + reglas; integrado y validado) | 51 (vitest `bloqueD.test.ts`); re-validado en canónica: vitest 460/460 · tsc 0 · build OK | OTP real SMS/email = `PENDIENTE_PROVEEDOR` (no hay proveedor inventado); canal MANUAL entrega en persona con `codigoPlainTemporal` controlado (solo ACTIVO/!usado, limpieza obligatoria tras uso — reforzado en la integración); comparación determinista sin IA; B/C intactos (tests 92+82). Ver §4 BLOQUE D y `docs/BLOQUE_D_ACTAS.md` |
 | 22 | **Morosidad + recobro + expediente legal (BLOQUE C)** | **INTEGRADO EN LA RAMA CANÓNICA (Arena A, 2026-09-21, merge `5293c3c`)** — origen: rama `arena/01a0c03d-gestor-de-inmuebles-vercel` (commit `91bac8e`, base `5ff8448`), tras auditoría selectiva 33/33 ficheros. Detección de deuda desde `registroCobros` (SOLO lectura; el pago sigue siendo `cobrosEngine.registrarPagoPeriodo`), máquina de estados con histórico append-only, política de recobro configurable (D+3/D+10/D+20/D+30) versionada, plan de recobro, comunicaciones **solo por GAP1**, evidencias, compromisos cubiertos con cobros reales, expedientes de aseguradora y jurídico con requisito de procedibilidad LO 1/2025, espejo de mínimo privilegio para el propietario | `src/types/morosidad.ts`, `src/utils/morosidad/*` (8 módulos), `src/lib/morosidadFirestore.ts`, `MorosidadSection.tsx`, `MorosidadDetalleModal.tsx`, colecciones `expedientes_morosidad`/`_hist`/`evidencias_morosidad`/`compromisos_morosidad`/`politicas_morosidad`/`morosidad_resumen_propietario`, reglas §32–§37 | `COMPLETO` (motor + UI + reglas; integrado y validado) | 79 (vitest) + 82 (batería `test:bloque-c`); re-validado en canónica: vitest 409/409 · tsc 0 · build OK | Comunicaciones externas = `DEPENDENCIA_EXTERNA` (email en safe-mode = `PENDIENTE_ENVIO`/`FALLIDA`, nunca `ENVIADA`); burofax/notaría/aseguradora/tribunal = registro manual con evidencia (PREPARADO, sin envío real); intereses sin tipo fijado por el ERP (solo parámetros del usuario, `ESTIMADO`/`VERIFICADO`); reglas verificadas textualmente (sin emulator). Pendientes reales: transporte real GAP1, programador de detección, adjuntos en Storage, gancho BLOQUE B solo a nivel interfaz (`listarLiquidacionesPorCobros`). Ver §4 BLOQUE C y `docs/BLOQUE-C-*.md` |
 
 ### 2.2 Colecciones Firestore (estado canónico)
@@ -317,12 +318,24 @@ salvo verificación documental expresa. **Comprobado en la rama:** D+3/D+10/D+20
 (`fechaObjetivo = vencimiento + diasOffset + diasGracia`) y cambiar la política no reescribe el
 histórico ni los planes ya generados (`versionarPolitica`).
 
-### BLOQUE D — Entrada/salida + actas + evidencias + firma digital
+### BLOQUE D — Entrada/salida + actas + evidencias + firma digital — **INTEGRADO EN CANÓNICA (Arena A, 2026-09-21)**
 
 Objetivo: profesionalizar el check-in/check-out del inmueble con evidencia
 auditable.
 
-Ámbito a documentar/planificar (no implementar ahora):
+> **Estado real:** el bloque está implementado, verificado y **INTEGRADO en la rama
+> canónica** por Arena A (2026-09-21) a partir de la entrega de la rama
+> `arena/01a0ab9d-gestor-de-inmuebles-vercel` (commits `698e9e6` + `672b7ee`, sobre base
+> `9cb01a43`), tras auditoría selectiva de los 20 ficheros del BLOQUE D (0 conflictos).
+> **Excluido** el commit `5d3ae7f` (`feat(gap6)`) de esa rama: creaba un segundo sistema de
+> conciliación sobre `src/utils/conciliacion/*`, que la canónica ya consolidó en `58c5454`
+> (GAP6). Ajustes de integración: reglas D renumeradas a **§38** (§25 canónico = GAP7);
+> predicado OTP reforzado y limpieza real de `codigoPlainTemporal` tras uso.
+> Batería sobre la canónica integrada: `bloqueD.test.ts` 51/51 · `test:bloque-b` 92/92 ·
+> `test:bloque-c` 82 · `vitest run` 460/460 · `tsc --noEmit` 0 · build OK.
+> Detalle: `docs/BLOQUE_D_ACTAS.md` (implementación, modelo, correcciones D2 y pendientes).
+
+Ámbito previsto en el plan (texto original de esta sección; hoy INTEGRADO salvo lo que se indica):
 - Check-in / check-out (base existente: acta de entrega de llaves en
   `contratoEngine`, con lecturas de suministros).
 - Inventario en entrada/salida (base existente: `inventarioEngine` + histórico
@@ -515,7 +528,7 @@ presentan como cinco órdenes pequeñas:
 |---|---|---|
 | **B** | Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001) | **IMPLEMENTADO (2026-09-20)** — ver §4 BLOQUE B (pendientes: envío bancario real, camt.053) |
 | **C** | Morosidad + recobro + expediente de recuperación | **INTEGRADO (2026-09-21, Arena A — merge `5293c3c`)** — ver §4 BLOQUE C (pendientes: transporte real de comunicaciones GAP1, emulator de reglas, programador de detección, adjuntos en Storage) |
-| **D** | Entrada/salida + actas + evidencias + firma digital | Bloque grande |
+| **D** | Entrada/salida + actas + evidencias + firma digital | **INTEGRADO (2026-09-21, Arena A)** — ver §4 BLOQUE D (pendiente externo: transporte real OTP SMS/email) |
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | Bloque grande |
 | **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | Capa transversal; crece y se profundiza con cada bloque estabilizado |
 | **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
@@ -640,6 +653,7 @@ endurecimiento final — §7)
 | `docs/BLOQUE-B-FASE0-VERIFICACION.md` | Verificación pre-integración del bloque B (rama B) |
 | `docs/BLOQUE-B-IMPLEMENTACION.md` | Informe de implementación del bloque B (rama B) |
 | `docs/BLOQUE-B-NORMATIVA-Y-AUDITORIA.md` | Decisiones fiscales/bancarias del bloque B (fuentes y «a verificar») |
+| `docs/BLOQUE_D_ACTAS.md` | BLOQUE D (rama `arena/01a0ab9d-…`, integrado 2026-09-21): auditoría final D2, modelo, correcciones críticas, pendientes externos (transporte OTP) y ajustes de integración en canónica |
 | `docs/BLOQUE-C-IMPLEMENTACION.md` | BLOQUE C (rama `arena/01a0c03d-…`): qué se construyó, qué se reutilizó, etiquetas IMPLEMENTADO/PREPARADO/SIMULADO/EXTERNO/PENDIENTE |
 | `docs/BLOQUE-C-VERIFICACION.md` | BLOQUE C: resultados exactos (tests, tsc, build), límites de la verificación e inventario de cambios para la auditoría de Arena A |
 | `docs/BLOQUE-C-NORMATIVA.md` | BLOQUE C: fuentes legales utilizadas, qué se codificó, qué NO afirma el ERP y pendientes de verificación jurídica |

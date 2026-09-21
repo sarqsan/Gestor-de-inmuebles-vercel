@@ -14,6 +14,7 @@ export type SectionType =
   | 'fiscal'
   | 'informes'
   | 'polizas'
+  | 'actas'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'

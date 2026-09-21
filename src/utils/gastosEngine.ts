@@ -752,6 +752,25 @@ export function sincronizarGastoDesdeTrabajo(params: {
   };
 }
 
+/**
+ * Fecha efectiva de un gasto para filtrado por rango (ORDEN 17 / D2).
+ *
+ * El ERP escribe `fechaDevengo` (y `fechaPago` al abonar); el campo `fecha`
+ * es solo un alias de conveniencia que el ERP no rellena. Todo consumidor que
+ * filtre gastos por fecha debe usar esta función y no leer `g.fecha`.
+ *
+ * - 'DEVENGO' (informes/exportación, misma cadena que `fiscalEngine.calcularGastosEjercicio`):
+ *   fechaDevengo → fechaPago → fecha → createdAt.
+ * - 'PAGO' (conciliación bancaria, el banco refleja el abono):
+ *   fechaPago → fechaDevengo → fecha → createdAt.
+ */
+export function fechaEfectivaGasto(g: Gasto, criterio: 'DEVENGO' | 'PAGO' = 'DEVENGO'): string | undefined {
+  const f = criterio === 'PAGO'
+    ? g.fechaPago || g.fechaDevengo || g.fecha || g.createdAt
+    : g.fechaDevengo || g.fechaPago || g.fecha || g.createdAt;
+  return f || undefined;
+}
+
 export function filtrarGastosPorInmueble(gastos: Gasto[], inmuebleId: string): Gasto[] {
   return gastos.filter((g) => g.inmuebleId === inmuebleId);
 }

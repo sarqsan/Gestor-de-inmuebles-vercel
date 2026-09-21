@@ -6,6 +6,7 @@
 
 import { MovimientoBancario, CandidatoConciliacion, FactorCoincidencia, ResultadoMatching, ConfiguracionMatching, DEFAULT_CONFIG_MATCHING, ConfianzaMatch } from '../../types/conciliacion';
 import { CobroPeriodo, Gasto, Inmueble, ContratoFormalizacion } from '../../types';
+import { fechaEfectivaGasto } from '../gastosEngine';
 
 function normalizarTexto(s: string): string {
   return s.toLowerCase()
@@ -251,7 +252,7 @@ export function buscarCandidatos(
         inmuebleId: gasto.inmuebleId,
         propietarioId: gasto.propietarioId || movimiento.propietarioId,
         importe: gasto.importe,
-        fecha: gasto.fecha,
+        fecha: (fechaEfectivaGasto(gasto, 'PAGO') || '').slice(0,10),
         referencia: gasto.id,
         concepto: gasto.concepto,
         proveedor: gasto.proveedor,

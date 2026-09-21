@@ -6,7 +6,9 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: 2026-09-20 — 2.ª actualización: decisiones de producto
+> Última actualización: 2026-09-21 — **§12 RECONCILIACIÓN GLOBAL (ORDEN 15)**:
+> clasificación definitiva A–F, GAPs de desarrollo real, matriz GAP→Arena y
+> orden técnico. Anteriores: 2026-09-20 — 2.ª actualización: decisiones de producto
 > (Portal del Inquilino consolidado como **BLOQUE E** con dependencias B/C/D y
 > **Capa Transversal de Experiencia, Ayuda, Tutoriales e IA Asistente**, sin
 > numeración GAP). 1.ª actualización: paquete de continuidad.
@@ -447,9 +449,9 @@ implementar).
 
 > **Decisión de producto (2026-09-20). Fuera de la numeración GAP** —
 > explícitamente **NO** es un GAP9/10/11 ni equivalente. Se gestiona dentro de
-> la estructura de este mapa. Estado global: **INICIADA — FASE 1 IMPLEMENTADA
-> (2026-09-21, Arena A)**; IA asistente todavía NO implementada (solo contrato
-> de tipos). Ver §6.5.
+> la estructura de este mapa. Estado global: **FASES 1–4 IMPLEMENTADAS
+> (2026-09-21, Arena A)** — ver §6.5–§6.8; la validación real de Gemini (F4) y
+> la publicación de la regla F3 son pendientes **externos** (§12).
 >
 > **Finalidad:** que la complejidad interna del ERP **no obligue al usuario a
 > conocer su arquitectura**. El usuario describe su necesidad en lenguaje
@@ -925,7 +927,7 @@ el esquema de trabajo de la orden:
 
 ```
 AUTH (authService + RBAC + scoping propietarioId)   ← transversal a TODO
-CAPA TRANSVERSAL — Ayuda/Tutoriales/IA asistente (PREVISTA, sin numeración GAP — §6)
+CAPA TRANSVERSAL — Ayuda/Tutoriales/IA asistente (IMPLEMENTADA F1–F4, sin numeración GAP — §6)
     ← interpreta estados/eventos/acciones de TODOS los bloques (requisitos §6.3)
     │
 CONTRATOS (contratoEngine + contratoCicloEngine GAP2)
@@ -1054,3 +1056,158 @@ endurecimiento final — §7)
 | `docs/informe-auditoria-D-global-2026-09-19.md` | Auditoría global D (habitaciones/inventario) (2026-09-19) |
 | `docs/auditoria/DIAGNOSTICO_FUNCIONAL_2026-09-16.md` | Diagnóstico funcional original vs main vs Arena (2026-09-16) |
 | `docs/arquitectura/FASE_*.md` (14) | Arquitectura por fases 1.4–3.6 (cobros, seguridad, gastos, préstamos, recomercialización) |
+
+---
+
+## 12. RECONCILIACIÓN GLOBAL (ORDEN 15, 2026-09-21) — MAPA DEFINITIVO
+
+> Auditoría de solo lectura sobre `2c47332` (HEAD = remoto, worktree limpio).
+> Regresión re-ejecutada: global **638/638** (32 ficheros) · B 92 · C 82 · D 51 ·
+> E 64 · batería E 73 · F1–F3 76 · F4 29 · tsc 0 · build OK. Corrección F4
+> (`violaEsquema`, `asistente.ts`) presente. Cruce MAPA ↔ código: 33 secciones
+> de UI, 69 bloques `match` en `firestore.rules`, 17 endpoints Express, 32
+> suites. Única discrepancia código↔reglas: `valoraciones_profesionales` (§10.9,
+> ya conocida). Cabecera de §6 y diagrama §8 actualizados (decían «IA prevista»).
+
+### 12.1 Clasificación (una categoría por elemento)
+
+**A — YA IMPLEMENTADO (funcional y probado)**
+Auth+RBAC (4 perfiles, 5 roles predefinidos, `PERMISOS_SISTEMA`) · Inmuebles + habitaciones (72) ·
+Captación pública/candidatos/visitas/cuestionario/solvencia/comparador ·
+Contratos LAU + ciclo GAP2 (44) · Cobros · Gastos/préstamos/rentabilidad ·
+Financiación GAP4 (29) · Incidencias/mantenimiento/profesionales (9) · Pólizas y
+siniestros + Gmail OAuth (única integración externa E2E real) · Inventario (12) ·
+Recomercialización/reformas/pricing/kit IA · Notificaciones GAP1 motor (26) +
+repositorio Firestore (vía C) · Reporting GAP3 (1 suite envolviendo 40 checks) ·
+Sindicación GAP5 generación de feeds (35) · Conciliación GAP6 (23) · Facturación
+GAP7 motor (39) · B2B GAP8 generación (40) · Backend IA Express (16 endpoints +
+asistente) · Seguridad perimetral (reglas deny-by-default) · **BLOQUE B** ·
+**BLOQUE C** · **BLOQUE D** · **BLOQUE E** · **§6 F1–F4** (código cerrado).
+
+**B — IMPLEMENTADO / VALIDACIÓN EXTERNA PENDIENTE**
+| Elemento | Qué falta (fuera de Arena) |
+|---|---|
+| §6 F4 asistente IA | Llamada real a Gemini (`docs/F4-PRUEBA-REAL-GEMINI.md`, 5 casos) |
+| Reglas Firestore/Storage B, C, D, E, §6 F3 | Publicación manual `firebase deploy --only firestore:rules,storage --project startup-sanctuary-sln7n` + `firestore.indexes.json` (6 índices de D) |
+| Reglas E y F3 contra Firebase real | Emulador/entorno real (sin Java ni red en el sandbox) |
+| Auth/Storage reales del Portal E | Registro por invitación y subida real a Storage en entorno real |
+
+**C — DEPENDENCIA EXTERNA / PROVEEDOR / DECISIÓN (no hay desarrollo que hacer hasta disponer de ella)**
+| Elemento | Dependencia | Punto de enganche ya existente |
+|---|---|---|
+| Envío real de email (GAP1 → C, B, GAP2/7/8, E) | Proveedor SMTP/Resend/SendGrid + secretos en backend | `EmailProvider` (`canales.ts`), `ENABLE_EMAIL`/`SMTP_URL`/`EMAIL_FROM` |
+| WhatsApp | WhatsApp Business API | canal `WHATSAPP: null` en `server.ts` |
+| OTP de firma D (SMS/email) | Proveedor de transporte | `TransporteOtpAdapter` / `TransportePendienteAdapter` (`PENDIENTE_PROVEEDOR`) |
+| Firma electrónica cualificada (D, GAP2 anexos) | Proveedor de firma | `referenciaDocumental` |
+| Emisión/recepción bancaria SEPA (B), camt.053 | Entidad/proveedor bancario (EBICS/API) | `sugerirConciliacion`, ficheros PAIN generados |
+| Feed bancario GAP6 en tiempo real | API bancaria | importación manual de MT940/OFX/N43/CSV |
+| Remisión VERI*FACTU / SII (GAP7) | Certificado AEAT + WSDL oficiales | `verifactuTransport.ts` (cola desacoplada) |
+| Envío B2B SPFE/plataforma privada, EDIFACT (GAP8) | Especificación oficial / plataforma certificada / orden ministerial | `adaptadoresB2B.ts` (nunca falso envío) |
+| Publicación real en portales (GAP5) | Cuenta de agente (Kyero feed XML) o acceso operador (resto: `PENDIENTE_ACCESO_OPERADOR`) | `ADAPTADORES_PORTAL` |
+| Custom claims (Storage por propietario, §10.2) | Decisión + Cloud Functions/Admin SDK fuera del cliente | `internalUser()` |
+| Reparación regla `valoraciones_profesionales` (§10.9) | Orden expresa + publicación manual | — |
+| PR #2 (draft) | Decisión del usuario | — |
+| Parámetros fiscales B (retención), `PstlAdr` SEPA 2026, calendario B2B | Verificación normativa por el usuario | marcados «a verificar» |
+
+**D — DESARROLLO REAL PENDIENTE** → §12.2 (fichas). Son los únicos elementos que
+justifican una orden de desarrollo.
+
+**E — DUPLICADO / ABSORBIDO (no volver a desarrollar)**
+| Referencia histórica | Absorbido en |
+|---|---|
+| «Portal del propietario» | `PropietarioPortalSection` + espejo `morosidad_resumen_propietario` (C) + liquidaciones (B) |
+| «Comunicaciones de recobro» (C) | Dispatcher GAP1 (`puenteGAP1.ts`); sin segundo canal |
+| «Notificaciones al inquilino» (E §5.3) | Hilo `mensajes_portal` (decisión E: no duplicar GAP1 en el portal) |
+| «Acta de llaves» de `contratoEngine` | BLOQUE D (actas completas); la de contrato queda como base histórica |
+| «Inventario en entrada/salida» | D (`actaInventarioEngine`) sobre `inventarioEngine` |
+| «Entrada/salida del inquilino» (E §5.3) | `actasAdapter` solo lectura en el portal |
+| `feat(gap6)` de la rama D | Excluido: GAP6 canónico `58c5454` |
+| Permisos `tesoreria.*` y bloque `tesoreria` de la rama E | Excluidos: B canónico |
+| Repositorio Firestore de GAP1 | Implementado por C (`escritorNotificacionesGAP1`), usado por `App.tsx` |
+| «Segundo motor de ayuda/tutoriales/IA» | Un solo motor §6 para ERP y Portal |
+| GAP9/10/11 | Nunca creados: §6 sin numeración GAP |
+
+**F — OBSOLETO / DESCARTADO**
+| Referencia | Motivo |
+|---|---|
+| §5.3/§5.4 «Funcionalidades previstas» de E | Texto de planificación previo a la integración; E está implementado (se conserva como histórico) |
+| «Programador de detección» de C | La detección es determinista bajo demanda desde `registroCobros`; no existe cron en Vercel (`vercel.json` sin `crons`) y no hay decisión de crearlo → no es GAP |
+| «Emulator de reglas» de C | Imposible en sandbox; equivale a B (publicación/validación externa) |
+| Línea paralela `main` (circuito de candidato `candidateCircuitEngine`, 4 ficheros) | Fuera de la canónica por decisión (§9); portarla exigiría orden expresa; **no** es GAP vigente |
+| `documentsStore` en memoria (§10.1) | Residual P2 preexistente al funnel público; no bloquea ningún bloque; se mantiene como deuda, no como GAP |
+| Script `test` en `package.json`, chunk >500 kB, rate-limit `/api/*` | Deuda de tooling/hardening, no funcionalidad |
+
+### 12.2 GAPs de desarrollo REAL (fichas)
+
+Solo hay **cuatro** pendientes que requieren código. Ninguno es un bloque nuevo:
+son cierres de circuitos ya existentes.
+
+**GAP-R1 — Persistencia Firestore de la conciliación bancaria (GAP6)**
+- Objetivo: que movimientos, propuestas e importaciones sobrevivan a la sesión.
+- Pendiente: capa `lib/conciliacionFirestore.ts` (CRUD sobre `movimientos_bancarios`, `conciliaciones_bancarias`, `importaciones_bancarias`, cuyas **reglas ya existen** y hoy no se usan) + sustitución del `useState` de `ConciliacionBancariaSection.tsx` por suscripciones; `conciliacionSession.ts` (espejo para B) se conserva.
+- Estado actual: motor GAP6 completo (23 tests), UI operativa **solo en memoria** (`useState`), B lee el espejo de sesión.
+- Código: `src/utils/conciliacion/*`, `ConciliacionBancariaSection.tsx`, `lib/conciliacionSession.ts`, `tesoreria/conciliacionAdapter.ts`. Tests: `tests/conciliacion.test.ts` 23.
+- Afecta: GAP6, BLOQUE B (evidencia de pago). Dependencias: ninguna. Externas: ninguna (reglas ya publicables).
+- Riesgos: duplicación BAJA (no crear segundo motor: solo persistencia); regresión MEDIA sobre B (`conciliacionAdapter`); integración canónica: SÍ (toca sección compartida).
+- Arena: **B** (dominio tesorería/conciliación). Prioridad: **1** (desbloquea el uso real de B con evidencia persistente). Precondición: ninguna.
+
+**GAP-R2 — Adjuntos de evidencias de morosidad en Storage (C)**
+- Objetivo: subir el comprobante real (burofax, justificante) en vez de solo metadatos.
+- Pendiente: ruta Storage `morosidad_evidencias/{propietarioId}/…` en `storage.rules` (patrón E.1–E.4/actas_fotos), función de subida en `lib/morosidadFirestore.ts`, UI en `MorosidadDetalleModal`. El modelo ya tiene `storagePath/nombreArchivo/tipoMime/tamanoBytes`.
+- Estado actual: `evidencias_morosidad` guarda metadatos y `hash`; no hay `uploadBytes` en C.
+- Código: `morosidadStore.ts` (l.474–516), `MorosidadDetalleModal.tsx`. Tests: C 82 + 79 vitest.
+- Afecta: C. Dependencias: ninguna. Externas: publicación de `storage.rules` (B).
+- Riesgos: duplicación BAJA (reutilizar patrón de subida de `suministrosFirestore`/actas); regresión BAJA; integración canónica: SÍ (storage.rules fusión selectiva).
+- Arena: **C**. Prioridad: **3**. Precondición: ninguna técnica.
+
+**GAP-R3 — Cierre de la ficha pública de inmueble (residual P1 §10.3)**
+- Objetivo: que `inmuebles` con `allow read: if true` no exponga campos fiscales/IBAN al funnel público.
+- Pendiente: decidir e implementar la separación (subcolección/documento público derivado o reglas por campo) + ajustar `Portal*PublicaView` y las escrituras que lo mantienen; publicar reglas.
+- Estado actual: documentado en `FASE_1.4_SEGURIDAD_PERMISOS.md` §5; regla `firestore.rules` l.~384.
+- Código: `InmueblesSection`, `PortalSolicitudPublicaView`, `PortalVisitaPublicaView`, `CuestionarioPublicoView`, `lib/firebase.ts`. Tests: ninguno específico (habitaciones 72 tocan `inmuebles`).
+- Afecta: Inmuebles, captación pública, GAP5 (lee inmuebles), B (IBAN). Dependencias: ninguna. Externas: publicación de reglas.
+- Riesgos: duplicación BAJA; regresión **ALTA** (funnel público y suscripciones de todo el ERP); integración canónica: SÍ.
+- Arena: **A** (transversal de seguridad; toca reglas y módulos base). Prioridad: **2** (seguridad de datos). Precondición: decisión de diseño (documento público vs reglas por campo) registrada en el MAPA antes de codificar.
+
+**GAP-R4 — Cobertura de tests de los motores base (cobros/fiscal/gastos) y GAP3 (§10.6)**
+- Objetivo: suites propias para `cobrosEngine` (interfaz económica central de B, C, GAP6, E), `fiscalEngine`, `gastosEngine` y desglose de la suite GAP3 (hoy 1 test que envuelve 40 checks).
+- Pendiente: solo tests (sin cambiar motores).
+- Estado actual: cubiertos indirectamente (GAP2 44, habitaciones 72, B 92, C 82, E 73).
+- Afecta: nada funcional. Dependencias: ninguna. Externas: ninguna.
+- Riesgos: duplicación NULA; regresión NULA (si un test revela un defecto: documentar y detener, no reparar en la misma orden).
+- Arena: **A** (regresión/protección). Prioridad: **4** (antes de cualquier orden que toque `cobrosEngine`, p. ej. GAP-R1). Precondición: ninguna.
+
+### 12.3 Matriz GAP → Arena y dependencias
+
+| GAP | Arena | Depende de | Bloquea a | Requiere publicación de reglas |
+|---|---|---|---|---|
+| GAP-R4 tests base | A | — | GAP-R1 (recomendado, no obligatorio) | No |
+| GAP-R1 persistencia GAP6 | B | — | Uso real de la evidencia de pago de B | No (reglas ya existen; publicación global pendiente igualmente) |
+| GAP-R3 ficha pública | A | Decisión de diseño | — | Sí |
+| GAP-R2 adjuntos morosidad | C | — | — | Sí (`storage.rules`) |
+
+Sin dependencias cruzadas entre R1, R2 y R3: pueden desarrollarse en ramas
+independientes; **Arena A integra** una a una con auditoría selectiva.
+
+### 12.4 Orden técnico de ejecución
+
+| Fase | GAP | Arena | Dependencia previa | Resultado esperado |
+|---|---|---|---|---|
+| **0** (externo, sin Arena) | Publicación de reglas B/C/D/E/F3 + índices; prueba real Gemini F4 | Usuario | — | Reglas e IA validadas en Firebase/Gemini reales; registro en `F4-PRUEBA-REAL-GEMINI.md` |
+| **1** | GAP-R4 | A | — | Suites `cobrosEngine`/`fiscalEngine`/`gastosEngine`/GAP3 desglosada; global > 638 solo por tests |
+| **2** | GAP-R1 | B (rama propia) → integra A | Fase 1 recomendada | Conciliación persistida; B con evidencia real; GAP6 23 + nuevos tests; sin segundo motor |
+| **3** | GAP-R3 | A | Decisión de diseño documentada | Ficha pública sin datos fiscales; reglas publicables; funnel intacto |
+| **4** | GAP-R2 | C (rama propia) → integra A | — | Evidencias con archivo en Storage; C 82 verde |
+| **5** | Integración global (§7 «Después») | A | Fases 1–4 + Fase 0 | E2E, UX, endurecimiento (rate-limit, `documentsStore`, script `test`) |
+
+Cuando llegue un proveedor (email, OTP, SEPA, AEAT, portales) se abre la orden
+correspondiente de la categoría C sobre el punto de enganche indicado; hasta
+entonces **no hay desarrollo que hacer**.
+
+### 12.5 Qué NO debe tocarse
+`src/tesoreria/*`, `lib/tesoreriaFirestore.ts`, reglas §26–31 (B) · `src/utils/morosidad/*`,
+§32–37 (C) · `src/utils/actas/*`, `lib/firebaseActas.ts`, §38 (D) · `src/inquilino/*`,
+`portal-inquilino/*`, §39–42, E.0–E.4 (E) · `src/experiencia/*`, `components/experiencia/*`,
+`usuarios_auth/{uid}/progreso_tutoriales` (§6) · `cobrosEngine.registrarPagoPeriodo` como
+única escritura de cobros · cadena de huellas GAP7 · identidad determinista GAP8 ·
+dispatcher GAP1 (un solo dispatcher) · configuración Gemini de `server.ts` · deny-by-default.

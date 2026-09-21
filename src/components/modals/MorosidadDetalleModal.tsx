@@ -8,9 +8,12 @@
 import React, { useMemo, useState } from 'react';
 import {
   BadgeCheck,
+  ExternalLink,
   FileClock,
   Gavel,
+  Loader2,
   MessageSquarePlus,
+  Paperclip,
   PhoneCall,
   RefreshCw,
   Scale,
@@ -26,9 +29,10 @@ import type {
   ResumenMorosidadPropietario,
   TransicionExpediente,
   EstadoExpediente,
+  TipoEvidencia,
 } from '../../types/morosidad';
 import { ESTADO_EXPEDIENTE_LABELS } from '../../types/morosidad';
-import type { ContratoFormalizacion } from '../../types';
+import type { ContratoFormalizacion, UsuarioApp } from '../../types';
 import {
   type CambiarEstadoFn,
   type EscalarFn,
@@ -38,6 +42,8 @@ import {
   type RegistrarPagoFn,
   type ContextoCaso,
 } from '../../utils/morosidad/morosidadStore';
+import { crearEvidencia } from '../../utils/morosidad/morosidadEngine';
+import { obtenerUrlEvidenciaMorosidad, subirEvidenciaMorosidadStorage } from '../../lib/morosidadEvidenciasStorage';
 import { TRANSICIONES_MOROSIDAD } from '../../utils/morosidad/morosidadEstados';
 
 interface Props {
@@ -109,6 +115,14 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
   const [confirmarCierre, setConfirmarCierre] = useState(false);
   const [mascEstado, setMascEstado] = useState<'NO_VERIFICADO' | 'PENDIENTE' | 'CUMPLIDO_EVIDENCIA' | 'IMPOSIBILIDAD_DECLARADA'>('NO_VERIFICADO');
 
+  // --- R2: adjunto de evidencia en Storage real (formulario aditivo; no altera los flujos C) ---
+  const [adjArchivo, setAdjArchivo] = useState<File | null>(null);
+  const [adjTipo, setAdjTipo] = useState<TipoEvidencia>('DOCUMENTO');
+  const [adjFecha, setAdjFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [adjResumen, setAdjResumen] = useState('');
+  const [adjClave, setAdjClave] = useState(0);
+  const [resolviendoAdjuntoId, setResolviendoAdjuntoId] = useState<string | null>(null);
+
   const transiciones = useMemo(() => TRANSICIONES_MOROSIDAD[exp.estado] || [], [exp.estado]);
   const totales = useMemo(() => {
     const abiertas = exp.piezasDeuda.filter((p) => p.estado !== 'PAGADA' && p.estado !== 'ANULADA' && p.estado !== 'CORREGIDA');
@@ -141,6 +155,54 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
       setEspera(false);
     }
   };
+
+  // R2: recupera el binario de una evidencia (la URL es efímera; el path es la referencia).
+  const verAdjunto = async (e: EvidenciaMorosidad) => {
+    if (!e.storagePath || resolviendoAdjuntoId) return;
+    setResolviendoAdjuntoId(e.id);
+    try {
+      const url = await obtenerUrlEvidenciaMorosidad(e.storagePath);
+      window.open(url, '_blank', 'noopener');
+    } catch (err) {
+      setAviso({ tipo: 'error', texto: err instanceof Error ? err.message : 'No se pudo recuperar el adjunto' });
+    } finally {
+      setResolviendoAdjuntoId(null);
+    }
+  };
+
+  // R2: sube el fichero a Storage y registra la evidencia con sus metadatos
+  // usando el motor canónico `crearEvidencia` (misma validación que el resto
+  // de flujos C) + append + contadores del expediente (igual que registrarPago).
+  const subirAdjunto = () =>
+    ejecutar(async () => {
+      if (!adjArchivo) return { ok: false, errores: ['Selecciona un fichero (PDF o imagen, máx. 10 MB)'] };
+      const subido = await subirEvidenciaMorosidadStorage(exp.propietarioId, exp.id, adjArchivo);
+      const ev = crearEvidencia({
+        expedienteId: exp.id,
+        propietarioId: exp.propietarioId,
+        tipo: adjTipo,
+        fecha: adjFecha,
+        resumen: adjResumen,
+        storagePath: subido.storagePath,
+        nombreArchivo: subido.nombreArchivo,
+        tipoMime: subido.tipoMime,
+        tamanoBytes: subido.tamanoBytes,
+        actor: (contexto.actor || null) as unknown as UsuarioApp | null,
+        claveEstable: `adjunto|${subido.storagePath}`,
+      });
+      if (!ev.ok || !ev.evidencia) return { ok: false, errores: ev.errores };
+      await contexto.repositorio.appendEvidencia(ev.evidencia);
+      await contexto.repositorio.guardarExpediente({
+        ...exp,
+        numEvidencias: Number(exp.numEvidencias || 0) + 1,
+        ultimaEvidenciaFecha: adjFecha,
+        actualizadoEn: new Date().toISOString(),
+      });
+      setAdjArchivo(null);
+      setAdjResumen('');
+      setAdjClave((k) => k + 1);
+      return { ok: true };
+    }, 'Evidencia con adjunto registrada en Storage');
 
   const paneles: [PanelId, string, number][] = [
     ['deuda', 'Deuda y tramos', exp.piezasDeuda.length],
@@ -691,6 +753,35 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
             )}
 
             {panel === 'evidencias' && (
+              <div className="space-y-2">
+                {esAdmin && (
+                  <div className="border border-indigo-200 bg-indigo-50/50 rounded-lg px-3 py-2 space-y-2 text-xs">
+                    <div className="font-semibold text-slate-800 flex items-center gap-1">
+                      <Paperclip className="w-3.5 h-3.5" /> Adjuntar evidencia (PDF/imagen, máx. 10 MB)
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                      <input key={adjClave} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setAdjArchivo(e.target.files?.[0] || null)} className="border border-slate-300 rounded px-2 py-1.5 bg-white md:col-span-2" />
+                      <select value={adjTipo} onChange={(e) => setAdjTipo(e.target.value as TipoEvidencia)} className="border border-slate-300 rounded px-2 py-1.5 bg-white">
+                        <option value="DOCUMENTO">DOCUMENTO</option>
+                        <option value="COMUNICACION">COMUNICACION</option>
+                        <option value="NOTIFICACION_FEHACIENTE">NOTIFICACION_FEHACIENTE</option>
+                        <option value="RESPUESTA_DEUDOR">RESPUESTA_DEUDOR</option>
+                        <option value="PROMESA_PAGO">PROMESA_PAGO</option>
+                        <option value="PAGO">PAGO</option>
+                        <option value="LLAMADA">LLAMADA</option>
+                        <option value="ACTUACION_PROFESIONAL">ACTUACION_PROFESIONAL</option>
+                        <option value="INCIDENCIA">INCIDENCIA</option>
+                        <option value="VISITA_PRESENCIAL">VISITA_PRESENCIAL</option>
+                        <option value="OTRO">OTRO</option>
+                      </select>
+                      <input type="date" value={adjFecha} onChange={(e) => setAdjFecha(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5 bg-white" />
+                    </div>
+                    <input value={adjResumen} onChange={(e) => setAdjResumen(e.target.value)} placeholder="Resumen de la evidencia (mín. 3 caracteres)" className="w-full border border-slate-300 rounded px-2 py-1.5 bg-white" />
+                    <button onClick={subirAdjunto} disabled={espera || !adjArchivo} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-semibold disabled:opacity-50">
+                      {espera ? 'Subiendo…' : 'Subir y registrar evidencia'}
+                    </button>
+                  </div>
+                )}
               <ul className="space-y-2 text-xs">
                 {evidencias.length === 0 && <li className="text-slate-500">Sin evidencias en la caché local; recarga para leer <code>evidencias_morosidad</code>.</li>}
                 {evidencias.map((e) => (
@@ -701,10 +792,17 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
                     </div>
                     <p className="text-slate-600 mt-1">{e.resumen}</p>
                     {e.detalle && <p className="text-[11px] text-slate-500 mt-0.5">{e.detalle}</p>}
+                    {e.storagePath && (
+                      <button onClick={() => verAdjunto(e)} disabled={resolviendoAdjuntoId === e.id} className="mt-1 inline-flex items-center gap-1 text-indigo-700 hover:underline disabled:opacity-50">
+                        {resolviendoAdjuntoId === e.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
+                        Ver adjunto{e.nombreArchivo ? ` (${e.nombreArchivo})` : ''}
+                      </button>
+                    )}
                     <p className="text-[10px] font-mono text-slate-400 mt-1">{e.id}</p>
                   </li>
                 ))}
               </ul>
+              </div>
             )}
 
             {panel === 'compromisos' && (

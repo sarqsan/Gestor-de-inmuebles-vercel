@@ -289,6 +289,26 @@ service firebase.storage {
       allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
       allow create, update, delete: if isSignedIn() && !isTenant();
     }
+
+    // =========================================================================
+    // R2 — EVIDENCIAS DE MOROSIDAD (adjuntos del expediente, BLOQUE C)
+    // Ruta PRIVADA por propietario y expediente:
+    //   morosidad_evidencias/{propietarioId}/{expedienteId}/{archivo}
+    // Autorización espejo de Firestore §34 (`evidencias_morosidad`): SOLO la
+    // administración maestra opera; el propietario/inquilino nunca leen
+    // evidencias (el propietario solo ve el espejo recortado §37). Sin
+    // segmentos validados contra Firestore: innecesario, el master ve todo.
+    // Creación con `esEvidenciaValida()` (PDF/JPEG/PNG/WEBP, < 10 MB).
+    // Append-only: sin update ni delete (igual que el metadato en §34).
+    // Los metadatos (storagePath, nombre, MIME, tamaño) viven en Firestore;
+    // el binario jamás viaja en base64 ni en localStorage.
+    // =========================================================================
+    match /morosidad_evidencias/{propietarioId}/{expedienteId}/{fileName} {
+      allow read: if isMasterAdmin();
+      allow create: if isMasterAdmin() && esEvidenciaValida();
+      allow update, delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

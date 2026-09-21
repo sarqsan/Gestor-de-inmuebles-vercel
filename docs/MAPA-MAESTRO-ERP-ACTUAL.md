@@ -553,7 +553,7 @@ presentan como cinco órdenes pequeñas:
 | **B** | Tesorería + liquidaciones de propietarios + SEPA (PAIN.008/001) | **IMPLEMENTADO (2026-09-20)** — ver §4 BLOQUE B (pendientes: envío bancario real, camt.053) |
 | **C** | Morosidad + recobro + expediente de recuperación | **INTEGRADO (2026-09-21, Arena A — merge `5293c3c`)** — ver §4 BLOQUE C (pendientes: transporte real de comunicaciones GAP1, emulator de reglas, programador de detección, adjuntos en Storage) |
 | **D** | Entrada/salida + actas + evidencias + firma digital | **INTEGRADO (2026-09-21, Arena A)** — ver §4 BLOQUE D (pendiente externo: transporte real OTP SMS/email) |
-| **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | Bloque grande |
+| **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | **INTEGRADO (2026-09-21, Arena A — `10f07b3`; validación automatizada `7dcb3ea`, 73/73)** — ver §5 (NV: reglas reales sin emulador) |
 | **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | Capa transversal; crece y se profundiza con cada bloque estabilizado |
 | **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
 
@@ -664,6 +664,15 @@ endurecimiento final — §7)
 7. `/api/*` sin rate-limit (documentado en diagnóstico funcional).
 8. Despliegue de reglas: `firestore.rules`/`storage.rules` se publican **manualmente**
    por el usuario con Firebase CLI (no desde el sandbox).
+9. Colección `valoraciones_profesionales` (GAP base «Profesionales», usada por
+   `ProfesionalesSection` vía `subscribeValoracionesProfesionales`/`saveValoracionProfesionalFirestore`)
+   **sin bloque `match` propio en `firestore.rules`** → cae en el deny-by-default
+   (lectura/escritura denegadas en producción). Residual **preexistente a B/C/D/E**:
+   la regla existía en `4d420bd` (§21 antiguo) y desapareció en la integración
+   AI Studio `24a2e23` (línea principal, antes de los bloques). Detectado en la
+   auditoría global post-E (2026-09-21); **no corregido** (fuera de alcance; la
+   reparación requiere orden expresa y publicación manual de reglas). Sin impacto
+   en B/C/D/E.
 
 ## 11. ÍNDICE DE DOCUMENTACIÓN (enlazar, no duplicar)
 

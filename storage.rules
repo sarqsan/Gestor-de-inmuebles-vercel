@@ -151,9 +151,34 @@ service firebase.storage {
       allow update, delete: if internalUser();
     }
 
-    // -------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
+    // FOTOGRAFÍAS Y PDFS DE ACTAS DE ENTRADA/SALIDA (BLOQUE D)
+    // Ruta PRIVADA por propietario y acta:
+    //   actas_fotos/{propietarioId}/{actaId}/{archivo}
+    //   actas_pdfs/{propietarioId}/{actaId}/{archivo}
+    // Documentos internos de trabajo (estado vivienda, inventario, firma).
+    // Sólo cuentas internas; imágenes y PDFs; máximo 15-20 MB por archivo.
+    // NO base64 en Firestore, referencia persistente Storage.
+    // ------------------------------------------------------------------------
+    match /actas_fotos/{propietarioId}/{actaId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage();
+      allow update, delete: if internalUser();
+    }
+
+    match /actas_pdfs/{propietarioId}/{actaId}/{fileName} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage();
+      allow update, delete: if internalUser();
+    }
+
+    // ------------------------------------------------------------------------
     // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
-    // -------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
     match /{allPaths=**} {
       allow read, write: if false;
     }

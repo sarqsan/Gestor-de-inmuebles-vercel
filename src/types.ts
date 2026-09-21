@@ -9,6 +9,7 @@ export type SectionType =
   | 'informes'
   | 'conciliacion'
   | 'polizas'
+  | 'actas'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'

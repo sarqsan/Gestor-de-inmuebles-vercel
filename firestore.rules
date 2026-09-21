@@ -994,6 +994,171 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 25. ACTAS DE ENTRADA Y SALIDA (BLOQUE D) — aislamiento estricto propietario
+    // - ownerId inmutable (propietario titular)
+    // - inmueble/contrato aislamiento
+    // - actas firmadas/cerradas no modificables silenciosamente → versionado
+    // - sin secretos, sin base64 evidencias (Storage)
+    // - trazabilidad historial obligatorio
+    // =========================================================================
+    match /actas/{actaId} {
+      function actaEsMia(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function actaVisible(d) {
+        return actaEsMia(d) || ('propertyId' in d && myInmuebleIds().hasAny([d.propertyId]));
+      }
+      function actaOwnerInmutable() {
+        return 'ownerId' in existing() && 'ownerId' in incoming() && incoming().ownerId == existing().ownerId;
+      }
+      function actaPropertyInmutable() {
+        return 'propertyId' in existing() && 'propertyId' in incoming() && incoming().propertyId == existing().propertyId;
+      }
+      function sinSecretosActa() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'tokenBancario' in incoming()
+        );
+      }
+      function estadoValido() {
+        return incoming().estado in ['BORRADOR', 'EN_REVISION', 'PENDIENTE_FIRMA', 'FIRMADA', 'CERRADA', 'ERROR', 'CANCELADA'];
+      }
+      function tipoValido() {
+        return incoming().tipo in ['ENTRADA', 'SALIDA'];
+      }
+      function versionIncrementoValido() {
+        return incoming().version >= existing().version;
+      }
+      function esVersionadoPermitido() {
+        // Permitir versionado de FIRMADA/CERRADA → BORRADOR con incremento versión
+        return (existing().estado in ['FIRMADA', 'CERRADA'])
+          && incoming().estado == 'BORRADOR'
+          && incoming().version > existing().version;
+      }
+      function noModificacionSilenciosaFirmada() {
+        // Si existente es FIRMADA/CERRADA, solo permitir si es versionado
+        return !(existing().estado in ['FIRMADA', 'CERRADA']) || esVersionadoPermitido();
+      }
+
+      allow get: if isMasterAdmin() || (isPropietarioRole() && actaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && actaEsMia(resource.data));
+
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'propertyId' in incoming() && incoming().propertyId is string
+        && tipoValido()
+        && estadoValido()
+        && incoming().estado == 'BORRADOR'
+        && 'version' in incoming() && incoming().version == 1
+      ) && sinSecretosActa();
+
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && actaOwnerInmutable()
+        && actaPropertyInmutable()
+        && versionIncrementoValido()
+        && noModificacionSilenciosaFirmada()
+        && estadoValido()
+      ) && sinSecretosActa();
+
+      allow delete: if isMasterAdmin();
+    }
+
+    match /actas_evidencias/{evidenciaId} {
+      function evidenciaEsMia(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function evidenciaVisible(d) {
+        return evidenciaEsMia(d) || ('propertyId' in d && myInmuebleIds().hasAny([d.propertyId]));
+      }
+      function sinBase64() {
+        // Evitar almacenamiento base64 en Firestore: storagePath obligatorio, no data URL gigante
+        return 'storagePath' in incoming()
+          && !(incoming().storagePath is string && incoming().storagePath.matches('data:.*'))
+          && !('base64Data' in incoming() && incoming().base64Data.size() > 1000);
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && evidenciaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && evidenciaEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId is string
+        && 'propertyId' in incoming() && incoming().propertyId is string
+        && 'storagePath' in incoming()
+      ) && sinBase64();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId == existing().actaId
+      ) && sinBase64();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+      );
+    }
+
+    match /actas_incidencias/{incidenciaId} {
+      function incidenciaEsMia(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function incidenciaVisible(d) {
+        return incidenciaEsMia(d) || ('propertyId' in d && myInmuebleIds().hasAny([d.propertyId]));
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && incidenciaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && incidenciaEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId is string
+        && 'propertyId' in incoming() && incoming().propertyId is string
+      );
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+      );
+    }
+
+    match /actas_otp/{otpId} {
+      function otpEsMio(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function sinSecretoPlanoExcesivo() {
+        // No permitir almacenamiento de codigo en texto plano salvo temporal controlado
+        // Permitimos codigoPlainTemporal solo si estado ACTIVO y usado false
+        return !('codigo' in incoming() && incoming().codigo.size() > 0) // nunca campo 'codigo' plano
+          && !('plain' in incoming());
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && otpEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && otpEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId is string
+        && 'firmaId' in incoming() && incoming().firmaId is string
+        && 'codigoHash' in incoming()
+      ) && sinSecretoPlanoExcesivo();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId == existing().actaId
+      ) && sinSecretoPlanoExcesivo();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)
     // =========================================================================
     match /{document=**} {

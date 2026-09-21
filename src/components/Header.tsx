@@ -57,6 +57,24 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Análisis Gemini IA', subtitle: 'Evaluación automatizada de solvencia y documentación' };
       case 'administracion':
         return { title: 'Administración Global & Seguridad', subtitle: 'Usuarios, roles, módulos, invitaciones y registro de auditoría' };
+      case 'actas':
+        return { title: 'Actas de Entrada y Salida — BLOQUE D', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };
+      case 'polizas':
+        return { title: 'Pólizas y Seguros', subtitle: 'Gestión de pólizas, siniestros, renovaciones y comparativas' };
+      case 'conciliacion':
+        return { title: 'Conciliación Bancaria', subtitle: 'Importación extractos y conciliación automática' };
+      case 'gastos':
+        return { title: 'Gestión de Gastos', subtitle: 'Explotación vs financiación y recurrentes' };
+      case 'cobros':
+        return { title: 'Gestión de Cobros', subtitle: 'Control mensual, vencimientos y pagos' };
+      case 'fiscal':
+        return { title: 'Fiscalidad IRPF', subtitle: 'Cálculo rendimiento y preparación IRPF' };
+      case 'informes':
+        return { title: 'Informes Ejecutivos', subtitle: 'Patrimonio, rentabilidad y exportación estructurada' };
+      case 'incidencias':
+        return { title: 'Incidencias y Mantenimiento', subtitle: 'Gestión operativa y trabajos profesionales' };
+      case 'recomercializacion':
+        return { title: 'Recomercialización', subtitle: 'Salida, inspección y nueva puesta en mercado' };
       case 'configuracion':
         return { title: 'Configuración del Sistema', subtitle: 'Preferencias, aseguradoras y conexión Google Workspace' };
       default:

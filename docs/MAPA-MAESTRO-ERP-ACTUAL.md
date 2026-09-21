@@ -28,7 +28,7 @@
 | Conciliación bancaria automática (camt.053) | 🟡 | Adaptador de lectura + `sugerirConciliacion` documentado; 🔌 extractos bancarios / conector |
 | Dispatcher notificaciones (GAP1) | ⬜ | Eventos tipados + auditoría; sin envío real (diseñado para enchufar dispatcher futuro) |
 | Facturación (GAP7/GAP8) | ⬜ | Solo base/IVA registrados; sin motor de facturación |
-| Portal del inquilino (BLOQUE E) | ⬜ | Fuera de alcance del BLOQUE B |
+| Portal del inquilino (BLOQUE E) | ✅ IMPLEMENTADO EN ARENA B / PENDIENTE INTEGRACIÓN | Ver docs/BLOQUE-E-IMPLEMENTACION.md |
 | IA asistente / Ayuda / Bloques C/D | ⬜ | Fuera de alcance |
 
 ## Colecciones Firestore (BLOQUE B, nuevas)

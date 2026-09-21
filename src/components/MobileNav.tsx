@@ -22,6 +22,8 @@ import {
   ArrowLeftRight,
   Receipt,
   AlertTriangle,
+  Smartphone,
+  Zap,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -81,6 +83,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
           { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Receipt, description: 'Liquidaciones y estado de cuenta' },
           { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías y mantenimiento' },
+          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'Lecturas y consumos' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : perfil === 'PROFESIONAL'
@@ -98,6 +101,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Receipt, description: 'Liquidaciones, gastos y SEPA' },
           { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías, peritajes IA y siniestros' },
+          { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone, description: 'Accesos, invitaciones y mensajes' },
+          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'CUPS, lecturas y reparto' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },

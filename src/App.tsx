@@ -134,6 +134,8 @@ import { PreseleccionadosSection } from './components/sections/PreseleccionadosS
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
 import { TesoreriaSection } from './components/sections/TesoreriaSection';
+import { InquilinosSection } from './components/sections/InquilinosSection';
+import { SuministrosSection } from './components/sections/SuministrosSection';
 import {
   deleteGastoFirestore,
   saveFicheroSepaFirestore,
@@ -380,7 +382,7 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'configuracion'];
+      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'configuracion', 'suministros'];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
@@ -2866,6 +2868,22 @@ export default function App() {
               />
             ) : null
           )}
+
+          {activeSection === 'inquilinos' && currentUser.tipoPerfil === 'ADMINISTRADOR' && (
+            <InquilinosSection
+              currentUser={currentUser}
+              contratos={contratos}
+              inmuebles={inmuebles}
+              usuarios={usuarios}
+            />
+          )}
+
+          {activeSection === 'suministros' &&
+            (currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
+              <SuministrosSection currentUser={currentUser} inmuebles={inmuebles} />
+            ) : currentUser.tipoPerfil === 'PROPIETARIO' ? (
+              <SuministrosSection currentUser={currentUser} inmuebles={scopedInmuebles} />
+            ) : null)}
 
           {activeSection === 'incidencias' && (
             <IncidenciasSection

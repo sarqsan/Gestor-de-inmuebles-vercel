@@ -10,7 +10,7 @@
     "clean": "rm -rf dist server.js",
     "test": "tsx scripts/test-candidate-circuit.ts",
     "test:bloque-b": "tsx scripts/test-bloque-b.ts",
-    "test:all": "tsx scripts/test-candidate-circuit.ts && tsx scripts/test-bloque-b.ts",
+    "test:all": "tsx scripts/test-candidate-circuit.ts && tsx scripts/test-bloque-b.ts && tsx scripts/test-bloque-e.ts",
     "lint": "tsc --noEmit",
     "test:bloque-e": "tsx scripts/test-bloque-e.ts"
   },

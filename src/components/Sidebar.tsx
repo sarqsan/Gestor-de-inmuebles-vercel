@@ -20,6 +20,8 @@ import {
   LogOut,
   Receipt,
   AlertTriangle,
+  Smartphone,
+  Zap,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -79,6 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
       { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Receipt },
       { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
   } else if (perfil === 'PROFESIONAL') {
@@ -98,6 +101,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Receipt },
       { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
       { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone },
+      { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },

@@ -213,7 +213,7 @@ export interface DatosNuevaLectura {
   id?: string;
   suministroId: string;
   inmuebleId: string;
-  contratoId: string;
+  contratoId?: string; // visible para el inquilino de ese contrato
   valor: number;
   unidad: string;
   fechaLectura: string;
@@ -264,7 +264,7 @@ export async function vincularLecturaASuministro(suministroId: string, lecturaId
 export interface DatosNuevoCambio {
   suministroId: string;
   inmuebleId: string;
-  contratoId: string;
+  contratoId?: string;
   titularAnteriorNombre?: string;
   titularNuevoNombre: string;
   titularNuevoNif?: string;

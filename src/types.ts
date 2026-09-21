@@ -4,6 +4,8 @@ export type SectionType =
   | 'propietarios'
   | 'cobros'
   | 'tesoreria'
+  | 'inquilinos'
+  | 'suministros'
   | 'incidencias'
   | 'profesionales'
   | 'preseleccionados'

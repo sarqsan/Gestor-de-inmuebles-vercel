@@ -151,9 +151,24 @@ service firebase.storage {
     // -------------------------------------------------------------------------
     // IMÁGENES DE INMUEBLES (catálogo / listado público)
     // Lectura pública (los listados son públicos); escritura interna.
+    // R3: el nivel público es SOLO el primer segmento (foto de catálogo
+    // `inmuebles/{id}/{fichero}`); la subruta `inventario/` (evidencia
+    // operativa interna: contenidos/estado del inmueble) es solo interna.
     // -------------------------------------------------------------------------
-    match /inmuebles/{inmuebleId}/{allFiles=**} {
+    match /inmuebles/{inmuebleId}/{fileName} {
       allow read: if true;
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage();
+      allow update, delete: if internalUser();
+    }
+
+    // R3 — ADJUNTOS DE INVENTARIO (documentación interna de trabajo).
+    // Antes cubiertos por el comodín público; ahora lectura/escritura
+    // interna. Las downloadURL con token ya emitidas siguen funcionando
+    // como enlaces de capacidad para su tenedor legítimo.
+    match /inmuebles/{inmuebleId}/inventario/{allFiles=**} {
+      allow read: if internalUser();
       allow create: if internalUser()
         && request.resource.size < 15 * 1024 * 1024
         && isImage();

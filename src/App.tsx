@@ -149,6 +149,12 @@ import { Header } from './components/Header';
 import { CandidateModal } from './components/CandidateModal';
 import { SmartReportModal } from './components/SmartReportModal';
 import { CrearAgendaVisitasModal } from './components/CrearAgendaVisitasModal';
+import {
+  adaptarFichaAInmuebleVista,
+  cargarFichaPublicaPorToken,
+  getFichaPublicaInmueble,
+  type FichaPublicaInmueble,
+} from './lib/fichaPublicaInmueble';
 import { CuestionarioPublicoView } from './components/CuestionarioPublicoView';
 import { EnviarCuestionarioModal } from './components/EnviarCuestionarioModal';
 
@@ -426,6 +432,9 @@ export default function App() {
 
   // State for Public/Standalone Questionnaire Token
   const [activePublicQuestionnaireToken, setActivePublicQuestionnaireToken] = useState<string | null>(null);
+  // R3: ficha pública mínima para las vistas anónimas (sin documento completo en memoria).
+  const [fichaPublicaVista, setFichaPublicaVista] = useState<FichaPublicaInmueble | null>(null);
+  const [cargandoFichaPublica, setCargandoFichaPublica] = useState(false);
 
   // State for Enviar Cuestionario Modal
   const [candidateForEnviarModal, setCandidateForEnviarModal] = useState<Candidato | null>(null);
@@ -849,20 +858,9 @@ export default function App() {
     checkUrlForTokens();
     window.addEventListener('hashchange', checkUrlForTokens);
 
-    const unsubscribeInm = subscribeInmuebles((data) => {
-      if (data && data.length > 0) {
-        setInmuebles(data);
-        try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(data)); } catch (e) {}
-      } else {
-        setInmuebles((current) => {
-          if (current.length > 0) {
-            current.forEach((inm) => saveInmuebleFirestore(inm));
-            return current;
-          }
-          return [];
-        });
-      }
-    });
+    // R3: `inmuebles` (documentos completos con datos privados) YA NO se
+    // suscribe aquí: vive en el efecto autenticado. Las vistas anónimas
+    // resuelven la ficha pública mínima por id (efecto R3 posterior).
 
     const unsubscribeInv = subscribeInvitaciones((data) => {
       if (data && data.length > 0) {
@@ -932,7 +930,6 @@ export default function App() {
 
     return () => {
       window.removeEventListener('hashchange', checkUrlForTokens);
-      unsubscribeInm();
       unsubscribeInv();
       unsubscribeSlot();
       unsubscribeDoc();
@@ -958,6 +955,23 @@ export default function App() {
       propietarioId: currentUser.propietarioId,
       inmuebleIds: currentUser.inmuebleIds || [],
     };
+
+    // R3: suscripción completa de inmuebles, SOLO autenticada (las reglas §1
+    // deniegan get/list anónimos; el funnel público usa la ficha espejo).
+    const unsubscribeInm = subscribeInmuebles((data) => {
+      if (data && data.length > 0) {
+        setInmuebles(data);
+        try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(data)); } catch (e) {}
+      } else {
+        setInmuebles((current) => {
+          if (current.length > 0) {
+            current.forEach((inm) => saveInmuebleFirestore(inm));
+            return current;
+          }
+          return [];
+        });
+      }
+    });
 
     const unsubscribeCand = subscribeCandidatos((data) => {
       if (data && data.length > 0) {
@@ -1119,6 +1133,7 @@ export default function App() {
     }
 
     return () => {
+      unsubscribeInm();
       unsubscribeCand();
       unsubscribeProp();
       unsubscribeSol();
@@ -3000,6 +3015,54 @@ export default function App() {
     setShowAuthModal(false);
   };
 
+  // R3: resolución anónima de la ficha pública para /visita, /solicitud y
+  // /cuestionario. Solo se toca la colección espejo (un documento por id);
+  // la colección `inmuebles` jamás se lee sin sesión.
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      setFichaPublicaVista(null);
+      if (currentUser) {
+        setCargandoFichaPublica(false);
+        return;
+      }
+      if (!activePublicVisitaToken && !activePublicSolicitudToken && !activePublicQuestionnaireToken) {
+        setCargandoFichaPublica(false);
+        return;
+      }
+      setCargandoFichaPublica(true);
+      try {
+        let ficha: FichaPublicaInmueble | null = null;
+        if (activePublicVisitaToken) {
+          const inv = invitaciones.find((i) => i.token === activePublicVisitaToken);
+          if (inv?.inmuebleId) ficha = await getFichaPublicaInmueble(inv.inmuebleId);
+        } else if (activePublicSolicitudToken) {
+          ficha = await cargarFichaPublicaPorToken(activePublicSolicitudToken);
+        } else if (activePublicQuestionnaireToken) {
+          const cand = candidatos.find(
+            (c) => c.cuestionarioToken === activePublicQuestionnaireToken || c.id === activePublicQuestionnaireToken
+          );
+          if (cand?.inmuebleId) ficha = await getFichaPublicaInmueble(cand.inmuebleId);
+        }
+        if (!cancelado) setFichaPublicaVista(ficha);
+      } catch {
+        if (!cancelado) setFichaPublicaVista(null);
+      } finally {
+        if (!cancelado) setCargandoFichaPublica(false);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [
+    currentUser,
+    activePublicVisitaToken,
+    activePublicSolicitudToken,
+    activePublicQuestionnaireToken,
+    invitaciones,
+    candidatos,
+  ]);
+
   // BLOQUE E: el perfil INQUILINO solo ve su portal (nunca el ERP)
   if (currentUser?.tipoPerfil === 'INQUILINO') {
     return <InquilinoPortalShell usuario={currentUser} onLogout={handleLogout} />;
@@ -3088,7 +3151,7 @@ export default function App() {
         token={activePublicVisitaToken}
         invitaciones={invitaciones}
         slots={slots}
-        inmuebles={inmuebles}
+        inmuebles={currentUser ? inmuebles : fichaPublicaVista ? [adaptarFichaAInmuebleVista(fichaPublicaVista)] : []}
         onUpdateInvitacion={(inv) => handleSaveInvitacion(inv)}
         onUpdateSlot={(slot) => handleSaveVisitSlot(slot)}
         onUpdateCandidateState={(candidateId, newState) => {
@@ -3100,11 +3163,25 @@ export default function App() {
 
   // Standalone Candidate Portal View (Public URL)
   if (activePublicSolicitudToken) {
-    const targetInmueble = inmuebles.find(
-      (i) => i.tokenSolicitud === activePublicSolicitudToken || i.id === activePublicSolicitudToken
-    );
+    // R3: anónimo resuelve SOLO la ficha pública (nunca el documento completo).
+    const targetInmueble = currentUser
+      ? inmuebles.find(
+          (i) => i.tokenSolicitud === activePublicSolicitudToken || i.id === activePublicSolicitudToken
+        )
+      : fichaPublicaVista
+        ? adaptarFichaAInmuebleVista(fichaPublicaVista)
+        : undefined;
 
     if (!targetInmueble) {
+      if (!currentUser && cargandoFichaPublica) {
+        return (
+          <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+            <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 text-center max-w-md">
+              <p className="text-sm font-semibold text-slate-700">Cargando ficha del inmueble…</p>
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
           <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 text-center space-y-3 max-w-md">
@@ -3133,7 +3210,12 @@ export default function App() {
       (c) => c.cuestionarioToken === activePublicQuestionnaireToken || c.id === activePublicQuestionnaireToken
     );
 
-    const publicInmueble = inmuebles.find((i) => i.id === publicCand?.inmuebleId);
+    // R3: anónimo usa la ficha pública mínima.
+    const publicInmueble = currentUser
+      ? inmuebles.find((i) => i.id === publicCand?.inmuebleId)
+      : fichaPublicaVista
+        ? adaptarFichaAInmuebleVista(fichaPublicaVista)
+        : undefined;
 
     if (!publicCand) {
       return (

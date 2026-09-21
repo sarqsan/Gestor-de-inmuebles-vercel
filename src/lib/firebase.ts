@@ -353,6 +353,13 @@ export async function saveInmuebleFirestore(inmueble: Inmueble) {
   try {
     const cleanInmueble = sanitizeInmuebleForFirestore(inmueble);
     await setDoc(doc(db, 'inmuebles', cleanInmueble.id), cleanInmueble, { merge: true });
+    // R3: espejo público mínimo (mejor esfuerzo: nunca rompe el guardado principal).
+    try {
+      const ficha = buildFichaPublicaInmueble(inmueble);
+      if (ficha) await saveFichaPublicaInmueble(ficha);
+    } catch (errMirror) {
+      console.warn('No se pudo actualizar la ficha pública del inmueble:', errMirror);
+    }
   } catch (err) {
     console.error('Error saving inmueble to Firestore:', err);
   }
@@ -364,12 +371,19 @@ export async function saveInmuebleFirestore(inmueble: Inmueble) {
 export async function deleteInmuebleFirestore(inmuebleId: string) {
   try {
     await deleteDoc(doc(db, 'inmuebles', inmuebleId));
+    // R3: la ficha pública no debe sobrevivir al documento (mejor esfuerzo).
+    try {
+      await deleteFichaPublicaInmueble(inmuebleId);
+    } catch (errMirror) {
+      console.warn('No se pudo eliminar la ficha pública del inmueble:', errMirror);
+    }
   } catch (err) {
     console.error('Error deleting inmueble from Firestore:', err);
   }
 }
 
 import { compressImageForUpload } from '../utils/fileCompressor';
+import { buildFichaPublicaInmueble, deleteFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
 
 /**
  * Recursively cleans any object or array to ensure it contains NO `undefined` values,

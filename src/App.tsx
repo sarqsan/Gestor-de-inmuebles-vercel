@@ -3507,19 +3507,22 @@ export default function App() {
                 contratos={contratos}
                 inmuebles={scopedInmuebles}
                 propietarios={scopedPropietarios}
-                liquidaciones={liquidaciones}
-                gastos={gastos}
-                ordenes={ordenesPago}
-                ficheros={ficherosSepa}
-                mandatos={mandatosSepa}
-                trabajos={trabajosProfesionales}
+                liquidaciones={tesoreriaLiquidaciones}
+                gastos={tesoreriaGastos}
+                ordenes={tesoreriaOrdenesPago}
+                ficheros={tesoreriaFicherosSepa}
+                mandatos={tesoreriaMandatosSepa}
+                trabajos={tesoreriaTrabajos}
+                movimientosBancarios={tesoreriaSesionConciliacion.movimientos}
+                propuestasConciliacion={tesoreriaSesionConciliacion.propuestas}
+                gastosCanonicos={scopedGastos}
                 currentUser={currentUser}
-                onSaveLiquidacion={handleSaveLiquidacion}
-                onSaveGasto={handleSaveGasto}
-                onDeleteGasto={handleDeleteGasto}
-                onSaveOrdenPago={handleSaveOrdenPago}
-                onSaveFicheroSepa={handleSaveFicheroSepa}
-                onSaveMandato={handleSaveMandatoSepa}
+                onSaveLiquidacion={handleSaveTesoreriaLiquidacion}
+                onSaveGasto={handleSaveTesoreriaGasto}
+                onDeleteGasto={handleDeleteTesoreriaGasto}
+                onSaveOrdenPago={handleSaveTesoreriaOrdenPago}
+                onSaveFicheroSepa={handleSaveTesoreriaFicheroSepa}
+                onSaveMandato={handleSaveTesoreriaMandatoSepa}
                 onSaveContratos={handleSaveContratosBatch}
               />
             ) : currentUser.tipoPerfil === 'PROPIETARIO' ? (

@@ -60,3 +60,48 @@ Auth/RBAC/usuarios/enlaces, `Incidencia` + `crearHistorialItem`, `ContratoFormal
 ## 9. Commits (rama de sesión)
 
 1. `299fd51` modelo + RBAC + reglas · 2. `ec20c16` motor + persistencia + tests · 3. `c4f78c0` portal + registro · 4. ERP + docs (este commit).
+
+## 10. Reconciliación contra la canónica de Arena A (2026-09-21)
+
+Merge `5030630`: canónica `7d21d44` INTO rama B (base `4d420bd`), sin reescritura
+de E y sin tocar Arena A. Tag de seguridad previo: `respaldo-e-pre-reconciliacion`.
+
+**Resolución del merge (canónica + E, sin duplicar matches de reglas):**
+- `package.json` (scripts canónicos + `test:bloque-e`), `Sidebar`/`MobileNav`
+  (items E tras actas/recomercialización), `authService` (canónico + guarda E:
+  INQUILINO sin espejo `usuarios_auth`).
+- `types.ts` (canónico + secciones/campos/roles E; campos E reubicados en
+  `Inmueble`), `App.tsx` (estados/handlers `tesoreria*` + morosidad canónicos;
+  rutas E: portal INQUILINO, `?registroInq=`, secciones inquilinos/suministros).
+- `firestore.rules`: modelo canónico §0–§38 + helpers E.0, §11/§13 uniones E,
+  trasplantes tenant en §2 contratos e incidencias, E.1–E.4 renumeradas §39–§42.
+- `storage.rules`: interno canónico + E.0–E.4 tenant-scoped.
+
+**Adaptaciones E→canónica (mínimas, justificadas):**
+- Categorías/estados de incidencia a valores canónicos; `resolucion` acepta
+  `string | ResolucionIncidencia` (normalizador `textoResolucionIncidencia`).
+- Render `TesoreriaSection` a nombres `tesoreria*` (cambio ERP, no E).
+- Adaptador D de solo lectura (`src/inquilino/actasAdapter.ts`): actas por
+  `contractId` + saneado PII; sección en Documentos (tipo/estado/versión/PDF).
+  Sin OTP/versionado/escrituras: firma y PDF los genera gestión.
+- Tests E-60/E-62 actualizados a §39–§42 y lista de actas acotada (misma
+  intención de seguridad).
+
+**Decisiones de reutilización (auditoría §4):**
+- E no usa ni duplica dispatcher GAP1, `comunicaciones`, `cobros_periodo`,
+  `subscribeCobros` ni motores C/D: cero duplicaciones, nada que borrar.
+- `mensajes_portal` SE MANTIENE (hilo portal-específico inquilino↔gestión).
+- Recibos leen `contrato.registroCobros` (vista, sin recalcular); morosidad y
+  actas-escritura quedan fuera del portal.
+
+**Re-auditoría de seguridad (tenant):** 7 endurecimientos solo-tenant (roles
+canónicos intactos): `solicitudes`, `configuracion_aseguradoras`,
+`solicitudes_seguro_impago`, lista `notificaciones`, escrituras
+`profesionales`/`especialidades`, `system/*`≠`modulos_config` (protege
+`gmail_config`). Verificado: INQUILINO sin acceso ERP (shell exclusiva), sin
+espejo (roles canónicos falsos), sin mutar ids, sin IA, 9 vistas aisladas.
+
+**Aceptación:** E 64/64 · B 92/92 · C 82/82 · D 51/51 · full 460/460 · tsc 0 ·
+build OK. B/C/D funcionalmente intactos.
+
+**Veredicto: LISTO PARA INTEGRACIÓN** (pendiente: orden de integración en A).

@@ -3,6 +3,8 @@
  *
  * El inquilino NO lista colecciones (reglas deny list): todo se lee por
  * get() directo siguiendo contrato → índices de capacidad → documentos hijo.
+ * Única excepción reconciliada: las actas D se consultan con query acotada por
+ * igualdad en `contractId` (lista demostrable, sin enumeración posible).
  * Suscripción en vivo a los contratos (cambios de índices y estado) para
  * actualización inmediata cuando gestión vincula contenido.
  */
@@ -18,6 +20,7 @@ import {
   getMensajesByIds,
   getSuministrosByIds,
 } from '../../lib/suministrosFirestore';
+import { getActasByContrato, type ActaInquilinoVM } from '../../inquilino/actasAdapter';
 import type {
   CambioTitularSuministro,
   ContratoFormalizacion,
@@ -37,6 +40,7 @@ export interface DatosPortalInquilino {
   suministros: Suministro[];
   lecturas: LecturaSuministro[];
   cambios: CambioTitularSuministro[];
+  actas: ActaInquilinoVM[];
   loading: boolean;
   error: string | null;
   recargar: () => Promise<void>;
@@ -50,6 +54,7 @@ const ESTADO_INICIAL: Omit<DatosPortalInquilino, 'loading' | 'error' | 'recargar
   suministros: [],
   lecturas: [],
   cambios: [],
+  actas: [],
 };
 
 export function usePortalInquilino(usuario: UsuarioApp): DatosPortalInquilino {
@@ -104,11 +109,17 @@ export function usePortalInquilino(usuario: UsuarioApp): DatosPortalInquilino {
       ]);
       if (recargaRef.current !== marca) return;
 
+      const actas = (
+        await Promise.all(contratos.map((c) => getActasByContrato(c.id)))
+      ).flat();
+      if (recargaRef.current !== marca) return;
+
       incidencias.sort((a, b) => (a.fechaCreacion < b.fechaCreacion ? 1 : -1));
       mensajes.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
       lecturas.sort((a, b) => (a.fechaLectura < b.fechaLectura ? 1 : -1));
+      actas.sort((a, b) => (a.fechaActo < b.fechaActo ? 1 : -1));
 
-      setDatos({ contratos, inmuebles, incidencias, mensajes, suministros, lecturas, cambios });
+      setDatos({ contratos, inmuebles, incidencias, mensajes, suministros, lecturas, cambios, actas });
       setError(null);
     } catch (e) {
       if (recargaRef.current !== marca) return;

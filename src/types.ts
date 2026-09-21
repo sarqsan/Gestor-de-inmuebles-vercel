@@ -543,6 +543,10 @@ export interface Inmueble {
   tipoPersianas?: string;
   fechaActualizacionFicha?: string;
   actualizadoPorFicha?: string;
+  // BLOQUE E (reconciliado): suministros del inmueble (lectura por get para el inquilino vinculado)
+  suministroIds?: string[];
+  // BLOQUE E (reconciliado): contratos cuyos inquilinos pueden leer (get) este inmueble
+  contratoIdsAutorizados?: string[];
 }
 
 export type CategoriaInventario =
@@ -660,10 +664,6 @@ export interface HabitacionInmueble {
   motivoBloqueo?: string;
   fianza?: number;
   selectedCandidatoId?: string;
-  // BLOQUE E: suministros del inmueble (lectura por get para el inquilino vinculado)
-  suministroIds?: string[];
-  // BLOQUE E: contratos cuyos inquilinos pueden leer (get) este inmueble
-  contratoIdsAutorizados?: string[];
 }
 
 export interface UserProfile {
@@ -1960,7 +1960,6 @@ export interface ModulosConfig {
   profesionales: boolean;
   gastos: boolean;
   cobros: boolean;
-  tesoreria?: boolean;
   hipotecas: boolean;
   patrimonio: boolean;
   incidencias: boolean;
@@ -1978,7 +1977,6 @@ export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   profesionales: true,
   gastos: false,
   cobros: false,
-  tesoreria: true,
   hipotecas: false,
   patrimonio: false,
   incidencias: false,
@@ -3846,6 +3844,7 @@ export interface RegistroTrazabilidadPublicacion {
   resultado: 'OK' | 'ERROR';
   errores: string[];
   advertencias: string[];
+}
 
 // =========================================================================
 // BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS

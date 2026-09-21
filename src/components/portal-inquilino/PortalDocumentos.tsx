@@ -6,13 +6,16 @@ import { imprimirContratoPDF } from '../../utils/contratoEngine';
 import { obtenerUrlDescarga } from '../../lib/suministrosFirestore';
 import { MiniaturaEvidencia } from './MiniaturaEvidencia';
 
+import type { ActaInquilinoVM } from '../../inquilino/actasAdapter';
+
 interface Props {
   contrato: ContratoFormalizacion;
   incidencias: Incidencia[];
   lecturas: LecturaSuministro[];
+  actas: ActaInquilinoVM[];
 }
 
-export const PortalDocumentos: React.FC<Props> = ({ contrato, incidencias, lecturas }) => {
+export const PortalDocumentos: React.FC<Props> = ({ contrato, incidencias, lecturas, actas }) => {
   const [abriendo, setAbriendo] = useState<string | null>(null);
 
   const abrirRef = async (id: string, url?: string, storagePath?: string) => {
@@ -49,6 +52,38 @@ export const PortalDocumentos: React.FC<Props> = ({ contrato, incidencias, lectu
             {contrato.actaEntregaLlaves?.firmadaPorAmbasPartes ? ' · Firmada' : ''}
           </span>
         </div>
+      </section>
+
+      {/* Actas de entrada/salida (BLOQUE D canónico, vía adaptador de solo lectura) */}
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-2">
+        <h3 className="text-sm font-extrabold flex items-center gap-2">
+          <FileText className="w-4 h-4 text-indigo-700" /> Actas de entrada/salida ({actas.length})
+        </h3>
+        {actas.length === 0 && (
+          <p className="text-xs text-slate-500">Gestión aún no ha publicado actas de este contrato.</p>
+        )}
+        {actas.map((a) => (
+          <div key={a.id} className="text-xs bg-slate-50 rounded-xl px-3 py-2.5 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold">
+                Acta de {a.tipo === 'ENTRADA' ? 'entrada' : 'salida'} · v{a.version}
+              </span>
+              <span className="text-slate-500">{a.fechaActo}</span>
+            </div>
+            <div className="text-slate-600">
+              Estado: <strong>{a.estado}</strong> · Firma: <strong>{a.estadoFirma}</strong>
+            </div>
+            {a.motivoVersionado && <div className="text-slate-500">{a.motivoVersionado}</div>}
+            {a.pdfUrl && (
+              <button
+                onClick={() => abrirRef(a.id, a.pdfUrl)}
+                className="text-indigo-700 font-bold cursor-pointer"
+              >
+                {abriendo === a.id ? 'Abriendo…' : 'Ver acta en PDF'}
+              </button>
+            )}
+          </div>
+        ))}
       </section>
 
       {/* Justificantes de recibos */}

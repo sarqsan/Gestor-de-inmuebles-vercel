@@ -219,6 +219,7 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
                   contrato={contratoActivo}
                   incidencias={portal.incidencias.filter((i) => i.contratoId === contratoActivo.id)}
                   lecturas={portal.lecturas.filter((l) => l.contratoId === contratoActivo.id)}
+                  actas={portal.actas.filter((a) => a.contratoId === contratoActivo.id)}
                 />
               )}
               {pantalla === 'historial' && (

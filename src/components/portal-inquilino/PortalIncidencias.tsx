@@ -36,9 +36,10 @@ const ESTADO_CLASE: Record<string, string> = {
   CERRADA: 'bg-slate-200 text-slate-600',
 };
 
+// BLOQUE E (reconciliado): categorías canónicas de incidencia (Arena A).
 const CATEGORIAS: CategoriaIncidencia[] = [
-  'AGUA', 'ELECTRICIDAD', 'FONTANERIA', 'CLIMATIZACION', 'ELECTRODOMESTICO',
-  'CERRAJERIA', 'HUMEDADES', 'ESTRUCTURAL', 'COMUNIDAD', 'PLAGAS', 'OTRO',
+  'FONTANERIA', 'ELECTRICIDAD', 'CALEFACCION_ACS', 'CERRAJERIA', 'ELECTRODOMESTICOS',
+  'HUMEDADES', 'CARPINTERIA', 'PINTURA', 'CRISTALERIA', 'PLAGAS_SANEAMIENTO', 'LIMPIEZA', 'OTROS',
 ];
 
 export const PortalIncidencias: React.FC<Props> = ({ usuario, contrato, inmueble, incidencias, onCambio }) => {
@@ -168,7 +169,7 @@ function NuevaIncidenciaModal({
 }) {
   const [titulo, setTitulo] = useState('');
   const [descripcion, setDescripcion] = useState('');
-  const [categoria, setCategoria] = useState<CategoriaIncidencia>('OTRO');
+  const [categoria, setCategoria] = useState<CategoriaIncidencia>('OTROS');
   const [prioridad, setPrioridad] = useState<PrioridadIncidencia>('NORMAL');
   const [fotos, setFotos] = useState<File[]>([]);
   const [error, setError] = useState('');
@@ -209,11 +210,11 @@ function NuevaIncidenciaModal({
         origen: 'INQUILINO',
         fechaCreacion: ahora,
         fechaActualizacion: ahora,
-        responsabilidad: 'PENDIENTE_DE_DETERMINAR',
+        responsabilidad: 'PENDIENTE_DETERMINAR',
         responsabilidadNotas: 'Pendiente de determinar quién debe asumir la actuación.',
-        seguroEstado: 'PENDIENTE_COMPROBACION',
+        seguroEstado: 'PENDIENTE_VERIFICACION',
         seguroComprobacionNotas: 'Cotejando con pólizas de seguro del inmueble.',
-        viaActuacion: 'PROFESIONAL',
+        viaActuacion: 'PROFESIONAL_DIRECTO',
         creadoPor: nombre,
         actualizadoPor: nombre,
         fotografias: [],

@@ -289,18 +289,26 @@ assert(
   59, 'firestore.rules incluye helpers E.0 (isTenant/isStaff/tenantTieneContrato)'
 );
 assert(
-  ['E.1. BLOQUE E: MENSAJES', 'E.2. BLOQUE E: SUMINISTROS', 'E.3. BLOQUE E: LECTURAS', 'E.4. BLOQUE E: CAMBIOS']
+  // Reconciliado contra canónica: E.1–E.4 renumeradas como §39–§42.
+  ['39. BLOQUE E (reconciliado): MENSAJES', '40. BLOQUE E (reconciliado): SUMINISTROS', '41. BLOQUE E (reconciliado): LECTURAS', '42. BLOQUE E (reconciliado): CAMBIOS']
     .every((s) => FIRESTORE_RULES.includes(s)),
-  60, 'firestore.rules incluye secciones E.1–E.4'
+  60, 'firestore.rules incluye secciones E §39–§42 (reconciliado)'
 );
 assert(
   /match \/lecturas_suministro\/\{lecturaId\}[\s\S]*?allow update, delete: if false;/.test(FIRESTORE_RULES),
   61, 'Lecturas inmutables: update/delete denegados en reglas'
 );
 assert(
-  (FIRESTORE_RULES.match(/allow list: if isStaff\(\);/g) || []).length >= 10 &&
-  !/match \/(mensajes_portal|suministros|lecturas_suministro|cambios_titular)\/[\s\S]*?allow list: if isSignedIn\(\);/.test(FIRESTORE_RULES),
-  62, 'Deny list para inquilino: listados restringidos a isStaff()'
+  // Reconciliado: el modelo canónico restringe listados por rol (master/propietario);
+  // las colecciones E mantienen list staff-only y NINGÚN listado concede acceso a isTenant().
+  ['mensajes_portal', 'suministros', 'lecturas_suministro', 'cambios_titular'].every((col) =>
+    new RegExp(`match \\/${col}\\/[\\s\\S]*?allow list: if isStaff\\(\\);`).test(FIRESTORE_RULES)
+  ) &&
+  // Única excepción reconciliada: lista de actas D acotada por igualdad en
+  // `contractId` de contratos vinculados (demostrable, sin enumeración).
+  FIRESTORE_RULES.split('\n').filter((ln) => ln.includes('allow list') && ln.includes('isTenant')).length === 1 &&
+  FIRESTORE_RULES.split('\n').some((ln) => ln.includes('allow list') && ln.includes('resource.data.contractId in tenantContratoIds()')),
+  62, 'Deny list para inquilino: E staff-only + solo actas D acotadas por contrato'
 );
 assert(
   FIRESTORE_RULES.includes('enlaceInquilinoValido(incoming().enlaceRegistroId, incoming().contratoIds)'),

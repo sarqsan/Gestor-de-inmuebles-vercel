@@ -246,6 +246,12 @@ export interface MiIncidenciaVM {
   documentos: { id: string; nombre: string; storagePath?: string; url: string; fechaSubida: string }[];
 }
 
+// BLOQUE E (reconciliado): la resolución canónica puede ser texto u objeto estructurado.
+export function textoResolucionIncidencia(r: Incidencia['resolucion']): string | undefined {
+  if (!r) return undefined;
+  return typeof r === 'string' ? r : r.descripcionTrabajo;
+}
+
 export function sanearIncidenciaParaInquilino(i: Incidencia): MiIncidenciaVM {
   return {
     id: i.id,
@@ -257,7 +263,7 @@ export function sanearIncidenciaParaInquilino(i: Incidencia): MiIncidenciaVM {
     fechaCreacion: i.fechaCreacion,
     fechaActualizacion: i.fechaActualizacion,
     fechaCierre: i.fechaCierre,
-    resolucion: i.resolucion,
+    resolucion: textoResolucionIncidencia(i.resolucion),
     viaActuacion: i.viaActuacion,
     trabajo: i.trabajoProfesional
       ? {
@@ -382,7 +388,9 @@ export function construirHistorialInquilino(f: FuentesHistorial): HistorialInqui
       fecha: i.fechaActualizacion || i.fechaCreacion,
       categoria: 'INCIDENCIA',
       titulo: `${i.titulo} — ${i.estado}`,
-      detalle: i.resolucion ? `Resolución: ${i.resolucion}` : undefined,
+      detalle: textoResolucionIncidencia(i.resolucion)
+        ? `Resolución: ${textoResolucionIncidencia(i.resolucion)}`
+        : undefined,
       entidadId: i.id,
     });
   }

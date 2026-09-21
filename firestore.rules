@@ -839,7 +839,8 @@ service cloud.firestore {
     // 4. SOLICITUDES DE ALQUILER (creación pública de captación)
     // =========================================================================
     match /solicitudes/{solicitudId} {
-      allow read: if isSignedIn();
+      // BLOQUE E (reconciliado): el inquilino no lee solicitudes (el alta sigue siendo pública).
+      allow read: if isStaff();
       allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado'])
         && incoming().nombre is string
         && incoming().email is string;
@@ -877,7 +878,8 @@ service cloud.firestore {
     // 8. CONFIGURACIÓN DE ASEGURADORAS (sólo uso interno)
     // =========================================================================
     match /configuracion_aseguradoras/{aseguradoraId} {
-      allow read: if isSignedIn();
+      // BLOQUE E (reconciliado): configuración interna, oculta al inquilino.
+      allow read: if isStaff();
       allow write: if isMasterAdmin();
     }
 
@@ -885,7 +887,8 @@ service cloud.firestore {
     // 9. SOLICITUDES DE SEGURO DE IMPAGO (uso interno)
     // =========================================================================
     match /solicitudes_seguro_impago/{solicitudSeguroId} {
-      allow read, write: if isSignedIn();
+      // BLOQUE E (reconciliado): el inquilino no accede a solicitudes de seguro.
+      allow read, write: if isStaff();
     }
 
     // =========================================================================
@@ -893,7 +896,8 @@ service cloud.firestore {
     // =========================================================================
     match /system/{systemDocId} {
       // Los flags de módulos son necesarios antes de iniciar sesión.
-      allow read: if systemDocId == 'modulos_config' || isSignedIn();
+      // BLOQUE E (reconciliado): el inquilino no lee gmail_config/metadata.
+      allow read: if systemDocId == 'modulos_config' || isStaff();
       allow write: if isMasterAdmin();
     }
 
@@ -967,7 +971,8 @@ service cloud.firestore {
     // =========================================================================
     match /profesionales/{profesionalId} {
       allow read: if true;
-      allow create, update: if isSignedIn();
+      // BLOQUE E (reconciliado): el inquilino no escribe en el catálogo.
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -993,7 +998,8 @@ service cloud.firestore {
     // =========================================================================
     match /especialidades/{especialidadId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      // BLOQUE E (reconciliado): el inquilino no escribe en el catálogo.
+      allow write: if isStaff();
     }
 
     // =========================================================================
@@ -1022,7 +1028,8 @@ service cloud.firestore {
         );
       }
       allow get: if isSignedIn() && (isMasterAdmin() || notifDelUsuario());
-      allow list: if isSignedIn();
+      // BLOQUE E (reconciliado): el inquilino no lista notificaciones GAP 1.
+      allow list: if isStaff();
       allow create: if isSignedIn() && (isMasterAdmin() || notifDelUsuarioIncoming());
       allow update: if isSignedIn() && (isMasterAdmin() || (
         notifDelUsuario() &&
@@ -1789,8 +1796,10 @@ service cloud.firestore {
           || esActualizacionPdfPermitida();
       }
 
-      allow get: if isMasterAdmin() || (isPropietarioRole() && actaVisible(existing()));
-      allow list: if isMasterAdmin() || (isPropietarioRole() && actaEsMia(resource.data));
+      // BLOQUE E (reconciliado): el inquilino lee (get) y consulta (lista acotada
+      // por igualdad en `contractId`) las actas D de SUS contratos vinculados.
+      allow get: if isMasterAdmin() || (isPropietarioRole() && actaVisible(existing())) || (isTenant() && ('contractId' in existing()) && tenantTieneContrato(existing().contractId));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && actaEsMia(resource.data)) || (isTenant() && ('contractId' in resource.data) && resource.data.contractId in tenantContratoIds());
 
       allow create: if isMasterAdmin() || (
         isPropietarioRole()

@@ -355,12 +355,14 @@ los DNI/adjuntos del funnel público ya son un residual documentado — no ampli
 
 ## 5. BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS
 
-> **GRAN CAPACIDAD PENDIENTE. PLANIFICADO ≠ IMPLEMENTADO.**
-> No existe hoy portal de inquilino ni rol INQUILINO en auth (`INQUILINO` solo
-> aparece como concepto en finiquito/incidencias). Todo lo descrito aquí son
-> **decisiones de producto aprobadas (2026-09-20)**, sujetas a posterior
-> implementación y validación en una orden futura. Nada de este bloque se
-> implementa en la orden de 2026-09-20.
+> **IMPLEMENTADO EN ARENA B / RECONCILIADO CONTRA CANÓNICA / PENDIENTE INTEGRACIÓN.**
+> Portal del inquilino + suministros implementado en la rama B (64/64) y
+> reconciliado contra la arquitectura canónica de Arena A el 2026-09-21:
+> merge `5030630` (canónica `7d21d44` INTO B), adaptaciones mínimas
+> (categorías canónicas, `tesoreria*`, adaptador D de solo lectura, reglas
+> §39–§42 + trasplantes tenant en §2/§11/incidencias/actas), suites
+> E 64/64 · B 92/92 · C 82/82 · D 51/51 · full 460/460, tsc 0, build OK.
+> Detalle: `docs/BLOQUE-E-IMPLEMENTACION.md` (§8 Reconciliación).
 
 ### 5.1 Naturaleza conceptual
 
@@ -581,7 +583,7 @@ NOTIFICACIONES (GAP1) — consumidor: eventos GAP2, GAP7, GAP8
 INCIDENCIAS (incidenciasEngine) + MANTENIMIENTO + PROFESIONALES + SEGUROS
     └── BLOQUE C — detección de deuda, recobro, expediente, seguro impago
 
-BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS (PLANIFICADO — §5)
+BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS (RECONCILIADO — §5, pendiente integración)
     ├── BLOQUE B (pagos / recibos / liquidación)
     ├── BLOQUE C (deuda / comunicaciones al inquilino)
     └── BLOQUE D (entrada/salida, actas, firma)

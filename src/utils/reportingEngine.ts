@@ -40,7 +40,7 @@ import {
 } from '../types';
 import { calcularResumenCobros, generarPeriodosParaContrato, obtenerTodosCobros, obtenerCobrosInmueble } from './cobrosEngine';
 import { generarResumenFiscalAnual, esGastoDeducible, integrarFiscalConRentabilidad } from './fiscalEngine';
-import { calcularTotalesPorCategoria, fechaEfectivaGasto } from './gastosEngine';
+import { calcularTotalesPorCategoria } from './gastosEngine';
 import { filtrarPolizasPorUsuario, detectarPolizasProximasVencer } from './segurosEngine';
 import { calcularMetricasIncidencias } from './incidenciasEngine';
 
@@ -220,7 +220,7 @@ export function generarInformeCartera(
   const resumenCobros = calcularResumenCobros(cobrosRango);
 
   const gastosRango = gastosPropietario.filter(g => {
-    const fecha = parseFechaSafe(fechaEfectivaGasto(g) || '');
+    const fecha = parseFechaSafe(g.fecha);
     if (!fecha) return false;
     return fecha >= inicioRango && fecha <= finRango;
   });
@@ -406,7 +406,7 @@ export function generarEvolucionTemporal(
       const resumenRaw = calcularResumenCobros(cobrosMes);
       const resumen = mapResumenCobros(resumenRaw);
       const gastosMes = gastos.filter(g => {
-        const fecha = parseFechaSafe(fechaEfectivaGasto(g) || '');
+        const fecha = parseFechaSafe(g.fecha);
         return fecha && fecha >= inicioEf && fecha <= finEf;
       });
       const totalGastos = gastosMes.reduce((sum, g) => sum + (g.importe || 0), 0);
@@ -445,7 +445,7 @@ export function generarEvolucionTemporal(
       const resumenRaw2 = calcularResumenCobros(cobrosTrim);
       const resumen = mapResumenCobros(resumenRaw2);
       const gastosTrim = gastos.filter(g => {
-        const fecha = parseFechaSafe(fechaEfectivaGasto(g) || '');
+        const fecha = parseFechaSafe(g.fecha);
         return fecha && fecha >= inicioTrim && fecha <= finTrim;
       });
       const totalGastos = gastosTrim.reduce((sum, g) => sum + (g.importe || 0), 0);
@@ -473,7 +473,7 @@ export function generarEvolucionTemporal(
       const resumenRaw3 = calcularResumenCobros(cobrosAnual);
       const resumen = mapResumenCobros(resumenRaw3);
       const gastosAnual = gastos.filter(g => {
-        const fecha = parseFechaSafe(fechaEfectivaGasto(g) || '');
+        const fecha = parseFechaSafe(g.fecha);
         return fecha && fecha.getFullYear() === anio;
       });
       const totalGastos = gastosAnual.reduce((sum, g) => sum + (g.importe || 0), 0);
@@ -607,7 +607,7 @@ export function generarInformeInmueble(
   const resumenCobrosRaw = calcularResumenCobros(cobrosRango);
   const resumenCobros = mapResumenCobros(resumenCobrosRaw);
   const gastosRango = gastosInmueble.filter(g => {
-    const fecha = parseFechaSafe(fechaEfectivaGasto(g) || '');
+    const fecha = parseFechaSafe(g.fecha);
     return fecha && fecha >= inicioRango && fecha <= finRango;
   });
   const totalGastos = gastosRango.reduce((sum, g) => sum + (g.importe||0), 0);
@@ -684,7 +684,7 @@ export function generarInformeInmueble(
     gastos: {
       total: totalGastos,
       porCategoria: calcularTotalesPorCategoria(gastosRango),
-      lista: gastosRango.map(g=>({ id: g.id, fecha: fechaEfectivaGasto(g) || '', concepto: g.concepto, importe: g.importe, categoria: g.categoria })),
+      lista: gastosRango.map(g=>({ id: g.id, fecha: g.fecha, concepto: g.concepto, importe: g.importe, categoria: g.categoria })),
     },
     ingresos: {
       totalCobrado: resumenCobros.totalCobrado,
@@ -729,7 +729,7 @@ export function generarInformeRentabilidad(
   const resumenCobrosRaw2 = calcularResumenCobros(cobros);
   const resumenCobros = mapResumenCobros(resumenCobrosRaw2);
   const gastosRango = gastosFiltrados.filter(g=>{
-    const fecha = parseFechaSafe(fechaEfectivaGasto(g) || '');
+    const fecha = parseFechaSafe(g.fecha);
     return fecha && fecha>=inicio && fecha<=fin;
   });
   const totalGastos = gastosRango.reduce((sum,g)=>sum+(g.importe||0),0);
@@ -771,7 +771,7 @@ export function generarInformeRentabilidad(
     });
     const resCobrosInmRaw = calcularResumenCobros(cobrosInm);
     const resCobrosInm = mapResumenCobros(resCobrosInmRaw);
-    const gastosInm = gastosFiltrados.filter(g=>g.inmuebleId===inm.id && (()=>{ const f=parseFechaSafe(fechaEfectivaGasto(g) || ''); return f && f>=inicio && f<=fin; })());
+    const gastosInm = gastosFiltrados.filter(g=>g.inmuebleId===inm.id && (()=>{ const f=parseFechaSafe(g.fecha); return f && f>=inicio && f<=fin; })());
     const totalGastosInm = gastosInm.reduce((sum,g)=>sum+(g.importe||0),0);
     const resultadoInm = resCobrosInm.totalCobrado - totalGastosInm;
     const rentInm = resCobrosInm.totalCobrado>0 ? Number(((resultadoInm/resCobrosInm.totalCobrado)*100).toFixed(2)) : 0;
@@ -924,7 +924,7 @@ export function generarExportacionFiscal(
     }
 
     const gastosInm = gastos.filter(g=>g.inmuebleId===inmueble.id).filter(g=>{
-      const fecha = parseFechaSafe(fechaEfectivaGasto(g) || '');
+      const fecha = parseFechaSafe(g.fecha);
       return fecha && fecha>=inicio && fecha<=fin;
     });
 
@@ -933,10 +933,10 @@ export function generarExportacionFiscal(
         propietarioId,
         inmuebleId: inmueble.id,
         inmuebleDireccion: inmueble.direccion,
-        ejercicio: gasto.ejercicioFiscal || parseFechaSafe(fechaEfectivaGasto(gasto) || '')?.getFullYear() || new Date().getFullYear(),
-        periodo: (fechaEfectivaGasto(gasto) || '').slice(0,7),
+        ejercicio: gasto.ejercicioFiscal || parseFechaSafe(gasto.fecha)?.getFullYear() || new Date().getFullYear(),
+        periodo: gasto.fecha.slice(0,7),
         concepto: gasto.concepto,
-        fecha: (fechaEfectivaGasto(gasto) || '').slice(0,10),
+        fecha: gasto.fecha,
         importe: gasto.importe,
         categoria: gasto.categoria,
         tipo: 'GASTO',

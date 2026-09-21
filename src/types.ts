@@ -15,6 +15,9 @@ export type SectionType =
   | 'informes'
   | 'polizas'
   | 'actas'
+  // BLOQUE E (reconciliado): portal del inquilino y suministros
+  | 'inquilinos'
+  | 'suministros'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'
@@ -540,6 +543,10 @@ export interface Inmueble {
   tipoPersianas?: string;
   fechaActualizacionFicha?: string;
   actualizadoPorFicha?: string;
+  // BLOQUE E (reconciliado): suministros del inmueble (lectura por get para el inquilino vinculado)
+  suministroIds?: string[];
+  // BLOQUE E (reconciliado): contratos cuyos inquilinos pueden leer (get) este inmueble
+  contratoIdsAutorizados?: string[];
 }
 
 export type CategoriaInventario =
@@ -1177,6 +1184,11 @@ export interface ContratoFormalizacion {
 
   // GESTIÓN DE COBROS MENSUALES (INMUEBLE → PROPIETARIO → CONTRATO → INQUILINO)
   registroCobros?: CobroPeriodo[];
+
+  // BLOQUE E: índices de capacidad — IDs de documentos hijos que el inquilino
+  // vinculado puede leer por get() directo (deny list para INQUILINO en reglas).
+  incidenciaIds?: string[];
+  mensajeIds?: string[];
 }
 
 // ==========================================
@@ -1671,7 +1683,7 @@ export interface AnalisisRespuestaAseguradoraAI {
 // CAPA ESTRUCTURAL: USUARIOS, PERFILES Y PERMISOS
 // ==========================================
 
-export type TipoPerfilUsuario = 'ADMINISTRADOR' | 'PROPIETARIO' | 'PROFESIONAL';
+export type TipoPerfilUsuario = 'ADMINISTRADOR' | 'PROPIETARIO' | 'PROFESIONAL' | 'INQUILINO';
 
 export type EstadoUsuario = 'ACTIVO' | 'PENDIENTE' | 'BLOQUEADO' | 'INACTIVO';
 
@@ -1692,6 +1704,9 @@ export interface UsuarioApp {
   inmuebleIds?: string[]; // IDs de inmuebles a los que tiene acceso
   propietarioId?: string; // ID del propietario vinculado en colección 'propietarios'
   profesionalId?: string; // ID del profesional vinculado en colección 'profesionales'
+  contratoIds?: string[]; // BLOQUE E: contratos LAU vinculados (alcance del perfil INQUILINO)
+  habitacionIdentificador?: string; // BLOQUE E: habitación arrendada (modalidad 'habitaciones')
+  enlaceRegistroId?: string; // BLOQUE E: invitación que originó la cuenta (trazabilidad + verificación en reglas)
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;
@@ -1769,12 +1784,14 @@ export interface Profesional {
 export interface EnlaceRegistro {
   id: string;
   token: string;
-  tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL';
+  tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL' | 'INQUILINO';
   textoVisible: string; // Ej: "🏠 Regístrate como propietario" o "🔧 Regístrate como profesional"
   descripcion?: string;
   activo: boolean;
   profesionalIdVinculado?: string; // Si es una invitación para un profesional privado existente
   propietarioIdVinculado?: string; // Si es una invitación para un propietario existente
+  contratoIdVinculado?: string; // BLOQUE E: contrato LAU que da acceso (invitación INQUILINO)
+  inmuebleIdVinculado?: string; // BLOQUE E: inmueble del contrato (invitación INQUILINO)
   fechaCaducidad?: string; // Opcional ISO
   usosMaximos?: number;
   usosActuales: number;
@@ -1799,7 +1816,7 @@ export interface AuditLog {
   accion: string; // Ej: "ADMIN_CREO_USUARIO", "ADMIN_BLOQUEO_USUARIO", "PROPIETARIO_ASIGNO_PROFESIONAL"
   descripcion: string;
   fechaHora: string;
-  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad';
+  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje';
   idAfectado: string;
   resultado: 'EXITO' | 'ERROR';
   detalles?: Record<string, any>;
@@ -1808,7 +1825,7 @@ export interface AuditLog {
 export interface PermisoDefinicion {
   codigo: string;
   nombre: string;
-  categoria: 'inmuebles' | 'propietarios' | 'profesionales' | 'contratos' | 'candidatos' | 'seguros' | 'administracion' | 'tesoreria';
+  categoria: 'inmuebles' | 'propietarios' | 'profesionales' | 'contratos' | 'candidatos' | 'seguros' | 'administracion' | 'tesoreria' | 'inquilinos' | 'suministros';
   descripcion: string;
 }
 
@@ -1851,6 +1868,11 @@ export const PERMISOS_SISTEMA: PermisoDefinicion[] = [
   { codigo: 'administracion.permisos', nombre: 'Gestión de Permisos', categoria: 'administracion', descripcion: 'Asignar roles y permisos granulares' },
   { codigo: 'administracion.configuracion', nombre: 'Configuración y Módulos', categoria: 'administracion', descripcion: 'Activar y desactivar módulos y enlaces' },
   { codigo: 'administracion.auditoria', nombre: 'Ver Auditoría', categoria: 'administracion', descripcion: 'Consultar logs de auditoría del sistema' },
+
+  { codigo: 'inquilinos.ver', nombre: 'Ver Inquilinos', categoria: 'inquilinos', descripcion: 'Consultar accesos de inquilinos al portal' },
+  { codigo: 'inquilinos.gestionar', nombre: 'Gestionar Inquilinos', categoria: 'inquilinos', descripcion: 'Invitar, vincular y revocar accesos de inquilinos' },
+  { codigo: 'suministros.ver', nombre: 'Ver Suministros', categoria: 'suministros', descripcion: 'Consultar suministros, lecturas y repartos' },
+  { codigo: 'suministros.gestionar', nombre: 'Gestionar Suministros', categoria: 'suministros', descripcion: 'Alta de suministros, repartos y cambios de titular' },
 ];
 
 export interface RolDefinicion {
@@ -1900,6 +1922,10 @@ export const ROLES_PREDEFINIDOS: RolDefinicion[] = [
       'seguros.crear',
       'seguros.tramitar',
       'profesionales.ver',
+      'inquilinos.ver',
+      'inquilinos.gestionar',
+      'suministros.ver',
+      'suministros.gestionar',
     ],
     esSistema: true,
   },
@@ -1908,6 +1934,13 @@ export const ROLES_PREDEFINIDOS: RolDefinicion[] = [
     nombre: 'Profesional de Mantenimiento',
     descripcion: 'Acceso a su perfil, especialidades, zonas y viviendas asignadas',
     permisos: ['profesionales.ver'],
+    esSistema: true,
+  },
+  {
+    id: 'INQUILINO_PORTAL',
+    nombre: 'Inquilino (Portal)',
+    descripcion: 'BLOQUE E: acceso exclusivo al Portal del Inquilino, limitado a sus contratos vinculados',
+    permisos: ['inmuebles.ver', 'contratos.ver'],
     esSistema: true,
   },
 ];
@@ -2444,6 +2477,7 @@ export interface Incidencia {
   inmuebleDireccion?: string;
   inmuebleCiudad?: string;
   contratoId?: string;
+  contratoIdsVisibles?: string[]; // BLOQUE E: contratos cuyos inquilinos pueden leer (get) esta incidencia
   inquilinoId?: string;
   inquilinoNombre?: string;
   inquilinoTelefono?: string;
@@ -3805,4 +3839,148 @@ export interface RegistroTrazabilidadPublicacion {
   resultado: 'OK' | 'ERROR';
   errores: string[];
   advertencias: string[];
+}
+
+// =========================================================================
+// BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS
+// Tipos nuevos E (aditivos). No se modifica la semántica de tipos existentes.
+// =========================================================================
+
+/** Suministro doméstico o comunitario asociado a un inmueble. Colección: `suministros`. */
+export type TipoSuministro = 'LUZ' | 'AGUA' | 'GAS' | 'INTERNET' | 'OTRO';
+
+export type ModoRepartoSuministro =
+  | 'SIN_REPARTO'
+  | 'IGUALITARIO'
+  | 'POR_HABITACION'
+  | 'PERSONALIZADO';
+
+export interface TramoRepartoSuministro {
+  /** Etiqueta del tramo (p. ej. 'HAB-1', 'Planta baja', 'Local A'). */
+  etiqueta: string;
+  /** Identificador de habitación del contrato (si aplica). */
+  habitacionIdentificador?: string;
+  /** Porcentaje 0-100. La suma de tramos debe ser 100. */
+  porcentaje: number;
+}
+
+export interface Suministro {
+  id: string;
+  inmuebleId: string;
+  tipo: TipoSuministro;
+  /** CUPS (luz/gas) o código de punto de suministro. */
+  cups?: string;
+  /** Número de contador (agua u otros). */
+  numeroContador?: string;
+  titularNombre?: string;
+  titularNif?: string;
+  comercializadora?: string;
+  tarifa?: string;
+  potenciaContratadaKw?: number;
+  modoReparto: ModoRepartoSuministro;
+  reparto?: TramoRepartoSuministro[];
+  activo: boolean;
+  // Contratos cuyos inquilinos pueden leer (get) este suministro
+  contratoIdsAutorizados?: string[];
+  /** Índices de capacidad E (lectura por get para el inquilino vinculado). */
+  lecturaIds?: string[];
+  cambioTitularIds?: string[];
+  observaciones?: string;
+  createdByUid?: string;
+  createdByEmail?: string;
+  fechaAlta: string;
+  fechaActualizacion: string;
+}
+
+/**
+ * Lectura de contador. INMUTABLE: una vez creada no admite update ni delete
+ * (reglas Firestore). Las correcciones se registran como nueva lectura con
+ * `corrigeLecturaId` apuntando a la lectura sustituida (trazabilidad).
+ * Colección: `lecturas_suministro`.
+ */
+export type OrigenLecturaSuministro = 'INQUILINO' | 'ADMIN' | 'PROPIETARIO' | 'CONTADOR_INTELIGENTE';
+
+export interface LecturaSuministro {
+  id: string;
+  suministroId: string;
+  inmuebleId: string;
+  contratoId?: string;
+  /** Valor del contador en la unidad indicada. */
+  valor: number;
+  unidad: string; // 'kWh' | 'm3' | ...
+  fechaLectura: string; // ISO
+  origen: OrigenLecturaSuministro;
+  registradoPorUid?: string;
+  registradoPorEmail?: string;
+  registradoPorNombre?: string;
+  /** Foto del contador en Storage (ruta privada, nunca base64). */
+  fotoStoragePath?: string;
+  /** Si corrige una lectura anterior, ID de la lectura sustituida. */
+  corrigeLecturaId?: string;
+  observaciones?: string;
+  createdAt: string;
+}
+
+/**
+ * Solicitud de cambio de titularidad de un suministro.
+ * Colección: `cambios_titular`.
+ */
+export type EstadoCambioTitular = 'SOLICITADO' | 'CONFIRMADO' | 'RECHAZADO';
+
+export interface CambioTitularSuministro {
+  id: string;
+  suministroId: string;
+  inmuebleId: string;
+  contratoId?: string;
+  titularAnteriorNombre?: string;
+  titularNuevoNombre: string;
+  titularNuevoNif?: string;
+  titularNuevoTelefono?: string;
+  titularNuevoEmail?: string;
+  fechaEfecto: string; // ISO
+  estado: EstadoCambioTitular;
+  motivoRechazo?: string;
+  solicitadoPorUid?: string;
+  solicitadoPorEmail?: string;
+  gestionadoPorUid?: string;
+  createdAt: string;
+  fechaActualizacion: string;
+}
+
+/**
+ * Mensaje del hilo portal inquilino ↔ gestión, anclado a un contrato.
+ * Hilo visible completo para ambas partes (sin borrado).
+ * Colección: `mensajes_portal`.
+ */
+export type RolRemitenteMensaje = 'INQUILINO' | 'GESTION';
+
+export interface MensajePortal {
+  id: string;
+  contratoId: string;
+  inmuebleId: string;
+  remitenteUid: string;
+  remitenteNombre: string;
+  remitenteRol: RolRemitenteMensaje;
+  texto: string;
+  leidoPorGestion?: boolean;
+  leidoPorInquilino?: boolean;
+  createdAt: string;
+}
+
+/** Vista saneada del historial del inquilino (derivada de entidades visibles + auditoría redactada). */
+export type CategoriaHistorialInquilino =
+  | 'CONTRATO'
+  | 'RECIBO'
+  | 'INCIDENCIA'
+  | 'SUMINISTRO'
+  | 'MENSAJE'
+  | 'DOCUMENTO';
+
+export interface HistorialInquilinoItem {
+  id: string;
+  fecha: string; // ISO
+  categoria: CategoriaHistorialInquilino;
+  titulo: string;
+  detalle?: string;
+  entidadId?: string;
 }

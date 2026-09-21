@@ -10,6 +10,7 @@
     "clean": "rm -rf dist server.js",
     "test:bloque-b": "tsx scripts/test-bloque-b.ts",
     "test:bloque-c": "tsx scripts/test-bloque-c.ts",
+    "test:bloque-e": "tsx scripts/test-bloque-e.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

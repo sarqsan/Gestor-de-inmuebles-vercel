@@ -19,6 +19,8 @@ import {
   User,
   LogOut,
   Receipt,
+  Smartphone,
+  Zap,
   TrendingDown,
   RefreshCw,
   LifeBuoy,
@@ -96,6 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText },
       { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
       { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
+      { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
     ];
   } else if (perfil === 'PROFESIONAL') {
@@ -121,6 +124,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3 },
       { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
       { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText },
+      { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone },
+      { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },

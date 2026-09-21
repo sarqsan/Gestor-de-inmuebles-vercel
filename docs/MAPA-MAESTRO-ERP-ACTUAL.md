@@ -115,6 +115,7 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 | 21 | **Tesorería + Liquidaciones + SEPA (BLOQUE B)** | **INTEGRADO EN ARENA A (2026-09-20)** — cierre del ciclo inmueble→propietario: liquidación mensual determinista, gastos imputables, órdenes de pago, SEPA PAIN.008/001 (preparación, sin envío real), portal propietario, conciliación evidencia | `src/tesoreria/*` (9 módulos), `TesoreriaSection.tsx`, `lib/tesoreriaFirestore.ts`, `lib/conciliacionSession.ts`, colección `liquidaciones_propietarios`/`gastos_inmuebles`/`ordenes_pago`/`ficheros_sepa`/`mandatos_sepa`/`config_liquidacion`, reglas §26–31 | `COMPLETO` (motor + integración) | 92 (batería `test:bloque-b`) | **Preparación** de ficheros SEPA: NO hay envío bancario real (sin APIs/EBICS/certificados inventados). Evidencia de pago requiere movimiento GAP6 conciliado en sesión. Ver §4 BLOQUE B |
 | 23 | **Actas de entrada/salida + firma OTP + PDF (BLOQUE D)** | **INTEGRADO EN LA RAMA CANÓNICA (Arena A, 2026-09-21)** — origen: rama `arena/01a0ab9d-gestor-de-inmuebles-vercel` (commits `698e9e6`+`672b7ee`, excluido su `feat(gap6)` que duplicaba el GAP6 canónico), tras auditoría selectiva 20/20 ficheros. Acta ENTRADA/SALIDA con inventario por elementos (estados expresivos con nivel 0–6), lecturas de contadores, evidencias en Storage (sin base64), incidencias propias de acta, comparación entrada↔salida determinista (sin IA, matching id-first), máquina de estados con histórico, firma vinculada a versión, OTP (SHA-256, 15 min, 5 intentos, uso único, contexto; transporte `PENDIENTE_PROVEEDOR`), PDF jsPDF persistido en Storage con referencia/versión/fecha en Firestore, versionado inmutable de actas firmadas (nuevo documento + `actaAnteriorId` + cadena) protegido en reglas | `src/types/actas.ts`, `src/utils/actas/*` (7 módulos + 51 tests), `src/lib/firebaseActas.ts`, `ActasSection.tsx`, colecciones `actas`/`actas_evidencias`/`actas_incidencias`/`actas_otp`, reglas §38 + storage `actas_fotos`/`actas_pdfs`, `firestore.indexes.json` | `COMPLETO` (motor + UI + reglas; integrado y validado) | 51 (vitest `bloqueD.test.ts`); re-validado en canónica: vitest 460/460 · tsc 0 · build OK | OTP real SMS/email = `PENDIENTE_PROVEEDOR` (no hay proveedor inventado); canal MANUAL entrega en persona con `codigoPlainTemporal` controlado (solo ACTIVO/!usado, limpieza obligatoria tras uso — reforzado en la integración); comparación determinista sin IA; B/C intactos (tests 92+82). Ver §4 BLOQUE D y `docs/BLOQUE_D_ACTAS.md` |
 | 22 | **Morosidad + recobro + expediente legal (BLOQUE C)** | **INTEGRADO EN LA RAMA CANÓNICA (Arena A, 2026-09-21, merge `5293c3c`)** — origen: rama `arena/01a0c03d-gestor-de-inmuebles-vercel` (commit `91bac8e`, base `5ff8448`), tras auditoría selectiva 33/33 ficheros. Detección de deuda desde `registroCobros` (SOLO lectura; el pago sigue siendo `cobrosEngine.registrarPagoPeriodo`), máquina de estados con histórico append-only, política de recobro configurable (D+3/D+10/D+20/D+30) versionada, plan de recobro, comunicaciones **solo por GAP1**, evidencias, compromisos cubiertos con cobros reales, expedientes de aseguradora y jurídico con requisito de procedibilidad LO 1/2025, espejo de mínimo privilegio para el propietario | `src/types/morosidad.ts`, `src/utils/morosidad/*` (8 módulos), `src/lib/morosidadFirestore.ts`, `MorosidadSection.tsx`, `MorosidadDetalleModal.tsx`, colecciones `expedientes_morosidad`/`_hist`/`evidencias_morosidad`/`compromisos_morosidad`/`politicas_morosidad`/`morosidad_resumen_propietario`, reglas §32–§37 | `COMPLETO` (motor + UI + reglas; integrado y validado) | 79 (vitest) + 82 (batería `test:bloque-c`); re-validado en canónica: vitest 409/409 · tsc 0 · build OK | Comunicaciones externas = `DEPENDENCIA_EXTERNA` (email en safe-mode = `PENDIENTE_ENVIO`/`FALLIDA`, nunca `ENVIADA`); burofax/notaría/aseguradora/tribunal = registro manual con evidencia (PREPARADO, sin envío real); intereses sin tipo fijado por el ERP (solo parámetros del usuario, `ESTIMADO`/`VERIFICADO`); reglas verificadas textualmente (sin emulator). Pendientes reales: transporte real GAP1, programador de detección, adjuntos en Storage, gancho BLOQUE B solo a nivel interfaz (`listarLiquidacionesPorCobros`). Ver §4 BLOQUE C y `docs/BLOQUE-C-*.md` |
+| 24 | **Portal del Inquilino + Suministros (BLOQUE E)** | **INTEGRADO EN LA RAMA CANÓNICA (Arena A, 2026-09-21)** — origen: rama `arena/01a0bfd3-gestor-de-inmuebles-vercel` (E reconciliado `97ea0cb` sobre `7d21d44`), integración selectiva (sin merge ciego; excluidos permisos `tesoreria.*` duplicados y bloque `tesoreria` duplicado en `App.tsx`). Perfil `INQUILINO` (rol `INQUILINO_PORTAL`, alta solo por invitación con contrato vinculado y Auth UID como ID), alcance inquilino→contrato(s)→inmueble, portal móvil aislado (inicio, contrato, documentos, recibos, incidencias, mensajes, suministros, historial, cuenta), vistas saneadas por whitelist, suministros (CUPS/contador, titular, reparto), lecturas **inmutables** con `corrigeLecturaId`, cambios de titular, hilo de mensajes por contrato, adaptador de solo lectura sobre actas D, gestión ERP `InquilinosSection`/`SuministrosSection` | `src/inquilino/*` (4 módulos), `src/lib/suministrosFirestore.ts`, `src/components/portal-inquilino/*` (13), `InquilinosSection.tsx`, `SuministrosSection.tsx`, `authService.ts` (helpers tenant), colecciones `mensajes_portal`/`suministros`/`lecturas_suministro`/`cambios_titular`, reglas §39–§42 + helpers E.0 + blindaje `isStaff()`, storage E.1–E.4 | `COMPLETO` (motor + UI + reglas; integrado y validado) | 64 (batería `test:bloque-e`); re-validado en canónica: vitest 460/460 · B 92 · C 82 · tsc 0 · build OK | Reglas verificadas textualmente (sin emulator); el registro público propietario/profesional conserva su limitación preexistente (lista `enlaces` sin sesión), el flujo inquilino usa `get` por ID. Ver §5 y `docs/BLOQUE-E-IMPLEMENTACION.md` |
 
 ### 2.2 Colecciones Firestore (estado canónico)
 
@@ -355,12 +356,15 @@ los DNI/adjuntos del funnel público ya son un residual documentado — no ampli
 
 ## 5. BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS
 
-> **GRAN CAPACIDAD PENDIENTE. PLANIFICADO ≠ IMPLEMENTADO.**
-> No existe hoy portal de inquilino ni rol INQUILINO en auth (`INQUILINO` solo
-> aparece como concepto en finiquito/incidencias). Todo lo descrito aquí son
-> **decisiones de producto aprobadas (2026-09-20)**, sujetas a posterior
-> implementación y validación en una orden futura. Nada de este bloque se
-> implementa en la orden de 2026-09-20.
+> **BLOQUE E INTEGRADO EN LA CANÓNICA (2026-09-21).** Portal del inquilino +
+> suministros, procedente de Arena B y reconciliado contra `7d21d44`
+> (`97ea0cb`), integrado de forma selectiva sobre la canónica: perfil
+> `INQUILINO` en auth/RBAC (`INQUILINO_PORTAL`), `src/inquilino/*` (scope,
+> portalEngine, suministrosEngine, actasAdapter solo lectura de D),
+> `src/lib/suministrosFirestore.ts`, portal móvil `src/components/portal-inquilino/*`,
+> `InquilinosSection` / `SuministrosSection`, reglas Firestore §39–§42 + helpers
+> E.0 + blindaje `isStaff()` y Storage E.1–E.4. Suite `test:bloque-e` 64/64.
+> Detalle: `docs/BLOQUE-E-IMPLEMENTACION.md`.
 
 ### 5.1 Naturaleza conceptual
 
@@ -581,7 +585,7 @@ NOTIFICACIONES (GAP1) — consumidor: eventos GAP2, GAP7, GAP8
 INCIDENCIAS (incidenciasEngine) + MANTENIMIENTO + PROFESIONALES + SEGUROS
     └── BLOQUE C — detección de deuda, recobro, expediente, seguro impago
 
-BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS (PLANIFICADO — §5)
+BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS (INTEGRADO — §5)
     ├── BLOQUE B (pagos / recibos / liquidación)
     ├── BLOQUE C (deuda / comunicaciones al inquilino)
     └── BLOQUE D (entrada/salida, actas, firma)

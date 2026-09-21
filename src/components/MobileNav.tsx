@@ -21,6 +21,8 @@ import {
   Wrench,
   ArrowLeftRight,
   Receipt,
+  Smartphone,
+  Zap,
   TrendingDown,
   RefreshCw,
   Calculator,
@@ -94,6 +96,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
           { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
           { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
+          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'Lecturas y consumos' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : perfil === 'PROFESIONAL'
@@ -117,6 +120,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
           { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
           { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
+          { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone, description: 'Accesos, invitaciones y mensajes' },
+          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'CUPS, lecturas y reparto' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },

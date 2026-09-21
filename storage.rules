@@ -21,6 +21,71 @@ service firebase.storage {
       return isMasterAdmin() || isSignedIn();
     }
 
+    // =========================================================================
+    // E.0. BLOQUE E — HELPERS DE AISLAMIENTO DEL INQUILINO (vía Firestore)
+    // =========================================================================
+    function existeUsuarioActual() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function isTenant() {
+      return isSignedIn() && !isMasterAdmin() && existeUsuarioActual() &&
+        firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.tipoPerfil == 'INQUILINO';
+    }
+
+    function tenantContratoIds() {
+      return firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.contratoIds;
+    }
+
+    function tenantVeContrato(contratoId) {
+      return isTenant() && contratoId is string && contratoId in tenantContratoIds();
+    }
+
+    function existeIncidencia(incidenciaId) {
+      return firestore.exists(/databases/(default)/documents/incidencias/$(incidenciaId));
+    }
+
+    function contratoDeIncidencia(incidenciaId) {
+      return firestore.get(/databases/(default)/documents/incidencias/$(incidenciaId)).data.contratoId;
+    }
+
+    function existeSuministro(suministroId) {
+      return firestore.exists(/databases/(default)/documents/suministros/$(suministroId));
+    }
+
+    function inmuebleDeSuministro(suministroId) {
+      return firestore.get(/databases/(default)/documents/suministros/$(suministroId)).data.inmuebleId;
+    }
+
+    function existeInmueble(inmuebleId) {
+      return firestore.exists(/databases/(default)/documents/inmuebles/$(inmuebleId));
+    }
+
+    function contratoActivoDeInmueble(inmuebleId) {
+      return firestore.get(/databases/(default)/documents/inmuebles/$(inmuebleId)).data.contratoActivoId;
+    }
+
+    // El inquilino sube fotos de lectura si su contrato es el activo del inmueble.
+    function tenantEnSuministroPorInmueble(suministroId) {
+      return isTenant() && existeSuministro(suministroId) &&
+        existeInmueble(inmuebleDeSuministro(suministroId)) &&
+        tenantVeContrato(contratoActivoDeInmueble(inmuebleDeSuministro(suministroId)));
+    }
+
+    function existeLectura(lecturaId) {
+      return firestore.exists(/databases/(default)/documents/lecturas_suministro/$(lecturaId));
+    }
+
+    function contratoDeLectura(lecturaId) {
+      return firestore.get(/databases/(default)/documents/lecturas_suministro/$(lecturaId)).data.contratoId;
+    }
+
+    function esEvidenciaValida() {
+      return request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('application/pdf|image/(jpeg|jpg|png|webp)');
+    }
+
     function isPdfOrImage() {
       return request.resource.contentType.matches('application/pdf')
         || request.resource.contentType.matches('application/octet-stream')
@@ -179,6 +244,51 @@ service firebase.storage {
     // -------------------------------------------------------------------------
     // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
     // -------------------------------------------------------------------------
+
+    // =========================================================================
+    // E.1. BLOQUE E — EVIDENCIAS DE INCIDENCIAS (fotos/documentos del expediente)
+    // El inquilino solo accede a las de incidencias de sus contratos.
+    // Subida: PDF/imágenes, máx. 10 MB. Solo el personal borra.
+    // =========================================================================
+    match /incidencias/{incidenciaId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() ||
+        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
+      allow create, update: if esEvidenciaValida() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
+        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
+      allow delete: if isSignedIn() && !isTenant();
+    }
+
+    // =========================================================================
+    // E.2. BLOQUE E — FOTOS DE LECTURAS DE CONTADOR
+    // Ruta: suministros/{suministroId}/lecturas/{lecturaId}/{fichero}
+    // La lectura se crea primero en Firestore (inmutable); la foto la referencia.
+    // =========================================================================
+    match /suministros/{suministroId}/lecturas/{lecturaId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() ||
+        (existeLectura(lecturaId) && tenantVeContrato(contratoDeLectura(lecturaId))));
+      // Subida ANTES de crear la lectura (inmutable): alcance vía contrato activo del inmueble.
+      allow create, update: if esEvidenciaValida() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
+        tenantEnSuministroPorInmueble(suministroId));
+      allow delete: if isSignedIn() && !isTenant();
+    }
+
+    // =========================================================================
+    // E.3. BLOQUE E — DOCUMENTOS DEL CONTRATO (PDF LAU, actas, anexos)
+    // El inquilino solo lee los de sus contratos; solo el personal publica.
+    // =========================================================================
+    match /contratos/{contratoId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
+      allow create, update, delete: if isSignedIn() && !isTenant();
+    }
+
+    // =========================================================================
+    // E.4. BLOQUE E — RECIBOS Y JUSTIFICANTES DE COBRO
+    // Ruta: recibos/{contratoId}/{claveCobro}/{fichero}
+    // =========================================================================
+    match /recibos/{contratoId}/{claveCobro}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
+      allow create, update, delete: if isSignedIn() && !isTenant();
+    }
     match /{allPaths=**} {
       allow read, write: if false;
     }

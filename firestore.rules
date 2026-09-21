@@ -50,11 +50,92 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // E.0. BLOQUE E — HELPERS DE AISLAMIENTO DEL INQUILINO
+    // Modelo: inquilino → contrato(s) vinculado(s) (usuario.contratoIds) → inmueble.
+    // - isStaff(): cualquier usuario autenticado que NO sea perfil INQUILINO.
+    // - El inquilino NUNCA lista colecciones: lee por get() directo los documentos
+    //   de su alcance y descubre los IDs hijo mediante los índices de capacidad
+    //   del contrato (incidenciaIds, mensajeIds) y del suministro
+    //   (lecturaIds, cambioTitularIds), que solo pueden crecer (sin borrado).
+    // =========================================================================
+
+    function existeUsuarioActual() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function getUsuarioActual() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function isTenant() {
+      return isSignedIn() && !isMasterAdmin() && existeUsuarioActual() &&
+        getUsuarioActual().tipoPerfil == 'INQUILINO';
+    }
+
+    function isStaff() {
+      return isSignedIn() && !isTenant();
+    }
+
+    function tenantContratoIds() {
+      return (existeUsuarioActual() &&
+        ('contratoIds' in getUsuarioActual()) &&
+        getUsuarioActual().contratoIds is list)
+        ? getUsuarioActual().contratoIds : [];
+    }
+
+    function tenantTieneContrato(contratoId) {
+      return isTenant() && contratoId is string && contratoId in tenantContratoIds();
+    }
+
+    function tenantVeContratos(lista) {
+      return isTenant() && lista is list && tenantContratoIds().hasAny(lista);
+    }
+
+    function campoListaActual(nombre) {
+      return (nombre in existing()) && existing()[nombre] is list ? existing()[nombre] : [];
+    }
+
+    // Un índice de capacidad solo puede crecer de forma acotada (sin borrado ni truncado).
+    function indiceInmutableOCrece(campo) {
+      return (!(campo in existing()) && !(campo in incoming())) ||
+        (!(campo in existing()) && (campo in incoming()) &&
+          incoming()[campo] is list && incoming()[campo].size() <= 5) ||
+        ((campo in existing()) && (campo in incoming()) &&
+          existing()[campo] is list && incoming()[campo] is list &&
+          existing()[campo].toSet().difference(incoming()[campo].toSet()).size() == 0 &&
+          incoming()[campo].size() <= existing()[campo].size() + 5);
+    }
+
+    // Un campo opcional debe permanecer idéntico (ausente-ausente o igual-igual).
+    function mismoCampoOpcional(campo) {
+      return (!(campo in existing()) && !(campo in incoming())) ||
+        ((campo in existing()) && (campo in incoming()) &&
+          incoming()[campo] == existing()[campo]);
+    }
+
+    function getEnlaceE(enlaceId) {
+      return get(/databases/$(database)/documents/enlaces_registro/$(enlaceId)).data;
+    }
+
+    // La cuenta INQUILINO solo nace de una invitación activa vinculada a su contrato.
+    function enlaceInquilinoValido(enlaceId, contratoIds) {
+      return enlaceId is string && isValidId(enlaceId) &&
+        exists(/databases/$(database)/documents/enlaces_registro/$(enlaceId)) &&
+        getEnlaceE(enlaceId).tipoPerfil == 'INQUILINO' &&
+        getEnlaceE(enlaceId).activo == true &&
+        contratoIds is list &&
+        getEnlaceE(enlaceId).contratoIdVinculado in contratoIds &&
+        (!('usosMaximos' in getEnlaceE(enlaceId)) ||
+          getEnlaceE(enlaceId).usosActuales < getEnlaceE(enlaceId).usosMaximos);
+    }
+
+    // =========================================================================
     // 0. PROPIETARIOS Y CUENTAS BANCARIAS
     // =========================================================================
     match /propietarios/{propietarioId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -63,11 +144,14 @@ service cloud.firestore {
     // Public listings are readable for candidate application links
     // =========================================================================
     match /inmuebles/{inmuebleId} {
-      // Lectura puntual para enlaces públicos de solicitud/cuestionario; listado restringido a usuarios autenticados
-      allow get: if isSignedIn() || (isValidId(inmuebleId) && resource.data.estado in ['disponible', 'alquilado']);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isMasterAdmin() || (isSignedIn() && (
+      // Lectura puntual para enlaces públicos de solicitud/cuestionario; listado restringido al personal.
+      // BLOQUE E: el inquilino lee (get) solo inmuebles de sus contratos vinculados.
+      allow get: if (isValidId(inmuebleId) && resource.data.estado in ['disponible', 'alquilado']) || (isSignedIn() && (!isTenant() ||
+        ((('contratoActivoId' in resource.data) && tenantTieneContrato(resource.data.contratoActivoId)) ||
+          tenantVeContratos(campoListaActual('contratoIdsAutorizados')))));
+      allow list: if isStaff();
+      allow create: if isStaff();
+      allow update, delete: if isMasterAdmin() || (isStaff() && (
         resource.data.propietarioId == request.auth.uid ||
         resource.data.authUid == request.auth.uid ||
         (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && 
@@ -81,29 +165,29 @@ service cloud.firestore {
     // Trazabilidad inmutable: no se permite truncar ni vaciar el array historial
     // =========================================================================
     match /candidatos/{candidatoId} {
-      allow get: if isMasterAdmin() || (isSignedIn() && (
+      allow get: if isMasterAdmin() || (isStaff() && (
         resource.data.propietarioId == request.auth.uid ||
         isOwnerOfInmueble(resource.data.inmuebleId)
       ));
-      allow list: if isSignedIn();
-      allow create: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(incoming().inmuebleId));
-      allow update: if (isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId))) && (
+      allow list: if isStaff();
+      allow create: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(incoming().inmuebleId));
+      allow update: if (isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId))) && (
         // Garantía de historial inmutable: el historial entrante debe conservar o aumentar las entradas
         (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
       );
-      allow delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
+      allow delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
     // 3. SOLICITUDES DE ALQUILER (Públicas para captación inicial de solicitantes)
     // =========================================================================
     match /solicitudes/{solicitudId} {
-      allow get: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(resource.data.inmuebleId));
-      allow list: if isSignedIn();
+      allow get: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(resource.data.inmuebleId));
+      allow list: if isStaff();
       allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado']) &&
                        incoming().nombre is string &&
                        incoming().email is string;
-      allow update, delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
+      allow update, delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
@@ -111,13 +195,13 @@ service cloud.firestore {
     // =========================================================================
     match /invitaciones/{invitacionId} {
       // Lectura puntual para el enlace de invitación de visita
-      allow get: if isSignedIn() || (isValidId(invitacionId) && resource.data.status in ['PENDIENTE', 'CONFIRMADA', 'COMPLETADA', 'CANCELADA']);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() || (
+      allow get: if isStaff() || (isValidId(invitacionId) && resource.data.status in ['PENDIENTE', 'CONFIRMADA', 'COMPLETADA', 'CANCELADA']);
+      allow list: if isStaff();
+      allow create: if isStaff();
+      allow update: if isStaff() || (
         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'cuestionarioCompletado', 'slotId', 'fechaVisita'])
       );
-      allow delete: if isSignedIn();
+      allow delete: if isStaff();
     }
 
     // =========================================================================
@@ -125,10 +209,10 @@ service cloud.firestore {
     // =========================================================================
     match /slots_visita/{slotId} {
       // Lectura de turnos para consulta y reserva atómica
-      allow get: if isSignedIn() || (isValidId(slotId) && resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
-      allow list: if isSignedIn() || (resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
-      allow create, delete: if isSignedIn();
-      allow update: if isSignedIn() || (
+      allow get: if isStaff() || (isValidId(slotId) && resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
+      allow list: if isStaff() || (resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
+      allow create, delete: if isStaff();
+      allow update: if isStaff() || (
         incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'candidateId', 'candidateNombre', 'candidateTelefono', 'candidateEmail', 'invitacionId', 'bookedAt'])
       );
     }
@@ -139,32 +223,44 @@ service cloud.firestore {
     // se gestiona a través del backend/API con verificación estricta de token.
     // =========================================================================
     match /solicitudes_documentacion/{solicitudDocId} {
-      allow get: if isMasterAdmin() || (isSignedIn() && (
+      allow get: if isMasterAdmin() || (isStaff() && (
         resource.data.ownerId == request.auth.uid ||
         resource.data.propietarioId == request.auth.uid ||
         isOwnerOfInmueble(resource.data.inmuebleId)
       ));
-      allow list: if isSignedIn();
-      allow create: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(incoming().inmuebleId));
-      allow update: if (isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId))) && (
+      allow list: if isStaff();
+      allow create: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(incoming().inmuebleId));
+      allow update: if (isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId))) && (
         (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
       );
-      allow delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
+      allow delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
     // 7. CONTRATOS DE FORMALIZACIÓN, LAU Y ENTREGA DE LLAVES
     // =========================================================================
     match /contratos_formalizacion/{contratoId} {
-      allow read, create, update, delete: if isSignedIn();
+      // BLOQUE E: el inquilino lee SOLO sus contratos vinculados (get por ID, sin listados)
+      // y solo puede añadir IDs a los índices de capacidad (incidenciaIds, mensajeIds).
+      allow get: if isStaff() || (isTenant() && tenantTieneContrato(contratoId));
+      allow list: if isStaff();
+      allow create: if isStaff();
+      allow update: if isStaff() || (
+        isTenant() &&
+        tenantTieneContrato(contratoId) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['incidenciaIds', 'mensajeIds', 'fechaActualizacion']) &&
+        indiceInmutableOCrece('incidenciaIds') &&
+        indiceInmutableOCrece('mensajeIds')
+      );
+      allow delete: if isStaff();
     }
 
     // =========================================================================
     // 8. CONFIGURACIÓN DE ASEGURADORAS (SEAG, Caser, etc.)
     // =========================================================================
     match /configuracion_aseguradoras/{aseguradoraId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update, delete: if isStaff();
     }
 
     // =========================================================================
@@ -172,23 +268,23 @@ service cloud.firestore {
     // Propietario A no puede consultar ni tramitar expedientes de Propietario B
     // =========================================================================
     match /solicitudes_seguro_impago/{solicitudSeguroId} {
-      allow get: if isMasterAdmin() || (isSignedIn() && (
+      allow get: if isMasterAdmin() || (isStaff() && (
         resource.data.propietarioId == request.auth.uid ||
         isOwnerOfInmueble(resource.data.inmuebleId)
       ));
-      allow list: if isSignedIn();
-      allow create: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(incoming().inmuebleId));
-      allow update: if (isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId))) && (
+      allow list: if isStaff();
+      allow create: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(incoming().inmuebleId));
+      allow update: if (isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId))) && (
         (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
       );
-      allow delete: if isMasterAdmin() || (isSignedIn() && isOwnerOfInmueble(existing().inmuebleId));
+      allow delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
     }
 
     // =========================================================================
     // 10. CONFIGURACIÓN DEL SISTEMA Y GMAIL INTEGRATION
     // =========================================================================
     match /system/{systemDocId} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow write: if isMasterAdmin();
     }
 
@@ -200,21 +296,32 @@ service cloud.firestore {
         isMasterAdmin() ||
         request.auth.uid == usuarioId ||
         resource.data.authUid == request.auth.uid ||
-        resource.data.tipoPerfil in ['PROFESIONAL', 'PROPIETARIO', 'ADMINISTRADOR']
+        resource.data.tipoPerfil in ['PROFESIONAL', 'PROPIETARIO', 'ADMINISTRADOR'] ||
+        (resource.data.tipoPerfil == 'INQUILINO' && !isTenant())
       );
-      allow list: if isSignedIn();
+      allow list: if isStaff();
+      // BLOQUE E: la cuenta INQUILINO solo nace de invitación activa vinculada a su contrato.
       allow create: if isMasterAdmin() || (
         isSignedIn() &&
         incoming().authUid == request.auth.uid &&
-        incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL'] &&
-        (!('SUPERADMIN' in incoming().roles))
+        (!('SUPERADMIN' in incoming().roles)) &&
+        (
+          incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL'] ||
+          (incoming().tipoPerfil == 'INQUILINO' &&
+            incoming().contratoIds is list &&
+            incoming().contratoIds.size() >= 1 &&
+            incoming().contratoIds.size() <= 5 &&
+            ('enlaceRegistroId' in incoming()) &&
+            enlaceInquilinoValido(incoming().enlaceRegistroId, incoming().contratoIds))
+        )
       );
       allow update: if isMasterAdmin() || (
         isSignedIn() &&
         (existing().authUid == request.auth.uid || usuarioId == request.auth.uid) &&
         incoming().tipoPerfil == existing().tipoPerfil &&
         incoming().roles == existing().roles &&
-        incoming().estado == existing().estado
+        incoming().estado == existing().estado &&
+        mismoCampoOpcional('contratoIds')
       );
       allow delete: if isMasterAdmin();
     }
@@ -223,8 +330,8 @@ service cloud.firestore {
     // 12. PROFESIONALES Y EMPRESAS DE MANTENIMIENTO
     // =========================================================================
     match /profesionales/{profesionalId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -233,24 +340,33 @@ service cloud.firestore {
     // =========================================================================
     match /enlaces_registro/{enlaceId} {
       allow get: if isSignedIn() || (isValidId(enlaceId) && resource.data.activo == true);
-      allow list: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
+      allow list: if isStaff();
+      allow create, delete: if isStaff();
+      // BLOQUE E: el inquilino solo consume su invitación (incremento de usos en +1).
+      allow update: if isStaff() || (
+        isTenant() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales']) &&
+        incoming().usosActuales is number &&
+        existing().usosActuales is number &&
+        incoming().usosActuales == existing().usosActuales + 1
+      );
     }
 
     // =========================================================================
     // 14. CATÁLOGO ADMINISTRABLE DE ESPECIALIDADES
     // =========================================================================
     match /especialidades/{especialidadId} {
-      allow get: if isSignedIn() || isValidId(especialidadId);
-      allow list: if isSignedIn() || (resource.data.activo == true || !('activo' in resource.data));
-      allow write: if isSignedIn();
+      allow get: if isStaff() || isValidId(especialidadId);
+      allow list: if isStaff() || (resource.data.activo == true || !('activo' in resource.data));
+      allow write: if isStaff();
     }
 
     // =========================================================================
     // 15. REGISTROS DE AUDITORÍA (INMUTABLE - SÓLO INSERCIÓN)
     // =========================================================================
     match /audit_logs/{auditId} {
-      allow read: if isSignedIn();
+      // BLOQUE E: el inquilino registra auditoría (create) pero no lee logs internos.
+      allow read: if isStaff();
       allow create: if isSignedIn() || (
         incoming().keys().hasAll(['id', 'action', 'timestamp']) &&
         incoming().action is string &&
@@ -263,13 +379,28 @@ service cloud.firestore {
     // 16. BLOQUE 4: INCIDENCIAS, MANTENIMIENTO Y TRABAJOS PROFESIONALES
     // =========================================================================
     match /incidencias/{incidenciaId} {
-      allow get: if isMasterAdmin() || (isSignedIn() && (
+      // BLOQUE E: el inquilino lee (get) las incidencias de sus contratos y puede crear
+      // las suyas (origen INQUILINO, estado ABIERTA); no edita ni borra.
+      allow get: if isMasterAdmin() || (isStaff() && (
         resource.data.propietarioId == request.auth.uid ||
         isOwnerOfInmueble(resource.data.inmuebleId) ||
         (resource.data.trabajoProfesional != null && resource.data.trabajoProfesional.profesionalId == request.auth.uid)
+      )) || (isTenant() && (
+        (('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId)) ||
+        tenantVeContratos(campoListaActual('contratoIdsVisibles'))
       ));
-      allow list: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow list: if isStaff();
+      allow create: if isStaff() || (isTenant() &&
+        incoming().contratoId is string &&
+        tenantTieneContrato(incoming().contratoId) &&
+        incoming().inmuebleId is string &&
+        incoming().origen == 'INQUILINO' &&
+        incoming().estado == 'ABIERTA' &&
+        incoming().titulo is string && incoming().titulo.size() >= 3 &&
+        incoming().descripcion is string && incoming().descripcion.size() >= 10 &&
+        (!('contratoIdsVisibles' in incoming()) || incoming().contratoIdsVisibles == [incoming().contratoId])
+      );
+      allow update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -277,8 +408,8 @@ service cloud.firestore {
     // 17. BLOQUE 4: PÓLIZAS DE SEGURO
     // =========================================================================
     match /polizas_seguros/{polizaId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -286,8 +417,8 @@ service cloud.firestore {
     // 18. BLOQUE 4: SINIESTROS VINCULADOS A INCIDENCIAS
     // =========================================================================
     match /siniestros/{siniestroId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -295,13 +426,13 @@ service cloud.firestore {
     // 19. BLOQUE 5: TRABAJOS PROFESIONALES
     // =========================================================================
     match /trabajos_profesionales/{trabajoId} {
-      allow get: if isMasterAdmin() || (isSignedIn() && (
+      allow get: if isMasterAdmin() || (isStaff() && (
         resource.data.propietarioId == request.auth.uid ||
         isOwnerOfInmueble(resource.data.inmuebleId) ||
         resource.data.profesionalId == request.auth.uid
       ));
-      allow list: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow list: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -309,8 +440,8 @@ service cloud.firestore {
     // 20. BLOQUE 5: PRESUPUESTOS DE PROFESIONALES
     // =========================================================================
     match /presupuestos_profesionales/{presupuestoId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -318,8 +449,8 @@ service cloud.firestore {
     // 21. BLOQUE 5: VALORACIONES Y EVALUACIONES DE PROFESIONALES
     // =========================================================================
     match /valoraciones_profesionales/{valoracionId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -328,13 +459,13 @@ service cloud.firestore {
     // Aislamiento: el propietario solo lee sus propias liquidaciones.
     // =========================================================================
     match /liquidaciones_propietarios/{liquidacionId} {
-      allow get: if isMasterAdmin() || (isSignedIn() && (
+      allow get: if isMasterAdmin() || (isStaff() && (
         resource.data.propietarioId == request.auth.uid ||
         (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == resource.data.propietarioId)
       ));
-      allow list: if isSignedIn();
-      allow create, update: if isSignedIn() && (
+      allow list: if isStaff();
+      allow create, update: if isStaff() && (
         (!('historial' in resource.data) || !('historial' in incoming()) || incoming().historial.size() >= resource.data.historial.size())
       );
       allow delete: if isMasterAdmin();
@@ -344,17 +475,17 @@ service cloud.firestore {
     // 23. BLOQUE B: GASTOS DE INMUEBLES
     // =========================================================================
     match /gastos_inmuebles/{gastoId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isMasterAdmin() || (isSignedIn() && resource.data.estado == 'pendiente');
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isMasterAdmin() || (isStaff() && resource.data.estado == 'pendiente');
     }
 
     // =========================================================================
     // 24. BLOQUE B: ÓRDENES DE PAGO (origen trazable obligatorio a nivel de app)
     // =========================================================================
     match /ordenes_pago/{ordenId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && incoming().origenId is string && incoming().origenTipo is string;
+      allow read: if isStaff();
+      allow create, update: if isStaff() && incoming().origenId is string && incoming().origenTipo is string;
       allow delete: if isMasterAdmin();
     }
 
@@ -362,8 +493,8 @@ service cloud.firestore {
     // 25. BLOQUE B: FICHEROS SEPA (generar→validar→preparar; sin envío automático)
     // =========================================================================
     match /ficheros_sepa/{ficheroId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && incoming().msgId is string && incoming().hashContenido is string;
+      allow read: if isStaff();
+      allow create, update: if isStaff() && incoming().msgId is string && incoming().hashContenido is string;
       allow delete: if isMasterAdmin();
     }
 
@@ -371,8 +502,8 @@ service cloud.firestore {
     // 26. BLOQUE B: MANDATOS SEPA
     // =========================================================================
     match /mandatos_sepa/{mandatoId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -380,8 +511,89 @@ service cloud.firestore {
     // 27. BLOQUE B: CONFIGURACIÓN DE LIQUIDACIÓN POR PROPIETARIO
     // =========================================================================
     match /config_liquidacion/{propietarioId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // E.1. BLOQUE E: MENSAJES DEL PORTAL (hilo inquilino ↔ gestión por contrato)
+    // Sin borrado: el hilo es el registro de comunicaciones.
+    // =========================================================================
+    match /mensajes_portal/{mensajeId} {
+      allow get: if isStaff() || (isTenant() &&
+        ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
+      allow list: if isStaff();
+      allow create: if isStaff() || (isTenant() &&
+        incoming().contratoId is string &&
+        tenantTieneContrato(incoming().contratoId) &&
+        incoming().inmuebleId is string &&
+        incoming().remitenteUid == request.auth.uid &&
+        incoming().remitenteRol == 'INQUILINO' &&
+        incoming().texto is string &&
+        incoming().texto.size() >= 1 &&
+        incoming().texto.size() <= 4000);
+      // Gestión actualiza (acuse de lectura); el inquilino solo marca su propio acuse.
+      allow update: if isStaff() || (isTenant() &&
+        ('contratoId' in existing()) && tenantTieneContrato(existing().contratoId) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['leidoPorInquilino']));
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // E.2. BLOQUE E: SUMINISTROS (CUPS/contador, titular, comercializadora, reparto)
+    // El inquilino lee (get) los de su inmueble y solo añade IDs a los índices.
+    // =========================================================================
+    match /suministros/{suministroId} {
+      allow get: if isStaff() || (isTenant() &&
+        tenantVeContratos(campoListaActual('contratoIdsAutorizados')));
+      allow list: if isStaff();
+      allow create: if isStaff();
+      allow update: if isStaff() || (isTenant() &&
+        tenantVeContratos(campoListaActual('contratoIdsAutorizados')) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['lecturaIds', 'cambioTitularIds', 'fechaActualizacion']) &&
+        indiceInmutableOCrece('lecturaIds') &&
+        indiceInmutableOCrece('cambioTitularIds'));
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // E.3. BLOQUE E: LECTURAS DE SUMINISTRO (INMUTABLES con trazabilidad)
+    // Sin update ni delete: la corrección es una nueva lectura (corrigeLecturaId).
+    // =========================================================================
+    match /lecturas_suministro/{lecturaId} {
+      allow get: if isStaff() || (isTenant() &&
+        ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
+      allow list: if isStaff();
+      allow create: if isStaff() || (isTenant() &&
+        incoming().contratoId is string &&
+        tenantTieneContrato(incoming().contratoId) &&
+        incoming().suministroId is string &&
+        incoming().inmuebleId is string &&
+        incoming().valor is number && incoming().valor >= 0 &&
+        incoming().unidad is string &&
+        incoming().fechaLectura is string &&
+        incoming().origen == 'INQUILINO');
+      allow update, delete: if false;
+    }
+
+    // =========================================================================
+    // E.4. BLOQUE E: CAMBIOS DE TITULARIDAD (solicita inquilino, resuelve gestión)
+    // =========================================================================
+    match /cambios_titular/{cambioId} {
+      allow get: if isStaff() || (isTenant() &&
+        ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
+      allow list: if isStaff();
+      allow create: if isStaff() || (isTenant() &&
+        incoming().contratoId is string &&
+        tenantTieneContrato(incoming().contratoId) &&
+        incoming().suministroId is string &&
+        incoming().inmuebleId is string &&
+        incoming().titularNuevoNombre is string &&
+        incoming().titularNuevoNombre.size() >= 3 &&
+        incoming().fechaEfecto is string &&
+        incoming().estado == 'SOLICITADO');
+      allow update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 

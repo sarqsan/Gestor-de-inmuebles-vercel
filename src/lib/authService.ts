@@ -384,8 +384,17 @@ export async function registerWithInvitationLink(params: {
     throw new Error('Seguridad: Los enlaces públicos no pueden crear perfiles de administración.');
   }
 
-  const tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL' =
-    enlace.tipoPerfil === 'PROFESIONAL' ? 'PROFESIONAL' : 'PROPIETARIO';
+  const tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL' | 'INQUILINO' =
+    enlace.tipoPerfil === 'PROFESIONAL'
+      ? 'PROFESIONAL'
+      : enlace.tipoPerfil === 'INQUILINO'
+      ? 'INQUILINO'
+      : 'PROPIETARIO';
+
+  // BLOQUE E: la invitación de inquilino exige contrato vinculado (alcance del portal)
+  if (tipoPerfil === 'INQUILINO' && !enlace.contratoIdVinculado) {
+    throw new Error('Seguridad: esta invitación de inquilino no tiene contrato vinculado.');
+  }
 
   let firebaseUser: FirebaseUser | null = null;
   try {
@@ -405,6 +414,8 @@ export async function registerWithInvitationLink(params: {
   const rolDef = ROLES_PREDEFINIDOS.find((r) =>
     tipoPerfil === 'PROPIETARIO'
       ? r.id === 'PROPIETARIO_ESTANDAR'
+      : tipoPerfil === 'INQUILINO'
+      ? r.id === 'INQUILINO_PORTAL'
       : r.id === 'PROFESIONAL_MANTENIMIENTO'
   );
 
@@ -422,13 +433,18 @@ export async function registerWithInvitationLink(params: {
     estado: 'ACTIVO',
     roles: rolDef ? [rolDef.id] : [],
     permisos: rolDef ? rolDef.permisos : [],
+    ...(tipoPerfil === 'INQUILINO' && enlace.contratoIdVinculado
+      ? { contratoIds: [enlace.contratoIdVinculado] }
+      : {}),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastLoginAt: new Date().toISOString(),
   };
 
-  // 3. Crear entidad relacionada (Propietario o Profesional)
-  if (tipoPerfil === 'PROPIETARIO') {
+  // 3. Crear entidad relacionada (Propietario o Profesional; el inquilino no crea entidad)
+  if (tipoPerfil === 'INQUILINO') {
+    // Sin entidad adicional: el alcance del inquilino es su contrato vinculado.
+  } else if (tipoPerfil === 'PROPIETARIO') {
     const propId = enlace.propietarioIdVinculado || `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     nuevoUsuario.propietarioId = propId;
 
@@ -633,6 +649,67 @@ export function isPropietario(usuario?: UsuarioApp | null): boolean {
 
 export function isProfesional(usuario?: UsuarioApp | null): boolean {
   return usuario?.tipoPerfil === 'PROFESIONAL';
+}
+
+// =========================================================================
+// BLOQUE E — ALCANCE DEL PORTAL DEL INQUILINO
+// Aislamiento: inquilino → contrato(s) vinculado(s) → inmueble(s).
+// Estos helpers alimentan la UI; la aplicación real es deny-by-default
+// en las reglas de Firestore/Storage (sección E).
+// =========================================================================
+
+export function isInquilino(usuario?: UsuarioApp | null): boolean {
+  return usuario?.tipoPerfil === 'INQUILINO';
+}
+
+/** Contratos del inquilino (intersección de sus contratoIds con los contratos cargados). */
+export function getContratosDelInquilino(
+  usuario: UsuarioApp | null | undefined,
+  allContratos: ContratoFormalizacion[]
+): ContratoFormalizacion[] {
+  if (!usuario || !isInquilino(usuario)) return [];
+  const ids = new Set(usuario.contratoIds || []);
+  if (ids.size === 0) return [];
+  return allContratos.filter((c) => ids.has(c.id));
+}
+
+/** ¿Puede el inquilino acceder a este contrato? (pertenencia estricta). */
+export function canTenantAccessContrato(
+  usuario: UsuarioApp | null | undefined,
+  contratoId: string
+): boolean {
+  if (!usuario || !isInquilino(usuario)) return false;
+  return (usuario.contratoIds || []).includes(contratoId);
+}
+
+/**
+ * ¿Puede el inquilino acceder a este inmueble?
+ * Solo a través de un contrato vinculado que apunte al inmueble.
+ */
+export function canTenantAccessInmueble(
+  usuario: UsuarioApp | null | undefined,
+  inmuebleId: string,
+  allContratos: ContratoFormalizacion[]
+): boolean {
+  if (!usuario || !isInquilino(usuario)) return false;
+  const ids = new Set(usuario.contratoIds || []);
+  if (ids.size === 0) return false;
+  return allContratos.some((c) => ids.has(c.id) && c.inmuebleId === inmuebleId);
+}
+
+export interface TenantScope {
+  contratos: ContratoFormalizacion[];
+  inmuebleIds: string[];
+}
+
+/** Resuelve el alcance visible del inquilino (contratos + inmuebles derivados). */
+export function resolveTenantScope(
+  usuario: UsuarioApp | null | undefined,
+  allContratos: ContratoFormalizacion[]
+): TenantScope {
+  const contratos = getContratosDelInquilino(usuario, allContratos);
+  const inmuebleIds = Array.from(new Set(contratos.map((c) => c.inmuebleId).filter(Boolean)));
+  return { contratos, inmuebleIds };
 }
 
 /**

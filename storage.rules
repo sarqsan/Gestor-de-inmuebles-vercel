@@ -7,9 +7,51 @@ service firebase.storage {
     }
 
     function isMasterAdmin() {
-      return request.auth != null && 
-             'email' in request.auth.token && 
+      return request.auth != null &&
+             'email' in request.auth.token &&
              request.auth.token.email == 'sarqsan2@gmail.com';
+    }
+
+    // =========================================================================
+    // E.0. BLOQUE E — HELPERS DE AISLAMIENTO DEL INQUILINO (vía Firestore)
+    // =========================================================================
+    function existeUsuarioActual() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function isTenant() {
+      return isSignedIn() && !isMasterAdmin() && existeUsuarioActual() &&
+        firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.tipoPerfil == 'INQUILINO';
+    }
+
+    function tenantContratoIds() {
+      return firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.contratoIds;
+    }
+
+    function tenantVeContrato(contratoId) {
+      return isTenant() && contratoId is string && contratoId in tenantContratoIds();
+    }
+
+    function existeIncidencia(incidenciaId) {
+      return firestore.exists(/databases/(default)/documents/incidencias/$(incidenciaId));
+    }
+
+    function contratoDeIncidencia(incidenciaId) {
+      return firestore.get(/databases/(default)/documents/incidencias/$(incidenciaId)).data.contratoId;
+    }
+
+    function existeLectura(lecturaId) {
+      return firestore.exists(/databases/(default)/documents/lecturas_suministro/$(lecturaId));
+    }
+
+    function contratoDeLectura(lecturaId) {
+      return firestore.get(/databases/(default)/documents/lecturas_suministro/$(lecturaId)).data.contratoId;
+    }
+
+    function esEvidenciaValida() {
+      return request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('application/pdf|image/(jpeg|jpg|png|webp)');
     }
 
     // =========================================================================
@@ -45,6 +87,50 @@ service firebase.storage {
     match /presupuestos/{presupuestoId}/{allPaths=**} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && request.resource.size < 25 * 1024 * 1024;
+    }
+
+    // =========================================================================
+    // E.1. BLOQUE E — EVIDENCIAS DE INCIDENCIAS (fotos/documentos del expediente)
+    // El inquilino solo accede a las de incidencias de sus contratos.
+    // Subida: PDF/imágenes, máx. 10 MB. Solo el personal borra.
+    // =========================================================================
+    match /incidencias/{incidenciaId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() ||
+        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
+      allow create, update: if esEvidenciaValida() && (isMasterAdmin() || !isTenant() ||
+        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
+      allow delete: if isSignedIn() && !isTenant();
+    }
+
+    // =========================================================================
+    // E.2. BLOQUE E — FOTOS DE LECTURAS DE CONTADOR
+    // Ruta: suministros/{suministroId}/lecturas/{lecturaId}/{fichero}
+    // La lectura se crea primero en Firestore (inmutable); la foto la referencia.
+    // =========================================================================
+    match /suministros/{suministroId}/lecturas/{lecturaId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() ||
+        (existeLectura(lecturaId) && tenantVeContrato(contratoDeLectura(lecturaId))));
+      allow create, update: if esEvidenciaValida() && (isMasterAdmin() || !isTenant() ||
+        (existeLectura(lecturaId) && tenantVeContrato(contratoDeLectura(lecturaId))));
+      allow delete: if isSignedIn() && !isTenant();
+    }
+
+    // =========================================================================
+    // E.3. BLOQUE E — DOCUMENTOS DEL CONTRATO (PDF LAU, actas, anexos)
+    // El inquilino solo lee los de sus contratos; solo el personal publica.
+    // =========================================================================
+    match /contratos/{contratoId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
+      allow create, update, delete: if isSignedIn() && !isTenant();
+    }
+
+    // =========================================================================
+    // E.4. BLOQUE E — RECIBOS Y JUSTIFICANTES DE COBRO
+    // Ruta: recibos/{contratoId}/{claveCobro}/{fichero}
+    // =========================================================================
+    match /recibos/{contratoId}/{claveCobro}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
+      allow create, update, delete: if isSignedIn() && !isTenant();
     }
 
     // =========================================================================

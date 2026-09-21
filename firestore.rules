@@ -34,6 +34,23 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
+    // R3 — Lista blanca CERRADA de claves de `fichas_publicas_inmueble`.
+    // Paridad con `CAMPOS_FICHA_PUBLICA` (src/lib/fichaPublicaInmueble.ts):
+    // solo campos destinados a publicación; ni IBAN, ni NIF, ni inquilino,
+    // ni valores, ni notas, ni token de solicitud, ni índices internos.
+    function clavesFichaPublicaOk() {
+      return incoming().keys().hasOnly([
+        'id', 'inmuebleId', 'propietarioId', 'direccion', 'ciudad',
+        'codigoPostal', 'precio', 'estado', 'habitaciones', 'banos',
+        'superficie', 'descripcion', 'imagenUrl', 'imagenes', 'fianzaMeses',
+        'tipoInmueble', 'modalidadAlquiler', 'planta', 'ascensor', 'terraza',
+        'balcon', 'interiorExterior', 'orientacion', 'anioConstruccion',
+        'estadoConservacion', 'aireAcondicionado', 'calefaccion',
+        'cocinaEquipada', 'electrodomesticosIncluidos', 'armariosEmpotrados',
+        'tipoVentanas', 'tipoPersianas', 'actualizadoEn'
+      ]);
+    }
+
     // BLOQUE B — verificación de secretos compartida por las colecciones de
     // tesorería (26–31). Ningún campo de credencial bancaria/certificado entra.
     function sinSecretosTesoreria() {
@@ -339,15 +356,24 @@ service cloud.firestore {
 
     // =========================================================================
     // 1. INMUEBLES
-    // La lectura permanece pública porque da servicio al funnel de captación
-    // (listados, enlaces de solicitud y reserva de visita sin iniciar sesión).
-    // La ESCRITURA queda restringida al administrador o al propietario titular.
-    // RESIDUAL CONOCIDO (siguiente endurecimiento): la ficha de inmueble aún
-    // contiene campos fiscales/IBAN; conviene moverlos a una subcolección
-    // privada o despojarlos de la vista pública.
+    // R3 (cierra el RESIDUAL conocido): el documento contiene IBAN, NIF de
+    // propietarios, inquilino actual, valores patrimoniales y notas internas,
+    // así que su lectura YA NO es pública. El funnel de captación anónimo
+    // (solicitud y reserva de visita) se sirve del espejo mínimo
+    // `fichas_publicas_inmueble` (bloque R3 siguiente), con solo campos
+    // publicables. Conocer un propertyId ya no entrega datos privados.
+    // Lectura: personal autenticado (master, administración, propietarios,
+    // profesionales) + inquilino vinculado a su vivienda (por índice de
+    // capacidad o por contrato activo). Sin enumeración anónima (list denegado
+    // sin sesión). Escrituras: sin cambios.
     // =========================================================================
     match /inmuebles/{inmuebleId} {
-      allow read: if true;
+      allow get: if isStaff()
+        || (isTenant() && (
+          tenantVeContratos(campoListaActual('contratoIdsAutorizados'))
+          || ('contratoActivoId' in resource.data && tenantTieneContrato(resource.data.contratoActivoId))
+        ));
+      allow list: if isStaff();
 
       allow create: if isMasterAdmin() || (
         isPropietarioRole() && (
@@ -362,6 +388,35 @@ service cloud.firestore {
           canReachInmuebleId(inmuebleId)
         )
       );
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // R3 — FICHA PÚBLICA DE INMUEBLE (espejo mínimo para accesos anónimos)
+    // Un documento por inmueble publicado (id = inmuebleId) con SOLO campos
+    // publicables (ver `clavesFichaPublicaOk`). Lectura: get público por id
+    // (el enlace legítimo), list solo autenticado (sin enumeración anónima).
+    // Escritura: master o propietario titular del propio documento; el id es
+    // invariante (== inmuebleId) y sin titular efectivo no se publica.
+    // Manipular IDs solo devuelve esta ficha recortada, jamás datos privados.
+    // =========================================================================
+    match /fichas_publicas_inmueble/{fichaId} {
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create: if (isMasterAdmin() || (isPropietarioRole() && incoming().propietarioId == myPropId()))
+        && isValidId(fichaId)
+        && incoming().id == fichaId
+        && incoming().inmuebleId == fichaId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && clavesFichaPublicaOk();
+      allow update: if (isMasterAdmin() || (isPropietarioRole()
+          && existing().propietarioId == myPropId()
+          && incoming().propietarioId == myPropId()))
+        && incoming().id == existing().id
+        && incoming().inmuebleId == existing().inmuebleId
+        && incoming().inmuebleId == fichaId
+        && clavesFichaPublicaOk();
       allow delete: if isMasterAdmin();
     }
 

@@ -1,10 +1,25 @@
-# BLOQUE D — Actas de Entrada y Salida
+# BLOQUE D — Actas de Entrada y Salida — Auditoría Final D2
 
-Estado: IMPLEMENTADO EN ARENA D / PENDIENTE INTEGRACIÓN Arena A
+Estado: IMPLEMENTADO EN ARENA D / PENDIENTE INTEGRACIÓN Arena A — LISTO AUDITORÍA FINAL
 Rama Arena D: `arena/01a0ab9d-gestor-de-inmuebles-vercel`
 HEAD final: ver git log
-Referencia Arena A: main @ 9cb01a43c737377a71216dd8a797e1a0509e99dc (no modificada)
+Referencia Arena A: main @ 9cb01a43c737377a71216dd8a797e1a0509e99dc (no modificada) / origin/main 4d420bd37e96ca24861ab7062e19f4300a8a20f5
 Fecha: 2026-09-21
+Auditoría D2: integridad versiones firmadas, identidad estable inventario, comparación id-first, PDF persistencia Storage+Firestore, OTP aislamiento sin logs, rules FIRMADA/CERRADA bloqueadas
+
+## Correcciones críticas D2 aplicadas
+- Defecto crítico firestore.rules esVersionadoPermitido FIRMADA/CERRADA→BORRADOR mismo doc: CORREGIDO → bloqueado. Ahora solo permite FIRMADA→CERRADA misma versión sin cambios críticos, y actualización PDF limitada (pdfUrl, pdfStoragePath, pdfVersion, pdfFechaGeneracion) con inventario/participantes/firmas idénticos. Versionado correcto exige nuevo documento con actaAnteriorId, motivoVersionado, fechaVersionado, cadenaVersionIds.
+- Defecto inventario crearActaSalidaDesdeEntrada id nuevo elem_sal_${Date.now()} rompiendo identidad estable: CORREGIDO → conserva id original entrada para matching determinista por ID, añade campos observacionesEntrada, cantidadEntrada, fotoUrlEntrada, evidenciaIdsEntrada, elementoEntradaId, idOriginalEntrada para trazabilidad entrada/salida inequívoca.
+- Riesgo PDF flujo no persistido: CORREGIDO → generarPdfActa → output blob → uploadPdfActaStorage actas_pdfs/{owner}/{acta}/{file} → guardar pdfUrl/pdfStoragePath/pdfVersion/pdfFechaGeneracion en Firestore → historial PDF_GENERADO → auditoría ACTA_PDF_GENERADO con storagePath. UI muestra ✅ si persistido, link a Storage, versión.
+- Riesgo OTP console.log código: CORREGIDO → eliminado console.log en ActasSection y TransporteManualAdapter, código solo en campo codigoPlainTemporal temporal controlado si canal MANUAL, limpio tras uso, nunca en logs prod. Añadido validarOtpContexto para aislamiento acta/firma/versión/owner/propertyId.
+- Comparación determinista falsos emparejamientos por texto ambiguo duplicado: CORREGIDO → compararInventarios prioriza ID estable (mapaSalidaPorId, mapaSalidaPorEntradaId), luego clave categoria|elemento solo si único en ambos lados, evita duplicados ambiguos tratándolos como ELEMENTO_NUEVO con requiereAtencion.
+- Tipos extendidos: Acta pdfFechaGeneracion, actaAnteriorId, motivoVersionado, fechaVersionado, cadenaVersionIds; ElementoActaInventario observacionesEntrada, cantidadEntrada, evidenciaIdsEntrada, fotoUrlEntrada, elementoEntradaId, idOriginalEntrada; OtpActa propertyId, contractId, versionActa, solicitanteId, transporteRealizado.
+- Tests D2: 15 adicionales — versionado inmutable nuevo ID preserva original pdf limpio, rules simulación bloque FIRMADA→BORRADOR, identidad estable entrada/salida, id-first evita falsos, PDF referencia persistente, PDF tras recarga, OTP aislamiento acta/firma/versión/owner, OTP no reutilización, OTP no expone logs, OTP expiración 15min bloqueo maxIntentos, storage aislamiento paths ownerId+actaId, evidencias no base64, trazabilidad cadenaVersionIds, índices ownerId+propertyId+contractId documentados. Total 51 bloqueD.
+- firestore.indexes.json creado documentando queries ownerId+propertyId+contractId y actas_otp ownerId+actaId, evidencias actas.
+- storage.rules verificados: actas_fotos <15MB imagen, actas_pdfs <20MB pdf, internalUser, no público, aislamiento por path ownerId.
+- UI ActasSection: PDF flujo completo, versionado seguro nueva versión con motivo, mostrar cadena versiones y pdf persistido, OTP aislamiento check antes de validar, sin console.log.
+
+## Objetivo
 
 ## Objetivo
 Circuito completo: VIVIENDA/CONTRATO → ENTRADA → ACTA ENTRADA → INVENTARIO/ESTADO/EVIDENCIAS → FIRMA → ESTANCIA → SALIDA → COMPARACIÓN → INCIDENCIAS → ACTA SALIDA → FIRMA → TRAZABILIDAD

@@ -75,15 +75,22 @@ export interface ElementoActaInventario {
   estadoEntrada?: EstadoElementoActa; // para acta SALIDA, referencia al estado inicial
   estadoSalida?: EstadoElementoActa; // para acta SALIDA, estado final
   observaciones?: string;
+  observacionesEntrada?: string; // observación original de entrada, para no perderla
   cantidad?: number;
+  cantidadEntrada?: number; // cantidad original entrada
   unidadCantidad?: string; // ej "uds", "m2"
   ubicacion?: string; // estancia
   marca?: string;
   modelo?: string;
   evidenciaIds?: string[]; // refs a EvidenciaActa
+  evidenciaIdsEntrada?: string[]; // evidencias de entrada
   fotoUrl?: string; // referencia rápida (no base64, URL Storage)
+  fotoUrlEntrada?: string;
   activo: boolean;
   orden: number;
+  // Trazabilidad inventario entrada→salida
+  elementoEntradaId?: string; // id del elemento en acta entrada (identidad estable)
+  idOriginalEntrada?: string; // alias compatibilidad
 }
 
 export type TipoContador = 'ELECTRICIDAD' | 'AGUA' | 'GAS' | 'CALEFACCION' | 'OTRO';
@@ -181,8 +188,11 @@ export interface OtpActa {
   actaId: string;
   firmaId: string;
   ownerId: string;
+  propertyId?: string; // para aislamiento adicional
+  contractId?: string;
+  versionActa?: number; // versión concreta a la que pertenece el OTP
   codigoHash: string; // SHA-256 hash del código, no texto plano
-  codigoPlainTemporal?: string; // solo para entrega inmediata en UI de prueba, no persistir en prod si se puede evitar; se limpia tras uso
+  codigoPlainTemporal?: string; // solo para entrega inmediata en UI de prueba manual/dev, se limpia tras uso, nunca en logs prod
   fechaCreacion: string; // ISO
   fechaExpiracion: string; // ISO
   intentos: number;
@@ -190,8 +200,10 @@ export interface OtpActa {
   usado: boolean;
   fechaUso?: string;
   solicitante?: string;
+  solicitanteId?: string;
   canal?: 'MANUAL' | 'EMAIL' | 'SMS' | 'PENDIENTE_PROVEEDOR'; // transporte
   estado: 'ACTIVO' | 'USADO' | 'EXPIRADO' | 'BLOQUEADO';
+  transporteRealizado?: boolean; // false = PENDIENTE_PROVEEDOR, true = enviado real
 }
 
 export type AccionHistorialActa =
@@ -328,7 +340,13 @@ export interface Acta {
   pdfUrl?: string;
   pdfStoragePath?: string;
   pdfVersion?: number;
+  pdfFechaGeneracion?: string; // fecha generación PDF vinculada a versión
   notasInternas?: string;
+  // Versionado correcto: conservar versión firmada intacta, nueva versión documental
+  actaAnteriorId?: string; // id de la versión anterior firmada/cerrada
+  motivoVersionado?: string;
+  fechaVersionado?: string;
+  cadenaVersionIds?: string[]; // trazabilidad cadena
 }
 
 // Para repositorio y UI

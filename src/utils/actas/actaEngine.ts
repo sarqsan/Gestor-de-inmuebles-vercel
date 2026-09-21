@@ -125,9 +125,10 @@ export function versionarActa(
   usuario: string,
   motivo: string,
   usuarioId?: string
-): { actaVersionada: Acta; historialItem: HistorialActa } {
+): { actaVersionada: Acta; actaOriginalPreservada: Acta; historialItem: HistorialActa } {
   const ahora = new Date().toISOString();
   const nuevaVersion = acta.version + 1;
+  const nuevoId = generarIdActa();
 
   const historialItem: HistorialActa = {
     id: `hist_${Date.now()}`,
@@ -137,21 +138,43 @@ export function versionarActa(
     accion: 'VERSIONADA',
     estadoAnterior: acta.estado,
     estadoNuevo: 'BORRADOR',
-    detalle: `Versionado de acta v${acta.version} → v${nuevaVersion}: ${motivo}`,
+    detalle: `Versionado de acta ${acta.id} v${acta.version} → ${nuevoId} v${nuevaVersion}: ${motivo}. Versión anterior ${acta.estado} preservada íntegra.`,
     version: nuevaVersion,
   };
 
+  // La versión original se preserva intacta, no se muta. Solo se le añade al historial un evento de que se ha versionado (para trazabilidad), pero en Firestore la original debe quedar inmutable.
+  // Para la nueva versión documental, creamos un nuevo documento con nuevo ID, version incrementada, estado BORRADOR, sin firmas, con referencia a anterior.
+  const cadenaPrevia = acta.cadenaVersionIds || [acta.id];
+  const actaVersionada: Acta = {
+    ...acta,
+    id: nuevoId,
+    version: nuevaVersion,
+    estado: 'BORRADOR',
+    estadoFirma: 'PENDIENTE',
+    firmas: [],
+    actaAnteriorId: acta.id,
+    motivoVersionado: motivo,
+    fechaVersionado: ahora,
+    cadenaVersionIds: [...cadenaPrevia, nuevoId],
+    historial: [...acta.historial, historialItem],
+    fechaCreacion: ahora,
+    fechaActualizacion: ahora,
+    creadoPor: usuario,
+    creadoPorId: usuarioId || acta.creadoPorId,
+    actualizadoPor: usuario,
+    // PDF no se hereda, debe generarse de nuevo para nueva versión
+    pdfUrl: undefined,
+    pdfStoragePath: undefined,
+    pdfVersion: undefined,
+    pdfFechaGeneracion: undefined,
+  };
+
+  // Acta original preservada: no se modifica su estado, solo se podría añadir un historial de que se versionó, pero para garantizar inmutabilidad documental, la original en Firestore permanece tal cual. Aquí devolvemos la original sin cambios para tests.
+  const actaOriginalPreservada: Acta = { ...acta };
+
   return {
-    actaVersionada: {
-      ...acta,
-      version: nuevaVersion,
-      estado: 'BORRADOR',
-      estadoFirma: 'PENDIENTE',
-      firmas: [], // reset firmas al versionar
-      historial: [...acta.historial, historialItem],
-      fechaActualizacion: ahora,
-      actualizadoPor: usuario,
-    },
+    actaVersionada,
+    actaOriginalPreservada,
     historialItem,
   };
 }
@@ -297,20 +320,36 @@ export function crearActaSalidaDesdeEntrada(
     actaEntradaId: actaEntrada.id,
   });
 
-  // Pre-cargar inventario con estados de entrada como referencia
+  // Pre-cargar inventario con estados de entrada como referencia, preservando identidad estable para comparación determinista
+  // - id se conserva igual al de entrada para matching por ID (evita falsos emparejamientos por texto ambiguo)
+  // - estadoEntrada, cantidadEntrada, observacionesEntrada, fotoUrlEntrada, evidenciaIdsEntrada conservan original
+  // - estado = PENDIENTE_REVISAR hasta revisión
   const inventarioPreCargado: ElementoActaInventario[] = actaEntrada.inventario.map(elem => ({
     ...elem,
-    id: `elem_sal_${actaEntrada.id}_${elem.id}_${Date.now()}`,
+    id: elem.id, // identidad estable conservada para comparación por ID
     actaId: actaSalida.id,
     estadoEntrada: elem.estado,
+    estadoSalida: undefined,
+    observacionesEntrada: elem.observaciones,
+    cantidadEntrada: elem.cantidad,
+    fotoUrlEntrada: elem.fotoUrl,
+    evidenciaIdsEntrada: elem.evidenciaIds ? [...elem.evidenciaIds] : [],
+    elementoEntradaId: elem.id,
+    idOriginalEntrada: elem.id,
     estado: 'PENDIENTE_REVISAR', // pendiente revisar en salida
+    // evidencias y foto de salida vacías hasta nueva aportación
     evidenciaIds: [],
     fotoUrl: undefined,
+    observaciones: '', // observación de salida separada
     orden: elem.orden,
   }));
 
   return {
     ...actaSalida,
     inventario: inventarioPreCargado,
+    // Relación inequívoca
+    actaEntradaId: actaEntrada.id,
+    // cadenaVersion para trazabilidad entrada→salida si se necesita
+    cadenaVersionIds: [...(actaEntrada.cadenaVersionIds || [actaEntrada.id]), actaSalida.id],
   };
 }

@@ -48,25 +48,46 @@ export function compararInventarios(
   inventarioSalida: ElementoActaInventario[]
 ): ComparacionElemento[] {
   const comparaciones: ComparacionElemento[] = [];
-  const mapaEntrada = new Map<string, ElementoActaInventario>();
-  const mapaSalida = new Map<string, ElementoActaInventario>();
+  // Mapas por ID estable
+  const mapaEntradaPorId = new Map<string, ElementoActaInventario>();
+  const mapaSalidaPorId = new Map<string, ElementoActaInventario>();
+  const mapaSalidaPorEntradaId = new Map<string, ElementoActaInventario>();
+  const mapaEntradaPorClave = new Map<string, ElementoActaInventario[]>();
+  const mapaSalidaPorClave = new Map<string, ElementoActaInventario[]>();
   
-  // Indexar por elemento nombre + categoria para matching tolerante
   for (const elem of inventarioEntrada) {
+    mapaEntradaPorId.set(elem.id, elem);
     const key = `${elem.categoria}|${elem.elemento.toLowerCase()}`;
-    mapaEntrada.set(key, elem);
-    mapaEntrada.set(elem.id, elem);
+    if (!mapaEntradaPorClave.has(key)) mapaEntradaPorClave.set(key, []);
+    mapaEntradaPorClave.get(key)!.push(elem);
   }
   for (const elem of inventarioSalida) {
+    mapaSalidaPorId.set(elem.id, elem);
+    if (elem.elementoEntradaId) mapaSalidaPorEntradaId.set(elem.elementoEntradaId, elem);
+    if (elem.idOriginalEntrada) mapaSalidaPorEntradaId.set(elem.idOriginalEntrada, elem);
     const key = `${elem.categoria}|${elem.elemento.toLowerCase()}`;
-    mapaSalida.set(key, elem);
-    mapaSalida.set(elem.id, elem);
+    if (!mapaSalidaPorClave.has(key)) mapaSalidaPorClave.set(key, []);
+    mapaSalidaPorClave.get(key)!.push(elem);
   }
 
-  // Comparar elementos de entrada que deben estar en salida
+  const salidaYaEmparejada = new Set<string>();
+
+  // Comparar elementos de entrada que deben estar en salida — prioridad ID estable
   for (const elemEntrada of inventarioEntrada) {
-    const key = `${elemEntrada.categoria}|${elemEntrada.elemento.toLowerCase()}`;
-    const elemSalida = mapaSalida.get(key) || mapaSalida.get(elemEntrada.id);
+    let elemSalida: ElementoActaInventario | undefined;
+    // 1. ID idéntico (caso versión corregida: salida conserva mismo ID)
+    elemSalida = mapaSalidaPorId.get(elemEntrada.id);
+    // 2. Referencia elementoEntradaId (caso crearActaSalidaDesdeEntrada con identidad estable)
+    if (!elemSalida) elemSalida = mapaSalidaPorEntradaId.get(elemEntrada.id);
+    // 3. Matching por clave categoria|elemento solo si es único en ambos lados (evita falsos emparejamientos por texto ambiguo)
+    if (!elemSalida) {
+      const key = `${elemEntrada.categoria}|${elemEntrada.elemento.toLowerCase()}`;
+      const candidatosEntrada = mapaEntradaPorClave.get(key) || [];
+      const candidatosSalida = mapaSalidaPorClave.get(key) || [];
+      if (candidatosEntrada.length === 1 && candidatosSalida.length === 1) {
+        elemSalida = candidatosSalida[0];
+      }
+    }
     
     if (!elemSalida) {
       comparaciones.push({
@@ -81,6 +102,7 @@ export function compararInventarios(
         requiereAtencion: true,
       });
     } else {
+      salidaYaEmparejada.add(elemSalida.id);
       const diff = determinarDiferencia(elemEntrada.estado, elemSalida.estado);
       comparaciones.push({
         elementoId: elemEntrada.id,
@@ -99,9 +121,13 @@ export function compararInventarios(
 
   // Elementos nuevos en salida que no estaban en entrada
   for (const elemSalida of inventarioSalida) {
+    if (salidaYaEmparejada.has(elemSalida.id)) continue;
+    // Si tiene elementoEntradaId que ya existe en entrada, ya fue emparejado arriba (aunque por clave), no considerar nuevo
+    if (elemSalida.elementoEntradaId && mapaEntradaPorId.has(elemSalida.elementoEntradaId)) continue;
+    if (elemSalida.idOriginalEntrada && mapaEntradaPorId.has(elemSalida.idOriginalEntrada)) continue;
+    // Si su clave no existe en entrada, es nuevo
     const key = `${elemSalida.categoria}|${elemSalida.elemento.toLowerCase()}`;
-    const existeEntrada = mapaEntrada.get(key) || mapaEntrada.get(elemSalida.id);
-    if (!existeEntrada) {
+    if (!mapaEntradaPorClave.has(key)) {
       comparaciones.push({
         elementoId: elemSalida.id,
         elementoIdSalida: elemSalida.id,
@@ -113,6 +139,26 @@ export function compararInventarios(
         observaciones: 'Elemento nuevo registrado en salida',
         requiereAtencion: false,
       });
+    } else {
+      // Si clave existe pero no fue emparejada (duplicados ambiguos), también considerar nuevo para evitar pérdida, pero marcar requiere revisión
+      const yaExiste = comparaciones.some(c => c.elementoIdSalida === elemSalida.id);
+      if (!yaExiste) {
+        // Si hay duplicados ambiguos, no emparejar automáticamente para evitar falsos positivos; tratar como nuevo con atención
+        const candidatosEntrada = mapaEntradaPorClave.get(key) || [];
+        if (candidatosEntrada.length !== 1) {
+          comparaciones.push({
+            elementoId: elemSalida.id,
+            elementoIdSalida: elemSalida.id,
+            nombre: elemSalida.elemento,
+            categoria: elemSalida.categoria,
+            estadoEntrada: 'NO_VERIFICABLE',
+            estadoSalida: elemSalida.estado,
+            diferencia: 'ELEMENTO_NUEVO',
+            observaciones: 'Elemento con nombre ambiguo duplicado, tratado como nuevo para evitar falso emparejamiento',
+            requiereAtencion: true,
+          });
+        }
+      }
     }
   }
 

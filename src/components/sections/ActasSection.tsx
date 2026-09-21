@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Acta, TipoActa, EstadoActa, ParticipanteActa, ElementoActaInventario, LecturaContador, EvidenciaActa, IncidenciaActa, OtpActa } from '../../types/actas';
 import { Inmueble, ContratoFormalizacion, UsuarioApp } from '../../types';
 import { FileText, Plus, Search, Filter, Eye, Edit, CheckCircle, Clock, AlertTriangle, FileCheck, Download, Camera, Zap, Droplets, Flame, UserCheck, Shield, History, BarChart3 } from 'lucide-react';
-import { crearActaBase, crearActaSalidaDesdeEntrada, validarActaParaRevision, cambiarEstadoActa, actualizarActa } from '../../utils/actas/actaEngine';
+import { crearActaBase, crearActaSalidaDesdeEntrada, validarActaParaRevision, cambiarEstadoActa, actualizarActa, versionarActa } from '../../utils/actas/actaEngine';
 import { compararActasEntradaSalida } from '../../utils/actas/actaComparacionEngine';
 import { prepararActaParaFirma, completarFirma, validarFirmaConOtp, todasFirmasCompletadas, cerrarActaTrasFirmas } from '../../utils/actas/actaFirmaEngine';
 import { crearOtpActa, validarOtp } from '../../utils/actas/actaOtpEngine';
@@ -191,11 +191,21 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
     try {
       const { actaActualizada } = prepararActaParaFirma(acta, currentUser?.nombre || 'Propietario', currentUser?.id);
       await saveActaFirestore(actaActualizada);
-      // Generar OTPs para cada firma
+      // Generar OTPs para cada firma — transporte PENDIENTE, código solo en campo temporal seguro, no en logs producción
       for (const firma of actaActualizada.firmas) {
-        const { otp, codigoPlain } = await crearOtpActa({ actaId: acta.id, firmaId: firma.id, ownerId: acta.ownerId, solicitante: currentUser?.nombre, canal: 'MANUAL' });
+        const { otp } = await crearOtpActa({ 
+          actaId: acta.id, 
+          firmaId: firma.id, 
+          ownerId: acta.ownerId, 
+          propertyId: acta.propertyId,
+          contractId: acta.contractId,
+          versionActa: acta.version,
+          solicitante: currentUser?.nombre, 
+          solicitanteId: currentUser?.id,
+          canal: 'PENDIENTE_PROVEEDOR' 
+        });
         await saveOtpActaFirestore(otp);
-        console.log(`[BLOQUE D] OTP para ${firma.firmanteNombre}: ${codigoPlain} (ID ${otp.id})`);
+        // NO console.log del código en producción. El código se entrega solo vía campo temporal controlado en UI dev/manual si canal MANUAL, y se limpia tras uso.
       }
       setSelectedActa(actaActualizada);
       await registrarAuditoriaFirestore({
@@ -219,6 +229,10 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
     if (!firma) { alert('Firma no encontrada'); return; }
     const otp = otps.find(o=>o.firmaId===firmaId && o.estado==='ACTIVO');
     if (!otp) { alert('OTP no encontrado o no activo'); return; }
+    // Aislamiento: verificar acta/firma/versión/owner corresponden
+    const { validarOtpContexto } = await import('../../utils/actas/actaOtpEngine');
+    const ctxCheck = validarOtpContexto(otp, { actaId: acta.id, firmaId, ownerId: acta.ownerId, versionActa: acta.version, propertyId: acta.propertyId });
+    if (!ctxCheck.valido) { alert(`OTP aislamiento: ${ctxCheck.motivo}`); return; }
     const { valido, motivo, otpActualizado } = await validarOtp(otp, codigo);
     await saveOtpActaFirestore(otpActualizado);
     await registrarAuditoriaFirestore({
@@ -267,26 +281,97 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
     let comparacionElementos;
     if (acta.tipo==='SALIDA' && actaEntrada) {
       try {
-        const resumen = compararActasEntradaSalida(actaEntrada, acta);
-        comparacionElementos = resumen ? undefined : undefined;
-        // Para PDF detallado, generar comparaciones
         const comps = (await import('../../utils/actas/actaComparacionEngine')).compararInventarios(actaEntrada.inventario, acta.inventario);
         comparacionElementos = comps;
       } catch {}
     }
     const docPdf = generarPdfActa({ acta, actaEntrada, inmuebleDireccion: inmueble?.direccion, inmuebleCiudad: inmueble?.ciudad, contratoRenta: contrato?.rentaMensual, comparacionElementos });
-    descargarPdfActa(docPdf, acta);
-    await registrarAuditoriaFirestore({
-      usuarioId: currentUser?.id || 'system',
-      usuarioEmail: currentUser?.email || '',
-      usuarioNombre: currentUser?.nombre || 'Propietario',
-      accion: 'ACTA_PDF_GENERADO',
-      descripcion: `PDF generado acta ${acta.id} v${acta.version} tipo ${acta.tipo}`,
-      entidadAfectada: 'inmueble' as any,
-      idAfectado: acta.propertyId,
-      resultado: 'EXITO',
-      detalles: { actaId: acta.id, version: acta.version },
-    });
+    // Generar blob y subir a Storage privado actas_pdfs/{owner}/{acta}/
+    try {
+      const blob = docPdf.output('blob');
+      const { uploadPdfActaStorage } = await import('../../lib/firebaseActas');
+      const fileName = `Acta_${acta.tipo}_${acta.fechaActo}_v${acta.version}_${acta.id.slice(0,8)}.pdf`;
+      const { url, storagePath } = await uploadPdfActaStorage(acta.ownerId, acta.id, blob, fileName);
+      // Guardar referencia persistente en Firestore — flujo completo generar → upload → guardar referencia → auditoría
+      const actaConPdf: Acta = {
+        ...acta,
+        pdfUrl: url,
+        pdfStoragePath: storagePath,
+        pdfVersion: acta.version,
+        pdfFechaGeneracion: new Date().toISOString(),
+        fechaActualizacion: new Date().toISOString(),
+        actualizadoPor: currentUser?.nombre,
+        historial: [
+          ...acta.historial,
+          {
+            id: `hist_pdf_${Date.now()}`,
+            fecha: new Date().toISOString(),
+            usuario: currentUser?.nombre || 'Propietario',
+            usuarioId: currentUser?.id,
+            accion: 'PDF_GENERADO' as any,
+            detalle: `PDF v${acta.version} generado y subido a ${storagePath}`,
+            estadoAnterior: acta.estado,
+            estadoNuevo: acta.estado,
+          },
+        ],
+      };
+      await saveActaFirestore(actaConPdf);
+      setSelectedActa(actaConPdf);
+      // Descargar local también
+      descargarPdfActa(docPdf, acta);
+      await registrarAuditoriaFirestore({
+        usuarioId: currentUser?.id || 'system',
+        usuarioEmail: currentUser?.email || '',
+        usuarioNombre: currentUser?.nombre || 'Propietario',
+        accion: 'ACTA_PDF_GENERADO',
+        descripcion: `PDF generado y persistido acta ${acta.id} v${acta.version} tipo ${acta.tipo} → ${storagePath}`,
+        entidadAfectada: 'inmueble' as any,
+        idAfectado: acta.propertyId,
+        resultado: 'EXITO',
+        detalles: { actaId: acta.id, version: acta.version, pdfUrl: url, storagePath },
+      });
+    } catch (e:any) {
+      // Fallback descarga local si falla Storage, pero auditar error
+      descargarPdfActa(docPdf, acta);
+      await registrarAuditoriaFirestore({
+        usuarioId: currentUser?.id || 'system',
+        usuarioEmail: currentUser?.email || '',
+        usuarioNombre: currentUser?.nombre || 'Propietario',
+        accion: 'ACTA_PDF_GENERADO',
+        descripcion: `PDF generado local acta ${acta.id} v${acta.version} pero fallo persistencia Storage: ${e.message}`,
+        entidadAfectada: 'inmueble' as any,
+        idAfectado: acta.propertyId,
+        resultado: 'ERROR',
+        detalles: { actaId: acta.id, version: acta.version, error: e.message },
+      });
+      alert(`PDF generado local pero error subiendo a Storage: ${e.message}`);
+    }
+  };
+
+  const handleVersionarActa = async (acta: Acta) => {
+    const motivo = prompt('Motivo de versionado (obligatorio para trazabilidad):', 'Corrección tras firma / actualización requerida');
+    if (!motivo || !motivo.trim()) { alert('Motivo obligatorio'); return; }
+    try {
+      const { actaVersionada, actaOriginalPreservada } = versionarActa(acta, currentUser?.nombre || 'Propietario', motivo.trim(), currentUser?.id);
+      // Preservar original intacta ya está en Firestore, no modificarla. Guardar nueva versión como nuevo documento.
+      await saveActaFirestore(actaVersionada);
+      // Auditar versionado
+      await registrarAuditoriaFirestore({
+        usuarioId: currentUser?.id || 'system',
+        usuarioEmail: currentUser?.email || '',
+        usuarioNombre: currentUser?.nombre || 'Propietario',
+        accion: 'ACTA_VERSIONADA',
+        descripcion: `Acta ${acta.id} v${acta.version} versionada → nueva ${actaVersionada.id} v${actaVersionada.version} motivo: ${motivo}`,
+        entidadAfectada: 'inmueble' as any,
+        idAfectado: acta.propertyId,
+        resultado: 'EXITO',
+        detalles: { actaIdOriginal: acta.id, actaIdNueva: actaVersionada.id, versionAnterior: acta.version, versionNueva: actaVersionada.version, motivo, cadenaVersionIds: actaVersionada.cadenaVersionIds },
+      });
+      setSelectedActa(actaVersionada);
+      alert(`Nueva versión creada: ${actaVersionada.id} v${actaVersionada.version}. La versión firmada original ${actaOriginalPreservada.id} v${actaOriginalPreservada.version} permanece intacta e inmutable.`);
+    } catch (e:any) {
+      alert(`Error versionando: ${e.message}`);
+    }
   };
 
   const handleUploadEvidencia = async (acta: Acta, file: File) => {
@@ -434,12 +519,16 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
               <div>Estado: {renderEstadoBadge(selectedActa.estado)} Firma: {selectedActa.estadoFirma}</div>
               <div>Versión: v{selectedActa.version} | Creado por: {selectedActa.creadoPor}</div>
               <div>Acta entrada vinculada: {selectedActa.actaEntradaId || '—'}</div>
+              {selectedActa.actaAnteriorId && <div className="text-[11px] text-slate-600">Versionado de: {selectedActa.actaAnteriorId} | Motivo: {selectedActa.motivoVersionado || '—'} | Fecha: {selectedActa.fechaVersionado?.slice(0,19) || '—'}</div>}
+              {selectedActa.cadenaVersionIds && selectedActa.cadenaVersionIds.length>1 && <div className="text-[10px] text-slate-500">Cadena versiones: {selectedActa.cadenaVersionIds.join(' → ').slice(0,120)}</div>}
+              {selectedActa.pdfUrl && <div className="text-[10px] text-emerald-700">PDF persistido: <a href={selectedActa.pdfUrl} target="_blank" className="underline">{selectedActa.pdfStoragePath}</a> v{selectedActa.pdfVersion} {selectedActa.pdfFechaGeneracion?.slice(0,19)}</div>}
               <div className="flex gap-1 flex-wrap pt-2">
                 <button onClick={()=>handleCambiarEstado(selectedActa, 'EN_REVISION')} className="px-2 py-1 bg-blue-600 text-white rounded-lg font-bold">A revisión</button>
                 <button onClick={()=>handleCambiarEstado(selectedActa, 'PENDIENTE_FIRMA')} className="px-2 py-1 bg-amber-600 text-white rounded-lg font-bold">Pendiente firma</button>
                 <button onClick={()=>handleSolicitarFirma(selectedActa)} className="px-2 py-1 bg-violet-600 text-white rounded-lg font-bold">Solicitar firma + OTP</button>
                 <button onClick={()=>handleCambiarEstado(selectedActa, 'CERRADA')} className="px-2 py-1 bg-slate-800 text-white rounded-lg font-bold">Cerrar</button>
-                <button onClick={()=>handleGenerarPdf(selectedActa)} className="px-2 py-1 bg-slate-100 border rounded-lg font-bold flex items-center gap-1"><Download className="w-3 h-3" />PDF</button>
+                <button onClick={()=>handleGenerarPdf(selectedActa)} className="px-2 py-1 bg-slate-100 border rounded-lg font-bold flex items-center gap-1"><Download className="w-3 h-3" />PDF {selectedActa.pdfUrl ? '✅' : ''}</button>
+                {(selectedActa.estado==='FIRMADA' || selectedActa.estado==='CERRADA') && <button onClick={()=>handleVersionarActa(selectedActa)} className="px-2 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded-lg font-bold">Nueva versión (versionado seguro)</button>}
               </div>
             </div>
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-1">

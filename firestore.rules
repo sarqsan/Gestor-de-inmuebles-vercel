@@ -997,7 +997,9 @@ service cloud.firestore {
     // 25. ACTAS DE ENTRADA Y SALIDA (BLOQUE D) — aislamiento estricto propietario
     // - ownerId inmutable (propietario titular)
     // - inmueble/contrato aislamiento
-    // - actas firmadas/cerradas no modificables silenciosamente → versionado
+    // - actas firmadas/cerradas NO modificables: FIRMADA/CERRADA → BORRADOR en mismo doc BLOQUEADO
+    //   versionado correcto: nueva versión = nuevo documento con actaAnteriorId, original preservada intacta
+    // - PDF persistido: permitir solo actualización de campos PDF en FIRMADA/CERRADA sin tocar inventario/participantes/firmas
     // - sin secretos, sin base64 evidencias (Storage)
     // - trazabilidad historial obligatorio
     // =========================================================================
@@ -1021,7 +1023,9 @@ service cloud.firestore {
           'accessToken' in incoming() ||
           'password' in incoming() ||
           'secret' in incoming() ||
-          'tokenBancario' in incoming()
+          'tokenBancario' in incoming() ||
+          'codigo' in incoming() ||
+          'otp' in incoming()
         );
       }
       function estadoValido() {
@@ -1031,17 +1035,43 @@ service cloud.firestore {
         return incoming().tipo in ['ENTRADA', 'SALIDA'];
       }
       function versionIncrementoValido() {
-        return incoming().version >= existing().version;
-      }
-      function esVersionadoPermitido() {
-        // Permitir versionado de FIRMADA/CERRADA → BORRADOR con incremento versión
+        // Si existente es FIRMADA/CERRADA, versión debe permanecer idéntica (no incrementar en mismo doc)
         return (existing().estado in ['FIRMADA', 'CERRADA'])
-          && incoming().estado == 'BORRADOR'
-          && incoming().version > existing().version;
+          ? incoming().version == existing().version
+          : incoming().version >= existing().version;
+      }
+      function esTransicionFirmadaACerrada() {
+        // Única transición permitida desde FIRMADA: → CERRADA, misma versión, sin cambios críticos
+        return existing().estado == 'FIRMADA'
+          && incoming().estado == 'CERRADA'
+          && incoming().version == existing().version
+          && actaOwnerInmutable()
+          && actaPropertyInmutable()
+          && incoming().tipo == existing().tipo
+          && incoming().inventario == existing().inventario
+          && incoming().participantes == existing().participantes
+          && incoming().lecturasContadores == existing().lecturasContadores
+          && incoming().firmas == existing().firmas;
+      }
+      function esActualizacionPdfPermitida() {
+        // Permitir solo añadir/actualizar referencia PDF en acta FIRMADA/CERRADA sin tocar datos críticos
+        return (existing().estado in ['FIRMADA', 'CERRADA'])
+          && incoming().estado == existing().estado
+          && incoming().version == existing().version
+          && actaOwnerInmutable()
+          && actaPropertyInmutable()
+          && incoming().tipo == existing().tipo
+          && incoming().inventario == existing().inventario
+          && incoming().participantes == existing().participantes
+          && incoming().lecturasContadores == existing().lecturasContadores
+          && incoming().firmas == existing().firmas
+          && incoming().estadoFirma == existing().estadoFirma;
       }
       function noModificacionSilenciosaFirmada() {
-        // Si existente es FIRMADA/CERRADA, solo permitir si es versionado
-        return !(existing().estado in ['FIRMADA', 'CERRADA']) || esVersionadoPermitido();
+        // FIRMADA/CERRADA no pueden mutar a BORRADOR en mismo documento. Solo transición FIRMADA→CERRADA o actualización PDF permitida.
+        return !(existing().estado in ['FIRMADA', 'CERRADA'])
+          || esTransicionFirmadaACerrada()
+          || esActualizacionPdfPermitida();
       }
 
       allow get: if isMasterAdmin() || (isPropietarioRole() && actaVisible(existing()));
@@ -1054,7 +1084,7 @@ service cloud.firestore {
         && tipoValido()
         && estadoValido()
         && incoming().estado == 'BORRADOR'
-        && 'version' in incoming() && incoming().version == 1
+        && 'version' in incoming() && incoming().version >= 1
       ) && sinSecretosActa();
 
       allow update: if isMasterAdmin() || (

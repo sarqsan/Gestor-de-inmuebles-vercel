@@ -38,7 +38,11 @@ export async function crearOtpActa(params: {
   actaId: string;
   firmaId: string;
   ownerId: string;
+  propertyId?: string;
+  contractId?: string;
+  versionActa?: number;
   solicitante?: string;
+  solicitanteId?: string;
   canal?: OtpActa['canal'];
 }): Promise<{ otp: OtpActa; codigoPlain: string }> {
   const codigoPlain = generarCodigoOtp();
@@ -61,17 +65,22 @@ export async function crearOtpActa(params: {
     actaId: params.actaId,
     firmaId: params.firmaId,
     ownerId: params.ownerId,
+    propertyId: params.propertyId,
+    contractId: params.contractId,
+    versionActa: params.versionActa,
     codigoHash,
-    // codigoPlainTemporal solo para entrega inmediata en UI de demostración, se limpia tras uso
-    codigoPlainTemporal: codigoPlain,
+    // codigoPlainTemporal solo para entrega inmediata en UI manual/dev, se limpia tras uso, nunca en logs prod
+    codigoPlainTemporal: params.canal === 'MANUAL' ? codigoPlain : undefined,
     fechaCreacion: ahora.toISOString(),
     fechaExpiracion: expiracion.toISOString(),
     intentos: 0,
     maxIntentos: OTP_MAX_INTENTOS,
     usado: false,
     solicitante: params.solicitante,
+    solicitanteId: params.solicitanteId,
     canal: params.canal || 'PENDIENTE_PROVEEDOR',
     estado: 'ACTIVO',
+    transporteRealizado: params.canal === 'MANUAL' ? true : false,
   };
 
   return { otp, codigoPlain };
@@ -144,16 +153,31 @@ export function esOtpUtilizable(otp: OtpActa): boolean {
   return otp.estado === 'ACTIVO' && !otp.usado && !esOtpExpirado(otp) && otp.intentos < otp.maxIntentos;
 }
 
+export function validarOtpContexto(otp: OtpActa, contexto: { actaId: string; firmaId: string; ownerId: string; versionActa?: number; propertyId?: string }): { valido: boolean; motivo?: string } {
+  if (otp.actaId !== contexto.actaId) return { valido: false, motivo: 'OTP no pertenece a esta acta' };
+  if (otp.firmaId !== contexto.firmaId) return { valido: false, motivo: 'OTP no pertenece a esta firma' };
+  if (otp.ownerId !== contexto.ownerId) return { valido: false, motivo: 'OTP no pertenece a este propietario (aislamiento)' };
+  if (contexto.versionActa !== undefined && otp.versionActa !== undefined && otp.versionActa !== contexto.versionActa) {
+    return { valido: false, motivo: `OTP versión ${otp.versionActa} no coincide con acta versión ${contexto.versionActa}` };
+  }
+  if (contexto.propertyId && otp.propertyId && otp.propertyId !== contexto.propertyId) {
+    return { valido: false, motivo: 'OTP propertyId no coincide' };
+  }
+  return { valido: true };
+}
+
 // Adaptador preparado para transporte externo (PENDIENTE)
 export interface TransporteOtpAdapter {
   enviarOtp(destino: string, codigo: string, contexto: { actaId: string; firmaId: string }): Promise<{ enviado: boolean; proveedor?: string; error?: string }>;
 }
 
-// Implementación manual/mock para desarrollo, no SMS/email ficticio real
+// Implementación manual para desarrollo local (solo dev, no logs prod)
+// En producción se usa TransportePendienteAdapter (PENDIENTE_PROVEEDOR) y el código no se expone en logs
 export class TransporteManualAdapter implements TransporteOtpAdapter {
-  async enviarOtp(destino: string, codigo: string, contexto: { actaId: string; firmaId: string }) {
-    console.log(`[OTP MANUAL] Acta ${contexto.actaId}, Firma ${contexto.firmaId}, Destino ${destino}, Código ${codigo}`);
-    return { enviado: true, proveedor: 'MANUAL' };
+  async enviarOtp(_destino: string, _codigo: string, _contexto: { actaId: string; firmaId: string }) {
+    // Intencionadamente sin console.log del código para evitar exposición en producción
+    // En entorno dev, el código se entrega vía campo codigoPlainTemporal controlado en Firestore, no vía logs
+    return { enviado: true, proveedor: 'MANUAL', transporteRealizado: true } as any;
   }
 }
 

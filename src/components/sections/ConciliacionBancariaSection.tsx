@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { MovimientoBancario, PropuestaConciliacion, ImportacionBancaria, ResumenConciliacion, TipoClasificacionNoConciliado, DEFAULT_CONFIG_MATCHING } from '../../types/conciliacion';
 import { CobroPeriodo, Gasto, Inmueble, ContratoFormalizacion, UsuarioApp } from '../../types';
 import { registrarMovimientosSesion, registrarPropuestasSesion } from '../../lib/conciliacionSession';
+import { actualizarPropuestaConciliacion, cargarConciliacionPropietario, fusionarSinDuplicados, guardarImportacionConciliacion } from '../../lib/conciliacionFirestore';
 import { importarDesdeCSV, importarDesdeOFX, importarDesdeMT940, importarDesdeNorma43, detectarFormato } from '../../utils/conciliacion/importEngine';
 import { crearPropuestasParaMovimientos, confirmarPropuesta, rechazarPropuesta, marcarNoConciliable, aplicarConciliacion, calcularResumenConciliacion } from '../../utils/conciliacion/conciliacionEngine';
 import { buscarCandidatos } from '../../utils/conciliacion/matchingEngine';
@@ -33,6 +34,8 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
   const [selectedPropuesta, setSelectedPropuesta] = useState<PropuestaConciliacion | null>(null);
   const [csvMapping, setCsvMapping] = useState<CsvMapping>({});
   const [nombreFichero, setNombreFichero] = useState<string>('');
+  const [cargandoPersistido, setCargandoPersistido] = useState(true);
+  const [errorPersistencia, setErrorPersistencia] = useState<string | null>(null);
 
   const allCobros = useMemo(() => {
     if (cobros && cobros.length>0) return cobros;
@@ -55,6 +58,30 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
     if (currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId) return currentUser.propietarioId;
     return inmuebles[0]?.propietarioId || inmuebles[0]?.propietarioPrincipalId || 'prop_demo';
   }, [currentUser, inmuebles]);
+
+  // R1: carga del estado persistido en Firestore (montaje / cambio de propietario).
+  // Unión race-safe: si el usuario importa antes de que termine la carga, sus
+  // filas locales se conservan (ganan en conflicto; el modelo es append-only).
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      setCargandoPersistido(true);
+      setErrorPersistencia(null);
+      try {
+        const estado = await cargarConciliacionPropietario(propietarioId);
+        if (cancelado) return;
+        setMovimientos((prev) => fusionarSinDuplicados(estado.movimientos, prev, (m) => m.idMovimiento));
+        setPropuestas((prev) => fusionarSinDuplicados(estado.propuestas, prev, (x) => x.id));
+        setImportaciones((prev) => fusionarSinDuplicados(estado.importaciones, prev, (x) => x.id));
+        registrarMovimientosSesion(estado.movimientos);
+      } catch (e: any) {
+        if (!cancelado) setErrorPersistencia(`No se pudo cargar el estado guardado: ${e?.message || e}`);
+      } finally {
+        if (!cancelado) setCargandoPersistido(false);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [propietarioId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -88,6 +115,15 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
       // Generar propuestas
       const nuevasPropuestas = crearPropuestasParaMovimientos(resultado.nuevos, allCobros, gastos, inmuebles, contratos, DEFAULT_CONFIG_MATCHING);
       setPropuestas(prev => [...prev, ...nuevasPropuestas]);
+
+      // R1: persistencia en Firestore (no bloquea la UI; el fallo se muestra en banner).
+      setErrorPersistencia(null);
+      guardarImportacionConciliacion({
+        propietarioId,
+        movimientos: resultado.nuevos,
+        propuestas: nuevasPropuestas,
+        importacion: resultado.importacion,
+      }).catch((e: any) => setErrorPersistencia(`No se pudo guardar la importación: ${e?.message || e}`));
 
       if (resultado.errores.length>0) {
         alert(`Importación con errores: ${resultado.errores.slice(0,3).join(', ')}`);
@@ -123,6 +159,9 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
     try {
       const confirmada = confirmarPropuesta(propuesta, currentUser);
       setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? confirmada : p));
+      setErrorPersistencia(null);
+      actualizarPropuestaConciliacion(propietarioId, confirmada)
+        .catch((e: any) => setErrorPersistencia(`No se pudo guardar la confirmación: ${e?.message || e}`));
       setSelectedPropuesta(confirmada);
     } catch (e:any) {
       alert(e.message);
@@ -136,6 +175,9 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
       return;
     }
     setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? res.propuestaActualizada : p));
+    setErrorPersistencia(null);
+    actualizarPropuestaConciliacion(propietarioId, res.propuestaActualizada)
+      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la aplicación: ${e?.message || e}`));
     setSelectedPropuesta(res.propuestaActualizada);
     if (res.contratoActualizado) {
       console.log(`Contrato actualizado ${res.contratoActualizado.id} con trazabilidad conciliación`);
@@ -145,12 +187,18 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
   const handleRechazar = (propuesta: PropuestaConciliacion) => {
     const rechazada = rechazarPropuesta(propuesta, currentUser, 'Rechazado por usuario');
     setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? rechazada : p));
+    setErrorPersistencia(null);
+    actualizarPropuestaConciliacion(propietarioId, rechazada)
+      .catch((e: any) => setErrorPersistencia(`No se pudo guardar el rechazo: ${e?.message || e}`));
     setSelectedPropuesta(rechazada);
   };
 
   const handleNoConciliable = (propuesta: PropuestaConciliacion, clasif: TipoClasificacionNoConciliado) => {
     const noConc = marcarNoConciliable(propuesta, clasif, currentUser);
     setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? noConc : p));
+    setErrorPersistencia(null);
+    actualizarPropuestaConciliacion(propietarioId, noConc)
+      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la clasificación: ${e?.message || e}`));
     setSelectedPropuesta(noConc);
   };
 
@@ -174,7 +222,7 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
           <div className="col-span-2">
             <label className="block font-semibold mb-1">Fichero bancario</label>
-            <input type="file" accept=".csv,.ofx,.mt940,.txt,.043" onChange={handleFileUpload} className="w-full px-3 py-2 bg-slate-50 border rounded-xl" />
+            <input type="file" accept=".csv,.ofx,.mt940,.txt,.043" onChange={handleFileUpload} disabled={cargandoPersistido} className="w-full px-3 py-2 bg-slate-50 border rounded-xl disabled:opacity-50" />
             <p className="text-[11px] text-slate-500 mt-1">Detecta formato automáticamente. CSV permite mapear columnas. OFX usa FITID para idempotencia. MT940 soporta :20: :25: :28C: :60F:/:60M: :61: :86: :62F:/:62M:. Norma43 registros 11/22/23/88.</p>
           </div>
           <div>
@@ -186,6 +234,18 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
         </div>
         {nombreFichero && <div className="text-xs text-slate-600">Último fichero: {nombreFichero}</div>}
       </div>
+
+      {/* R1: estado de persistencia Firestore */}
+      {cargandoPersistido && (
+        <div className="bg-slate-50 border rounded-2xl px-4 py-2 text-xs text-slate-500">
+          Cargando estado guardado…
+        </div>
+      )}
+      {errorPersistencia && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl px-4 py-3 text-xs text-rose-700">
+          {errorPersistencia}
+        </div>
+      )}
 
       {/* Resumen */}
       <div className="bg-slate-900 text-white p-5 rounded-2xl border space-y-3">

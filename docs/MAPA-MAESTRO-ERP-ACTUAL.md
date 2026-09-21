@@ -56,8 +56,8 @@ Firebase (Firestore ~45 colecciones / Storage) + server.ts (Express: 16 endpoint
 
 | Comando | Nota |
 |---|---|
-| `npx vitest run` | **835/835 tests en 35 ficheros** (verificado 2026-09-21 tras ORDEN 16; 638 previos + 197 de GAP-R4). `package.json` canónico **no define script `test`** — este es el comando oficial |
-| `npx tsc --noEmit` | 0 errores (verificado 2026-09-20) |
+| `npx vitest run` | **899/899 tests en 38 ficheros** (verificado 2026-09-21 tras la integración de GAP-R3 `5e47fc2`; 835 tras ORDEN 16 + 15 R1 + 20 R2 + 29 R3). `package.json` canónico **no define script `test`** — este es el comando oficial |
+| `npx tsc --noEmit` | 0 errores (re-verificado 2026-09-21 tras R1, R2 y R3) |
 | `npm run build` | OK (~11 s; warning conocido de chunk >500 kB, documentado y no bloqueante) |
 | `npm run dev` | `tsx server.ts` (dev local, puerto 3000) |
 
@@ -81,11 +81,17 @@ Distribución actual de tests:
 | `tests/facturacionReporte.test.ts` | 6 | GAP7 |
 | `tests/facturacion-notificaciones.test.ts` | 5 | GAP7 |
 | `tests/informesEngine.test.ts` | 41 (O16: 40 comprobaciones desglosadas + 1 de recuento; antes 1 test envolvente) | GAP3 |
+| `tests/conciliacion-persistencia.test.ts` | 15 (GAP-R1, Arena B; Firestore mockeado) | GAP6 persistencia |
+| `tests/morosidad-evidencias-storage.test.ts` | 20 (GAP-R2, Arena B; Storage mockeado + inspección de `storage.rules`) | C evidencias |
+| `tests/ficha-publica-inmueble.test.ts` | 29 (GAP-R3, Arena B; espejo público + inspección de reglas) | Seguridad ficha pública |
 | **Total** | **330** (tabla del punto de partida 2026-09-20; no incluye B/C/D/E/§6) | |
 
 > **ORDEN 16 (GAP-R4, 2026-09-21)** — suites propias de motores económicos añadidas:
 > `src/utils/cobrosEngine.test.ts` (69) · `src/utils/fiscalEngine.test.ts` (43) ·
 > `src/utils/gastosEngine.test.ts` (45) · GAP3 desglosada (+40 netos). Global 835/835.
+>
+> **GAP-R1 / R2 / R3 (2026-09-21, desarrollo Arena B, integración Arena A)** — `tests/conciliacion-persistencia.test.ts` (15),
+> `tests/morosidad-evidencias-storage.test.ts` (20), `tests/ficha-publica-inmueble.test.ts` (29). Global 899/899 (38 ficheros).
 
 Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJORAS` ·
 `PENDIENTE` · `NO_IMPLEMENTADO` · `DEPENDENCIA_EXTERNA`.
@@ -1016,9 +1022,11 @@ endurecimiento final — §7)
 2. Sin **custom claims** → `storage.rules` usa `internalUser()` (maestro o cualquier
    usuario interno) con comentario de residual; el aislamiento fino por
    propietarioId en Storage queda pendiente de emitir claims.
-3. `inmuebles` con `allow read: if true` (funnel público): expone la ficha completa
-   (incl. campos fiscales/IBAN) en listado público. **P1** documentado en
-   `FASE_1.4_SEGURIDAD_PERMISOS.md` §5 — separar ficha pública de datos fiscales.
+3. ~~`inmuebles` con `allow read: if true` (funnel público): expone la ficha completa
+   (incl. campos fiscales/IBAN) en listado público.~~ **Resuelto en el repositorio por GAP-R3**
+   (`5e47fc2`, 2026-09-21): `inmuebles` ya no es legible sin sesión; el funnel anónimo usa el
+   espejo `fichas_publicas_inmueble` (ver §12.2). **Pendiente operativo:** publicar las reglas y
+   materializar las fichas de los inmuebles existentes (§12.6, pendientes 2 y 3).
 4. `package.json` canónico sin script `test` (correr `npx vitest run`); añadirlo es
    un cambio de tooling menor pendiente de decisión.
 5. Chunk de build >500 kB (warning conocido, no bloqueante).
@@ -1146,32 +1154,30 @@ justifican una orden de desarrollo.
 Solo hay **cuatro** pendientes que requieren código. Ninguno es un bloque nuevo:
 son cierres de circuitos ya existentes.
 
-**GAP-R1 — Persistencia Firestore de la conciliación bancaria (GAP6)**
+**GAP-R1 — Persistencia Firestore de la conciliación bancaria (GAP6)** — **CERRADO / INTEGRADO (2026-09-21)**
 - Objetivo: que movimientos, propuestas e importaciones sobrevivan a la sesión.
-- Pendiente: capa `lib/conciliacionFirestore.ts` (CRUD sobre `movimientos_bancarios`, `conciliaciones_bancarias`, `importaciones_bancarias`, cuyas **reglas ya existen** y hoy no se usan) + sustitución del `useState` de `ConciliacionBancariaSection.tsx` por suscripciones; `conciliacionSession.ts` (espejo para B) se conserva.
-- Estado actual: motor GAP6 completo (23 tests), UI operativa **solo en memoria** (`useState`), B lee el espejo de sesión.
-- Código: `src/utils/conciliacion/*`, `ConciliacionBancariaSection.tsx`, `lib/conciliacionSession.ts`, `tesoreria/conciliacionAdapter.ts`. Tests: `tests/conciliacion.test.ts` 23.
-- Afecta: GAP6, BLOQUE B (evidencia de pago). Dependencias: ninguna. Externas: ninguna (reglas ya publicables).
-- Riesgos: duplicación BAJA (no crear segundo motor: solo persistencia); regresión MEDIA sobre B (`conciliacionAdapter`); integración canónica: SÍ (toca sección compartida).
-- Arena: **B** (dominio tesorería/conciliación). Prioridad: **1** (desbloquea el uso real de B con evidencia persistente). Precondición: ninguna.
+- Desarrollo: **Arena B**, commit `415de41` (`feat(gap-r1): persistencia Firestore del estado de conciliación bancaria (GAP 6)`, rama `arena/01a0bfd3-gestor-de-inmuebles-vercel`). Integración: **Arena A**, commit `a18967f` (`merge(gap-r1)`, cherry-pick selectivo, 0 conflictos, diff idéntico al origen).
+- Entregado: `src/lib/conciliacionFirestore.ts` (carga por propietario, guardado de importación en lote, actualización de propuesta; ids deterministas; validadores de forma) sobre las colecciones **ya reguladas** `movimientos_bancarios` / `conciliaciones_bancarias` / `importaciones_bancarias`; `ConciliacionBancariaSection.tsx` carga el estado persistido al montar (fusión sin duplicados), persiste cada importación y cada cambio de propuesta, y muestra banner de error; `conciliacionSession.ts` (espejo para B) se conserva. Sin cambios en `src/utils/conciliacion/*`, `cobrosEngine`, reglas ni índices.
+- Validación canónica tras `a18967f`: R1 **15/15** (`tests/conciliacion-persistencia.test.ts`, Firestore mockeado) · suite **850/850** · `tsc` 0 · build OK · GAP6 23/23 intacto.
+- Nota: el hallazgo **D2** (§12.2 GAP-R4) sigue sin corregir; el matching de gastos persistido no puntúa fecha (comportamiento documentado, no regresión de R1).
+- Arena: **B** → integrado por **A**. Prioridad original: 1. **Estado: CERRADO.**
 
-**GAP-R2 — Adjuntos de evidencias de morosidad en Storage (C)**
+**GAP-R2 — Adjuntos de evidencias de morosidad en Storage (C)** — **CERRADO / INTEGRADO (2026-09-21)**
 - Objetivo: subir el comprobante real (burofax, justificante) en vez de solo metadatos.
-- Pendiente: ruta Storage `morosidad_evidencias/{propietarioId}/…` en `storage.rules` (patrón E.1–E.4/actas_fotos), función de subida en `lib/morosidadFirestore.ts`, UI en `MorosidadDetalleModal`. El modelo ya tiene `storagePath/nombreArchivo/tipoMime/tamanoBytes`.
-- Estado actual: `evidencias_morosidad` guarda metadatos y `hash`; no hay `uploadBytes` en C.
-- Código: `morosidadStore.ts` (l.474–516), `MorosidadDetalleModal.tsx`. Tests: C 82 + 79 vitest.
-- Afecta: C. Dependencias: ninguna. Externas: publicación de `storage.rules` (B).
-- Riesgos: duplicación BAJA (reutilizar patrón de subida de `suministrosFirestore`/actas); regresión BAJA; integración canónica: SÍ (storage.rules fusión selectiva).
-- Arena: **C**. Prioridad: **3**. Precondición: ninguna técnica.
+- Desarrollo: **Arena B**, commit `58a495a` (`feat(gap-r2): persistencia storage de evidencias de morosidad`). Integración: **Arena A**, commit `92c8185` (`merge(gap-r2)`, cherry-pick selectivo, 0 conflictos, diff idéntico al origen).
+- Entregado: `src/lib/morosidadEvidenciasStorage.ts` (ruta `morosidad_evidencias/{propietarioId}/{expedienteId}/…`, validación cliente PDF/JPEG/PNG/WEBP < 10 MB, `uploadBytes` + `getDownloadURL`, sin base64 ni localStorage); `MorosidadDetalleModal.tsx` adjunta el fichero y registra el metadato vía `crearEvidencia` del motor C (motor intacto); `storage.rules` +20 líneas: bloque `morosidad_evidencias` (lectura/creación solo master-admin con `esEvidenciaValida()`, sin update/delete, deny-by-default). `firestore.rules` e índices sin cambios.
+- Validación canónica tras `92c8185`: R2 **20/20** (`tests/morosidad-evidencias-storage.test.ts`, Storage mockeado) · suite **870/870** · `tsc` 0 · build OK · C 82 + morosidad vitest intactos.
+- **Anotación expresa:** la implementación de Storage está integrada en el repositorio; las reglas de `storage.rules` **todavía no están desplegadas en Firebase**; la validación contra Firebase real/emulador **queda pendiente** (§12.6).
+- Arena: **B** (en lugar de C, por asignación del usuario) → integrado por **A**. Prioridad original: 3. **Estado: CERRADO.**
 
-**GAP-R3 — Cierre de la ficha pública de inmueble (residual P1 §10.3)**
+**GAP-R3 — Cierre de la ficha pública de inmueble (residual P1 §10.3)** — **CERRADO / INTEGRADO (2026-09-21)**
 - Objetivo: que `inmuebles` con `allow read: if true` no exponga campos fiscales/IBAN al funnel público.
-- Pendiente: decidir e implementar la separación (subcolección/documento público derivado o reglas por campo) + ajustar `Portal*PublicaView` y las escrituras que lo mantienen; publicar reglas.
-- Estado actual: documentado en `FASE_1.4_SEGURIDAD_PERMISOS.md` §5; regla `firestore.rules` l.~384.
-- Código: `InmueblesSection`, `PortalSolicitudPublicaView`, `PortalVisitaPublicaView`, `CuestionarioPublicoView`, `lib/firebase.ts`. Tests: ninguno específico (habitaciones 72 tocan `inmuebles`).
-- Afecta: Inmuebles, captación pública, GAP5 (lee inmuebles), B (IBAN). Dependencias: ninguna. Externas: publicación de reglas.
-- Riesgos: duplicación BAJA; regresión **ALTA** (funnel público y suscripciones de todo el ERP); integración canónica: SÍ.
-- Arena: **A** (transversal de seguridad; toca reglas y módulos base). Prioridad: **2** (seguridad de datos). Precondición: decisión de diseño (documento público vs reglas por campo) registrada en el MAPA antes de codificar.
+- Decisión de diseño aplicada: **documento público derivado** (espejo mínimo `fichas_publicas_inmueble`, un documento por inmueble con id = inmuebleId y lista blanca cerrada de claves), no reglas por campo.
+- Desarrollo: **Arena B**, commit `8534b43` (`feat(gap-r3): seguridad ficha publica de inmueble`). Integración: **Arena A**, commit `5e47fc2` (`merge(gap-r3)`, cherry-pick selectivo; auto-merge limpio en `firestore.rules` y `App.tsx` por offsets de §6/E, hunks idénticos al origen; 0 conflictos).
+- Entregado: `firestore.rules` §1 `inmuebles` → **se endureció el acceso público**: `get` solo staff o inquilino vinculado, `list` solo staff, escrituras sin cambios; nueva colección **`fichas_publicas_inmueble`** (`get` público por id, `list` autenticado —sin enumeración anónima—, escritura master/propietario titular con `clavesFichaPublicaOk()`); `storage.rules`: catálogo `inmuebles/{id}/{fichero}` sigue público solo en el primer nivel y **`inmuebles/{id}/inventario/**` pasa a interno**; `src/lib/fichaPublicaInmueble.ts` (construcción del espejo, campos públicos/privados, get por id y por token, adaptador de vista); `src/lib/firebase.ts` mantiene el espejo al guardar/borrar inmueble (mejor esfuerzo); `src/App.tsx`: la suscripción completa de `inmuebles` solo en el flujo autenticado; visita, solicitud y cuestionario anónimos resuelven exclusivamente la ficha pública. Índices sin cambios.
+- Validación canónica tras `5e47fc2`: R3 **29/29** (`tests/ficha-publica-inmueble.test.ts`) · R1 15/15 · R2 20/20 · suite **899/899** (38 ficheros) · `tsc` 0 · build OK · R4, C, D, E, §6 intactos.
+- **Anotaciones expresas:** las reglas nuevas (Firestore y Storage) **todavía no están desplegadas en Firebase**; la validación contra Firebase real/emulador **queda pendiente**; **no existe backfill automático** de las fichas públicas: las de los inmuebles existentes se materializan al volver a guardar cada inmueble (`saveInmuebleFirestore`), salvo que posteriormente se ordene implementar un backfill controlado (§12.6, pendiente 3).
+- Arena: **B** (en lugar de A, por asignación del usuario) → integrado por **A**. Prioridad original: 2. **Estado: CERRADO.**
 
 **GAP-R4 — Cobertura de tests de los motores base (cobros/fiscal/gastos) y GAP3 (§10.6)** — **CERRADO (ORDEN 16, 2026-09-21)**
 - Objetivo: suites propias para `cobrosEngine` (interfaz económica central de B, C, GAP6, E), `fiscalEngine`, `gastosEngine` y desglose de la suite GAP3 (antes 1 test que envolvía 40 checks).
@@ -1188,12 +1194,13 @@ son cierres de circuitos ya existentes.
 | GAP | Arena | Depende de | Bloquea a | Requiere publicación de reglas |
 |---|---|---|---|---|
 | GAP-R4 tests base | A | — | GAP-R1 (recomendado, no obligatorio) — **CERRADO O16** | No |
-| GAP-R1 persistencia GAP6 | B | — | Uso real de la evidencia de pago de B | No (reglas ya existen; publicación global pendiente igualmente) |
-| GAP-R3 ficha pública | A | Decisión de diseño | — | Sí |
-| GAP-R2 adjuntos morosidad | C | — | — | Sí (`storage.rules`) |
+| GAP-R1 persistencia GAP6 | B → A | — | Uso real de la evidencia de pago de B | No (reglas ya existían) — **CERRADO / INTEGRADO `a18967f`** |
+| GAP-R3 ficha pública | B → A | Decisión de diseño (documento público derivado) | — | Sí (**pendiente de publicar**) — **CERRADO / INTEGRADO `5e47fc2`** |
+| GAP-R2 adjuntos morosidad | B → A | — | — | Sí (`storage.rules`, **pendiente de publicar**) — **CERRADO / INTEGRADO `92c8185`** |
 
-Sin dependencias cruzadas entre R1, R2 y R3: pueden desarrollarse en ramas
-independientes; **Arena A integra** una a una con auditoría selectiva.
+Sin dependencias cruzadas entre R1, R2 y R3: se desarrollaron en la rama de Arena B
+(`415de41` → `58a495a` → `8534b43`) y **Arena A los integró** uno a uno por cherry-pick selectivo
+(`a18967f` → `92c8185` → `5e47fc2`). Los cuatro GAPs R1–R4 están **CERRADOS**.
 
 ### 12.4 Orden técnico de ejecución
 
@@ -1201,10 +1208,10 @@ independientes; **Arena A integra** una a una con auditoría selectiva.
 |---|---|---|---|---|
 | **0** (externo, sin Arena) | Publicación de reglas B/C/D/E/F3 + índices; prueba real Gemini F4 | Usuario | — | Reglas e IA validadas en Firebase/Gemini reales; registro en `F4-PRUEBA-REAL-GEMINI.md` |
 | **1** | GAP-R4 | A | — | **HECHO (O16)**: suites `cobrosEngine` 69 / `fiscalEngine` 43 / `gastosEngine` 45 / GAP3 41; global 835 (solo tests). Hallazgos D1–D3 pendientes de orden |
-| **2** | GAP-R1 | B (rama propia) → integra A | Fase 1 recomendada | Conciliación persistida; B con evidencia real; GAP6 23 + nuevos tests; sin segundo motor |
-| **3** | GAP-R3 | A | Decisión de diseño documentada | Ficha pública sin datos fiscales; reglas publicables; funnel intacto |
-| **4** | GAP-R2 | C (rama propia) → integra A | — | Evidencias con archivo en Storage; C 82 verde |
-| **5** | Integración global (§7 «Después») | A | Fases 1–4 + Fase 0 | E2E, UX, endurecimiento (rate-limit, `documentsStore`, script `test`) |
+| **2** | GAP-R1 | B (rama propia) → integra A | Fase 1 recomendada | **HECHO**: B `415de41` → A `a18967f`; conciliación persistida; GAP6 23 + 15 tests; sin segundo motor; suite 850 |
+| **3** | GAP-R3 | B (rama propia) → integra A | Decisión de diseño documentada | **HECHO**: B `8534b43` → A `5e47fc2`; espejo `fichas_publicas_inmueble`; 29 tests; suite 899. Reglas **pendientes de publicar**; backfill de fichas **pendiente de decisión** |
+| **4** | GAP-R2 | B (rama propia) → integra A | — | **HECHO**: B `58a495a` → A `92c8185`; evidencias con archivo en Storage; 20 tests; C 82 verde; suite 870. `storage.rules` **pendiente de publicar** |
+| **5** | Integración global (§7 «Después») | A | Fases 1–4 (**hechas**) + Fase 0 (**pendiente**) | E2E, UX, endurecimiento (rate-limit, `documentsStore`, script `test`) |
 
 Cuando llegue un proveedor (email, OTP, SEPA, AEAT, portales) se abre la orden
 correspondiente de la categoría C sobre el punto de enganche indicado; hasta
@@ -1217,3 +1224,30 @@ entonces **no hay desarrollo que hacer**.
 `usuarios_auth/{uid}/progreso_tutoriales` (§6) · `cobrosEngine.registrarPagoPeriodo` como
 única escritura de cobros · cadena de huellas GAP7 · identidad determinista GAP8 ·
 dispatcher GAP1 (un solo dispatcher) · configuración Gemini de `server.ts` · deny-by-default.
+
+### 12.6 Pendientes técnicos reales tras R1 + R2 + R3 (2026-09-21)
+
+Estado de los bloques: **R1 cerrado** · **R2 cerrado** · **R3 cerrado** · **R4 cerrado** (O16) ·
+BLOQUE C integrado · BLOQUE D integrado · BLOQUE E reconciliado e integrado · §6 integrado.
+Ningún GAP cerrado se reabre. Los únicos pendientes técnicos que existen realmente son:
+
+**PENDIENTE 1 — Validación Firebase real.** R2 y R3 (y R1) están validados mediante tests con
+Firestore/Storage mockeados, inspección estructural de las reglas, `tsc` y build; **no** se ha
+ejecutado validación contra Firebase real ni emulador (el sandbox no dispone de red hacia
+Firebase, credenciales ni emulador). Estado: **PENDIENTE — NO BLOQUEA LA INTEGRACIÓN DE CÓDIGO,
+SÍ EL CIERRE OPERATIVO DEL DESPLIEGUE.**
+
+**PENDIENTE 2 — Despliegue de reglas.** Las modificaciones de `firestore.rules` (R3: §1 `inmuebles`
+endurecido + `fichas_publicas_inmueble`) y `storage.rules` (R2: `morosidad_evidencias`; R3:
+`inmuebles/{id}/inventario/**` interno) están **únicamente en el repositorio**; **no están
+publicadas en Firebase**. Publicación manual por el usuario con Firebase CLI (nunca desde el
+sandbox; ver §10.8 y O12b).
+
+**PENDIENTE 3 — Materialización de fichas públicas existentes.** R3 **no incluye backfill
+automático**. Antes de activar las nuevas reglas en producción hay que resolver de forma
+controlada la creación de `fichas_publicas_inmueble` para los inmuebles ya existentes: hasta
+entonces cada ficha solo se crea al volver a guardar su inmueble. No implementado; pendiente
+de una orden específica.
+
+Trazabilidad Git (ver `docs/ESTADO-GIT-ERP.md`): R1 `415de41` → `a18967f` · R2 `58a495a` →
+`92c8185` · R3 `8534b43` → `5e47fc2` (HEAD canónico).

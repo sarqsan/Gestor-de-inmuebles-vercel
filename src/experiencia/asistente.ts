@@ -380,6 +380,16 @@ function conTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
+ * Una respuesta del proveedor que NO cumple el esquema (mal formada, intención fuera del contrato,
+ * capacidad que no existe en el catálogo, parámetros inválidos) se RECHAZA y se pasa al resolutor
+ * local: nunca se presenta al usuario como respuesta final. En cambio, SIN_PERMISO, NO_SOPORTADA con
+ * intención NINGUNA, AMBIGUA y las resoluciones válidas son respuestas legítimas del proveedor.
+ */
+function violaEsquema(res: AIIntentResolution): boolean {
+  return res.estado === 'ERROR' || res.errores.some((e) => e === 'INTENCION_DESCONOCIDA' || e.startsWith('CAPACIDAD_INEXISTENTE:'));
+}
+
+/**
  * Resuelve una petición: construye la petición IA, consulta al proveedor (si lo hay), valida de
  * forma determinista y —si el proveedor falla, no está disponible o su propuesta es inservible—
  * cae al proveedor local. Nunca lanza.
@@ -395,7 +405,7 @@ export async function resolverPeticion(input: string, ctx: ExperienceContext, op
     try {
       const propuesta = await conTimeout(opciones.proveedor.interpretar(req), opciones.timeoutMs ?? 12000);
       const res = validarResolucionIA(propuesta, ctx, { origen: 'IA', proveedor: opciones.proveedor.nombre });
-      if (res.estado !== 'ERROR') return res;
+      if (!violaEsquema(res)) return res;
       avisos.push('La interpretación del asistente no era válida; se ha usado el resolutor local.');
     } catch (err) {
       avisos.push(`Asistente IA no disponible (${err instanceof Error ? err.message : 'error'}); se ha usado el resolutor local.`);

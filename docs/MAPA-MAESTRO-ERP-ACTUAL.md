@@ -845,7 +845,18 @@ firme, apruebe, envíe SEPA o modifique reglas).
   ninguna llamada real a Gemini se ha realizado. La ruta de código está
   escrita y tipada, pero su validación con la API real queda **PENDIENTE**
   (requiere `GEMINI_API_KEY` en el entorno del servidor y una prueba manual).
-  No se afirma lo contrario.
+  No se afirma lo contrario. **Procedimiento de prueba externa (5 casos) en
+  `docs/F4-PRUEBA-REAL-GEMINI.md`** (ORDEN 14, 2026-09-21).
+- **Revisión pre-validación (ORDEN 14)**: el endpoint responde sin clave
+  `{disponible:false}` (200) y con clave sin red `502 PROVEEDOR_ERROR`
+  (comprobado en Arena, clave no filtrada); el cuerpo enviado al servidor no
+  contiene permisos ni secretos. **Defecto corregido**: una propuesta del
+  proveedor con **capacidad inexistente** o **intención fuera del contrato**
+  se presentaba como respuesta final del proveedor (`SIN_CAPACIDAD`/
+  `NO_SOPORTADA`, origen IA); ahora se trata como violación del esquema → se
+  rechaza y se cae al resolutor local con aviso (`violaEsquema` en
+  `asistente.ts`). `SIN_PERMISO`, `NINGUNA` y `AMBIGUA` siguen siendo
+  respuestas legítimas del proveedor. +1 test (F4 = 29).
 
 **UI (`src/components/experiencia/AsistentePanel.tsx`)**: botón «Asistente»
 + panel ligero (no chat): petición, estado «Interpretando…», interpretación
@@ -861,14 +872,15 @@ del ERP / `iniciarTutorial` F2), y `InquilinoPortalShell.tsx` con
 deriva** a Tesorería/Morosidad/Actas/inmuebles: una petición de ese tipo se
 responde «no está disponible en el portal del inquilino».
 
-**Tests F4 (28 nuevos)**: `src/experiencia/asistente.test.ts` (19: contrato
+**Tests F4 (28 nuevos en `f98feed` + 1 en ORDEN 14 = 29)**: `src/experiencia/asistente.test.ts` (19 + 1: contrato
 —válida, ambigua, no soportada, sin capacidad, sin permiso—; seguridad
 —permitida aceptada, no permitida rechazada, ampliación de permisos
 rechazada, ERP nunca capacidad Portal, Portal nunca capacidad ERP, petición
 IA sin códigos de permiso—; confirmación —lectura/navegación no, escritura
 sí, sin confirmar no ejecuta, confirmada ejecuta—; proveedor —respuesta
 válida, mal formada, capacidad inexistente, parámetros inválidos, proveedor
-no disponible → fallback local—) + `src/components/experiencia/experiencia.f4.ui.test.tsx`
+no disponible → fallback local; respuesta fuera del contrato rechazada y
+SIN_PERMISO/NINGUNA/AMBIGUA respetadas—) + `src/components/experiencia/experiencia.f4.ui.test.tsx`
 (9, jsdom: visible en Header/MobileNav y accesibilidad, navegación,
 loading + interpretación, ambigüedad, confirmación/cancelación con Firestore
 en memoria intacto, errores y modo local, Portal real con contrato y sin
@@ -876,7 +888,7 @@ contrato, tutorial y ayuda del portal, host con `accessibleSections` que
 conserva la última palabra). Ajuste justificado en F1: el test de «contexto
 vacío» de `capacidadesDisponibles` admite ahora las capacidades
 transversales sin host/permiso (no conceden nada por sí mismas: revalidan
-parámetros contra el contexto). Suite global **637/637** (609 + 28) · B 92 ·
+parámetros contra el contexto). Suite global **638/638** (609 + 29) · B 92 ·
 C 82 · D 51 · E 64 · batería E 73 · tsc 0 · build OK.
 
 **PENDIENTE (no implementado, no marcar como hecho)**: validación real con
@@ -1027,6 +1039,7 @@ endurecimiento final — §7)
 | `docs/CONTINUIDAD-ARENA.md` | Manual operativo para nuevas sesiones de Arena |
 | `docs/CONTRATO-INTEGRACION-ARENAS.md` | Reglas permanentes de trabajo multi-Arena |
 | `docs/ESTADO-GIT-ERP.md` | Registro de estado Git (rama, HEAD, tests, build) |
+| `docs/F4-PRUEBA-REAL-GEMINI.md` | §6 F4: procedimiento de validación REAL de Gemini fuera de Arena (5 casos, registro de resultados). Gemini = NO VALIDADO hasta rellenarlo |
 | `docs/integracion-BLOQUE-B-2026-09-20.md` | Informe de comparación A↔B e integración selectiva del BLOQUE B (2026-09-20) |
 | `docs/BLOQUE-B-FASE0-VERIFICACION.md` | Verificación pre-integración del bloque B (rama B) |
 | `docs/BLOQUE-B-IMPLEMENTACION.md` | Informe de implementación del bloque B (rama B) |

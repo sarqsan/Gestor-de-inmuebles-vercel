@@ -253,14 +253,34 @@ describe('§6 F4 · adaptador IA (mock) y fallback local', () => {
     expect(mal.origen).toBe('LOCAL');
     expect(mal.estado).toBe('RESUELTA');
     expect(mal.avisos?.[0]).toMatch(/no era válida/);
-    const inex = await resolverPeticion('haz magia', ctxAdmin, { proveedor: mock({ intencion: 'EJECUTAR', capabilityId: 'cap.magia' }) });
-    expect(inex.estado).toBe('SIN_CAPACIDAD');
-    expect(inex.origen).toBe('IA');
+    // Capacidad inventada = viola el esquema → se rechaza y cae al local (el validador por sí solo la marca SIN_CAPACIDAD)
+    expect(validarResolucionIA({ intencion: 'EJECUTAR', capabilityId: 'cap.magia' }, ctxAdmin)).toMatchObject({ estado: 'SIN_CAPACIDAD', errores: ['CAPACIDAD_INEXISTENTE:cap.magia'] });
+    const inex = await resolverPeticion('xyzqwv plim', ctxAdmin, { proveedor: mock({ intencion: 'EJECUTAR', capabilityId: 'cap.magia' }) });
+    expect(inex.origen).toBe('LOCAL');
+    expect(inex.estado).toBe('NO_SOPORTADA');
+    expect(inex.capabilityId).toBeUndefined();
+    expect(inex.avisos?.[0]).toMatch(/no era válida/);
+    const inexNav = await resolverPeticion('ir a tesorería', ctxAdmin, { proveedor: mock({ intencion: 'NAVEGAR', capabilityId: 'cap.tesoreria.inventada' }) });
+    expect(inexNav).toMatchObject({ origen: 'LOCAL', estado: 'RESUELTA', capabilityId: 'cap.tesoreria.consultar' });
     const params = await resolverPeticion('ve a la luna', ctxAdmin, { proveedor: mock({ intencion: 'NAVEGAR', capabilityId: 'cap.navegacion.ir', parametros: { route: 'luna' } }) });
     expect(params.origen).toBe('LOCAL'); // ERROR del proveedor → fallback local
     expect(validarResolucionIA({ intencion: 'VOLAR', capabilityId: 'cap.inmuebles.consultar' }, ctxAdmin).estado).toBe('NO_SOPORTADA');
     expect(validarResolucionIA(null, ctxAdmin).estado).toBe('ERROR');
     expect(validarResolucionIA([1, 2], ctxAdmin).estado).toBe('ERROR');
+  });
+
+  it('respuesta fuera del contrato (intención desconocida) → rechazada y fallback local; SIN_PERMISO / NINGUNA / AMBIGUA del proveedor sí son respuestas finales', async () => {
+    const eng = await resolverPeticion('ir a tesorería', ctxAdmin, { proveedor: mock({ intencion: 'NAVIGATE', capabilityId: 'cap.tesoreria.consultar', confianza: 0.9 }) });
+    expect(eng).toMatchObject({ origen: 'LOCAL', estado: 'RESUELTA', capabilityId: 'cap.tesoreria.consultar' });
+    expect(eng.avisos?.[0]).toMatch(/no era válida/);
+    // Respuestas legítimas del proveedor: no se sustituyen por el local
+    const sinPermiso = await resolverPeticion('ver la tesorería', ctxGestor, { proveedor: mock({ intencion: 'CONSULTAR', capabilityId: 'cap.tesoreria.consultar', confianza: 0.9 }) });
+    expect(sinPermiso).toMatchObject({ origen: 'IA', estado: 'SIN_PERMISO', avisos: undefined });
+    const ninguna = await resolverPeticion('ir a tesorería', ctxAdmin, { proveedor: mock({ intencion: 'NINGUNA', confianza: 0.2, explicacion: 'No corresponde.' }) });
+    expect(ninguna).toMatchObject({ origen: 'IA', estado: 'NO_SOPORTADA', explicacion: 'No corresponde.' });
+    const amb = await resolverPeticion('cosas', ctxAdmin, { proveedor: mock({ alternativas: ['cap.inmuebles.consultar', 'cap.tesoreria.consultar'], confianza: 0.5 }) });
+    expect(amb).toMatchObject({ origen: 'IA', estado: 'AMBIGUA' });
+    expect(ejecutarResolucion(amb, ctxAdmin).tipo).toBe('NINGUNA');
   });
 
   it('proveedor no disponible (lanza) o lento (timeout) → fallback local con aviso; ambigüedad del proveedor se respeta solo con ids permitidos', async () => {

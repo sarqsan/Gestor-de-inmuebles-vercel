@@ -1217,3 +1217,57 @@ entonces **no hay desarrollo que hacer**.
 `usuarios_auth/{uid}/progreso_tutoriales` (§6) · `cobrosEngine.registrarPagoPeriodo` como
 única escritura de cobros · cadena de huellas GAP7 · identidad determinista GAP8 ·
 dispatcher GAP1 (un solo dispatcher) · configuración Gemini de `server.ts` · deny-by-default.
+
+### 12.6 Pliego de traspaso GAP-R1 → Arena B (redactado por Arena A tras cerrar GAP-R4, 2026-09-21)
+
+> Documento de traspaso: **no implementa nada**. Fija base, alcance, límites y criterios de
+> integración para que Arena B ejecute GAP-R1 sin ambigüedad. Sin cambios funcionales en este commit.
+
+**Base obligatoria:** `c39f183` (rama canónica `arena/01a0bfbe-gestor-de-inmuebles-vercel`; global 835/835 ·
+B 92 · C 82 · D 51 · E 64 · batería E 73 · F1–F3 76 · F4 29 · tsc 0 · build OK). Arena B trabaja en **rama propia**
+anclada a ese SHA y lo declara en su informe (CONTRATO §2).
+
+**Alcance (exactamente esto):**
+1. Nueva capa `src/lib/conciliacionFirestore.ts` con CRUD/suscripciones sobre las colecciones **ya reguladas**
+   `movimientos_bancarios` (§ reglas l.1120), `conciliaciones_bancarias` (l.1156) e `importaciones_bancarias`
+   (l.1187) de `firestore.rules`. Las reglas son deny-by-default con `sinSecretosBancarios()`, get/list por
+   propietario y delete solo master-admin: **el modelo persistido debe cumplirlas tal cual**; si B necesita
+   cambiar una regla, lo documenta como propuesta para Arena A (no la edita).
+2. Sustituir en `ConciliacionBancariaSection.tsx` los `useState` de `movimientos`, `propuestas` e
+   `importaciones` (l.26–28) por suscripciones a esa capa, sin alterar el flujo IMPORTAR → NORMALIZAR →
+   VALIDAR → DUPLICADOS → CANDIDATOS → MATCH → CONFIANZA → PROPONER → CONFIRMAR → APLICAR → TRAZABILIDAD.
+3. Persistir el resultado de APLICAR: hoy `aplicarConciliacion()` devuelve `contratoActualizado` (producido
+   por `cobrosEngine.registrarPagoPeriodo`) y la sección **solo lo registra en consola** (l.140–142). R1 debe
+   guardarlo por la vía canónica ya existente: pasar a la sección la prop `onSaveContrato={handleSaveContrato}`
+   de `App.tsx` (la misma que recibe `CobrosSection`, l.3373; hoy `ConciliacionBancariaSection` no la recibe),
+   nunca escribiendo `registroCobros` directamente.
+4. Mantener `lib/conciliacionSession.ts` (espejo para Tesorería B) alimentado desde la fuente persistida,
+   de modo que `tesoreria/conciliacionAdapter.ts` siga recibiendo la evidencia sin cambios de interfaz.
+5. Tests: `tests/conciliacion.test.ts` 23 intactos + tests nuevos de la capa de persistencia (repositorio en
+   memoria/mocks; sin Firebase real) y de la idempotencia de importación sobre datos persistidos.
+
+**Fuera de alcance (prohibido en R1):**
+- Segundo motor de conciliación o de matching; reescribir `src/utils/conciliacion/*`.
+- Tocar `cobrosEngine`, `registrarPagoPeriodo`, `src/tesoreria/*`, `lib/tesoreriaFirestore.ts`, reglas §26–31,
+  morosidad C, actas D, portal E, §6, `firestore.rules`/`storage.rules`/`firestore.indexes.json`.
+- Corregir los defectos D1–D3 de §12.2 (requieren órdenes propias de Arena A).
+- Conciliación automática que marque cobros como recibidos sin confirmación explícita (texto vigente de la
+  sección: «no marca recibo como cobrado solo por coincidencia probabilística»).
+- Secretos, credenciales, IBAN completos o datos bancarios en claro fuera de lo que ya permiten las reglas.
+
+**Avisos técnicos obligatorios para B:**
+- **D2 (§12.2):** `matchingEngine.ts` l.254 puntúa gastos por `gasto.fecha`, campo que el ERP no rellena → la
+  puntuación de fecha de candidatos GASTO es hoy nula («Fecha fuera ventana 999d»). B **no** debe «arreglarlo»
+  rellenando `fecha` al persistir ni tocando el motor: la persistencia guarda los gastos tal como vienen y la
+  corrección la hará Arena A en la orden D2. Si B necesita fecha para la UI, leer `fechaDevengo`/`fechaPago`.
+- La red de seguridad de R4 cubre `registrarPagoPeriodo` (inmutabilidad, trazabilidad, RECIBIDO/INCIDENCIA por
+  importe, periodo inexistente → mismo contrato). Cualquier cambio de comportamiento romperá
+  `src/utils/cobrosEngine.test.ts`; eso es intencionado.
+- Sandbox de Arena sin acceso a Firebase real: la persistencia se prueba con repositorio en memoria/mocks y la
+  publicación/validación real de reglas sigue en Fase 0 (usuario). No marcar como «validado en Firestore» lo
+  no ejecutado contra el proyecto real.
+
+**Criterios de integración (Arena A):** rama de B con base `c39f183` declarada · diff 100 % aditivo salvo
+`ConciliacionBancariaSection.tsx` y el punto de guardado de contrato en `App.tsx` · GAP6 23 + nuevos en verde ·
+B 92 / C 82 / D 51 / E 64 / batería E 73 / F1–F4 105 / cobros 69 / fiscal 43 / gastos 45 / GAP3 41 sin
+regresión · tsc 0 · build OK · informe con checklist CONTRATO §4 · integración selectiva por A (nunca merge ciego).

@@ -52,10 +52,11 @@ programador automático de detección, adjuntos en Storage, gancho BLOQUE B solo
 
 - Canónico: **`91da820`** (`feat(integracion): integrar GAP 8 de factura
   electronica B2B`) — GAP 1–8 consolidados.
-- La rama de sesión de 2026-09-20 (`arena/01a0bfbe-gestor-de-inmuebles-vercel`)
-  contiene el merge de alineación `d24ab1f` (árbol ≡ `91da820`) + el paquete de
-  continuidad + **la integración selectiva del BLOQUE B** (commit
-  `feat(tesoreria): integrar bloque B en ERP canonico`, 2026-09-20).
+- La rama de sesión (`arena/01a0bfbe-gestor-de-inmuebles-vercel`) contiene el
+  merge de alineación `d24ab1f` (árbol ≡ `91da820`) + el paquete de
+  continuidad + **BLOQUE B** (merge `5ff8448`, 2026-09-20) + **BLOQUE C**
+  (merge `5293c3c` + docs `7ed7f59`, 2026-09-21) + **BLOQUE D** (commit
+  `d606ff8` + docs, 2026-09-21).
 - Estado completo y actualizado: `docs/ESTADO-GIT-ERP.md`.
 
 ## 4. ¿Cómo comprobar el estado al llegar? (FASE 0, 5 minutos)
@@ -130,14 +131,26 @@ Reglas de la FASE 0 (permanentes):
   «Mis Liquidaciones» en portal propietario, reglas §26–31, origen GAP1
   `TESORERIA`, conector GAP6 de evidencia de pago. Pendientes externos: envío
   bancario real, camt.053, XSD oficial (mapa maestro §4 BLOQUE B).
+- **BLOQUE C — Morosidad + recobro + expediente legal: INTEGRADO (2026-09-21)** —
+  detección desde `registroCobros` (solo lectura), máquina de estados con
+  histórico append-only, recobro configurable, comunicaciones solo por GAP1,
+  compromisos cubiertos con cobros reales, aseguradora/jurídico PREPARADO
+  (MASC LO 1/2025), espejo de mínimo privilegio, reglas §32–§37, 79 tests +
+  batería `test:bloque-c` (mapa maestro §4 BLOQUE C).
+- **BLOQUE D — Actas de entrada/salida + firma OTP + PDF: INTEGRADO (2026-09-21)** —
+  circuito completo check-in/check-out: inventario por elementos, contadores,
+  evidencias en Storage (sin base64), comparación entrada↔salida determinista
+  (sin IA), firma vinculada a versión, OTP (SHA-256/15 min/5 intentos/uso
+  único; transporte real `PENDIENTE_PROVEEDOR`), PDF jsPDF persistido en
+  Storage, versionado inmutable de actas firmadas, reglas §38 + storage
+  `actas_fotos`/`actas_pdfs`, 51 tests (mapa maestro §4 BLOQUE D y
+  `docs/BLOQUE_D_ACTAS.md`).
 - Bloques base cerrados: auth/roles, inmuebles+habitaciones (circuito 72/72),
   cobros, gastos/préstamos/rentabilidad, incidencias/mantenimiento/profesionales,
   pólizas/siniestros+Gmail, inventario, recomercialización, deploy Vercel.
 
 ## 9. ¿Qué bloques están pendientes?
 
-- **BLOQUE C** — Morosidad + recobro + expediente de recuperación.
-- **BLOQUE D** — Entrada/salida + actas + evidencias + firma digital.
 - **BLOQUE E — Portal del Inquilino + suministros** — PLANIFICADO ≠
   IMPLEMENTADO. Gran capacidad pendiente que depende de B, C y D; acceso
   independiente y simplificado del arrendatario (sin acceso al ERP interno);

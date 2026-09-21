@@ -126,6 +126,7 @@ Un bloque NO se considera terminado hasta que **todo** lo siguiente consta:
 | Fecha | Bloque | Rama de entrega | BASE | Estado | Verificación declarada |
 |---|---|---|---|---|---|
 | 2026-09-20 | **BLOQUE C** — Morosidad + recobro + expediente legal | `arena/01a0c03d-gestor-de-inmuebles-vercel` | `5ff8448` | **ENTREGADO EN RAMA**; **INTEGRADO en canónica (Arena A, 2026-09-21, merge `5293c3c`)** tras auditoría selectiva 33/33 ficheros | `test:bloque-c` 82 PASS · vitest 409/409 · `test:bloque-b` 92/92 (sin regresión) · `tsc --noEmit` 0 · build OK — re-verificado sobre la canónica 2026-09-21. Docs: `docs/BLOQUE-C-*.md` |
+| 2026-09-21 | **BLOQUE D** — Actas de entrada/salida + firma OTP + PDF | `arena/01a0ab9d-gestor-de-inmuebles-vercel` | `9cb01a43` | **INTEGRADO SELECTIVAMENTE en canónica (Arena A, 2026-09-21, commit `d606ff8`)** tras auditoría de los 20 ficheros (0 conflictos). Excluido su `5d3ae7f` (`feat(gap6)`): duplicaba el GAP6 ya consolidado en la canónica. Reglas D renumeradas a §38 (colisión con §25 = GAP7) | `bloqueD.test.ts` 51/51 · `test:bloque-b` 92/92 · `test:bloque-c` 82 PASS · vitest 460/460 · `tsc --noEmit` 0 · build OK — verificado sobre la canónica 2026-09-21. Docs: `docs/BLOQUE_D_ACTAS.md` |
 
 Notas de aplicación a esta entrega (conforme a §5 y §6; no son reglas nuevas):
 

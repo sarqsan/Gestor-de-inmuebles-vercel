@@ -125,7 +125,7 @@ Un bloque NO se considera terminado hasta que **todo** lo siguiente consta:
 
 | Fecha | Bloque | Rama de entrega | BASE | Estado | Verificación declarada |
 |---|---|---|---|---|---|
-| 2026-09-20 | **BLOQUE C** — Morosidad + recobro + expediente legal | `arena/01a0c03d-gestor-de-inmuebles-vercel` | `5ff8448` | **ENTREGADO EN RAMA · NO INTEGRADO** (decide Arena A) | `test:bloque-c` 82 PASS · vitest 409/409 · `test:bloque-b` 92/92 (sin regresión) · `tsc --noEmit` 0 · build OK. Docs: `docs/BLOQUE-C-*.md` |
+| 2026-09-20 | **BLOQUE C** — Morosidad + recobro + expediente legal | `arena/01a0c03d-gestor-de-inmuebles-vercel` | `5ff8448` | **ENTREGADO EN RAMA**; **INTEGRADO en canónica (Arena A, 2026-09-21, merge `5293c3c`)** tras auditoría selectiva 33/33 ficheros | `test:bloque-c` 82 PASS · vitest 409/409 · `test:bloque-b` 92/92 (sin regresión) · `tsc --noEmit` 0 · build OK — re-verificado sobre la canónica 2026-09-21. Docs: `docs/BLOQUE-C-*.md` |
 
 Notas de aplicación a esta entrega (conforme a §5 y §6; no son reglas nuevas):
 

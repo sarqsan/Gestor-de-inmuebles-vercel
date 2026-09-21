@@ -9,14 +9,15 @@
  *  - invarianza de ids: el id del documento es el id determinista del modelo;
  *  - `propietarioId` validado en cada escritura;
  *  - histórico y evidencias APPEND-ONLY (sin update ni delete para nadie);
- *  - sin borrado ordinario del expediente: cerrar/anaular es la vía (delete solo
- *    reservado al administrador principal, como en BLOQUE B);
+ *  - sin borrado del expediente: la regla §32 deniega el delete para TODOS
+ *    (incluso el administrador principal; más estricto que BLOQUE B).
+ *    Cerrar/anular es la vía; el expediente es memoria de recobro;
  *  - inmutables: `id`, `claveIdempotencia`, `contratoId`, `propietarioId`,
  *    `inmuebleId`, `fechaDeteccion`, `versionPolitica`;
  *  - sin secretos: predicado `sinSecretosMorosidad()`.
  */
 
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { db, sanitizeObjectForFirestore } from './firebase';
 import type {
   CompromisoPago,
@@ -169,11 +170,6 @@ export async function appendEvidenciaMorosidadFirestore(e: EvidenciaMorosidad): 
 
 export async function savePoliticaMorosidadFirestore(p: PoliticaMorosidad): Promise<void> {
   await setDoc(doc(db, 'politicas_morosidad', p.id), sanitizeObjectForFirestore(p), { merge: true });
-}
-
-/** Sin borrado ordinario: solo el administrador principal (vía de emergencia). */
-export async function deleteExpedienteMorosidadFirestore(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'expedientes_morosidad', id));
 }
 
 // ---------------------------------------------------------------------------

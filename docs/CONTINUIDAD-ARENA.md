@@ -24,23 +24,29 @@ mantiene/integra **Arena A**. Si tu sesión se ancló a `main`, **no asumas** qu
 `main` contiene el ERP: `main` es una línea paralela (ver
 `MAPA-MAESTRO-ERP-ACTUAL.md` §9). Verifica siempre el árbol (FASE 0 de abajo).
 
-### 2.1 Rama con el BLOQUE C entregado (2026-09-20) — **NO integrado**
+### 2.1 BLOQUE C — entregado en rama (2026-09-20) e **INTEGRADO en la canónica (2026-09-21, Arena A)**
 
-`arena/01a0c03d-gestor-de-inmuebles-vercel` (BASE `5ff8448`) contiene el **BLOQUE C** completo:
-detección de deuda desde `registroCobros`, máquina de estados con histórico append-only,
-política de recobro configurable y versionada, plan de recobro, comunicaciones **únicamente por
-GAP 1**, evidencias, compromisos cubiertos solo con cobros reales, expedientes de aseguradora y
-jurídico (requisito de procedibilidad LO 1/2025), espejo `morosidad_resumen_propietario` de
-mínimo privilegio, 6 colecciones nuevas con reglas §32–§37 y 79 tests.
+El **BLOQUE C** completo (desarrollado en `arena/01a0c03d-gestor-de-inmuebles-vercel`, BASE
+`5ff8448`, commit de cierre `91bac8e`) está ahora en la rama canónica: merge `--no-ff`
+`5293c3c` — `feat(morosidad): integrar bloque C en ERP canonico` — tras auditoría selectiva de los
+33 ficheros (100 % aditivo). Contenido: detección de deuda desde `registroCobros` (solo lectura;
+el pago sigue siendo `cobrosEngine.registrarPagoPeriodo`), máquina de estados con histórico
+append-only, política de recobro configurable y versionada, plan de recobro, comunicaciones
+**únicamente por GAP 1**, evidencias, compromisos cubiertos solo con cobros reales, expedientes de
+aseguradora y jurídico (requisito de procedibilidad LO 1/2025), espejo
+`morosidad_resumen_propietario` de mínimo privilegio, 6 colecciones nuevas con reglas §32–§37,
+79 tests + batería `test:bloque-c`, y la implementación Firestore del
+`RepositorioNotificaciones` de GAP 1 (email safe-mode).
 
-Verificación en esa rama: `npm run test:bloque-c` (82 PASS) · `npx vitest run` (409/409) ·
-`npm run test:bloque-b` (92/92, sin regresión) · `npx tsc --noEmit` (0 errores) ·
-`npm run build` (OK). Documentación: `docs/BLOQUE-C-IMPLEMENTACION.md`,
-`docs/BLOQUE-C-VERIFICACION.md`, `docs/BLOQUE-C-NORMATIVA.md`.
+Verificación re-ejecutada sobre la canónica integrada (2026-09-21): `npm run test:bloque-c`
+(82 PASS) · `npx vitest run` (409/409) · `npm run test:bloque-b` (92/92, sin regresión) ·
+`npx tsc --noEmit` (0 errores) · `npm run build` (OK). Documentación:
+`docs/BLOQUE-C-IMPLEMENTACION.md`, `docs/BLOQUE-C-VERIFICACION.md`,
+`docs/BLOQUE-C-NORMATIVA.md` (compatibles y conservados; el MAPA MAESTRO canónico los referencia).
 
-**Si eres Arena A**: audita e integra selectivamente desde esa rama (no merge ciego: la rama es
-100 % aditiva en los ficheros compartidos y trabaja sobre `5ff8448`). **Si continúas el BLOQUE C**:
-arranca en esa rama. **No** inicies el BLOQUE D ni el portal del inquilino (BLOQUE E) sin orden expresa.
+**Pendientes reales del BLOQUE C** (ver MAPA §4): transporte real de comunicaciones GAP 1,
+programador automático de detección, adjuntos en Storage, gancho BLOQUE B solo a nivel interfaz.
+**No** inicies el BLOQUE D ni el portal del inquilino (BLOQUE E) sin orden expresa.
 
 ## 3. ¿Cuál es el HEAD conocido?
 

@@ -4,36 +4,36 @@
 > el estado actualiza este fichero en el mismo commit.** No se almacenan
 > secretos en este documento.
 
-## ESTADO ACTUAL (actualizado 2026-09-20)
+## ESTADO ACTUAL (actualizado 2026-09-21)
 
 | Campo | Valor |
 |---|---|
 | Repositorio remoto | `origin` → `https://github.com/sarqsan/Gestor-de-inmuebles-vercel.git` |
-| Rama canónica | `arena/01a0a413-gestor-de-inmuebles-vercel` |
-| HEAD canónico | `91da820b5c18b93b9bdcf1aa9be0a185650948f8` |
-| Último commit canónico | `91da820` — `feat(integracion): integrar GAP 8 de factura electronica B2B` |
-| Último bloque integrado | **BLOQUE B — Tesorería + Liquidaciones + SEPA** (INTEGRADO EN ARENA A, 2026-09-20, commit `feat(tesoreria): integrar bloque B en ERP canonico`) |
-| GAP 1–8 | **CONSOLIDADOS** (commits `b1d45aa` → `91da820`) — intactos tras la integración de B (regresión 330/330) |
+| Rama canónica | `arena/01a0bfbe-gestor-de-inmuebles-vercel` (sesión Arena A; la canónica histórica `arena/01a0a413-…` queda en `91da820`) |
+| HEAD canónico | `5293c3c` — `feat(morosidad): integrar bloque C en ERP canonico` (merge `--no-ff` de `arena/01a0c03d-…` @ `91bac8e` sobre `5ff8448`), + commit de cierre de documentación de la integración |
+| Último commit canónico | `5293c3c` — integración **selectiva** (auditoría 33/33 ficheros) del BLOQUE C sobre `5ff8448` |
+| Último bloque integrado | **BLOQUE C — Morosidad + recobro + expediente legal** (INTEGRADO EN ARENA A, 2026-09-21, merge `5293c3c`) — precedido por **BLOQUE B — Tesorería + Liquidaciones + SEPA** (INTEGRADO 2026-09-20, commit `feat(tesoreria)`) |
+| GAP 1–8 | **CONSOLIDADOS** (commits `b1d45aa` → `91da820`) — intactos tras B y C (regresión 409/409); GAP1 gana además su implementación Firestore de `RepositorioNotificaciones` vía BLOQUE C |
 | RAMA DE SESIÓN ACTUAL | `arena/01a0bfbe-gestor-de-inmuebles-vercel` |
 | — merge de alineación | `d24ab1f` — merge de la canónica `91da820` en la rama de sesión (antes: rama basada en `main` `4d420bd`, árbol **sin** GAP 1–8). Árbol resultante byte-idéntico a `91da820` (verificado: `git diff --cached 91da820` = ∅) |
 | — commits de docs | `docs: crear paquete de continuidad y mapa maestro ERP` · `docs: actualizar mapa maestro con portal inquilino y capa IA` |
 | — integración BLOQUE B | Commit `feat(tesoreria): integrar bloque B en ERP canonico` — integración **selectiva** de `arena/01a0bfd3` @ `87aed9a` (NO merge ciego; la rama B trabajaba sobre `main` sin GAP1–8). Informe: `docs/integracion-BLOQUE-B-2026-09-20.md`. Nuevo: `src/tesoreria/*` (9 módulos), `TesoreriaSection.tsx`, `lib/tesoreriaFirestore.ts`, `lib/conciliacionSession.ts`, reglas §26–31, origen GAP1 `TESORERIA` + 7 plantillas, script `test:bloque-b` (92 tests) |
-| Tests | **330/330** (16 ficheros vitest, regresión) + **92/92** (`npm run test:bloque-b`) — verificados 2026-09-20 en la rama de sesión |
-| TypeScript | `npx tsc --noEmit` → **0 errores** — verificado 2026-09-20 |
-| Build | `npm run build` → **OK** (warning conocido de chunk >500 kB) — verificado 2026-09-20 |
+| Tests | **409/409** (20 ficheros vitest, regresión; baseline 330 + 79 del BLOQUE C) + **92/92** (`npm run test:bloque-b`) + **82 PASS** (`npm run test:bloque-c`) — re-verificados 2026-09-21 en la rama canónica integrada |
+| TypeScript | `npx tsc --noEmit` → **0 errores** — re-verificado 2026-09-21 |
+| Build | `npm run build` → **OK** (warning conocido de chunk >500 kB) — re-verificado 2026-09-21 |
 | Worktree | CLEAN |
 | Remoto | SYNCED (push verificado con `git ls-remote`) |
-| Fecha de actualización | 2026-09-20 |
+| Fecha de actualización | 2026-09-21 |
 
-## ENTREGA EN RAMA — BLOQUE C (2026-09-20) — **NO INTEGRADO**
+## ENTREGA EN RAMA — BLOQUE C (2026-09-20) — **INTEGRADO EN CANÓNICA (2026-09-21, Arena A)**
 
 | Campo | Valor |
 |---|---|
 | Bloque | **BLOQUE C — Morosidad avanzada, recobro y expediente legal** |
 | Rama de entrega | `arena/01a0c03d-gestor-de-inmuebles-vercel` |
 | BASE sobre la que se desarrolló | `5ff8448301ba2e49f4418f9a66d66ec2ff5eb15f` (HEAD canónico tras la integración de B) |
-| Commit de cierre | `feat(morosidad): cerrar bloque C de recobro y expediente` (commit único de cierre; sin merge con la canónica) |
-| Estado de integración | **NO INTEGRADO en la rama canónica.** Queda a disposición de Arena A para auditoría e integración selectiva |
+| Commit de cierre | `91bac8e` — `feat(morosidad): cerrar bloque C de recobro y expediente` (commit único de cierre; sin merge con la canónica) |
+| Estado de integración | **INTEGRADO en la rama canónica (Arena A, 2026-09-21)**: merge `--no-ff` `5293c3c` — `feat(morosidad): integrar bloque C en ERP canonico` — tras auditoría selectiva de los 33 ficheros (100 % aditivo; cero escritura en `registroCobros`; pagos solo vía `cobrosEngine.registrarPagoPeriodo`; comunicaciones solo vía dispatcher GAP1). Corrección de coherencia en la integración: se eliminó `deleteExpedienteMorosidadFirestore` (código muerto contradictorio con la propia regla §32, que deniega el delete para todos) y se alineó el comentario del header de `morosidadFirestore.ts`. |
 | Cambios | 16 ficheros nuevos (~8.800 líneas: 8 módulos + 4 suites + tipos + lib + 2 pantallas + script de batería) y 9 modificados (aditivos): `firestore.rules` +150, `src/App.tsx` +140, `PropietarioPortalSection.tsx` +118, `notificaciones/plantillas.ts` +93, `types/notificaciones.ts` +6, `Sidebar.tsx`/`MobileNav.tsx` +5, `types.ts` +2, `package.json` +1 script |
 | No tocado (verificado) | `src/tesoreria/**`, `src/utils/cobrosEngine.ts`, `src/notificaciones/dispatcher.ts`, `server.ts`, `src/firebase.ts` — **cero regresión sobre los motores de B y de los GAP** |
 | Tests en la rama | `npm run test:bloque-c` → **82 PASS · 0 FAIL**; `npx vitest run` → **409/409** (20 ficheros; baseline 330 → +79); `npm run test:bloque-b` → **92/92** |
@@ -50,10 +50,10 @@
 | Rama | SHA | Contenido |
 |---|---|---|
 | `arena/01a0a413-gestor-de-inmuebles-vercel` | `91da820` | **CANÓNICA** — ERP GAP 1–8 consolidado |
-| `arena/01a0bfbe-gestor-de-inmuebles-vercel` | (ver arriba) | Sesión de continuidad: canónica + paquete de continuidad |
+| `arena/01a0bfbe-gestor-de-inmuebles-vercel` | `5293c3c` (+docs) | **CANÓNICA ACTUAL** — ERP GAP 1–8 + BLOQUE B + BLOQUE C integrados |
 | `main` | `4d420bd` | Línea paralela AI Studio (mantenimiento/candidatos/seguros) — preservada, no es base del ERP |
 | `arena/01a0bfd3-gestor-de-inmuebles-vercel` | `87aed9a` | BLOQUE B (Tesorería/Liquidaciones/SEPA) sobre `main` — **integrado selectivamente en la rama de sesión (2026-09-20)**; la rama se conserva como origen de referencia |
-| `arena/01a0c03d-gestor-de-inmuebles-vercel` | (ver sección «ENTREGA EN RAMA — BLOQUE C») | **BLOQUE C** (morosidad/recobro/expediente legal) sobre `5ff8448` — **DESARROLLADO Y ENTREGADO EN RAMA, NO INTEGRADO** |
+| `arena/01a0c03d-gestor-de-inmuebles-vercel` | `91bac8e` | **BLOQUE C** (morosidad/recobro/expediente legal) sobre `5ff8448` — **INTEGRADO en la canónica (2026-09-21, merge `5293c3c`)**; la rama se conserva como origen de referencia |
 | `arena/01a0ab19-…` / `01a0ab97-…` / `01a0ab9d-…` / `01a0b91c-…` | (variados) | Sesiones históricas de Arenas (trabajo de GAPs y auditorías) |
 | `recovery/arena-a`, `recovery/arena-b-content` | (variados) | Ramas de recuperación históricas |
 | `refs/pull/1/head` | `29a9795` | PR histórica |
@@ -62,6 +62,7 @@
 
 | Fecha | Evento | HEAD canónico | Tests / TSC / Build |
 |---|---|---|---|
+| 2026-09-21 | **BLOQUE C INTEGRADO** (morosidad, recobro, expediente legal, comunicaciones solo por GAP 1, reglas §32–§37, UI de administración + espejo de mínimo privilegio del propietario): integración **selectiva** por Arena A (merge `--no-ff` `5293c3c` de `91bac8e`, hija directa de `5ff8448`) tras auditoría de los 33 ficheros (100 % aditivo; cero escritura en `registroCobros`; pago solo vía `cobrosEngine.registrarPagoPeriodo`; comunicaciones solo vía dispatcher GAP1, nunca `ENVIADA` sin transporte real; compromisos cubiertos solo con cobros reales; intereses sin tipo inventado). GAP1: se integra su implementación Firestore de `RepositorioNotificaciones` (email safe-mode). Corrección de coherencia: eliminada la función muerta `deleteExpedienteMorosidadFirestore` (contradecía la regla §32, que deniega el delete para todos). MAPA MAESTRO → BLOQUE C `COMPLETO`/INTEGRADO; pendientes reales declarados (transporte real GAP1, programador de detección, adjuntos Storage, gancho B a nivel interfaz) | `5ff8448` → `5293c3c` (+commit docs de la integración) | 409/409 + 92/92 + 82/82 · 0 · OK |
 | 2026-09-20 | **BLOQUE C ENTREGADO EN SU RAMA (sin integrar)**: morosidad, recobro, expediente legal, comunicaciones solo por GAP 1, reglas §32–§37, UI de administración + espejo de mínimo privilegio del propietario, 79 tests + batería `test:bloque-c` (82 comprobaciones) y `docs/BLOQUE-C-*.md`. MAPA MAESTRO actualizado solo en lo relativo a estado (sin cambios funcionales) | `5ff8448` **sin cambios** (desde esta rama no se toca la canónica) | en la rama: 409/409 + 92/92 + 82/82 · 0 · OK |
 | 2026-09-20 | **BLOQUE B INTEGRADO** (Tesorería + Liquidaciones + SEPA): integración selectiva de `arena/01a0bfd3` @ `87aed9a` sobre la base canónica (sin merge ciego). Nuevo motor de liquidaciones + SEPA PAIN.008/001 (preparación, sin envío real) + TesoreriaSection + «Mis Liquidaciones» en portal propietario + reglas §26–31 + origen GAP1 `TESORERIA` + conector GAP6 de evidencia + importación de gastos canónicos. Se descartó el MAPA MAESTRO de B y sus «rules 22–27» (choque de numeración/aislamiento). Diferencia 100 % aditiva en ficheros compartidos | `91da820` → commit `feat(tesoreria)` | 330/330 + 92/92 · 0 · OK |
 | 2026-09-20 | 2.ª actualización del mapa maestro: Portal del Inquilino como BLOQUE E (dependencias B/C/D, PLANIFICADO ≠ IMPLEMENTADO) + Capa Transversal Experiencia/Ayuda/Tutoriales/IA (sin numeración GAP) + roadmap de evolución. Solo documentación; sin cambios funcionales | `91da820` | 330/330 · 0 · OK |

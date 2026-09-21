@@ -378,6 +378,99 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+
+  // =======================================================================
+  // MOROSIDAD / RECOBRO (BLOQUE C — 2026-09-20)
+  // -----------------------------------------------------------------------
+  // ADITIVO sobre el dispatcher GAP1: NO se crea un segundo sistema de
+  // notificaciones. Los textos son NEUTROS y OPERATIVOS:
+  //  - no amenazan con acciones que el ERP no puede verificar;
+  //  - no afirman un envío: el estado real lo decide el dispatcher/canal;
+  //  - no citan preceptos como si fueran exigibles (la verificación normativa es
+  //    del usuario/letrado: ver docs/BLOQUE-C-NORMATIVA.md);
+  //  - ningún dato del propietario/contrato/renta ajena aparece en el cuerpo.
+  // Propiedades: {destinatario} {inmuebleDireccion} {periodoMesAnio}
+  // {importePendiente} {fechaHoy} {fechaVencimiento} {diasRetraso} {titulo} {mensaje}
+  // =======================================================================
+  'morosidad.primer_recordatorio': {
+    id: 'morosidad.primer_recordatorio',
+    asunto: 'Recordatorio de pago pendiente — {inmuebleDireccion}',
+    cuerpo:
+      'Estimado/a {destinatario}:\n\nConsta pendiente de pago la cantidad correspondiente a {periodoMesAnio} (vencida el {fechaVencimiento}), por importe de {importePendiente}. Le agradecemos que proceda a su abono o, si ya lo ha realizado, nos remita el justificante.\n\nSi prefiere acordar un calendario de pagos, responda a este mensaje.\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.requerimiento_pago': {
+    id: 'morosidad.requerimiento_pago',
+    asunto: 'Requerimiento de pago — {inmuebleDireccion}',
+    cuerpo:
+      'Estimado/a {destinatario}:\n\nA fecha {fechaHoy} permanece impagada la cantidad de {importePendiente} correspondiente a {periodoMesAnio} (vencida el {fechaVencimiento}, {diasRetraso} días de retraso).\n\nLe requerimos para que abone dicha cantidad o se comunique con esta administración para acordar las condiciones de pago.\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.requerimiento_fehaciente': {
+    id: 'morosidad.requerimiento_fehaciente',
+    asunto: 'Reclamación de deuda — {inmuebleDireccion}',
+    cuerpo:
+      'Estimado/a {destinatario}:\n\nReclamamos el pago de {importePendiente} correspondiente a {periodoMesAnio}, vencido el {fechaVencimiento} y pendiente a fecha {fechaHoy}.\n\nEste mensaje se emite desde el sistema de gestión; si necesita un medio con constancia fidedigna (burofax, correo certificado o acta notarial), la administración lo preparará y lo registrará como evidencia del expediente.\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.aviso_pago_parcial': {
+    id: 'morosidad.aviso_pago_parcial',
+    asunto: 'Confirmación de pago parcial — {inmuebleDireccion}',
+    cuerpo:
+      'Estimado/a {destinatario}:\n\nHemos registrado un pago parcial para {periodoMesAnio}. El saldo pendiente tras aplicarlo es de {importePendiente}.\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.compromiso_alcanzado': {
+    id: 'morosidad.compromiso_alcanzado',
+    asunto: 'Calendario de pagos acordado — {inmuebleDireccion}',
+    cuerpo:
+      'Estimado/a {destinatario}:\n\nDejamos constancia del calendario de pagos acordado sobre el saldo pendiente de {importePendiente}. Este acuerdo no modifica las obligaciones del contrato ni sustituye a los recibos de cada mensualidad.\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.compromiso_incumplido': {
+    id: 'morosidad.compromiso_incumplido',
+    asunto: 'Calendario de pagos incumplido — {inmuebleDireccion}',
+    cuerpo:
+      'Estimado/a {destinatario}:\n\nNo consta el pago de la cuota vencida del calendario acordado. Saldo pendiente: {importePendiente}.\n\nLe rogamos regularice la situación o contacte con esta administración.\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.escalado_aseguradora': {
+    id: 'morosidad.escalado_aseguradora',
+    asunto: 'Expediente preparado para la aseguradora — {inmuebleDireccion}',
+    cuerpo:
+      'Aviso interno: el expediente de morosidad queda preparado para su remisión a la aseguradora ({aseguradoraNombre}). El ERP NO ha enviado nada a terceros: el envío lo realiza la administración por el canal que conste en el expediente.\n\nSaldo pendiente: {importePendiente}.',
+    canalesPermitidos: ['INAPP', 'EMAIL'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.escalado_juridico': {
+    id: 'morosidad.escalado_juridico',
+    asunto: 'Expediente preparado para derivación jurídica — {inmuebleDireccion}',
+    cuerpo:
+      'Aviso interno: el expediente queda preparado para su derivación al departamento jurídico/letrado. El ERP no presenta escritos ni se comunica con órganos judiciales; la decisión y la actuación corresponden al profesional designado.\n\nSaldo pendiente: {importePendiente}.',
+    canalesPermitidos: ['INAPP', 'EMAIL'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.cierre_por_pago': {
+    id: 'morosidad.cierre_por_pago',
+    asunto: 'Deuda saldada — {inmuebleDireccion}',
+    cuerpo:
+      'Estimado/a {destinatario}:\n\nConfirmamos que la deuda asociada a {periodoMesAnio} figura como íntegramente cobrada en nuestros registros contables. El expediente de recobro queda cerrado.\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'morosidad.registro_pagos': {
+    id: 'morosidad.registro_pagos',
+    asunto: '{titulo}',
+    cuerpo: 'Hola:\n\n{mensaje}\n\n— Administración SARQSAN',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
 };
 
 /** Lista plana de claves de plantilla registradas. */

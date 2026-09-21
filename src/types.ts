@@ -7,6 +7,8 @@ export type SectionType =
   | 'tesoreria'
   | 'gastos'
   | 'conciliacion'
+  // BLOQUE C (morosidad avanzada): recobro y expediente legal
+  | 'morosidad'
   | 'facturacion'
   | 'financiacion'
   | 'fiscal'

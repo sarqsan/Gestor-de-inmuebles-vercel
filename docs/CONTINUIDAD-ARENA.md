@@ -24,6 +24,24 @@ mantiene/integra **Arena A**. Si tu sesión se ancló a `main`, **no asumas** qu
 `main` contiene el ERP: `main` es una línea paralela (ver
 `MAPA-MAESTRO-ERP-ACTUAL.md` §9). Verifica siempre el árbol (FASE 0 de abajo).
 
+### 2.1 Rama con el BLOQUE C entregado (2026-09-20) — **NO integrado**
+
+`arena/01a0c03d-gestor-de-inmuebles-vercel` (BASE `5ff8448`) contiene el **BLOQUE C** completo:
+detección de deuda desde `registroCobros`, máquina de estados con histórico append-only,
+política de recobro configurable y versionada, plan de recobro, comunicaciones **únicamente por
+GAP 1**, evidencias, compromisos cubiertos solo con cobros reales, expedientes de aseguradora y
+jurídico (requisito de procedibilidad LO 1/2025), espejo `morosidad_resumen_propietario` de
+mínimo privilegio, 6 colecciones nuevas con reglas §32–§37 y 79 tests.
+
+Verificación en esa rama: `npm run test:bloque-c` (82 PASS) · `npx vitest run` (409/409) ·
+`npm run test:bloque-b` (92/92, sin regresión) · `npx tsc --noEmit` (0 errores) ·
+`npm run build` (OK). Documentación: `docs/BLOQUE-C-IMPLEMENTACION.md`,
+`docs/BLOQUE-C-VERIFICACION.md`, `docs/BLOQUE-C-NORMATIVA.md`.
+
+**Si eres Arena A**: audita e integra selectivamente desde esa rama (no merge ciego: la rama es
+100 % aditiva en los ficheros compartidos y trabaja sobre `5ff8448`). **Si continúas el BLOQUE C**:
+arranca en esa rama. **No** inicies el BLOQUE D ni el portal del inquilino (BLOQUE E) sin orden expresa.
+
 ## 3. ¿Cuál es el HEAD conocido?
 
 - Canónico: **`91da820`** (`feat(integracion): integrar GAP 8 de factura
@@ -171,6 +189,7 @@ Reglas de la FASE 0 (permanentes):
 
 Checklist de cierre (idéntico al del contrato de integración, §4):
 
+- [ ] `npm run test:bloque-b` y/o `npm run test:bloque-c` (baterías del bloque entregado)
 - [ ] `npx vitest run` → todo en verde (≥330 + nuevos)
 - [ ] `npx tsc --noEmit` → 0 errores
 - [ ] `npm run build` → OK

@@ -16,6 +16,7 @@ import {
   Building,
   ArrowRight,
   ShieldAlert,
+  ShieldCheck,
   Save,
   Wallet,
 } from 'lucide-react';
@@ -28,6 +29,9 @@ import {
   Propietario,
 } from '../../types';
 import type { LiquidacionPropietario } from '../../tesoreria/tipos';
+// BLOQUE C — Morosidad: el portal del propietario SOLO consume el espejo recortado
+// (`morosidad_resumen_propietario`); nunca lee expedientes, comunicaciones internas ni estrategias.
+import type { ResumenMorosidadPropietario } from '../../types/morosidad';
 import { formatoImporteSepa } from '../../tesoreria/sepaUtils';
 import { imprimirLiquidacionPDF } from '../../tesoreria/liquidacionPdf';
 
@@ -40,6 +44,8 @@ interface PropietarioPortalSectionProps {
   propietarios: Propietario[];
   /** BLOQUE B — liquidaciones (ya acotadas por propietario desde el App). */
   liquidaciones?: LiquidacionPropietario[];
+  /** BLOQUE C — resumen de morosidad ya recortado (sin datos del inquilino ni de estrategia). */
+  resumenMorosidad?: ResumenMorosidadPropietario[];
   onOpenCrearProfesionalModal: (profesional?: Profesional) => void;
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
   onSavePropietario?: (propietario: Propietario) => Promise<void>;
@@ -54,14 +60,22 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   especialidades,
   propietarios,
   liquidaciones = [],
+  resumenMorosidad = [],
   onOpenCrearProfesionalModal,
   onSaveProfesional,
   onSavePropietario,
   onNavigateToInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
+    'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'morosidad' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
   >('viviendas');
+  // BLOQUE C: aislamiento defensivo en profundidad — aunque el prop incoming contuviera
+  // otra fila, el propietario solo ve las suyas (la regla de Firestore ya lo garantiza).
+  const miMorosidad = (resumenMorosidad || []).filter(
+    (r) => !currentUser?.propietarioId || r.propietarioId === currentUser.propietarioId,
+  );
+  const morosidadConSaldo = miMorosidad.filter((r) => r.saldoPendiente > 0.009);
+  const morosidadTotalPendiente = morosidadConSaldo.reduce((sum, r) => sum + Number(r.saldoPendiente || 0), 0);
   // BLOQUE B: detalle de liquidación seleccionado
   const [liqDetalleId, setLiqDetalleId] = useState<string | null>(null);
 
@@ -236,6 +250,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             },
             { id: 'contratos', label: 'Mis Contratos', icon: FileCheck, count: misContratos.length },
             { id: 'liquidaciones', label: 'Mis Liquidaciones', icon: Wallet, count: misLiquidaciones.length },
+            { id: 'morosidad', label: 'Morosidad', icon: AlertTriangle, count: morosidadConSaldo.length },
             { id: 'gastos', label: 'Gastos', icon: TrendingDown, badge: 'Próximamente' },
             { id: 'cobros', label: 'Cobros', icon: DollarSign, badge: 'Próximamente' },
             { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, badge: 'Próximamente' },
@@ -695,6 +710,107 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SUBTAB: MOROSIDAD (BLOQUE C — 2026-09-20). Vista de MÍNIMO PRIVILEGIO:
+              solo importe, periodos y estado visible. No hay nombre del inquilino,
+              datos de contacto, estrategia de recobro, póliza ni expedientes externos. */}
+          {activeSubTab === 'morosidad' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Situación de impagos ({morosidadConSaldo.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Información que la administración tiene registrada sobre contratos con rentas pendientes. El detalle
+                  del recobro (llamadas, requerimientos, acuerdos con la aseguradora o acciones legales) lo gestiona
+                  la administración y no se publica aquí.
+                </p>
+              </div>
+
+              {miMorosidad.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
+                  <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">Sin incidencias de impago registradas</div>
+                  <p className="text-xs text-slate-500">
+                    No hay ningún contrato tuyo con rentas vencidas pendientes de cobro.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+                    <div>
+                      <span className="text-slate-500 block">Pendiente de cobro</span>
+                      <span className="font-mono font-bold text-rose-700 text-base">
+                        {formatoImporteSepa(morosidadTotalPendiente)} €
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Contratos afectados</span>
+                      <span className="font-bold text-slate-800 text-base">{morosidadConSaldo.length}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Periodos impagados</span>
+                      <span className="font-bold text-slate-800 text-base">
+                        {morosidadConSaldo.reduce((n, r) => n + Number(r.numPeriodosImpagados || 0), 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {miMorosidad.map((r) => {
+                    const abierta = r.saldoPendiente > 0.009;
+                    return (
+                      <div key={r.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                        <div className="flex items-start justify-between flex-wrap gap-2">
+                          <div>
+                            <div className="font-bold text-sm text-slate-900">{r.inmuebleDireccion || r.inmuebleId}</div>
+                            <div className="text-[11px] text-slate-500">
+                              Periodos {r.periodoDesde} → {r.periodoHasta} · {r.numPeriodosImpagados} impagado(s) ·{' '}
+                              {r.diasRetraso} día(s) de retraso
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className={`font-mono font-bold text-base ${abierta ? 'text-rose-700' : 'text-emerald-700'}`}>
+                              {formatoImporteSepa(r.saldoPendiente)} €
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
+                                abierta ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {r.estadoEtiqueta}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Reclamado</span>
+                            <span className="font-mono font-semibold text-slate-800">{formatoImporteSepa(r.importeTotalReclamado)} €</span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Cubierto con cobros reales</span>
+                            <span className="font-mono font-semibold text-emerald-700">{formatoImporteSepa(r.importeCubierto)} €</span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Última actualización</span>
+                            <span className="font-semibold text-slate-800">{String(r.ultimaActualizacion).slice(0, 10)}</span>
+                          </div>
+                        </div>
+                        {r.ultimoHechoResumen && (
+                          <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                            {r.ultimoHechoResumen}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-slate-400">
+                          Importes calculados desde los cobros del contrato; si un pago aún no está conciliado puede
+                          aparecer pendiente hasta que la administración lo registre.
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -9,6 +9,7 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "test:bloque-b": "tsx scripts/test-bloque-b.ts",
+    "test:bloque-c": "tsx scripts/test-bloque-c.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

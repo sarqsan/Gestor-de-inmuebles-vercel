@@ -1,0 +1,20 @@
+COMMIT:
+c2c3b30815ca3e1cd85294a755bed0501881420b
+
+PARENT:
+29a97951decfbd85124b9bb56a6fc72dccfb6f23
+
+MESSAGE:
+feat: close professional budget adjustment and decision circuit
+
+FILES:
+src/components/modals/DetallePresupuestoProfesionalModal.tsx
+src/components/modals/DetalleTrabajoProfesionalModal.tsx
+src/components/modals/PresupuestoProfesionalModal.tsx
+src/lib/firebase.ts
+src/types.ts
+src/utils/profesionalesEngine.ts
+test-presupuestos-circuito.ts
+
+SHA256:
+53e2a10793aeda8edcdf3dca2648799b7eaa3eecd6437ca2622e4f184b04a608

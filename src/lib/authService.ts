@@ -38,6 +38,40 @@ import {
 export const ADMIN_MASTER_EMAIL = 'sarqsan2@gmail.com';
 
 /**
+ * FASE 1.4 — Mantiene el espejo de identidad `usuarios_auth/{uid}` que las
+ * Security Rules usan para resolver el rol y el propietarioId a partir del UID
+ * de Firebase Authentication (las reglas no pueden hacer consultas, sólo una
+ * lectura puntual por ruta). El documento es reducido y el usuario sólo puede
+ * escribirlo si coincide con su perfil autoritativo de `usuarios/{id}` (la
+ * propia regla lo fuerza), por lo que no sirve para escalar privilegios.
+ * Es idempotente y nunca debe bloquear el inicio de sesión.
+ */
+export async function syncAuthIndex(
+  usuario: UsuarioApp,
+  authUser?: { uid: string } | null
+): Promise<void> {
+  try {
+    const fb = authUser || auth.currentUser;
+    if (!fb || !fb.uid || !usuario || !usuario.id) return;
+    const payload = {
+      uid: fb.uid,
+      usuarioId: usuario.id,
+      email: usuario.email || '',
+      tipoPerfil: usuario.tipoPerfil,
+      estado: usuario.estado,
+      roles: Array.isArray(usuario.roles) ? usuario.roles : [],
+      propietarioId: usuario.propietarioId || '',
+      profesionalId: usuario.profesionalId || '',
+      inmuebleIds: Array.isArray(usuario.inmuebleIds) ? usuario.inmuebleIds : [],
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, 'usuarios_auth', fb.uid), payload, { merge: true });
+  } catch (err) {
+    console.warn('No se pudo sincronizar el espejo de identidad usuarios_auth:', err);
+  }
+}
+
+/**
  * Genera un hash criptográfico SHA-256 seguro para verificación de credenciales directas.
  */
 async function hashPassword(password: string): Promise<string> {
@@ -268,6 +302,11 @@ export async function loginWithEmail(
     resultado: 'EXITO',
   });
 
+  // FASE 1.4: escribir el espejo de identidad para las Security Rules.
+  if (firebaseUser) {
+    await syncAuthIndex(usuario, firebaseUser);
+  }
+
   return { firebaseUser, usuarioApp: usuario };
 }
 
@@ -455,13 +494,29 @@ export async function registerWithInvitationLink(params: {
     lastLoginAt: new Date().toISOString(),
   };
 
-  // 3. Crear entidad relacionada (Propietario o Profesional; el inquilino no crea entidad)
-  if (tipoPerfil === 'INQUILINO') {
-    // Sin entidad adicional: el alcance del inquilino es su contrato vinculado.
-  } else if (tipoPerfil === 'PROPIETARIO') {
-    const propId = enlace.propietarioIdVinculado || `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  // 3. Determinar el ID de la entidad relacionada y vincularlo al usuario
+  // BLOQUE E: el inquilino no crea entidad; su alcance es su contrato vinculado.
+  let propId: string | undefined;
+  let profId: string | undefined;
+  if (tipoPerfil === 'PROPIETARIO') {
+    propId = enlace.propietarioIdVinculado || `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     nuevoUsuario.propietarioId = propId;
+  } else if (tipoPerfil === 'PROFESIONAL') {
+    profId = enlace.profesionalIdVinculado || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    nuevoUsuario.profesionalId = profId;
+  }
 
+  // 4. Guardar PRIMERO el registro de usuario (documento autoritativo)...
+  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario, passwordHash: pHash });
+
+  // 4b. ...y después el espejo de identidad que leen las Security Rules.
+  //     Debe existir antes de crear la ficha de propietario (su regla lo exige).
+  if (firebaseUser) {
+    await syncAuthIndex(nuevoUsuario, firebaseUser);
+  }
+
+  // 5. Crear la entidad relacionada (Propietario o Profesional)
+  if (tipoPerfil === 'PROPIETARIO' && propId) {
     const propietarioData: Propietario = {
       id: propId,
       nombre: `${nombre.trim()} ${apellidos?.trim() || ''}`.trim(),
@@ -478,10 +533,7 @@ export async function registerWithInvitationLink(params: {
       fechaActualizacion: new Date().toISOString(),
     };
     await setDoc(doc(db, 'propietarios', propId), propietarioData, { merge: true });
-  } else {
-    const profId = enlace.profesionalIdVinculado || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    nuevoUsuario.profesionalId = profId;
-
+  } else if (tipoPerfil === 'PROFESIONAL' && profId) {
     const profesionalData: Profesional = {
       id: profId,
       usuarioId: userId,
@@ -501,10 +553,7 @@ export async function registerWithInvitationLink(params: {
     await setDoc(doc(db, 'profesionales', profId), profesionalData, { merge: true });
   }
 
-  // 4. Guardar registro de usuario en Firestore
-  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario, passwordHash: pHash });
-
-  // 5. Incrementar usos del enlace
+  // 6. Incrementar usos del enlace
   await setDoc(
     doc(db, 'enlaces_registro', enlace.id),
     { usosActuales: (enlace.usosActuales || 0) + 1 },
@@ -637,6 +686,10 @@ export function subscribeAuthState(
         callback(null, null, false);
         return;
       }
+
+      // FASE 1.4: asegurar que el espejo de identidad existe ANTES de que la
+      // aplicación abra las suscripciones de datos (las reglas lo necesitan).
+      await syncAuthIndex(usuarioApp, user);
 
       try {
         localStorage.setItem('rentselect_active_session', JSON.stringify(usuarioApp));

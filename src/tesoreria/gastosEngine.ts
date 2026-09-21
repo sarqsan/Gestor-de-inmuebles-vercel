@@ -1,8 +1,16 @@
 /**
  * BLOQUE B — Gastos del inmueble: importador desde trabajos finalizados + alta manual.
  * Todo gasto guarda su origen trazable (trabajoId/presupuestoId o 'manual').
+ *
+ * INTEGRACIÓN A (2026-09-20): el modelo oficial de gastos del ERP canónico es
+ * `Gasto` (colección `gastos`, `src/utils/gastosEngine.ts`). `GastoInmueble`
+ * (colección `gastos_inmuebles`) es la PROYECCIÓN DE LIQUIDACIÓN: añade conceptos
+ * de tesorería que no existen en el modelo oficial (imputableA/pagadoPor/estado
+ * 'liquidado'/liquidacionId). La importación desde el modelo oficial es
+ * UNIDIRECCIONAL: `gastoDesdeGastoCanonico()`. No es un segundo motor de gastos:
+ * la contabilidad oficial (P&L, fiscal, reporting) sigue en `gastos`.
  */
-import type { TrabajoProfesional } from '../types';
+import type { Gasto, TrabajoProfesional } from '../types';
 import { redondear2 } from './sepaUtils';
 import type { EstadoGasto, GastoInmueble, ImputacionGasto, PagadoPor } from './tipos';
 
@@ -34,6 +42,18 @@ export function gastoDesdeTrabajo(
   },
 ): { ok: boolean; errores: string[]; gasto?: GastoInmueble } {
   const errores: string[] = [];
+  // INTEGRACIÓN A: si el trabajo ya generó su Gasto oficial (puente canónico
+  // trabajo → colección `gastos`, campo gastoId), NO se duplica el puente:
+  // se importa desde el gasto canónico con gastoDesdeGastoCanonico().
+  const gastoCanonicoId = (trabajo as { gastoId?: string }).gastoId;
+  if (gastoCanonicoId) {
+    return {
+      ok: false,
+      errores: [
+        `El trabajo ya tiene gasto contable oficial (${gastoCanonicoId}). Importelo con gastoDesdeGastoCanonico() para evitar doble registro en la liquidación.`,
+      ],
+    };
+  }
   const finalizado = trabajo.estado === 'FINALIZADO' || trabajo.estado === 'FINALIZADA';
   if (!finalizado) errores.push('El trabajo debe estar FINALIZADO para generar gasto');
   const total = Number(trabajo.importeFinal);
@@ -64,7 +84,7 @@ export function gastoDesdeTrabajo(
     pagadoPor: opciones?.pagadoPor || 'administracion',
     imputableA: opciones?.imputableA || 'propietario',
     estado: 'pendiente',
-    facturaNumero: trabajo.facturaNumero,
+    facturaNumero: (trabajo as { facturaNumero?: string }).facturaNumero,
     proveedorNombre: opciones?.proveedorNombre || trabajo.profesionalNombre,
     notas: `Origen: trabajo profesional ${trabajo.id}${trabajo.incidenciaId ? ` (incidencia ${trabajo.incidenciaId})` : ''}`,
     creadoPor: opciones?.actor?.nombre,
@@ -136,6 +156,65 @@ export function crearGastoManual(datos: {
       fechaActualizacion: ahora,
     },
   };
+}
+
+/**
+ * IMPORTADOR UNIDIRECCIONAL desde el modelo oficial `Gasto` (colección `gastos`
+ * canónica) a la proyección de liquidación `GastoInmueble`.
+ * Idempotente: id `gas_gasto_{gastoId}` — reimportar no duplica.
+ * Mapeo: aCargoDe arrendador → imputableA propietario; arrendatario → inquilino.
+ * El modelo oficial no registra quién pagó (pagadoPor): se toma el valor de
+ * `opciones` o el conservado en la reimportación.
+ */
+export function gastoDesdeGastoCanonico(
+  g: Gasto,
+  previo?: GastoInmueble,
+  opciones?: { pagadoPor?: PagadoPor; imputableA?: ImputacionGasto },
+): { ok: boolean; errores: string[]; gasto?: GastoInmueble } {
+  const errores: string[] = [];
+  if (!g?.id) errores.push('Falta gasto canónico');
+  if (!g.propietarioId) errores.push('El gasto canónico no tiene propietario');
+  if (!g.inmuebleId) errores.push('El gasto canónico no tiene inmueble');
+  const total = redondear2(Number(g.importe) || 0);
+  if (!(total > 0)) errores.push('El gasto canónico no tiene importe positivo');
+  if (errores.length > 0) return { ok: false, errores };
+
+  const imputableA: ImputacionGasto =
+    opciones?.imputableA ?? previo?.imputableA ?? (g.aCargoDe === 'arrendador' ? 'propietario' : 'inquilino');
+  const ahora = new Date().toISOString();
+  const estado: EstadoGasto = previo?.estado || (g.estado === 'PAGADO' ? 'pagado' : 'pendiente');
+
+  const gasto: GastoInmueble = {
+    id: `gas_gasto_${g.id}`,
+    inmuebleId: g.inmuebleId,
+    inmuebleDireccion: previo?.inmuebleDireccion,
+    propietarioId: g.propietarioId,
+    contratoId: g.contratoId,
+    trabajoId: g.trabajoId || (g.origenId && g.origen === 'ORDEN_TRABAJO' ? g.origenId : undefined),
+    presupuestoId: previo?.presupuestoId,
+    categoria: (g.categoria || 'otro') as string,
+    concepto: g.concepto || g.id,
+    // El Gasto canónico guarda el total sin desglose IVA propio: se conserva
+    // como base sin IVA (no se inventan porcentajes).
+    base: total,
+    ivaPct: 0,
+    ivaImporte: 0,
+    total,
+    fechaGasto: (g.fechaDevengo || g.fechaPago || ahora).slice(0, 10),
+    fechaPago: g.fechaPago,
+    pagadoPor: opciones?.pagadoPor ?? previo?.pagadoPor ?? 'administracion',
+    imputableA,
+    estado,
+    liquidacionId: previo?.liquidacionId,
+    facturaNumero: previo?.facturaNumero,
+    proveedorNombre: g.proveedor ?? previo?.proveedorNombre,
+    notas: previo?.notas ?? `Importado del gasto contable oficial ${g.id}${g.trabajoId ? ` (trabajo ${g.trabajoId})` : ''}`,
+    creadoPor: previo?.creadoPor,
+    creadoPorId: previo?.creadoPorId,
+    fechaCreacion: previo?.fechaCreacion ?? ahora,
+    fechaActualizacion: ahora,
+  };
+  return { ok: true, errores: [], gasto };
 }
 
 export function cambiarEstadoGasto(

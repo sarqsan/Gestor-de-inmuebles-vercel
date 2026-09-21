@@ -3,50 +3,227 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // =========================================================================
-    // HELPER FUNCTIONS & AUTHENTICATION PREDICATES (ZERO-BYPASS PRODUCTION)
+    // FASE 1.4 — PREDICADOS DE IDENTIDAD, ROL Y AISLAMIENTO POR PROPIETARIO
+    // =========================================================================
+    // NOTA DE DISEÑO:
+    //  - request.auth sólo está poblado cuando el usuario se autentica con
+    //    Firebase Authentication (Email/Contraseña). El modo "directo" sin Auth
+    //    no puede identificarse y, por tanto, no puede ser asegurado con reglas.
+    //  - El documento `usuarios_auth/{uid}` es un espejo REDUCIDO y NO
+    //    falsificable del perfil `usuarios/{id}`: la regla de escritura obliga
+    //    a que sus campos sensibles coincidan con el documento autoritativo,
+    //    que a su vez no puede ser modificado por el propio usuario para
+    //    cambiar de rol o de propietario.
     // =========================================================================
 
     function isSignedIn() {
       return request.auth != null;
     }
 
+    function authEmail() {
+      return isSignedIn() && 'email' in request.auth.token ? request.auth.token.email : '';
+    }
+
+    // El Administrador Principal se identifica por el email verificado por
+    // Firebase (imposible de suplantar desde el cliente).
     function isMasterAdmin() {
-      return request.auth != null && 
-             'email' in request.auth.token && 
-             request.auth.token.email == 'sarqsan2@gmail.com';
+      return isSignedIn() && authEmail() == 'sarqsan2@gmail.com';
     }
 
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
+    // BLOQUE B — verificación de secretos compartida por las colecciones de
+    // tesorería (26–31). Ningún campo de credencial bancaria/certificado entra.
+    function sinSecretosTesoreria() {
+      return !(
+        'credentials' in incoming() ||
+        'apiKey' in incoming() ||
+        'accessToken' in incoming() ||
+        'psd2' in incoming() ||
+        'certificado' in incoming() ||
+        'privateKey' in incoming() ||
+        'ibanSecreto' in incoming() ||
+        'tokenBancario' in incoming() ||
+        'password' in incoming() ||
+        'secret' in incoming() ||
+        'token' in incoming()
+      );
+    }
+
     function incoming() {
       return request.resource.data;
     }
+
+    // --- BLOQUE C (morosidad) ------------------------------------------------
+        // BLOQUE C — mismo control de secretos para las colecciones de morosidad.
+    // Un expediente referencia comunicaciones y evidencias: nunca admite
+    // credenciales, tokens ni adjuntos en base64 dentro del documento.
+    function sinSecretosMorosidad() {
+      return !(
+        'credentials' in incoming() ||
+        'apiKey' in incoming() ||
+        'accessToken' in incoming() ||
+        'refreshToken' in incoming() ||
+        'privateKey' in incoming() ||
+        'password' in incoming() ||
+        'secret' in incoming() ||
+        'token' in incoming() ||
+        'base64Data' in incoming() ||
+        'adjuntoBase64' in incoming()
+      );
+    }
+
 
     function existing() {
       return resource.data;
     }
 
-    function getInmueble(inmuebleId) {
-      return get(/databases/$(database)/documents/inmuebles/$(inmuebleId)).data;
+    // --- Espejo de identidad usuarios_auth/{uid} -----------------------------
+    function me() {
+      return get(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid)).data;
     }
 
-    // Aislamiento Real del Propietario basado en las relaciones existentes en el modelo:
-    // inmueble.propietarioId, inmueble.authUid, usuario.propietarioId, usuario.inmuebleIds
-    function isOwnerOfInmueble(inmuebleId) {
-      return isSignedIn() && (
-        isMasterAdmin() ||
-        (inmuebleId != null && exists(/databases/$(database)/documents/inmuebles/$(inmuebleId)) && (
-          getInmueble(inmuebleId).authUid == request.auth.uid ||
-          getInmueble(inmuebleId).propietarioId == request.auth.uid ||
-          (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && (
-            get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == getInmueble(inmuebleId).propietarioId ||
-            get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == getInmueble(inmuebleId).propietarioPrincipalId ||
-            inmuebleId in get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.inmuebleIds
-          ))
-        ))
+    function activeUser() {
+      return isSignedIn() && me().estado == 'ACTIVO';
+    }
+
+    function isPropietarioRole() {
+      return activeUser() && me().tipoPerfil == 'PROPIETARIO';
+    }
+
+    function isProfesionalRole() {
+      return activeUser() && me().tipoPerfil == 'PROFESIONAL';
+    }
+
+    function myProfId() {
+      return me().profesionalId;
+    }
+
+    // El profesional sólo puede ver una incidencia que le haya sido asignada
+    // (presupuestos pendientes o datos económicos de otros quedan ocultos).
+    function incidenciaAsignadaAmi(src) {
+      return isProfesionalRole()
+        && 'profesionalAsignadoId' in src
+        && src.profesionalAsignadoId == myProfId();
+    }
+
+    function myPropId() {
+      return me().propietarioId;
+    }
+
+    function myInmuebleIds() {
+      return me().inmuebleIds;
+    }
+
+    function ownsPropietario(pid) {
+      return isPropietarioRole() && pid is string && pid.size() > 0 && myPropId() == pid;
+    }
+
+    // ¿Puede el propietario ver el inmueble? Por titularidad o por asignación
+    // explícita (cuando se le comparte una vivienda que no es suya).
+    function canReachInmuebleId(inmId) {
+      return isPropietarioRole() && myInmuebleIds().hasAny([inmId]);
+    }
+
+    // ¿El contrato pertenece a este propietario? Es la ÚNICA condición
+    // demostrable para una CONSULTA (list): el cliente debe filtrar con
+    // where('propietarioId','==', propietarioId). El valor propietarioId se
+    // obtiene con un get de RUTA FIJA (sólo request.auth.uid), que el motor
+    // trata como constante, así que la restricción where satisface la regla.
+    function contratoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+
+    // Para un documento concreto (get) se admite también el inmueble asignado.
+    // NO se usa en list (la membresía por array no sería demostrable para una
+    // consulta sin el filtro adecuado).
+    function contratoVisible(d) {
+      return contratoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+
+    // FASE 2.0 — GASTOS (datos económicos): mismo aislamiento que los contratos,
+    // por propietarioId. La cuota hipotecaria también es un dato sensible.
+    function gastoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+    function gastoVisible(d) {
+      return gastoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+
+    // FASE 3 — Helpers genéricos de aislamiento por propietarioId, reutilizables
+    // por cualquier recurso económico del propietario (expedientes, propuestas,
+    // leads…). Mismas garantías que en contratos/gastos.
+    function aisladoEsMio(d) {
+      return 'propietarioId' in d && d.propietarioId == myPropId();
+    }
+    function aisladoVisible(d) {
+      return aisladoEsMio(d) ||
+             ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+    }
+    function aisladoCreateOk() {
+      return isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string;
+    }
+    function aisladoUpdateOk() {
+      return isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();
+    }
+
+    // Validación del espejo de identidad contra el perfil autoritativo.
+    function indexMatchesProfile(profileId) {
+      return get(/databases/$(database)/documents/usuarios/$(profileId)).data;
+    }
+
+    function indexIsTruthful() {
+      let src = indexMatchesProfile(incoming().usuarioId);
+      let propOk = ('propietarioId' in src)
+        ? incoming().propietarioId == src.propietarioId
+        : incoming().propietarioId == '';
+      let profOk = ('profesionalId' in src)
+        ? incoming().profesionalId == src.profesionalId
+        : incoming().profesionalId == '';
+      let inmOk = ('inmuebleIds' in src)
+        ? incoming().inmuebleIds == src.inmuebleIds
+        : incoming().inmuebleIds.size() == 0;
+      return incoming().usuarioId is string
+        && src.authUid == request.auth.uid
+        && incoming().email == src.email
+        && incoming().tipoPerfil == src.tipoPerfil
+        && incoming().estado == src.estado
+        && incoming().roles == src.roles
+        && propOk
+        && profOk
+        && inmOk;
+    }
+
+    // =========================================================================
+    // 0A. ESPEJO DE IDENTIDAD POR UID (usuarios_auth) — anti-elevación
+    // =========================================================================
+    match /usuarios_auth/{uid} {
+      allow read: if isMasterAdmin() || (isSignedIn() && request.auth.uid == uid);
+
+      // El espejo sólo puede crearse/actualizarse para el UID propio y debe
+      // reflejar exactamente el perfil autoritativo. Nunca puede afirmar que es
+      // ADMINISTRADOR por sí mismo (la administración se reconoce por email).
+      allow create: if isMasterAdmin() || (
+        isSignedIn()
+        && request.auth.uid == uid
+        && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+        && indexIsTruthful()
       );
+      allow update: if isMasterAdmin() || (
+        isSignedIn()
+        && request.auth.uid == uid
+        && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+        && indexIsTruthful()
+      );
+      allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
@@ -139,160 +316,584 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 0. PROPIETARIOS Y CUENTAS BANCARIAS
+    // 0B. PROPIETARIOS — DATOS FISCALES Y CUENTAS BANCARIAS (máxima sensibilidad)
     // =========================================================================
     match /propietarios/{propietarioId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
+      // Cada propietario sólo puede leer su propia ficha. El Administrador, todas.
+      allow get: if isMasterAdmin() || ownsPropietario(propietarioId);
+      allow list: if isMasterAdmin();
+
+      // El propietario puede crear/editar únicamente SU ficha (id coincidente).
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && propietarioId == myPropId()
+        && 'id' in incoming() && incoming().id == propietarioId
+      );
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && propietarioId == myPropId()
+        && 'id' in existing() && existing().id == propietarioId
+      );
       allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
-    // 1. INMUEBLES & DATOS FISCALES
-    // Public listings are readable for candidate application links
+    // 1. INMUEBLES
+    // La lectura permanece pública porque da servicio al funnel de captación
+    // (listados, enlaces de solicitud y reserva de visita sin iniciar sesión).
+    // La ESCRITURA queda restringida al administrador o al propietario titular.
+    // RESIDUAL CONOCIDO (siguiente endurecimiento): la ficha de inmueble aún
+    // contiene campos fiscales/IBAN; conviene moverlos a una subcolección
+    // privada o despojarlos de la vista pública.
     // =========================================================================
     match /inmuebles/{inmuebleId} {
-      // Lectura puntual para enlaces públicos de solicitud/cuestionario; listado restringido al personal.
-      // BLOQUE E: el inquilino lee (get) solo inmuebles de sus contratos vinculados.
-      allow get: if (isValidId(inmuebleId) && resource.data.estado in ['disponible', 'alquilado']) || (isSignedIn() && (!isTenant() ||
-        ((('contratoActivoId' in resource.data) && tenantTieneContrato(resource.data.contratoActivoId)) ||
-          tenantVeContratos(campoListaActual('contratoIdsAutorizados')))));
-      allow list: if isStaff();
-      allow create: if isStaff();
-      allow update, delete: if isMasterAdmin() || (isStaff() && (
-        resource.data.propietarioId == request.auth.uid ||
-        resource.data.authUid == request.auth.uid ||
-        (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == resource.data.propietarioId)
-      ));
-    }
+      allow read: if true;
 
-    // =========================================================================
-    // 2. CANDIDATOS (Expedientes personales y circuito de selección)
-    // Aislamiento estricto: Propietario A no puede leer ni modificar candidato de Propietario B
-    // Trazabilidad inmutable: no se permite truncar ni vaciar el array historial
-    // =========================================================================
-    match /candidatos/{candidatoId} {
-      allow get: if isMasterAdmin() || (isStaff() && (
-        resource.data.propietarioId == request.auth.uid ||
-        isOwnerOfInmueble(resource.data.inmuebleId)
-      ));
-      allow list: if isStaff();
-      allow create: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(incoming().inmuebleId));
-      allow update: if (isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId))) && (
-        // Garantía de historial inmutable: el historial entrante debe conservar o aumentar las entradas
-        (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole() && (
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
+          ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
+        )
       );
-      allow delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
-    }
-
-    // =========================================================================
-    // 3. SOLICITUDES DE ALQUILER (Públicas para captación inicial de solicitantes)
-    // =========================================================================
-    match /solicitudes/{solicitudId} {
-      allow get: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(resource.data.inmuebleId));
-      allow list: if isStaff();
-      allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado']) &&
-                       incoming().nombre is string &&
-                       incoming().email is string;
-      allow update, delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
-    }
-
-    // =========================================================================
-    // 4. INVITACIONES DE VISITA (Lectura por token para confirmación de reserva)
-    // =========================================================================
-    match /invitaciones/{invitacionId} {
-      // Lectura puntual para el enlace de invitación de visita
-      allow get: if isStaff() || (isValidId(invitacionId) && resource.data.status in ['PENDIENTE', 'CONFIRMADA', 'COMPLETADA', 'CANCELADA']);
-      allow list: if isStaff();
-      allow create: if isStaff();
-      allow update: if isStaff() || (
-        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'cuestionarioCompletado', 'slotId', 'fechaVisita'])
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole() && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId()) ||
+          canReachInmuebleId(inmuebleId)
+        )
       );
-      allow delete: if isStaff();
+      allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
-    // 5. TURNOS / SLOTS DE VISITA (Lectura pública de calendario, reserva atómica)
-    // =========================================================================
-    match /slots_visita/{slotId} {
-      // Lectura de turnos para consulta y reserva atómica
-      allow get: if isStaff() || (isValidId(slotId) && resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
-      allow list: if isStaff() || (resource.data.estado in ['DISPONIBLE', 'RESERVADO']);
-      allow create, delete: if isStaff();
-      allow update: if isStaff() || (
-        incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'candidateId', 'candidateNombre', 'candidateTelefono', 'candidateEmail', 'invitacionId', 'bookedAt'])
-      );
-    }
-
-    // =========================================================================
-    // 6. SOLICITUDES DE DOCUMENTACIÓN
-    // Protegidas bajo aislamiento de propietario. El flujo público para candidatos
-    // se gestiona a través del backend/API con verificación estricta de token.
-    // =========================================================================
-    match /solicitudes_documentacion/{solicitudDocId} {
-      allow get: if isMasterAdmin() || (isStaff() && (
-        resource.data.ownerId == request.auth.uid ||
-        resource.data.propietarioId == request.auth.uid ||
-        isOwnerOfInmueble(resource.data.inmuebleId)
-      ));
-      allow list: if isStaff();
-      allow create: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(incoming().inmuebleId));
-      allow update: if (isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId))) && (
-        (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
-      );
-      allow delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
-    }
-
-    // =========================================================================
-    // 7. CONTRATOS DE FORMALIZACIÓN, LAU Y ENTREGA DE LLAVES
+    // 2. CONTRATOS DE ARRENDAMIENTO = NÚCLEO ECONÓMICO (COBROS + JUSTIFICANTES)
+    // Aislamiento estricto por propietario. Un propietario sólo accede a sus
+    // contratos; los profesionales no tienen acceso en absoluto.
     // =========================================================================
     match /contratos_formalizacion/{contratoId} {
-      // BLOQUE E: el inquilino lee SOLO sus contratos vinculados (get por ID, sin listados)
-      // y solo puede añadir IDs a los índices de capacidad (incidenciaIds, mensajeIds).
-      allow get: if isStaff() || (isTenant() && tenantTieneContrato(contratoId));
-      allow list: if isStaff();
-      allow create: if isStaff();
-      allow update: if isStaff() || (
-        isTenant() &&
-        tenantTieneContrato(contratoId) &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['incidenciaIds', 'mensajeIds', 'fechaActualizacion']) &&
-        indiceInmutableOCrece('incidenciaIds') &&
-        indiceInmutableOCrece('mensajeIds')
+      // get (documento concreto): titularidad directa o inmueble asignado.
+      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing()));
+      // list (consulta): OBLIGA a where('propietarioId','==', mi propietarioId).
+      allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data));
+
+      // El propietario sólo puede crear contratos a su nombre y con propietarioId.
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
       );
-      allow delete: if isStaff();
+
+      // No puede mover un contrato a otro propietario ni tocar contratos ajenos.
+      // BLOQUE E (reconciliado): el inquilino solo añade IDs a los índices de
+      // capacidad (incidenciaIds, mensajeIds) de SUS contratos vinculados.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) || (
+        isTenant()
+        && tenantTieneContrato(contratoId)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['incidenciaIds', 'mensajeIds', 'fechaActualizacion'])
+        && indiceInmutableOCrece('incidenciaIds')
+        && indiceInmutableOCrece('mensajeIds')
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
     }
 
     // =========================================================================
-    // 8. CONFIGURACIÓN DE ASEGURADORAS (SEAG, Caser, etc.)
+    // 2B. GASTOS (FASE 2.0 — explotación vs financiación hipotecaria)
+    // Datos económicos privados: mismo aislamiento por propietarioId que los
+    // contratos. Los profesionales no tienen ninguna regla permitida (deny).
+    // =========================================================================
+    match /gastos/{gastoId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing()));
+      // list OBLIGA a where('propietarioId','==', mi propietarioId).
+      allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2C. PLANTILLAS DE GASTOS RECURRENTES (FASE 2.2)
+    // Mismo aislamiento por propietarioId que los gastos/contratos.
+    // =========================================================================
+    match /gastos_recurrentes/{plantillaId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2D. PRÉSTAMOS / HIPOTECAS (FASE 2.3 — condiciones financieras)
+    // Mismo aislamiento por propietarioId que gastos/contratos.
+    // =========================================================================
+    match /prestamos/{prestamoId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data));
+
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+      );
+
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2E. RECOMERCIALIZACIÓN (FASE 3.0)
+    // Expedientes, propuestas (RFP) y leads: datos del propietario aislados por
+    // propietarioId (patrón de contratos/gastos). Profesionales sin acceso.
+    // =========================================================================
+    match /expedientes_recomercializacion/{expedienteId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /propuestas_inmobiliaria/{propuestaId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /leads_inmobiliario/{leadId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // Directorio de inmobiliarias: lo consultan administrador y propietarios
+    // (bolsa para delegar/comparar). La escritura (alta/verificación de una
+    // agencia) queda reservada al administrador; profesionales sin acceso.
+    // Cuando exista el rol de agencia se ampliará para que editen su ficha.
+    match /inmobiliarias_directorio/{inmobiliariaId} {
+      allow get, list: if isMasterAdmin() || isPropietarioRole();
+      allow write: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 2F. INCIDENCIAS Y MANTENIMIENTO (BLOQUE 4)
+    // Datos operativos del propietario, aislados por propietarioId (patrón de
+    // contratos/gastos). El profesional puede LEER únicamente las incidencias
+    // que le han sido asignadas (la consulta obliga a
+    // where('profesionalAsignadoId','==', suId)); no puede escribir.
+    // =========================================================================
+    match /incidencias/{incidenciaId} {
+      // BLOQUE E (reconciliado): el inquilino lee (get) las incidencias de SUS
+      // contratos, crea las suyas (origen INQUILINO, estado ABIERTA) y solo
+      // aporta evidencias (listas append-only). Nunca lista ni borra.
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || incidenciaAsignadaAmi(existing())
+        || (isTenant() && (
+          (('contratoId' in existing()) && tenantTieneContrato(existing().contratoId)) ||
+          tenantVeContratos(campoListaActual('contratoIdsVisibles'))
+        ));
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole()
+          && 'profesionalAsignadoId' in resource.data
+          && resource.data.profesionalAsignadoId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk() || (isTenant() &&
+        incoming().contratoId is string &&
+        tenantTieneContrato(incoming().contratoId) &&
+        incoming().inmuebleId is string &&
+        incoming().origen == 'INQUILINO' &&
+        incoming().estado == 'ABIERTA' &&
+        incoming().titulo is string && incoming().titulo.size() >= 3 &&
+        incoming().descripcion is string && incoming().descripcion.size() >= 10 &&
+        (!('contratoIdsVisibles' in incoming()) || incoming().contratoIdsVisibles == [incoming().contratoId])
+      );
+      allow update: if isMasterAdmin() || aisladoUpdateOk() || (isTenant() &&
+        (('contratoId' in existing()) && tenantTieneContrato(existing().contratoId)) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['fotografias', 'documentos', 'fechaActualizacion']) &&
+        listaSoloCrece('fotografias') &&
+        listaSoloCrece('documentos'));
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // Plan de mantenimiento preventivo: estrictamente propietario/admin; los
+    // profesionales no lo consultan (sólo reciben la incidencia resultante).
+    match /tareas_mantenimiento/{tareaId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2G. GARANTÍAS DE REPARACIÓN Y SEGUIMIENTO POST-INTERVENCIÓN
+    // =========================================================================
+    match /garantias_reparacion/{garantiaId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2H. ÓRDENES DE TRABAJO PROFESIONAL (FASE 4 - EJECUCIÓN TÉCNICA)
+    // El propietario gestiona sus inmuebles. El profesional solo accede a sus
+    // trabajos asignados (profesionalId == myProfId()). Inmutabilidad de propietarioId e inmuebleId.
+    // =========================================================================
+    match /trabajos_profesionales/{trabajoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin()
+        || (aisladoUpdateOk())
+        || (isProfesionalRole()
+          && 'profesionalId' in existing() && existing().profesionalId == myProfId()
+          && 'profesionalId' in incoming() && incoming().profesionalId == myProfId()
+          && (!('propietarioId' in existing()) || ('propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId))
+          && (!('inmuebleId' in existing()) || ('inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId)));
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2I. PRESUPUESTOS DE PROFESIONALES (FASE 4 - COMPARATIVA Y ADJUDICACIÓN)
+    // =========================================================================
+    match /presupuestos_profesionales/{presupuestoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk() || (isProfesionalRole() && 'profesionalId' in incoming() && incoming().profesionalId == myProfId());
+      allow update: if isMasterAdmin() || aisladoUpdateOk() || (
+        isProfesionalRole()
+        && 'profesionalId' in existing() && existing().profesionalId == myProfId()
+        && 'profesionalId' in incoming() && incoming().profesionalId == myProfId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2J. REFORMAS: NECESIDADES Y PROYECTOS DE REFORMA
+    // Datos patrimoniales del propietario, aislados por propietarioId. El
+    // profesional asignado accede únicamente a su proyecto de reforma asignado.
+    // Inmutabilidad estricta de propietarioId e inmuebleId.
+    // =========================================================================
+    match /necesidades_reforma/{necesidadId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /proyectos_reforma/{proyectoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoVisible(existing()))
+        || (isProfesionalRole() && 'profesionalPrincipalId' in existing() && existing().profesionalPrincipalId == myProfId());
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || (isProfesionalRole() && 'profesionalPrincipalId' in resource.data && resource.data.profesionalPrincipalId == myProfId());
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin()
+        || (aisladoUpdateOk())
+        || (isProfesionalRole()
+          && 'profesionalPrincipalId' in existing() && existing().profesionalPrincipalId == myProfId()
+          && 'profesionalPrincipalId' in incoming() && incoming().profesionalPrincipalId == myProfId()
+          && (!('propietarioId' in existing()) || ('propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId))
+          && (!('inmuebleId' in existing()) || ('inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId)));
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 2K. INVENTARIO Y HABITACIONES DEL INMUEBLE (ARENA C)
+    // Aislados estrictamente por inmueble/propietario.
+    // =========================================================================
+    match /inventario_inmuebles/{inventarioId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+      ));
+      allow list: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && incoming().keys().hasAll(['inmuebleId', 'nombre', 'categoria', 'estado'])
+        && (
+          myInmuebleIds().hasAny([incoming().inmuebleId]) ||
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+        )
+      );
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+        && incoming().inmuebleId == existing().inmuebleId
+        && (!('propietarioId' in incoming()) || !('propietarioId' in existing()) || incoming().propietarioId == existing().propietarioId)
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+      );
+    }
+
+    match /inventario_historial/{histId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+      ));
+      allow list: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'inmuebleId' in incoming()
+        && (
+          myInmuebleIds().hasAny([incoming().inmuebleId]) ||
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+        )
+      );
+      allow update, delete: if false;
+    }
+
+    match /habitaciones_inmueble/{habitacionId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+        ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+        ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+      ));
+      allow list: if isMasterAdmin() || isPropietarioRole();
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && incoming().keys().hasAll(['inmuebleId', 'nombre', 'estado'])
+        && (
+          myInmuebleIds().hasAny([incoming().inmuebleId]) ||
+          ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+        )
+      );
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+        && incoming().inmuebleId == existing().inmuebleId
+        && (!('propietarioId' in incoming()) || !('propietarioId' in existing()) || incoming().propietarioId == existing().propietarioId)
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && (
+          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
+          ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
+        )
+      );
+    }
+
+    // =========================================================================
+    // 2L. PÓLIZAS DE SEGURO Y SINIESTROS (ARENA D)
+    // Aislados por propietarioId.
+    // =========================================================================
+    match /polizas_seguros/{polizaId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    match /siniestros/{siniestroId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 3. CANDIDATOS (expedientes y cuestionarios)
+    // El listado y la gestión requieren cuenta interna. Se conserva el enlace
+    // público de cuestionario (autoservicio del candidato por token), que sólo
+    // puede tocar un conjunto acotado de campos.
+    // =========================================================================
+    match /candidatos/{candidatoId} {
+      // get permanece accesible por el enlace de cuestionario por token.
+      allow get: if true;
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() || (
+        incoming().keys().hasAll(['nombre', 'email', 'telefono', 'estado'])
+        && incoming().nombre is string
+        && incoming().nombre.size() > 0
+      );
+      allow update: if isSignedIn() || (
+        // Candidato respondiendo su cuestionario / aportando documentación
+        incoming().diff(existing()).affectedKeys().hasAny([
+          'cuestionarioIncidencias',
+          'cuestionarioToken',
+          'fechaCuestionario',
+          'estado',
+          'documentosAnalizados',
+          'notasAdicionales',
+          'ingresosMensuales',
+          'antiguedadAnos',
+          'tipoContrato',
+          'empresa',
+          'numInquilinos',
+          'tieneMascotas'
+        ])
+      );
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 4. SOLICITUDES DE ALQUILER (creación pública de captación)
+    // =========================================================================
+    match /solicitudes/{solicitudId} {
+      allow read: if isSignedIn();
+      allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado'])
+        && incoming().nombre is string
+        && incoming().email is string;
+      allow update, delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 5. INVITACIONES DE VISITA (confirmación/reserva pública por token)
+    // =========================================================================
+    match /invitaciones/{invitacionId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 6. TURNOS / SLOTS DE VISITA (reserva atómica pública)
+    // =========================================================================
+    match /slots_visita/{slotId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 7. SOLICITUDES DE DOCUMENTACIÓN POST-VISITA (portal público por token)
+    // =========================================================================
+    match /solicitudes_documentacion/{solicitudDocId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 8. CONFIGURACIÓN DE ASEGURADORAS (sólo uso interno)
     // =========================================================================
     match /configuracion_aseguradoras/{aseguradoraId} {
-      allow read: if isStaff();
-      allow create, update, delete: if isStaff();
+      allow read: if isSignedIn();
+      allow write: if isMasterAdmin();
     }
 
     // =========================================================================
-    // 9. SOLICITUDES DE SEGURO DE IMPAGO Y EXPEDIENTES
-    // Propietario A no puede consultar ni tramitar expedientes de Propietario B
+    // 9. SOLICITUDES DE SEGURO DE IMPAGO (uso interno)
     // =========================================================================
     match /solicitudes_seguro_impago/{solicitudSeguroId} {
-      allow get: if isMasterAdmin() || (isStaff() && (
-        resource.data.propietarioId == request.auth.uid ||
-        isOwnerOfInmueble(resource.data.inmuebleId)
-      ));
-      allow list: if isStaff();
-      allow create: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(incoming().inmuebleId));
-      allow update: if (isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId))) && (
-        (!('historial' in existing()) || !('historial' in incoming()) || incoming().historial.size() >= existing().historial.size())
-      );
-      allow delete: if isMasterAdmin() || (isStaff() && isOwnerOfInmueble(existing().inmuebleId));
+      allow read, write: if isSignedIn();
     }
 
     // =========================================================================
-    // 10. CONFIGURACIÓN DEL SISTEMA Y GMAIL INTEGRATION
+    // 10. CONFIGURACIÓN DEL SISTEMA
     // =========================================================================
     match /system/{systemDocId} {
-      allow read: if isStaff();
+      // Los flags de módulos son necesarios antes de iniciar sesión.
+      allow read: if systemDocId == 'modulos_config' || isSignedIn();
       allow write: if isMasterAdmin();
     }
 
@@ -300,51 +901,78 @@ service cloud.firestore {
     // 11. USUARIOS Y CONTROL DE ACCESO (PROTECCIÓN ESTRICTA CONTRA ELEVACIÓN)
     // =========================================================================
     match /usuarios/{usuarioId} {
-      allow get: if isSignedIn() && (
-        isMasterAdmin() ||
+      // BLOQUE E (reconciliado): el personal lee cualquier ficha; el inquilino solo la
+      // suya (por uid o authUid) y las fichas que NO sean de otro inquilino.
+      allow get: if isSignedIn() && (isStaff() ||
         request.auth.uid == usuarioId ||
-        resource.data.authUid == request.auth.uid ||
-        resource.data.tipoPerfil in ['PROFESIONAL', 'PROPIETARIO', 'ADMINISTRADOR'] ||
-        (resource.data.tipoPerfil == 'INQUILINO' && !isTenant())
-      );
-      allow list: if isStaff();
-      // BLOQUE E: la cuenta INQUILINO solo nace de invitación activa vinculada a su contrato.
+        (('authUid' in resource.data) && resource.data.authUid == request.auth.uid) ||
+        resource.data.tipoPerfil != 'INQUILINO');
+      allow list: if isMasterAdmin();
+      // BLOQUE E (reconciliado): la cuenta INQUILINO solo nace de invitación activa
+      // vinculada a su contrato (además del alta canónica PROPIETARIO/PROFESIONAL).
       allow create: if isMasterAdmin() || (
-        isSignedIn() &&
-        incoming().authUid == request.auth.uid &&
-        (!('SUPERADMIN' in incoming().roles)) &&
-        (
-          incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL'] ||
-          (incoming().tipoPerfil == 'INQUILINO' &&
-            incoming().contratoIds is list &&
-            incoming().contratoIds.size() >= 1 &&
-            incoming().contratoIds.size() <= 5 &&
-            ('enlaceRegistroId' in incoming()) &&
-            enlaceInquilinoValido(incoming().enlaceRegistroId, incoming().contratoIds))
+        isSignedIn()
+        && incoming().authUid == request.auth.uid
+        && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
+        && incoming().estado in ['ACTIVO', 'PENDIENTE']
+        && (
+          (incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+            && (
+              incoming().tipoPerfil == 'PROFESIONAL'
+              || !('propietarioId' in incoming())
+              || !exists(/databases/$(database)/documents/propietarios/$(incoming().propietarioId))
+            ))
+          ||
+          (incoming().tipoPerfil == 'INQUILINO'
+            && incoming().contratoIds is list
+            && incoming().contratoIds.size() >= 1
+            && incoming().contratoIds.size() <= 5
+            && ('enlaceRegistroId' in incoming())
+            && enlaceInquilinoValido(incoming().enlaceRegistroId, incoming().contratoIds))
         )
       );
+
       allow update: if isMasterAdmin() || (
-        isSignedIn() &&
-        (existing().authUid == request.auth.uid || usuarioId == request.auth.uid) &&
-        incoming().tipoPerfil == existing().tipoPerfil &&
-        incoming().roles == existing().roles &&
-        incoming().estado == existing().estado &&
-        mismoCampoOpcional('contratoIds')
+        isSignedIn()
+        // El documento pertenece a este UID (salvo que se esté enlazando por
+        // primera vez un perfil sin authUid).
+        && (
+          !('authUid' in existing())
+          || existing().authUid == request.auth.uid
+          || usuarioId == request.auth.uid
+        )
+        && incoming().tipoPerfil == existing().tipoPerfil
+        && incoming().roles == existing().roles
+        && incoming().estado == existing().estado
+        // El usuario no puede cambiar por sí mismo su identidad ni sus permisos.
+        && !incoming().diff(existing()).affectedKeys().hasAny([
+          'permisos',
+          'propietarioId',
+          'profesionalId',
+          'inmuebleIds',
+          'email',
+          'createdAt',
+          'passwordHash',
+          // BLOQUE E (reconciliado): el inquilino no puede auto-vincularse contratos
+          'contratoIds'
+        ])
       );
+
       allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
     // 12. PROFESIONALES Y EMPRESAS DE MANTENIMIENTO
+    // Catálogo legible durante el registro público; la escritura es interna.
     // =========================================================================
     match /profesionales/{profesionalId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
+      allow read: if true;
+      allow create, update: if isSignedIn();
       allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
-    // 13. ENLACES DE REGISTRO E INVITACIONES CONFIGURABLES
+    // 13. ENLACES DE REGISTRO (lectura pública para validar el token)
     // =========================================================================
     match /enlaces_registro/{enlaceId} {
       allow get: if isSignedIn() || (isValidId(enlaceId) && resource.data.activo == true);
@@ -361,176 +989,338 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 14. CATÁLOGO ADMINISTRABLE DE ESPECIALIDADES
+    // 14. CATÁLOGO DE ESPECIALIDADES (lectura pública en el registro)
     // =========================================================================
     match /especialidades/{especialidadId} {
-      allow get: if isStaff() || isValidId(especialidadId);
-      allow list: if isStaff() || (resource.data.activo == true || !('activo' in resource.data));
-      allow write: if isStaff();
+      allow read: if true;
+      allow write: if isSignedIn();
     }
 
     // =========================================================================
-    // 15. REGISTROS DE AUDITORÍA (INMUTABLE - SÓLO INSERCIÓN)
+    // 15. REGISTROS DE AUDITORÍA (INMUTABLE - SÓLO INSERCIÓN POR USUARIOS INTERNOS)
     // =========================================================================
     match /audit_logs/{auditId} {
-      // BLOQUE E: el inquilino registra auditoría (create) pero no lee logs internos.
-      allow read: if isStaff();
-      allow create: if isSignedIn() || (
-        incoming().keys().hasAll(['id', 'action', 'timestamp']) &&
-        incoming().action is string &&
-        incoming().timestamp is string
-      );
+      allow read: if isMasterAdmin();
+      allow create: if isSignedIn();
       allow update, delete: if false;
     }
 
     // =========================================================================
-    // 16. BLOQUE 4: INCIDENCIAS, MANTENIMIENTO Y TRABAJOS PROFESIONALES
+    // 22. NOTIFICACIONES TRANSACCIONALES (GAP 1) — aislamiento por propietario.
     // =========================================================================
-    match /incidencias/{incidenciaId} {
-      // BLOQUE E: el inquilino lee (get) las incidencias de sus contratos y puede crear
-      // las suyas (origen INQUILINO, estado ABIERTA); no edita ni borra.
-      allow get: if isMasterAdmin() || (isStaff() && (
-        resource.data.propietarioId == request.auth.uid ||
-        isOwnerOfInmueble(resource.data.inmuebleId) ||
-        (resource.data.trabajoProfesional != null && resource.data.trabajoProfesional.profesionalId == request.auth.uid)
-      )) || (isTenant() && (
-        (('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId)) ||
-        tenantVeContratos(campoListaActual('contratoIdsVisibles'))
+    match /notificaciones/{notificacionId} {
+      function notifDelUsuario() {
+        return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && (
+          (get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == resource.data.propietarioId) ||
+          resource.data.inmuebleId in get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.inmuebleIds
+        );
+      }
+      function notifDelUsuarioIncoming() {
+        return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) && (
+          (get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == incoming().propietarioId) ||
+          incoming().inmuebleId in get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.inmuebleIds
+        );
+      }
+      allow get: if isSignedIn() && (isMasterAdmin() || notifDelUsuario());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isMasterAdmin() || notifDelUsuarioIncoming());
+      allow update: if isSignedIn() && (isMasterAdmin() || (
+        notifDelUsuario() &&
+        incoming().propietarioId == resource.data.propietarioId &&
+        incoming().inmuebleId == resource.data.inmuebleId
       ));
-      allow list: if isStaff();
-      allow create: if isStaff() || (isTenant() &&
-        incoming().contratoId is string &&
-        tenantTieneContrato(incoming().contratoId) &&
-        incoming().inmuebleId is string &&
-        incoming().origen == 'INQUILINO' &&
-        incoming().estado == 'ABIERTA' &&
-        incoming().titulo is string && incoming().titulo.size() >= 3 &&
-        incoming().descripcion is string && incoming().descripcion.size() >= 10 &&
-        (!('contratoIdsVisibles' in incoming()) || incoming().contratoIdsVisibles == [incoming().contratoId])
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 23. FINANCIACIÓN HIPOTECARIA (GAP 4) — aislamiento por propietario.
+    // =========================================================================
+    match /financiaciones/{financiacionId} {
+      function sinSecretos() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'ibanSecreto' in incoming() ||
+          'tokenBancario' in incoming()
+        );
+      }
+      allow get: if isSignedIn() && (
+        isMasterAdmin() ||
+        resource.data.propietarioId == request.auth.uid
       );
-      // El inquilino solo aporta evidencias a sus incidencias (las listas solo crecen).
-      allow update: if isStaff() || (isTenant() &&
-        (('contratoId' in existing()) && tenantTieneContrato(existing().contratoId)) &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['fotografias', 'documentos', 'fechaActualizacion']) &&
-        listaSoloCrece('fotografias') &&
-        listaSoloCrece('documentos'));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (
+        isMasterAdmin() ||
+        (
+          incoming().propietarioId == request.auth.uid &&
+          incoming().inmuebleId is string &&
+          isValidId(incoming().inmuebleId)
+        )
+      ) && sinSecretos();
+      allow update: if isSignedIn() && (
+        isMasterAdmin() || (
+          resource.data.propietarioId == request.auth.uid &&
+          incoming().propietarioId == resource.data.propietarioId &&
+          incoming().inmuebleId == resource.data.inmuebleId
+        )
+      ) && sinSecretos();
       allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
-    // 17. BLOQUE 4: PÓLIZAS DE SEGURO
+    // 24. CONCILIACIÓN BANCARIA AUTOMÁTICA (GAP 6) — aislamiento estricto propietario
+    // - propietario inmutable
+    // - no acceso cruzado
+    // - no almacenamiento credenciales bancarias
+    // - trazabilidad: propietario, inmueble, usuario/actor, estado
     // =========================================================================
-    match /polizas_seguros/{polizaId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
+    match /movimientos_bancarios/{movimientoId} {
+      function movimientoEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function movimientoVisible(d) {
+        return movimientoEsMio(d) || ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+      }
+      function sinSecretosBancarios() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'ibanSecreto' in incoming() ||
+          'tokenBancario' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'clave' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && movimientoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && movimientoEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'idMovimiento' in incoming() && incoming().idMovimiento is string
+        && 'hashIdempotencia' in incoming()
+      ) && sinSecretosBancarios();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
+      allow delete: if isMasterAdmin();
+    }
+
+    match /conciliaciones_bancarias/{conciliacionId} {
+      function conciliacionEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosBancarios() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'ibanSecreto' in incoming() ||
+          'tokenBancario' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'movimientoId' in incoming() && incoming().movimientoId is string
+      ) && sinSecretosBancarios();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
+      allow delete: if isMasterAdmin();
+    }
+
+    match /importaciones_bancarias/{importacionId} {
+      function importacionEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosBancarios() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'psd2' in incoming() ||
+          'tokenBancario' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+      ) && sinSecretosBancarios();
       allow delete: if isMasterAdmin();
     }
 
     // =========================================================================
-    // 18. BLOQUE 4: SINIESTROS VINCULADOS A INCIDENCIAS
+    // 25. FACTURACIÓN Y VERI*FACTU (GAP 7) — aislamiento estricto por propietario
+    // - propietario inmutable en facturas, registros y envíos
+    // - registros de facturación (RRSIF) NO editables arbitrariamente: huella,
+    //   importe/número/fecha/receptor protegidos tras la emisión
+    // - sin secretos (certificados y credenciales AEAT jamás en Firestore)
+    // - factura emitida y su registro protegidos más que el borrador
     // =========================================================================
-    match /siniestros/{siniestroId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
+    match /facturas/{facturaId} {
+      function facturaEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function facturaVisible(d) {
+        return facturaEsMia(d) || ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
+      }
+      function sinSecretosFacturacion() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && facturaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && facturaEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'id' in incoming() && incoming().id is string
+      ) && sinSecretosFacturacion();
+      // Una factura EMITIDA no puede renumerarse ni alterarse silenciosamente:
+      // número/serie/ejercicio/fecha/propietario e importes quedan inmutables.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && facturaEsMia(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && (
+          !('estado' in existing()) || existing().estado != 'EMITIDA' || (
+            incoming().numero == existing().numero
+            && incoming().serie == existing().serie
+            && incoming().ejercicio == existing().ejercicio
+            && incoming().fechaExpedicion == existing().fechaExpedicion
+            && incoming().importeTotal == existing().importeTotal
+          )
+        )
+      ) && sinSecretosFacturacion();
       allow delete: if isMasterAdmin();
     }
 
-    // =========================================================================
-    // 19. BLOQUE 5: TRABAJOS PROFESIONALES
-    // =========================================================================
-    match /trabajos_profesionales/{trabajoId} {
-      allow get: if isMasterAdmin() || (isStaff() && (
-        resource.data.propietarioId == request.auth.uid ||
-        isOwnerOfInmueble(resource.data.inmuebleId) ||
-        resource.data.profesionalId == request.auth.uid
-      ));
-      allow list: if isStaff();
-      allow create, update: if isStaff();
+    match /registros_facturacion/{registroId} {
+      function registroEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosFacturacion() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && registroEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && registroEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'facturaId' in incoming() && incoming().facturaId is string
+        && 'huella' in incoming() && incoming().huella is string
+      ) && sinSecretosFacturacion();
+      // Inalterabilidad RRSIF: la huella y los campos hasheados jamás se tocan.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && registroEsMio(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().huella == existing().huella
+        && incoming().numSerieFactura == existing().numSerieFactura
+        && incoming().fechaExpedicionFactura == existing().fechaExpedicionFactura
+        && incoming().importeTotal == existing().importeTotal
+        && incoming().idEmisorFactura == existing().idEmisorFactura
+        && incoming().fechaHoraHusoGenRegistro == existing().fechaHoraHusoGenRegistro
+      ) && sinSecretosFacturacion();
       allow delete: if isMasterAdmin();
     }
 
-    // =========================================================================
-    // 20. BLOQUE 5: PRESUPUESTOS DE PROFESIONALES
-    // =========================================================================
-    match /presupuestos_profesionales/{presupuestoId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
+    match /envios_verifactu/{envioId} {
+      function envioEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosFacturacion() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'token' in incoming()
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && envioEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && envioEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'registroFacturacionId' in incoming() && incoming().registroFacturacionId is string
+        && 'idempotencyKey' in incoming() && incoming().idempotencyKey is string
+      ) && sinSecretosFacturacion();
+      // Trazabilidad de envío: propietario y registro de facturación inmutables.
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && envioEsMio(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().registroFacturacionId == existing().registroFacturacionId
+      ) && sinSecretosFacturacion();
       allow delete: if isMasterAdmin();
     }
 
-    // =========================================================================
-    // 21. BLOQUE 5: VALORACIONES Y EVALUACIONES DE PROFESIONALES
-    // =========================================================================
-    match /valoraciones_profesionales/{valoracionId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // 22. BLOQUE B: LIQUIDACIONES DE PROPIETARIOS (sin borrado físico; anular/reversar)
-    // Aislamiento: el propietario solo lee sus propias liquidaciones.
-    // =========================================================================
-    match /liquidaciones_propietarios/{liquidacionId} {
-      allow get: if isMasterAdmin() || (isStaff() && (
-        resource.data.propietarioId == request.auth.uid ||
-        (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.propietarioId == resource.data.propietarioId)
-      ));
-      allow list: if isStaff();
-      allow create, update: if isStaff() && (
-        (!('historial' in resource.data) || !('historial' in incoming()) || incoming().historial.size() >= resource.data.historial.size())
+    match /series_facturacion/{serieId} {
+      function serieEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && serieEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && serieEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'codigo' in incoming() && incoming().codigo is string
+        && 'ejercicio' in incoming() && incoming().ejercicio is int
+      );
+      // La correlación avanza solo hacia adelante (último número nunca decrece).
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && serieEsMia(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().codigo == existing().codigo
+        && incoming().ejercicio == existing().ejercicio
+        && (incoming().ultimoNumero is int) && incoming().ultimoNumero >= existing().ultimoNumero
       );
       allow delete: if isMasterAdmin();
     }
-
     // =========================================================================
-    // 23. BLOQUE B: GASTOS DE INMUEBLES
-    // =========================================================================
-    match /gastos_inmuebles/{gastoId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
-      allow delete: if isMasterAdmin() || (isStaff() && resource.data.estado == 'pendiente');
-    }
-
-    // =========================================================================
-    // 24. BLOQUE B: ÓRDENES DE PAGO (origen trazable obligatorio a nivel de app)
-    // =========================================================================
-    match /ordenes_pago/{ordenId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && incoming().origenId is string && incoming().origenTipo is string;
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // 25. BLOQUE B: FICHEROS SEPA (generar→validar→preparar; sin envío automático)
-    // =========================================================================
-    match /ficheros_sepa/{ficheroId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && incoming().msgId is string && incoming().hashContenido is string;
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // 26. BLOQUE B: MANDATOS SEPA
-    // =========================================================================
-    match /mandatos_sepa/{mandatoId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // 27. BLOQUE B: CONFIGURACIÓN DE LIQUIDACIÓN POR PROPIETARIO
-    // =========================================================================
-    match /config_liquidacion/{propietarioId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
-      allow delete: if isMasterAdmin();
-    }
-
-    // =========================================================================
-    // E.1. BLOQUE E: MENSAJES DEL PORTAL (hilo inquilino ↔ gestión por contrato)
+    // 39. BLOQUE E (reconciliado): MENSAJES DEL PORTAL (hilo inquilino ↔ gestión por contrato)
     // Sin borrado: el hilo es el registro de comunicaciones.
     // =========================================================================
     match /mensajes_portal/{mensajeId} {
@@ -554,7 +1344,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // E.2. BLOQUE E: SUMINISTROS (CUPS/contador, titular, comercializadora, reparto)
+    // 40. BLOQUE E (reconciliado): SUMINISTROS (CUPS/contador, titular, comercializadora, reparto)
     // El inquilino lee (get) los de su inmueble y solo añade IDs a los índices.
     // =========================================================================
     match /suministros/{suministroId} {
@@ -571,7 +1361,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // E.3. BLOQUE E: LECTURAS DE SUMINISTRO (INMUTABLES con trazabilidad)
+    // 41. BLOQUE E (reconciliado): LECTURAS DE SUMINISTRO (INMUTABLES con trazabilidad)
     // Sin update ni delete: la corrección es una nueva lectura (corrigeLecturaId).
     // =========================================================================
     match /lecturas_suministro/{lecturaId} {
@@ -591,7 +1381,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // E.4. BLOQUE E: CAMBIOS DE TITULARIDAD (solicita inquilino, resuelve gestión)
+    // 42. BLOQUE E (reconciliado): CAMBIOS DE TITULARIDAD (solicita inquilino, resuelve gestión)
     // =========================================================================
     match /cambios_titular/{cambioId} {
       allow get: if isStaff() || (isTenant() &&
@@ -611,7 +1401,515 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // GLOBAL DEFAULT DENY CATCH-ALL
+    // GAP 8 — FACTURA ELECTRÓNICA B2B (RD 238/2026)
+    // Colección propia y separada de facturas / registros_facturacion /
+    // envios_verifactu: aislamiento total, deny-by-default global.
+    // - propietarioId e id inmutables; facturaId e idempotencyKey inmutables
+    // - tras el intercambio (ENVIADA+) la representación económica/documental
+    //   queda inmovilizada: sin modificaciones silenciosas
+    // - historial append-only (nunca se pierden eventos ya registrados)
+    // - sin secretos: certificados/credenciales de plataformas jamás en Firestore
+    // =========================================================================
+    match /facturas_electronicas_b2b/{febId} {
+      function febEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      function sinSecretosB2B() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'certificado' in incoming() ||
+          'privateKey' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'token' in incoming()
+        );
+      }
+      function estadoIntercambiado(d) {
+        return ('estado' in d)
+          && ['ENVIADA','RECIBIDA','ACEPTADA','RECHAZADA','PAGADA','PARCIALMENTE_PAGADA','ANULADA','RECTIFICADA'].hasAny([d.estado]);
+      }
+      function representacionInmovil() {
+        return !estadoIntercambiado(existing()) || (
+          incoming().baseImponible == existing().baseImponible
+          && incoming().cuotaIva == existing().cuotaIva
+          && incoming().cuotaRetencion == existing().cuotaRetencion
+          && incoming().importeTotal == existing().importeTotal
+          && incoming().numeroCompleto == existing().numeroCompleto
+          && incoming().serie == existing().serie
+          && incoming().numero == existing().numero
+          && incoming().ejercicio == existing().ejercicio
+          && incoming().formato == existing().formato
+        );
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && febEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && febEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && 'id' in incoming() && incoming().id is string && incoming().id == febId
+        && 'facturaId' in incoming() && incoming().facturaId is string
+        && 'idempotencyKey' in incoming() && incoming().idempotencyKey is string
+        && 'estado' in incoming() && incoming().estado == 'GENERADA'
+      ) && sinSecretosB2B();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && febEsMia(existing())
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && incoming().id == existing().id
+        && incoming().facturaId == existing().facturaId
+        && incoming().idempotencyKey == existing().idempotencyKey
+        // historial append-only: nunca se elimina ni reescribe lo trazado
+        && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size()
+        && representacionInmovil()
+      ) && sinSecretosB2B();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 26. LIQUIDACIONES DE PROPIETARIOS (BLOQUE B — tesorería, 2026-09-20)
+    // - el propietario SOLO lee sus liquidaciones (aislamiento por propietarioId)
+    // - crea/edita SOLO la administración (isMasterAdmin): el motor es
+    //   determinista e idempotente (claveIdempotencia inmutable)
+    // - historial append-only: nunca se elimina ni reescribe lo trazado
+    // - NO hay borrado ordinario: la anulación/reversión (ANULADA/REVERSADA) es
+    //   la vía; el delete queda reservado al administrador principal
+    // - sin secretos en ningún campo
+    // =========================================================================
+    match /liquidaciones_propietarios/{liqId} {
+      function liqEsMia(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && liqEsMia(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && liqEsMia(resource.data));
+      allow create: if isMasterAdmin() && (
+        isValidId(incoming().id) && incoming().id == liqId
+        && 'propietarioId' in incoming() && incoming().propietarioId is string
+        && 'claveIdempotencia' in incoming() && incoming().claveIdempotencia is string
+        && incoming().estado == 'BORRADOR'
+      ) && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && (
+        incoming().id == existing().id
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+        && 'claveIdempotencia' in incoming() && incoming().claveIdempotencia == existing().claveIdempotencia
+        && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size()
+      ) && sinSecretosTesoreria();
+      // Sin borrado ordinario: se anula/reversa. Excepción puntual del
+      // administrador principal (vía de emergencia, queda en audit_logs).
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 27. GASTOS DE TESORERÍA (BLOQUE B — proyección de liquidación, 2026-09-20)
+    // - el propietario SOLO lee los gastos imputados a su nombre
+    // - crea/edita SOLO la administración (importación desde el modelo oficial
+    //   `gastos` o alta manual); la contabilidad oficial vive en `gastos`
+    // - sin secretos
+    // =========================================================================
+    match /gastos_inmuebles/{gastoId} {
+      function gastoEsMio(d) {
+        return 'propietarioId' in d && d.propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data));
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == gastoId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && (
+        incoming().id == existing().id
+        && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
+      ) && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 28. ÓRDENES DE PAGO (BLOQUE B — 2026-09-20)
+    // - contienen IBAN de beneficiario: SOLO la administración
+    // - historial append-only (trazabilidad del origen: liquidación→orden)
+    // - sin envío bancario real: preparar ≠ ejecutar
+    // =========================================================================
+    match /ordenes_pago/{opId} {
+      allow get: if isMasterAdmin();
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == opId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && (
+        incoming().id == existing().id
+        && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size()
+      ) && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 29. FICHEROS SEPA PAIN.008/001 (BLOQUE B — 2026-09-20)
+    // - contienen XML con IBAN, BIC y Creditor Identifier: SOLO la
+    //   administración; nunca visibles para propietarios ni profesionales
+    // - sin secretos (el fichero SEPA en sí NO es una credencial)
+    // =========================================================================
+    match /ficheros_sepa/{ficheroId} {
+      allow get: if isMasterAdmin();
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == ficheroId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && incoming().id == existing().id && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 30. MANDATOS SEPA (BLOQUE B — 2026-09-20)
+    // - contienen IBAN de deudor y MndtId: SOLO la administración
+    // =========================================================================
+    match /mandatos_sepa/{mandatoId} {
+      allow get: if isMasterAdmin();
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && isValidId(incoming().id) && incoming().id == mandatoId && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && incoming().id == existing().id && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 31. CONFIGURACIÓN FISCAL DE LIQUIDACIÓN (BLOQUE B — 2026-09-20)
+    // - documento por propietario (id de documento = propietarioId)
+    // - el propietario puede leer la suya; crea/edita SOLO la administración
+    // - sin secretos
+    // =========================================================================
+    match /config_liquidacion/{propietarioId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && propietarioId == myPropId());
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && propietarioId is string && propietarioId.size() > 0 && sinSecretosTesoreria();
+      allow update: if isMasterAdmin() && sinSecretosTesoreria();
+      allow delete: if isMasterAdmin();
+    }
+
+
+    // =========================================================================
+    // BLOQUE C — MOROSIDAD, RECOBRO Y EXPEDIENTE LEGAL (2026-09-20)
+    // Criterios comunes a 32–37:
+    //  · deny-by-default: todo lo no listado queda denegado por el catch-all final
+    //  · escritura SOLO de la administración (isMasterAdmin)
+    //  · el propietario NUNCA lee expedientes/histórico/evidencias/comunicaciones:
+    //    solo el espejo recortado (§37), sin datos del inquilino ni de estrategia
+    //  · invariante de id: request.resource.data.id == {docId} (sin duplicados por escritura)
+    //  · histórico y evidencias son append-only: create sí, update/delete no
+    //  · sin credenciales, tokens, adjuntos en base64 ni secretos (sinSecretosMorosidad)
+    // =========================================================================
+
+    // 32. EXPEDIENTES DE MOROSIDAD — agregado de recobro por contrato.
+    match /expedientes_morosidad/{expedienteId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(expedienteId)
+        && incoming().id == expedienteId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && incoming().contratoId is string
+        && incoming().contratoId.size() > 0
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.propietarioId == existing().propietarioId
+        && request.resource.data.contratoId == existing().contratoId
+        && sinSecretosMorosidad();
+      // Sin borrado ordinario: un expediente es memoria de recobro y trazabilidad.
+      allow delete: if false;
+    }
+
+    // 33. HISTÓRICO DE ESTADO (append-only). Nadie actualiza ni borra una transición.
+    match /expedientes_morosidad_hist/{transicionId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(transicionId)
+        && incoming().id == transicionId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && incoming().expedienteId is string
+        && incoming().expedienteId.size() > 0
+        && sinSecretosMorosidad();
+      allow update, delete: if false;
+    }
+
+    // 34. EVIDENCIAS DEL EXPEDIENTE (append-only, metadatos: el archivo vive en Storage).
+    //     No se guardan importes como fuente de verdad (vienen de la fuente canónica de cobros).
+    match /evidencias_morosidad/{evidenciaId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(evidenciaId)
+        && incoming().id == evidenciaId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && sinSecretosMorosidad();
+      // Append-only en la práctica: solo se corrige el contenido, jamás la identidad
+      // del registro (id, expediente, propietario y tipo quedan anclados).
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.expedienteId == existing().expedienteId
+        && request.resource.data.propietarioId == existing().propietarioId
+        && request.resource.data.tipo == existing().tipo
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // 35. COMPROMISOS DE PAGO — calendario declarado; las cuotas solo se cubren
+    //     con cobros ya existentes en la fuente contable (el ERP no inventa pagos).
+    //     El propietario puede leer los compromisos de su propia cartera.
+    match /compromisos_morosidad/{compromisoId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && resource.data.propietarioId == myPropId());
+      // `list` se evalúa por documento: un propietario solo obtiene filas cuyo
+      // propietarioId coincide con el suyo (la consulta ya filtra por ese campo).
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && resource.data.propietarioId == myPropId());
+      allow create: if isMasterAdmin()
+        && isValidId(compromisoId)
+        && incoming().id == compromisoId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.propietarioId == existing().propietarioId
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // 36. POLÍTICA DE RECOBRO Y SU VERSIONADO. Los plazos (D+3/D+10/D+20/D+30) son
+    //     offsets de negocio configurables, NO plazos legales. Cambiar la política no
+    //     reescribe la historia: cada paso del plan guarda la versión vigente.
+    match /politicas_morosidad/{politicaId} {
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin()
+        && isValidId(politicaId)
+        && incoming().id == politicaId
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // 37. RESUMEN DE MOROSIDAD ENVIADO AL PROPIETARIO: espejo recortado e
+    //     invariable por propietarioId. Escrito por la administración al guardar el
+    //     expediente (§32); el propietario solo lee la suya. Sin campos sensibles:
+    //     el recorte lo hace `recortarResumenPropietario` (lista blanca de campos).
+    match /morosidad_resumen_propietario/{docId} {
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && resource.data.propietarioId == myPropId());
+      allow list: if isPropietarioRole() && resource.data.propietarioId == myPropId();
+      allow create: if isMasterAdmin()
+        && isValidId(docId)
+        && incoming().id == docId
+        && incoming().propietarioId is string
+        && incoming().propietarioId.size() > 0
+        && sinSecretosMorosidad();
+      allow update: if isMasterAdmin()
+        && request.resource.data.id == existing().id
+        && request.resource.data.propietarioId == existing().propietarioId
+        && sinSecretosMorosidad();
+      allow delete: if false;
+    }
+
+    // (las notificaciones de recobro se rigen por §22 — GAP 1 — y no duplican reglas:
+    //  la bandeja del propietario sigue aislada por propietarioId/inmuebleId)
+
+    // =========================================================================
+    // 38. ACTAS DE ENTRADA Y SALIDA (BLOQUE D) — aislamiento estricto propietario
+    // - ownerId inmutable (propietario titular)
+    // - inmueble/contrato aislamiento
+    // - actas firmadas/cerradas NO modificables: FIRMADA/CERRADA → BORRADOR en mismo doc BLOQUEADO
+    //   versionado correcto: nueva versión = nuevo documento con actaAnteriorId, original preservada intacta
+    // - PDF persistido: permitir solo actualización de campos PDF en FIRMADA/CERRADA sin tocar inventario/participantes/firmas
+    // - sin secretos, sin base64 evidencias (Storage)
+    // - trazabilidad historial obligatorio
+    // =========================================================================
+    match /actas/{actaId} {
+      function actaEsMia(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function actaVisible(d) {
+        return actaEsMia(d) || ('propertyId' in d && myInmuebleIds().hasAny([d.propertyId]));
+      }
+      function actaOwnerInmutable() {
+        return 'ownerId' in existing() && 'ownerId' in incoming() && incoming().ownerId == existing().ownerId;
+      }
+      function actaPropertyInmutable() {
+        return 'propertyId' in existing() && 'propertyId' in incoming() && incoming().propertyId == existing().propertyId;
+      }
+      function sinSecretosActa() {
+        return !(
+          'credentials' in incoming() ||
+          'apiKey' in incoming() ||
+          'accessToken' in incoming() ||
+          'password' in incoming() ||
+          'secret' in incoming() ||
+          'tokenBancario' in incoming() ||
+          'codigo' in incoming() ||
+          'otp' in incoming()
+        );
+      }
+      function estadoValido() {
+        return incoming().estado in ['BORRADOR', 'EN_REVISION', 'PENDIENTE_FIRMA', 'FIRMADA', 'CERRADA', 'ERROR', 'CANCELADA'];
+      }
+      function tipoValido() {
+        return incoming().tipo in ['ENTRADA', 'SALIDA'];
+      }
+      function versionIncrementoValido() {
+        // Si existente es FIRMADA/CERRADA, versión debe permanecer idéntica (no incrementar en mismo doc)
+        return (existing().estado in ['FIRMADA', 'CERRADA'])
+          ? incoming().version == existing().version
+          : incoming().version >= existing().version;
+      }
+      function esTransicionFirmadaACerrada() {
+        // Única transición permitida desde FIRMADA: → CERRADA, misma versión, sin cambios críticos
+        return existing().estado == 'FIRMADA'
+          && incoming().estado == 'CERRADA'
+          && incoming().version == existing().version
+          && actaOwnerInmutable()
+          && actaPropertyInmutable()
+          && incoming().tipo == existing().tipo
+          && incoming().inventario == existing().inventario
+          && incoming().participantes == existing().participantes
+          && incoming().lecturasContadores == existing().lecturasContadores
+          && incoming().firmas == existing().firmas;
+      }
+      function esActualizacionPdfPermitida() {
+        // Permitir solo añadir/actualizar referencia PDF en acta FIRMADA/CERRADA sin tocar datos críticos
+        return (existing().estado in ['FIRMADA', 'CERRADA'])
+          && incoming().estado == existing().estado
+          && incoming().version == existing().version
+          && actaOwnerInmutable()
+          && actaPropertyInmutable()
+          && incoming().tipo == existing().tipo
+          && incoming().inventario == existing().inventario
+          && incoming().participantes == existing().participantes
+          && incoming().lecturasContadores == existing().lecturasContadores
+          && incoming().firmas == existing().firmas
+          && incoming().estadoFirma == existing().estadoFirma;
+      }
+      function noModificacionSilenciosaFirmada() {
+        // FIRMADA/CERRADA no pueden mutar a BORRADOR en mismo documento. Solo transición FIRMADA→CERRADA o actualización PDF permitida.
+        return !(existing().estado in ['FIRMADA', 'CERRADA'])
+          || esTransicionFirmadaACerrada()
+          || esActualizacionPdfPermitida();
+      }
+
+      allow get: if isMasterAdmin() || (isPropietarioRole() && actaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && actaEsMia(resource.data));
+
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'propertyId' in incoming() && incoming().propertyId is string
+        && tipoValido()
+        && estadoValido()
+        && incoming().estado == 'BORRADOR'
+        && 'version' in incoming() && incoming().version >= 1
+      ) && sinSecretosActa();
+
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && actaOwnerInmutable()
+        && actaPropertyInmutable()
+        && versionIncrementoValido()
+        && noModificacionSilenciosaFirmada()
+        && estadoValido()
+      ) && sinSecretosActa();
+
+      allow delete: if isMasterAdmin();
+    }
+
+    match /actas_evidencias/{evidenciaId} {
+      function evidenciaEsMia(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function evidenciaVisible(d) {
+        return evidenciaEsMia(d) || ('propertyId' in d && myInmuebleIds().hasAny([d.propertyId]));
+      }
+      function sinBase64() {
+        // Evitar almacenamiento base64 en Firestore: storagePath obligatorio, no data URL gigante
+        return 'storagePath' in incoming()
+          && !(incoming().storagePath is string && incoming().storagePath.matches('data:.*'))
+          && !('base64Data' in incoming() && incoming().base64Data.size() > 1000);
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && evidenciaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && evidenciaEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId is string
+        && 'propertyId' in incoming() && incoming().propertyId is string
+        && 'storagePath' in incoming()
+      ) && sinBase64();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId == existing().actaId
+      ) && sinBase64();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+      );
+    }
+
+    match /actas_incidencias/{incidenciaId} {
+      function incidenciaEsMia(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function incidenciaVisible(d) {
+        return incidenciaEsMia(d) || ('propertyId' in d && myInmuebleIds().hasAny([d.propertyId]));
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && incidenciaVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && incidenciaEsMia(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId is string
+        && 'propertyId' in incoming() && incoming().propertyId is string
+      );
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+      );
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+      );
+    }
+
+    match /actas_otp/{otpId} {
+      function otpEsMio(d) {
+        return 'ownerId' in d && d.ownerId == myPropId();
+      }
+      function sinSecretoPlanoExcesivo() {
+        // No permitir almacenamiento de codigo en texto plano salvo temporal controlado.
+        // codigoPlainTemporal (solo canal MANUAL, entrega en persona por personal interno)
+        // se permite SOLO mientras el OTP sigue ACTIVO y sin usar, o si se envía null
+        // (limpieza obligatoria tras uso/expiración).
+        return !('codigo' in incoming() && incoming().codigo.size() > 0) // nunca campo 'codigo' plano
+          && !('plain' in incoming())
+          && (!('codigoPlainTemporal' in incoming())
+              || incoming().codigoPlainTemporal == null
+              || (incoming().estado == 'ACTIVO' && incoming().usado == false));
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && otpEsMio(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && otpEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId is string
+        && 'firmaId' in incoming() && incoming().firmaId is string
+        && 'codigoHash' in incoming()
+      ) && sinSecretoPlanoExcesivo();
+      allow update: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'ownerId' in existing() && existing().ownerId == myPropId()
+        && 'ownerId' in incoming() && incoming().ownerId == myPropId()
+        && 'actaId' in incoming() && incoming().actaId == existing().actaId
+      ) && sinSecretoPlanoExcesivo();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // DENEGACIÓN GLOBAL POR DEFECTO (cualquier colección no contemplada)
     // =========================================================================
     match /{document=**} {
       allow read, write: if false;

@@ -3,14 +3,26 @@ export type SectionType =
   | 'inmuebles'
   | 'propietarios'
   | 'cobros'
+  // BLOQUE B (integración canónica 2026-09-20): tesorería y liquidaciones de propietarios
   | 'tesoreria'
+  | 'gastos'
+  | 'conciliacion'
+  // BLOQUE C (morosidad avanzada): recobro y expediente legal
+  | 'morosidad'
+  | 'facturacion'
+  | 'financiacion'
+  | 'fiscal'
+  | 'informes'
+  | 'polizas'
+  | 'actas'
+  // BLOQUE E (reconciliado): portal del inquilino y suministros
   | 'inquilinos'
   | 'suministros'
-  | 'incidencias'
-  | 'profesionales'
   | 'preseleccionados'
   | 'seguro_impago'
   | 'formalizacion'
+  | 'recomercializacion'
+  | 'incidencias'
   | 'solicitudes'
   | 'candidatos'
   | 'nuevo_candidato'
@@ -27,21 +39,12 @@ export type SectionType =
 
 export type CandidateStatus =
   | 'nuevo'
+  | 'pendiente_doc'
+  | 'pendiente_analisis'
+  | 'analizado'
   | 'preseleccionado'
   | 'visita_reservada'
   | 'seleccionado'
-  | 'pendiente_doc'
-  | 'doc_solicitada'
-  | 'doc_recibida'
-  | 'pendiente_analisis'
-  | 'en_analisis'
-  | 'analizado'
-  | 'seguro_solicitado'
-  | 'aprobado_seguro'
-  | 'rechazado_seguro'
-  | 'decision_pendiente'
-  | 'aceptado_final'
-  | 'rechazado_final'
   | 'formalizado'
   | 'no_seleccionado';
 
@@ -355,20 +358,6 @@ export interface CuestionarioIncidenciasData {
   analisisIa?: AnalisisIncidencias;
 }
 
-export interface CandidatoHistorialItem {
-  id: string;
-  fecha: string;
-  timestamp?: number;
-  autor: 'propietario' | 'candidato' | 'sistema_ia' | 'aseguradora';
-  autorNombre?: string;
-  fase: 'preseleccion' | 'seleccion' | 'documentacion' | 'analisis_ia' | 'seguro' | 'decision_final';
-  accion: string;
-  detalle?: string;
-  estadoAnterior?: CandidateStatus | string;
-  estadoNuevo?: CandidateStatus | string;
-  metadatos?: Record<string, any>;
-}
-
 export interface Candidato {
   id: string;
   nombre: string;
@@ -376,8 +365,6 @@ export interface Candidato {
   email: string;
   inmuebleId: string;
   inmuebleNombre: string;
-  inmuebleInteresId?: string;
-  propietarioId?: string; // ID permanente del propietario arrendador vinculante
   numPersonas: number;
   ingresosNetos: number; // en euros mensuales
   tipoEmpleo: EmploymentType;
@@ -395,6 +382,7 @@ export interface Candidato {
   ultimoInforme?: InformeInteligente;
   cuestionarioToken?: string; // Token único seguro para el enlace público e.g. "q-a8f3d1"
   cuestionarioIncidencias?: CuestionarioIncidenciasData;
+  habitacionId?: string;
   // Campos para 1 o 2 titulares y notas privadas del propietario
   numTitularesContrato?: 1 | 2;
   cotitular?: CotitularData;
@@ -403,20 +391,6 @@ export interface Candidato {
   // Campos preparados para puntuación / IA posterior
   scoreEstimado?: number; // 0 - 100
   ratioSolvencia?: number; // % sobre el alquiler del inmueble
-  // Trazabilidad del circuito completo hasta seguro de impago y decisión
-  historial?: CandidatoHistorialItem[];
-  fechaPreseleccion?: string;
-  fechaSeleccion?: string;
-  seleccionadoMotivo?: string;
-  clasificacionDocumental?: 'COMPLETO' | 'INCOMPLETO' | 'REVISAR' | 'NO_VALIDO';
-  clasificacionDocumentalMotivo?: string;
-  solicitudDocId?: string;
-  solicitudSeguroId?: string;
-  seguroDictamen?: DictamenAseguradora;
-  decisionFinal?: 'ACEPTAR' | 'RECHAZAR' | 'PENDIENTE';
-  decisionFinalMotivo?: string;
-  decisionFinalFecha?: string;
-  decisionFinalAutor?: string;
 }
 
 export interface InmuebleImage {
@@ -514,6 +488,8 @@ export interface Inmueble {
   fianzaMeses: number;
   referenciaCatastral?: string;
   codigoPostal?: string;
+  // FASE 3.5.1 — detalle catastral para afinar la valoración
+  datosCatastrales?: DatosCatastrales;
   // Vinculación con Propietarios y Cuentas Bancarias
   propietarioId?: string; // ID permanente del Propietario titular vinculado
   propietarioPrincipalId?: string;
@@ -538,6 +514,152 @@ export interface Inmueble {
   fechaAdquisicion?: string;
   notasInternas?: string;
 
+  // Campos adicionales y alias operativos
+  alias?: string;
+  municipio?: string;
+  localidad?: string;
+  provincia?: string;
+  pais?: string;
+  tipo?: string;
+  rentaMensual?: number;
+  createdAt?: string;
+  updatedAt?: string;
+
+  // Ficha técnica (campos opcionales: inmuebles antiguos siguen válidos)
+  planta?: string;
+  ascensor?: boolean;
+  terraza?: boolean;
+  balcon?: boolean;
+  interiorExterior?: 'exterior' | 'interior' | 'mixto';
+  orientacion?: string;
+  anioConstruccion?: number;
+  estadoConservacion?: 'nuevo' | 'muy_bueno' | 'bueno' | 'a_reformar' | 'en_obras';
+  aireAcondicionado?: boolean;
+  calefaccion?: boolean;
+  cocinaEquipada?: boolean;
+  electrodomesticosIncluidos?: boolean;
+  armariosEmpotrados?: boolean;
+  tipoVentanas?: string;
+  tipoPersianas?: string;
+  fechaActualizacionFicha?: string;
+  actualizadoPorFicha?: string;
+}
+
+export type CategoriaInventario =
+  | 'COCINA'
+  | 'SALON'
+  | 'DORMITORIO'
+  | 'BANO'
+  | 'TERRAZA'
+  | 'EXTERIOR'
+  | 'ELECTRODOMESTICOS'
+  | 'MOBILIARIO'
+  | 'ILUMINACION'
+  | 'CLIMATIZACION'
+  | 'OTROS';
+
+export type EstadoInventario =
+  | 'NUEVO'
+  | 'BUEN_ESTADO'
+  | 'USADO'
+  | 'DETERIORADO'
+  | 'REPARAR'
+  | 'BAJA';
+
+export interface DocumentoInventario {
+  id: string;
+  inventarioId: string;
+  inmuebleId: string;
+  nombre: string;
+  mimeType?: string;
+  url: string;
+  storagePath: string;
+  tamanoBytes?: number;
+  fechaSubida: string;
+  subidoPor?: string;
+}
+
+export interface HistorialInventarioItem {
+  id: string;
+  fecha: string;
+  usuarioId?: string;
+  usuarioNombre: string;
+  accion: string;
+  elementoAfectado: string;
+  cambios?: string;
+  estadoAnterior?: EstadoInventario;
+  estadoNuevo?: EstadoInventario;
+}
+
+export interface ElementoInventario {
+  id: string;
+  inmuebleId: string;
+  nombre: string;
+  categoria?: CategoriaInventario | string;
+  descripcion?: string;
+  cantidad?: number;
+  estado?: EstadoInventario | string;
+  ubicacion?: string;
+  estancia?: string;
+  estadoUso?: string;
+  marca?: string;
+  modelo?: string;
+  numeroSerie?: string;
+  garantiaHasta?: string;
+  observaciones?: string;
+  fechaAlta?: string;
+  fechaModificacion?: string;
+  creadoPor?: string;
+  actualizadoPor?: string;
+  activo?: boolean;
+  documentos?: DocumentoInventario[];
+  historial?: HistorialInventarioItem[];
+  habitacionId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type EstadoHabitacion =
+  | 'DISPONIBLE'
+  | 'RESERVADA'
+  | 'EN_PROCESO'
+  | 'OCUPADA'
+  | 'ALQUILADA'
+  | 'NO_DISPONIBLE'
+  | 'BLOQUEADA'
+  | 'INACTIVA';
+
+export interface HistorialHabitacionItem {
+  id: string;
+  fecha: string;
+  usuarioNombre: string;
+  accion: string;
+  estadoAnterior?: EstadoHabitacion;
+  estadoNuevo?: EstadoHabitacion;
+  detalle?: string;
+  contratoId?: string;
+}
+
+export interface HabitacionInmueble {
+  id: string;
+  inmuebleId: string;
+  propietarioId?: string;
+  nombre: string;
+  descripcion?: string;
+  estado: EstadoHabitacion;
+  superficie?: number;
+  precioObjetivo?: number;
+  caracteristicas?: string;
+  activo: boolean;
+  fechaAlta: string;
+  fechaModificacion: string;
+  creadoPor: string;
+  actualizadoPor: string;
+  historial?: HistorialHabitacionItem[];
+  contratoId?: string;
+  motivoBloqueo?: string;
+  fianza?: number;
+  selectedCandidatoId?: string;
   // BLOQUE E: suministros del inmueble (lectura por get para el inquilino vinculado)
   suministroIds?: string[];
   // BLOQUE E: contratos cuyos inquilinos pueden leer (get) este inmueble
@@ -565,6 +687,7 @@ export type InvitationStatus =
 export interface VisitSlot {
   id: string; // e.g. "slot-inm-1-1"
   inmuebleId: string;
+  habitacionId?: string;
   fecha: string; // YYYY-MM-DD
   horaInicio: string; // e.g. "10:15"
   horaFin: string; // e.g. "10:45"
@@ -583,6 +706,7 @@ export interface InvitacionVisita {
   candidateTelefono: string;
   candidateEmail?: string;
   inmuebleId: string;
+  habitacionId?: string;
   inmuebleNombre: string;
   inmueblePrecio: number;
   inmuebleCiudad?: string;
@@ -617,7 +741,7 @@ export type SolicitudDocEstado =
   | 'APROBADA'
   | 'RECHAZADA';
 
-export type DocItemEstado = 'pendiente' | 'subido' | 'requiere_correccion' | 'validado' | 'revisar' | 'rechazado';
+export type DocItemEstado = 'pendiente' | 'subido' | 'requiere_correccion' | 'validado';
 
 export interface ArchivoAportado {
   id: string;
@@ -706,7 +830,153 @@ export type EstadoFormalizacion =
   | 'FIANZA_DEPOSITADA'
   | 'FORMALIZADO_ACTIVO'
   | 'FINALIZADO'
+  | 'RESCINDIDO'
   | 'CANCELADO';
+
+// ==========================================
+// GAP 2: MODALIDADES CONTRACTUALES, ANEXOS, RESCISIÓN Y FINIQUITO
+// ==========================================
+
+/**
+ * Modalidad jurídica/funcional del contrato. Extensible.
+ * - VIVIENDA_HABITUAL: arrendamiento LAU de vivienda permanente (modelo actual).
+ * - TEMPORADA: uso distinto de vivienda por temporada (Art. 3.2 LAU).
+ * - LOCAL_USO_DISTINTO: local comercial / uso distinto de vivienda (Art. 3.1 LAU).
+ * - HABITACION: alquiler de una habitación concreta dentro de un inmueble en modo habitaciones.
+ */
+export type ModalidadContractual =
+  | 'VIVIENDA_HABITUAL'
+  | 'TEMPORADA'
+  | 'LOCAL_USO_DISTINTO'
+  | 'HABITACION';
+
+/** Motivo/tipo por el que un contrato alcanza un estado terminal. */
+export type TipoFinalizacionContrato =
+  | 'FINALIZACION_NATURAL'
+  | 'RESCISION_ANTICIPADA'
+  | 'MUTUO_ACUERDO'
+  | 'CANCELACION_EXPEDIENTE';
+
+/** Datos formales de la finalización/rescisión/cancelación de un contrato. */
+export interface FinalizacionContrato {
+  tipo: TipoFinalizacionContrato;
+  fechaEfectiva: string; // YYYY-MM-DD
+  motivo?: string;
+  observaciones?: string;
+  ejecutadoPor: string; // nombre del usuario que ejecuta la operación
+  ejecutadoPorId?: string;
+  fechaOperacion: string; // ISO
+}
+
+export type TipoAnexoContractual =
+  | 'MODIFICACION_CONTRACTUAL'
+  | 'PRORROGA'
+  | 'INVENTARIO'
+  | 'GARANTIA_ADICIONAL'
+  | 'CONDICIONES_PARTICULARES'
+  | 'OTRO';
+
+export type EstadoAnexoContractual = 'BORRADOR' | 'CONFIRMADO' | 'SUPERSEDIDO';
+
+/**
+ * Anexo contractual versionado.
+ * REGLA: un anexo CONFIRMADO no se modifica; si necesita corrección se crea una
+ * nueva versión (nuevo anexo con version+1 y anexoOriginalId) y el anterior pasa
+ * a SUPERSEDIDO, conservándose el histórico completo.
+ */
+export interface AnexoContractual {
+  id: string; // anexoId
+  contratoId: string;
+  propietarioId?: string;
+  inmuebleId: string;
+  habitacionId?: string;
+  tipo: TipoAnexoContractual;
+  titulo: string;
+  descripcion?: string;
+  fecha: string; // YYYY-MM-DD fecha del anexo
+  contenido: string; // texto o datos estructurados serializados
+  version: number;
+  estado: EstadoAnexoContractual;
+  anexoOriginalId?: string; // si es una nueva versión de un anexo anterior
+  referenciaDocumental?: string; // p.ej. ruta Storage o URL del documento
+  fechaCreacion: string; // ISO
+  fechaConfirmacion?: string; // ISO
+  creadoPor: string;
+  creadoPorId?: string;
+}
+
+/** Concepto económico del finiquito. favoreceA indica a quién beneficia el importe. */
+export type TipoConceptoFiniquito =
+  | 'RENTA_PENDIENTE'
+  | 'SUMINISTROS_PENDIENTES'
+  | 'DANOS'
+  | 'OTROS_CARGOS_PROPIETARIO'
+  | 'DEVOLUCION_FIANZA'
+  | 'GARANTIAS_A_DEVOLVER'
+  | 'SALDOS_A_FAVOR_INQUILINO';
+
+export type EstadoConceptoFiniquito = 'PENDIENTE' | 'PARCIAL' | 'LIQUIDADO';
+
+export interface ConceptoFiniquito {
+  id: string;
+  tipo: TipoConceptoFiniquito;
+  favoreceA: 'PROPIETARIO' | 'INQUILINO';
+  concepto: string;
+  periodoRelacionado?: string; // p.ej. "2026-05" si deriva de un cobro concreto (solo referencia)
+  importeReclamado: number;
+  importePendiente: number;
+  importePagado: number; // pagado por el inquilino (cargos del propietario)
+  importeDevuelto: number; // devuelto al inquilino (conceptos a su favor)
+  estado: EstadoConceptoFiniquito;
+  fechaCreacion: string; // ISO
+  creadoPor: string;
+}
+
+export type EstadoFiniquito = 'ABIERTO' | 'CERRADO';
+
+/**
+ * Finiquito económico de cierre del contrato.
+ * saldoFinal > 0: el inquilino debe pagar al propietario.
+ * saldoFinal < 0: el propietario debe devolver al inquilino.
+ * Nunca modifica retroactivamente los cobros históricos (registroCobros).
+ */
+export interface FiniquitoContrato {
+  contratoId: string;
+  inmuebleId: string;
+  habitacionId?: string;
+  propietarioId?: string;
+  estado: EstadoFiniquito;
+  conceptos: ConceptoFiniquito[];
+  saldoFinal: number;
+  fechaGeneracion: string; // ISO
+  generadoPor: string;
+  fechaCierre?: string; // ISO
+  cerradoPor?: string;
+  observaciones?: string;
+}
+
+/**
+ * Eventos del ciclo contractual para el sistema de notificaciones (Arena B, GAP 1).
+ * C solo define el contrato de eventos y los puntos de emisión; el dispatcher es de B.
+ */
+export type TipoEventoContrato =
+  | 'CONTRATO_CREADO'
+  | 'CONTRATO_FORMALIZADO'
+  | 'ANEXO_CREADO'
+  | 'CONTRATO_PROXIMO_A_FINALIZAR'
+  | 'CONTRATO_FINALIZADO'
+  | 'FINIQUITO_GENERADO'
+  | 'FINIQUITO_CERRADO';
+
+export interface EventoContrato {
+  tipo: TipoEventoContrato;
+  contratoId: string;
+  inmuebleId: string;
+  habitacionId?: string;
+  propietarioId?: string;
+  fecha: string; // ISO
+  detalle?: string;
+}
 
 export type DictamenAsegurabilidad =
   | 'APTO_RECOMENDADO'
@@ -778,6 +1048,7 @@ export interface ContratoFormalizacion {
   token?: string; // Enlace privado si se comparte
   candidatoId: string;
   inmuebleId: string;
+  habitacionId?: string;
   propietarioId?: string; // ID directo del Propietario arrendador asociado
   solicitudDocId?: string; // Vinculación opcional con solicitud de doc
   
@@ -858,6 +1129,32 @@ export interface ContratoFormalizacion {
   // Cláusulas adicionales editables
   clausulasPersonalizadas: ClausulaPersonalizada[];
 
+  // ---- GAP 2: MODALIDAD CONTRACTUAL Y CICLO DE VIDA ----
+  /** Modalidad jurídica del contrato (ver ModalidadContractual). Si no existe, se infiere del resto de datos. */
+  modalidadContractual?: ModalidadContractual;
+  /** Finalidad o uso pactado (actividad en locales, uso concreto en temporada/habitación). */
+  finalidadUso?: string;
+  /** TEMPORADA: causa/motivo declarado de la temporalidad (dato aportado por el usuario). */
+  motivoTemporalidad?: string;
+  /** Duración pactada en meses (temporada/locales), complementaria a duracionAnios. */
+  duracionMeses?: number;
+  /** Relación histórica: contrato precedente (prórroga/renovación/novación). */
+  contratoOrigenId?: string;
+  /** Relación histórica: contrato que sustituye a este. */
+  contratoDerivadoId?: string;
+  /** IDs de contratos que se derivaron de este (historial hacia delante). */
+  contratosDerivadosIds?: string[];
+  /** Tipo de relación con el contratoOrigenId. */
+  relacionHistoricaTipo?: 'RENOVACION' | 'PRORROGA' | 'SUBROGACION' | 'ORIGINAL';
+  /** Versión dentro de la cadena origen→derivado (1 = contrato inicial). */
+  version?: number;
+  /** Datos formales cuando el contrato alcanza un estado terminal (FINALIZADO / RESCINDIDO / CANCELADO). */
+  finalizacion?: FinalizacionContrato;
+  /** Anexos versionados asociados a este contrato (adendas, prórrogas, inventario, etc.). */
+  anexos?: AnexoContractual[];
+  /** Finiquito económico de cierre (cargos pendientes, fianza a devolver, saldo neto final). */
+  finiquito?: FiniquitoContrato;
+
   // Estado del Expediente
   estado: EstadoFormalizacion;
   
@@ -900,15 +1197,22 @@ export interface ContratoFormalizacion {
 
 export type EstadoCobroAlquiler =
   | 'PENDIENTE'
+  | 'PAGADO'
+  | 'PAGADO_PARCIAL'
+  | 'IMPAGADO'
+  | 'ANULADO'
   | 'RECIBIDO'
   | 'VERIFICADO'
   | 'RETRASADO'
+  | 'RECLAMADO'
+  | 'DEVUELTO'
   | 'INCIDENCIA';
 
 export interface JustificanteCobro {
   id: string;
   nombreArchivo: string;
   url?: string;
+  downloadURL?: string;
   storagePath?: string;
   tipoMime?: string;
   tamanoBytes?: number;
@@ -934,6 +1238,7 @@ export interface CobroPeriodo {
   id: string; // "cobro_{contratoId}_{anio}_{mes}"
   inmuebleId: string;
   contratoId: string;
+  habitacionId?: string;
   inquilinoId: string;
   propietarioId: string;
 
@@ -976,6 +1281,222 @@ export interface CobroPeriodo {
   fechaRegistro?: string;
   ultimaModificacion?: string;
   historialCambios: HistorialCobroItem[];
+}
+
+// ==========================================
+// FASE 2: GASTOS — EXPLOTACIÓN vs FINANCIACIÓN
+// ==========================================
+
+/**
+ * Naturaleza contable del gasto (clave de la Fase 2):
+ * - EXPLOTACION: costes de mantener y alquilar la vivienda (comunidad, IBI,
+ *   seguros, reparaciones, comisiones...). Computan al RESULTADO OPERATIVO del
+ *   alquiler y, en su mayoría, son fiscalmente deducibles.
+ * - FINANCIACION: cuotas de financiación ajena (hipoteca). Son una SALIDA DE
+ *   CAJA del propietario, pero NO un gasto operativo del inmueble: la parte de
+ *   capital es amortización de deuda (no es gasto); sólo los intereses serían
+ *   gasto financiero. Por eso se registran aparte y nunca se mezclan con los
+ *   gastos de explotación en los cuadres de rentabilidad.
+ */
+export type TipoGasto = 'EXPLOTACION' | 'FINANCIACION';
+
+export type CategoriaGasto =
+  // --- Explotación ---
+  | 'COMUNIDAD'
+  | 'IBI'
+  | 'SEGURO_HOGAR'
+  | 'SEGUROS'
+  | 'SUMINISTROS'
+  | 'MANTENIMIENTO'
+  | 'REPARACION'
+  | 'MANTENIMIENTO_REPARACION'
+  | 'ADMINISTRACION'
+  | 'GESTION'
+  | 'LIMPIEZA'
+  | 'IMPUESTOS_TASAS'
+  | 'ELECTRODOMESTICOS'
+  | 'MOBILIARIO'
+  | 'REFORMAS'
+  | 'OTRO'
+  | 'OTRO_EXPLOTACION'
+  // --- Financiación ---
+  | 'CUOTA_HIPOTECARIA'
+  | 'INTERESES_PRESTAMO'
+  | 'OTRO_FINANCIACION';
+
+export type EstadoGasto = 'PENDIENTE' | 'PAGADO' | 'ANULADO' | 'EN_REVISION';
+
+export interface Gasto {
+  id: string; // "gas_{inmuebleId}_{timestamp}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario (igual que contratos)
+  contratoId?: string; // Opcional: vinculación a un contrato/período
+
+  tipo: TipoGasto;
+  categoria: CategoriaGasto;
+  concepto: string;
+  proveedor?: string;
+
+  importe: number; // Importe total del gasto (EUR)
+  estado: EstadoGasto;
+
+  // Fechas y período (para agrupación mensual/anual)
+  fechaDevengo?: string; // YYYY-MM-DD (fecha de la factura / período)
+  fechaPago?: string; // YYYY-MM-DD (cuando se abona)
+  periodoMesAnio?: string; // YYYY-MM
+
+  // ¿Quién soporta económicamente el coste según el contrato?
+  aCargoDe: 'arrendador' | 'arrendatario';
+  deducible?: boolean; // Deducible en IRPF del alquiler (gastos de explotación)
+
+  // Desglose financiero (solo FINANCIACION / hipoteca)
+  capitalAmortizado?: number; // Parte de la cuota que amortiza deuda (no es gasto)
+  intereses?: number; // Parte de intereses (gasto financiero)
+
+  metodoPago?: 'transferencia' | 'domiciliacion' | 'bizum' | 'efectivo' | 'otro';
+  justificanteUrl?: string;
+  justificantePath?: string;
+  notas?: string;
+
+  // Trazabilidad de origen (reparaciones / OT / incidencias / seguros)
+  origen?: 'MANUAL' | 'RECURRENTE' | 'REPARACION' | 'ORDEN_TRABAJO' | 'INCIDENCIA' | 'SEGURO' | 'OTRO' | string;
+  origenId?: string; // ID del registro origen (ej: trabajoId)
+  trabajoId?: string; // ID de la Orden de Trabajo vinculada
+  ordenTrabajoId?: string; // Alias de compatibilidad con trabajoId
+  incidenciaId?: string; // ID de la Incidencia vinculada
+  proyectoId?: string; // ID del Proyecto de Reforma vinculado
+  partidaId?: string; // ID de la partida vinculada si aplica
+  profesionalId?: string; // ID del Profesional que ejecutó el trabajo
+  presupuestoId?: string; // ID del Presupuesto previo asociado si existió
+  fecha?: string; // Alias de conveniencia
+  pagado?: boolean; // Alias de conveniencia
+  esDeducible?: boolean; // Alias fiscal
+  tipoDeducible?: 'DEDUCIBLE' | 'NO_DEDUCIBLE';
+  ejercicioFiscal?: number;
+  documento?: { id: string; nombre: string; url: string; storagePath?: string };
+  documentos?: { id: string; nombre: string; url: string; storagePath?: string }[];
+  inmuebleDireccion?: string;
+
+  // Trazabilidad
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Frecuencia de un gasto recurrente (plantilla que genera apuntes `Gasto`).
+ */
+export type FrecuenciaRecurrente = 'MENSUAL' | 'TRIMESTRAL' | 'ANUAL';
+
+/**
+ * Plantilla de gasto periódico (comunidad mensual, IBI anual, cuota hipotecaria
+ * mensual…). No es un gasto en sí: el sistema materializa documentos `Gasto`
+ * en estado PENDIENTE a partir de ella. Los apuntes ya generados nunca se
+ * borran al desactivar/eliminar la plantilla (se conserva el histórico).
+ */
+export interface GastoRecurrente {
+  id: string; // "rec_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario
+
+  tipo: TipoGasto;
+  categoria: CategoriaGasto;
+  concepto: string;
+  proveedor?: string;
+  importe: number;
+
+  frecuencia: FrecuenciaRecurrente;
+  diaVencimiento: number; // Día del mes (1-28) de devengo de cada apunte
+  fechaInicio: string; // YYYY-MM (primer período)
+  fechaFin?: string; // YYYY-MM opcional (último período)
+
+  aCargoDe: 'arrendador' | 'arrendatario';
+  deducible?: boolean;
+  metodoPago?: Gasto['metodoPago'];
+  notas?: string;
+
+  activo: boolean;
+  ultimoPeriodoGenerado?: string; // YYYY-MM (cursór de materialización)
+
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * FASE 2.3 — Préstamo / financiación ajena (normalmente hipoteca). Describe las
+ * condiciones para calcular el cuadro de amortización (sistema francés de cuota
+ * constante) y así separar automáticamente capital e intereses en cada cuota.
+ * Al crearse se enlaza con una plantilla `GastoRecurrente` que materializa los
+ * recibos; este documento sólo guarda las condiciones financieras.
+ */
+export type TipoPrestamo = 'HIPOTECARIO' | 'PERSONAL';
+
+/**
+ * FASE 2.4 — Modalidad de la amortización anticipada:
+ * - REDUCE_CUOTA: se mantiene el plazo y baja el importe mensual.
+ * - REDUCE_PLAZO: se mantiene la cuota y el préstamo vence antes.
+ */
+export type ModalidadAmortizacion = 'REDUCE_CUOTA' | 'REDUCE_PLAZO';
+
+/** Amortización anticipada (cancelación parcial de principal) en un mes dado. */
+export interface AmortizacionAnticipada {
+  id: string;
+  periodo: string; // YYYY-MM en el que se aplica (al inicio del recibo)
+  importe: number;
+  modalidad: ModalidadAmortizacion;
+}
+
+/**
+ * Tramo de tipo de interés variable (p. ej. revisión anual del Euribor): a
+ * partir de `fechaInicio` pasa a aplicarse `tasaInteresAnual`. El primer tipo
+ * es el `tasaInteresAnual` del propio préstamo.
+ */
+export interface TramoTipoInteres {
+  id: string;
+  fechaInicio: string; // YYYY-MM desde el que rige este TIN
+  tasaInteresAnual: number;
+}
+
+/**
+ * FASE 2.4 — Tipo de carencia inicial:
+ * - TOTAL: no se paga nada durante la carencia; los intereses se capitalizan
+ *   (se añaden al saldo vivo).
+ * - PARCIAL: sólo se pagan intereses; no se amortiza capital.
+ */
+export type TipoCarencia = 'TOTAL' | 'PARCIAL';
+
+export interface Prestamo {
+  id: string; // "prest_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  propietarioId: string; // Clave de aislamiento por propietario
+
+  tipo: TipoPrestamo;
+  descripcion?: string;
+  entidad?: string; // Banco / acreedor
+
+  capitalInicial: number; // Principal prestado (EUR)
+  tasaInteresAnual: number; // TIN inicial en porcentaje (p.ej. 3,25 para el 3,25%)
+  plazoMeses: number;
+  fechaInicio: string; // YYYY-MM (primera cuota)
+  diaVencimiento: number; // Día de cargo (1-28)
+
+  // FASE 2.4 — flexibilidad financiera
+  carenciaMeses?: number; // Meses iniciales de carencia (0 por defecto)
+  tipoCarencia?: TipoCarencia; // 'TOTAL' | 'PARCIAL'
+  tramosTipo?: TramoTipoInteres[]; // Revisiones de tipo (variable)
+  amortizaciones?: AmortizacionAnticipada[]; // Amortizaciones anticipadas
+
+  gastoRecurrenteId?: string; // Plantilla vinculada que genera los recibos
+  activo: boolean;
+  notas?: string;
+
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ==========================================
@@ -1073,7 +1594,6 @@ export interface SolicitudSeguroImpago {
   referenciaUnica: string; // e.g. "REF-IMPAGO-2026-0819-A8F"
   candidatoId: string;
   inmuebleId: string;
-  propietarioId?: string; // ID del propietario arrendador vinculante
   inmuebleNombre: string;
   inmuebleDireccion: string;
   inmuebleCiudad: string;
@@ -1169,13 +1689,16 @@ export type EstadoUsuario = 'ACTIVO' | 'PENDIENTE' | 'BLOQUEADO' | 'INACTIVO';
 
 export interface UsuarioApp {
   id: string;
+  uid?: string; // Alias auth
   authUid?: string;
   nombre: string;
   apellidos?: string;
   email: string;
   telefono?: string;
   tipoPerfil: TipoPerfilUsuario;
+  rol?: string; // Alias
   estado: EstadoUsuario;
+  activo?: boolean; // Flag de estado
   roles: string[];
   permisos: string[];
   inmuebleIds?: string[]; // IDs de inmuebles a los que tiene acceso
@@ -1190,55 +1713,44 @@ export interface UsuarioApp {
   creadoPor?: string;
 }
 
-export type TipoProfesional =
-  | 'AUTONOMO'
-  | 'EMPRESA'
-  | 'PROFESIONAL_INDIVIDUAL'
-  | 'PARTICULAR'
-  | 'OTRO';
-
-export type EstadoProfesional =
-  | 'ACTIVO'
-  | 'INACTIVO'
-  | 'PENDIENTE_VALIDACION'
-  | 'BLOQUEADO';
+export type TipoProfesional = 'EMPRESA' | 'AUTONOMO' | 'PARTICULAR' | 'PROFESIONAL_INDIVIDUAL' | 'OTRO';
+export type EstadoProfesional = 'ACTIVO' | 'INACTIVO' | 'PAUSADO' | 'PENDIENTE_VALIDACION' | 'BLOQUEADO';
 
 export interface ServicioProfesional {
-  id?: string;
-  especialidad: string;
+  id: string;
   nombre: string;
   descripcion?: string;
-  precioEstimado?: number;
+  especialidad: string;
+  precioOrientativo?: number;
 }
 
 export interface DocumentoProfesional {
   id: string;
   nombre: string;
-  tipo:
-    | 'SEGURO_RC'
-    | 'ALTA_IAE'
-    | 'PREVENCION_RIESGOS'
-    | 'CERTIFICADO_CONTRATISTA'
-    | 'TITULO_OFICIAL'
-    | 'OTRO';
-  tamano?: number;
-  storagePath: string;
-  downloadUrl: string;
+  tipo: string;
+  url?: string;
+  downloadUrl?: string;
+  storagePath?: string;
   fechaSubida: string;
-  subidoPor: string;
+  tamano?: number;
+  subidoPor?: string;
 }
 
 export interface ZonaServicio {
-  id: string;
+  id?: string;
   provincia: string;
   municipio?: string;
+  municipios?: string[];
   localidad?: string;
   codigosPostales?: string[];
-  radioKm?: number;
+  esTodaProvincia?: boolean;
 }
 
 export interface Profesional {
   id: string;
+  usuarioId?: string; // Vinculado a UsuarioApp cuando se registre
+  creadoPorPropietarioId?: string; // Si fue creado manualmente por un propietario (profesional privado)
+  esPrivado?: boolean; // Privado de un propietario hasta que se registre o comparta
   tipo: TipoProfesional;
   nombre?: string;
   nombreComercial: string;
@@ -1251,23 +1763,20 @@ export interface Profesional {
   web?: string;
   descripcion?: string;
   especialidades: string[]; // Nombres o IDs de especialidades
-  servicios?: ServicioProfesional[];
+  servicios?: (ServicioProfesional | string)[];
   estado?: EstadoProfesional;
-  activo: boolean; // compatibilidad
+  activo: boolean;
+  disponible?: boolean;
+  propietarioId?: string;
   zonasServicio: ZonaServicio[];
   inmuebleIdsAsignados?: string[]; // Viviendas asignadas donde presta servicio
   documentos?: DocumentoProfesional[];
   observaciones?: string;
-  creadoPor?: string;
-  actualizadoPor?: string;
-  usuarioId?: string; // Vinculado a UsuarioApp cuando se registre
-  creadoPorPropietarioId?: string; // Si fue creado manualmente por un propietario (profesional privado)
-  esPrivado?: boolean; // Privado de un propietario hasta que se registre o comparta
-  tokenInvitacion?: string; // Token para invitarlo a registrarse
   valoracionMedia?: number;
   totalValoraciones?: number;
   fechaAlta?: string;
   fechaActualizacion?: string;
+  tokenInvitacion?: string; // Token para invitarlo a registrarse
   createdAt: string;
   updatedAt: string;
 }
@@ -1349,6 +1858,11 @@ export const PERMISOS_SISTEMA: PermisoDefinicion[] = [
   { codigo: 'seguros.ver', nombre: 'Ver Seguros de Impago', categoria: 'seguros', descripcion: 'Consultar expedientes de pólizas' },
   { codigo: 'seguros.crear', nombre: 'Crear Solicitudes de Seguro', categoria: 'seguros', descripcion: 'Iniciar trámites de asegurabilidad' },
   { codigo: 'seguros.tramitar', nombre: 'Tramitar con Aseguradoras', categoria: 'seguros', descripcion: 'Enviar expedientes vía Gmail API' },
+
+  { codigo: 'tesoreria.ver', nombre: 'Ver Tesorería', categoria: 'tesoreria', descripcion: 'Consultar liquidaciones, gastos de tesorería y movimientos (BLOQUE B)' },
+  { codigo: 'tesoreria.liquidar', nombre: 'Generar y Aprobar Liquidaciones', categoria: 'tesoreria', descripcion: 'Crear borradores de liquidación y aprobarlas para pago' },
+  { codigo: 'tesoreria.pagar', nombre: 'Pagar y Reversar Liquidaciones', categoria: 'tesoreria', descripcion: 'Registrar pago con evidencia y reversión con motivo (trazable)' },
+  { codigo: 'tesoreria.sepa', nombre: 'Ficheros SEPA (PAIN.008/001)', categoria: 'tesoreria', descripcion: 'Preparar y validar ficheros SEPA. Solo preparación: sin envío bancario' },
 
   { codigo: 'administracion.usuarios', nombre: 'Gestión de Usuarios', categoria: 'administracion', descripcion: 'Crear, editar, activar y bloquear usuarios' },
   { codigo: 'administracion.permisos', nombre: 'Gestión de Permisos', categoria: 'administracion', descripcion: 'Asignar roles y permisos granulares' },
@@ -1450,6 +1964,8 @@ export interface ModulosConfig {
   hipotecas: boolean;
   patrimonio: boolean;
   incidencias: boolean;
+  // BLOQUE B (integración canónica 2026-09-20)
+  tesoreria: boolean;
 }
 
 export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
@@ -1465,119 +1981,401 @@ export const DEFAULT_MODULOS_CONFIG: ModulosConfig = {
   tesoreria: true,
   hipotecas: false,
   patrimonio: false,
-  incidencias: true,
+  incidencias: false,
+  tesoreria: true,
 };
 
-// =========================================================================
-// BLOQUE 4: GESTIÓN DE INCIDENCIAS, MANTENIMIENTO, SEGUROS Y SINIESTROS
-// =========================================================================
+
+// ==========================================================
+// FASE 3 — RECOMERCIALIZACIÓN INTELIGENTE DEL INMUEBLE
+// Ciclo: salida del inquilino → inspección/IA → reformas/ROI →
+// pricing → estrategia de comercialización → nuevo contrato/venta.
+// INVARIANTE: se reutiliza siempre el mismo inmuebleId (histórico).
+// ==========================================================
+
+export type EstadoRecomercializacion =
+  | 'BORRADOR'
+  | 'SALIDA_NOTIFICADA'
+  | 'REVISION_PENDIENTE'
+  | 'FOTOS_ACTUALIZADAS'
+  | 'VALORACION_COMPLETADA'
+  | 'DECISION_ESTRATEGIA'
+  | 'EN_COMERCIALIZACION'
+  | 'CERRADO_REARRENDADO'
+  | 'CERRADO_VENDIDO'
+  | 'CANCELADO';
+
+export type DestinoInmueble =
+  | 'ALQUILER_TRADICIONAL'
+  | 'ALQUILER_HABITACIONES'
+  | 'ALQUILER_TEMPORAL'
+  | 'VENTA'
+  | 'INDECISO';
+
+export type ModalidadComercializacion = 'GESTION_PROPIA' | 'INMOBILIARIA' | 'AMBAS';
+
+export type EstanciaFoto =
+  | 'salon'
+  | 'cocina'
+  | 'bano'
+  | 'dormitorio'
+  | 'terraza'
+  | 'exterior'
+  | 'otro';
+
+export interface FotoInspeccion {
+  id: string;
+  estancia: EstanciaFoto;
+  url: string;
+  storagePath?: string;
+  fecha: string; // ISO
+  analisisIa?: {
+    observaciones: string[]; // Redacción no asertiva / prudente
+    sugerenciasMejora: string[];
+    // FASE 3.3: prioridad orientativa de revisión (no una certeza de daño)
+    prioridad?: 'baja' | 'media' | 'alta';
+    // 'gemini' = análisis multimodal real; 'heuristico' = respaldo sin API key
+    motor?: 'gemini' | 'heuristico';
+    analizFecha?: string;
+  };
+}
+
+export interface DatosSalidaInquilino {
+  fechaComunicacion?: string; // ISO: notificación del desistimiento/fin
+  fechaPrevistaSalida?: string; // ISO: desalojo pactado
+  fechaEntregaLlaves?: string; // ISO: inspección y recepción de llaves
+  observaciones?: string;
+  depositoFianzaADevolver?: number;
+  contratoEstado?: 'ACTIVO' | 'EN_PROCESO_RESOLUCION' | 'FINALIZADO_LIQUIDADO';
+}
+
+/**
+ * Datos catastrales del activo (FASE 3.5.1). El propietario puede
+ * transcribirlos desde el IBI / la Sede Electrónica del Catastro; la
+ * plataforma puede completar dirección y coordenadas con el servicio
+ * público OVC (sólo datos abiertos; superficie construida, año y valor
+ * catastral NO los sirve ese servicio sin convenio).
+ */
+export interface DatosCatastrales {
+  referenciaCatastral: string;
+  superficieCatastralConstruida?: number; // m² construidos catastrales
+  anioConstruccion?: number;
+  valorCatastral?: number;
+  usoCatastral?: string; // p. ej. "V: Vivienda"
+  planta?: string;
+  direccionCatastral?: string; // Domicilio normalizado (ldt) por la OVC
+  latitud?: number;
+  longitud?: number;
+  fuente?: 'manual' | 'catastro_ovc';
+  fechaConsulta?: string; // ISO
+  notas?: string;
+}
+
+/** Testigo/manual de mercado de la misma zona y tipología (FASE 3.5). */
+export interface ComparableMercado {
+  id: string;
+  fuente?: string; // Portal, inmobiliaria, enlace…
+  descripcion?: string;
+  metros?: number;
+  precioAlquilerMensual?: number;
+  precioVenta?: number;
+  // FASE 3.5.1 — características para comparar perfiles homogéneos
+  habitaciones?: number;
+  banos?: number;
+  tipoInmueble?: string;
+  planta?: string;
+  estadoConservacion?: 'nuevo' | 'bueno' | 'reformado' | 'a_reformar' | 'desconocido';
+  distanciaKm?: number; // distancia aproximada al activo
+}
+
+export interface PricingRecomercializacion {
+  rentaAnterior?: number;
+  escenarioConservador?: number;
+  escenarioRecomendado?: number;
+  escenarioMaximo?: number;
+  valoracionVentaEstimada?: number;
+  horquillaVentaMin?: number;
+  horquillaVentaMax?: number;
+  precioSalidaRecomendado?: number;
+  plazoMedioComercializacionDias?: number;
+  notasCalculo?: string;
+  fechaCalculo?: string; // ISO
+  // FASE 3.5 — hipótesis y datos de cálculo (trazabilidad del precio)
+  ipcAcumuladoPct?: number; // Variación por IPC desde el contrato anterior (%)
+  ajusteMercadoPct?: number; // Ajuste manual de mercado/zona (%) sin comparables
+  mejoraRentaConfirmada?: number; // Suma de incrementos de renta de mejoras confirmadas (€/mes)
+  precioM2Alquiler?: number; // €/m² al mes resultante del escenario recomendado
+  precioM2Venta?: number; // €/m² de venta estimado
+  comparables?: ComparableMercado[];
+  motor?: 'ia' | 'calculadora'; // Quién produjo la última estimación
+}
+
+export type CategoriaMejora =
+  | 'PINTURA'
+  | 'ILUMINACION'
+  | 'COCINA'
+  | 'BANO'
+  | 'SUELOS'
+  | 'MOBILIARIO'
+  | 'LIMPIEZA_PUESTA_A_PUNTO'
+  | 'EFICIENCIA_ENERGETICA'
+  | 'REPARACION'
+  | 'OTRA';
+
+export interface MejoraROI {
+  id: string;
+  actuacion: string;
+  categoria?: CategoriaMejora;
+  costeEstimadoMin?: number;
+  costeEstimadoMax?: number;
+  incrementoRentaMensual?: number;
+  incrementoValoracion?: number;
+  paybackMeses?: number;
+  // Impacto orientativo en la presentación del anuncio (no una certeza de daño)
+  impacto?: 'bajo' | 'medio' | 'alto';
+  confirmadaPorPropietario?: boolean;
+  profesionalIdSolicitado?: string;
+  presupuestoSolicitadoFecha?: string; // ISO
+  origen?: 'ia' | 'manual';
+}
+
+export interface KitPublicacion {
+  titulo?: string;
+  descripcion?: string;
+  puntosFuertes?: string[];
+  entorno?: string[];
+  extras?: string[]; // p. ej. "Ascensor (verificar en la visita)"
+  motor?: 'ia' | 'heuristico';
+  fechaGeneracion?: string;
+}
+
+export interface ComercializacionExpediente {
+  inmobiliariasContactadasIds: string[];
+  enlaceAnuncioManualGenerado?: boolean;
+  kitPublicacion?: KitPublicacion;
+  fechaPublicacion?: string; // ISO
+  // FASE 3.6 — cierre del ciclo
+  fechaInicioComercializacion?: string; // ISO
+  fechaCierre?: string; // ISO
+  resultadoCierre?: 'REARRENDADO' | 'VENDIDO';
+  nuevoContratoId?: string; // enlace al contrato que reabre el ciclo (mismo inmuebleId)
+}
+
+export interface ExpedienteRecomercializacion {
+  id: string;
+  inmuebleId: string; // INVARIANTE: mismo inmuebleId, se conserva el histórico
+  propietarioId: string; // Clave de aislamiento por propietario
+  contratoAnteriorId?: string;
+  fechaInicio: string; // ISO
+  estado: EstadoRecomercializacion;
+  destinoPrevisto: DestinoInmueble;
+  modalidadElegida?: ModalidadComercializacion;
+
+  datosSalida?: DatosSalidaInquilino;
+  revisionFotografica?: {
+    fechaCarga?: string;
+    fotografias: FotoInspeccion[];
+  };
+  mejorasPropuestas?: MejoraROI[];
+  pricing?: PricingRecomercializacion;
+  comercializacion?: ComercializacionExpediente;
+
+  notasInternas?: string;
+  creadoPor?: string;
+  creadoPorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Directorio de inmobiliarias (bolsa para delegar/comparar la comercialización)
+export interface InmobiliariaDirectorio {
+  id: string;
+  nombreComercial: string;
+  razonSocial?: string;
+  cifNif?: string;
+  logoUrl?: string;
+  telefono: string;
+  email: string;
+  web?: string;
+
+  // Cobertura geográfica
+  localidad: string;
+  provincia: string;
+  codigosPostales: string[];
+
+  // Servicios y especialidades
+  operaVenta: boolean;
+  operaAlquiler: boolean;
+  operaHabitaciones: boolean;
+  especialidades: string[];
+  comisionMediaVenta?: string;
+  comisionMediaAlquiler?: string;
+
+  // Estado y verificación
+  origen: 'REGISTRADA_EN_PLATAFORMA' | 'LOCALIZADA_EXTERNA';
+  verificada: boolean;
+  esPatrocinada: boolean;
+  activo: boolean;
+
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Propuestas (RFP) emitidas por inmobiliarias para un expediente
+export type EstadoPropuestaInmobiliaria = 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'EXPIRADA';
+
+export interface PropuestaInmobiliaria {
+  id: string;
+  expedienteId: string;
+  inmuebleId: string;
+  propietarioId: string; // Aislamiento
+  inmobiliariaId: string;
+  fechaPropuesta: string; // ISO
+  honorariosPropuestos: string;
+  plazoEstimadoDias: number;
+  serviciosIncluidos: string[];
+  estrategiaResumen: string;
+  estado: EstadoPropuestaInmobiliaria;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// Lead/contacto de intermediación con una inmobiliaria
+export type EstadoLeadInmobiliario =
+  | 'SOLICITADO'
+  | 'CONTACTADO'
+  | 'ACUERDO_FIRMADO'
+  | 'DESCARTADO';
+
+export interface LeadInmobiliario {
+  id: string;
+  inmuebleId: string;
+  propietarioId: string; // Aislamiento
+  inmobiliariaId: string;
+  fechaSolicitud: string; // ISO
+  tipoOperacion: 'ALQUILER' | 'VENTA' | 'HABITACIONES';
+  estado: EstadoLeadInmobiliario;
+  notas?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// ============================================================
+// BLOQUE 4 — INCIDENCIAS, SEGUROS Y MANTENIMIENTO
+// ============================================================
 
 export type CategoriaIncidencia =
-  | 'AGUA'
-  | 'ELECTRICIDAD'
   | 'FONTANERIA'
-  | 'CLIMATIZACION'
-  | 'ELECTRODOMESTICO'
+  | 'ELECTRICIDAD'
+  | 'CALEFACCION_ACS'
   | 'CERRAJERIA'
+  | 'ELECTRODOMESTICOS'
   | 'HUMEDADES'
-  | 'ESTRUCTURAL'
-  | 'COMUNIDAD'
-  | 'PLAGAS'
-  | 'OTRO';
+  | 'CARPINTERIA'
+  | 'PINTURA'
+  | 'CRISTALERIA'
+  | 'PLAGAS_SANEAMIENTO'
+  | 'LIMPIEZA'
+  | 'OTROS';
 
-export type PrioridadIncidencia =
-  | 'URGENTE'
-  | 'ALTA'
-  | 'NORMAL'
-  | 'BAJA';
+export type PrioridadIncidencia = 'BAJA' | 'MEDIA' | 'NORMAL' | 'ALTA' | 'URGENTE';
 
 export type EstadoIncidencia =
   | 'ABIERTA'
-  | 'EN_ANALISIS'
-  | 'PENDIENTE_INFORMACION'
-  | 'PENDIENTE_SEGURO'
-  | 'PENDIENTE_PROFESIONAL'
+  | 'REGISTRADA'
+  | 'REPORTADA'
+  | 'EN_VALORACION'
+  | 'PRESUPUESTOS'
+  | 'ASIGNADA'
   | 'EN_REPARACION'
-  | 'PENDIENTE_RESOLUCION'
+  | 'EN_CURSO'
   | 'RESUELTA'
   | 'CERRADA'
-  | 'CANCELADA';
+  | 'CANCELADA'
+  | 'RECHAZADA';
 
 export type OrigenIncidencia =
   | 'INQUILINO'
   | 'PROPIETARIO'
-  | 'ADMINISTRADOR'
   | 'INSPECCION'
-  | 'COMUNIDAD'
+  | 'MANTENIMIENTO_PREVENTIVO'
+  | 'REFORMA_ROI'
   | 'OTRO';
 
 export type ResponsabilidadIncidencia =
-  | 'PENDIENTE_DE_DETERMINAR'
+  | 'PENDIENTE_DETERMINAR'
   | 'PROPIETARIO'
   | 'INQUILINO'
-  | 'GARANTIA'
-  | 'SEGURO'
-  | 'PROFESIONAL'
   | 'COMUNIDAD'
   | 'TERCERO'
-  // Compatibilidad con registros existentes
-  | 'POSIBLE_PROPIETARIO'
-  | 'POSIBLE_INQUILINO'
-  | 'POSIBLE_COMUNIDAD'
-  | 'POSIBLE_TERCERO'
-  | 'INDETERMINADA'
-  | 'PENDIENTE_COMPROBACION';
+  | 'INDETERMINADA';
 
 export type EstadoSeguroIncidencia =
-  | 'POSIBLEMENTE_CUBIERTA'
-  | 'NO_CUBIERTA_SEGUN_DATOS'
-  | 'COBERTURA_DUDOSA'
-  | 'SIN_SEGURO_APLICABLE'
-  | 'PENDIENTE_COMPROBACION';
+  | 'PENDIENTE_VERIFICACION'
+  | 'NO_APLICA'
+  | 'POSIBLE_COBERTURA'
+  | 'SINIESTRO_APERTURADO'
+  | 'RECHAZADO_ASEGURADORA'
+  | 'INDEMNIZADO';
 
 export type SeguroEstadoIncidencia = EstadoSeguroIncidencia;
 
 export type ViaActuacionIncidencia =
-  | 'REPARACION_DIRECTA'
-  | 'SOLICITAR_INFORMACION'
-  | 'PROFESIONAL'
+  | 'PROFESIONAL_DIRECTO'
   | 'SEGURO'
   | 'COMUNIDAD'
-  | 'TERCERO';
+  | 'INQUILINO_GESTIONA'
+  | 'GARANTIA_CONSTRUCTOR';
 
 export interface AdjuntoIncidencia {
   id: string;
+  nombre: string;
+  url: string;
+  storagePath?: string;
+  tipo?: 'IMAGEN' | 'VIDEO' | 'DOCUMENTO' | 'OTRO' | 'imagen' | 'video' | 'documento';
+  fechaSubida: string; // ISO
+  tamano?: number;
+  tamanoBytes?: number;
+  mimeType?: string;
   incidenciaId?: string;
   inmuebleId?: string;
   propietarioId?: string;
-  nombre: string;
-  tipo: 'imagen' | 'video' | 'documento';
-  mimeType?: string;
+  trabajoId?: string;
+  subidoPor?: string;
+}
+
+export interface FotoIncidencia {
+  id: string;
   url: string;
   storagePath?: string;
-  tamanoBytes?: number;
-  tamano?: number;
-  fechaSubida: string;
-  subidoPor?: string;
-  observaciones?: string;
+  etiqueta?: string;
+  fechaSubida: string; // ISO
 }
 
 export interface CausaIncidenciaIA {
-  causa: string;
-  probabilidad?: string;
-  detalles?: string;
+  titulo: string;
+  probabilidad: number; // 0-100
+  explicacion: string;
+  responsabilidadProbable: ResponsabilidadIncidencia;
 }
 
 export interface AnalisisIaIncidencia {
-  urgenciaEstimada: PrioridadIncidencia;
-  posiblesCausas: (string | CausaIncidenciaIA)[];
-  informacionFaltante: string[];
-  posiblesActuaciones: string[];
-  posibleResponsabilidad: ResponsabilidadIncidencia;
-  justificacionResponsabilidad: string;
-  necesidadProfesional: boolean;
-  especialidadRequerida?: string;
-  relacionSeguros?: {
+  id?: string;
+  resumenPericial: string;
+  gravedadEstimada: PrioridadIncidencia;
+  causasPosibles: CausaIncidenciaIA[];
+  actuacionesRecomendadas: string[];
+  estimacionEconomica: {
+    minimo: number;
+    maximo: number;
+    moneda: string;
+  };
+  evaluacionResponsabilidad: {
+    responsableSugerido: ResponsabilidadIncidencia;
+    argumentacionJuridicaLAU: string;
+    articulosAplicables: string[];
+  };
+  evaluacionSeguro: {
     posibleCobertura: EstadoSeguroIncidencia;
     explicacion: string;
     ramoRecomendado?: string;
@@ -1585,9 +2383,19 @@ export interface AnalisisIaIncidencia {
   advertenciaLegal: string;
   fechaAnalisis: string;
   modeloUtilizado?: string;
-
-  // Propiedades opcionales de compatibilidad
+  categoriaSugerida?: CategoriaIncidencia;
+  prioridadSugerida?: PrioridadIncidencia;
+  resumen?: string;
+  posibleCausa?: string;
+  actuacionesSugeridas?: string[];
+  senalesAtencion?: string[];
+  preguntasClave?: string[];
+  motor?: 'ia' | 'heuristico';
+  fecha?: string;
   evaluacionUrgencia?: string;
+  urgenciaEstimada?: PrioridadIncidencia | string;
+  posiblesCausas?: Array<string | { causa?: string; probabilidad?: string }>;
+  informacionFaltante?: string[];
   recomendacionResponsabilidad?: string;
   fundamentoResponsabilidad?: string;
   estimacionCoberturaSeguro?: string;
@@ -1597,6 +2405,7 @@ export interface AnalisisIaIncidencia {
 }
 
 export type AnalisisIncidenciaIA = AnalisisIaIncidencia;
+export type AnalisisIncidencia = AnalisisIaIncidencia;
 
 export interface HistorialIncidenciaItem {
   id: string;
@@ -1624,12 +2433,52 @@ export interface TrabajoProfesionalIncidencia {
   facturaNumero?: string;
   facturaUrl?: string;
   facturaStoragePath?: string;
+  gastoId?: string; // ID del Gasto contable generado
   estadoTrabajo: 'ASIGNADO' | 'PRESUPUESTADO' | 'ACEPTADO' | 'EN_CURSO' | 'FINALIZADO' | 'CANCELADO';
   observaciones?: string;
 }
 
+export type TipoEventoIncidencia =
+  | 'CREACION'
+  | 'CAMBIO_ESTADO'
+  | 'NOTA'
+  | 'FOTO'
+  | 'ANALISIS_IA'
+  | 'PRESUPUESTO'
+  | 'ASIGNACION'
+  | 'RESOLUCION'
+  | 'GASTO'
+  | 'REAPERTURA';
+
+export interface EventoIncidencia {
+  id: string;
+  fecha: string; // ISO
+  tipo: TipoEventoIncidencia;
+  autor?: string;
+  descripcion: string;
+}
+
+export interface OrdenTrabajo {
+  numero: string; // OT-YYYY-NNNN
+  fechaEmision: string; // ISO
+  profesionalId: string;
+  fechaPrevista?: string; // ISO date
+  instrucciones?: string;
+}
+
+export interface ResolucionIncidencia {
+  fechaResolucion: string; // ISO
+  descripcionTrabajo: string;
+  aCargoDe: 'arrendador' | 'arrendatario';
+  importeFinal?: number;
+  deducibleIRPF?: boolean;
+  proveedor?: string;
+  gastoId?: string; // apunte contable generado en el cierre
+}
+
 export interface Incidencia {
   id: string;
+  numero?: string; // INC-YYYY-NNNN
   propietarioId: string;
   inmuebleId: string;
   inmuebleDireccion?: string;
@@ -1639,37 +2488,58 @@ export interface Incidencia {
   inquilinoId?: string;
   inquilinoNombre?: string;
   inquilinoTelefono?: string;
+  expedienteId?: string;
+  mejoraOrigenId?: string;
   titulo: string;
   descripcion: string;
   categoria: CategoriaIncidencia;
   prioridad: PrioridadIncidencia;
   estado: EstadoIncidencia;
   origen: OrigenIncidencia;
-  fechaCreacion: string;
-  fechaActualizacion: string;
+  fechaCreacion?: string;
+  fechaActualizacion?: string;
+  fechaCompromiso?: string;
   fechaCierre?: string;
-  responsabilidad: ResponsabilidadIncidencia;
+  responsabilidad?: ResponsabilidadIncidencia;
   responsabilidadNotas?: string;
   responsabilidadMotivo?: string;
   responsabilidadFechaDecision?: string;
   responsabilidadDecididoPor?: string;
   responsabilidadGarantiaRef?: string;
-  seguroEstado: EstadoSeguroIncidencia;
+  seguroEstado?: EstadoSeguroIncidencia;
   seguroComprobacionNotas?: string;
   viaActuacion?: ViaActuacionIncidencia;
   polizaId?: string;
   siniestroId?: string;
   profesionalId?: string;
   presupuestoId?: string;
-  resolucion?: string;
+  profesionalAsignadoId?: string;
+  profesionalAsignadoNombre?: string;
+  fechaReporte?: string;
+  reportadoPor?: string;
+  origenReporte?: string;
+  ordenTrabajo?: OrdenTrabajo;
+  fechaInicioReparacion?: string;
+  resolucion?: string | ResolucionIncidencia;
   observaciones?: string;
-  creadoPor: string;
-  actualizadoPor: string;
-  fotografias: AdjuntoIncidencia[];
-  documentos: AdjuntoIncidencia[];
+  notasInternas?: string;
+  contactoNombre?: string;
+  contactoTelefono?: string;
+  creadoPor?: string;
+  creadoPorId?: string;
+  actualizadoPor?: string;
+  fotografias?: AdjuntoIncidencia[];
+  fotos?: FotoIncidencia[];
+  documentos?: AdjuntoIncidencia[];
   analisisIa?: AnalisisIaIncidencia;
-  historial: HistorialIncidenciaItem[];
+  inventarioId?: string; // Vinculación a elemento de inventario
+  elementoInventarioId?: string;
+  historial?: HistorialIncidenciaItem[];
+  eventos?: EventoIncidencia[];
   trabajoProfesional?: TrabajoProfesionalIncidencia;
+  presupuestos?: PresupuestoProfesional[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // -------------------------------------------------------------------------
@@ -1681,6 +2551,7 @@ export type TipoPolizaSeguro =
   | 'IMPAGO_ALQUILER'
   | 'RESPONSABILIDAD_CIVIL'
   | 'COMUNIDAD'
+  | 'ELECTRODOMESTICOS'
   | 'OTRO';
 
 export type EstadoPolizaSeguro =
@@ -1688,6 +2559,25 @@ export type EstadoPolizaSeguro =
   | 'VENCIDA'
   | 'CANCELADA'
   | 'EN_TRAMITE';
+
+export type EstadoRenovacionPoliza =
+  | 'VIGENTE'
+  | 'PENDIENTE'
+  | 'PENDIENTE_RENOVACION'
+  | 'RENOVACION_SOLICITADA'
+  | 'RENOVACION_RECIBIDA'
+  | 'RENOVADA'
+  | 'NO_RENOVADA'
+  | 'SUSTITUIDA'
+  | 'CANCELADA';
+
+export type TipoDocumentoPoliza =
+  | 'POLIZA_ORIGINAL'
+  | 'POLIZA_RENOVACION'
+  | 'CARTA_RENOVACION'
+  | 'CONDICIONES_PARTICULARES'
+  | 'RECIBO_PRIMA'
+  | 'OTRO';
 
 export interface DocumentoPoliza {
   id: string;
@@ -1698,18 +2588,123 @@ export interface DocumentoPoliza {
   fechaSubida: string;
 }
 
+export interface DocumentoRenovacionPoliza {
+  id: string;
+  nombre: string;
+  tipo: TipoDocumentoPoliza;
+  url: string;
+  storagePath?: string;
+  fechaRecepcion: string; // YYYY-MM-DD fecha en que se recibió físicamente
+  fechaSubida: string; // ISO
+  subidoPor?: string;
+  subidoPorId?: string;
+  tamanoBytes?: number;
+  mimeType?: string;
+  observaciones?: string;
+}
+
+export interface HistorialPolizaItem {
+  id: string;
+  fecha: string; // ISO
+  usuario: string; // nombre visible
+  usuarioId?: string;
+  accion:
+    | 'CREACION'
+    | 'COMPROBACION_RENOVACION'
+    | 'RENOVACION_SOLICITADA'
+    | 'RENOVACION_RECIBIDA'
+    | 'RENOVACION_CONFIRMADA'
+    | 'MODIFICACION'
+    | 'SUSTITUCION'
+    | 'CANCELACION'
+    | 'NO_RENOVACION'
+    | 'DOCUMENTO_ADJUNTADO'
+    | 'COMPARACION_REALIZADA'
+    | 'ESTADO_MODIFICADO'
+    | 'ALERTA_GENERADA';
+  detalle?: string;
+  resultado?: string;
+  observaciones?: string;
+  estadoAnterior?: string;
+  estadoNuevo?: string;
+  datosAnteriores?: Partial<PolizaSeguro>;
+  datosNuevos?: Partial<PolizaSeguro>;
+}
+
+export interface DatosExtraidosRenovacion {
+  aseguradora?: string;
+  numeroPoliza?: string;
+  fechaInicio?: string;
+  fechaVencimiento?: string;
+  primaAnual?: number;
+  coberturas?: string[];
+  franquicia?: number;
+  limites?: string;
+  cambiosRelevantes?: string[];
+  confianza: 'ALTA' | 'MEDIA' | 'BAJA';
+  fechaExtraccion: string;
+  confirmadoUsuario: boolean;
+  confirmadoPor?: string;
+  fechaConfirmacion?: string;
+  observaciones?: string;
+}
+
+export interface ComparacionPoliza {
+  id: string;
+  polizaAnteriorId: string;
+  polizaNuevaId: string;
+  primaAnterior?: number;
+  primaNueva?: number;
+  diferenciaAbsoluta?: number;
+  variacionPorcentual?: number;
+  fechaInicioAnterior?: string;
+  fechaInicioNueva?: string;
+  fechaVencimientoAnterior?: string;
+  fechaVencimientoNueva?: string;
+  coberturasAnadidas: string[];
+  coberturasEliminadas: string[];
+  coberturasComunes: string[];
+  franquiciaAnterior?: number;
+  franquiciaNueva?: number;
+  diferenciaFranquicia?: number;
+  aumentoPrima: boolean;
+  reduccionCobertura: boolean;
+  aumentoFranquicia: boolean;
+  modificacionLimites: boolean;
+  observaciones?: string;
+  fechaComparacion: string;
+  generadoPor?: string;
+  generadoPorId?: string;
+}
+
+export interface AlertaRenovacionPoliza {
+  polizaId: string;
+  polizaNumero: string;
+  aseguradora: string;
+  inmuebleId?: string;
+  inmuebleDireccion?: string;
+  propietarioId: string;
+  fechaVencimiento: string;
+  diasRestantes: number;
+  nivelProximidad: 60 | 45 | 30 | 15 | 0 | -1; // 0 hoy, -1 vencida
+  estadoRenovacion: EstadoRenovacionPoliza;
+  tipoPoliza: TipoPolizaSeguro;
+  primaAnual?: number;
+  ultimaComprobacion?: string;
+}
+
 export interface PolizaSeguro {
   id: string;
   aseguradora: string;
   numeroPoliza: string;
   tipo: TipoPolizaSeguro;
   propietarioId: string;
-  inmuebleId?: string; // Opcional si es cobertura multirriesgo o global
+  inmuebleId?: string;
   inmuebleDireccion?: string;
   fechaInicio: string; // YYYY-MM-DD
   fechaVencimiento: string; // YYYY-MM-DD
   estado: EstadoPolizaSeguro;
-  coberturas: string[]; // Ej: 'Daños por agua', 'Cerrajería urgente', 'Rotura cristales', etc.
+  coberturas: string[];
   franquicia?: number;
   primaAnual?: number;
   contacto?: {
@@ -1721,6 +2716,27 @@ export interface PolizaSeguro {
   observaciones?: string;
   createdAt: string;
   updatedAt: string;
+
+  // --- CIRCUITO DE RENOVACIÓN ARENA D ---
+  estadoRenovacion?: EstadoRenovacionPoliza;
+  fechaUltimaComprobacion?: string; // ISO
+  usuarioUltimaComprobacion?: string;
+  usuarioUltimaComprobacionId?: string;
+  resultadoUltimaComprobacion?: string;
+  observacionesRenovacion?: string;
+  polizaAnteriorId?: string;
+  polizaSiguienteId?: string;
+  historial?: HistorialPolizaItem[];
+  documentosRenovacion?: DocumentoRenovacionPoliza[];
+  datosExtraidosRenovacion?: DatosExtraidosRenovacion;
+  comparacionUltima?: ComparacionPoliza;
+  comparacionesHistorial?: ComparacionPoliza[];
+  fechaRecepcionRenovacion?: string; // YYYY-MM-DD
+  primaAnterior?: number;
+  alertaGenerada?: boolean;
+  fechaAlertaGenerada?: string;
+  nivelAlertaActual?: 60 | 45 | 30 | 15 | 0 | -1;
+  diasRestantes?: number;
 }
 
 // -------------------------------------------------------------------------
@@ -1739,7 +2755,7 @@ export type EstadoSiniestro =
 export interface ComunicacionSiniestro {
   id: string;
   fecha: string;
-  remitente: string; // Ej: 'Aseguradora', 'Perito', 'Gestor', 'Propietario'
+  remitente: string;
   mensaje: string;
   canal?: 'email' | 'telefono' | 'portal' | 'presencial';
 }
@@ -1765,7 +2781,7 @@ export interface Siniestro {
 }
 
 // =========================================================================
-// BLOQUE 5: PROFESIONALES, SERVICIOS Y GESTIÓN DE TRABAJOS
+// BLOQUE 5: PROFESIONALES, SERVICIOS Y GESTIÓN DE TRABAJOS (OT & PRESUPUESTOS)
 // =========================================================================
 
 export type EspecialidadCodigo =
@@ -1790,6 +2806,38 @@ export type EspecialidadCodigo =
   | 'INGENIERIA'
   | 'SEGUROS'
   | 'OTRO';
+
+// =========================================================================
+// MOTOR DE MATCHING Y COMPATIBILIDAD OPERATIVA DE PROFESIONALES
+// =========================================================================
+
+export type NivelCompatibilidad = 'COMPATIBLE' | 'COMPATIBLE_CON_RESERVA' | 'NO_COMPATIBLE';
+
+export type EstadoZonaCompatibilidad =
+  | 'MUNICIPIO_O_CP_EXACTO'
+  | 'ZONA_COINCIDENTE'
+  | 'PROVINCIAL'
+  | 'ZONA_PROVINCIAL'
+  | 'COBERTURA_GENERAL'
+  | 'ZONA_NO_DETERMINADA'
+  | 'FUERA_DE_ZONA';
+
+export interface ResultadoCompatibilidadProfesional {
+  profesional: Profesional;
+  nivel: NivelCompatibilidad;
+  cumpleEspecialidad: boolean;
+  cumpleZona: boolean;
+  cumpleEstado: boolean;
+  estadoZona: EstadoZonaCompatibilidad;
+  especialidadEvaluada?: EspecialidadCodigo | string;
+  servicioEvaluado?: string;
+  motivo: string;
+  detalles: {
+    especialidad: string;
+    zona: string;
+    estado: string;
+  };
+}
 
 export type TipoTrabajoProfesional =
   | 'REPARACION_INCIDENCIA'
@@ -1826,6 +2874,8 @@ export interface HistorialTrabajoItem {
   accion:
     | 'TRABAJO_CREADO'
     | 'PROFESIONAL_ASIGNADO'
+    | 'PROFESIONAL_CAMBIADO'
+    | 'PROFESIONAL_REASIGNADO'
     | 'PRESUPUESTO_SOLICITADO'
     | 'PRESUPUESTO_RECIBIDO'
     | 'PRESUPUESTO_ACEPTADO'
@@ -1839,6 +2889,9 @@ export interface HistorialTrabajoItem {
     | 'NOTA_ANADIDA';
   estadoAnterior?: EstadoTrabajoProfesional;
   estadoNuevo?: EstadoTrabajoProfesional;
+  profesionalAnteriorId?: string;
+  profesionalNuevoId?: string;
+  motivo?: string;
   observacion?: string;
 }
 
@@ -1868,6 +2921,8 @@ export interface TrabajoProfesional {
   inmuebleId: string;
   inmuebleDireccion?: string;
   incidenciaId?: string; // Opcional (puede no proceder de una incidencia)
+  proyectoId?: string; // Vinculación a Proyecto de Reforma si procede
+  partidaId?: string; // Partida específica de reforma si procede
   profesionalId?: string;
   profesionalNombre?: string;
   profesionalTelefono?: string;
@@ -1875,6 +2930,7 @@ export interface TrabajoProfesional {
   titulo: string;
   descripcion: string;
   categoria: string; // Especialidad o tipo de servicio
+  servicioRequerido?: string; // Servicio específico identificado
   tipoTrabajo?: TipoTrabajoProfesional;
   prioridad: PrioridadIncidencia;
   estado: EstadoTrabajoProfesional;
@@ -1885,10 +2941,16 @@ export interface TrabajoProfesional {
   presupuestoId?: string;
   importeEstimado?: number;
   importeFinal?: number;
-  facturaNumero?: string;
+  gastoId?: string; // ID del Gasto contable generado a partir de este trabajo
+  inventarioId?: string; // Vinculación a elemento de inventario
+  elementoInventarioId?: string;
+  inventarioNombre?: string;
+  inventarioUbicacion?: string;
   observaciones?: string;
   creadoPor: string;
   actualizadoPor: string;
+  fotos?: AdjuntoIncidencia[] | string[];
+  adjuntos?: AdjuntoIncidencia[] | any[];
   documentos?: AdjuntoIncidencia[];
   historial: HistorialTrabajoItem[];
   valoracion?: ValoracionProfesionalTrabajo;
@@ -1896,14 +2958,41 @@ export interface TrabajoProfesional {
   updatedAt: string;
 }
 
+// =========================================================================
+// PRESUPUESTOS DE PROFESIONALES (CIRCUITO COMPLETO DE REVISIÓN Y AJUSTES)
+// =========================================================================
+
 export type EstadoPresupuestoProfesional =
   | 'BORRADOR'
   | 'RECIBIDO'
   | 'EN_REVISION'
+  | 'EN_NEGOCIACION'
   | 'ACEPTADO'
   | 'RECHAZADO'
-  | 'CADUCADO'
-  | 'EN_NEGOCIACION';
+  | 'CADUCADO';
+
+export type EstadoPresupuesto = EstadoPresupuestoProfesional;
+
+export type CategoriaMotivoAjuste =
+  | 'PRECIO'
+  | 'ALCANCE'
+  | 'MATERIALES'
+  | 'PARTIDAS'
+  | 'CANTIDADES'
+  | 'PLAZO'
+  | 'DOCUMENTACION'
+  | 'OTRO';
+
+export type AccionHistorialPresupuesto =
+  | 'CREACION'
+  | 'PRESENTACION'
+  | 'EN_REVISION'
+  | 'SOLICITUD_AJUSTE'
+  | 'MODIFICACION'
+  | 'REENVIO'
+  | 'APROBACION'
+  | 'RECHAZO'
+  | 'CAMBIO_ESTADO';
 
 export interface PartidaPresupuesto {
   id: string;
@@ -1914,47 +3003,849 @@ export interface PartidaPresupuesto {
 }
 
 export interface HistorialDecisionPresupuesto {
+  id?: string;
   fecha: string;
   usuario: string;
+  usuarioId?: string;
+  accion?: AccionHistorialPresupuesto;
   estadoAnterior: EstadoPresupuestoProfesional;
   estadoNuevo: EstadoPresupuestoProfesional;
+  categoriaMotivo?: CategoriaMotivoAjuste | string;
+  motivo?: string;
   observaciones?: string;
+  version?: number;
+  importeTotal?: number;
+  partidasSnapshot?: PartidaPresupuesto[];
 }
 
 export interface PresupuestoProfesional {
   id: string;
   numeroPresupuesto?: string;
   trabajoId: string;
+  proyectoId?: string; // Vinculación a Proyecto de Reforma si procede
+  partidaId?: string; // Partida específica si procede
   profesionalId: string;
   profesionalNombre?: string;
   propietarioId: string;
   inmuebleId: string;
   inmuebleDireccion?: string;
   incidenciaId?: string;
-  fecha: string;
+  fecha: string; // ISO
   importeBase: number;
   iva: number; // importe de IVA calculado
-  porcentajeIva?: number; // Ej: 21
+  porcentajeIva?: number; // Ej: 21, 10, 0
   importeTotal: number;
   validez: string; // Ej: "30 días" o fecha límite
   descripcion: string;
   partidas: PartidaPresupuesto[];
   estado: EstadoPresupuestoProfesional;
-  observaciones?: string;
-  documentoUrl?: string;
-  documentoStoragePath?: string;
+  version?: number; // 1, 2, 3...
+  
+  // Solicitud de Ajuste / Negociación
+  categoriaAjuste?: CategoriaMotivoAjuste | string;
+  motivoAjuste?: string;
+  fechaSolicitudAjuste?: string;
+  solicitadoAjustePor?: string;
+  
+  // Decisión definitiva (SÓLO para ACEPTADO o RECHAZADO)
   motivoRechazo?: string;
   fechaDecision?: string;
+  fechaPresupuesto?: string;
+  fechaAceptacion?: string;
   decididoPor?: string;
+  
+  documentoUrl?: string;
+  documentoStoragePath?: string;
+  observaciones?: string;
+  
   historialDecision?: HistorialDecisionPresupuesto[];
+  
+  creadoPor?: string;
+  actualizadoPor?: string;
+  createdAt: string;
+  updatedAt: string;
+  
+  // Propiedades opcionales de compatibilidad legacy
+  fechaSolicitud?: string;
+  fechaRespuesta?: string;
+  importeEstimado?: number;
+  importePresupuestado?: number;
+  plazoDias?: number;
+}
+
+// =========================================================================
+// MANTENIMIENTO PREVENTIVO, GARANTÍAS Y SEGUIMIENTO POST-REPARACIÓN
+// =========================================================================
+
+export type TipoMantenimiento =
+  | 'PREVENTIVO'
+  | 'CORRECTIVO'
+  | 'GARANTIA'
+  | 'REVISION'
+  | 'LEGAL_OBLIGATORIO'
+  | 'INSTALACIONES_CLIMA'
+  | 'OTRO';
+
+export type PeriodicidadMantenimiento =
+  | 'PUNTUAL'
+  | 'UNICA'
+  | 'MENSUAL'
+  | 'BIMESTRAL'
+  | 'TRIMESTRAL'
+  | 'SEMESTRAL'
+  | 'ANUAL'
+  | 'BIENAL'
+  | 'QUINQUENAL'
+  | 'PERSONALIZADA';
+
+export type EstadoSeguimientoMantenimiento =
+  | 'ACTIVO'
+  | 'FUTURO'
+  | 'PROXIMO'
+  | 'VENCIDO'
+  | 'EN_CURSO'
+  | 'COMPLETADO'
+  | 'CANCELADO'
+  | 'INACTIVO';
+
+export interface ActuacionMantenimientoHistorial {
+  id: string;
+  fecha: string; // ISO
+  fechaRealizacion: string; // ISO date
+  ordenTrabajoId?: string;
+  profesionalId?: string;
+  profesionalNombre?: string;
+  costeReal?: number;
+  gastoId?: string;
+  observaciones?: string;
+  realizadoPor?: string;
+}
+
+export interface DocumentoMantenimiento {
+  id: string;
+  nombre: string;
+  url: string;
+  storagePath?: string;
+  fechaSubida: string;
+  tipo?: string;
+}
+
+export interface TareaMantenimiento {
+  id: string; // "mant_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  propietarioId: string; // Aislamiento
+  elementoInventarioId?: string; // Vinculación opcional a elemento de inventario
+  elementoNombre?: string;
+  titulo: string;
+  descripcion?: string;
+  tipo?: TipoMantenimiento;
+  categoria?: CategoriaIncidencia;
+  periodicidad: PeriodicidadMantenimiento;
+  diasIntervaloPersonalizado?: number;
+  
+  // Fechas deterministas
+  fechaInicio?: string; // ISO
+  ultimaFecha?: string; // ISO date de la última realización (compatibilidad legacy)
+  ultimaFechaRealizada?: string; // ISO date
+  proximaFecha: string; // ISO date calculada
+  
+  // Responsable y asignación
+  responsableTipo?: 'PROPIETARIO' | 'INQUILINO' | 'COMUNIDAD' | 'EMPRESA_MANTENIMIENTO';
+  profesionalPreferidoId?: string;
+  profesionalPreferidoNombre?: string;
+  preferredProfessionalId?: string;
+  preferredProfessionalName?: string;
+  
+  // Estado y seguimiento
+  activa: boolean;
+  activo?: boolean;
+  estadoSeguimiento?: EstadoSeguimientoMantenimiento;
+  costeEstimado?: number;
+  ultimoCosteReal?: number;
+  
+  // Relaciones con OT, Incidencia y Gasto
+  ultimaOrdenTrabajoId?: string;
+  ultimoPresupuestoId?: string;
+  ultimoGastoId?: string;
+  ultimaIncidenciaId?: string;
+  garantiaId?: string;
+  
+  historialActuaciones?: ActuacionMantenimientoHistorial[];
+  documentos?: DocumentoMantenimiento[];
+  notas?: string;
+  creadoPor?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PlanMantenimiento = TareaMantenimiento;
+
+export type EstadoGarantia = 'ACTIVA' | 'VENCIDA' | 'SIN_GARANTIA' | 'RECLAMADA';
+
+export interface GarantiaReparacion {
+  id: string; // "gar_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  propietarioId: string;
+  trabajoId: string; // OT de origen
+  incidenciaId?: string;
+  presupuestoId?: string;
+  gastoId?: string;
+  elementoInventarioId?: string;
+  elementoNombre?: string;
+  
+  titulo: string;
+  concepto: string;
+  categoria: CategoriaIncidencia;
+  
+  proveedor: string; // Profesional o empresa emisora
+  profesionalId?: string;
+  profesionalContacto?: string;
+  
+  fechaInicio: string; // ISO date (YYYY-MM-DD o ISO)
+  duracionMeses: number; // Ej: 6, 12, 24
+  fechaFin: string; // ISO date
+  
+  cobertura: string;
+  documentoUrl?: string;
+  documentoStoragePath?: string;
+  facturaRef?: string;
+  
+  estado: EstadoGarantia;
+  notas?: string;
+  
+  reincidencias?: {
+    incidenciaId: string;
+    fecha: string;
+    resultado: string;
+  }[];
+  
+  creadoPor?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// =========================================================================
+// CIRCUITO OPERATIVO DE REFORMAS (NECESIDAD -> PROYECTO -> PARTIDAS -> CIERRE)
+// =========================================================================
+
+export type CategoriaReforma =
+  | 'INTEGRAL'
+  | 'COCINA'
+  | 'BANO'
+  | 'SUELOS'
+  | 'PINTURA'
+  | 'CLIMATIZACION'
+  | 'ELECTRICIDAD'
+  | 'FONTANERIA'
+  | 'CARPINTERIA'
+  | 'FACHADA_EXTERIOR'
+  | 'PARCIAL'
+  | 'OTRO';
+
+export type EstadoNecesidadReforma =
+  | 'BORRADOR'
+  | 'IDENTIFICADA'
+  | 'EN_ESTUDIO'
+  | 'PRESUPUESTANDO'
+  | 'APROBADA'
+  | 'EN_EJECUCION'
+  | 'FINALIZADA'
+  | 'CANCELADA';
+
+export interface NecesidadReforma {
+  id: string; // "nec_ref_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  propietarioId: string; // Aislamiento RBAC
+  incidenciaId?: string; // Vinculación opcional a incidencia origen
+  expedienteId?: string; // Vinculación opcional a expediente de recomercialización
+  mejoraRoiId?: string; // Vinculación opcional a mejora ROI sugerida
+  
+  titulo: string;
+  descripcion: string;
+  prioridad: PrioridadIncidencia;
+  estado: EstadoNecesidadReforma;
+  categoria: CategoriaReforma | string;
+  tipoReforma?: string;
+  
+  presupuestoEstimadoMin?: number;
+  presupuestoEstimadoMax?: number;
+  observaciones?: string;
+  fotos?: string[] | any[];
+  documentos?: any[];
+  
+  proyectoReformaId?: string; // ID del ProyectoReforma creado al aprobar
+  fechaIdentificacion?: string; // ISO
+  fecha: string; // ISO
+  creadoPor?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CategoriaPartidaReforma =
+  | 'ALBANILERIA'
+  | 'ELECTRICIDAD'
+  | 'FONTANERIA'
+  | 'PINTURA'
+  | 'CARPINTERIA'
+  | 'CLIMATIZACION'
+  | 'COCINA'
+  | 'BANO'
+  | 'SUELO'
+  | 'VENTANAS'
+  | 'DERRIBOS'
+  | 'AISLAMIENTO'
+  | 'OTROS'
+  | string;
+
+export type EstadoPartidaReforma =
+  | 'PENDIENTE'
+  | 'PRESUPUESTADA'
+  | 'EN_EJECUCION'
+  | 'EJECUTADA'
+  | 'CANCELADA';
+
+export interface PartidaReforma {
+  id: string; // "part_{ts}_{random}"
+  proyectoId?: string;
+  concepto: string;
+  descripcion?: string;
+  categoria: CategoriaPartidaReforma;
+  cantidad: number;
+  unidad: string; // "m2", "ud", "ml", "paquete", "h", "global", etc.
+  precioEstimado: number; // Precio unitario estimado
+  importeEstimado: number; // cantidad * precioEstimado
+  precioReal?: number; // Precio unitario real liquidado
+  importeReal?: number; // Importe real final
+  profesionalId?: string; // Profesional asignado a esta partida
+  profesionalNombre?: string;
+  ordenTrabajoId?: string; // OT técnica específica generada
+  estado: EstadoPartidaReforma;
+  observaciones?: string;
+}
+
+export type EstadoProyectoReforma =
+  | 'PENDIENTE'
+  | 'PRESUPUESTANDO'
+  | 'ADJUDICADO'
+  | 'ASIGNADO'
+  | 'EN_EJECUCION'
+  | 'PAUSADO'
+  | 'PAUSADA'
+  | 'FINALIZADO'
+  | 'FINALIZADA'
+  | 'CANCELADO'
+  | 'CANCELADA';
+
+export type AccionHistorialProyectoReforma =
+  | 'PROYECTO_CREADO'
+  | 'PARTIDA_ANADIDA'
+  | 'PARTIDA_MODIFICADA'
+  | 'PARTIDA_ELIMINADA'
+  | 'PRESUPUESTO_SOLICITADO'
+  | 'PRESUPUESTO_RECIBIDO'
+  | 'PRESUPUESTO_SELECCIONADO'
+  | 'PROFESIONAL_ASIGNADO'
+  | 'PROFESIONAL_CAMBIADO'
+  | 'EJECUCION_INICIADA'
+  | 'PAUSADO'
+  | 'REANUDADO'
+  | 'OT_GENERADA'
+  | 'COSTE_REGISTRADO'
+  | 'GASTO_GENERADO'
+  | 'PROYECTO_FINALIZADO'
+  | 'PROYECTO_CANCELADO'
+  | 'CIERRE_PATRIMONIAL'
+  | 'NOTA_AUDITORIA';
+
+export interface HistorialProyectoReformaItem {
+  id: string;
+  fecha: string; // ISO
+  usuario: string;
+  usuarioId?: string;
+  accion: AccionHistorialProyectoReforma;
+  estadoAnterior?: EstadoProyectoReforma | string;
+  estadoNuevo?: EstadoProyectoReforma | string;
+  profesionalId?: string;
+  presupuestoId?: string;
+  partidaId?: string;
+  ordenTrabajoId?: string;
+  gastoId?: string;
+  importe?: number;
+  motivo?: string;
+  observacion?: string;
+}
+
+export interface ResumenCierreReforma {
+  fechaCierre: string; // ISO
+  presupuestoInicial: number;
+  presupuestoSeleccionado: number;
+  costeRealFinal: number;
+  desviacionTotal: number; // costeRealFinal - presupuestoSeleccionado
+  desviacionPorcentaje: number;
+  gastosGeneradosTotal: number;
+  numPartidasEjecutadas: number;
+  numOTsCompletadas: number;
+  profesionalesParticipantes: { id: string; nombre: string; partidas?: string[] }[];
+  observacionesCierre?: string;
+  cerradoPor: string;
+}
+
+export interface ImpactoPatrimonialReforma {
+  costeTotalReforma: number;
+  gastoAsociadoId?: string;
+  fechaCierreReforma: string;
+  inmuebleId: string;
+  
+  // Observación neutral de valoración (sin causalidad económica inventada)
+  valoracionPreviaInmueble?: number;
+  fechaValoracionPrevia?: string;
+  valoracionPosteriorInmueble?: number;
+  fechaValoracionPosterior?: string;
+  variacionValoracion?: number; // valoracionPosterior - valoracionPrevia (informativo)
+  notas?: string;
+}
+
+export interface ProyectoReforma {
+  id: string; // "proj_ref_{inmuebleId}_{ts}"
+  inmuebleId: string;
+  inmuebleDireccion?: string;
+  propietarioId: string; // Aislamiento RBAC
+  necesidadId?: string; // Necesidad de reforma origen
+  incidenciaId?: string; // Incidencia origen si existió
+  expedienteId?: string; // Expediente de recomercialización origen si existió
+  
+  titulo: string;
+  descripcion: string;
+  alcance?: string;
+  categoria: CategoriaReforma | string;
+  tipoReforma?: string;
+  
+  fechaPrevistaInicio?: string; // ISO
+  fechaPrevistaFin?: string; // ISO
+  fechaRealInicio?: string; // ISO
+  fechaRealFin?: string; // ISO
+  fechaCierre?: string; // ISO
+  
+  estado: EstadoProyectoReforma;
+  prioridad?: PrioridadIncidencia;
+  
+  partidas: PartidaReforma[];
+  presupuestoPrevisto: number; // Suma importes estimados de partidas
+  presupuestoAdjudicadoId?: string; // ID del presupuesto seleccionado
+  presupuestoAdjudicadoImporte?: number;
+  costeReal: number; // Suma costes reales liquidados
+  desviacionCoste?: number; // costeReal - presupuestoPrevisto / presupuestoAdjudicado
+  
+  profesionalPrincipalId?: string;
+  profesionalPrincipalNombre?: string;
+  profesionalesAsignados?: {
+    profesionalId: string;
+    nombre: string;
+    especialidad?: string;
+    partidaId?: string;
+  }[];
+  
+  ordenesTrabajoIds?: string[];
+  presupuestosIds?: string[];
+  gastosIds?: string[];
+  
+  documentos?: AdjuntoIncidencia[] | any[];
+  fotosAntes?: string[];
+  fotosDurante?: string[];
+  fotosDespues?: string[];
+  
+  resumenCierre?: ResumenCierreReforma;
+  impactoPatrimonial?: ImpactoPatrimonialReforma;
+  
+  historial: HistorialProyectoReformaItem[];
   creadoPor?: string;
   actualizadoPor?: string;
   createdAt: string;
   updatedAt: string;
 }
 
+// =========================================================================
+// BLOQUE 9: REPORTING EJECUTIVO - INFORMES CARTERA, INMUEBLE, RENTABILIDAD, FISCAL, EVOLUCIÓN, EXPORTACIÓN
+// Capa de lectura/agregación que consume motores existentes (cobros, gastos, fiscal, contratos, incidencias, seguros)
+// NO crea segundo motor económico, NO segundo cálculo de rentabilidad, NO segundo motor fiscal
+// =========================================================================
 
+export type PeriodoInforme = 'MENSUAL' | 'TRIMESTRAL' | 'ANUAL' | 'PERSONALIZADO';
+export type FormatoExportacion = 'CSV' | 'JSON' | 'PDF';
 
+export interface RangoFechas {
+  fechaInicio: string; // YYYY-MM-DD explícito, evita errores zona horaria
+  fechaFin: string; // YYYY-MM-DD explícito
+  periodo: PeriodoInforme;
+  ejercicio?: number;
+  trimestre?: number; // 1-4
+  mes?: number; // 1-12
+}
+
+export interface FiltrosInforme {
+  propietarioId?: string;
+  inmuebleId?: string;
+  habitacionId?: string;
+  rango: RangoFechas;
+  incluirHabitaciones?: boolean;
+  categoriaGasto?: string;
+  estadoContrato?: string;
+}
+
+export interface InformePatrimonio {
+  numeroInmuebles: number;
+  numeroHabitaciones: number;
+  inmueblesOcupados: number;
+  inmueblesVacios: number;
+  inmueblesParcialmenteOcupados: number;
+  contratosActivos: number;
+  contratosProximosFinalizar: number; // próximos 60 días
+  superficieTotal: number;
+  valorAdquisicionTotal: number;
+  valoracionEstimadaTotal: number;
+}
+
+export interface InformeEconomia {
+  ingresosTotales: number; // cobrados
+  ingresosPrevistos: number; // contractuales
+  ingresosPendientes: number;
+  gastosTotales: number;
+  gastosDeducibles: number;
+  resultado: number; // ingresos - gastos deducibles
+  rentabilidadBruta?: number; // % si se puede calcular con datos existentes
+  rentabilidadNeta?: number;
+  rentabilidadEstimada?: number; // reutiliza definición existente
+  cobrosRealizados: number;
+  cobrosPendientes: number;
+  cobrosVencidos: number;
+  cobrosImpagados: number;
+  deudaPendiente: number;
+  formulaRentabilidad: string; // documenta fórmula usada
+}
+
+export interface InformeOperativa {
+  incidenciasAbiertas: number;
+  incidenciasCerradas: number;
+  incidenciasUrgentes: number;
+  siniestrosAbiertos: number;
+  siniestrosCerrados: number;
+  polizasActivas: number;
+  polizasProximasVencer: number;
+  trabajosPendientes: number;
+  trabajosEnCurso: number;
+}
+
+export interface InformeOcupacion {
+  diasAlquilados: number;
+  diasVacios: number;
+  porcentajeOcupacion: number; // 0-100
+  mesesOcupados: number;
+  mesesVacios: number;
+  numInquilinosUnicos: number;
+  numContratos: number;
+  definicionOcupacion: string; // reutiliza definición módulos actuales
+}
+
+export interface EvolucionTemporalItem {
+  periodo: string; // ej "2025-01", "2025-T1", "2025"
+  fechaInicio: string;
+  fechaFin: string;
+  ingresos: number;
+  gastos: number;
+  resultado: number;
+  ocupacion: number;
+  numContratos: number;
+}
+
+export interface InformeCartera {
+  id: string;
+  propietarioId: string;
+  propietarioNombre?: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string; // ej "1.0.0"
+  patrimonio: InformePatrimonio;
+  economia: InformeEconomia;
+  operativa: InformeOperativa;
+  ocupacion: InformeOcupacion;
+  evolucion: EvolucionTemporalItem[];
+  // Para extensión notificaciones GAP 1
+  eventoExtension?: 'INFORME_GENERADO';
+}
+
+export interface InformeContratoDetalle {
+  contratoId: string;
+  inmuebleId: string;
+  inquilinoNombre: string;
+  modalidad: string; // vivienda habitual, temporada, local, habitación
+  estado: EstadoFormalizacion;
+  fechaInicio: string;
+  fechaFin?: string;
+  rentaMensual: number;
+  diasOcupadosPeriodo: number;
+  ingresosPeriodo: number;
+  esProximoFinalizar: boolean;
+  habitacionId?: string;
+}
+
+export interface InformeInmueble {
+  id: string;
+  propietarioId: string;
+  inmuebleId: string;
+  inmuebleDireccion: string;
+  inmuebleCiudad: string;
+  tipoInmueble?: string;
+  modalidadAlquiler?: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string;
+  datosBasicos: {
+    direccion: string;
+    ciudad: string;
+    superficie: number;
+    habitaciones: number;
+    banos: number;
+    valorAdquisicion?: number;
+    fechaAdquisicion?: string;
+  };
+  contratos: InformeContratoDetalle[];
+  ocupacion: InformeOcupacion;
+  economia: InformeEconomia;
+  incidencias: {
+    abiertas: number;
+    cerradas: number;
+    lista: { id: string; titulo: string; estado: string; categoria: string; fecha: string }[];
+  };
+  seguros: {
+    polizasActivas: number;
+    lista: { id: string; aseguradora: string; numeroPoliza: string; tipo: string; vencimiento: string }[];
+  };
+  gastos: {
+    total: number;
+    porCategoria: Record<string, number>;
+    lista: { id: string; fecha: string; concepto: string; importe: number; categoria: string }[];
+  };
+  ingresos: {
+    totalCobrado: number;
+    totalPrevisto: number;
+    lista: { periodo: string; previsto: number; cobrado: number; estado: string }[];
+  };
+  habitaciones?: {
+    id: string;
+    identificador: string;
+    ocupada: boolean;
+    ingresos: number;
+  }[];
+  inventario?: string;
+  periodosPendientes: { periodo: string; importe: number; estado: string }[];
+}
+
+export interface InformeRentabilidad {
+  id: string;
+  propietarioId: string;
+  inmuebleId?: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string;
+  ingresos: number;
+  gastos: number;
+  resultado: number;
+  rentabilidadBruta?: number;
+  rentabilidadNeta?: number;
+  rentabilidadEstimada: number;
+  formula: string; // documenta fórmula exacta reutilizada
+  definicionesDisponibles: string[]; // si existen varias definiciones legítimas
+  detallePorInmueble?: { inmuebleId: string; direccion: string; ingresos: number; gastos: number; resultado: number; rentabilidad: number }[];
+}
+
+export interface InformeFiscal {
+  id: string;
+  propietarioId: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  moneda: 'EUR';
+  versionEsquema: string;
+  ejercicio: number;
+  agrupacion: 'PROPIETARIO' | 'INMUEBLE' | 'EJERCICIO' | 'CONCEPTO';
+  totalIngresos: number;
+  totalGastos: number;
+  totalGastosDeducibles: number;
+  totalResultado: number;
+  porInmueble: {
+    inmuebleId: string;
+    direccion: string;
+    ingresos: number;
+    gastos: number;
+    gastosDeducibles: number;
+    resultado: number;
+    categorias: Record<string, number>;
+  }[];
+  porCategoria?: Record<string, number>;
+  categoriasFiscalesConservadas: boolean;
+  notaAEAT: string; // "Exportación fiscal estructurada compatible con procesos posteriores..."
+}
+
+export interface ExportacionFiscalItem {
+  propietarioId: string;
+  propietarioNombre?: string;
+  inmuebleId: string;
+  inmuebleDireccion: string;
+  ejercicio: number;
+  periodo: string; // YYYY-MM o YYYY
+  concepto: string;
+  fecha: string; // YYYY-MM-DD
+  importe: number;
+  categoria: string;
+  tipo: 'INGRESO' | 'GASTO' | 'AMORTIZACION' | 'INTERES';
+  referenciaId: string; // id cobro, gasto, etc.
+  origen: string; // 'COBRO' | 'GASTO' | 'FISCAL' | etc.
+  moneda: 'EUR';
+  ejercicioFiscal?: number;
+  esDeducible?: boolean;
+}
+
+export interface ExportacionFiscalEstructurada {
+  id: string;
+  propietarioId: string;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  versionEsquema: string;
+  formato: FormatoExportacion;
+  items: ExportacionFiscalItem[];
+  nota: string; // Exportación fiscal estructurada compatible...
+  totalIngresos: number;
+  totalGastos: number;
+  totalResultado: number;
+}
+
+export interface HistorialInformeGenerado {
+  id: string;
+  propietarioId: string;
+  tipo: 'CARTERA' | 'INMUEBLE' | 'RENTABILIDAD' | 'FISCAL' | 'EXPORTACION';
+  formato?: FormatoExportacion;
+  rango: RangoFechas;
+  fechaGeneracion: string;
+  generadoPor: string;
+  inmuebleId?: string;
+  numInmuebles?: number;
+  eventoExtension?: 'INFORME_GENERADO' | 'EXPORTACION_GENERADA';
+}
+
+// ==========================================
+// GAP 5: SINDICACIÓN Y PUBLICACIÓN MULTICANAL DE INMUEBLES
+// Capa desacoplada: DATOS ERP → MODELO NORMALIZADO → VALIDADOR → GENERADOR → FEED
+// ==========================================
+
+export type PortalInmobiliario = 'IDEALISTA' | 'FOTOCASA' | 'HABITACLIA' | 'KYERO';
+
+export type FormatoFeedPublicacion = 'XML_GENERICO' | 'XML_KYLERO' | 'JSON_NORMALIZADO' | 'JSON_LD';
+
+/**
+ * Estado de publicación POR PORTAL. Independiente del estado interno del inmueble
+ * ('disponible' | 'alquilado'): un inmueble puede estar publicado en un portal y no en otro.
+ */
+export type EstadoPublicacionPortal =
+  | 'BORRADOR'
+  | 'VALIDADO'
+  | 'LISTO_PARA_PUBLICAR'
+  | 'PUBLICADO'
+  | 'ACTUALIZADO'
+  | 'DESPUBLICADO'
+  | 'ERROR';
+
+/** Imagen normalizada para publicación (URL de Firebase Storage; nunca base64 en Firestore). */
+export interface ImagenPublicacion {
+  url: string;
+  orden: number;
+  portada: boolean;
+  estadoPublicacion?: 'PENDIENTE' | 'PUBLICADA' | 'RECHAZADA';
+}
+
+/** Habitación publicable dentro de un inmueble en modalidad habitaciones (solo lectura del circuito). */
+export interface HabitacionPublicacion {
+  habitacionId: string;
+  nombre: string;
+  descripcion?: string;
+  superficieM2?: number;
+  precioMensual?: number;
+  disponible: boolean;
+}
+
+/** Modelo normalizado de publicación: única fuente para validadores, generadores y adaptadores. */
+export interface PublicacionInmueble {
+  // Identificación
+  inmuebleId: string;
+  idPublico: string; // identificador público estable del inmueble
+  referenciaInterna: string; // referencia interna del ERP
+  propietarioId?: string;
+  // Ubicación
+  direccion: string;
+  municipio: string;
+  provincia?: string;
+  codigoPostal?: string;
+  coordenadas?: { latitud: number; longitud: number };
+  // Características
+  tipoInmueble?: string;
+  modalidadAlquiler: 'completo' | 'habitaciones';
+  superficieM2?: number;
+  habitaciones?: number;
+  banos?: number;
+  planta?: string;
+  ascensor?: boolean;
+  terraza?: boolean;
+  balcon?: boolean;
+  garaje?: boolean;
+  trastero?: boolean;
+  aireAcondicionado?: boolean;
+  calefaccion?: boolean;
+  // Económico
+  precioMensual: number;
+  fianzaMeses?: number;
+  tipoOperacion: 'ALQUILER';
+  // Descripción
+  titulo: string;
+  descripcion?: string;
+  caracteristicas: string[];
+  // Imágenes (Storage URLs, orden y portada)
+  imagenes: ImagenPublicacion[];
+  // Habitaciones (solo modalidad 'habitaciones'; no altera el circuito actual)
+  habitacionesPublicables?: HabitacionPublicacion[];
+  // Generación (determinista: mismo dato → mismo resultado)
+  generadoEn?: string; // ISO opcional, solo si el llamador lo aporta explícitamente
+}
+
+export interface ValidacionPublicacion {
+  valido: boolean; // true si no hay errores bloqueantes (puede haber advertencias)
+  erroresBloqueantes: string[];
+  advertencias: string[];
+}
+
+/** Identidad estable por inmueble + portal (idempotencia: actualizar no duplica anuncios). */
+export interface EstadoSindicacionPortal {
+  portal: PortalInmobiliario;
+  externalId: string; // derivado determinista de inmuebleId + portal
+  estado: EstadoPublicacionPortal;
+  ultimaSincronizacion?: string; // ISO
+  ultimoError?: string;
+}
+
+/** Trazabilidad de generación/exportación (sin credenciales ni secretos). */
+export interface RegistroTrazabilidadPublicacion {
+  inmuebleId: string;
+  idPublico: string;
+  portal: PortalInmobiliario | 'EXPORTACION_DIRECTA';
+  formato: FormatoFeedPublicacion;
+  fecha: string; // ISO
+  externalId?: string;
+  resultado: 'OK' | 'ERROR';
+  errores: string[];
+  advertencias: string[];
 
 // =========================================================================
 // BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS

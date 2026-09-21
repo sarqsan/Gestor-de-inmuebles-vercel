@@ -7,7 +7,6 @@ import {
   InformeInteligente,
   NotaPrivada,
   SolicitudDocumentacion,
-  SolicitudSeguroImpago,
   ContratoFormalizacion,
 } from '../types';
 import { calcularValuracionCandidato } from '../utils/solvenciaEngine';
@@ -15,7 +14,6 @@ import { SolvenciaCard } from './SolvenciaCard';
 import { DocumentosListSection } from './DocumentosListSection';
 import { ResumenDocumentalCard } from './ResumenDocumentalCard';
 import { AnalisisIncidenciasCard } from './AnalisisIncidenciasCard';
-import { CandidateCircuitTimeline } from './CandidateCircuitTimeline';
 import { getSolicitudDocEstadoInfo } from '../utils/documentTemplates';
 import {
   openCandidatoQuestionnairePDF,
@@ -67,7 +65,6 @@ interface CandidateModalProps {
   candidato: Candidato | null;
   inmuebles: Inmueble[];
   solicitudesDoc?: SolicitudDocumentacion[];
-  solicitudesSeguro?: SolicitudSeguroImpago[];
   contratos?: ContratoFormalizacion[];
   onClose: () => void;
   onUpdateStatus: (candidateId: string, newStatus: CandidateStatus) => void;
@@ -81,21 +78,12 @@ interface CandidateModalProps {
   onOpenCrearSolicitudDoc?: (candidato: Candidato, inmueble?: Inmueble) => void;
   onOpenDetalleSolicitudDoc?: (solicitud: SolicitudDocumentacion) => void;
   onOpenFormalizarModal?: (candidato: Candidato, inmueble?: Inmueble, contrato?: ContratoFormalizacion) => void;
-  onSelectCandidate?: (candidato: Candidato, motivo?: string) => void;
-  onOpenTramitarSeguro?: (candidato: Candidato) => void;
-  onOpenDetalleSeguro?: (solicitud: SolicitudSeguroImpago) => void;
-  onRegistrarDecisionFinal?: (
-    candidato: Candidato,
-    decision: 'ACEPTAR' | 'RECHAZAR',
-    motivo: string
-  ) => void;
 }
 
 export const CandidateModal: React.FC<CandidateModalProps> = ({
   candidato,
   inmuebles,
   solicitudesDoc = [],
-  solicitudesSeguro = [],
   contratos = [],
   onClose,
   onUpdateStatus,
@@ -109,10 +97,6 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
   onOpenCrearSolicitudDoc,
   onOpenDetalleSolicitudDoc,
   onOpenFormalizarModal,
-  onSelectCandidate,
-  onOpenTramitarSeguro,
-  onOpenDetalleSeguro,
-  onRegistrarDecisionFinal,
 }) => {
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
@@ -355,21 +339,12 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
                 className="w-full sm:w-auto px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-2xs"
               >
                 <option value="nuevo">Nuevo</option>
+                <option value="pendiente_doc">Pendiente de documentación</option>
+                <option value="pendiente_analisis">Pendiente de análisis</option>
+                <option value="analizado">Analizado</option>
                 <option value="preseleccionado">⭐ Preseleccionado (Para Visita)</option>
                 <option value="visita_reservada">📅 Visita reservada</option>
-                <option value="seleccionado">🏆 Seleccionado (Inquilino Preferente)</option>
-                <option value="doc_solicitada">📄 Documentación solicitada</option>
-                <option value="pendiente_doc">⏳ Pendiente de documentación</option>
-                <option value="doc_recibida">📥 Documentación recibida</option>
-                <option value="pendiente_analisis">🤖 Pendiente de análisis IA</option>
-                <option value="analizado">✓ Analizado (Solvencia consultiva)</option>
-                <option value="seguro_solicitado">🛡️ Seguro de impago solicitado</option>
-                <option value="aprobado_seguro">🟢 Aprobado por aseguradora</option>
-                <option value="rechazado_seguro">🔴 Rechazado por aseguradora</option>
-                <option value="decision_pendiente">⚖️ Decisión final pendiente</option>
-                <option value="aceptado_final">✅ Aceptado definitivo</option>
-                <option value="rechazado_final">❌ Rechazado definitivo</option>
-                <option value="formalizado">🔑 Contrato Formalizado</option>
+                <option value="seleccionado">🏆 Seleccionado (Inquilino Final)</option>
                 <option value="no_seleccionado">No seleccionado</option>
               </select>
 
@@ -399,28 +374,6 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
               )}
             </div>
           </div>
-
-          {/* Circuito Completo de Admisión y Decisión (Pipeline & Auditoría) */}
-          <CandidateCircuitTimeline
-            candidato={candidato}
-            property={property}
-            solicitudDoc={docSol}
-            solicitudSeguro={(solicitudesSeguro || []).find(
-              (s) =>
-                s.candidatoId === candidato.id ||
-                (candidato.solicitudSeguroId && s.id === candidato.solicitudSeguroId)
-            )}
-            onSelectCandidate={onSelectCandidate}
-            onOpenSolicitudDoc={onOpenDetalleSolicitudDoc}
-            onCrearSolicitudDoc={() => {
-              if (onOpenCrearSolicitudDoc) {
-                onOpenCrearSolicitudDoc(candidato, property);
-              }
-            }}
-            onOpenTramitarSeguro={onOpenTramitarSeguro}
-            onOpenDetalleSeguro={onOpenDetalleSeguro}
-            onRegistrarDecisionFinal={onRegistrarDecisionFinal}
-          />
 
           {/* Preseleccionado Banner & WhatsApp Action */}
           {(candidato.estado === 'preseleccionado' || candidato.estado === 'visita_reservada') && (

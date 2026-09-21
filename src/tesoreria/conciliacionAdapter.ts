@@ -1,15 +1,22 @@
 /**
  * BLOQUE B — Adaptador de conciliación/tesorería sobre el modelo existente.
  *
- * IMPORTANTE: en este repositorio NO existe motor de conciliación bancaria (GAP6).
  * Este adaptador NO escribe en estructuras internas ajenas: solo LEE CobroPeriodo
  * (anidado en contratos) y LiquidacionPropietario/OrdenPago/GastoInmueble para:
  *  - listar cobros liquidables (cobrados reales);
  *  - proyectar movimientos de tesorería (vista de lectura para futura camt.05x);
  *  - marcar cobros como liquidados (retorna contratos actualizados con historial,
- *    reutilizando el patrón de trazabilidad de cobrosEngine sin modificarlo).
+ *    reutilizando el patrón de trazabilidad de cobrosEngine sin modificarlo);
+ *  - INTEGRACIÓN A (2026-09-20): conector de LECTURA sobre el motor de
+ *    conciliación bancaria canónico (GAP6, `src/utils/conciliacion/*`):
+ *    evidencia de pago de liquidación desde `MovimientoBancario` conciliado
+ *    (`evidenciaPagoDesdeMovimientoBancario` / `movimientosBancariosParaLiquidacion`).
+ *    No inventa conciliación automática: GAP6 es la fuente; aquí solo se
+ *    selecciona evidencia de un pago ya conciliado (cadena:
+ *    propietario→liquidación→orden de pago→PAIN.001→evidencia→conciliación).
  */
 import type { CobroPeriodo, ContratoFormalizacion } from '../types';
+import type { MovimientoBancario, PropuestaConciliacion } from '../types/conciliacion';
 import { esCobroLiquidable } from './liquidacionEngine';
 import type { GastoInmueble, LiquidacionPropietario, MovimientoTesoreria, OrdenPago } from './tipos';
 
@@ -253,4 +260,62 @@ export function sugerirConciliacion(
     }
   }
   return out.sort((x, y) => y.score - x.score);
+}
+
+/**
+ * INTEGRACIÓN A — CONECTOR GAP6 (solo lectura, no duplica el motor de conciliación).
+ *
+ * La evidencia de que una liquidación se ha PAGADO realment procede de un
+ * `MovimientoBancario` ya conciliado/confirmado por el GAP6 canónico
+ * (colección `movimientos_bancarios`). Sin conciliación automática: aquí solo
+ * se expone qué movimientos bancarios pueden servir de evidencia para una
+ * liquidación, y cómo se extraen de ellos la referencia y la fecha de pago.
+ */
+
+/** Evidencia de pago extraída de un movimiento bancario (GAP6). */
+export interface EvidenciaPagoBancaria {
+  referenciaBancaria: string;
+  fechaPago: string; // YYYY-MM-DD
+  idMovimiento: string;
+  importe: number; // negativo = salida (abono al propietario)
+  hashIdempotencia: string;
+}
+
+/**
+ * Extrae la evidencia de pago de un `MovimientoBancario` canónico.
+ * Preferencia de referencia: `referencia` → `identificadorBanco` → `idMovimiento`.
+ */
+export function evidenciaPagoDesdeMovimientoBancario(mov: MovimientoBancario): EvidenciaPagoBancaria {
+  return {
+    referenciaBancaria: mov.referencia || mov.identificadorBanco || mov.idMovimiento,
+    fechaPago: (mov.fechaOperacion || mov.fechaImportacion || '').slice(0, 10),
+    idMovimiento: mov.idMovimiento,
+    importe: Number(mov.importe) || 0,
+    hashIdempotencia: mov.hashIdempotencia || mov.idMovimiento,
+  };
+}
+
+/**
+ * Lista los movimientos bancarios (GAP6) que pueden servir de EVIDENCIA de pago
+ * de una liquidación: del propietario de la liquidación, con PROPUESTA DE
+ * CONCILIACIÓN CONFIRMADA (estado 'CONFIRMADO' del GAP6, es decir, conciliado
+ * y aplicado) y con importe negativo (salida de caja, es decir, abono real al
+ * propietario). Ordenados por fecha de operación (recientes primero).
+ *
+ * NO inventa conciliación: la lista de confirmadas proviene del propio GAP6.
+ */
+export function movimientosBancariosParaLiquidacion(
+  movimientos: MovimientoBancario[],
+  propuestas: PropuestaConciliacion[],
+  liquidacion: Pick<LiquidacionPropietario, 'propietarioId' | 'id'>,
+): EvidenciaPagoBancaria[] {
+  const conciliados = new Set(
+    propuestas.filter((p) => p.estado === 'CONFIRMADO').map((p) => p.movimientoId),
+  );
+  return movimientos
+    .filter((m) => m.propietarioId === liquidacion.propietarioId)
+    .filter((m) => conciliados.has(m.idMovimiento))
+    .filter((m) => (Number(m.importe) || 0) < 0)
+    .map(evidenciaPagoDesdeMovimientoBancario)
+    .sort((a, b) => (b.fechaPago > a.fechaPago ? 1 : b.fechaPago < a.fechaPago ? -1 : 0));
 }

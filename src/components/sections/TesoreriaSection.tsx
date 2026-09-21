@@ -24,11 +24,13 @@ import {
 import type {
   CobroPeriodo,
   ContratoFormalizacion,
+  Gasto,
   Inmueble,
   Propietario,
   TrabajoProfesional,
   UsuarioApp,
 } from '../../types';
+import type { MovimientoBancario, PropuestaConciliacion } from '../../types/conciliacion';
 import {
   aprobarLiquidacion,
   anularLiquidacion,
@@ -41,11 +43,12 @@ import {
 import {
   clasificarCobrosPeriodo,
   marcarCobrosLiquidados,
+  movimientosBancariosParaLiquidacion,
   proyectarMovimientos,
   resumenGastosLiquidados,
   resumenCobrosLiquidados,
 } from '../../tesoreria/conciliacionAdapter';
-import { crearGastoManual, gastoDesdeTrabajo } from '../../tesoreria/gastosEngine';
+import { crearGastoManual, gastoDesdeGastoCanonico, gastoDesdeTrabajo } from '../../tesoreria/gastosEngine';
 import { generarPain008 } from '../../tesoreria/sepaPain008';
 import { aprobarOrdenPago, crearOrdenPagoLiquidacion, generarPain001 } from '../../tesoreria/sepaPain001';
 import { calcularCreditorIdES, formatoImporteSepa, validarIban } from '../../tesoreria/sepaUtils';
@@ -80,6 +83,12 @@ interface TesoreriaSectionProps {
   mandatos: MandatoSEPA[];
   trabajos?: TrabajoProfesional[];
   currentUser?: UsuarioApp | null;
+  /** INTEGRACIÓN A (GAP 6): movimientos bancarios canónicos para evidencia de pago. */
+  movimientosBancarios?: MovimientoBancario[];
+  /** INTEGRACIÓN A (GAP 6): propuestas de conciliación (estado CONFIRMADO = conciliado). */
+  propuestasConciliacion?: PropuestaConciliacion[];
+  /** INTEGRACIÓN A: gastos del modelo oficial (colección `gastos`) para importación. */
+  gastosCanonicos?: Gasto[];
   onSaveLiquidacion: (l: LiquidacionPropietario) => Promise<void> | void;
   onSaveGasto: (g: GastoInmueble) => Promise<void> | void;
   onDeleteGasto: (id: string) => Promise<void> | void;
@@ -110,7 +119,9 @@ function badgeEstadoLiquidacion(e: EstadoLiquidacion) {
 export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
   const {
     contratos, inmuebles, propietarios, liquidaciones, gastos, ordenes, ficheros, mandatos,
-    trabajos = [], currentUser, onSaveLiquidacion, onSaveGasto, onDeleteGasto,
+    trabajos = [], currentUser,
+    movimientosBancarios = [], propuestasConciliacion = [], gastosCanonicos = [],
+    onSaveLiquidacion, onSaveGasto, onDeleteGasto,
     onSaveOrdenPago, onSaveFicheroSepa, onSaveMandato, onSaveContratos,
   } = props;
 
@@ -166,6 +177,43 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
   const [pagoLiq, setPagoLiq] = useState<LiquidacionPropietario | null>(null);
   const [pagoRef, setPagoRef] = useState('');
   const [pagoFecha, setPagoFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [pagoEvidenciaId, setPagoEvidenciaId] = useState<string>('');
+
+  // Evidencia de pago desde movimiento bancario conciliado (GAP 6)
+  const evidenciasPago = useMemo(() => {
+    if (!pagoLiq) return [];
+    return movimientosBancariosParaLiquidacion(movimientosBancarios, propuestasConciliacion, pagoLiq);
+  }, [movimientosBancarios, propuestasConciliacion, pagoLiq]);
+
+  const onElegirEvidencia = (idMov: string) => {
+    setPagoEvidenciaId(idMov);
+    if (!idMov) return;
+    const ev = evidenciasPago.find((e) => e.idMovimiento === idMov);
+    if (ev) {
+      setPagoRef(ev.referenciaBancaria);
+      if (ev.fechaPago) setPagoFecha(ev.fechaPago);
+    }
+  };
+
+  // INTEGRACIÓN A: importación unidireccional del modelo oficial `gastos` (colección canónica)
+  const [showGastoImport, setShowGastoImport] = useState(false);
+  const [gimpId, setGimpId] = useState('');
+  const [gimpImputa, setGimpImputa] = useState<'propietario' | 'inquilino'>('propietario');
+
+  const gastosCanonicosImportables = useMemo(() => {
+    return gastosCanonicos.filter((g) => !gastos.some((gi) => gi.id === `gas_gasto_${g.id}`));
+  }, [gastosCanonicos, gastos]);
+
+  const handleImportarGastoCanonico = () => {
+    const g = gastosCanonicos.find((x) => x.id === gimpId);
+    if (!g) { avisar('error', 'Seleccione un gasto canónico'); return; }
+    const res = gastoDesdeGastoCanonico(g, gastos.find((gi) => gi.id === `gas_gasto_${g.id}`), { imputableA: gimpImputa });
+    if (!res.ok || !res.gasto) { avisar('error', res.errores.join(' · ')); return; }
+    void onSaveGasto(res.gasto);
+    setShowGastoImport(false);
+    setGimpId('');
+    avisar('ok', `Gasto canónico ${g.id} importado a la liquidación (idempotente, sin duplicar).`);
+  };
 
   const actor = { id: currentUser?.id, nombre: currentUser?.nombre || currentUser?.email || 'Administración' };
 
@@ -530,7 +578,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                               {l.estado === 'BORRADOR' && <button onClick={() => handleAprobar(l)} className="px-2.5 py-1.5 bg-blue-600 text-white rounded-lg text-[11px] font-bold">Aprobar</button>}
                               {l.estado === 'APROBADA' && (<>
                                 <button onClick={() => handleCrearOrden(l)} className="px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[11px] font-bold">Orden pago</button>
-                                <button onClick={() => { setPagoLiq(l); setPagoRef(''); }} className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-[11px] font-bold">Pagar</button>
+                                <button onClick={() => { setPagoLiq(l); setPagoRef(''); setPagoEvidenciaId(''); }} className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-[11px] font-bold">Pagar</button>
                               </>)}
                             </div>
                           </td>
@@ -563,7 +611,12 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
             <div className="space-y-4">
               <div className="flex justify-between items-center flex-wrap gap-2">
                 <h4 className="text-xs font-bold text-slate-800">Gastos imputables ({gastos.length}) — base/IVA/total, origen trazable</h4>
-                <button onClick={() => { setGInmuebleId(inmuebles[0]?.id || ''); setShowGasto(true); }} className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Plus className="w-4 h-4" /><span>Nuevo gasto</span></button>
+                <div className="flex gap-2">
+                  <button onClick={() => { setGInmuebleId(inmuebles[0]?.id || ''); setShowGasto(true); }} className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Plus className="w-4 h-4" /><span>Nuevo gasto</span></button>
+                  {gastosCanonicosImportables.length > 0 && (
+                    <button onClick={() => { setGimpId(gastosCanonicosImportables[0].id); setGimpImputa('propietario'); setShowGastoImport(true); }} className="px-3 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Upload className="w-4 h-4" /><span>Importar de gastos canónicos ({gastosCanonicosImportables.length})</span></button>
+                  )}
+                </div>
               </div>
               {trabajosFinalizados.filter((t) => !gastos.some((g) => g.id === `gas_${t.id}`)).length > 0 && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs">
@@ -760,6 +813,36 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
         </div>
       )}
 
+      {showGastoImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden my-auto">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <h3 className="font-bold flex items-center gap-2"><Upload className="w-5 h-5" />Importar gasto canónico</h3>
+              <button onClick={() => setShowGastoImport(false)} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-3 text-xs">
+              <p className="text-slate-500">Importación <strong>unidireccional</strong> del modelo oficial de gastos (colección <span className="font-mono">gastos</span>) a la proyección de liquidación. Es idempotente: reimportar no duplica. La contabilidad oficial se conserva intacta.</p>
+              <div><label className="font-semibold block mb-1">Gasto canónico *</label>
+                <select value={gimpId} onChange={(e) => setGimpId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                  {gastosCanonicosImportables.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {(g.fechaDevengo || '').slice(0, 10)} · {g.concepto || g.id} — {formatoImporteSepa(Number(g.importe) || 0)} € ({g.aCargoDe === 'arrendador' ? 'a cargo del propietario' : 'a cargo del inquilino'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div><label className="font-semibold block mb-1">Imputación en liquidación</label>
+                <select value={gimpImputa} onChange={(e) => setGimpImputa(e.target.value as 'propietario' | 'inquilino')} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                  <option value="propietario">Propietario (descontable de su liquidación)</option>
+                  <option value="inquilino">Inquilino (a recuperar)</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t"><button type="button" onClick={() => setShowGastoImport(false)} className="px-4 py-2 border border-slate-200 rounded-xl font-semibold">Cancelar</button><button type="button" onClick={handleImportarGastoCanonico} className="px-4 py-2 bg-slate-800 text-white rounded-xl font-bold">Importar</button></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {detalleLiq && (
         <DetalleLiquidacionModal
           liq={liquidaciones.find((l) => l.id === detalleLiq.id) || detalleLiq}
@@ -767,7 +850,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
           onRecalcular={() => handleRecalcular(liquidaciones.find((l) => l.id === detalleLiq.id) || detalleLiq)}
           onAprobar={() => handleAprobar(liquidaciones.find((l) => l.id === detalleLiq.id) || detalleLiq)}
           onAnular={() => handleAnular(liquidaciones.find((l) => l.id === detalleLiq.id) || detalleLiq)}
-          onPagar={(l) => { setDetalleLiq(null); setPagoLiq(l); setPagoRef(''); }}
+          onPagar={(l) => { setDetalleLiq(null); setPagoLiq(l); setPagoRef(''); setPagoEvidenciaId(''); }}
           onCrearOrden={(l) => { handleCrearOrden(l); }}
           onPdf={(l) => imprimirLiquidacionPDF(l)}
         />
@@ -783,6 +866,20 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
             <form onSubmit={handleConfirmarPago} className="p-5 space-y-3 text-xs">
               <p>Neto a transferir a <strong>{pagoLiq.propietarioNombre}</strong>: <strong className="font-mono text-emerald-700 text-base">{formatoImporteSepa(pagoLiq.netoPropietario)} €</strong></p>
               <p className="text-slate-500">IBAN destino: <span className="font-mono">{pagoLiq.cuentaAbonoIban}</span></p>
+              {evidenciasPago.length > 0 && (
+                <div>
+                  <label className="font-semibold block mb-1">Evidencia: movimiento bancario conciliado (GAP 6)</label>
+                  <select value={pagoEvidenciaId} onChange={(e) => onElegirEvidencia(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                    <option value="">— Introducir referencia manualmente —</option>
+                    {evidenciasPago.map((ev) => (
+                      <option key={ev.idMovimiento} value={ev.idMovimiento}>
+                        {ev.fechaPago || 's/f'} · {ev.referenciaBancaria} · {formatoImporteSepa(ev.importe)} €
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">Selección rellena referencia y fecha. El movimiento debe estar CONCILIADO/CONFIRMADO en Conciliación bancaria.</p>
+                </div>
+              )}
               <div><label className="font-semibold block mb-1">Referencia bancaria * (evidencia)</label><input value={pagoRef} onChange={(e) => setPagoRef(e.target.value)} placeholder="Ej. TRF-2026-09-001" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
               <div><label className="font-semibold block mb-1">Fecha de pago</label><input type="date" value={pagoFecha} onChange={(e) => setPagoFecha(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
               <div className="flex justify-end gap-2 pt-2 border-t"><button type="button" onClick={() => setPagoLiq(null)} className="px-4 py-2 border border-slate-200 rounded-xl font-semibold">Cancelar</button><button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold">Confirmar pago</button></div>

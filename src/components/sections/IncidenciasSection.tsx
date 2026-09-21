@@ -11,6 +11,9 @@ import {
   EstadoIncidencia,
   PrioridadIncidencia,
   CategoriaIncidencia,
+  TareaMantenimiento,
+  GarantiaReparacion,
+  TrabajoProfesional,
 } from '../../types';
 import {
   subscribeIncidencias,
@@ -22,6 +25,9 @@ import {
   subscribeSiniestros,
   saveSiniestroFirestore,
   deleteSiniestroFirestore,
+  subscribeTareasMantenimiento,
+  subscribeGarantiasReparacion,
+  subscribeTrabajosProfesionales,
 } from '../../lib/firebase';
 import {
   ESTADOS_INCIDENCIA_LABELS,
@@ -36,6 +42,8 @@ import { IncidenciaModal } from '../modals/IncidenciaModal';
 import { PolizaModal } from '../modals/PolizaModal';
 import { SiniestroModal } from '../modals/SiniestroModal';
 import { DetalleIncidenciaModal } from '../modals/DetalleIncidenciaModal';
+import { MantenimientoPreventivoPanel } from '../mantenimiento/MantenimientoPreventivoPanel';
+import { GarantiasReparacionPanel } from '../mantenimiento/GarantiasReparacionPanel';
 import {
   AlertTriangle,
   ShieldCheck,
@@ -79,10 +87,13 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
   const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
   const [polizas, setPolizas] = useState<PolizaSeguro[]>([]);
   const [siniestros, setSiniestros] = useState<Siniestro[]>([]);
+  const [tareas, setTareas] = useState<TareaMantenimiento[]>([]);
+  const [garantias, setGarantias] = useState<GarantiaReparacion[]>([]);
+  const [trabajos, setTrabajos] = useState<TrabajoProfesional[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Pestaña activa del módulo
-  const [subTab, setSubTab] = useState<'incidencias' | 'polizas' | 'siniestros'>('incidencias');
+  const [subTab, setSubTab] = useState<'incidencias' | 'preventivo' | 'garantias' | 'polizas' | 'siniestros'>('incidencias');
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -121,10 +132,25 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
       setSiniestros(items);
     });
 
+    const unsubTareas = subscribeTareasMantenimiento((items) => {
+      setTareas(items);
+    });
+
+    const unsubGarantias = subscribeGarantiasReparacion((items) => {
+      setGarantias(items);
+    });
+
+    const unsubTrabajos = subscribeTrabajosProfesionales((items) => {
+      setTrabajos(items);
+    });
+
     return () => {
       unsubIncidencias();
       unsubPolizas();
       unsubSiniestros();
+      unsubTareas();
+      unsubGarantias();
+      unsubTrabajos();
     };
   }, []);
 
@@ -293,7 +319,7 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
       </div>
 
       {/* Selector de Sub-Pestañas */}
-      <div className="flex items-center gap-2 border-b border-slate-200 bg-white p-2 rounded-xl shadow-xs">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white p-2 rounded-xl shadow-xs">
         <button
           onClick={() => setSubTab('incidencias')}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
@@ -307,6 +333,30 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
         </button>
 
         <button
+          onClick={() => setSubTab('preventivo')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+            subTab === 'preventivo'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Wrench className="w-4 h-4" />
+          <span>Mantenimiento Preventivo ({tareas.length})</span>
+        </button>
+
+        <button
+          onClick={() => setSubTab('garantias')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+            subTab === 'garantias'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          <span>Garantías de Reparación ({garantias.length})</span>
+        </button>
+
+        <button
           onClick={() => setSubTab('polizas')}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
             subTab === 'polizas'
@@ -315,7 +365,7 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
           }`}
         >
           <ShieldCheck className="w-4 h-4" />
-          <span>Pólizas de Seguro ({polizas.length})</span>
+          <span>Pólizas ({polizas.length})</span>
         </button>
 
         <button
@@ -327,7 +377,7 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
           }`}
         >
           <FileCheck className="w-4 h-4" />
-          <span>Siniestros Tramitados ({siniestros.length})</span>
+          <span>Siniestros ({siniestros.length})</span>
         </button>
       </div>
 
@@ -582,6 +632,29 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* SUBTAB PREVENTIVO: MANTENIMIENTO PREVENTIVO */}
+      {subTab === 'preventivo' && (
+        <MantenimientoPreventivoPanel
+          tareas={tareas}
+          inmuebles={inmuebles}
+          propietarios={propietarios}
+          profesionales={profesionales}
+          trabajos={trabajos}
+          currentUser={currentUser}
+        />
+      )}
+
+      {/* SUBTAB GARANTIAS: GARANTÍAS DE REPARACIÓN */}
+      {subTab === 'garantias' && (
+        <GarantiasReparacionPanel
+          garantias={garantias}
+          inmuebles={inmuebles}
+          propietarios={propietarios}
+          profesionales={profesionales}
+          currentUser={currentUser}
+        />
       )}
 
       {/* SUBTAB 2: PÓLIZAS DE SEGURO */}

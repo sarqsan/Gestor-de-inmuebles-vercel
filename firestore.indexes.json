@@ -1,0 +1,120 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "actas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "propertyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fechaCreacion",
+          "order": "DESCENDING"
+        }
+      ],
+      "description": "BLOQUE D — listado actas por propietario e inmueble, usado por subscribeActasPorInmueble filtrado client-side tras ownerId, pero índice compuesto opcional si se migra a query server-side where ownerId== && propertyId=="
+    },
+    {
+      "collectionGroup": "actas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "contractId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fechaCreacion",
+          "order": "DESCENDING"
+        }
+      ],
+      "description": "BLOQUE D — actas por contrato, subscribeActasPorContrato"
+    },
+    {
+      "collectionGroup": "actas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tipo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        }
+      ],
+      "description": "BLOQUE D — filtros UI tipo/estado"
+    },
+    {
+      "collectionGroup": "actas_evidencias",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "actaId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "orden",
+          "order": "ASCENDING"
+        }
+      ],
+      "description": "BLOQUE D — evidencias por acta ordenadas"
+    },
+    {
+      "collectionGroup": "actas_incidencias",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "actaId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fechaHora",
+          "order": "DESCENDING"
+        }
+      ],
+      "description": "BLOQUE D — incidencias por acta"
+    },
+    {
+      "collectionGroup": "actas_otp",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "actaId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        }
+      ],
+      "description": "BLOQUE D — OTP por acta y estado, usado por subscribeOtpPorActa"
+    }
+  ],
+  "fieldOverrides": [],
+  "notes": "BLOQUE D — arquitectura canónica Firestore: aislamiento por ownerId. Queries actuales usan where ownerId== + filtro client-side propertyId/contractId para evitar índice obligatorio, pero se documentan índices opcionales para futura migración server-side. No se requiere intervención manual inmediata; si Firebase lanza error FAILED_PRECONDITION con link crear índice, seguir link. Reglas firestore.rules bloque 38 (BLOQUE D, renumerado al integrar en la canónica donde §25 era GAP7) protegen actas firmadas: FIRMADA/CERRADA no pueden mutar a BORRADOR mismo doc, solo FIRMADA→CERRADA misma versión o actualización PDF limitada. Versionado correcto crea nuevo documento con actaAnteriorId y cadenaVersionIds."
+}

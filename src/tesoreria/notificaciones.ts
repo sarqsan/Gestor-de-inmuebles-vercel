@@ -1,11 +1,17 @@
 /**
  * BLOQUE B — Eventos de notificación de tesorería.
  *
- * En este repositorio NO existe dispatcher de notificaciones (GAP1 citado en la orden).
- * Este módulo NO crea otro sistema de envío: genera eventos tipados con título/mensaje
- * y ofrece `publicarEventoTesoreria()` que (1) registra en audit_logs mediante el
- * callback inyectado (por defecto console + retorno del evento) y (2) devuelve el evento
- * para que un futuro dispatcher GAP1 lo consuma sin cambios.
+ * Este módulo NO crea otro sistema de envío: genera eventos tipados (título/mensaje)
+ * y ofrece `publicarEventoTesoreria()` que registra en `audit_logs` mediante el
+ * callback inyectado (en la app canónica: `registrarAuditoriaFirestore`).
+ *
+ * INTEGRACIÓN A (2026-09-20): el envío de notificaciones usa el GAP 1 canónico
+ * (`src/notificaciones/*`): el adaptador `eventoTesoreriaAEventoNotificacion`
+ * (en `src/notificaciones/adaptadores.ts`) convierte estos eventos a
+ * `EventoNotificacion` {origen:'TESORERIA', idempotencia, destinatario por
+ * propietario} y las plantillas `tesoreria.*` viven en el registro canónico
+ * (`src/notificaciones/plantillas.ts`). `audit_logs` se conserva como auditoría,
+ * no como sustituto del dispatcher.
  * Comportamiento seguro: sin envío real de emails/SMS, sin secretos.
  */
 import type { EventoTesoreria, NotificacionTesoreria } from './tipos';
@@ -129,8 +135,16 @@ export function eventoSepaError(d: DatosEventoSepa): NotificacionTesoreria {
   );
 }
 
-/** Publica el evento: auditoría + retorno para futuro dispatcher. Nunca lanza. */
-export function publicarEventoTesoreria(evento: NotificacionTesoreria): NotificacionTesoreria {
+/**
+ * Publica el evento: auditoría (audit_logs) + retorno. Nunca lanza.
+ * `eventoGap1` es el evento canónico equivalente (GAP 1) construido por
+ * `eventoTesoreriaAEventoNotificacion`: se registra en la auditoría para
+ * trazabilidad completa (tipo + clave de idempotencia del dispatcher).
+ */
+export function publicarEventoTesoreria(
+  evento: NotificacionTesoreria,
+  eventoGap1?: { tipoEvento: string; idempotencyKey: string } | null,
+): NotificacionTesoreria {
   try {
     const descripcion = `[${evento.evento}] ${evento.titulo} — ${evento.mensaje}`;
     if (auditWriter) {
@@ -139,6 +153,9 @@ export function publicarEventoTesoreria(evento: NotificacionTesoreria): Notifica
         entidadTipo: evento.entidadTipo,
         entidadId: evento.entidadId,
         propietarioId: evento.propietarioId,
+        gap1: eventoGap1
+          ? { tipoEvento: eventoGap1.tipoEvento, idempotencyKey: eventoGap1.idempotencyKey }
+          : null,
       });
     } else {
       // eslint-disable-next-line no-console

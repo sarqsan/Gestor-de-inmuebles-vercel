@@ -17,13 +17,21 @@ import {
 } from '../src/tesoreria/liquidacionEngine';
 import {
   clasificarCobrosPeriodo,
+  evidenciaPagoDesdeMovimientoBancario,
   marcarCobrosLiquidados,
+  movimientosBancariosParaLiquidacion,
   proyectarMovimientos,
   resumenCobrosLiquidados,
   resumenGastosLiquidados,
   sugerirConciliacion,
 } from '../src/tesoreria/conciliacionAdapter';
-import { crearGastoManual, gastoDesdeTrabajo } from '../src/tesoreria/gastosEngine';
+import { crearGastoManual, gastoDesdeGastoCanonico, gastoDesdeTrabajo } from '../src/tesoreria/gastosEngine';
+// INTEGRACIÓN A (2026-09-20): puentes GAP 1 / GAP 6 / gastos canónicos
+import { eventoTesoreriaAEventoNotificacion } from '../src/notificaciones/adaptadores';
+import { idempotenciaDeEvento } from '../src/types/notificaciones';
+import { PLANTILLAS } from '../src/notificaciones/plantillas';
+import type { Gasto } from '../src/types';
+import type { MovimientoBancario, PropuestaConciliacion } from '../src/types/conciliacion';
 import { generarPain008, validarXmlPain008 } from '../src/tesoreria/sepaPain008';
 import { aprobarOrdenPago, crearOrdenPagoLiquidacion, generarPain001, validarXmlPain001 } from '../src/tesoreria/sepaPain001';
 import {
@@ -382,6 +390,84 @@ async function run() {
   assert(pgInt.estado === 'PAGADA' && pgInt.ordenPagoId === ordInt.id && fInt.items[0].origenId === ordInt.id && ordInt.origenId === apInt.id, 78, 'Circuito cobro→liquidación→orden→pain.001→pago trazable');
   // Neto esperado: 900 − 72 − 15.12 = 812.88
   assert(pgInt.netoPropietario === 812.88, 79, 'Neto integración 812.88 €', String(pgInt.netoPropietario));
+
+  // ---------- INTEGRACIÓN A: gasto canónico → proyección de liquidación ----------
+  const gastoCanonico: Gasto = {
+    id: 'gas_inm_A_1', inmuebleId: 'inm_A', propietarioId: 'prop_1',
+    tipo: 'EXPLOTACION', categoria: 'REPARACION', concepto: 'Caldera',
+    proveedor: 'Fontanera SL', importe: 242, estado: 'PAGADO',
+    fechaDevengo: '2026-09-02', fechaPago: '2026-09-03',
+    aCargoDe: 'arrendador', deducible: true,
+    origen: 'ORDEN_TRABAJO', origenId: 'trab_1', trabajoId: 'trab_1',
+  } as unknown as Gasto;
+  const gc = gastoDesdeGastoCanonico(gastoCanonico);
+  assert(gc.ok && gc.gasto!.id === 'gas_gasto_gas_inm_A_1' && gc.gasto!.total === 242, 80, 'Importa gasto canónico a proyección (id idempotente, total trazable)', JSON.stringify(gc.gasto && { id: gc.gasto.id, total: gc.gasto.total }));
+  assert(gc.gasto!.imputableA === 'propietario' && gc.gasto!.trabajoId === 'trab_1' && gc.gasto!.propietarioId === 'prop_1', 81, 'Mapeo aCargoDe arrendador→imputableA propietario + origen trabajo');
+  const gc2 = gastoDesdeGastoCanonico(gastoCanonico, gc.gasto!, { pagadoPor: 'administracion' });
+  assert(gc2.ok && gc2.gasto!.id === 'gas_gasto_gas_inm_A_1' && gc2.gasto!.total === 242, 82, 'Reimportación idempotente (no duplica, conserva id/estado)');
+  const gcMal = gastoDesdeGastoCanonico({ ...gastoCanonico, importe: 0 } as unknown as Gasto);
+  assert(!gcMal.ok, 83, 'Gasto canónico sin importe positivo rechazado');
+
+  // Guard: un trabajo con gastoId (puente canónico) NO se duplica vía gastoDesdeTrabajo
+  const trabajoConGasto = { id: 'trab_2', propietarioId: 'prop_1', inmuebleId: 'inm_A', estado: 'FINALIZADO', titulo: 'Electricidad', importeFinal: 150, gastoId: 'gas_trab_2' } as unknown as TrabajoProfesional;
+  const gtGuard = gastoDesdeTrabajo(trabajoConGasto);
+  assert(!gtGuard.ok && gtGuard.errores.some((e) => e.includes('gastoDesdeGastoCanonico')), 84, 'Trabajo con gastoId se remite al importador canónico (anti doble registro)');
+
+  // ---------- INTEGRACIÓN A: evidencia de pago desde GAP 6 ----------
+  const mkMov = (partial: Partial<MovimientoBancario> & { idMovimiento: string }): MovimientoBancario =>
+    ({
+      idImportacion: 'imp_1',
+      fechaOperacion: '2026-09-20',
+      importe: -812.88,
+      tipo: 'GASTO',
+      concepto: 'Liquidación',
+      conceptoOriginal: 'ABONO LIQ SEP',
+      referencia: 'TRF-2026-09-001',
+      identificadorBanco: 'FITID-1',
+      origen: 'CSV',
+      propietarioId: 'prop_1',
+      metadatosOriginales: {},
+      hashIdempotencia: `hash_${partial.idMovimiento}`,
+      fechaImportacion: '2026-09-20T10:00:00Z',
+      ...partial,
+    }) as unknown as MovimientoBancario;
+  const movA = mkMov({ idMovimiento: 'MOV_A' });
+  const evA = evidenciaPagoDesdeMovimientoBancario(movA);
+  assert(evA.referenciaBancaria === 'TRF-2026-09-001' && evA.fechaPago === '2026-09-20' && evA.importe === -812.88, 85, 'Evidencia de pago extraída de movimiento (referencia/fecha/importe)');
+
+  const mkProp = (partial: Partial<PropuestaConciliacion> & { id: string; movimientoId: string }): PropuestaConciliacion =>
+    ({
+      idImportacion: 'imp_1',
+      propietarioId: 'prop_1',
+      puntuacion: 95,
+      confianza: 'ALTA',
+      factores: [],
+      estado: 'PENDIENTE',
+      esDiscrepancia: false,
+      fechaPropuesta: '2026-09-20T10:00:00Z',
+      propuestaPor: 'USUARIO',
+      historial: [],
+      ...partial,
+    }) as unknown as PropuestaConciliacion;
+  const propConfirmada = mkProp({ id: 'conc_1', movimientoId: 'MOV_A', estado: 'CONFIRMADO', importeMovimiento: -812.88 });
+  const propPendiente = mkProp({ id: 'conc_2', movimientoId: 'MOV_B', estado: 'PENDIENTE', importeMovimiento: -100 });
+  const movB = mkMov({ idMovimiento: 'MOV_B', importe: -100, referencia: 'TRF-B' });
+  const movIngreso = mkMov({ idMovimiento: 'MOV_C', importe: 500, referencia: 'ING' });
+  const movOtroProp = mkMov({ idMovimiento: 'MOV_D', importe: -50, referencia: 'OTRO', propietarioId: 'prop_2' });
+  const evidencias = movimientosBancariosParaLiquidacion([movA, movB, movIngreso, movOtroProp], [propConfirmada, propPendiente], { id: 'liq_x', propietarioId: 'prop_1' });
+  assert(evidencias.length === 1 && evidencias[0].idMovimiento === 'MOV_A', 86, 'Solo movimientos CONFIRMADOS + negativos + del propietario sirven de evidencia', JSON.stringify(evidencias.map((e) => e.idMovimiento)));
+
+  // ---------- INTEGRACIÓN A: puente GAP 1 (eventos canónicos) ----------
+  const evtGen = eventoLiquidacionGenerada({ liquidacionId: 'liq_1', periodo: '2026-09', propietarioId: 'prop_1', propietarioNombre: 'Ana', neto: 812.88 });
+  const gap1 = eventoTesoreriaAEventoNotificacion(evtGen, { email: 'ana@x.com', nombre: 'Ana' });
+  assert(gap1.origen === 'TESORERIA' && gap1.tipoEvento === 'tesoreria.liquidacion_generada' && gap1.entidadId === 'liq_1', 87, 'Puente GAP1: origen TESORERIA + tipoEvento tesoreria.* + entidadId');
+  assert(gap1.idempotencyKey === idempotenciaDeEvento('TESORERIA', 'liquidacion_generada', 'liq_1'), 88, 'Puente GAP1: idempotencyKey canónica (idempotenciaDeEvento)');
+  assert(gap1.destinatario?.email === 'ana@x.com' && gap1.propietarioId === 'prop_1', 89, 'Puente GAP1: destinatario por propietario (ownership)');
+  const gap1b = eventoTesoreriaAEventoNotificacion({ ...evtGen, id: 'otro' });
+  assert(gap1.idempotencyKey === gap1b.idempotencyKey, 90, 'Puente GAP1: misma entidad → misma clave (repetir suceso no duplica)');
+  const todasTesoreria = Object.keys(PLANTILLAS).filter((k) => k.startsWith('tesoreria.'));
+  assert(todasTesoreria.length === 7, 91, 'Registro GAP1: 7 plantillas tesoreria.* presentes', String(todasTesoreria.length));
+  assert(todasTesoreria.every((k) => PLANTILLAS[k].id === k && PLANTILLAS[k].canalesPermitidos.includes('INAPP')), 92, 'Plantillas tesoreria.* coherentes (id + canal INAPP)');
 
   console.log('\n================================================================');
   console.log(` RESULTADO BLOQUE B: ${passed} PASS · ${failed} FAIL (${passed + failed} pruebas)`);

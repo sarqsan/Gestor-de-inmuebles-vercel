@@ -6,7 +6,12 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: 2026-09-21 — **§12 RECONCILIACIÓN GLOBAL (ORDEN 15)**:
+> Última actualización: 2026-09-21 — **ORDEN 16-R: GAP-R4 CERRADO (solo tests)**:
+> suites propias de `cobrosEngine`/`fiscalEngine`/`gastosEngine` + suite GAP3
+> desglosada (42 tests); 0 cambios en producción; global **820/820** · tsc 0 ·
+> build OK. (Rama de ejecución `arena/01a0c559-gestor-de-inmuebles-vercel`,
+> base `ce67c09`; detalle en §12.2 ficha GAP-R4.) Anteriores: 2026-09-21 —
+> **§12 RECONCILIACIÓN GLOBAL (ORDEN 15)**:
 > clasificación definitiva A–F, GAPs de desarrollo real, matriz GAP→Arena y
 > orden técnico. Anteriores: 2026-09-20 — 2.ª actualización: decisiones de producto
 > (Portal del Inquilino consolidado como **BLOQUE E** con dependencias B/C/D y
@@ -56,32 +61,52 @@ Firebase (Firestore ~45 colecciones / Storage) + server.ts (Express: 16 endpoint
 
 | Comando | Nota |
 |---|---|
-| `npx vitest run` | **330/330 tests en 16 ficheros** (estado verificado 2026-09-20). `package.json` canónico **no define script `test`** — este es el comando oficial |
+| `npx vitest run` | **820/820 tests en 35 ficheros** (estado verificado 2026-09-21, ORDEN 16-R). `package.json` canónico **no define script `test`** — este es el comando oficial |
 | `npx tsc --noEmit` | 0 errores (verificado 2026-09-20) |
 | `npm run build` | OK (~11 s; warning conocido de chunk >500 kB, documentado y no bloqueante) |
 | `npm run dev` | `tsx server.ts` (dev local, puerto 3000) |
 
-Distribución actual de tests:
+Distribución actual de tests (verificado 2026-09-21, ORDEN 16-R — 820/820 en 35 ficheros;
+las suites marcadas **R4** son las añadidas/desglosadas en esta orden):
 
 | Fichero | Tests | Bloque |
 |---|---|---|
+| `src/utils/actas/bloqueD.test.ts` | 51 | BLOQUE D |
+| `src/utils/fiscalEngine.test.ts` | 50 | **R4** — suite propia fiscalEngine |
+| `src/utils/cobrosEngine.test.ts` | 49 | **R4** — suite propia cobrosEngine |
 | `src/utils/contratoCicloGAP2.test.ts` | 44 | GAP2 |
+| `tests/informesEngine.test.ts` | 42 | **R4** — GAP3 desglosado (40 checks + 2 invariantes) |
+| `src/utils/gastosEngine.test.ts` | 42 | **R4** — suite propia gastosEngine |
 | `tests/facturaElectronicaB2B.test.ts` | 40 | GAP8 |
 | `src/utils/publicacionGAP5.test.ts` | 35 | GAP5 |
+| `src/test/e/bloqueE.portal.test.tsx` | 33 | BLOQUE E (validación) |
+| `src/utils/morosidad/morosidadEngine.test.ts` | 33 | BLOQUE C |
+| `src/test/e/bloqueE.servicios.test.ts` | 31 | BLOQUE E (validación) |
 | `tests/financiacion.test.ts` | 29 | GAP4 |
 | `tests/facturacion.test.ts` | 28 | GAP7 |
 | `src/utils/habitacionesCircuitoComercial.test.ts` | 28 | Habitaciones |
-| `tests/notificaciones.test.ts` | 20 | GAP1 |
+| `src/experiencia/experiencia.test.ts` | 25 | §6 F1–F3 |
 | `src/utils/habitacionesEconomia.test.ts` | 24 | Habitaciones |
-| `src/utils/habitacionesIsolation.test.ts` | 20 | Habitaciones |
 | `tests/conciliacion.test.ts` | 23 | GAP6 |
-| `src/utils/inventarioIsolation.test.ts` | 12 | Inventario (ya suite vitest real) |
+| `tests/notificaciones.test.ts` | 20 | GAP1 |
+| `src/experiencia/asistente.test.ts` | 20 | §6 F4 |
+| `src/utils/habitacionesIsolation.test.ts` | 20 | Habitaciones |
+| `src/utils/morosidad/morosidadEstados.test.ts` | 19 | BLOQUE C |
+| `src/utils/morosidad/morosidadStore.test.ts` | 18 | BLOQUE C |
+| `src/experiencia/progreso.test.ts` | 13 | §6 F3 |
+| `src/components/experiencia/experiencia.ui.test.tsx` | 13 | §6 F1–F2 (UI) |
+| `src/utils/inventarioIsolation.test.ts` | 12 | Inventario |
+| `src/experiencia/targets.test.ts` | 9 | §6 F2 |
 | `src/utils/incidenciaCircuitoOperativoEconomico.test.ts` | 9 | Circuito operativo |
-| `tests/notificaciones-plantillas.test.ts` | 6 | GAP1 |
+| `src/components/experiencia/experiencia.f2.ui.test.tsx` | 9 | §6 F2 (UI) |
+| `src/components/experiencia/experiencia.f4.ui.test.tsx` | 9 | §6 F4 (UI) |
+| `src/test/e/bloqueE.navegacion.test.tsx` | 9 | BLOQUE E (validación) |
+| `src/utils/morosidad/firestoreRulesMorosidad.test.ts` | 9 | BLOQUE C |
+| `src/components/experiencia/experiencia.f3.ui.test.tsx` | 7 | §6 F3 (UI) |
 | `tests/facturacionReporte.test.ts` | 6 | GAP7 |
+| `tests/notificaciones-plantillas.test.ts` | 6 | GAP1 |
 | `tests/facturacion-notificaciones.test.ts` | 5 | GAP7 |
-| `tests/informesEngine.test.ts` | 1 | GAP3 |
-| **Total** | **330** | |
+| **Total** | **820** | 35 ficheros |
 
 Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJORAS` ·
 `PENDIENTE` · `NO_IMPLEMENTADO` · `DEPENDENCIA_EXTERNA`.
@@ -107,7 +132,7 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 | 11 | Recomercialización | Salida de inquilino, inspección por estancias + IA, reformas/ROI, pricing (catastro/OVC), estrategia/comercialización, kit de publicación, cierre que libera el inmueble | `recomercializacionEngine.ts`, `reformasEngine.ts`, `pricingRecomerc.ts`, `kitPublicacionIa.ts`, `RecomercializacionSection.tsx`, docs `arquitectura/FASE_3.*` | `FUNCIONAL_CON_MEJORAS` | indirectos | Documentado en `docs/arquitectura/` (14 ficheros) — enlazar, no duplicar |
 | 12 | Notificaciones transaccionales (GAP1) | Dispatcher de eventos de negocio: plantilla, canal, momento, reintentos, auditoría, idempotencia | `src/notificaciones/*` (6 módulos), `types/notificaciones.ts`, reglas §22 `notificaciones`, endpoint `/api/notificaciones/enviar` | Motor `COMPLETO`; transporte `DEPENDENCIA_EXTERNA` | 26 | Implementación Firestore del `RepositorioNotificaciones` (interface) **INTEGRADA vía BLOQUE C** (`repositorioNotificacionesFirestore`/`escritorNotificacionesGAP1` en `src/lib/morosidadFirestore.ts`, escribe en la colección canónica `notificaciones`; ver `src/utils/morosidad/puenteGAP1.ts`); EMAIL en safe-mode (sin proveedor real); WHATSAPP preparado-no implementado; sin bandeja UI |
 | 13 | Contratos especiales (GAP2) | Modalidades (temporada/local/habitación), anexos versionados inmutables, finalización/rescisión irreversible, finiquito, derivados/prórrogas, eventos de ciclo | `contratoCicloEngine.ts`, `CicloContractualPanel.tsx`, `types.ts` (bloque GAP2) | `COMPLETO` | 44 | Eventos de ciclo emitidos hacia GAP1 (dispatcher aún sin transporte real); sin UI de creación directa desde cero (flujo real: sobre borrador LAU) |
-| 14 | Reporting (GAP3) | Capa de agregación/lectura sobre cobros/fiscal/gastos; PDF (jsPDF); informes de inversor/rentabilidad | `reportingEngine.ts` (1.116 l.), `pdfExportEngine.ts`, `InformesSection.tsx` | `COMPLETO` | 1 (cobertura fina; ver límite) | Capa de SOLO LECTURA: no escribe en cobros/gastos. Sin gráficos (tarjetas HTML) |
+| 14 | Reporting (GAP3) | Capa de agregación/lectura sobre cobros/fiscal/gastos; PDF (jsPDF); informes de inversor/rentabilidad | `reportingEngine.ts` (1.116 l.), `pdfExportEngine.ts`, `InformesSection.tsx` | `COMPLETO` | 42 (suite desglosada R4: 40 checks + 2 invariantes de solo lectura) | Capa de SOLO LECTURA: no escribe en cobros/gastos (invariante probada desde R4). Sin gráficos (tarjetas HTML) |
 | 15 | Sindicación (GAP5) | Publicación multicanal de inmuebles/habitaciones: modelo normalizado → validador → adaptadores (XML/JSON/portales), trazabilidad | `publicacionEngine.ts`, `publicacionXml.ts`, `publicacionJson.ts`, `publicacionPortales.ts`, `PublicacionInmueblesPanel.tsx` | `COMPLETO` (generación) | 35 | Publicación REAL a portales = `PENDIENTE` (sin credenciales; se generan feed/export, no se envían) |
 | 16 | Conciliación bancaria (GAP6) | Importación MT940/OFX/Norma43/CSV, matching con cobros/gastos, propuestas→confirmación→aplicación, idempotencia | `src/utils/conciliacion/*` (9 módulos), `ConciliacionBancariaSection.tsx`, colecciones `movimientos_bancarios`/`conciliaciones_bancarias`/`importaciones_bancarias` | `COMPLETO` | 23 | Flujo Detecta→Propone→Valida→Aplica; la única escritura sobre operaciones es `registrarPagoPeriodo` (cobrosEngine). Sin feed bancario real (import manual) |
 | 17 | Facturación / RRSIF / VERI*FACTU (GAP7) | Series/numeración, líneas/IVA/retenciones, registro de facturación con hash SHA-256 encadenado (spec AEAT v0.1.2), reporte RRSIF, máquina VERI*FACTU con transporte desacoplado | `facturacionEngine.ts`, `facturacionReporte.ts`, `verifactuTransport.ts`, `sha256.ts`, `FacturacionSection.tsx`, colecciones `facturas`/`registros_facturacion`/`envios_verifactu`/`series_facturacion` | Motor `COMPLETO`; remisión `DEPENDENCIA_EXTERNA` | 39 | NO hay remisión real a AEAT/SII (sin endpoints inventados, sin certificados en código); RRSIF se genera, no se transmite |
@@ -165,7 +190,7 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 
 ### GAP3 — Reporting / informes
 - **Qué existe:** `reportingEngine.ts` (1.116 l., capa de agregación/lectura sobre `cobrosEngine`/`fiscalEngine`/`gastosEngine`), `pdfExportEngine.ts` (jsPDF), `InformesSection.tsx`.
-- **Probado:** 1 test vitest (`informesEngine.test.ts`) — **cobertura fina**; la calidad se apoya en que es capa de solo-lectura sobre motores ya probados. Aumentar cobertura es una mejora legítima (sin tocar los motores que consume).
+- **Probado:** **42 tests vitest (`informesEngine.test.ts`)** desde la ORDEN 16-R (2026-09-21): los 40 checks del harness `src/tests/tests_reporting.ts` **desglosados** en tests nombrados por zona (cartera 3 · inmueble 3 · economía 1 · fechas 5 · contratos 6 · fiscal 1 · exportación 4 · seguridad/RBAC 7 · PDF 4 · no duplicación 4 · rentabilidad/evolución 2) + **2 invariantes de solo-lectura** (inputs congelados: los informes no mutan cobros/gastos/contratos). El harness legacy se conserva para ejecución manual standalone (no duplicado). Los motores subyacentes (`cobrosEngine`/`fiscalEngine`/`gastosEngine`) tienen suite propia desde la misma orden (ver §12.2 GAP-R4).
 - **Limitaciones reales:** sin gráficos (tarjetas HTML); informes generados en memoria desde datos suscritos; sin persistencia propia de informes.
 - **Dependencias externas:** ninguna (motor puro).
 - **NO modificar accidentalmente:** su naturaleza de **solo lectura** (no debe escribir en cobros/gastos/fiscal); no duplicar cálculos que ya viven en `cobrosEngine`/`fiscalEngine`/`gastosEngine`.
@@ -1018,8 +1043,14 @@ endurecimiento final — §7)
 4. `package.json` canónico sin script `test` (correr `npx vitest run`); añadirlo es
    un cambio de tooling menor pendiente de decisión.
 5. Chunk de build >500 kB (warning conocido, no bloqueante).
-6. Cobertura vitest fina en GAP3 (1 test) y en subsistemas base (cobros/fiscal/
-   gastos no tienen suite propia; se apoyan en tests de integración de GAPs).
+6. ~~Cobertura vitest fina en GAP3 (1 test) y en subsistemas base (cobros/fiscal/
+   gastos sin suite propia)~~ — **CERRADO por ORDEN 16-R (2026-09-21)**: suites
+   propias `cobrosEngine` (49), `fiscalEngine` (50), `gastosEngine` (42) y suite
+   GAP3 desglosada (42). Quirks documentados en cabeceras de suite (sin defecto
+   de producción): `EN_REVISION` contado como pagado en `resumenGastos`;
+   `totalDeducible` sin filtro de estado; IBI no en la lista `esGastoDeducible`
+   aunque `deduciblePorDefecto(ibi)=true` (inconsistencia preexistente, pendiente
+   externo, no bloqueante).
 7. `/api/*` sin rate-limit (documentado en diagnóstico funcional).
 8. Despliegue de reglas: `firestore.rules`/`storage.rules` se publican **manualmente**
    por el usuario con Firebase CLI (no desde el sandbox).
@@ -1068,17 +1099,29 @@ endurecimiento final — §7)
 > de UI, 69 bloques `match` en `firestore.rules`, 17 endpoints Express, 32
 > suites. Única discrepancia código↔reglas: `valoraciones_profesionales` (§10.9,
 > ya conocida). Cabecera de §6 y diagrama §8 actualizados (decían «IA prevista»).
+>
+> **Actualización ORDEN 16-R (2026-09-21) — GAP-R4 CERRADO (solo tests):** rama
+> `arena/01a0c559-gestor-de-inmuebles-vercel` sobre la base `ce67c09` (tip de la
+> línea canónica; la rama de sesión la fija la plataforma, no fue posible
+> ejecutarlo en `arena/01a0bfbe-…`). Regresión: global **820/820** (35 ficheros;
+> Δ+182 solo tests: 49+50+42 nuevos + 41 del desglose GAP3) · B 92 · C 82 · D 51 ·
+> E 64 · batería E 73 · tsc 0 · build OK. **Cero cambios en producción** (diff =
+> 4 ficheros de test + este MAPA). **Cero defectos de producción detectados**
+> (los quirks documentados son comportamientos preexistentes, no errores de la
+> nueva lógica — ver §10.6).
 
 ### 12.1 Clasificación (una categoría por elemento)
 
 **A — YA IMPLEMENTADO (funcional y probado)**
 Auth+RBAC (4 perfiles, 5 roles predefinidos, `PERMISOS_SISTEMA`) · Inmuebles + habitaciones (72) ·
 Captación pública/candidatos/visitas/cuestionario/solvencia/comparador ·
-Contratos LAU + ciclo GAP2 (44) · Cobros · Gastos/préstamos/rentabilidad ·
-Financiación GAP4 (29) · Incidencias/mantenimiento/profesionales (9) · Pólizas y
-siniestros + Gmail OAuth (única integración externa E2E real) · Inventario (12) ·
+Contratos LAU + ciclo GAP2 (44) · Cobros (suite propia 49 — R4) ·
+Fiscal (suite propia 50 — R4) · Gastos/préstamos/rentabilidad (suite propia 42 —
+R4) · Financiación GAP4 (29) · Incidencias/mantenimiento/profesionales (9) ·
+Pólizas y siniestros + Gmail OAuth (única integración externa E2E real) ·
+Inventario (12) ·
 Recomercialización/reformas/pricing/kit IA · Notificaciones GAP1 motor (26) +
-repositorio Firestore (vía C) · Reporting GAP3 (1 suite envolviendo 40 checks) ·
+repositorio Firestore (vía C) · Reporting GAP3 (suite desglosada 42 — R4) ·
 Sindicación GAP5 generación de feeds (35) · Conciliación GAP6 (23) · Facturación
 GAP7 motor (39) · B2B GAP8 generación (40) · Backend IA Express (16 endpoints +
 asistente) · Seguridad perimetral (reglas deny-by-default) · **BLOQUE B** ·
@@ -1169,10 +1212,16 @@ son cierres de circuitos ya existentes.
 - Riesgos: duplicación BAJA; regresión **ALTA** (funnel público y suscripciones de todo el ERP); integración canónica: SÍ.
 - Arena: **A** (transversal de seguridad; toca reglas y módulos base). Prioridad: **2** (seguridad de datos). Precondición: decisión de diseño (documento público vs reglas por campo) registrada en el MAPA antes de codificar.
 
-**GAP-R4 — Cobertura de tests de los motores base (cobros/fiscal/gastos) y GAP3 (§10.6)**
+**GAP-R4 — Cobertura de tests de los motores base (cobros/fiscal/gastos) y GAP3 (§10.6) — CERRADO (ORDEN 16-R, 2026-09-21)**
 - Objetivo: suites propias para `cobrosEngine` (interfaz económica central de B, C, GAP6, E), `fiscalEngine`, `gastosEngine` y desglose de la suite GAP3 (hoy 1 test que envuelve 40 checks).
 - Pendiente: solo tests (sin cambiar motores).
-- Estado actual: cubiertos indirectamente (GAP2 44, habitaciones 72, B 92, C 82, E 73).
+- Estado actual: **CERRADO**. Entregado en `arena/01a0c559-gestor-de-inmuebles-vercel` (base `ce67c09`):
+  - `src/utils/cobrosEngine.test.ts` — **49 tests** (generación de periodos, estados y transiciones de cobros, resumen económico, pagos/parciales/anulados, incidencias y retrasos, `registrarPagoPeriodo` como única escritura, aislamiento y consistencia).
+  - `src/utils/fiscalEngine.test.ts` — **50 tests** (deducibilidad por categoría, días alquilado/sin alquilar, periodos, ingresos/gastos por ejercicio, resumen fiscal anual, RBAC resumen, consistencia y advertencias de duplicidad).
+  - `src/utils/gastosEngine.test.ts` — **42 tests** (clasificación de categorías, totales, normalización, resumen, período/meses, plantillas recurrentes, puente OT→GASTO, reporting/filtros).
+  - `tests/informesEngine.test.ts` — **42 tests** (los 40 checks del harness `src/tests/tests_reporting.ts` desglosados en tests nombrados + 2 invariantes de solo-lectura; harness legacy conservado).
+- Defectos de producción detectados: **0**. Quirks preexistentes documentados en cabeceras de suite (sin cambio de comportamiento): `EN_REVISION`→PAGADO en `resumenGastos`; `totalDeducible` sin filtro de estado; `esGastoDeducible` no lista IBI aunque `deduciblePorDefecto(ibi)=true` (pendiente externo, no bloqueante).
+- Regresión final: global **638→820/820** (Δ solo tests) · B 92 · C 82 · D 51 · E 64 · batería E 73 · tsc 0 · build OK. **0 cambios en producción.**
 - Afecta: nada funcional. Dependencias: ninguna. Externas: ninguna.
 - Riesgos: duplicación NULA; regresión NULA (si un test revela un defecto: documentar y detener, no reparar en la misma orden).
 - Arena: **A** (regresión/protección). Prioridad: **4** (antes de cualquier orden que toque `cobrosEngine`, p. ej. GAP-R1). Precondición: ninguna.
@@ -1194,7 +1243,7 @@ independientes; **Arena A integra** una a una con auditoría selectiva.
 | Fase | GAP | Arena | Dependencia previa | Resultado esperado |
 |---|---|---|---|---|
 | **0** (externo, sin Arena) | Publicación de reglas B/C/D/E/F3 + índices; prueba real Gemini F4 | Usuario | — | Reglas e IA validadas en Firebase/Gemini reales; registro en `F4-PRUEBA-REAL-GEMINI.md` |
-| **1** | GAP-R4 | A | — | Suites `cobrosEngine`/`fiscalEngine`/`gastosEngine`/GAP3 desglosada; global > 638 solo por tests |
+| **1** | GAP-R4 | A | — | **CERRADA (2026-09-21, ORDEN 16-R)**: suites 49+50+42 + GAP3 desglosado 42; global 638→820/820 (Δ solo tests); tsc 0 · build OK · 0 cambios producción |
 | **2** | GAP-R1 | B (rama propia) → integra A | Fase 1 recomendada | Conciliación persistida; B con evidencia real; GAP6 23 + nuevos tests; sin segundo motor |
 | **3** | GAP-R3 | A | Decisión de diseño documentada | Ficha pública sin datos fiscales; reglas publicables; funnel intacto |
 | **4** | GAP-R2 | C (rama propia) → integra A | — | Evidencias con archivo en Storage; C 82 verde |

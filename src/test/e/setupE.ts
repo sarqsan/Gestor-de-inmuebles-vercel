@@ -104,7 +104,12 @@ vi.mock('../../lib/firebase', async () => {
   return {
     db,
     storage: { __storage: 'memoria' },
-    auth: { currentUser: null },
+    // El `auth` canónico refleja el usuario sintético actual (§6 F3 lo usa para el UID del progreso).
+    auth: {
+      get currentUser() {
+        return authSintetico.usuarioActual;
+      },
+    },
     USUARIOS_COL: fs.collection(db, 'usuarios'),
     ENLACES_REGISTRO_COL: fs.collection(db, 'enlaces_registro'),
     registrarAuditoriaFirestore,

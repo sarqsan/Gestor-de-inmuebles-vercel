@@ -174,6 +174,7 @@ import { ConfiguracionSection } from './components/sections/ConfiguracionSection
 // CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda, ayuda contextual y tutoriales
 import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
 import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
+import { servicioProgresoTutoriales } from './lib/progresoTutorialesFirestore';
 import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial } from './experiencia';
 import type { SesionTutorial } from './experiencia';
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
@@ -742,7 +743,7 @@ export default function App() {
 
   // Modales de administración
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
-  // CAPA TRANSVERSAL §6 (Fase 1): sesión de tutorial en memoria (sin persistencia)
+  // CAPA TRANSVERSAL §6: sesión de tutorial en memoria (estado UI); el progreso persiste vía servicioProgresoTutoriales (F3)
   const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
   const seccionesAccesibles = useMemo<SectionType[] | undefined>(() => {
     if (currentUser?.tipoPerfil === 'PROPIETARIO') return SECCIONES_PROPIETARIO;
@@ -3890,6 +3891,7 @@ export default function App() {
           onCambio={setSesionTutorial}
           onNavegar={(r) => setActiveSection(r as SectionType)}
           onCerrar={() => setSesionTutorial(null)}
+          servicio={servicioProgresoTutoriales}
         />
       )}
 

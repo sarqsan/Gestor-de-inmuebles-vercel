@@ -32,6 +32,7 @@ import { PortalCuenta } from './PortalCuenta';
 // CAPA TRANSVERSAL §6 (Fase 2): ayuda contextual y recorridos guiados (misma infraestructura que el ERP)
 import { ContextualHelp } from '../experiencia/ContextualHelp';
 import { TutorialPlayer } from '../experiencia/TutorialPlayer';
+import { servicioProgresoTutoriales } from '../../lib/progresoTutorialesFirestore';
 import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, PANTALLAS_PORTAL } from '../../experiencia';
 import type { SesionTutorial } from '../../experiencia';
 
@@ -69,7 +70,7 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
   const [pantalla, setPantalla] = useState<PantallaPortal>('inicio');
   const [contratoSel, setContratoSel] = useState<string | null>(null);
   const portal = usePortalInquilino(usuario);
-  // §6 F2: sesión de recorrido en memoria (sin persistencia)
+  // §6 F2/F3: sesión de recorrido en memoria (estado UI); progreso persistido por servicioProgresoTutoriales
   const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
   const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
   const iniciarRecorrido = (id: string) => {
@@ -304,6 +305,7 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
             onNavegar={(r) => ir(r as PantallaPortal)}
             onCerrar={() => setSesionTutorial(null)}
             posicion="abajo-centro"
+            servicio={servicioProgresoTutoriales}
           />
         )}
 

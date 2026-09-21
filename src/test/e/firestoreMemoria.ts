@@ -199,8 +199,10 @@ export function crearModuloFirestore() {
     let coleccion: string;
     let id: string;
     if (args.length >= 3) {
-      coleccion = String(args[1]);
-      id = String(args[2]);
+      // doc(db, col, id) | doc(db, col, id, subcol, subid, …) (§6 F3: subcolecciones)
+      const segmentos = args.slice(1).map(String);
+      id = segmentos[segmentos.length - 1];
+      coleccion = segmentos.slice(0, -1).join('/');
     } else if (args.length === 2 && args[0] && typeof args[0] === 'object' && (args[0] as RefCol).__tipo === 'col') {
       coleccion = (args[0] as RefCol).coleccion;
       id = String(args[1]);

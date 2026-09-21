@@ -224,6 +224,40 @@ service cloud.firestore {
         && indexIsTruthful()
       );
       allow delete: if isMasterAdmin();
+
+      // -----------------------------------------------------------------------
+      // §6 F3 — PROGRESO DE TUTORIALES (Capa Transversal de Experiencia)
+      // usuarios_auth/{uid}/progreso_tutoriales/{host}__{tutorialId}
+      // Solo el propio usuario autenticado (request.auth.uid == uid) lee y
+      // escribe su progreso. Ni el administrador ni ningún otro usuario acceden
+      // (deny-by-default). Modelo mínimo y cerrado: claves exactas, tipos y
+      // rangos; nunca contenido de tutoriales ni datos arbitrarios.
+      // -----------------------------------------------------------------------
+      function esProgresoTutorialValido(d, docId) {
+        return d.keys().hasAll(['tutorialId', 'host', 'currentStep', 'stepCount', 'completed', 'skippedSteps', 'startedAt', 'updatedAt'])
+          && d.keys().hasOnly(['tutorialId', 'host', 'currentStep', 'stepCount', 'completed', 'skippedSteps', 'startedAt', 'updatedAt', 'completedAt'])
+          && isValidId(d.tutorialId)
+          && d.host in ['ERP', 'PORTAL_INQUILINO']
+          && docId == d.host + '__' + d.tutorialId
+          && d.currentStep is int && d.currentStep >= 0 && d.currentStep < 100
+          && d.stepCount is int && d.stepCount >= 1 && d.stepCount <= 100
+          && d.currentStep < d.stepCount
+          && d.completed is bool
+          && d.skippedSteps is list && d.skippedSteps.size() <= 100
+          && d.startedAt is string && d.startedAt.size() <= 40
+          && d.updatedAt is string && d.updatedAt.size() <= 40
+          && (!('completedAt' in d) || (d.completedAt is string && d.completedAt.size() <= 40));
+      }
+
+      match /progreso_tutoriales/{progresoId} {
+        allow get: if isSignedIn() && request.auth.uid == uid;
+        allow list: if false;
+        allow create, update: if isSignedIn()
+          && request.auth.uid == uid
+          && isValidId(progresoId)
+          && esProgresoTutorialValido(incoming(), progresoId);
+        allow delete: if isSignedIn() && request.auth.uid == uid;
+      }
     }
 
     // =========================================================================

@@ -24,4 +24,19 @@ export {
   reanudar,
   progreso,
 } from './tutoriales';
+export {
+  COLECCION_PADRE_PROGRESO,
+  SUBCOLECCION_PROGRESO_TUTORIALES,
+  MAX_PASOS_PROGRESO,
+  HOSTS_EXPERIENCIA,
+  CAMPOS_PROGRESO,
+  esHostExperiencia,
+  hostDeTutorial,
+  idProgreso,
+  rutaProgreso,
+  esProgresoValido,
+  progresoDesdeSesion,
+  sesionDesdeProgreso,
+} from './progreso';
+export type { TutorialProgress, MotivoProgreso, ResultadoProgreso, ServicioProgresoTutoriales } from './progreso';
 export { CAPACIDADES_ERP, capacidadesDisponibles, construirIntentRequest, resolverIntencionLocal } from './intenciones';

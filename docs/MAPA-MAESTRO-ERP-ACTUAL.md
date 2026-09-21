@@ -682,10 +682,92 @@ la ayuda del portal no cubre pantallas que no existen (p. ej. actas del
 inquilino no tiene vista propia en el portal); sin persistencia del progreso
 (al recargar se pierde la sesión).
 
-**NO implementado (siguientes fases, en este orden):** (F3) progreso de
-tutoriales persistido por usuario (colección canónica a definir; sin duplicar
-auditoría); (F4) IA asistente: implementación de `ResolveUserIntent` con Gemini
-sobre `capacidadesDisponibles` (límites §6.3), sin chatbot vacío previo.
+### 6.7 Estado real — FASE 3 implementada (2026-09-21): progreso persistido
+
+**Alcance F3**: persistir y recuperar el progreso de los tutoriales (iniciar →
+avanzar → abandonar → volver → reanudar → completar). Sin IA, sin nuevos
+tutoriales, sin pantalla «Mis tutoriales», sin gamificación.
+
+**Modelo Firestore elegido**
+
+```
+usuarios_auth/{uid}/progreso_tutoriales/{host}__{tutorialId}
+{ tutorialId, host: 'ERP'|'PORTAL_INQUILINO', currentStep, stepCount,
+  completed, skippedSteps[], startedAt, updatedAt, completedAt? }   (ISO-8601)
+```
+
+Justificación: `usuarios_auth/{uid}` es el espejo de identidad por UID de
+Firebase Auth que ya existe (FASE 1.4) y la única clave que las reglas pueden
+comprobar con `request.auth.uid`; el progreso cuelga del usuario como
+subcolección (no hay colección global de progreso, no se toca `usuarios/{id}`
+—cuyo id no siempre coincide con el UID— ni `audit_logs`). El id del documento
+incluye el `host` para que un mismo `tutorialId` en ERP y Portal no colisione.
+`stepCount` detecta progresos de otra versión del tutorial (se reinicia desde 0).
+`completed` es pegajoso: repetir un tutorial no lo «des-completa». Solo se
+guarda estado; el contenido sigue siendo el registro tipado del código. Ni
+localStorage ni sessionStorage.
+
+**Servicio (único, transversal)** `src/lib/progresoTutorialesFirestore.ts`:
+`getTutorialProgress(tutorialId, host?)`, `saveTutorialProgress(sesion,
+tutorial)`, `clearTutorialProgress(tutorialId, host?)` y el objeto inyectable
+`servicioProgresoTutoriales`. Usa `auth.currentUser`/`db` canónicos de
+`src/lib/firebase.ts` (sin segunda abstracción de auth); el UID nunca es un
+parámetro; valida `tutorialId` contra `TUTORIALES_REGISTRO` y coherencia de
+host; valida el documento con `esProgresoValido` al escribir **y al leer** (un
+documento corrupto se trata como ausencia); nunca lanza: devuelve
+`ResultadoProgreso` (`NO_AUTENTICADO | TUTORIAL_DESCONOCIDO | DATOS_INVALIDOS |
+ERROR_FIRESTORE`). Parte pura en `src/experiencia/progreso.ts`
+(`progresoDesdeSesion`, `sesionDesdeProgreso`, `idProgreso`, `rutaProgreso`).
+
+**Integración** — `TutorialPlayer` acepta `servicio?` (lo inyectan `App.tsx` y
+`InquilinoPortalShell.tsx`; ERP y Portal comparten motor y servicio). Al abrir:
+lee el progreso; si es reanudable (en curso, misma versión, paso > 0 o con
+saltos) sustituye la sesión y muestra «Reanudado desde el paso N»; si no, deja
+constancia del paso 0. Guarda en cada cambio de sesión (avanzar, retroceder,
+saltar, finalizar → `completed=true`), al «Salir» (cancelar guarda el paso
+actual) y al desmontar si quedó algo sin guardar. La sesión en memoria del host
+sigue siendo el estado de UI. Si Firestore falla o no hay sesión Auth: el
+tutorial continúa en memoria, aviso no intrusivo («No se pudo guardar el
+progreso; puedes continuar y se reintentará» + «Reintentar»), y el siguiente
+cambio vuelve a intentarlo. Sin sistema offline propio.
+
+**Reglas nuevas** (`firestore.rules`, dentro de `match /usuarios_auth/{uid}`):
+`match /progreso_tutoriales/{progresoId}` — `get` solo si
+`request.auth.uid == uid`; `list: false`; `create/update` solo el propio uid
+con `isValidId(progresoId)` y `esProgresoTutorialValido(incoming(), progresoId)`
+(claves exactas `hasAll/hasOnly`, host ∈ {ERP, PORTAL_INQUILINO}, `progresoId
+== host + '__' + tutorialId`, enteros con rango, `currentStep < stepCount`,
+`completed` bool, lista ≤ 100, fechas string ≤ 40); `delete` solo el propio
+uid. Ni `isMasterAdmin` ni staff acceden al progreso ajeno. Ninguna regla
+existente se ha relajado; reglas B/C/D/E intactas; deny-by-default final.
+
+**Arnés de tests (aditivo)**: `firestoreMemoria.doc()` admite rutas a
+subcolecciones; el mock de `lib/firebase` expone `auth.currentUser` vivo desde
+`authSintetico`. Batería E sigue 73/73.
+
+**Tests F3 (20 nuevos)**: `src/experiencia/progreso.test.ts` (13: modelo y
+validación, conversión sesión⇄progreso, servicio sin usuario / sin progreso /
+guardar / actualizar / cancelar / completar / borrar / tutorial desconocido /
+error Firestore / doc corrupto / dos hosts; seguridad: A nunca toca la ruta de
+B, comprobación **estática** de `firestore.rules`, sin contenido ni permisos en
+el documento) + `src/components/experiencia/experiencia.f3.ui.test.tsx` (7,
+jsdom: inicio desde 0 y guardado en avanzar/retroceder/saltar, salir y reanudar,
+completar y reabrir, error Firestore con «Reintentar», sin sesión Auth / sin
+servicio, otra versión del tutorial, y el Portal del Inquilino real: abandonar,
+volver y reanudar bajo su propio UID). Suite global **609/609** (589 + 20) ·
+F1+F2 56 · B 92 · C 82 · D 51 · E 64 · batería E 73 · tsc 0 · build OK.
+
+**NV — Firebase real**: el sandbox no tiene red hacia Firebase ni emulador
+(sin Java); las reglas nuevas están **comprobadas estáticamente** y el
+comportamiento del servicio está probado sobre el Firestore en memoria del
+arnés E. La regla real (`usuarios_auth/{uid}/progreso_tutoriales`) queda **NO
+VALIDADA** contra Firebase hasta publicarla (publicación manual de reglas
+pendiente, como el resto). No se han creado datos en Firestore real.
+
+**NO implementado (siguiente fase):** (F4) IA asistente: implementación de
+`ResolveUserIntent` con Gemini sobre `capacidadesDisponibles` (límites §6.3),
+sin chatbot vacío previo. Posible mejora menor posterior (no F4): vista
+«Mis tutoriales» en el Centro de Ayuda a partir del progreso persistido.
 
 ---
 
@@ -700,7 +782,7 @@ presentan como cinco órdenes pequeñas:
 | **C** | Morosidad + recobro + expediente de recuperación | **INTEGRADO (2026-09-21, Arena A — merge `5293c3c`)** — ver §4 BLOQUE C (pendientes: transporte real de comunicaciones GAP1, emulator de reglas, programador de detección, adjuntos en Storage) |
 | **D** | Entrada/salida + actas + evidencias + firma digital | **INTEGRADO (2026-09-21, Arena A)** — ver §4 BLOQUE D (pendiente externo: transporte real OTP SMS/email) |
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | **INTEGRADO (2026-09-21, Arena A — `10f07b3`; validación automatizada `7dcb3ea`, 73/73)** — ver §5 (NV: reglas reales sin emulador) |
-| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASES 1 y 2 IMPLEMENTADAS (2026-09-21)**: motor de contexto + ayuda contextual (ERP y Portal del Inquilino) + Centro de Ayuda + 23 contenidos + recorridos guiados con resaltado real (3 tutoriales) (§6.5–6.6). Pendiente: F3 progreso persistido, F4 IA |
+| **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASES 1, 2 y 3 IMPLEMENTADAS (2026-09-21)**: motor de contexto + ayuda contextual (ERP y Portal del Inquilino) + Centro de Ayuda + 23 contenidos + recorridos guiados con resaltado real (3 tutoriales) + progreso persistido por usuario en `usuarios_auth/{uid}/progreso_tutoriales` (§6.5–6.7; regla real NV). Pendiente: F4 IA |
 | **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
 
 Dependencias entre fases: §8.

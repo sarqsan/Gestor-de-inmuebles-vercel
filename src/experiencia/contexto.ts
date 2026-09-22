@@ -31,6 +31,7 @@ export const MODULO_POR_SECCION: Record<SectionType, ModuloERP> = {
   formalizacion: 'contratos',
   recomercializacion: 'captacion',
   incidencias: 'incidencias',
+  operaciones: 'incidencias',
   solicitudes: 'captacion',
   candidatos: 'captacion',
   nuevo_candidato: 'captacion',

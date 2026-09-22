@@ -23,6 +23,7 @@ export type SectionType =
   | 'formalizacion'
   | 'recomercializacion'
   | 'incidencias'
+  | 'operaciones'
   | 'solicitudes'
   | 'candidatos'
   | 'nuevo_candidato'

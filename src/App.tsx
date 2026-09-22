@@ -247,6 +247,7 @@ import { RecomercializacionSection } from './components/sections/Recomercializac
 import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
 import { IncidenciasSection } from './components/sections/IncidenciasSection';
+import { OperacionesSection } from './components/sections/OperacionesSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
 import { AdministracionSection } from './components/sections/AdministracionSection';
@@ -499,6 +500,7 @@ export default function App() {
         'polizas',
         'actas',
         'incidencias',
+        'operaciones',
         'recomercializacion',
         // BLOQUE E (reconciliado): el propietario consulta los suministros de sus inmuebles
         'suministros',
@@ -3649,6 +3651,17 @@ export default function App() {
               contratos={scopedContratos}
               profesionales={scopedProfesionales}
               currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'operaciones' && (
+            <OperacionesSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              profesionales={scopedProfesionales}
+              gastos={scopedGastos}
+              currentUser={currentUser}
+              onSelectSection={setActiveSection}
             />
           )}
 

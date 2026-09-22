@@ -4,6 +4,47 @@ service firebase.storage {
 
     // =========================================================================
     // FASE 1.4 — SEGURIDAD DE FICHEROS
+    // (endurecido el 2026-09-22 en la auditoría de acceso a documentos y
+    //  archivos: ver docs/AUDITORIA-SEGURIDAD-STORAGE-DOCUMENTOS-2026-09-22.md)
+    //
+    // Matriz vigente en este fichero (detalle y residuales en el doc de auditoría):
+    //   · PÚBLICO  : sólo la IMAGEN DE CATÁLOGO de un inmueble, en la ruta plana
+    //                `inmuebles/{inmuebleId}/{archivo}`, y sólo en `get`.
+    //                Nada más en todo el bucket es accesible sin sesión, ni
+    //                siquiera LISTABLE.
+    //   · INTERNO  : toda cuenta autenticada puede leer/crear/borrar en los
+    //                árboles de documentos privados (justificantes, facturas,
+    //                documentos de candidatos, inspección, incidencias, reformas,
+    //                inventario).
+    //   · ADMIN    : único rol que puede LISTAR los árboles privados (soporte y
+    //                depuración); el `list` público queda prohibido en todo el
+    //                bucket, porque listar permite ENUMERAR archivos ajenos.
+    //   · INMUTABLE: `update: if false` en TODOS los árboles. Un objeto subido es
+    //                evidencia: nadie (ni una cuenta interna) sustituye sus bytes
+    //                en su sitio; cada aportación nueva genera un objeto nuevo.
+    //
+    // RESIDUALES CONOCIDOS y aceptados (no se improvisa aquí un nuevo modelo de
+    // autorización; ver G-1..G-5 del documento de auditoría):
+    //   G-1 Sin custom claims, Storage no puede comparar el segmento
+    //       `{propietarioId}` de la ruta con el uid del usuario: el aislamiento
+    //       FINO por propietario se apoya en Firestore (que sí lo hace con
+    //       `myPropId()` / `aisladoVisible()`) y en que el acceso requiere
+    //       cuenta interna. Las rutas mantienen el segmento de propietario
+    //       precisamente para poder activar el claim sin migrar objetos.
+    //   G-2 `internalUser()` es hoy equivalente a "cuenta autenticada" (no existe
+    //       rol interno en token); se conserva el nombre para poder endurecerlo
+    //       cuando se emitan claims de rol.
+    //   G-3 `isPdfOrImage()` sigue aceptando `application/octet-stream` porque
+    //       varios clientes suben blobs sin tipo declarado; endurecerlo requiere
+    //       antes fijar el contentType en cada llamada de `uploadBytes`.
+    //   G-4 Las `downloadURL` de Firebase Storage son URLs con token de
+    //       capacidad: quien la posee puede abrirla aunque no tenga sesión. Las
+    //       reglas gobiernan el `get` por SDK y el listado, no el token ya
+    //       emitido. Los objetos privados NUNCA se enlazan desde la ficha pública
+    //       (R3 proyecta sólo `isPublic:true` en `inmuebles/{id}/{archivo}`).
+    //   G-5 La ruta `cobros_justificantes/{cobroPeriodoId}/{archivo}` está
+    //       congelada (sin nuevas subidas) y sólo admite lectura interna y
+    //       borrado de limpieza.
     // =========================================================================
 
     function isSignedIn() {
@@ -31,28 +72,46 @@ service firebase.storage {
       return request.resource.contentType.matches('image/.*');
     }
 
+    // Documentos del circuito operativo (incidencias/presupuestos/trabajos):
+    // imagen, PDF o vídeo. No se admite application/octet-stream en estas rutas.
+    function isOperativeDoc() {
+      return request.resource.contentType.matches('image/.*')
+        || request.resource.contentType.matches('application/pdf')
+        || request.resource.contentType.matches('video/.*');
+    }
+
+    // Forma del nombre de objeto. Todos los clientes construyen el nombre con
+    // `replace(/[^a-zA-Z0-9._-]/g, '_')`, así que esta comprobación no rompe
+    // ninguna subida legítima y cierra rutas inventadas / trayectos anidados.
+    function hasSafeObjectName() {
+      return request.resource.name.matches('^[A-Za-z0-9][A-Za-z0-9._-]{0,511}$');
+    }
+
+    function withinSize(limitMb) {
+      return request.resource.size < limitMb * 1024 * 1024;
+    }
+
     // -------------------------------------------------------------------------
     // JUSTIFICANTES DE COBRO (datos económicos)
     // Ruta por propietario: cobros_justificantes/{propietarioId}/{cobroId}/{archivo}
-    // Exige cuenta interna. Las URL de descarga con token que genera el SDK
-    // funcionan como enlace de capacidad para el destinatario (quien lo recibe
-    // puede abrirlo aunque no tenga sesión).
-    // RESIDUAL: sin custom claims, Storage no puede leer Firestore para comparar
-    // el segmento propietarioId con el usuario; se exige cuenta interna y el
-    // aislamiento fino por propietario queda para cuando se emitan claims.
+    // Exige cuenta interna. Privado: ni lectura ni listado anónimo.
     // -------------------------------------------------------------------------
     match /cobros_justificantes/{propietarioId}/{cobroPeriodoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
-        && request.resource.size < 12 * 1024 * 1024
-        && isPdfOrImage();
-      allow update, delete: if internalUser();
+        && withinSize(12)
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // Ruta heredada anterior (sin carpeta de propietario): sólo lectura interna;
-    // ya no se permiten nuevas subidas a este esquema.
+    // ya no se permiten nuevas subidas a este esquema (G-5).
     match /cobros_justificantes/{cobroPeriodoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create, update: if false;
       allow delete: if internalUser();
     }
@@ -60,72 +119,109 @@ service firebase.storage {
     // -------------------------------------------------------------------------
     // FACTURAS / JUSTIFICANTES DE GASTOS (FASE 2.2 — datos económicos)
     // Ruta por propietario: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
-    // Cuenta interna; PDF o imagen; máximo 12 MB. Mismo residual de aislamiento
-    // fino que los justificantes de cobro (pendiente de custom claims).
+    // Cuenta interna; PDF o imagen; máximo 12 MB.
     // -------------------------------------------------------------------------
     match /gastos_facturas/{propietarioId}/{gastoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
-        && request.resource.size < 12 * 1024 * 1024
-        && isPdfOrImage();
-      allow update, delete: if internalUser();
+        && withinSize(12)
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
     // DOCUMENTOS APORTADOS POR LOS CANDIDATOS (portal público por token)
-    // La SUBIDA (create) la realiza el candidato sin iniciar sesión (funnel de
-    // captación), por lo que se permite anónimo con límite de tipo y tamaño;
-    // lectura/modificación/borrado quedan reservados a usuarios internos.
+    // La SUBIDA (create) la realiza el candidato SIN iniciar sesión (funnel de
+    // captación), por lo que se permite anónima pero CERRADA: objeto nuevo
+    // (nunca sustitución de uno existente), un único segmento bajo la carpeta de
+    // la solicitud, nombre de forma segura, tipo PDF/imagen y tamaño <= 15 MB.
+    // Lectura, listado, modificación y borrado siguen reservados a cuentas
+    // internas (el candidato no recibe URL de lectura: sube y ya).
     // -------------------------------------------------------------------------
-    match /documentos_solicitados/{solicitudDocId}/{allFiles=**} {
-      allow read: if internalUser();
-      allow create: if request.resource.size < 15 * 1024 * 1024 && isPdfOrImage();
-      allow update, delete: if internalUser();
+    match /documentos_solicitados/{solicitudDocId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if withinSize(15)
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
     // IMÁGENES DE INMUEBLES (catálogo / listado público)
-    // Lectura pública (los listados son públicos); escritura interna.
+    // Único acceso PÚBLICO de todo el bucket y SÓLO en `get` de la ruta plana
+    // `inmuebles/{inmuebleId}/{archivo}` (las imágenes que R3 proyecta en la
+    // ficha pública). El `list` queda interno: sin él no se puede ENUMERAR el
+    // carpeta de un inmueble (antes, con `read: if true` sobre `{allFiles=**}`,
+    // cualquiera podía listar TODOS los archivos del inmueble, incluidos los no
+    // públicos).
     // -------------------------------------------------------------------------
-    match /inmuebles/{inmuebleId}/{allFiles=**} {
-      allow read: if true;
+    match /inmuebles/{inmuebleId}/{fileName} {
+      allow get: if true;
+      allow list: if internalUser();
       allow create: if internalUser()
-        && request.resource.size < 15 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && withinSize(15)
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // SUBÁRBOLES PRIVADOS DENTRO DE inmuebles/  (p. ej. inventario)
+    //   inmuebles/{inmuebleId}/inventario/{inventarioId}/{archivo}
+    // HALLAZGO CERRADO: estas fotografías/adjuntos del inventario del inmueble
+    // viven dentro del prefijo del catálogo. Antes heredaban `read: if true` y
+    // eran listables y visibles para cualquier visitante. Ahora NUNCA son
+    // públicas: sólo cuentas internas, sin `update`, y `list` reservado al admin.
+    // Cualquier otra subcarpeta que aparezca bajo inmuebles/ cae en esta regla
+    // (por defecto privada), no en la pública.
+    // -------------------------------------------------------------------------
+    match /inmuebles/{inmuebleId}/{subcarpeta}/{allFiles=**} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && withinSize(15)
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
     // FOTOGRAFÍAS DE INSPECCIÓN DE RECOMERCIALIZACIÓN (FASE 3.2)
     // Ruta PRIVADA por propietario y expediente:
     //   recomercializacion_fotos/{propietarioId}/{expedienteId}/{archivo}
-    // Son documentos internos de trabajo (estado aparente / desperfectos previos
-    // a la nueva comercialización), por lo que NO son públicas como las del
-    // catálogo. Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
-    // RESIDUAL: sin custom claims, el aislamiento fino por propietario queda
-    // pendiente de emitir claims (igual que justificantes y facturas).
     // -------------------------------------------------------------------------
     match /recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
-        && request.resource.size < 15 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && withinSize(15)
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
     // FOTOGRAFÍAS DE INCIDENCIAS (BLOQUE 4)
     // Ruta PRIVADA por propietario e incidencia:
     //   incidencias_fotos/{propietarioId}/{incidenciaId}/{archivo}
-    // Documentos internos de trabajo (desperfectos/reparaciones); no públicos.
-    // Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
     // -------------------------------------------------------------------------
     match /incidencias_fotos/{propietarioId}/{incidenciaId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
-        && request.resource.size < 15 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && withinSize(15)
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
@@ -136,23 +232,88 @@ service firebase.storage {
     // Documentación contractual, planos, presupuestos y certificados técnicos.
     // -------------------------------------------------------------------------
     match /reformas_documentos/{propietarioId}/{proyectoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
-        && request.resource.size < 20 * 1024 * 1024
-        && isPdfOrImage();
-      allow update, delete: if internalUser();
+        && withinSize(20)
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     match /reformas_fotos/{propietarioId}/{proyectoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
-        && request.resource.size < 20 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && withinSize(20)
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // DOCUMENTOS DEL CIRCUITO OPERATIVO (hallazgo nuevo: las RUTAS EXISTÍAN EN
+    // EL CLIENTE PERO NO TENÍAN REGLA, de modo que toda subida caía en la
+    // denegación por defecto y el cliente degradaba a base64 dentro de
+    // Firestore — ver F-6 de la auditoría). Se declaran aquí con MÍNIMO
+    // PRIVILEGIO: siempre internas, nunca públicas, nunca listables por
+    // usuarios no admin, sin `update`:
+    //   incidencias/{incidenciaId}/{archivo}                    (fotos/vídeos/PDF)
+    //   presupuestos/{presupuestoId}/{archivo}                  (PDF/imagen)
+    //   trabajos/{trabajoId}/{archivo}                          (PDF/imagen)
+    //   profesionales/{profesionalId}/documentos/{archivo}     (PDF/imagen)
+    // -------------------------------------------------------------------------
+    match /incidencias/{incidenciaId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && withinSize(20)
+        && isOperativeDoc()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    match /presupuestos/{presupuestoId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && withinSize(20)
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    match /trabajos/{trabajoId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && withinSize(20)
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    match /profesionales/{profesionalId}/documentos/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && withinSize(20)
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
     // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
+    // Cualquier prefijo nuevo (o ruta construida a partir de un identificador
+    // arbitrario) queda denegado hasta que se declare explícitamente con su
+    // matriz de acceso.
     // -------------------------------------------------------------------------
     match /{allPaths=**} {
       allow read, write: if false;

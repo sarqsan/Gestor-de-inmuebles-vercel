@@ -21,7 +21,13 @@ import {
   Wrench,
   ArrowLeftRight,
   Receipt,
-  AlertTriangle,
+  TrendingDown,
+  RefreshCw,
+  Calculator,
+  BarChart3,
+  Landmark,
+  Banknote,
+  LayoutDashboard,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -35,8 +41,6 @@ interface MobileNavProps {
   contratosCount?: number;
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
-  incidenciasCount?: number;
-  trabajosActivosCount?: number;
   currentUser?: UsuarioApp;
   onOpenAddCandidateModal?: () => void;
   onOpenAuthModal?: () => void;
@@ -53,8 +57,6 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   contratosCount = 0,
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
-  incidenciasCount = 0,
-  trabajosActivosCount = 0,
   currentUser,
   onOpenAddCandidateModal,
   onOpenAuthModal,
@@ -74,31 +76,44 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   }[] =
     perfil === 'PROPIETARIO'
       ? [
+          { id: 'dashboard', label: 'Centro de Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs, atención, financiero, operaciones' },
           { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck, description: 'Servicios y profesionales' },
           { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
-          { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
-          { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías y mantenimiento' },
+          { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
+          { id: 'financiacion', label: 'Financiación', icon: Landmark, description: 'Hipotecas y amortización' },
+          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos y conciliar cobros/gastos' },
+          { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
+          { id: 'informes', label: 'Informes & Export', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
+          { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
+          { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
+          { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : perfil === 'PROFESIONAL'
       ? [
           { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
           { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
-          { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount, description: 'Reparaciones asignadas' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
         ]
       : [
+          { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs reales, atención prioritaria, financiero y operaciones' },
           { id: 'administracion', label: 'Centro de Control', icon: Shield, description: 'Gestión de usuarios, roles y seguridad' },
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
-          { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
-          { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías, peritajes IA y siniestros' },
+          { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
+          { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },
+          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos CSV/OFX/MT940/Norma43 y conciliar' },
+          { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
+          { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
+          { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
+          { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },
+          { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw, description: 'Salida, inspección y nueva comercialización' },
           { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length, description: 'Listado completo' },
           { id: 'analisis', label: 'Análisis IA', icon: Sparkles, description: 'Puntuación e informes' },
           { id: 'configuracion', label: 'Configuración', icon: Settings, description: 'Ajustes del sistema' },

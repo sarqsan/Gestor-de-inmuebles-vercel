@@ -124,8 +124,8 @@ describe('Dashboard — Permisos y seguridad', () => {
   it('Sidebar y MobileNav incluyen dashboard para PROPIETARIO y ADMIN', () => {
     const sidebar = fs.readFileSync(path.resolve(__dirname, '../components/Sidebar.tsx'), 'utf-8');
     const mobile = fs.readFileSync(path.resolve(__dirname, '../components/MobileNav.tsx'), 'utf-8');
-    expect(sidebar).toContain("'dashboard'").toBeTruthy();
-    expect(mobile).toContain("'dashboard'").toBeTruthy();
+    expect(sidebar).toContain("'dashboard'");
+    expect(mobile).toContain("'dashboard'");
     expect(sidebar).toContain('LayoutDashboard');
   });
 

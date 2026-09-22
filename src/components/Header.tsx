@@ -74,6 +74,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Administración Global & Seguridad', subtitle: 'Usuarios, roles, módulos, invitaciones y registro de auditoría' };
       case 'actas':
         return { title: 'Actas de Entrada y Salida — BLOQUE D', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };
+      case 'operaciones':
+        return { title: 'Centro de Operaciones y Mantenimiento', subtitle: 'Coordinación de incidencias, mantenimiento, OOTT, reformas, garantías y seguros' };
       case 'configuracion':
         return { title: 'Configuración del Sistema', subtitle: 'Preferencias, aseguradoras y conexión Google Workspace' };
       case 'ayuda':

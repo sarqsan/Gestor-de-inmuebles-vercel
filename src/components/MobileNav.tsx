@@ -31,6 +31,7 @@ import {
   Banknote,
   Wallet,
   ShieldAlert,
+  Activity,
 } from 'lucide-react';
 
 import { AsistentePanel } from './experiencia/AsistentePanel';
@@ -106,6 +107,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
           { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
           { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
+          { id: 'operaciones', label: 'Operaciones', icon: Activity, description: 'Centro de operaciones y mantenimiento' },
           { id: 'suministros', label: 'Suministros', icon: Zap, description: 'Lecturas y consumos' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
           { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
@@ -138,6 +140,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },
           { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw, description: 'Salida, inspección y nueva comercialización' },
+          { id: 'operaciones', label: 'Operaciones', icon: Activity, description: 'Centro de operaciones y mantenimiento' },
           { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length, description: 'Listado completo' },
           { id: 'analisis', label: 'Análisis IA', icon: Sparkles, description: 'Puntuación e informes' },
           { id: 'configuracion', label: 'Configuración', icon: Settings, description: 'Ajustes del sistema' },

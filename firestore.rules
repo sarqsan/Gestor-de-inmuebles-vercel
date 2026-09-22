@@ -461,7 +461,9 @@ service cloud.firestore {
     // =========================================================================
     match /contratos_formalizacion/{contratoId} {
       // get (documento concreto): titularidad directa o inmueble asignado.
-      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing()));
+      // BLOQUE E (D-1): el inquilino lee (get) SOLO un contrato incluido en su
+      // `contratoIds`; nunca `list` (sigue restringido a master/propietario).
+      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing())) || (isTenant() && tenantTieneContrato(contratoId));
       // list (consulta): OBLIGA a where('propietarioId','==', mi propietarioId).
       allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data));
 

@@ -189,6 +189,7 @@ import { PropietariosSection } from './components/sections/PropietariosSection';
 import { AdministracionSection } from './components/sections/AdministracionSection';
 import { PropietarioPortalSection } from './components/sections/PropietarioPortalSection';
 import { ProfesionalPortalSection } from './components/sections/ProfesionalPortalSection';
+import { InversionSection } from './components/sections/InversionSection';
 import { PortalRegistroView } from './components/PortalRegistroView';
 import { LoginView } from './components/LoginView';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
@@ -405,6 +406,7 @@ export default function App() {
         'dashboard',
         'propietarios',
         'inmuebles',
+        'inversion',
         'formalizacion',
         'cobros',
         'gastos',
@@ -422,7 +424,7 @@ export default function App() {
         setActiveSection('dashboard');
       }
     } else if (perfil === 'PROFESIONAL') {
-      const allowedSections: SectionType[] = ['dashboard', 'administracion', 'inmuebles', 'incidencias', 'configuracion', 'inicio'];
+      const allowedSections: SectionType[] = ['dashboard', 'administracion', 'inmuebles', 'inversion', 'incidencias', 'configuracion', 'inicio'];
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('dashboard');
       }
@@ -434,6 +436,7 @@ export default function App() {
         'administracion',
         'inmuebles',
         'propietarios',
+        'inversion',
         'cobros',
         'gastos',
         'financiacion',
@@ -3167,6 +3170,14 @@ export default function App() {
               contratos={scopedContratos}
               profesionales={scopedProfesionales}
               currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'inversion' && (
+            <InversionSection
+              inmuebles={scopedInmuebles}
+              currentUser={currentUser}
+              onAddInmueble={handleAddInmueble}
             />
           )}
 

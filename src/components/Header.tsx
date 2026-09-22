@@ -67,6 +67,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Conciliación Bancaria', subtitle: 'Importación extractos y conciliación automática' };
       case 'gastos':
         return { title: 'Gestión de Gastos', subtitle: 'Explotación vs financiación y recurrentes' };
+      case 'financiacion':
+        return { title: 'Financiación Hipotecaria', subtitle: 'LTV, cuadro francés, carencia y coste financiero' };
       case 'cobros':
         return { title: 'Gestión de Cobros', subtitle: 'Control mensual, vencimientos y pagos' };
       case 'fiscal':
@@ -77,6 +79,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Incidencias y Mantenimiento', subtitle: 'Gestión operativa y trabajos profesionales' };
       case 'recomercializacion':
         return { title: 'Recomercialización', subtitle: 'Salida, inspección y nueva puesta en mercado' };
+      case 'inversion':
+        return { title: 'Inversión y Valoración', subtitle: 'Analizador COMPRA→COSTES→REFORMA→ALQUILER→RENTABILIDAD→ESCENARIOS — sin datos ficticios, todo estimado' };
       case 'configuracion':
         return { title: 'Configuración del Sistema', subtitle: 'Preferencias, aseguradoras y conexión Google Workspace' };
       default:

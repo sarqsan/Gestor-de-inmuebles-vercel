@@ -21,6 +21,35 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import type { Inmueble } from '../src/types';
+
+// ---------------------------------------------------------------------------
+// Firestore en memoria para los tests que llegan al módulo canónico R3
+// (`resolverDependenciasCanonicas`). En la rama canónica R3 SÍ existe y su
+// escritor delega en `setDoc`; con estos mocks ninguna prueba toca red ni el
+// proyecto real, y la escritura canónica queda capturada y es inspeccionable.
+// ---------------------------------------------------------------------------
+const firestoreMem = vi.hoisted(() => {
+  const store = new Map<string, unknown>();
+  const setDocCalls: Array<{ col: string; id: string; data: Record<string, unknown> }> = [];
+  return { store, setDocCalls };
+});
+
+vi.mock('firebase/firestore', () => ({
+  doc: (_db: unknown, col: string, id: string) => ({ __col: col, __id: id }),
+  getDoc: async (r: { __col: string; __id: string }) => {
+    const v = firestoreMem.store.get(`${r.__col}/${r.__id}`);
+    return { exists: () => v !== undefined, data: () => v };
+  },
+  setDoc: async (r: { __col: string; __id: string }, data: Record<string, unknown>) => {
+    firestoreMem.setDocCalls.push({ col: r.__col, id: r.__id, data });
+    firestoreMem.store.set(`${r.__col}/${r.__id}`, data);
+  },
+  deleteDoc: async (r: { __col: string; __id: string }) => {
+    firestoreMem.store.delete(`${r.__col}/${r.__id}`);
+  },
+}));
+
+vi.mock('../src/lib/firebase', () => ({ db: {} }));
 import {
   CAMPO_NO_COMPARABLE,
   MOTIVO_SIN_TITULAR,
@@ -620,15 +649,54 @@ describe('backfill R3 · ausencia de rutas de escritura propias y enlace con el 
     expect('escribirFicha' in (soloAnalisis as object)).toBe(false);
   });
 
-  it('#19b sin escritor canónico, la ejecución real se niega en lugar de improvisar uno', async () => {
+  it('#19b sin escritor inyectado, la ejecución real solo puede usar el escritor canónico de R3 (o negarse); nunca improvisa uno', async () => {
     const ent = crearEntorno([inmueble('INM-A')], { omitirEscritor: true });
-    // En este árbol (rama sin el módulo R3 integrado) la ruta canónica no está
-    // disponible: debe fallar de forma explícita y CERO escrituras.
-    await expect(
-      materializarFichasPublicas({ listarInmuebles: ent.listarInmuebles, deps: ent.deps, ahoraIso: AHORA, ejecutar: true }),
-    ).rejects.toThrow(/R3_NO_DISPONIBLE|R3_INCOMPLETO/);
-    expect(ent.store.size).toBe(0);
+    firestoreMem.store.clear();
+    firestoreMem.setDocCalls.length = 0;
+
+    // Dos únicos desenlaces admisibles, ambos deterministas y sin red:
+    //  (a) R3 no está en el árbol → fallo explícito R3_NO_DISPONIBLE/R3_INCOMPLETO y CERO escrituras.
+    //  (b) R3 está en el árbol (rama canónica) → la única escritura posible pasa por
+    //      `saveFichaPublicaInmueble` de R3 (aquí capturada por el mock de `setDoc`),
+    //      con el id del inmueble, en la colección canónica, y con la ficha construida
+    //      por el builder inyectado (NO por un builder improvisado por el backfill).
+    let informe: Awaited<ReturnType<typeof materializarFichasPublicas>> | null = null;
+    let error: unknown = null;
+    try {
+      informe = await materializarFichasPublicas({ listarInmuebles: ent.listarInmuebles, deps: ent.deps, ahoraIso: AHORA, ejecutar: true });
+    } catch (err) {
+      error = err;
+    }
+
+    // Pase lo que pase, el entorno de test no ha inventado ningún escritor propio.
     expect(ent.llamadas.escribir).toBe(0);
+    expect(ent.store.size).toBe(0);
+
+    if (error) {
+      // (a) rama sin R3
+      expect(String((error as Error).message)).toMatch(/R3_NO_DISPONIBLE|R3_INCOMPLETO/);
+      expect(firestoreMem.setDocCalls.length).toBe(0);
+      return;
+    }
+
+    // (b) rama canónica con R3: el módulo R3 debe ser exactamente el resuelto por el backfill.
+    const r3 = await resolverDependenciasCanonicas();
+    expect(typeof r3.escribirFicha).toBe('function');
+    expect(informe).not.toBeNull();
+    expect(informe!.escrituras).toBe(1);
+    expect(firestoreMem.setDocCalls.length).toBe(1);
+    const [escritura] = firestoreMem.setDocCalls;
+    expect(escritura.col).toBe('fichas_publicas_inmueble');
+    expect(escritura.id).toBe('INM-A');
+    expect(escritura.data.id).toBe('INM-A');
+    expect(escritura.data.inmuebleId).toBe('INM-A');
+    // La ficha escrita es la que produjo el builder inyectado (espiado), no otra.
+    expect(ent.llamadas.construir).toBe(1);
+    expect(proyeccionPublicaComparable(escritura.data as FichaPublicaRef)).toEqual(
+      proyeccionPublicaComparable(ent.fichasProducidas[0] as FichaPublicaRef),
+    );
+    // Y sin ninguna clave fuera de la lista blanca canónica de R3.
+    expect(clavesFueraDeLista(escritura.data as FichaPublicaRef, r3.camposPublicos)).toEqual([]);
   });
 
   it('#20 resolverDependenciasCanonicas: o el contrato de R3, o un fallo explícito', async () => {

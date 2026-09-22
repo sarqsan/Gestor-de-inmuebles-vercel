@@ -247,7 +247,6 @@ export const OperacionesSection: React.FC<OperacionesSectionProps> = ({
     const unsubPolizas = subscribePolizas(setPolizas);
     const unsubNecesidades = subscribeNecesidadesReforma(setNecesidades);
     const unsubProyectos = subscribeProyectosReforma(setProyectos);
-    const unsubValoraciones = subscribeValoracionesProfesionales(setValoraciones);
     return () => {
       unsubIncidencias();
       unsubTareas();
@@ -258,9 +257,20 @@ export const OperacionesSection: React.FC<OperacionesSectionProps> = ({
       unsubPolizas();
       unsubNecesidades();
       unsubProyectos();
-      unsubValoraciones();
     };
   }, []);
+
+  // §10.9: valoraciones acotadas por propietario (where propietarioId) con el
+  // mismo ámbito de propietario que ya usa la sección (tipoPerfil/propietarioId).
+  useEffect(() => {
+    const unsubValoraciones = subscribeValoracionesProfesionales(setValoraciones, {
+      tipoPerfil: currentUser?.tipoPerfil,
+      propietarioId: currentUser?.propietarioId,
+    });
+    return () => {
+      unsubValoraciones();
+    };
+  }, [currentUser?.tipoPerfil, currentUser?.propietarioId]);
 
   // Alcance RBAC en profundidad sobre listas ya acotadas por App
   const alcance: AlcanceOperativa = useMemo(

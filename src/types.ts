@@ -2909,6 +2909,8 @@ export interface ValoracionProfesionalTrabajo {
   trabajoId: string;
   profesionalId: string;
   inmuebleId: string;
+  /** Propietario del trabajo valorado (clave de aislamiento en reglas y consulta). Opcional: documentos históricos carecen de él. */
+  propietarioId?: string;
   inmuebleDireccion?: string;
   createdAt?: string;
 }

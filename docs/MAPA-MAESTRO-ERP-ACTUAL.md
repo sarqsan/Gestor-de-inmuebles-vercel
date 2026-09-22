@@ -1036,14 +1036,26 @@ endurecimiento final — §7)
 8. Despliegue de reglas: `firestore.rules`/`storage.rules` se publican **manualmente**
    por el usuario con Firebase CLI (no desde el sandbox).
 9. Colección `valoraciones_profesionales` (GAP base «Profesionales», usada por
-   `ProfesionalesSection` vía `subscribeValoracionesProfesionales`/`saveValoracionProfesionalFirestore`)
-   **sin bloque `match` propio en `firestore.rules`** → cae en el deny-by-default
-   (lectura/escritura denegadas en producción). Residual **preexistente a B/C/D/E**:
-   la regla existía en `4d420bd` (§21 antiguo) y desapareció en la integración
-   AI Studio `24a2e23` (línea principal, antes de los bloques). Detectado en la
-   auditoría global post-E (2026-09-21); **no corregido** (fuera de alcance; la
-   reparación requiere orden expresa y publicación manual de reglas). Sin impacto
-   en B/C/D/E.
+   `OperacionesSection`/`ProfesionalesSection` vía `subscribeValoracionesProfesionales`/`saveValoracionProfesionalFirestore`).
+   Histórico: la regla existía en `4d420bd` (§21 antiguo) y desapareció en la
+   integración AI Studio `24a2e23` → la colección caía en el deny-by-default.
+   **RESUELTO (2026-09-22, bloque 2I-bis de `firestore.rules`): regla restaurada y
+   endurecida** (la histórica `isSignedIn()` NO se recuperó):
+   - aislamiento por `propietarioId` (nuevo campo opcional de `ValoracionProfesionalTrabajo`,
+     copiado siempre de `trabajo.propietarioId`); `get`/`list` del propietario solo con
+     `propietarioId == myPropId()`; master acceso completo; `update`/`delete` solo master;
+   - consulta del propietario filtrada: `subscribeValoracionesProfesionales(callback, scope)`
+     delega en `subscribeColeccionPropietario` (`where('propietarioId','==', pid)`), y
+     `OperacionesSection` le pasa el ámbito del usuario actual (sin `orderBy`, sin índices nuevos);
+   - creación validada contra `trabajos_profesionales`: el trabajo debe existir, pertenecer al
+     propietario y el `inmuebleId` coincidir con el del trabajo; `usuarioId` (id interno del
+     usuario, escrito por `ValoracionProfesionalModal`) es solo trazabilidad, nunca autorización;
+   - PROFESIONAL sin acceso (no existe consumidor montado); INQUILINO/anónimo denegados;
+   - documentos históricos sin `propietarioId` quedan fuera del alcance del propietario
+     (visibles solo para master; sin migración);
+   - test semántico `tests/seguridad-firestore-valoraciones.test.ts` (32 casos, incluye
+     discriminación contra `33fcf38`). **Publicación de las reglas en Firebase: PENDIENTE**
+     (manual, ver §10.8).
 
 ## 11. ÍNDICE DE DOCUMENTACIÓN (enlazar, no duplicar)
 

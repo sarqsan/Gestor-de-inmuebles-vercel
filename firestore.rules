@@ -742,6 +742,46 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 2I-bis. VALORACIONES DE TRABAJOS PROFESIONALES (§10.9 — regla restaurada
+    // y endurecida). La regla histórica (`isSignedIn()`) NO se recupera.
+    // Aislamiento por propietarioId (mismo patrón que 2H/2I): el propietario
+    // solo lee las valoraciones con propietarioId == myPropId() y su consulta
+    // OBLIGA a where('propietarioId','==', mi propietarioId). La creación se
+    // valida contra el trabajo valorado (trabajos_profesionales): debe existir,
+    // pertenecer al propietario y el inmuebleId debe coincidir con el del
+    // trabajo. `usuarioId` es trazabilidad, nunca autorización. PROFESIONAL sin
+    // acceso (sin consumidor montado); INQUILINO/anónimo: deny-by-default.
+    // =========================================================================
+    match /valoraciones_profesionales/{valoracionId} {
+      function trabajoExiste(d) {
+        return 'trabajoId' in d && d.trabajoId is string
+          && exists(/databases/$(database)/documents/trabajos_profesionales/$(d.trabajoId));
+      }
+      function trabajoDe(d) {
+        return get(/databases/$(database)/documents/trabajos_profesionales/$(d.trabajoId)).data;
+      }
+      function trabajoEsMio(d) {
+        return trabajoExiste(d)
+          && 'propietarioId' in trabajoDe(d)
+          && trabajoDe(d).propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(existing()));
+      // list: única condición demostrable por la consulta where('propietarioId','==', myPropId()).
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && trabajoEsMio(incoming())
+        && 'profesionalId' in incoming() && incoming().profesionalId is string
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+        && 'inmuebleId' in trabajoDe(incoming())
+        && incoming().inmuebleId == trabajoDe(incoming()).inmuebleId
+      );
+      allow update: if isMasterAdmin();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // 2J. REFORMAS: NECESIDADES Y PROYECTOS DE REFORMA
     // Datos patrimoniales del propietario, aislados por propietarioId. El
     // profesional asignado accede únicamente a su proyecto de reforma asignado.

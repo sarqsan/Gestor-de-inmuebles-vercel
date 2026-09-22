@@ -29,6 +29,7 @@ export type SectionType =
   | 'nuevo_candidato'
   | 'cuestionario'
   | 'analisis'
+  | 'inversion'
   | 'configuracion'
   | 'administracion'
   | 'mis_profesionales'

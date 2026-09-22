@@ -76,6 +76,10 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Actas de Entrada y Salida — BLOQUE D', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };
       case 'operaciones':
         return { title: 'Centro de Operaciones y Mantenimiento', subtitle: 'Coordinación de incidencias, mantenimiento, OOTT, reformas, garantías y seguros' };
+      case 'financiacion':
+        return { title: 'Financiación Hipotecaria', subtitle: 'LTV, cuadro francés, carencia y coste financiero' };
+      case 'inversion':
+        return { title: 'Inversión y Valoración', subtitle: 'Analizador COMPRA→COSTES→REFORMA→ALQUILER→RENTABILIDAD→ESCENARIOS — sin datos ficticios, todo estimado' };
       case 'configuracion':
         return { title: 'Configuración del Sistema', subtitle: 'Preferencias, aseguradoras y conexión Google Workspace' };
       case 'ayuda':

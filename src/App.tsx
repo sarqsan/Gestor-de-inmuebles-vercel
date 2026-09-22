@@ -259,6 +259,7 @@ import { PropietariosSection } from './components/sections/PropietariosSection';
 import { AdministracionSection } from './components/sections/AdministracionSection';
 import { PropietarioPortalSection } from './components/sections/PropietarioPortalSection';
 import { ProfesionalPortalSection } from './components/sections/ProfesionalPortalSection';
+import { InversionSection } from './components/sections/InversionSection';
 import { PortalRegistroView } from './components/PortalRegistroView';
 import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPortalShell';
 import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
@@ -284,6 +285,7 @@ import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistr
 const SECCIONES_PROPIETARIO: SectionType[] = [
   'propietarios',
   'inmuebles',
+  'inversion',
   'formalizacion',
   'cobros',
   // BLOQUE B — "Mis Liquidaciones" en el portal del propietario
@@ -305,7 +307,7 @@ const SECCIONES_PROPIETARIO: SectionType[] = [
   // CAPA TRANSVERSAL §6: Centro de Ayuda (solo lectura)
   'ayuda',
 ];
-const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'configuracion', 'ayuda'];
+const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'inversion', 'configuracion', 'ayuda'];
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
@@ -3660,6 +3662,14 @@ export default function App() {
               gastos={scopedGastos}
               currentUser={currentUser}
               onSelectSection={setActiveSection}
+            />
+          )}
+
+          {activeSection === 'inversion' && (
+            <InversionSection
+              inmuebles={scopedInmuebles}
+              currentUser={currentUser}
+              onAddInmueble={handleAddInmueble}
             />
           )}
 

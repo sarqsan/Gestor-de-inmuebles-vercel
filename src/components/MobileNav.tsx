@@ -30,6 +30,7 @@ import {
   BarChart3,
   Landmark,
   Banknote,
+  LayoutDashboard,
   Wallet,
   ShieldAlert,
   Activity,
@@ -94,6 +95,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   }[] =
     perfil === 'PROPIETARIO'
       ? [
+          { id: 'dashboard', label: 'Centro de Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs, atención, financiero, operaciones' },
           { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck, description: 'Servicios y profesionales' },
           { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Compra, reforma, alquiler, rentabilidad' },
@@ -122,6 +124,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ]
       : [
+          { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs reales, atención prioritaria, financiero y operaciones' },
           { id: 'administracion', label: 'Centro de Control', icon: Shield, description: 'Gestión de usuarios, roles y seguridad' },
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },

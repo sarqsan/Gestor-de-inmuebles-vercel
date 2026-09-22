@@ -170,6 +170,7 @@ import { CrearSolicitudSeguroModal } from './components/CrearSolicitudSeguroModa
 import { DetalleSolicitudSeguroModal } from './components/DetalleSolicitudSeguroModal';
 import { ConfiguracionAseguradorasModal } from './components/ConfiguracionAseguradorasModal';
 
+import { DashboardEjecutivoSection } from './components/sections/DashboardEjecutivoSection';
 import { InicioSection } from './components/sections/InicioSection';
 import { InmueblesSection } from './components/sections/InmueblesSection';
 import { CandidatosSection } from './components/sections/CandidatosSection';
@@ -283,6 +284,7 @@ import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistr
 
 // Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
 const SECCIONES_PROPIETARIO: SectionType[] = [
+  'dashboard',
   'propietarios',
   'inmuebles',
   'inversion',
@@ -3357,6 +3359,20 @@ export default function App() {
 
         {/* Dynamic Section Renderer */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          {activeSection === 'dashboard' && (
+            <DashboardEjecutivoSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              cobros={scopedCobros}
+              gastos={scopedGastos}
+              candidatos={scopedCandidatos}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+              onSelectSection={setActiveSection}
+              cobrosPendientesCount={cobrosPendientesCount}
+            />
+          )}
+
           {activeSection === 'inicio' && (
             <InicioSection
               candidatos={scopedCandidatos}

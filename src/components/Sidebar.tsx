@@ -29,6 +29,7 @@ import {
   BarChart3,
   Landmark,
   Banknote,
+  LayoutDashboard,
   Wallet,
   ShieldAlert,
   Activity,
@@ -85,6 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   if (perfil === 'PROPIETARIO') {
     navItems = [
+      { id: 'dashboard', label: 'Centro de Control', icon: LayoutDashboard },
       { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck },
       { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount },
       { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
@@ -116,6 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   } else {
     // ADMINISTRADOR
     navItems = [
+      { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard },
       { id: 'administracion', label: 'Centro de Control', icon: Shield },
       { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },

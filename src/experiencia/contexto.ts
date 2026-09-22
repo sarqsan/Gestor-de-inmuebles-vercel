@@ -10,6 +10,7 @@ import type { ExperienceContext, ExperienceContextInput, ModuloERP } from './tip
 
 /** Sección del ERP → módulo funcional. Fuente única para ayuda, tutoriales e IA. */
 export const MODULO_POR_SECCION: Record<SectionType, ModuloERP> = {
+  dashboard: 'inicio',
   inicio: 'inicio',
   inmuebles: 'inmuebles',
   propietarios: 'propietarios',

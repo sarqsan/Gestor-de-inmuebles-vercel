@@ -48,6 +48,8 @@ export const Header: React.FC<HeaderProps> = ({
 
   const getSectionTitle = (section: SectionType) => {
     switch (section) {
+      case 'dashboard':
+        return { title: 'Centro de Control Ejecutivo', subtitle: 'KPIs reales, requiere tu atención, financiero, inmuebles, operaciones y actividad — sin datos ficticios' };
       case 'inicio':
         return { title: 'Inicio y Resumen General', subtitle: 'Panel de control de candidatos e inmuebles' };
       case 'inmuebles':

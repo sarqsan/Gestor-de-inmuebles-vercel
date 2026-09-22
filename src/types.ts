@@ -1,4 +1,5 @@
 export type SectionType =
+  | 'dashboard'
   | 'inicio'
   | 'inmuebles'
   | 'propietarios'

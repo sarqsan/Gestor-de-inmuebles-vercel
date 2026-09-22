@@ -20,6 +20,7 @@ export const MODULO_POR_SECCION: Record<SectionType, ModuloERP> = {
   morosidad: 'morosidad',
   facturacion: 'finanzas',
   financiacion: 'finanzas',
+  inversion: 'finanzas',
   fiscal: 'finanzas',
   informes: 'finanzas',
   polizas: 'seguros',

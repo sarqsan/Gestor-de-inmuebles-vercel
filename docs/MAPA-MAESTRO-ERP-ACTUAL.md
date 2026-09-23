@@ -6,7 +6,12 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: 2026-09-20 — 2.ª actualización: decisiones de producto
+> Última actualización: 2026-09-23 — **cierre definitivo de GAP 5 (SINDICACIÓN)**:
+> pasa a `CERRADO ✅` en §2.1 y §3 (verificación: 164/164 propios, 621/621 suite,
+> `tsc` 0 errores, build OK, 82/82 mutaciones detectadas). La publicación efectiva por
+> APIs de terceros no forma parte del cierre (integración externa independiente).
+>
+> 2.ª actualización (2026-09-20): decisiones de producto
 > (Portal del Inquilino consolidado como **BLOQUE E** con dependencias B/C/D y
 > **Capa Transversal de Experiencia, Ayuda, Tutoriales e IA Asistente**, sin
 > numeración GAP). 1.ª actualización: paquete de continuidad.
@@ -65,7 +70,7 @@ Distribución actual de tests:
 |---|---|---|
 | `src/utils/contratoCicloGAP2.test.ts` | 44 | GAP2 |
 | `tests/facturaElectronicaB2B.test.ts` | 40 | GAP8 |
-| `src/utils/publicacionGAP5.test.ts` | 35 | GAP5 |
+| `src/utils/publicacionGAP5.test.ts` + `tests/sindicacion-{nucleo-fase1,estado-persistencia,reglas-firestore,panel-conexion}.test.ts` | 164 | **GAP5 — CERRADO** (129 de estos 4 suites + 35 de generación) |
 | `tests/financiacion.test.ts` | 29 | GAP4 |
 | `tests/facturacion.test.ts` | 28 | GAP7 |
 | `src/utils/habitacionesCircuitoComercial.test.ts` | 28 | Habitaciones |
@@ -106,7 +111,7 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 | 12 | Notificaciones transaccionales (GAP1) | Dispatcher de eventos de negocio: plantilla, canal, momento, reintentos, auditoría, idempotencia | `src/notificaciones/*` (6 módulos), `types/notificaciones.ts`, reglas §22 `notificaciones`, endpoint `/api/notificaciones/enviar` | Motor `COMPLETO`; transporte `DEPENDENCIA_EXTERNA` | 26 | Sin implementación Firestore del `RepositorioNotificaciones` (interface) **en la canónica** — el BLOQUE C en rama aporta `repositorioNotificacionesFirestore`/`escritorNotificacionesGAP1`, pendiente de integración; EMAIL en safe-mode (sin proveedor real); WHATSAPP preparado-no implementado; sin bandeja UI |
 | 13 | Contratos especiales (GAP2) | Modalidades (temporada/local/habitación), anexos versionados inmutables, finalización/rescisión irreversible, finiquito, derivados/prórrogas, eventos de ciclo | `contratoCicloEngine.ts`, `CicloContractualPanel.tsx`, `types.ts` (bloque GAP2) | `COMPLETO` | 44 | Eventos de ciclo emitidos hacia GAP1 (dispatcher aún sin transporte real); sin UI de creación directa desde cero (flujo real: sobre borrador LAU) |
 | 14 | Reporting (GAP3) | Capa de agregación/lectura sobre cobros/fiscal/gastos; PDF (jsPDF); informes de inversor/rentabilidad | `reportingEngine.ts` (1.116 l.), `pdfExportEngine.ts`, `InformesSection.tsx` | `COMPLETO` | 1 (cobertura fina; ver límite) | Capa de SOLO LECTURA: no escribe en cobros/gastos. Sin gráficos (tarjetas HTML) |
-| 15 | Sindicación (GAP5) | Publicación multicanal de inmuebles/habitaciones: modelo normalizado → validador → adaptadores (XML/JSON/portales), trazabilidad | `publicacionEngine.ts`, `publicacionXml.ts`, `publicacionJson.ts`, `publicacionPortales.ts`, `PublicacionInmueblesPanel.tsx` | `COMPLETO` (generación) | 35 | Publicación REAL a portales = `PENDIENTE` (sin credenciales; se generan feed/export, no se envían) |
+| 15 | Sindicación (GAP5) | **CERRADO 2026-09-23** — generación/normalización de la publicación, identidad estable `inmuebleId+portal`, hash canónico y versionado, idempotencia, validación estructurada, adaptadores desacoplados, persistencia del estado, histórico/trazabilidad, integración Firestore (puerto), reglas de seguridad §38 y panel montado | `src/sindicacion/*` (6: `index`, `hashContenido`, `idempotencia`, `validacion`, `adaptadores`, `estadoRepositorio`), `src/lib/sindicacionFirestore.ts`, `publicacionEngine.ts`, `publicacionXml.ts`, `publicacionJson.ts`, `publicacionPortales.ts`, `PublicacionInmueblesPanel.tsx` (montado en `InmueblesSection.tsx`), colección `sindicacion_inmuebles`, reglas §38 + espejo `usuarios_auth` | **`CERRADO` ✅** | 164 (35 generación + 39 núcleo + 42 persistencia + 23 reglas + 25 panel) + 27 de identidad/ownership del circuito (`tests/fase14-espejo-identidad.test.ts`) | La conexión/publicación efectiva mediante APIs o pasarelas de terceros queda fuera del cierre funcional actual y se abordará, si procede, como una integración externa independiente, sin reabrir GAP 5 |
 | 16 | Conciliación bancaria (GAP6) | Importación MT940/OFX/Norma43/CSV, matching con cobros/gastos, propuestas→confirmación→aplicación, idempotencia | `src/utils/conciliacion/*` (9 módulos), `ConciliacionBancariaSection.tsx`, colecciones `movimientos_bancarios`/`conciliaciones_bancarias`/`importaciones_bancarias` | `COMPLETO` | 23 | Flujo Detecta→Propone→Valida→Aplica; la única escritura sobre operaciones es `registrarPagoPeriodo` (cobrosEngine). Sin feed bancario real (import manual) |
 | 17 | Facturación / RRSIF / VERI*FACTU (GAP7) | Series/numeración, líneas/IVA/retenciones, registro de facturación con hash SHA-256 encadenado (spec AEAT v0.1.2), reporte RRSIF, máquina VERI*FACTU con transporte desacoplado | `facturacionEngine.ts`, `facturacionReporte.ts`, `verifactuTransport.ts`, `sha256.ts`, `FacturacionSection.tsx`, colecciones `facturas`/`registros_facturacion`/`envios_verifactu`/`series_facturacion` | Motor `COMPLETO`; remisión `DEPENDENCIA_EXTERNA` | 39 | NO hay remisión real a AEAT/SII (sin endpoints inventados, sin certificados en código); RRSIF se genera, no se transmite |
 | 18 | Factura electrónica B2B (GAP8) | **INTEGRADO EN ARENA A** — integración commit `91da820`. Modelo B2B separado, validador bloqueante, CII/UBL 2.1/Facturae 3.2.2, máquina de estados, idempotencia, reglas deny-by-default, panel UI | `types/facturaElectronicaB2B.ts`, `facturaElectronicaB2BEngine.ts`, `facturaElectronicaB2BService.ts`, `generadores/*` (3), `intercambioB2B/adaptadoresB2B.ts`, `notificacionesB2B.ts`, `FacturaElectronicaB2BPanel.tsx`, colección `facturas_electronicas_b2b` | Generación `COMPLETO`; envío real `DEPENDENCIA_EXTERNA` | 40 | Ver §3 (GAP8). EDIFACT `PENDIENTE-ESPECIFICACIÓN`; SPFE/plataforma privada `PENDIENTE`; B2G/FACe fuera de alcance |
@@ -129,7 +134,7 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 `profesionales`, `system` (incl. `gmail_config`), `notificaciones`,
 `movimientos_bancarios`, `conciliaciones_bancarias`, `importaciones_bancarias`,
 `facturas`, `registros_facturacion`, `envios_verifactu`, `series_facturacion`,
-`facturas_electronicas_b2b`,
+`facturas_electronicas_b2b`, `sindicacion_inmuebles`,
 `liquidaciones_propietarios`, `gastos_inmuebles`, `ordenes_pago`,
 `ficheros_sepa`, `mandatos_sepa`, `config_liquidacion` (BLOQUE B).
 
@@ -173,12 +178,13 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 - **Dependencias externas:** ninguna.
 - **NO modificar accidentalmente:** las fórmulas documentadas en cabecera (cambiarlas cambia el resultado económico de todos los casos de test); la coexistencia con `prestamos` (Fase 2.3) — si se migra, migrar ambos a la vez.
 
-### GAP5 — Sindicación / publicación multicanal
-- **Qué existe:** `publicacionEngine.ts` (modelo normalizado `PublicacionInmueble`, validador, trazabilidad) + adaptadores `publicacionXml.ts`/`publicacionJson.ts`/`publicacionPortales.ts` + `PublicacionInmueblesPanel.tsx` (integrado en `InmueblesSection.tsx`) + tipos de sindicación.
-- **Probado:** 35/35 (`publicacionGAP5.test.ts`).
-- **Limitaciones reales:** la **publicación real a portales está pendiente** (sin credenciales ni APIs externas; se generan feed/export y estados de sindicación locales); los adaptadores que requieren acceso externo lo declaran explícitamente.
-- **Dependencias externas:** credenciales de portales (siempre fuera del cliente/Firestore).
-- **NO modificar accidentalmente:** la lectura del circuito de habitaciones (publica **leído**, nunca modifica contratos/disponibilidad); la idempotencia por `inmuebleId + portal`; que el modelo interno no dependa de ningún portal concreto.
+### GAP5 — Sindicación / publicación multicanal — **CERRADO ✅ (2026-09-23)**
+- **Estado:** bloque terminado para el alcance definido en este mapa. Cierre verificado sobre el estado actual de la rama: **164/164** tests propios (35 de generación/normalización + 39 de núcleo: hash canónico, versionado, decisor de idempotencia, validación estructurada, contrato de adaptador + 42 de persistencia del estado con histórico inmutable e independencia de portal + 23 de reglas §38 y 25 del panel montado), **621/621** en la suite general, `tsc --noEmit` con 0 errores y `npm run build` correcto. Detección de mutaciones `scripts/mutaciones-sindicacion.py`: 82/82 mutaciones detectadas, 0 supervivientes.
+- **Qué existe:** `src/sindicacion/` (motor determinista: `hashContenido.ts` con `formaCanonicaPublicable`, `idempotencia.ts`, `validacion.ts` con errores estructurados, `adaptadores.ts` con `ejecutarOperacion` y `CLAVES_CREDENCIAL_PROHIBIDAS`, `estadoRepositorio.ts` con `externalId`/`clave`/`version`/`operacionesRegistradas`), `src/lib/sindicacionFirestore.ts` (puerto de persistencia real, sin Firebase en el núcleo), `publicacionEngine.ts`/`publicacionXml.ts`/`publicacionJson.ts`/`publicacionPortales.ts` (generación y export), `PublicacionInmueblesPanel.tsx` montado en `InmueblesSection.tsx`, colección `sindicacion_inmuebles` y `firestore.rules` §38.
+- **Identidad/ownership del circuito:** resuelta con el espejo canónico `usuarios_auth/{uid}` (no falsificable: `indexIsTruthful()` lo contrasta contra el perfil autoritativo `usuarios/{id}`) y el circuito `me → activeUser → isPropietarioRole → myPropId/myInmuebleIds → canReachInmuebleId`; `syncAuthIndex` lo mantiene al login, al restaurar la sesión y tras el alta por invitación. 27/27 en `tests/fase14-espejo-identidad.test.ts`, evaluando las `allow` reales del fichero desplegado.
+- **Alcance del cierre:** feed/export, validación, estados de sindicación locales, aislamiento por propietario e idempotencia. **La conexión/publicación efectiva mediante APIs o pasarelas de terceros queda fuera del cierre funcional actual y se abordará, si procede, como una integración externa independiente, sin reabrir GAP 5.**
+- **Dependencias externas:** credenciales/endpoints de portales (siempre fuera del cliente y de Firestore; nunca se inventan).
+- **NO modificar accidentalmente:** la lectura del circuito de habitaciones (publica **leído**, nunca modifica contratos/disponibilidad); la idempotencia por `inmuebleId + portal`; que el modelo interno no dependa de ningún portal concreto; que el núcleo siga sin I/O ni Firebase (el único contacto con Firestore vive en `src/lib/sindicacionFirestore.ts`); el `hashContenido`/`version` como cadena verificable y las guardas de §38 (`esDoc`/`esUpdateSeguro`/`documentoCoherente`).
 
 ### GAP6 — Conciliación bancaria
 - **Qué existe:** `src/utils/conciliacion/` — parsers `mt940Parser`/`ofxParser`/`norma43Parser`/`csvParser`, `normalizador`, `matchingEngine` (config de tolerancias), `importEngine` (idempotencia de importaciones), `conciliacionEngine` (Detecta→Propuesta→Validada→Aplicada con histórico append-only), `idempotencia.ts`; UI `ConciliacionBancariaSection.tsx`; colecciones `movimientos_bancarios`/`conciliaciones_bancarias`/`importaciones_bancarias` + reglas. **BLOQUE B (2026-09-20):** espejo de sesión aditivo (`lib/conciliacionSession.ts`, 2 líneas en la sección) que expone movimientos/propuestas al selector de evidencia de pago de Tesorería. **Lógica de conciliación intacta.**

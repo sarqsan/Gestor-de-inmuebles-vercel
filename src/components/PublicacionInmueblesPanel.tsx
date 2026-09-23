@@ -1,30 +1,333 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EstadoSindicacionPortal,
   FormatoFeedPublicacion,
   HabitacionInmueble,
   Inmueble,
   PortalInmobiliario,
+  PublicacionInmueble,
   RegistroTrazabilidadPublicacion,
   UsuarioApp,
 } from '../types';
 import {
   buildPublicacionInmueble,
   estadoSindicacionInicial,
-  aplicarEstadoPublicacion,
   identidadPublicacionPortal,
   registrarTrazabilidadPublicacion,
   validarPublicacion,
 } from '../utils/publicacionEngine';
 import { ADAPTADORES_PORTAL, FORMATOS_EXPORTACION, PORTALES_DISPONIBLES, generarExportacion, obtenerAdaptadorPortal } from '../utils/publicacionPortales';
 import { subscribeHabitacionesInmueble } from '../lib/firebase';
+import { crearRepositorioEstadoSindicacionFirestore } from '../lib/sindicacionFirestore';
+import {
+  crearEstadoInicialSindicacion,
+  leerEstadosSindicacion,
+  registrarValidacionSindicacion,
+  resumenDelEstado,
+  resolverAccionSindicacion,
+  type InstantaneaPublicada,
+  type PuertoEstadoSindicacion,
+  type RegistroEstadoSindicacion,
+  type ResultadoOperacionPersistida,
+} from '../sindicacion';
 import { Megaphone, Download, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
 /**
- * GAP 5 — Panel de sindicación/publicación (fase 13).
+ * GAP 5 — Panel de sindicación/publicación.
  * Exportación manual: valida, genera el feed en el formato elegido, lo muestra y lo descarga.
  * No automatiza la publicación en portales que requieren credenciales/acceso externo.
+ *
+ * FASE 2B — el estado por (inmueble, portal) deja de ser local: la fuente de verdad es
+ * el repositorio de la Fase 2 (`crearRepositorioEstadoSindicacionFirestore` →
+ * `sindicacion_inmuebles/{externalId}`), con hidratación al montar y listener vivo que
+ * actualiza el panel cuando Firestore cambia. El `useState` del componente es sólo una
+ * PROYECCIÓN de ese estado; no decide transiciones ni inventa estados: lo que se ve es
+ * lo que el dominio persistió y trazó (`audit_logs`).
+ *
+ * El cableado del circuito vive en `crearCircuitoSindicacionPanel` (exportado): el
+ * componente lo consume tal cual, así que el mismo código que ve el usuario es el que
+ * prueban los tests — sin una segunda implementación de persistencia dentro del
+ * componente y sin importar Firebase aquí (toda la E/S está en el adaptador).
  */
+
+// ===========================================================================
+// CIRCUITO PANEL ↔ REPOSITORIO (exportado para poder probarlo sin DOM)
+// ===========================================================================
+
+/** Fila del panel: el registro persistido, o la proyección derivada si aún no hay documento. */
+export interface FilaEstadoSindicacionPanel extends RegistroEstadoSindicacion {
+  origen: 'repositorio' | 'deriva';
+}
+
+export interface InfoHidratacionSindicacion {
+  persistidos: number;
+  derivados: number;
+  creados: PortalInmobiliario[];
+  preexistentes: PortalInmobiliario[];
+  /** true ⇒ la lectura/escritura contra `sindicacion_inmuebles` funcionó. */
+  persistido: boolean;
+  /** Motivo legible cuando `persistido` es false (nunca se rompe el panel por esto). */
+  aviso: string | null;
+}
+
+export interface ParamsCircuitoSindicacion {
+  inmuebleId: string;
+  portales: PortalInmobiliario[];
+  /** Getter: el payload puede cambiar (las habitaciones llegan por listener). */
+  publicacion: () => PublicacionInmueble | null;
+  actor?: { id?: string; nombre?: string; email?: string } | null;
+  /**
+   * Propietario en cuyo nombre se lee (ver `OpcionesRepositorioSindicacion`): es lo que
+   * hace legal el `list` en `firestore.rules` §38. Se usa SOLO para el alcance de
+   * lectura; el `propietarioId` del documento sale del inmueble (`publicacion.propietarioId`).
+   */
+  propietarioIdAlcance?: string;
+  /** El dominio no tiene reloj: la marca de tiempo la aporta quien persiste. */
+  fecha: () => string;
+  onEstados: (filas: FilaEstadoSindicacionPanel[], info: InfoHidratacionSindicacion) => void;
+  /** Permite inyectar otro puerto (tests); en la app se construye el de Firestore. */
+  puerto?: PuertoEstadoSindicacion;
+}
+
+export interface CircuitoSindicacionPanel {
+  readonly puerto: PuertoEstadoSindicacion;
+  inicializar(): Promise<InfoHidratacionSindicacion>;
+  /** Persiste el resultado REAL de «validar + generar feed» (hubo o no hubo feed). */
+  registrarValidacion(args: { portal: PortalInmobiliario; ok: boolean; codigo?: string; mensaje?: string }): Promise<ResultadoOperacionPersistida | null>;
+  /** Cierra el listener y bloquea cualquier emisión posterior. Idempotente. */
+  disposar(): void;
+}
+
+const mensajeDe = (e: unknown): string =>
+  e instanceof Error ? e.message : typeof e === 'string' ? e : 'error desconocido';
+
+/**
+ * Instantánea publicada a partir del registro persistido (lo que la Fase 1 necesita para
+ * decidir). IMPORTA QUÉ SE CONSIDERA "precedente": sólo hay precedente si hay huella o
+ * versión publicada. Un documento en `BORRADOR`/`VALIDADO` (inicializado, nunca enviado)
+ * se reporta SIN precedente ⇒ la primera validación correcta decide `NUEVO`, no
+ * `ACTUALIZAR`. Omitir `externalId` en ese caso es deliberado: el id existe, el anuncio
+ * en el portal no.
+ */
+function instantaneaDesde(registro: RegistroEstadoSindicacion): InstantaneaPublicada {
+  const publicado = Boolean(registro.hashContenido) || (typeof registro.version === 'number' && registro.version > 0);
+  const retirado = registro.estado === 'DESPUBLICADO';
+  if (!publicado) return { retirado };
+  return {
+    externalId: registro.externalId,
+    ...(registro.hashContenido
+      ? { version: { hashContenido: registro.hashContenido, numero: typeof registro.version === 'number' ? registro.version : 1 } }
+      : {}),
+    retirado,
+  };
+}
+
+/** Mezcla lo persistido con los portales sin documento (proyección derivada, claramente marcada). */
+function mezclarEstadosSindicacion(
+  persistidos: RegistroEstadoSindicacion[],
+  inmuebleId: string,
+  portales: PortalInmobiliario[],
+): FilaEstadoSindicacionPanel[] {
+  const porPortal = new Map<PortalInmobiliario, RegistroEstadoSindicacion>();
+  for (const r of persistidos) if (r && r.inmuebleId === inmuebleId) porPortal.set(r.portal, r);
+  return portales.map<FilaEstadoSindicacionPanel>((portal) => {
+    const r = porPortal.get(portal);
+    if (r) return { ...r, origen: 'repositorio' };
+    const derivado: EstadoSindicacionPortal = estadoSindicacionInicial(inmuebleId, [portal])[0];
+    return {
+      ...(derivado as RegistroEstadoSindicacion),
+      id: derivado.externalId,
+      clave: `${portal}:${inmuebleId}`,
+      inmuebleId,
+      operacionesRegistradas: 0,
+      creadoEn: '',
+      actualizadoEn: '',
+      esquema: 1,
+      origen: 'deriva',
+    };
+  });
+}
+
+/** Filas de arranque (antes de leer el repositorio): proyección derivada, no un estado inventado. */
+export function filasDerivadasSindicacion(inmuebleId: string, portales: PortalInmobiliario[]): FilaEstadoSindicacionPanel[] {
+  return mezclarEstadosSindicacion([], inmuebleId, portales);
+}
+
+export function crearCircuitoSindicacionPanel(params: ParamsCircuitoSindicacion): CircuitoSindicacionPanel {
+  const { inmuebleId, portales, actor } = params;
+  const puerto = params.puerto || crearRepositorioEstadoSindicacionFirestore({
+    ...(actor ? { actor } : {}),
+    ...(params.propietarioIdAlcance ? { propietarioId: params.propietarioIdAlcance } : {}),
+  });
+
+  let cerrado = false;
+  let desuscribir: (() => void) | null = null;
+  let info: InfoHidratacionSindicacion = {
+    persistidos: 0,
+    derivados: portales.length,
+    creados: [],
+    preexistentes: [],
+    persistido: false,
+    aviso: 'El estado de sindicación todavía no se ha leído del repositorio.',
+  };
+  let filaActual: FilaEstadoSindicacionPanel[] = mezclarEstadosSindicacion([], inmuebleId, portales);
+
+  const emitir = () => {
+    if (cerrado) return;
+    params.onEstados(filaActual, { ...info });
+  };
+
+  const hidratar = async (): Promise<RegistroEstadoSindicacion[]> => {
+    const lectura = await leerEstadosSindicacion(inmuebleId, { puerto, fecha: params.fecha(), ...(actor ? { actor } : {}) });
+    return lectura.estados;
+  };
+
+  const pintar = (persistidos: RegistroEstadoSindicacion[]) => {
+    filaActual = mezclarEstadosSindicacion(persistidos, inmuebleId, portales);
+    info = {
+      ...info,
+      persistidos: persistidos.length,
+      derivados: Math.max(0, portales.length - persistidos.filter((r) => r.inmuebleId === inmuebleId).length),
+    };
+    emitir();
+  };
+
+  const inicializar = async (): Promise<InfoHidratacionSindicacion> => {
+    if (cerrado) return info;
+    const ctx = { puerto, fecha: params.fecha(), ...(actor ? { actor } : {}) };
+    const publicacion = params.publicacion();
+    let aviso: string | null = null;
+    let creados: PortalInmobiliario[] = [];
+    let preexistentes: PortalInmobiliario[] = [];
+    // 1) estado inicial idempotente (si ya hay documento por portal, no lo pisa)
+    try {
+      const ini = await crearEstadoInicialSindicacion(
+        {
+          inmuebleId,
+          portales,
+          ...(publicacion ? { publicacion } : {}),
+          ...(publicacion?.propietarioId ? { propietarioId: publicacion.propietarioId } : {}),
+        },
+        ctx,
+      );
+      creados = ini.creados;
+      preexistentes = ini.preexistentes;
+    } catch (e) {
+      aviso = `No se pudo inicializar el estado persistido: ${mensajeDe(e)}`;
+    }
+    if (cerrado) return info;
+    // 2) hidratación desde el repositorio
+    let persistidos: RegistroEstadoSindicacion[] = [];
+    try {
+      persistidos = await hidratar();
+      if (!aviso) aviso = persistidos.length === 0 && creados.length === 0
+        ? 'Sin estado persistido para este inmueble: la escritura puede no estar autorizada para esta sesión.'
+        : null;
+    } catch (e) {
+      // se conserva el PRIMER fallo: es el motivo raíz (si la escritura ya fue denegada,
+      // la lectura fallará por lo mismo y no aporta nada pisar el mensaje)
+      const motivo = `No se pudo leer el estado persistido: ${mensajeDe(e)}`;
+      aviso = aviso || motivo;
+    }
+    if (cerrado) return info;
+    info = {
+      persistidos: persistidos.length,
+      derivados: Math.max(0, portales.length - persistidos.length),
+      creados,
+      preexistentes,
+      persistido: !aviso,
+      aviso,
+    };
+    filaActual = mezclarEstadosSindicacion(persistidos, inmuebleId, portales);
+    emitir();
+    // 3) suscripción: el panel se actualiza solo cuando cambia Firestore
+    if (!cerrado && typeof puerto.suscribirEstados === 'function' && !desuscribir) {
+      try {
+        const unsub = puerto.suscribirEstados(inmuebleId, (filas) => {
+          if (cerrado) return;
+          pintar(Array.isArray(filas) ? filas : []);
+        });
+        if (cerrado) {
+          // se desmontó mientras se abrían: nada de listeners huérfanos
+          try { unsub && unsub(); } catch { /* ignora */ }
+        } else {
+          desuscribir = () => { try { unsub && unsub(); } catch { /* ignora */ } };
+        }
+      } catch (e) {
+        info = { ...info, aviso: `Sin escucha de cambios: ${mensajeDe(e)}` };
+        emitir();
+      }
+    }
+    return { ...info };
+  };
+
+  const registrarValidacion = async (args: {
+    portal: PortalInmobiliario;
+    ok: boolean;
+    codigo?: string;
+    mensaje?: string;
+  }): Promise<ResultadoOperacionPersistida | null> => {
+    if (cerrado) return null;
+    const publicacion = params.publicacion();
+    if (!publicacion) return null;
+    let previo: RegistroEstadoSindicacion | null = null;
+    try {
+      previo = await puerto.leerEstado(inmuebleId, args.portal);
+    } catch {
+      // sin lectura no hay precedente: se decide como si no estuviera publicado
+      previo = null;
+    }
+    if (cerrado) return null;
+    // La acción la decide la Fase 1 contra lo QUE YA ESTÁ PUBLICADO (nunca contra la
+    // memoria del panel): aquí no hay ningún if sobre el portal ni sobre el contenido.
+    const decision = resolverAccionSindicacion({
+      publicacion,
+      portal: args.portal,
+      ...(previo ? { publicada: instantaneaDesde(previo) } : {}),
+    });
+    let r: ResultadoOperacionPersistida;
+    try {
+      r = await registrarValidacionSindicacion(
+        {
+          decision,
+          publicacion,
+          resultado: { ok: args.ok, ...(args.codigo ? { codigo: args.codigo } : {}), ...(args.mensaje ? { mensaje: args.mensaje } : {}) },
+        },
+        { puerto, fecha: params.fecha(), ...(actor ? { actor } : {}) },
+      );
+    } catch (e) {
+      // La E/S puede estar denegada (sesión sin permisos, sin espejo de identidad, regla
+      // sin desplegar). El panel NO revienta: el feed generado es válido igualmente y se
+      // puede descargar; lo que no hay es estado persistido, y eso se dice.
+      info = { ...info, persistido: false, aviso: `El estado no se pudo guardar: ${mensajeDe(e)}` };
+      emitir();
+      return null;
+    }
+    if (r.escritura === 'CREADO' || r.escritura === 'ACTUALIZADO') {
+      // el listener puede ir unos milisegundos por detrás: se pinta ya el resultado
+      // persistido (es el registro real, no una transición imaginada).
+      const resto = filaActual.filter((f) => f.portal !== args.portal && f.origen === 'repositorio');
+      filaActual = mezclarEstadosSindicacion([...resto, r.registro], inmuebleId, portales);
+      emitir();
+    }
+    return r;
+  };
+
+  const disposar = () => {
+    if (cerrado) return;
+    cerrado = true;
+    const unsub = desuscribir;
+    desuscribir = null;
+    if (unsub) unsub();
+  };
+
+  return { puerto, inicializar, registrarValidacion, disposar };
+}
+
+// ===========================================================================
+// COMPONENTE
+// ===========================================================================
+
 interface PublicacionInmueblesPanelProps {
   inmueble?: Inmueble | null;
   currentUser?: UsuarioApp | null;
@@ -37,8 +340,13 @@ export const PublicacionInmueblesPanel: React.FC<PublicacionInmueblesPanelProps>
   const [portalSel, setPortalSel] = useState<PortalInmobiliario>('KYERO');
   const [resultado, setResultado] = useState<string | null>(null);
   const [errorGen, setErrorGen] = useState<string | null>(null);
-  const [estados, setEstados] = useState<EstadoSindicacionPortal[]>([]);
   const [trazabilidad, setTrazabilidad] = useState<RegistroTrazabilidadPublicacion[]>([]);
+  // PROYECCIÓN del repositorio (antes `useState<EstadoSindicacionPortal[]>` era la fuente
+  // de verdad; ahora sólo refleja lo persistido en `sindicacion_inmuebles`).
+  const [filas, setFilas] = useState<FilaEstadoSindicacionPanel[]>(() => filasDerivadasSindicacion(inmueble?.id || '', PORTALES_DISPONIBLES));
+  const [info, setInfo] = useState<InfoHidratacionSindicacion | null>(null);
+  const [ultimoResumen, setUltimoResumen] = useState<string | null>(null);
+  const circuitoRef = useRef<CircuitoSindicacionPanel | null>(null);
 
   useEffect(() => {
     if (!inmueble || inmueble.modalidadAlquiler !== 'habitaciones') {
@@ -54,16 +362,44 @@ export const PublicacionInmueblesPanel: React.FC<PublicacionInmueblesPanelProps>
     [inmueble, habitaciones]
   );
   const validacion = useMemo(() => (publicacion ? validarPublicacion(publicacion) : null), [publicacion]);
+  // El circuito necesita leer el payload MÁS NUEVO sin recrearse (las habitaciones
+  // llegan por su propio listener): por eso se pasa un getter respaldado por un ref.
+  const publicacionRef = useRef<PublicacionInmueble | null>(publicacion);
+  publicacionRef.current = publicacion;
 
   useEffect(() => {
-    if (inmueble) setEstados(estadoSindicacionInicial(inmueble.id, PORTALES_DISPONIBLES));
     setResultado(null);
     setErrorGen(null);
-  }, [inmueble?.id]);
+    if (!inmueble) {
+      setFilas([]);
+      setInfo(null);
+      return;
+    }
+    setUltimoResumen(null);
+    const esPropietario = currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId;
+    const circuito = crearCircuitoSindicacionPanel({
+      inmuebleId: inmueble.id,
+      portales: PORTALES_DISPONIBLES,
+      publicacion: () => publicacionRef.current,
+      actor: currentUser ? { id: currentUser.id, nombre: currentUser.nombre, email: currentUser.email } : null,
+      ...(esPropietario ? { propietarioIdAlcance: currentUser?.propietarioId } : {}),
+      fecha: () => new Date().toISOString(),
+      onEstados: (nuevas, nuevaInfo) => {
+        setFilas(nuevas);
+        setInfo(nuevaInfo);
+      },
+    });
+    circuitoRef.current = circuito;
+    void circuito.inicializar();
+    // DESMONTAJE: se cierra el listener. No queda ninguna escucha viva por inmueble.
+    return () => {
+      circuitoRef.current = null;
+      circuito.disposar();
+    };
+  }, [inmueble?.id, currentUser?.id]);
 
   if (!inmueble) return null;
-
-  const generar = () => {
+  const generar = async () => {
     if (!publicacion || !validacion) return;
     const res = generarExportacion([publicacion], formato, portalSel);
     const traza = registrarTrazabilidadPublicacion(
@@ -74,27 +410,27 @@ export const PublicacionInmueblesPanel: React.FC<PublicacionInmueblesPanelProps>
       res.ok ? identidadPublicacionPortal(publicacion.inmuebleId, portalSel).externalId : undefined
     );
     setTrazabilidad((prev) => [traza, ...prev].slice(0, 20));
+    // Lo que se persiste es el resultado REAL de esta operación (feed generado o no).
+    // El panel no decide estados: los pide al repositorio y el listener los refresca.
+    // `validar` es un hito local: no estampa versión publicada (nunca se llamó al portal).
+    const persistido = await circuitoRef.current?.registrarValidacion({
+      portal: portalSel,
+      ok: res.ok,
+      ...(res.ok ? {} : { codigo: 'FEED_NO_GENERADO', mensaje: res.motivo || 'Error generando el feed.' }),
+    });
     if (!res.ok) {
       setErrorGen(res.motivo || 'Error generando el feed.');
       setResultado(null);
-      setEstados((prev) =>
-        prev.map((e) =>
-          e.portal === portalSel
-            ? aplicarEstadoPublicacion(e, 'ERROR', { ultimoError: res.motivo }).registro || e
-            : e
-        )
-      );
       return;
     }
     setErrorGen(null);
     setResultado(res.contenido || '');
-    setEstados((prev) =>
-      prev.map((e) => {
-        if (e.portal !== portalSel) return e;
-        const aValidado = aplicarEstadoPublicacion(e, e.estado === 'BORRADOR' ? 'VALIDADO' : 'ACTUALIZADO');
-        return aValidado.ok ? aValidado.registro! : e;
-      })
-    );
+    if (persistido) {
+      // `resumenDelEstado` es el resumen determinista del dominio: el mismo texto que
+      // vería cualquier otro consumidor del registro, no un mensaje local del panel.
+      setUltimoResumen(`${persistido.resumen} · ${resumenDelEstado(persistido.registro)}`);
+      if (persistido.escritura === 'RECHAZADO') setErrorGen(`El estado no se guardó: ${persistido.motivo}`);
+    }
   };
 
   const descargar = () => {
@@ -203,13 +539,26 @@ export const PublicacionInmueblesPanel: React.FC<PublicacionInmueblesPanelProps>
 
           {/* ESTADOS POR PORTAL (independientes del estado interno del inmueble) */}
           <div>
-            <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Estado de publicación por portal</h4>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Estado de publicación por portal</h4>
+              {info && !info.persistido && (
+                <span className="text-[9px] font-semibold text-amber-700" title={info.aviso || ''}>sin persistir</span>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {estados.map((e) => (
+              {filas.map((e) => (
                 <div key={e.portal} className="flex items-center justify-between p-2 rounded-xl border border-slate-100 bg-slate-50">
                   <div>
                     <span className="text-[11px] font-bold text-slate-700">{e.portal}</span>
-                    <span className="block text-[9px] text-slate-400">ext: {e.externalId}</span>
+                    <span className="block text-[9px] text-slate-400">
+                      ext: {e.externalId}
+                      {e.origen === 'repositorio'
+                        ? ` · ${e.version !== undefined ? `v${e.version}` : 'sin versión'} · ${e.ultimaOperacion || '—'}=${e.ultimoResultado || '—'}${e.operacionesRegistradas ? ` · ${e.operacionesRegistradas} op` : ''}`
+                        : ' · sin registrar'}
+                    </span>
+                    {e.ultimoError ? (
+                      <span className="block text-[9px] text-rose-600">{e.ultimoError}</span>
+                    ) : null}
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
                     e.estado === 'ERROR' ? 'bg-rose-100 text-rose-700'
@@ -235,6 +584,12 @@ export const PublicacionInmueblesPanel: React.FC<PublicacionInmueblesPanelProps>
                 ))}
               </div>
             </div>
+          )}
+
+          {ultimoResumen && (
+            <p className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+              Estado persistido: {ultimoResumen}
+            </p>
           )}
 
           {currentUser && (

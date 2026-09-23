@@ -3,7 +3,12 @@
  * Suite auto-contenida con Firestore mockeado en memoria (sin red/credenciales).
  * Cubre:ids deterministas namespaced, guardas, carga, guardado idempotente,
  * aislamiento por propietario, tolerancia a inválidos y propagación de errores.
+ * GAP-R1 (consolidación): consulta filtrada demostrada, recuperar-tras-actualizar,
+ * falsificación neutralizada e invariantes estáticos de firestore.rules §24
+ * con control negativo de discriminación (§14).
  */
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -13,14 +18,18 @@ const mem = vi.hoisted(() => {
   const store = new Map<string, Map<string, any>>();
   const calls = { getDocs: 0, commits: 0, setDocs: 0 };
   const failNext = { getDocs: false };
-  return { store, calls, failNext };
+  const queries: Array<{ col: string; conds: any[] }> = [];
+  return { store, calls, failNext, queries };
 });
 
 vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, name: string) => ({ __col: name }),
   doc: (_db: unknown, col: string, id: string) => ({ __col: col, __id: id }),
   where: (field: string, op: string, value: unknown) => ({ field, op, value }),
-  query: (colRef: any, ...conds: any[]) => ({ ...colRef, __conds: conds }),
+  query: (colRef: any, ...conds: any[]) => {
+    mem.queries.push({ col: colRef.__col, conds });
+    return { ...colRef, __conds: conds };
+  },
   getDocs: async (q: any) => {
     mem.calls.getDocs += 1;
     if (mem.failNext.getDocs) {
@@ -83,12 +92,15 @@ vi.mock('../src/lib/firebase', () => {
 import {
   actualizarPropuestaConciliacion,
   cargarConciliacionPropietario,
+  CONCILIACIONES_BANCARIAS_COL,
   docIdImportacion,
   docIdMovimiento,
   docIdPropuesta,
   esPropietarioPersistible,
   fusionarSinDuplicados,
   guardarImportacionConciliacion,
+  IMPORTACIONES_BANCARIAS_COL,
+  MOVIMIENTOS_BANCARIOS_COL,
   sanearIdDoc,
 } from '../src/lib/conciliacionFirestore';
 import type {
@@ -154,6 +166,7 @@ beforeEach(() => {
   mem.calls.commits = 0;
   mem.calls.setDocs = 0;
   mem.failNext.getDocs = false;
+  mem.queries.length = 0;
 });
 
 // ---------------------------------------------------------------------------
@@ -351,5 +364,168 @@ describe('R1 guardarImportacionConciliacion / actualizarPropuestaConciliacion', 
     const stored = mem.store.get('conciliaciones_bancarias')!.get('prop_A_conc_1');
     expect(stored.estado).toBe('RECHAZADO');
     expect(stored.propietarioId).toBe('prop_A');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GAP-R1 consolidación: query filtrada, recuperar-tras-actualizar, antifalsificación
+// ---------------------------------------------------------------------------
+describe('R1 consulta filtrada por propietario (compatible con reglas §24)', () => {
+  it('las 3 consultas filtran con where(propietarioId == pid)', async () => {
+    await cargarConciliacionPropietario('prop_A');
+    expect(mem.queries.map((q) => q.col).sort()).toEqual(
+      [CONCILIACIONES_BANCARIAS_COL, IMPORTACIONES_BANCARIAS_COL, MOVIMIENTOS_BANCARIOS_COL].sort(),
+    );
+    expect(mem.queries).toHaveLength(3);
+    for (const q of mem.queries) {
+      expect(q.conds).toEqual([{ field: 'propietarioId', op: '==', value: 'prop_A' }]);
+    }
+  });
+
+  it('recuperar después de actualizar refleja la transición persistida', async () => {
+    await guardarImportacionConciliacion({
+      propietarioId: 'prop_A',
+      movimientos: [mov({})],
+      propuestas: [prop({})],
+      importacion: imp({}),
+    });
+    await actualizarPropuestaConciliacion('prop_A', prop({ estado: 'CONFIRMADO' }));
+    const estado = await cargarConciliacionPropietario('prop_A');
+    expect(estado.propuestas).toHaveLength(1);
+    expect(estado.propuestas[0].estado).toBe('CONFIRMADO');
+    expect(estado.movimientos).toHaveLength(1);
+    expect(estado.importaciones).toHaveLength(1);
+  });
+
+  it('propietario falsificado en el documento se neutraliza al guardar', async () => {
+    await guardarImportacionConciliacion({
+      propietarioId: 'prop_A',
+      movimientos: [mov({ propietarioId: 'prop_B' })],
+      propuestas: [prop({ propietarioId: 'prop_B' })],
+      importacion: imp({ propietarioId: 'prop_B' }),
+    });
+    const movGuardado = mem.store.get('movimientos_bancarios')!.get('prop_A_a1b2c3d4');
+    expect(movGuardado.propietarioId).toBe('prop_A');
+    const propGuardada = mem.store.get('conciliaciones_bancarias')!.get('prop_A_conc_1');
+    expect(propGuardada.propietarioId).toBe('prop_A');
+    // B no recupera nada: el docId namespaced y el propietarioId sellado pertenecen a A
+    const estadoB = await cargarConciliacionPropietario('prop_B');
+    expect(estadoB.movimientos).toHaveLength(0);
+    expect(estadoB.propuestas).toHaveLength(0);
+    const estadoA = await cargarConciliacionPropietario('prop_A');
+    expect(estadoA.movimientos).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GAP-R1 consolidación: invariantes estáticos de firestore.rules §24.
+// Sin emulator disponible: se fijan los invariantes leyendo el fichero
+// (mismo patrón que BLOQUE C). Cada invariante es una función pura sobre el
+// texto del bloque, con control negativo ante un bloque relajado (§14).
+// ---------------------------------------------------------------------------
+const RULES_SRC = readFileSync(resolve(__dirname, '../firestore.rules'), 'utf8');
+
+/** Bloque `match /{coleccion}/{param}` con su contenido (llaves anidadas incluidas). */
+function bloqueReglas(coleccion: string): string {
+  const inicio = RULES_SRC.indexOf(`match /${coleccion}/`);
+  if (inicio < 0) throw new Error(`Sin sección ${coleccion} en firestore.rules`);
+  const finLinea = RULES_SRC.indexOf('\n', inicio);
+  // la llave de apertura del cuerpo es la ÚLTIMA '{' de la línea `match`
+  // (la anterior es el {param} del path); desde ahí se balancea.
+  const apertura = RULES_SRC.lastIndexOf('{', finLinea);
+  let nivel = 0;
+  for (let i = apertura; i < RULES_SRC.length; i++) {
+    if (RULES_SRC[i] === '{') nivel++;
+    else if (RULES_SRC[i] === '}') {
+      nivel--;
+      if (nivel === 0) return RULES_SRC.slice(inicio, i + 1);
+    }
+  }
+  throw new Error(`Sección ${coleccion} sin cerrar`);
+}
+
+const COLECCIONES_R1 = [
+  MOVIMIENTOS_BANCARIOS_COL,
+  CONCILIACIONES_BANCARIAS_COL,
+  IMPORTACIONES_BANCARIAS_COL,
+];
+
+const invDeleteSoloMaster = (b: string): boolean =>
+  /allow delete:\s*if isMasterAdmin\(\);/.test(b);
+const invCreateExigePropietario = (b: string): boolean =>
+  b.includes('allow create:') && /incoming\(\)\.propietarioId == myPropId\(\)/.test(b);
+const invUpdatePropietarioInmutable = (b: string): boolean =>
+  b.includes('allow update:') &&
+  /existing\(\)\.propietarioId == myPropId\(\)/.test(b) &&
+  /incoming\(\)\.propietarioId == myPropId\(\)/.test(b);
+const invSinAccesoGenerico = (b: string): boolean =>
+  !/allow (read|get|list|create|update|write)[\w, ]*:\s*if isSignedIn\(\);/.test(b);
+const invSoloRolesPropietarioYMaster = (b: string): boolean => {
+  const allows = [...b.matchAll(/allow [\w, ]+: if ([\s\S]*?);/g)].map((m) => m[1]);
+  if (allows.length === 0) return false;
+  return allows.every(
+    (cond) => cond.includes('isMasterAdmin()') || cond.includes('isPropietarioRole()'),
+  );
+};
+const invSinSecretos = (b: string): boolean => b.includes('sinSecretosBancarios()');
+
+/** Bloque deliberadamente relajado: control negativo de discriminación (§14). */
+const BLOQUE_RELAJADO = `match /movimientos_bancarios/{movimientoId} {
+  allow get, list: if isSignedIn();
+  allow create, update: if isSignedIn();
+  allow delete: if isSignedIn();
+}`;
+
+describe('R1 firestore.rules §24: invariantes de aislamiento', () => {
+  it('las 3 colecciones existen y están antes del catch-all', () => {
+    const catchAll = RULES_SRC.indexOf('match /{document=**}');
+    expect(catchAll).toBeGreaterThan(0);
+    for (const c of COLECCIONES_R1) {
+      const idx = RULES_SRC.indexOf(`match /${c}/`);
+      expect(idx).toBeGreaterThan(0);
+      expect(idx).toBeLessThan(catchAll);
+    }
+  });
+
+  it('el extractor captura el bloque completo (los 5 allows)', () => {
+    for (const c of COLECCIONES_R1) {
+      const b = bloqueReglas(c);
+      for (const k of ['allow get:', 'allow list:', 'allow create:', 'allow update:', 'allow delete:']) {
+        expect(b).toContain(k);
+      }
+    }
+  });
+
+  it('delete solo master en las 3 colecciones', () => {
+    for (const c of COLECCIONES_R1) expect(invDeleteSoloMaster(bloqueReglas(c))).toBe(true);
+  });
+
+  it('create exige propietarioId propio', () => {
+    for (const c of COLECCIONES_R1) expect(invCreateExigePropietario(bloqueReglas(c))).toBe(true);
+  });
+
+  it('update exige propietario inmutable (existente == entrante == propio)', () => {
+    for (const c of COLECCIONES_R1) expect(invUpdatePropietarioInmutable(bloqueReglas(c))).toBe(true);
+  });
+
+  it('sin accesos genéricos isSignedIn() ni read/write abiertos', () => {
+    for (const c of COLECCIONES_R1) expect(invSinAccesoGenerico(bloqueReglas(c))).toBe(true);
+  });
+
+  it('todo allow pasa por isMasterAdmin() o isPropietarioRole() (profesional/inquilino/anónimo sin vía)', () => {
+    for (const c of COLECCIONES_R1) expect(invSoloRolesPropietarioYMaster(bloqueReglas(c))).toBe(true);
+  });
+
+  it('prohibición de secretos bancarios en las 3 colecciones', () => {
+    for (const c of COLECCIONES_R1) expect(invSinSecretos(bloqueReglas(c))).toBe(true);
+  });
+
+  it('§14 discriminación: los invariantes FALLAN ante un bloque relajado', () => {
+    expect(invDeleteSoloMaster(BLOQUE_RELAJADO)).toBe(false);
+    expect(invCreateExigePropietario(BLOQUE_RELAJADO)).toBe(false);
+    expect(invUpdatePropietarioInmutable(BLOQUE_RELAJADO)).toBe(false);
+    expect(invSinAccesoGenerico(BLOQUE_RELAJADO)).toBe(false);
+    expect(invSoloRolesPropietarioYMaster(BLOQUE_RELAJADO)).toBe(false);
+    expect(invSinSecretos(BLOQUE_RELAJADO)).toBe(false);
   });
 });

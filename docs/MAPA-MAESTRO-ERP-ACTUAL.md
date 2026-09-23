@@ -81,7 +81,7 @@ Distribución actual de tests:
 | `tests/facturacionReporte.test.ts` | 6 | GAP7 |
 | `tests/facturacion-notificaciones.test.ts` | 5 | GAP7 |
 | `tests/informesEngine.test.ts` | 41 (O16: 40 comprobaciones desglosadas + 1 de recuento; antes 1 test envolvente) | GAP3 |
-| `tests/conciliacion-persistencia.test.ts` | 15 (GAP-R1, Arena B; Firestore mockeado) | GAP6 persistencia |
+| `tests/conciliacion-persistencia.test.ts` | 27 (GAP-R1, Arena B; Firestore mockeado: 15 base + 12 de cierre — query filtrada, recuperar-tras-actualizar, antifalsificación, invariantes estáticos §24 con control negativo) | GAP6 persistencia |
 | `tests/morosidad-evidencias-storage.test.ts` | 20 (GAP-R2, Arena B; Storage mockeado + inspección de `storage.rules`) | C evidencias |
 | `tests/ficha-publica-inmueble.test.ts` | 29 (GAP-R3, Arena B; espejo público + inspección de reglas) | Seguridad ficha pública |
 | **Total** | **330** (tabla del punto de partida 2026-09-20; no incluye B/C/D/E/§6) | |
@@ -90,7 +90,7 @@ Distribución actual de tests:
 > `src/utils/cobrosEngine.test.ts` (69) · `src/utils/fiscalEngine.test.ts` (43) ·
 > `src/utils/gastosEngine.test.ts` (45) · GAP3 desglosada (+40 netos). Global 835/835.
 >
-> **GAP-R1 / R2 / R3 (2026-09-21, desarrollo Arena B, integración Arena A)** — `tests/conciliacion-persistencia.test.ts` (15),
+> **GAP-R1 / R2 / R3 (2026-09-21, desarrollo Arena B, integración Arena A)** — `tests/conciliacion-persistencia.test.ts` (15 → 27 tras el cierre de GAP-R1, 2026-09-23),
 > `tests/morosidad-evidencias-storage.test.ts` (20), `tests/ficha-publica-inmueble.test.ts` (29). Global 899/899 (38 ficheros).
 
 Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJORAS` ·
@@ -196,7 +196,7 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 
 ### GAP6 — Conciliación bancaria
 - **Qué existe:** `src/utils/conciliacion/` — parsers `mt940Parser`/`ofxParser`/`norma43Parser`/`csvParser`, `normalizador`, `matchingEngine` (config de tolerancias), `importEngine` (idempotencia de importaciones), `conciliacionEngine` (Detecta→Propuesta→Validada→Aplicada con histórico append-only), `idempotencia.ts`; UI `ConciliacionBancariaSection.tsx`; colecciones `movimientos_bancarios`/`conciliaciones_bancarias`/`importaciones_bancarias` + reglas. **BLOQUE B (2026-09-20):** espejo de sesión aditivo (`lib/conciliacionSession.ts`, 2 líneas en la sección) que expone movimientos/propuestas al selector de evidencia de pago de Tesorería. **Lógica de conciliación intacta.**
-- **Probado:** 23/23 (`conciliacion.test.ts`): parsers, matching, aplicación, idempotencia, trazabilidad.
+- **Probado:** 23/23 (`conciliacion.test.ts`): parsers, matching, aplicación, idempotencia, trazabilidad. Persistencia Firestore: 27/27 (`conciliacion-persistencia.test.ts`, ver GAP-R1 en §12.3).
 - **Limitaciones reales:** sin feed bancario en tiempo real (importación manual de archivos); la aplicación de una conciliación sobre un cobro pasa **exclusivamente** por `registrarPagoPeriodo` de `cobrosEngine` (única vía de escritura sobre la operación contable, nunca silenciosa).
 - **Dependencias externas:** archivos bancarios (hoy) / futura API bancaria.
 - **NO modificar accidentalmente:** la regla «no modificar silenciosamente contabilidad operativa» (todo cambio produce propuesta + evento de histórico); `registrarPagoPeriodo` como única interfaz de escritura a cobros; la idempotencia de importaciones (re-importar no duplica).
@@ -1171,6 +1171,14 @@ son cierres de circuitos ya existentes.
 - Desarrollo: **Arena B**, commit `415de41` (`feat(gap-r1): persistencia Firestore del estado de conciliación bancaria (GAP 6)`, rama `arena/01a0bfd3-gestor-de-inmuebles-vercel`). Integración: **Arena A**, commit `a18967f` (`merge(gap-r1)`, cherry-pick selectivo, 0 conflictos, diff idéntico al origen).
 - Entregado: `src/lib/conciliacionFirestore.ts` (carga por propietario, guardado de importación en lote, actualización de propuesta; ids deterministas; validadores de forma) sobre las colecciones **ya reguladas** `movimientos_bancarios` / `conciliaciones_bancarias` / `importaciones_bancarias`; `ConciliacionBancariaSection.tsx` carga el estado persistido al montar (fusión sin duplicados), persiste cada importación y cada cambio de propuesta, y muestra banner de error; `conciliacionSession.ts` (espejo para B) se conserva. Sin cambios en `src/utils/conciliacion/*`, `cobrosEngine`, reglas ni índices.
 - Validación canónica tras `a18967f`: R1 **15/15** (`tests/conciliacion-persistencia.test.ts`, Firestore mockeado) · suite **850/850** · `tsc` 0 · build OK · GAP6 23/23 intacto.
+- **Cierre de GAP-R1 (2026-09-23, solo tests + documentación; origen Arena B `3d18b10`, integración selectiva en la canónica sin tocar código funcional ni reglas §24):**
+  - *Arquitectura de persistencia:* motor canónico intacto (importar → proponer → confirmar → aplicar; sin segundo motor). `conciliacionFirestore.ts`: carga acotada por propietario (one-shot al montar), guardado en batch atómico idempotente, transiciones con `merge`; la sección fusiona lo persistido con lo local sin duplicados (modelo append-only) y persiste importación + transiciones de propuesta con banner de carga/error. `conciliacionSession.ts` es caché derivado para la evidencia de pago de Tesorería (B), no fuente de verdad. `ResumenConciliacion` se recalcula (`calcularResumenConciliacion`), no se almacena. Cero localStorage/sessionStorage en el circuito.
+  - *Colecciones (existentes, reutilizadas; reglas §24 sin cambios):* `movimientos_bancarios`, `conciliaciones_bancarias`, `importaciones_bancarias`. DocIds namespaced y saneados `${propietarioId}_${idDeterminista}` (`hashIdempotencia` no incluye propietario). Sin índices compuestos (3 igualdades mono-campo + orden en cliente).
+  - *Aislamiento por propietario:* las 3 consultas filtran `where('propietarioId','==', pid)` (única condición demostrable para `list`); `propietarioId` sellado en escritura (un documento con propietario falsificado se neutraliza al guardar); guard client-side anti-demo (`prop_demo` nunca toca Firestore).
+  - *Invariantes de seguridad §24 (fijados por test estático, mismo patrón que BLOQUE C):* las 3 colecciones existen antes del catch-all; `delete` solo master; `create` exige `incoming().propietarioId == myPropId()`; `update` exige propietario inmutable (`existing == incoming == myPropId`); sin accesos genéricos `isSignedIn()`; todo `allow` pasa por `isMasterAdmin()` o `isPropietarioRole()` (profesional/inquilino/anónimo sin vía); `sinSecretosBancarios()` en las 3. Control negativo §14: los invariantes fallan ante un bloque relajado.
+  - *Tests:* `tests/conciliacion-persistencia.test.ts` **27/27** = 15 base (roundtrip, aislamiento A/B, inválidos, idempotencia, merge, guardas) + 12 de cierre (registro/verificación de las 3 queries filtradas, recuperar-tras-actualizar, antifalsificación, extractor de bloque + 8 invariantes §24 + control negativo).
+  - *Limitaciones conocidas:* carga **one-shot** al montar (sin live-sync entre pestañas/dispositivos; cada dispositivo recupera al abrir); validación de reglas contra Firebase real/emulador pendiente (§12.6 pendiente 1); defecto **D2** (matching de gastos no puntúa fecha por `g.fecha` vs `fechaDevengo`) afecta a la puntuación, no a la persistencia — fuera del alcance de R1.
+  - *NO modificar accidentalmente:* el sellado de `propietarioId` en escritura; el esquema de docIds namespaced (cambiarlo rompería la idempotencia); las reglas §24 (los invariantes estáticos fallan si se relajan).
 - Nota: el hallazgo **D2** (§12.2 GAP-R4) sigue sin corregir; el matching de gastos persistido no puntúa fecha (comportamiento documentado, no regresión de R1).
 - Arena: **B** → integrado por **A**. Prioridad original: 1. **Estado: CERRADO.**
 

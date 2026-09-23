@@ -43,6 +43,7 @@ import {
   ROLES_PREDEFINIDOS,
   PERMISOS_SISTEMA,
 } from '../../types';
+import { DryRunFichasPublicasPanel } from './DryRunFichasPublicasPanel';
 
 interface AdminControlCenterProps {
   currentUser: UsuarioApp;
@@ -1155,6 +1156,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* R3 · DRY-RUN de fichas públicas (solo lectura; solo master) */}
+            <DryRunFichasPublicasPanel currentUser={currentUser} />
           </div>
         )}
 

@@ -32,6 +32,8 @@ import {
   EnlaceRegistro,
   Propietario,
   Profesional,
+  TipoProfesional,
+  TipoPropietario,
   CobroPeriodo,
   ROLES_PREDEFINIDOS,
   PERMISOS_SISTEMA,
@@ -705,6 +707,341 @@ export async function registerWithInvitationLink(params: {
     usuarioNombre: nuevoUsuario.nombre,
     accion: 'REGISTRO_USUARIO_INVITACION',
     descripcion: `Alta exitosa de nuevo ${tipoPerfil} mediante enlace [${enlace.token}].`,
+    entidadAfectada: 'usuario',
+    idAfectado: userId,
+    resultado: 'EXITO',
+  });
+
+  return { firebaseUser, usuarioApp: nuevoUsuario };
+}
+
+// =========================================================================
+// REGISTRO AUTÓNOMO — Alta sin invitación (PROPIETARIO / PROFESIONAL)
+// -------------------------------------------------------------------------
+// Núcleo interno de altas autónomas. La UI (formularios/selectores) llegará
+// en un bloque posterior; este servicio define el contrato y las garantías.
+// NO sustituye a `registerWithInvitationLink` (invitaciones intactas).
+// Orden de escrituras exigido por las reglas: usuarios → espejo → ficha.
+// =========================================================================
+
+export interface RegisterAutonomoBaseParams {
+  tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL';
+  email: string;
+  password: string;
+  nombre: string;
+  apellidos?: string;
+  telefono?: string;
+}
+
+export interface RegisterAutonomoPropietarioParams extends RegisterAutonomoBaseParams {
+  tipoPerfil: 'PROPIETARIO';
+  /** NIF/CIF/NIE real (obligatorio: el modelo Propietario no admite marcadores). */
+  nifCif: string;
+  /** Domicilio real a efectos de notificaciones. */
+  direccion: string;
+  ciudad: string;
+  codigoPostal: string;
+  provincia?: string;
+  tipoPropietario?: TipoPropietario;
+}
+
+export interface RegisterAutonomoProfesionalParams extends RegisterAutonomoBaseParams {
+  tipoPerfil: 'PROFESIONAL';
+  nombreComercial: string;
+  cifNif?: string;
+  /** Al menos una especialidad real (mismo criterio que el alta manual). */
+  especialidades: string[];
+  /** Provincia de la zona de servicio (obligatoria). */
+  provincia: string;
+  municipio?: string;
+  tipo?: TipoProfesional;
+}
+
+export type RegisterAutonomoParams =
+  | RegisterAutonomoPropietarioParams
+  | RegisterAutonomoProfesionalParams;
+
+/** Rol estándar exacto que corresponde a cada perfil autónomo (nunca admin). */
+const ROLES_AUTONOMOS: Record<'PROPIETARIO' | 'PROFESIONAL', string> = {
+  PROPIETARIO: 'PROPIETARIO_ESTANDAR',
+  PROFESIONAL: 'PROFESIONAL_MANTENIMIENTO',
+};
+
+/** IDs con el mismo formato que el resto de altas (`prefijo_timestamp_aleatorio`). */
+function generarIdAutonomo(prefijo: string): string {
+  return `${prefijo}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+}
+
+/** Email con el mismo criterio que el resto del sistema (ver notificaciones/resolucion). */
+function esEmailAutonomoValido(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function exigirTextoAutonomo(valor: unknown, campo: string): string {
+  if (typeof valor !== 'string' || valor.trim().length === 0) {
+    throw new Error(`Registro autónomo: el campo '${campo}' es obligatorio.`);
+  }
+  return valor.trim();
+}
+
+interface BaseAutonomaValidada {
+  tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL';
+  email: string;
+  password: string;
+  nombre: string;
+  apellidos?: string;
+  telefono?: string;
+  rolId: string;
+}
+
+/**
+ * Valida y normaliza los datos comunes ANTES de tocar Firebase Auth.
+ * Fija rol y permisos de forma inmutable: el llamante nunca puede indicarlos
+ * (ni siquiera con `as any`). Las reglas Firestore son la segunda barrera.
+ */
+function validarBaseAutonoma(params: RegisterAutonomoParams): BaseAutonomaValidada {
+  if (!params || typeof params !== 'object') {
+    throw new Error('Registro autónomo: faltan los datos del alta.');
+  }
+  const crudo = params as unknown as Record<string, unknown>;
+  if ('roles' in crudo || 'permisos' in crudo) {
+    throw new Error('Seguridad: no está permitido indicar roles ni permisos en el alta autónoma.');
+  }
+  const tipoPerfil = crudo.tipoPerfil;
+  if (tipoPerfil !== 'PROPIETARIO' && tipoPerfil !== 'PROFESIONAL') {
+    throw new Error('Seguridad: el alta autónoma solo admite perfiles PROPIETARIO o PROFESIONAL.');
+  }
+  const email = exigirTextoAutonomo(crudo.email, 'email').toLowerCase();
+  if (!esEmailAutonomoValido(email)) {
+    throw new Error('Registro autónomo: el email no es válido.');
+  }
+  if (typeof crudo.password !== 'string' || crudo.password.length < 6) {
+    throw new Error('Registro autónomo: la contraseña debe tener al menos 6 caracteres.');
+  }
+  const nombre = exigirTextoAutonomo(crudo.nombre, 'nombre');
+  const apellidos =
+    typeof crudo.apellidos === 'string' && crudo.apellidos.trim().length > 0
+      ? crudo.apellidos.trim()
+      : undefined;
+  const telefono =
+    typeof crudo.telefono === 'string' && crudo.telefono.trim().length > 0
+      ? crudo.telefono.trim()
+      : undefined;
+
+  // Rol exacto por perfil, verificado contra el catálogo (nunca admin).
+  const rolId = ROLES_AUTONOMOS[tipoPerfil];
+  const rolDef = ROLES_PREDEFINIDOS.find((r) => r.id === rolId);
+  if (!rolDef || rolDef.id === 'SUPERADMIN') {
+    throw new Error('Seguridad: rol no disponible para el alta autónoma.');
+  }
+  return { tipoPerfil, email, password: crudo.password, nombre, apellidos, telefono, rolId };
+}
+
+/**
+ * REGISTRO AUTÓNOMO — Alta sin invitación (PROPIETARIO o PROFESIONAL).
+ *
+ * Flujo: valida datos → crea Firebase Auth → genera IDs nuevos →
+ * `usuarios/{id}` (ACTIVO, rol exacto, sin permisos) → espejo
+ * `usuarios_auth/{uid}` → ficha `propietarios/{id}` o `profesionales/{id}`
+ * con los datos reales del formulario → auditoría → sesión local.
+ *
+ * Garantías: solo PROPIETARIO/PROFESIONAL; email válido ligado a la cuenta
+ * Auth; IDs siempre nuevos; sin roles/permisos administrativos (imposibles
+ * de inyectar); sin datos ficticios (los obligatorios se exigen).
+ * Email duplicado → error controlado (no toca la cuenta existente).
+ * Fallo tras crear Auth → error técnico controlado (sin auto-reparación).
+ */
+export async function registerAutonomo(
+  params: RegisterAutonomoParams
+): Promise<{ firebaseUser: FirebaseUser; usuarioApp: UsuarioApp }> {
+  // 0. Validación de servicio (antes de crear nada en Firebase Auth).
+  const base = validarBaseAutonoma(params);
+  const { tipoPerfil, email, password, nombre, apellidos, rolId } = base;
+
+  // Datos reales de la ficha (nunca marcadores ficticios).
+  let telefonoProp = '';
+  let nifCif = '';
+  let direccion = '';
+  let ciudad = '';
+  let codigoPostal = '';
+  let provinciaProp: string | undefined;
+  let tipoProp: TipoPropietario = 'persona_fisica';
+  let nombreComercial = '';
+  let cifNifProf: string | undefined;
+  let especialidades: string[] = [];
+  let provinciaProf = '';
+  let municipioProf: string | undefined;
+  let tipoProf: TipoProfesional = 'AUTONOMO';
+
+  if (tipoPerfil === 'PROPIETARIO') {
+    const p = params as RegisterAutonomoPropietarioParams;
+    telefonoProp = exigirTextoAutonomo(base.telefono, 'telefono');
+    nifCif = exigirTextoAutonomo(p.nifCif, 'nifCif');
+    direccion = exigirTextoAutonomo(p.direccion, 'direccion');
+    ciudad = exigirTextoAutonomo(p.ciudad, 'ciudad');
+    codigoPostal = exigirTextoAutonomo(p.codigoPostal, 'codigoPostal');
+    provinciaProp =
+      typeof p.provincia === 'string' && p.provincia.trim().length > 0 ? p.provincia.trim() : undefined;
+    if (p.tipoPropietario !== undefined) {
+      if (
+        p.tipoPropietario !== 'persona_fisica' &&
+        p.tipoPropietario !== 'persona_juridica' &&
+        p.tipoPropietario !== 'comunidad_bienes'
+      ) {
+        throw new Error('Registro autónomo: el campo \'tipoPropietario\' no es válido.');
+      }
+      tipoProp = p.tipoPropietario;
+    }
+  } else {
+    const p = params as RegisterAutonomoProfesionalParams;
+    nombreComercial = exigirTextoAutonomo(p.nombreComercial, 'nombreComercial');
+    cifNifProf =
+      typeof p.cifNif === 'string' && p.cifNif.trim().length > 0 ? p.cifNif.trim() : undefined;
+    especialidades = (Array.isArray(p.especialidades) ? p.especialidades : [])
+      .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+      .map((e) => e.trim());
+    if (especialidades.length === 0) {
+      throw new Error('Registro autónomo: indica al menos una especialidad.');
+    }
+    provinciaProf = exigirTextoAutonomo(p.provincia, 'provincia');
+    municipioProf =
+      typeof p.municipio === 'string' && p.municipio.trim().length > 0 ? p.municipio.trim() : undefined;
+    if (p.tipo !== undefined) {
+      if (
+        p.tipo !== 'EMPRESA' &&
+        p.tipo !== 'AUTONOMO' &&
+        p.tipo !== 'PARTICULAR' &&
+        p.tipo !== 'PROFESIONAL_INDIVIDUAL' &&
+        p.tipo !== 'OTRO'
+      ) {
+        throw new Error('Registro autónomo: el campo \'tipo\' de profesional no es válido.');
+      }
+      tipoProf = p.tipo;
+    }
+  }
+
+  // 1-2. Crear la cuenta en Firebase Auth y obtener el UID real.
+  // A diferencia del flujo con invitación, aquí Auth es obligatorio: las
+  // reglas exigen authUid == UID y email == token.email en cada escritura.
+  let firebaseUser: FirebaseUser | null = null;
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    firebaseUser = cred.user;
+    await updateProfile(firebaseUser, { displayName: `${nombre} ${apellidos || ''}`.trim() });
+  } catch (err: any) {
+    if (err?.code === 'auth/email-already-in-use') {
+      throw new Error('Este correo electrónico ya tiene una cuenta. Inicia sesión con tu contraseña.');
+    }
+    if (err?.code === 'auth/operation-not-allowed' || err?.message?.includes('operation-not-allowed')) {
+      throw new Error('Registro autónomo no disponible: el proveedor Email/Contraseña no está habilitado.');
+    }
+    throw err;
+  }
+  if (!firebaseUser) {
+    throw new Error('Registro autónomo: no se pudo crear la cuenta de acceso.');
+  }
+
+  // 3. IDs completamente nuevos (nunca reutilizar entidades existentes).
+  const userId = generarIdAutonomo('user');
+  const entidadId = generarIdAutonomo(tipoPerfil === 'PROPIETARIO' ? 'prop' : 'prof');
+  const ahora = new Date().toISOString();
+
+  // 4. Documento autoritativo `usuarios/{id}` (rol exacto, sin permisos).
+  const nuevoUsuario: UsuarioApp = {
+    id: userId,
+    authUid: firebaseUser.uid,
+    nombre,
+    ...(apellidos ? { apellidos } : {}),
+    email,
+    ...(base.telefono ? { telefono: base.telefono } : {}),
+    tipoPerfil,
+    estado: 'ACTIVO',
+    roles: [rolId],
+    permisos: [],
+    ...(tipoPerfil === 'PROPIETARIO' ? { propietarioId: entidadId } : { profesionalId: entidadId }),
+    createdAt: ahora,
+    updatedAt: ahora,
+    lastLoginAt: ahora,
+  };
+
+  // 5-6. Espejo de identidad + ficha. Escrituras secuenciales (no batch):
+  // la regla de `propietarios/create` exige que el espejo ya exista.
+  // Si algo falla tras crear Auth: error técnico controlado, sin
+  // reparaciones silenciosas ni datos fabricados (§7).
+  try {
+    await setDoc(doc(db, 'usuarios', userId), nuevoUsuario);
+    await syncAuthIndex(nuevoUsuario, firebaseUser);
+    if (tipoPerfil === 'PROPIETARIO') {
+      const ficha: Propietario = {
+        id: entidadId,
+        nombre: `${nombre} ${apellidos || ''}`.trim(),
+        nifCif,
+        email,
+        telefono: telefonoProp,
+        direccion,
+        ciudad,
+        codigoPostal,
+        ...(provinciaProp ? { provincia: provinciaProp } : {}),
+        tipoPropietario: tipoProp,
+        cuentasBancarias: [],
+        fechaCreacion: ahora,
+        fechaActualizacion: ahora,
+      };
+      await setDoc(doc(db, 'propietarios', entidadId), ficha, { merge: true });
+    } else {
+      const ficha: Profesional = {
+        id: entidadId,
+        usuarioId: userId,
+        tipo: tipoProf,
+        nombreComercial,
+        contactoNombre: `${nombre} ${apellidos || ''}`.trim(),
+        ...(cifNifProf ? { cifNif: cifNifProf } : {}),
+        email,
+        ...(base.telefono ? { telefono: base.telefono } : {}),
+        especialidades,
+        zonasServicio: [
+          { id: 'z1', provincia: provinciaProf, ...(municipioProf ? { municipio: municipioProf } : {}) },
+        ],
+        inmuebleIdsAsignados: [],
+        activo: true,
+        createdAt: ahora,
+        updatedAt: ahora,
+      };
+      await setDoc(doc(db, 'profesionales', entidadId), ficha, { merge: true });
+    }
+  } catch (err: any) {
+    await saveAuditLogFirestore({
+      usuarioId: userId,
+      usuarioEmail: email,
+      usuarioNombre: nombre,
+      accion: 'REGISTRO_AUTONOMO',
+      descripcion:
+        `Fallo parcial de alta autónoma ${tipoPerfil} [${email}]: cuenta Auth creada ` +
+        `(UID ${firebaseUser.uid}) pero la escritura de documentos falló ` +
+        `(${err?.code || err?.message || 'error desconocido'}).`,
+      entidadAfectada: 'usuario',
+      idAfectado: userId,
+      resultado: 'ERROR',
+    });
+    throw new Error(
+      `Alta incompleta: tu cuenta de acceso (${email}) se creó pero no se pudo completar el perfil. ` +
+        'No se ha creado ningún perfil válido. Contacta con soporte indicando tu email. ' +
+        `Detalle técnico: ${err?.code || err?.message || 'escritura denegada'}`
+    );
+  }
+
+  // 7-8. Sesión local + auditoría del alta + retorno para continuar el login.
+  try {
+    localStorage.setItem('rentselect_active_session', JSON.stringify(nuevoUsuario));
+    localStorage.setItem('rentselect_current_user_id', userId);
+  } catch (e) {}
+
+  await saveAuditLogFirestore({
+    usuarioId: userId,
+    usuarioEmail: email,
+    usuarioNombre: nombre,
+    accion: 'REGISTRO_AUTONOMO',
+    descripcion: `Alta autónoma exitosa de nuevo ${tipoPerfil} [${email}] sin invitación.`,
     entidadAfectada: 'usuario',
     idAfectado: userId,
     resultado: 'EXITO',

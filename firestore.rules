@@ -975,12 +975,34 @@ service cloud.firestore {
         && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
         && incoming().estado in ['ACTIVO', 'PENDIENTE']
         && (
-          (incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
-            && (
-              incoming().tipoPerfil == 'PROFESIONAL'
-              || !('propietarioId' in incoming())
-              || !exists(/databases/$(database)/documents/propietarios/$(incoming().propietarioId))
-            ))
+          // REGISTRO-AUTONOMO: alta estricta de PROPIETARIO (sin invitación).
+          // Email atado al de Auth, estado ACTIVO, rol exacto, sin permisos,
+          // y propietarioId obligatorio que aún no exista (anti-hijack).
+          // No sirve para crear administradores, PENDIENTES ni para otro UID.
+          (incoming().tipoPerfil == 'PROPIETARIO'
+            && incoming().authUid == request.auth.uid
+            && incoming().estado == 'ACTIVO'
+            && incoming().roles == ['PROPIETARIO_ESTANDAR']
+            && (!('permisos' in incoming()) || (incoming().permisos is list && incoming().permisos.size() == 0))
+            && incoming().email is string && incoming().email.size() > 0
+            && 'email' in request.auth.token && request.auth.token.email == incoming().email
+            && 'propietarioId' in incoming() && isValidId(incoming().propietarioId)
+            && !exists(/databases/$(database)/documents/propietarios/$(incoming().propietarioId))
+          )
+          ||
+          // REGISTRO-AUTONOMO: alta estricta de PROFESIONAL (sin invitación).
+          // Mismas garantías + profesionalId obligatorio que aún no exista:
+          // nadie puede reclamar la ficha de otro profesional.
+          (incoming().tipoPerfil == 'PROFESIONAL'
+            && incoming().authUid == request.auth.uid
+            && incoming().estado == 'ACTIVO'
+            && incoming().roles == ['PROFESIONAL_MANTENIMIENTO']
+            && (!('permisos' in incoming()) || (incoming().permisos is list && incoming().permisos.size() == 0))
+            && incoming().email is string && incoming().email.size() > 0
+            && 'email' in request.auth.token && request.auth.token.email == incoming().email
+            && 'profesionalId' in incoming() && isValidId(incoming().profesionalId)
+            && !exists(/databases/$(database)/documents/profesionales/$(incoming().profesionalId))
+          )
           ||
           (incoming().tipoPerfil == 'INQUILINO'
             && incoming().contratoIds is list
@@ -1030,6 +1052,16 @@ service cloud.firestore {
           // BLOQUE E (reconciliado): el inquilino no puede auto-vincularse contratos
           'contratoIds'
         ])
+        // REGISTRO-AUTONOMO: el authUid existente es inmutable; solo puede
+        // fijarse cuando el documento aún no tiene uno, y con el UID propio.
+        // Es exactamente la activación nominal PENDIENTE→ACTIVO (ver arriba).
+        && (
+          !incoming().diff(existing()).affectedKeys().hasAny(['authUid'])
+          || (
+            !('authUid' in existing())
+            && incoming().authUid == request.auth.uid
+          )
+        )
       );
 
       allow delete: if isMasterAdmin();
@@ -1042,7 +1074,17 @@ service cloud.firestore {
     match /profesionales/{profesionalId} {
       allow read: if true;
       // BLOQUE E (reconciliado): el inquilino no escribe en el catálogo.
-      allow create, update: if isStaff();
+      allow create: if isStaff();
+      // REGISTRO-AUTONOMO: un profesional solo modifica SU ficha
+      // (profesionalId == myProfId(), id invariante). El master conserva
+      // la gestión global. Crear sigue abierto al personal (alta de fichas
+      // por propietario/admin y autorregistro: crear jamás pisa otra ficha).
+      allow update: if isMasterAdmin() || (
+        isProfesionalRole()
+        && 'id' in existing() && existing().id == profesionalId
+        && 'id' in incoming() && incoming().id == profesionalId
+        && profesionalId == myProfId()
+      );
       allow delete: if isMasterAdmin();
     }
 

@@ -10,6 +10,7 @@ import {
   Sparkles,
   Link2,
   Info,
+  UserPlus,
 } from 'lucide-react';
 import {
   loginWithEmail,
@@ -21,11 +22,13 @@ import { UsuarioApp } from '../types';
 interface LoginViewProps {
   onLoginSuccess: (usuario: UsuarioApp) => void;
   onOpenRegisterWithToken?: (token: string) => void;
+  onOpenRegistroAutonomo?: () => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
   onLoginSuccess,
   onOpenRegisterWithToken,
+  onOpenRegistroAutonomo,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -327,6 +330,20 @@ export const LoginView: React.FC<LoginViewProps> = ({
           {/* Opciones y accesos secundarios */}
           {!showAdminSetup && !showInvitationPrompt && (
             <div className="mt-6 pt-6 border-t border-slate-800/80 space-y-3">
+              {onOpenRegistroAutonomo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMsg('');
+                    onOpenRegistroAutonomo();
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-slate-950/50 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-medium flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>¿No tienes cuenta? Regístrate</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {

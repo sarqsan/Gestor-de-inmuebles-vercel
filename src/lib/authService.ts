@@ -755,6 +755,8 @@ export interface RegisterAutonomoProfesionalParams extends RegisterAutonomoBaseP
   provincia: string;
   municipio?: string;
   tipo?: TipoProfesional;
+  /** Zonas de cobertura adicionales (la principal va en provincia/municipio). */
+  zonasAdicionales?: Array<{ provincia: string; municipio?: string }>;
 }
 
 export type RegisterAutonomoParams =
@@ -870,6 +872,7 @@ export async function registerAutonomo(
   let cifNifProf: string | undefined;
   let especialidades: string[] = [];
   let provinciaProf = '';
+  let zonasAdicionales: Array<{ provincia: string; municipio?: string }> = [];
   let municipioProf: string | undefined;
   let tipoProf: TipoProfesional = 'AUTONOMO';
 
@@ -906,6 +909,20 @@ export async function registerAutonomo(
     provinciaProf = exigirTextoAutonomo(p.provincia, 'provincia');
     municipioProf =
       typeof p.municipio === 'string' && p.municipio.trim().length > 0 ? p.municipio.trim() : undefined;
+    if (p.zonasAdicionales !== undefined) {
+      if (!Array.isArray(p.zonasAdicionales)) {
+        throw new Error('Registro autónomo: el campo \'zonasAdicionales\' no es válido.');
+      }
+      zonasAdicionales = p.zonasAdicionales.map((z, i) => {
+        const zona = (z && typeof z === 'object' ? z : {}) as Record<string, unknown>;
+        const prov = exigirTextoAutonomo(zona.provincia, `provincia de la zona adicional ${i + 1}`);
+        const mun =
+          typeof zona.municipio === 'string' && zona.municipio.trim().length > 0
+            ? zona.municipio.trim()
+            : undefined;
+        return mun ? { provincia: prov, municipio: mun } : { provincia: prov };
+      });
+    }
     if (p.tipo !== undefined) {
       if (
         p.tipo !== 'EMPRESA' &&
@@ -1001,6 +1018,7 @@ export async function registerAutonomo(
         especialidades,
         zonasServicio: [
           { id: 'z1', provincia: provinciaProf, ...(municipioProf ? { municipio: municipioProf } : {}) },
+          ...zonasAdicionales.map((z, i) => ({ id: `z${i + 2}`, ...z })),
         ],
         inmuebleIdsAsignados: [],
         activo: true,

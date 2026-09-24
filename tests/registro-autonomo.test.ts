@@ -267,6 +267,27 @@ describe('alta autónoma de PROFESIONAL', () => {
     const ficha = docGuardado<Profesional>('profesionales', usuarioApp.profesionalId as string);
     expect(ficha.tipo).toBe('AUTONOMO');
   });
+
+  it('profesional con zonas adicionales → ficha con todas las zonas', async () => {
+    const { usuarioApp } = await registerAutonomo({
+      ...PARAM_PROF,
+      zonasAdicionales: [{ provincia: 'Granada', municipio: 'Motril' }, { provincia: 'Murcia' }],
+    });
+    const ficha = docGuardado<Profesional>('profesionales', usuarioApp.profesionalId as string);
+    expect(ficha.zonasServicio).toEqual([
+      { id: 'z1', provincia: 'Almería', municipio: 'Roquetas de Mar' },
+      { id: 'z2', provincia: 'Granada', municipio: 'Motril' },
+      { id: 'z3', provincia: 'Murcia' },
+    ]);
+  });
+
+  it('zona adicional sin provincia → rechazo previo a Auth', async () => {
+    await expect(
+      registerAutonomo({ ...PARAM_PROF, zonasAdicionales: [{ provincia: '  ' }] })
+    ).rejects.toThrow(/obligatorio/);
+    expect(authm.createCalls).toBe(0);
+    expect(mem.store.size).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

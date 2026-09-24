@@ -257,6 +257,7 @@ import { PortalRegistroView } from './components/PortalRegistroView';
 import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPortalShell';
 import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
 import { LoginView } from './components/LoginView';
+import { RegistroAutonomoView } from './components/RegistroAutonomoView';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
 import {
   subscribeAuthState,
@@ -753,6 +754,8 @@ export default function App() {
   const [activePublicRegistroToken, setActivePublicRegistroToken] = useState<string | null>(null);
   const [activePublicRegistroInqId, setActivePublicRegistroInqId] = useState<string | null>(null); // BLOQUE E
   const [activePublicRegistroPropId, setActivePublicRegistroPropId] = useState<string | null>(null); // ACCESO-PROPIETARIOS: nominal (?registroProp={enlaceId})
+  // REGISTRO AUTÓNOMO: alta sin invitación (propietario/profesional).
+  const [showRegistroAutonomo, setShowRegistroAutonomo] = useState(false);
 
   // Public subscriptions and URL token checking
   useEffect(() => {
@@ -3015,6 +3018,19 @@ export default function App() {
     setCurrentUser(usuario);
   };
 
+  // REGISTRO AUTÓNOMO: tras el alta sin invitación, el usuario entra
+  // directamente en su portal (misma puerta de entrada que el login).
+  const handleCompleteRegistroAutonomo = async (usuario: UsuarioApp) => {
+    setShowRegistroAutonomo(false);
+    window.history.pushState({}, '', window.location.pathname);
+    await handleCompleteSelfRegistration(usuario);
+    if (usuario.tipoPerfil === 'PROPIETARIO') {
+      setActiveSection('propietarios');
+    } else if (usuario.tipoPerfil === 'PROFESIONAL') {
+      setActiveSection('administracion');
+    }
+  };
+
   const handleLogout = async () => {
     await logoutUser();
     setCurrentUser(null);
@@ -3296,6 +3312,16 @@ export default function App() {
   }
 
   if (!currentUser) {
+    // REGISTRO AUTÓNOMO: alta sin invitación (convive con registro/registroProp/registroInq).
+    if (showRegistroAutonomo) {
+      return (
+        <RegistroAutonomoView
+          especialidades={especialidades}
+          onComplete={handleCompleteRegistroAutonomo}
+          onCancel={() => setShowRegistroAutonomo(false)}
+        />
+      );
+    }
     return (
       <LoginView
         onLoginSuccess={(usuario) => {
@@ -3311,6 +3337,7 @@ export default function App() {
         onOpenRegisterWithToken={(token) => {
           setActivePublicRegistroToken(token);
         }}
+        onOpenRegistroAutonomo={() => setShowRegistroAutonomo(true)}
       />
     );
   }

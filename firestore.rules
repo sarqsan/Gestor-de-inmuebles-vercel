@@ -1002,7 +1002,22 @@ service cloud.firestore {
         )
         && incoming().tipoPerfil == existing().tipoPerfil
         && incoming().roles == existing().roles
-        && incoming().estado == existing().estado
+        // ACCESO-PROPIETARIOS: el estado es inmutable salvo la activación
+        // nominal — el titular del email invitado, tras crear su cuenta Auth
+        // con ese email, activa su ficha PENDIENTE al vincular su UID por
+        // primera vez. No puede re-activar, escalar ni tocar identidad,
+        // vínculos o permisos (claves vetadas más abajo).
+        && (
+          incoming().estado == existing().estado
+          || (
+            !('authUid' in existing())
+            && existing().estado == 'PENDIENTE'
+            && incoming().estado == 'ACTIVO'
+            && incoming().authUid == request.auth.uid
+            && existing().email is string
+            && request.auth.token.email == existing().email
+          )
+        )
         // El usuario no puede cambiar por sí mismo su identidad ni sus permisos.
         && !incoming().diff(existing()).affectedKeys().hasAny([
           'permisos',

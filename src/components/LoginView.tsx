@@ -102,6 +102,14 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
     // Extraer token si el usuario pegó la URL completa
     let token = invitationTokenInput.trim();
+    // ACCESO-PROPIETARIOS: invitación nominal (?registroProp=<enlaceId>)
+    if (token.includes('registroProp=')) {
+      const match = token.match(/registroProp=([^&]+)/);
+      if (match && match[1]) {
+        window.location.search = `?registroProp=${encodeURIComponent(match[1])}`;
+        return;
+      }
+    }
     if (token.includes('registro=')) {
       const match = token.match(/registro=([^&]+)/);
       if (match && match[1]) {

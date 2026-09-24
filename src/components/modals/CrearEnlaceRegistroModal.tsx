@@ -1,19 +1,33 @@
 import React, { useState } from 'react';
 import { X, Link2, Copy, Check, Calendar, Users, Eye } from 'lucide-react';
-import { EnlaceRegistro } from '../../types';
+import { EnlaceRegistro, Propietario, UsuarioApp } from '../../types';
+import {
+  buildInvitacionNominalPropietario,
+  buildUrlInvitacionPropietario,
+  generarIdEnlace,
+} from '../../lib/accesoPropietarios';
 
 interface CrearEnlaceRegistroModalProps {
   enlaceParaEditar?: EnlaceRegistro | null;
+  usuarios?: UsuarioApp[];
+  propietarios?: Propietario[];
   onSave: (enlace: EnlaceRegistro) => Promise<void>;
   onClose: () => void;
 }
 
 export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> = ({
   enlaceParaEditar,
+  usuarios = [],
+  propietarios = [],
   onSave,
   onClose,
 }) => {
   const isEditing = !!enlaceParaEditar;
+  // ACCESO-PROPIETARIOS: id estable para previsualizar la URL nominal.
+  const [enlaceId] = useState(enlaceParaEditar?.id || generarIdEnlace());
+  const [usuarioVinculadoId, setUsuarioVinculadoId] = useState(
+    enlaceParaEditar?.usuarioIdVinculado || ''
+  );
 
   const [tipoPerfil, setTipoPerfil] = useState<'PROPIETARIO' | 'PROFESIONAL'>(
     enlaceParaEditar?.tipoPerfil || 'PROPIETARIO'
@@ -45,10 +59,35 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
   const [errorMsg, setErrorMsg] = useState('');
   const [copiado, setCopiado] = useState(false);
 
-  const fullUrl = `${window.location.origin}?registro=${token}`;
+  // ACCESO-PROPIETARIOS: candidatos a invitación nominal (pendientes sin acceso).
+  const usuariosPendientes = usuarios.filter(
+    (u) => u.tipoPerfil === 'PROPIETARIO' && u.estado === 'PENDIENTE' && !u.authUid
+  );
+  const usuarioVinculado = usuarios.find((u) => u.id === usuarioVinculadoId);
+  const propietarioVinculado = propietarios.find(
+    (p) => p.id === (usuarioVinculado?.propietarioId || enlaceParaEditar?.propietarioIdVinculado)
+  );
+
+  const handleUsuarioVinculadoChange = (nuevoId: string) => {
+    setUsuarioVinculadoId(nuevoId);
+    if (nuevoId && !isEditing) {
+      // Disciplina nominal: un solo uso + caducidad a 14 días si está vacía.
+      setUsosMaximos('1');
+      setFechaCaducidad((prev) => {
+        if (prev) return prev;
+        const d = new Date(Date.now() + 14 * 86400000);
+        return d.toISOString().slice(0, 10);
+      });
+    }
+  };
+
+  const fullUrl = usuarioVinculadoId
+    ? buildUrlInvitacionPropietario(enlaceId, window.location.origin)
+    : `${window.location.origin}?registro=${token}`;
 
   const handleTipoChange = (nuevoTipo: 'PROPIETARIO' | 'PROFESIONAL') => {
     setTipoPerfil(nuevoTipo);
+    if (nuevoTipo !== 'PROPIETARIO') setUsuarioVinculadoId('');
     if (!isEditing) {
       setTextoVisible(
         nuevoTipo === 'PROPIETARIO'
@@ -76,18 +115,48 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
       setGuardando(true);
       setErrorMsg('');
 
+      // ACCESO-PROPIETARIOS: disciplina de la invitación nominal.
+      let vinculosNominal: Partial<EnlaceRegistro> = {};
+      let usosMaximosFinal = usosMaximos ? parseInt(usosMaximos, 10) : undefined;
+      if (usuarioVinculadoId) {
+        if (!usuarioVinculado) {
+          setErrorMsg('El usuario pendiente seleccionado ya no existe.');
+          return;
+        }
+        if (!usuarioVinculado.propietarioId) {
+          setErrorMsg('El usuario pendiente no está vinculado a ningún propietario.');
+          return;
+        }
+        if (!fechaCaducidad) {
+          setErrorMsg('La invitación nominal requiere fecha de caducidad.');
+          return;
+        }
+        const nominal = buildInvitacionNominalPropietario({ usuario: usuarioVinculado });
+        vinculosNominal = {
+          token: isEditing ? token.trim() : nominal.token,
+          textoVisible: textoVisible.trim() || nominal.textoVisible,
+          descripcion: descripcion.trim() || nominal.descripcion,
+          fechaCaducidad: new Date(fechaCaducidad).toISOString(),
+          propietarioIdVinculado: usuarioVinculado.propietarioId,
+          usuarioIdVinculado: usuarioVinculado.id,
+          emailInvitado: usuarioVinculado.email.trim().toLowerCase(),
+        };
+        usosMaximosFinal = 1;
+      }
+
       const enlaceActualizado: EnlaceRegistro = {
-        id: enlaceParaEditar?.id || `enlace_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: enlaceId,
         token: token.trim(),
         tipoPerfil,
         textoVisible: textoVisible.trim(),
         descripcion: descripcion.trim() || undefined,
         activo,
         fechaCaducidad: fechaCaducidad ? new Date(fechaCaducidad).toISOString() : undefined,
-        usosMaximos: usosMaximos ? parseInt(usosMaximos, 10) : undefined,
+        usosMaximos: usosMaximosFinal,
         usosActuales: enlaceParaEditar?.usosActuales || 0,
         creadoPor: enlaceParaEditar?.creadoPor || 'admin',
         createdAt: enlaceParaEditar?.createdAt || new Date().toISOString(),
+        ...vinculosNominal,
       };
 
       await onSave(enlaceActualizado);
@@ -180,6 +249,50 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
               </button>
             </div>
           </div>
+
+          {/* ACCESO-PROPIETARIOS: invitación nominal de un solo uso */}
+          {tipoPerfil === 'PROPIETARIO' && (
+            <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-emerald-900 uppercase tracking-wider mb-1.5">
+                  Invitación Nominal (usuario pendiente)
+                </label>
+                <select
+                  value={usuarioVinculadoId}
+                  onChange={(e) => handleUsuarioVinculadoChange(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-emerald-300 rounded-xl bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                >
+                  <option value="">— Enlace genérico (sin nominalizar) —</option>
+                  {usuarioVinculado &&
+                    !usuariosPendientes.some((u) => u.id === usuarioVinculado.id) && (
+                      <option value={usuarioVinculado.id}>
+                        {usuarioVinculado.nombre} · {usuarioVinculado.email} (vinculado actual)
+                      </option>
+                    )}
+                  {usuariosPendientes.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nombre} · {u.email}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-emerald-800 mt-1">
+                  Al nominalizar: un solo uso, caducidad obligatoria y URL por ID directo (sin
+                  listar). El propietario activa su cuenta pendiente, sin duplicados.
+                </p>
+              </div>
+              {usuarioVinculadoId && (
+                <div className="text-[11px] text-emerald-900 bg-white/70 border border-emerald-200 rounded-lg px-3 py-2 space-y-0.5">
+                  <div>
+                    <strong>Usuario:</strong> {usuarioVinculado?.nombre || '—'} (
+                    {usuarioVinculado?.email || enlaceParaEditar?.emailInvitado || '—'})
+                  </div>
+                  <div>
+                    <strong>Propietario:</strong> {propietarioVinculado?.nombre || '—'}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Texto Visible */}
           <div>

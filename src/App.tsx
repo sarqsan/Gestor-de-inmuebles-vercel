@@ -752,6 +752,7 @@ export default function App() {
   // Token de registro público (por enlace o invitación)
   const [activePublicRegistroToken, setActivePublicRegistroToken] = useState<string | null>(null);
   const [activePublicRegistroInqId, setActivePublicRegistroInqId] = useState<string | null>(null); // BLOQUE E
+  const [activePublicRegistroPropId, setActivePublicRegistroPropId] = useState<string | null>(null); // ACCESO-PROPIETARIOS: nominal (?registroProp={enlaceId})
 
   // Public subscriptions and URL token checking
   useEffect(() => {
@@ -775,6 +776,12 @@ export default function App() {
       const regInq = params.get('registroInq');
       if (regInq) {
         setActivePublicRegistroInqId(regInq);
+      }
+
+      // ACCESO-PROPIETARIOS: invitación nominal de propietario (?registroProp={enlaceId})
+      const regProp = params.get('registroProp');
+      if (regProp) {
+        setActivePublicRegistroPropId(regProp);
       }
 
       // Check Visita Public Token
@@ -2906,6 +2913,34 @@ export default function App() {
     profesionalData?: Partial<Profesional>,
     enlaceUtilizado?: EnlaceRegistro
   ) => {
+    // ACCESO-PROPIETARIOS: si el registro ya lo persistió el servicio
+    // canónico (registerWithInvitationLink), aquí solo se sincroniza el
+    // estado local y la sesión — sin re-guardar ni re-consumir.
+    // (La auditoría ya la escribió el servicio.)
+    if (!propietarioData && !profesionalData) {
+      setUsuarios((prev) => {
+        const idx = prev.findIndex((u) => u.id === nuevoUsuario.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = nuevoUsuario;
+          return next;
+        }
+        return [nuevoUsuario, ...prev];
+      });
+      if (enlaceUtilizado) {
+        setEnlacesRegistro((prev) =>
+          prev.map((e) =>
+            e.id === enlaceUtilizado.id
+              ? { ...e, usosActuales: (e.usosActuales || 0) + 1 }
+              : e
+          )
+        );
+      }
+      setCurrentUser(nuevoUsuario);
+      return;
+    }
+
+    // Camino histórico: profesional invitado por token de ficha (sin enlace).
     await saveUsuarioFirestore(nuevoUsuario);
     setUsuarios((prev) => [nuevoUsuario, ...prev]);
 
@@ -3047,6 +3082,25 @@ export default function App() {
         onComplete={handleCompleteInquilinoRegistration}
         onCancel={() => {
           setActivePublicRegistroInqId(null);
+          window.history.pushState({}, '', window.location.pathname);
+        }}
+      />
+    );
+  }
+
+  // ACCESO-PROPIETARIOS: activación nominal de propietario (?registroProp=).
+  // Lectura directa por ID; no requiere listas cargadas.
+  if (activePublicRegistroPropId) {
+    return (
+      <PortalRegistroView
+        token=""
+        enlaceId={activePublicRegistroPropId}
+        enlaces={[]}
+        profesionales={[]}
+        especialidades={[]}
+        onCompleteRegistro={handleCompleteSelfRegistration}
+        onCancel={() => {
+          setActivePublicRegistroPropId(null);
           window.history.pushState({}, '', window.location.pathname);
         }}
       />
@@ -3753,8 +3807,10 @@ export default function App() {
                   setModulosConfig(cfg);
                   await saveModulosConfigFirestore(cfg);
                 }}
-                onOpenCrearUsuarioModal={() => {
-                  setSelectedUserForEdit(undefined);
+                onOpenCrearUsuarioModal={(prefill) => {
+                  // ACCESO-PROPIETARIOS §1: conservar el propietario
+                  // seleccionado (prefill) al abrir el alta de usuario.
+                  setSelectedUserForEdit(prefill as UsuarioApp | undefined);
                   setShowCrearUsuarioModal(true);
                 }}
                 onOpenCrearEnlaceModal={() => {
@@ -4112,6 +4168,8 @@ export default function App() {
       {showCrearEnlaceModal && (
         <CrearEnlaceRegistroModal
           enlaceParaEditar={selectedEnlaceForEdit}
+          usuarios={usuarios}
+          propietarios={propietarios}
           onSave={async (e) => {
             await handleSaveEnlaceRegistro(e);
             setShowCrearEnlaceModal(false);

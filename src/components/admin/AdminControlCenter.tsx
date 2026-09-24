@@ -43,6 +43,11 @@ import {
   ROLES_PREDEFINIDOS,
   PERMISOS_SISTEMA,
 } from '../../types';
+import {
+  buildPrefillUsuarioDesdePropietario,
+  buildUrlInvitacion,
+  esInvitacionNominalPropietario,
+} from '../../lib/accesoPropietarios';
 
 interface AdminControlCenterProps {
   currentUser: UsuarioApp;
@@ -63,7 +68,7 @@ interface AdminControlCenterProps {
   onSaveEspecialidad: (especialidad: Especialidad) => Promise<void>;
   onDeleteEspecialidad: (id: string) => Promise<void>;
   onSaveModulosConfig?: (config: ModulosConfig) => Promise<void>;
-  onOpenCrearUsuarioModal: () => void;
+  onOpenCrearUsuarioModal: (prefill?: Partial<UsuarioApp>) => void;
   onOpenCrearEnlaceModal: () => void;
 }
 
@@ -170,9 +175,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     });
   };
 
-  // Copy link helper
+  // Copy link helper (nominal → URL por ID directo; genérica → URL por token)
   const handleCopyLink = (enlace: EnlaceRegistro) => {
-    const url = `${window.location.origin}?registro=${encodeURIComponent(enlace.token)}`;
+    const url = buildUrlInvitacion(enlace, window.location.origin);
     navigator.clipboard.writeText(url);
     setCopiedEnlaceId(enlace.id);
     setTimeout(() => setCopiedEnlaceId(null), 2500);
@@ -1077,10 +1082,20 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                         ) : (
                           <span className="text-[10px] text-slate-500">Inactivo</span>
                         )}
+                        {esInvitacionNominalPropietario(enlace) && (
+                          <span
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                            title={`Nominal para ${enlace.emailInvitado || '—'}`}
+                          >
+                            NOMINAL 1 USO
+                          </span>
+                        )}
                       </div>
                       <div className="font-mono text-slate-500 text-[11px]">
                         Token: {enlace.token} · Usos: {enlace.usosActuales || 0}
                         {enlace.usosMaximos ? ` / ${enlace.usosMaximos}` : ' (Ilimitados)'}
+                        {esInvitacionNominalPropietario(enlace) &&
+                          ` · Para: ${enlace.emailInvitado || '—'}`}
                       </div>
                     </div>
 
@@ -1313,6 +1328,17 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
               </div>
 
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    // ACCESO-PROPIETARIOS §1: alta con el propietario ya vinculado.
+                    const prop = selectedPropietarioDetail;
+                    setSelectedPropietarioDetail(null);
+                    onOpenCrearUsuarioModal(buildPrefillUsuarioDesdePropietario(prop));
+                  }}
+                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold cursor-pointer"
+                >
+                  Crear Cuenta de Usuario
+                </button>
                 <button
                   onClick={() => {
                     const propId = selectedPropietarioDetail.id;

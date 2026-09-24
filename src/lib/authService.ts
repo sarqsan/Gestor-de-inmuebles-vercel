@@ -12,10 +12,12 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
   query,
   where,
 } from 'firebase/firestore';
 import { auth, db, USUARIOS_COL, ENLACES_REGISTRO_COL, saveAuditLogFirestore } from './firebase';
+import { validarActivacionPendiente } from './accesoPropietarios';
 import {
   contratosDelInquilino,
   puedeAccederContrato,
@@ -134,6 +136,24 @@ export async function getUsuarioByAuthUid(
       } catch (e) {
         // Continuar
       }
+    }
+
+    // 0b. ACCESO-PROPIETARIOS: resolución por espejo de identidad.
+    // Lecturas directas (permitidas al titular) en lugar de consultas
+    // globales, que las reglas solo permiten al administrador.
+    try {
+      const mirrorSnap = await getDoc(doc(db, 'usuarios_auth', authUid));
+      if (mirrorSnap.exists()) {
+        const usuarioId = (mirrorSnap.data() as { usuarioId?: unknown })?.usuarioId;
+        if (typeof usuarioId === 'string' && usuarioId.length > 0) {
+          const perfilSnap = await getDoc(doc(db, 'usuarios', usuarioId));
+          if (perfilSnap.exists()) {
+            return { id: perfilSnap.id, ...perfilSnap.data() } as UsuarioApp;
+          }
+        }
+      }
+    } catch (e) {
+      // Continuar con la resolución histórica
     }
 
     // 1. Búsqueda directa por authUid
@@ -394,6 +414,87 @@ export async function initFirstAdminAccount(
 }
 
 /**
+ * ACCESO-PROPIETARIOS — Activa el usuario pendiente de una invitación nominal.
+ * Vincula el UID de Auth recién creado y pasa la ficha a ACTIVO. No crea
+ * usuario ni propietario; no toca identidad, roles, permisos ni vínculos.
+ */
+async function activarUsuarioVinculado(params: {
+  enlace: EnlaceRegistro;
+  email: string;
+  nombre: string;
+  apellidos?: string;
+  telefono?: string;
+  firebaseUser: FirebaseUser;
+}): Promise<{ firebaseUser: FirebaseUser | null; usuarioApp: UsuarioApp }> {
+  const { enlace, email, nombre, apellidos, telefono, firebaseUser } = params;
+  const emailNorm = email.trim().toLowerCase();
+
+  // 1. Leer la ficha pendiente por get() directo (firmado).
+  const pendienteSnap = await getDoc(doc(db, 'usuarios', enlace.usuarioIdVinculado as string));
+  const pendiente = (
+    pendienteSnap.exists() ? { id: pendienteSnap.id, ...pendienteSnap.data() } : null
+  ) as UsuarioApp | null;
+
+  // 2. Validar contra la invitación (perfil, estado, email, propietario).
+  const v = validarActivacionPendiente(pendiente, enlace, emailNorm);
+  if (!v.ok || !pendiente) {
+    throw new Error(v.errores[0] || 'No se puede activar esta cuenta.');
+  }
+
+  await updateProfile(firebaseUser, {
+    displayName: `${nombre} ${apellidos || ''}`.trim() || pendiente.nombre,
+  });
+
+  // 3. Vincular UID + activar. Solo claves permitidas por las reglas
+  //    (PENDIENTE→ACTIVO con email coincidente; lo demás queda intacto).
+  const ahora = new Date().toISOString();
+  const actualizacion: Record<string, unknown> = {
+    authUid: firebaseUser.uid,
+    estado: 'ACTIVO',
+    enlaceRegistroId: enlace.id,
+    updatedAt: ahora,
+    lastLoginAt: ahora,
+  };
+  if (nombre.trim()) actualizacion.nombre = nombre.trim();
+  if (apellidos?.trim()) actualizacion.apellidos = apellidos.trim();
+  if (telefono?.trim()) actualizacion.telefono = telefono.trim();
+  await updateDoc(doc(db, 'usuarios', pendiente.id), actualizacion);
+  const usuarioActivado: UsuarioApp = {
+    ...pendiente,
+    ...(actualizacion as Partial<UsuarioApp>),
+  };
+
+  // 4. Espejo de identidad (las reglas lo exigen veraz contra la ficha).
+  await syncAuthIndex(usuarioActivado, firebaseUser);
+
+  // 5. Consumir la invitación nominal (un solo uso).
+  await setDoc(
+    doc(db, 'enlaces_registro', enlace.id),
+    { usosActuales: (enlace.usosActuales || 0) + 1 },
+    { merge: true }
+  );
+
+  // 6. Sesión local + auditoría (mismo contrato que el alta clásica).
+  try {
+    localStorage.setItem('rentselect_active_session', JSON.stringify(usuarioActivado));
+    localStorage.setItem('rentselect_current_user_id', usuarioActivado.id);
+  } catch (e) {}
+
+  await saveAuditLogFirestore({
+    usuarioId: usuarioActivado.id,
+    usuarioEmail: usuarioActivado.email,
+    usuarioNombre: usuarioActivado.nombre,
+    accion: 'ACTIVACION_USUARIO_INVITACION',
+    descripcion: `Activación de cuenta PROPIETARIO pendiente mediante invitación nominal [${enlace.token}].`,
+    entidadAfectada: 'usuario',
+    idAfectado: usuarioActivado.id,
+    resultado: 'EXITO',
+  });
+
+  return { firebaseUser, usuarioApp: usuarioActivado };
+}
+
+/**
  * Registro de un usuario nuevo mediante un enlace de invitación oficial.
  * Restricción estricta: NUNCA permite crear privilegios de ADMINISTRADOR ni SUPERADMIN.
  */
@@ -453,6 +554,23 @@ export async function registerWithInvitationLink(params: {
     } else {
       throw err;
     }
+  }
+
+  // ACCESO-PROPIETARIOS: la invitación nominal activa el usuario pendiente
+  // vinculado (sin crear usuario ni propietario). Solo perfil PROPIETARIO;
+  // INQUILINO y PROFESIONAL conservan su flujo intacto.
+  if (tipoPerfil === 'PROPIETARIO' && enlace.usuarioIdVinculado) {
+    if (!firebaseUser) {
+      throw new Error('La activación nominal requiere Firebase Authentication (proveedor Email/Contraseña).');
+    }
+    return activarUsuarioVinculado({
+      enlace,
+      email,
+      nombre,
+      apellidos,
+      telefono,
+      firebaseUser,
+    });
   }
 
   // 2. Determinar rol predefinido según el enlace
@@ -516,6 +634,20 @@ export async function registerWithInvitationLink(params: {
   }
 
   // 5. Crear la entidad relacionada (Propietario o Profesional)
+  if (tipoPerfil === 'PROPIETARIO' && propId) {
+    // ACCESO-PROPIETARIOS: si el ID vino de la invitación y la ficha ya
+    // existe, reutilizarla sin sobrescribir datos reales con marcadores.
+    if (enlace.propietarioIdVinculado && propId === enlace.propietarioIdVinculado) {
+      try {
+        const fichaPrevia = await getDoc(doc(db, 'propietarios', propId));
+        if (fichaPrevia.exists()) {
+          propId = undefined;
+        }
+      } catch (e) {
+        // Sin lectura: mantener el alta clásica.
+      }
+    }
+  }
   if (tipoPerfil === 'PROPIETARIO' && propId) {
     const propietarioData: Propietario = {
       id: propId,

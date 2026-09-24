@@ -1791,6 +1791,8 @@ export interface EnlaceRegistro {
   activo: boolean;
   profesionalIdVinculado?: string; // Si es una invitación para un profesional privado existente
   propietarioIdVinculado?: string; // Si es una invitación para un propietario existente
+  usuarioIdVinculado?: string; // ACCESO-PROPIETARIOS: usuario pendiente nominal (un solo uso, NO crear usuario)
+  emailInvitado?: string; // ACCESO-PROPIETARIOS: email nominal de la invitación (verificación previa a crear Auth)
   contratoIdVinculado?: string; // BLOQUE E: contrato LAU que da acceso (invitación INQUILINO)
   inmuebleIdVinculado?: string; // BLOQUE E: inmueble del contrato (invitación INQUILINO)
   fechaCaducidad?: string; // Opcional ISO

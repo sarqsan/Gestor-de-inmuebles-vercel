@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Home,
   Wrench,
@@ -16,6 +16,9 @@ import {
   Building,
   ArrowRight,
   ShieldAlert,
+  ShieldCheck,
+  Save,
+  Wallet,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -25,6 +28,12 @@ import {
   Especialidad,
   Propietario,
 } from '../../types';
+import type { LiquidacionPropietario } from '../../tesoreria/tipos';
+// BLOQUE C — Morosidad: el portal del propietario SOLO consume el espejo recortado
+// (`morosidad_resumen_propietario`); nunca lee expedientes, comunicaciones internas ni estrategias.
+import type { ResumenMorosidadPropietario } from '../../types/morosidad';
+import { formatoImporteSepa } from '../../tesoreria/sepaUtils';
+import { imprimirLiquidacionPDF } from '../../tesoreria/liquidacionPdf';
 
 interface PropietarioPortalSectionProps {
   currentUser: UsuarioApp;
@@ -33,8 +42,13 @@ interface PropietarioPortalSectionProps {
   contratos: ContratoFormalizacion[];
   especialidades: Especialidad[];
   propietarios: Propietario[];
+  /** BLOQUE B — liquidaciones (ya acotadas por propietario desde el App). */
+  liquidaciones?: LiquidacionPropietario[];
+  /** BLOQUE C — resumen de morosidad ya recortado (sin datos del inquilino ni de estrategia). */
+  resumenMorosidad?: ResumenMorosidadPropietario[];
   onOpenCrearProfesionalModal: (profesional?: Profesional) => void;
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
+  onSavePropietario?: (propietario: Propietario) => Promise<void>;
   onNavigateToInmueble?: (inmuebleId: string) => void;
 }
 
@@ -45,26 +59,47 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   contratos,
   especialidades,
   propietarios,
+  liquidaciones = [],
+  resumenMorosidad = [],
   onOpenCrearProfesionalModal,
   onSaveProfesional,
+  onSavePropietario,
   onNavigateToInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'viviendas' | 'profesionales' | 'contratos' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
+    'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'morosidad' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
   >('viviendas');
+  // BLOQUE C: aislamiento defensivo en profundidad — aunque el prop incoming contuviera
+  // otra fila, el propietario solo ve las suyas (la regla de Firestore ya lo garantiza).
+  const miMorosidad = (resumenMorosidad || []).filter(
+    (r) => !currentUser?.propietarioId || r.propietarioId === currentUser.propietarioId,
+  );
+  const morosidadConSaldo = miMorosidad.filter((r) => r.saldoPendiente > 0.009);
+  const morosidadTotalPendiente = morosidadConSaldo.reduce((sum, r) => sum + Number(r.saldoPendiente || 0), 0);
+  // BLOQUE B: detalle de liquidación seleccionado
+  const [liqDetalleId, setLiqDetalleId] = useState<string | null>(null);
 
   const [profesionalTab, setProfesionalTab] = useState<'catalogo' | 'privados'>('catalogo');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEspecialidad, setSelectedEspecialidad] = useState<string>('TODAS');
   const [copiedLinkProfId, setCopiedLinkProfId] = useState<string | null>(null);
+  const [formFicha, setFormFicha] = useState<{
+    nombre: string;
+    nifCif: string;
+    telefono: string;
+    email: string;
+    direccion: string;
+    ciudad: string;
+    codigoPostal: string;
+  } | null>(null);
+  const [guardandoFicha, setGuardandoFicha] = useState<boolean>(false);
+  const [mensajeFicha, setMensajeFicha] = useState<string | null>(null);
 
   // Security check: Only filter properties that belong to this owner
   const misViviendas = inmuebles.filter((inm) => {
-    const isOwnerByPropietarioId =
-      currentUser.propietarioId && inm.propietarioPrincipalId === currentUser.propietarioId;
-    const isOwnerByInmuebleIds =
-      currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
-    // If user has no specific filter but is a demo owner, show their associated properties
+    const pid = currentUser.propietarioId;
+    const isOwnerByPropietarioId = !!pid && (inm.propietarioId === pid || inm.propietarioPrincipalId === pid);
+    const isOwnerByInmuebleIds = !!currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
     return isOwnerByPropietarioId || isOwnerByInmuebleIds;
   });
 
@@ -83,6 +118,71 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
 
   // Associated Propietario record
   const miFichaPropietario = propietarios.find((p) => p.id === currentUser.propietarioId);
+
+  // BLOQUE B: liquidaciones del propietario (aislamiento estricto por propietarioId)
+  const misLiquidaciones = liquidaciones
+    .filter((l) => l.propietarioId && l.propietarioId === currentUser.propietarioId && l.estado !== 'ANULADA' && l.estado !== 'REVERSADA')
+    .sort((a, b) => (a.periodo < b.periodo ? 1 : -1));
+  const liqDetalle = misLiquidaciones.find((l) => l.id === liqDetalleId) || null;
+
+  useEffect(() => {
+    setFormFicha({
+      nombre: miFichaPropietario?.nombre || `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim(),
+      nifCif: miFichaPropietario?.nifCif || '',
+      telefono: miFichaPropietario?.telefono || currentUser.telefono || '',
+      email: miFichaPropietario?.email || currentUser.email || '',
+      direccion: miFichaPropietario?.direccion || '',
+      ciudad: miFichaPropietario?.ciudad || '',
+      codigoPostal: miFichaPropietario?.codigoPostal || '',
+    });
+  }, [miFichaPropietario, currentUser]);
+
+  const puedeEditarFicha = !!onSavePropietario && !!currentUser.propietarioId;
+
+  const handleGuardarFicha = async () => {
+    if (!onSavePropietario || !currentUser.propietarioId || !formFicha) return;
+    setGuardandoFicha(true);
+    setMensajeFicha(null);
+    try {
+      const base: Propietario =
+        miFichaPropietario ||
+        ({
+          id: currentUser.propietarioId,
+          nombre: formFicha.nombre,
+          nifCif: formFicha.nifCif,
+          tipoPropietario: 'persona_fisica',
+          telefono: formFicha.telefono,
+          email: formFicha.email,
+          direccion: formFicha.direccion,
+          ciudad: formFicha.ciudad,
+          codigoPostal: formFicha.codigoPostal,
+          cuentasBancarias: [],
+          fechaCreacion: new Date().toISOString(),
+          fechaActualizacion: new Date().toISOString(),
+        } as Propietario);
+
+      const actualizada: Propietario = {
+        ...base,
+        id: currentUser.propietarioId,
+        nombre: formFicha.nombre.trim() || base.nombre,
+        nifCif: formFicha.nifCif.trim() || base.nifCif,
+        telefono: formFicha.telefono.trim() || base.telefono,
+        email: formFicha.email.trim() || base.email,
+        direccion: formFicha.direccion.trim() || base.direccion,
+        ciudad: formFicha.ciudad.trim() || base.ciudad,
+        codigoPostal: formFicha.codigoPostal.trim() || base.codigoPostal,
+        fechaActualizacion: new Date().toISOString(),
+      };
+
+      await onSavePropietario(actualizada);
+      setMensajeFicha('Ficha fiscal guardada correctamente.');
+      setTimeout(() => setMensajeFicha(null), 3000);
+    } catch (e: any) {
+      setMensajeFicha(`Error al guardar: ${e?.message || 'Revisa los campos.'}`);
+    } finally {
+      setGuardandoFicha(false);
+    }
+  };
 
   const handleCopyInvitacion = (prof: Profesional) => {
     const token = prof.tokenInvitacion || `inv_${prof.id}`;
@@ -149,6 +249,8 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
               count: misProfesionalesPrivados.length,
             },
             { id: 'contratos', label: 'Mis Contratos', icon: FileCheck, count: misContratos.length },
+            { id: 'liquidaciones', label: 'Mis Liquidaciones', icon: Wallet, count: misLiquidaciones.length },
+            { id: 'morosidad', label: 'Morosidad', icon: AlertTriangle, count: morosidadConSaldo.length },
             { id: 'gastos', label: 'Gastos', icon: TrendingDown, badge: 'Próximamente' },
             { id: 'cobros', label: 'Cobros', icon: DollarSign, badge: 'Próximamente' },
             { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, badge: 'Próximamente' },
@@ -544,6 +646,176 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             </div>
           )}
 
+          {/* SUBTAB: MIS LIQUIDACIONES (BLOQUE B — 2026-09-20) */}
+          {activeSubTab === 'liquidaciones' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Mis Liquidaciones Mensuales ({misLiquidaciones.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Estado de cuenta: ingresos cobrados, deducciones y neto transferido. Solo se liquida lo efectivamente cobrado.
+                </p>
+              </div>
+
+              {misLiquidaciones.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
+                  <DollarSign className="w-8 h-8 text-slate-400 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">Aún no tienes liquidaciones</div>
+                  <p className="text-xs text-slate-500">
+                    La administración genera tu liquidación mensual cuando existen cobros registrados.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {misLiquidaciones.map((l) => (
+                    <div key={l.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                      <div className="flex items-start justify-between flex-wrap gap-2">
+                        <div>
+                          <div className="font-bold text-sm text-slate-900">Periodo {l.periodo}</div>
+                          <div className="text-[11px] text-slate-500">
+                            Bruto {formatoImporteSepa(l.totalBrutoCobrado)} € · Deducciones −{formatoImporteSepa(l.totalDeducciones)} €
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-mono font-bold text-emerald-700 text-base">{formatoImporteSepa(l.netoPropietario)} €</div>
+                          <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-700 rounded-md">{l.estado}</span>
+                        </div>
+                      </div>
+                      {(l.fechaPago || l.referenciaBancariaPago) && (
+                        <div className="text-[11px] text-slate-600">
+                          Pagada el {l.fechaPago}{l.referenciaBancariaPago ? ` · ref. ${l.referenciaBancariaPago}` : ''}
+                        </div>
+                      )}
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={() => setLiqDetalleId(liqDetalleId === l.id ? null : l.id)} className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold">
+                          {liqDetalleId === l.id ? 'Ocultar detalle' : 'Ver detalle'}
+                        </button>
+                        <button onClick={() => imprimirLiquidacionPDF(l)} className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold">
+                          Descargar PDF
+                        </button>
+                      </div>
+                      {liqDetalleId === l.id && liqDetalle && liqDetalle.id === l.id && (
+                        <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                          {liqDetalle.lineas.map((x) => (
+                            <div key={x.id} className="flex justify-between gap-2 text-[11px]">
+                              <span className="text-slate-600"><span className="font-mono text-[10px] bg-slate-100 px-1 rounded mr-1">{x.naturaleza}</span>{x.concepto}{x.detalle ? ` — ${x.detalle}` : ''}</span>
+                              <span className={`font-mono font-bold whitespace-nowrap ${x.importe < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatoImporteSepa(x.importe)} €</span>
+                            </div>
+                          ))}
+                          <div className="text-[11px] text-slate-500 pt-1">
+                            Cuenta de abono: <span className="font-mono">{liqDetalle.cuentaAbonoIban}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SUBTAB: MOROSIDAD (BLOQUE C — 2026-09-20). Vista de MÍNIMO PRIVILEGIO:
+              solo importe, periodos y estado visible. No hay nombre del inquilino,
+              datos de contacto, estrategia de recobro, póliza ni expedientes externos. */}
+          {activeSubTab === 'morosidad' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Situación de impagos ({morosidadConSaldo.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Información que la administración tiene registrada sobre contratos con rentas pendientes. El detalle
+                  del recobro (llamadas, requerimientos, acuerdos con la aseguradora o acciones legales) lo gestiona
+                  la administración y no se publica aquí.
+                </p>
+              </div>
+
+              {miMorosidad.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
+                  <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">Sin incidencias de impago registradas</div>
+                  <p className="text-xs text-slate-500">
+                    No hay ningún contrato tuyo con rentas vencidas pendientes de cobro.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+                    <div>
+                      <span className="text-slate-500 block">Pendiente de cobro</span>
+                      <span className="font-mono font-bold text-rose-700 text-base">
+                        {formatoImporteSepa(morosidadTotalPendiente)} €
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Contratos afectados</span>
+                      <span className="font-bold text-slate-800 text-base">{morosidadConSaldo.length}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Periodos impagados</span>
+                      <span className="font-bold text-slate-800 text-base">
+                        {morosidadConSaldo.reduce((n, r) => n + Number(r.numPeriodosImpagados || 0), 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {miMorosidad.map((r) => {
+                    const abierta = r.saldoPendiente > 0.009;
+                    return (
+                      <div key={r.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                        <div className="flex items-start justify-between flex-wrap gap-2">
+                          <div>
+                            <div className="font-bold text-sm text-slate-900">{r.inmuebleDireccion || r.inmuebleId}</div>
+                            <div className="text-[11px] text-slate-500">
+                              Periodos {r.periodoDesde} → {r.periodoHasta} · {r.numPeriodosImpagados} impagado(s) ·{' '}
+                              {r.diasRetraso} día(s) de retraso
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className={`font-mono font-bold text-base ${abierta ? 'text-rose-700' : 'text-emerald-700'}`}>
+                              {formatoImporteSepa(r.saldoPendiente)} €
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
+                                abierta ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {r.estadoEtiqueta}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Reclamado</span>
+                            <span className="font-mono font-semibold text-slate-800">{formatoImporteSepa(r.importeTotalReclamado)} €</span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Cubierto con cobros reales</span>
+                            <span className="font-mono font-semibold text-emerald-700">{formatoImporteSepa(r.importeCubierto)} €</span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Última actualización</span>
+                            <span className="font-semibold text-slate-800">{String(r.ultimaActualizacion).slice(0, 10)}</span>
+                          </div>
+                        </div>
+                        {r.ultimoHechoResumen && (
+                          <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                            {r.ultimoHechoResumen}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-slate-400">
+                          Importes calculados desde los cobros del contrato; si un pago aún no está conciliado puede
+                          aparecer pendiente hasta que la administración lo registre.
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* SUBTAB 4: GASTOS (PRÓXIMAMENTE) */}
           {activeSubTab === 'gastos' && (
             <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
@@ -636,6 +908,97 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                   <span className="font-bold text-blue-700">{misViviendas.length} viviendas</span>
                 </div>
               </div>
+
+              {puedeEditarFicha && formFicha && (
+                <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">Mi Ficha Fiscal</h4>
+                    <p className="text-xs text-slate-500">
+                      Estos datos se guardan en tu ficha de propietario y se conservan al recargar.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Nombre y apellidos / Razón social</span>
+                      <input
+                        type="text"
+                        value={formFicha.nombre}
+                        onChange={(e) => setFormFicha({ ...formFicha, nombre: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">NIF / CIF / NIE</span>
+                      <input
+                        type="text"
+                        value={formFicha.nifCif}
+                        onChange={(e) => setFormFicha({ ...formFicha, nifCif: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Teléfono</span>
+                      <input
+                        type="tel"
+                        value={formFicha.telefono}
+                        onChange={(e) => setFormFicha({ ...formFicha, telefono: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Email de contacto</span>
+                      <input
+                        type="email"
+                        value={formFicha.email}
+                        onChange={(e) => setFormFicha({ ...formFicha, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1 sm:col-span-2">
+                      <span className="text-xs font-semibold text-slate-600">Domicilio a efectos de notificaciones</span>
+                      <input
+                        type="text"
+                        value={formFicha.direccion}
+                        onChange={(e) => setFormFicha({ ...formFicha, direccion: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Ciudad</span>
+                      <input
+                        type="text"
+                        value={formFicha.ciudad}
+                        onChange={(e) => setFormFicha({ ...formFicha, ciudad: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-slate-600">Código postal</span>
+                      <input
+                        type="text"
+                        value={formFicha.codigoPostal}
+                        onChange={(e) => setFormFicha({ ...formFicha, codigoPostal: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={handleGuardarFicha}
+                      disabled={guardandoFicha}
+                      className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>{guardandoFicha ? 'Guardando…' : 'Guardar Mi Ficha'}</span>
+                    </button>
+                    {mensajeFicha && (
+                      <span className="text-xs font-semibold text-slate-600">{mensajeFicha}</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

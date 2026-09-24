@@ -5,12 +5,17 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
   setDoc,
   deleteDoc,
   deleteField,
   onSnapshot,
   writeBatch,
   runTransaction,
+  query,
+  where,
+  type Unsubscribe,
+  type QuerySnapshot,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -29,6 +34,25 @@ import {
   VisitSlot,
   SolicitudDocumentacion,
   ContratoFormalizacion,
+  Gasto,
+  GastoRecurrente,
+  Prestamo,
+  ExpedienteRecomercializacion,
+  InmobiliariaDirectorio,
+  PropuestaInmobiliaria,
+  LeadInmobiliario,
+  Incidencia,
+  TareaMantenimiento,
+  GarantiaReparacion,
+  TrabajoProfesional,
+  PresupuestoProfesional,
+  ValoracionProfesionalTrabajo,
+  NecesidadReforma,
+  ProyectoReforma,
+  ElementoInventario,
+  HabitacionInmueble,
+  PolizaSeguro,
+  Siniestro,
   ConfiguracionAseguradora,
   SolicitudSeguroImpago,
   GmailIntegracionConfig,
@@ -40,15 +64,15 @@ import {
   ModulosConfig,
   DEFAULT_MODULOS_CONFIG,
   PERMISOS_SISTEMA,
-  Incidencia,
-  PolizaSeguro,
-  Siniestro,
-  AdjuntoIncidencia,
-  TrabajoProfesional,
-  PresupuestoProfesional,
-  ValoracionProfesionalTrabajo,
-  DocumentoProfesional,
 } from '../types';
+import type { Financiacion } from '../types/financiacion';
+import type {
+  Factura,
+  RegistroFacturacion,
+  EnvioVerifactu,
+  SerieFacturacion,
+} from '../types/facturacion';
+import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -81,8 +105,30 @@ const INVITACIONES_COL = collection(db, 'invitaciones');
 const SLOTS_VISITA_COL = collection(db, 'slots_visita');
 const SOLICITUDES_DOC_COL = collection(db, 'solicitudes_documentacion');
 const CONTRATOS_COL = collection(db, 'contratos_formalizacion');
+const GASTOS_COL = collection(db, 'gastos');
+const GASTOS_RECURRENTES_COL = collection(db, 'gastos_recurrentes');
+const PRESTAMOS_COL = collection(db, 'prestamos');
+// FASE 3 — Recomercialización inteligente
+const EXPEDIENTES_RECOMERCIALIZACION_COL = collection(db, 'expedientes_recomercializacion');
+const INMOBILIARIAS_DIRECTORIO_COL = collection(db, 'inmobiliarias_directorio');
+const PROPUESTAS_INMOBILIARIA_COL = collection(db, 'propuestas_inmobiliaria');
+const LEADS_INMOBILIARIOS_COL = collection(db, 'leads_inmobiliario');
+const INCIDENCIAS_COL = collection(db, 'incidencias');
+const TAREAS_MANTENIMIENTO_COL = collection(db, 'tareas_mantenimiento');
+export const GARANTIAS_REPARACION_COL = collection(db, 'garantias_reparacion');
 const ASEGURADORAS_COL = collection(db, 'configuracion_aseguradoras');
 const SOLICITUDES_SEGURO_COL = collection(db, 'solicitudes_seguro_impago');
+export const POLIZAS_SEGUROS_COL = collection(db, 'polizas_seguros');
+export const SINIESTROS_COL = collection(db, 'siniestros');
+export const TRABAJOS_PROFESIONALES_COL = collection(db, 'trabajos_profesionales');
+export const PRESUPUESTOS_PROFESIONALES_COL = collection(db, 'presupuestos_profesionales');
+export const VALORACIONES_PROFESIONALES_COL = collection(db, 'valoraciones_profesionales');
+export const NECESIDADES_REFORMA_COL = collection(db, 'necesidades_reforma');
+export const PROYECTOS_REFORMA_COL = collection(db, 'proyectos_reforma');
+export const INVENTARIO_COL = collection(db, 'inventario_inmuebles');
+export const INVENTARIO_HISTORIAL_COL = collection(db, 'inventario_historial');
+export const HABITACIONES_COL = collection(db, 'habitaciones_inmueble');
+export const FINANCIACIONES_COL = collection(db, 'financiaciones');
 
 // Colecciones estructurales de usuarios, perfiles, permisos y profesionales
 export const USUARIOS_COL = collection(db, 'usuarios');
@@ -91,16 +137,6 @@ export const ENLACES_REGISTRO_COL = collection(db, 'enlaces_registro');
 export const ESPECIALIDADES_COL = collection(db, 'especialidades');
 export const AUDIT_LOGS_COL = collection(db, 'audit_logs');
 export const MODULOS_CONFIG_REF = doc(db, 'system', 'modulos_config');
-
-// Colecciones Bloque 4: Incidencias, Mantenimiento, Seguros y Siniestros
-export const INCIDENCIAS_COL = collection(db, 'incidencias');
-export const POLIZAS_COL = collection(db, 'polizas_seguros');
-export const SINIESTROS_COL = collection(db, 'siniestros');
-
-// Colecciones Bloque 5: Profesionales, Trabajos, Presupuestos y Valoraciones
-export const TRABAJOS_PROFESIONALES_COL = collection(db, 'trabajos_profesionales');
-export const PRESUPUESTOS_PROFESIONALES_COL = collection(db, 'presupuestos_profesionales');
-export const VALORACIONES_PROFESIONALES_COL = collection(db, 'valoraciones_profesionales');
 
 /**
  * Seeds initial mock data into Firestore if database has never been initialized,
@@ -138,9 +174,48 @@ export async function seedInitialDataIfEmpty() {
 }
 
 /**
- * Real-time listener for Propietarios
+ * Ámbito de acceso a datos (FASE 1.4).
+ * - ADMINISTRADOR / sin ámbito: colección completa.
+ * - PROPIETARIO: únicamente sus propios recursos.
+ * - PROFESIONAL: sin acceso a datos económicos/fiscales.
  */
-export function subscribePropietarios(callback: (propietarios: Propietario[]) => void) {
+export interface DataAccessScope {
+  tipoPerfil?: string;
+  propietarioId?: string;
+  inmuebleIds?: string[];
+}
+
+/**
+ * Real-time listener for Propietarios.
+ * Con ámbito de propietario escucha únicamente SU ficha (datos fiscales/cuentas);
+ * los profesionales no reciben nada y el administrador, la colección completa.
+ */
+export function subscribePropietarios(
+  callback: (propietarios: Propietario[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    const pid = scope.propietarioId;
+    if (!pid) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      doc(db, 'propietarios', pid),
+      (docSnap) => {
+        callback(docSnap.exists() ? [{ id: docSnap.id, ...docSnap.data() } as Propietario] : []);
+      },
+      (err) => {
+        console.error('Firestore propietario (scoped) snapshot error:', err);
+      }
+    );
+  }
+
   return onSnapshot(
     PROPIETARIOS_COL,
     (snapshot) => {
@@ -278,6 +353,13 @@ export async function saveInmuebleFirestore(inmueble: Inmueble) {
   try {
     const cleanInmueble = sanitizeInmuebleForFirestore(inmueble);
     await setDoc(doc(db, 'inmuebles', cleanInmueble.id), cleanInmueble, { merge: true });
+    // R3: espejo público mínimo (mejor esfuerzo: nunca rompe el guardado principal).
+    try {
+      const ficha = buildFichaPublicaInmueble(inmueble);
+      if (ficha) await saveFichaPublicaInmueble(ficha);
+    } catch (errMirror) {
+      console.warn('No se pudo actualizar la ficha pública del inmueble:', errMirror);
+    }
   } catch (err) {
     console.error('Error saving inmueble to Firestore:', err);
   }
@@ -289,12 +371,19 @@ export async function saveInmuebleFirestore(inmueble: Inmueble) {
 export async function deleteInmuebleFirestore(inmuebleId: string) {
   try {
     await deleteDoc(doc(db, 'inmuebles', inmuebleId));
+    // R3: la ficha pública no debe sobrevivir al documento (mejor esfuerzo).
+    try {
+      await deleteFichaPublicaInmueble(inmuebleId);
+    } catch (errMirror) {
+      console.warn('No se pudo eliminar la ficha pública del inmueble:', errMirror);
+    }
   } catch (err) {
     console.error('Error deleting inmueble from Firestore:', err);
   }
 }
 
 import { compressImageForUpload } from '../utils/fileCompressor';
+import { buildFichaPublicaInmueble, deleteFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
 
 /**
  * Recursively cleans any object or array to ensure it contains NO `undefined` values,
@@ -391,36 +480,9 @@ export async function saveCandidatoFirestore(candidato: Candidato) {
         return d;
       });
     }
-
-    const docRef = doc(db, 'candidatos', candidato.id);
-    await runTransaction(db, async (transaction) => {
-      const existingSnap = await transaction.get(docRef);
-      if (existingSnap.exists()) {
-        const existingData = existingSnap.data() as Candidato;
-        // Preservación estricta de historial inmutable
-        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
-        const incomingHist = Array.isArray(cleanCand.historial) ? cleanCand.historial : [];
-        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
-
-        // Impedir que un candidato en estado rechazado_final sea revertido sin autorización de propietario
-        if (existingData.estado === 'rechazado_final' && cleanCand.estado !== 'rechazado_final' && !cleanCand.decisionFinalAutor) {
-          cleanCand.estado = 'rechazado_final';
-          cleanCand.decisionFinal = 'RECHAZAR';
-        }
-
-        transaction.set(docRef, { ...cleanCand, historial: mergedHist }, { merge: true });
-      } else {
-        transaction.set(docRef, cleanCand);
-      }
-    });
+    await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
   } catch (err) {
     console.error('Error saving candidato to Firestore:', err);
-    try {
-      const cleanCand = deepCleanForFirestore(candidato);
-      await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
-    } catch (fallbackErr) {
-      console.error('Fallback setDoc also failed:', fallbackErr);
-    }
   }
 }
 
@@ -531,6 +593,7 @@ export async function bookSlotTransaction(
       reservaCandidateId: candidateData.id,
       reservaCandidateNombre: candidateData.nombre,
       reservaInvitationId: invitacionId,
+      ...(slotData.habitacionId ? { habitacionId: slotData.habitacionId } : {}),
     });
 
     // 2. Update invitation status
@@ -648,67 +711,9 @@ export function subscribeSolicitudesDoc(callback: (solicitudesDoc: SolicitudDocu
 export async function saveSolicitudDocFirestore(solicitudDoc: SolicitudDocumentacion) {
   try {
     const cleanDoc = sanitizeDocForFirestore(solicitudDoc);
-    const docRef = doc(db, 'solicitudes_documentacion', solicitudDoc.id);
-
-    await runTransaction(db, async (transaction) => {
-      const existingSnap = await transaction.get(docRef);
-      if (existingSnap.exists()) {
-        const existingData = existingSnap.data() as SolicitudDocumentacion;
-        // Merge without losing previously uploaded files if incoming is partial
-        const incomingItems = cleanDoc.documentos || [];
-        const existingItems = existingData.documentos || [];
-
-        const mergedItems = incomingItems.map((inc) => {
-          const prev = existingItems.find((p) => p.id === inc.id);
-          if (prev && Array.isArray(prev.archivos) && prev.archivos.length > 0) {
-            const incArchivos = Array.isArray(inc.archivos) ? inc.archivos : [];
-            if (incArchivos.length < prev.archivos.length) {
-              return {
-                ...inc,
-                archivos: prev.archivos,
-                estado: prev.estado || inc.estado,
-                fechaSubida: prev.fechaSubida || inc.fechaSubida,
-              };
-            }
-          }
-          return inc;
-        });
-
-        // Ensure immutable history items preservation
-        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
-        const incomingHist = Array.isArray(cleanDoc.historial) ? cleanDoc.historial : [];
-        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
-
-        transaction.set(docRef, { ...cleanDoc, documentos: mergedItems, historial: mergedHist }, { merge: true });
-      } else {
-        transaction.set(docRef, cleanDoc);
-      }
-    });
-    // Sincronización proactiva con backend para portal público con validación segura de token
-    try {
-      if (typeof window !== 'undefined' && window.fetch) {
-        fetch('/api/solicitudes-documentacion/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cleanDoc),
-        }).catch(() => {});
-      }
-    } catch (e) {}
+    await setDoc(doc(db, 'solicitudes_documentacion', solicitudDoc.id), cleanDoc, { merge: true });
   } catch (err) {
-    console.error('Error saving solicitud documentacion with transaction:', err);
-    try {
-      const cleanDoc = sanitizeDocForFirestore(solicitudDoc);
-      await setDoc(doc(db, 'solicitudes_documentacion', solicitudDoc.id), cleanDoc, { merge: true });
-      if (typeof window !== 'undefined' && window.fetch) {
-        fetch('/api/solicitudes-documentacion/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cleanDoc),
-        }).catch(() => {});
-      }
-    } catch (fallbackErr) {
-      console.error('Fallback setDoc also failed:', fallbackErr);
-    }
+    console.error('Error saving solicitud documentacion to Firestore:', err);
   }
 }
 
@@ -724,20 +729,62 @@ export async function deleteSolicitudDocFirestore(solicitudDocId: string) {
 }
 
 /**
- * Real-time listener for Contratos de Formalización (Fase 3)
+ * Real-time listener for Contratos de Formalización (Fase 3).
+ * FASE 1.4: con ámbito de PROPIETARIO lanza una consulta acotada por
+ * propietarioId (nunca la colección completa). Es exactamente el filtro que las
+ * Security Rules exigen para conceder el listado. Los profesionales no reciben
+ * contratos. El administrador mantiene la escucha global.
  */
-export function subscribeContratos(callback: (contratos: ContratoFormalizacion[]) => void) {
+export function subscribeContratos(
+  callback: (contratos: ContratoFormalizacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // Profesionales: cero acceso a contratos/cobros.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  // Administrador o sin ámbito: colección completa.
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      CONTRATOS_COL,
+      (snapshot) => {
+        const items: ContratoFormalizacion[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore contratos_formalizacion snapshot error:', err);
+      }
+    );
+  }
+
+  // --- PROPIETARIO ---
+  // La regla de Firestore EXIGE el filtro de igualdad por propietarioId (las
+  // reglas no filtran); por eso se consulta únicamente por ese campo. Un
+  // inmueble compartido pero titularidad de otro propietario no pertenece
+  // económicamente a este usuario y, por tanto, no se incluye aquí.
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+
+  const scopedQuery = query(CONTRATOS_COL, where('propietarioId', '==', pid));
   return onSnapshot(
-    CONTRATOS_COL,
-    (snapshot) => {
+    scopedQuery,
+    (snap) => {
       const items: ContratoFormalizacion[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion);
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as ContratoFormalizacion);
       });
       callback(items);
     },
     (err) => {
-      console.error('Firestore contratos_formalizacion snapshot error:', err);
+      console.error('Firestore contratos (scoped) snapshot error:', err);
     }
   );
 }
@@ -747,10 +794,22 @@ export function subscribeContratos(callback: (contratos: ContratoFormalizacion[]
  */
 export async function saveContratoFirestore(contrato: ContratoFormalizacion) {
   try {
+    const refC = doc(db, 'contratos_formalizacion', contrato.id);
+    const existing = await getDoc(refC);
+    if (existing.exists()) {
+      const prev = existing.data() as ContratoFormalizacion;
+      if (prev.habitacionId && contrato.habitacionId && prev.habitacionId !== contrato.habitacionId) {
+        throw new Error('No se puede reasignar habitacionId de un contrato activo.');
+      }
+      if (prev.inmuebleId && contrato.inmuebleId && prev.inmuebleId !== contrato.inmuebleId) {
+        throw new Error('No se puede reasignar inmuebleId de un contrato.');
+      }
+    }
     const cleanContrato = sanitizeObjectForFirestore(contrato);
-    await setDoc(doc(db, 'contratos_formalizacion', contrato.id), cleanContrato, { merge: true });
+    await setDoc(refC, cleanContrato, { merge: true });
   } catch (err) {
     console.error('Error saving contrato formalizacion to Firestore:', err);
+    throw err;
   }
 }
 
@@ -762,6 +821,639 @@ export async function deleteContratoFirestore(contratoId: string) {
     await deleteDoc(doc(db, 'contratos_formalizacion', contratoId));
   } catch (err) {
     console.error('Error deleting contrato formalizacion from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.0 — GASTOS (explotación vs financiación)
+// ============================================================
+
+/**
+ * Listener de gastos con el mismo aislamiento que los contratos:
+ * - PROFESIONAL: cero acceso (son datos económicos).
+ * - PROPIETARIO: consulta demostrable where('propietarioId','==', pid).
+ * - ADMINISTRADOR / sin ámbito: colección completa.
+ */
+export function subscribeGastos(
+  callback: (gastos: Gasto[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      GASTOS_COL,
+      (snapshot) => {
+        const items: Gasto[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Gasto);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore gastos snapshot error:', err);
+      }
+    );
+  }
+
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+
+  const scopedQuery = query(GASTOS_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: Gasto[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as Gasto);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore gastos (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function saveGastoFirestore(gasto: Gasto) {
+  try {
+    const cleanGasto = sanitizeObjectForFirestore(gasto);
+    await setDoc(doc(db, 'gastos', gasto.id), cleanGasto, { merge: true });
+  } catch (err) {
+    console.error('Error saving gasto to Firestore:', err);
+  }
+}
+
+export async function deleteGastoFirestore(gastoId: string) {
+  try {
+    await deleteDoc(doc(db, 'gastos', gastoId));
+  } catch (err) {
+    console.error('Error deleting gasto from Firestore:', err);
+  }
+}
+
+/**
+ * Listener de plantillas de gastos recurrentes con el mismo aislamiento que los
+ * gastos: profesionales sin datos, propietario por where('propietarioId','=='),
+ * administrador con la colección completa.
+ */
+export function subscribeGastosRecurrentes(
+  callback: (plantillas: GastoRecurrente[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      GASTOS_RECURRENTES_COL,
+      (snapshot) => {
+        const items: GastoRecurrente[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as GastoRecurrente);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore gastos_recurrentes snapshot error:', err);
+      }
+    );
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  const scopedQuery = query(GASTOS_RECURRENTES_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: GastoRecurrente[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as GastoRecurrente);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore gastos_recurrentes (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function saveGastoRecurrenteFirestore(plantilla: GastoRecurrente) {
+  try {
+    const clean = sanitizeObjectForFirestore(plantilla);
+    await setDoc(doc(db, 'gastos_recurrentes', plantilla.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving gasto recurrente to Firestore:', err);
+  }
+}
+
+export async function deleteGastoRecurrenteFirestore(plantillaId: string) {
+  try {
+    // No se eliminan los apuntes ya materializados: se conserva el histórico.
+    await deleteDoc(doc(db, 'gastos_recurrentes', plantillaId));
+  } catch (err) {
+    console.error('Error deleting gasto recurrente from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 2.3 — PRÉSTAMOS / HIPOTECAS (condiciones financieras)
+// ============================================================
+
+export function subscribePrestamos(
+  callback: (prestamos: Prestamo[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      PRESTAMOS_COL,
+      (snapshot) => {
+        const items: Prestamo[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Prestamo);
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error('Firestore prestamos snapshot error:', err);
+      }
+    );
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  const scopedQuery = query(PRESTAMOS_COL, where('propietarioId', '==', pid));
+  return onSnapshot(
+    scopedQuery,
+    (snap) => {
+      const items: Prestamo[] = [];
+      snap.forEach((ds) => {
+        items.push({ id: ds.id, ...ds.data() } as Prestamo);
+      });
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore prestamos (scoped) snapshot error:', err);
+    }
+  );
+}
+
+export async function savePrestamoFirestore(prestamo: Prestamo) {
+  try {
+    const clean = sanitizeObjectForFirestore(prestamo);
+    await setDoc(doc(db, 'prestamos', prestamo.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving prestamo to Firestore:', err);
+  }
+}
+
+export async function deletePrestamoFirestore(prestamoId: string) {
+  try {
+    await deleteDoc(doc(db, 'prestamos', prestamoId));
+  } catch (err) {
+    console.error('Error deleting prestamo from Firestore:', err);
+  }
+}
+
+// ============================================================
+// FASE 3.0 — RECOMERCIALIZACIÓN INTELIGENTE
+// Suscripción genérica aislada por propietario (patrón de
+// contratos/gastos): profesionales sin datos, propietario con
+// where('propietarioId','==', pid), administrador con todo.
+// ============================================================
+function subscribeColeccionPropietario<T extends { id: string }>(
+  col: ReturnType<typeof collection>,
+  callback: (items: T[]) => void,
+  scope: DataAccessScope | undefined,
+  etiqueta: string
+): Unsubscribe {
+  const mapear = (snap: QuerySnapshot) => {
+    const items: T[] = [];
+    snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as unknown as T));
+    callback(items);
+  };
+  const onError = (err: unknown) => console.error(`Firestore ${etiqueta} snapshot error:`, err);
+
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(col, mapear, onError);
+  }
+  const pid = scope.propietarioId;
+  if (!pid) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(query(col, where('propietarioId', '==', pid)), mapear, onError);
+}
+
+// ---- Expedientes de recomercialización ----
+export function subscribeExpedientesRecomercializacion(
+  callback: (items: ExpedienteRecomercializacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<ExpedienteRecomercializacion>(
+    EXPEDIENTES_RECOMERCIALIZACION_COL,
+    callback,
+    scope,
+    'expedientes_recomercializacion'
+  );
+}
+export async function saveExpedienteRecomercializacionFirestore(item: ExpedienteRecomercializacion) {
+  try {
+    await setDoc(
+      doc(db, 'expedientes_recomercializacion', item.id),
+      sanitizeObjectForFirestore(item),
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error saving expediente recomercializacion:', err);
+  }
+}
+export async function deleteExpedienteRecomercializacionFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'expedientes_recomercializacion', id));
+  } catch (err) {
+    console.error('Error deleting expediente recomercializacion:', err);
+  }
+}
+
+// ---- Directorio de inmobiliarias (lectura propietario+admin; escritura admin) ----
+export function subscribeInmobiliarias(
+  callback: (items: InmobiliariaDirectorio[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // El directorio lo consultan administrador y propietario (bolsa para delegar);
+  // los profesionales no participan en la comercialización.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    INMOBILIARIAS_DIRECTORIO_COL,
+    (snap) => {
+      const items: InmobiliariaDirectorio[] = [];
+      snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as InmobiliariaDirectorio));
+      callback(items);
+    },
+    (err) => console.error('Firestore inmobiliarias_directorio snapshot error:', err)
+  );
+}
+export async function saveInmobiliariaFirestore(item: InmobiliariaDirectorio) {
+  try {
+    await setDoc(doc(db, 'inmobiliarias_directorio', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving inmobiliaria:', err);
+  }
+}
+export async function deleteInmobiliariaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'inmobiliarias_directorio', id));
+  } catch (err) {
+    console.error('Error deleting inmobiliaria:', err);
+  }
+}
+
+// ---- Propuestas de inmobiliarias (RFP) ----
+export function subscribePropuestasInmobiliaria(
+  callback: (items: PropuestaInmobiliaria[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<PropuestaInmobiliaria>(
+    PROPUESTAS_INMOBILIARIA_COL,
+    callback,
+    scope,
+    'propuestas_inmobiliaria'
+  );
+}
+export async function savePropuestaInmobiliariaFirestore(item: PropuestaInmobiliaria) {
+  try {
+    await setDoc(doc(db, 'propuestas_inmobiliaria', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving propuesta inmobiliaria:', err);
+  }
+}
+export async function deletePropuestaInmobiliariaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'propuestas_inmobiliaria', id));
+  } catch (err) {
+    console.error('Error deleting propuesta inmobiliaria:', err);
+  }
+}
+
+// ---- Leads de intermediación ----
+export function subscribeLeadsInmobiliarios(
+  callback: (items: LeadInmobiliario[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<LeadInmobiliario>(
+    LEADS_INMOBILIARIOS_COL,
+    callback,
+    scope,
+    'leads_inmobiliario'
+  );
+}
+export async function saveLeadInmobiliarioFirestore(item: LeadInmobiliario) {
+  try {
+    await setDoc(doc(db, 'leads_inmobiliario', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving lead inmobiliario:', err);
+  }
+}
+export async function deleteLeadInmobiliarioFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'leads_inmobiliario', id));
+  } catch (err) {
+    console.error('Error deleting lead inmobiliario:', err);
+  }
+}
+
+// ============================================================
+// BLOQUE 4 — INCIDENCIAS Y MANTENIMIENTO
+// Aislamiento por propietarioId (patrón de contratos/gastos). Los
+// profesionales también necesitan ver sus órdenes ASIGNADAS: se
+// resuelve en la regla con where('profesionalAsignadoId','==', id).
+// ============================================================
+export function subscribeIncidencias(
+  callback: (items: Incidencia[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<Incidencia>(
+    INCIDENCIAS_COL,
+    callback,
+    scope,
+    'incidencias'
+  );
+}
+export async function saveIncidenciaFirestore(item: Incidencia) {
+  try {
+    await setDoc(doc(db, 'incidencias', item.id), sanitizeObjectForFirestore(item), { merge: true });
+  } catch (err) {
+    console.error('Error saving incidencia:', err);
+  }
+}
+export async function deleteIncidenciaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'incidencias', id));
+  } catch (err) {
+    console.error('Error deleting incidencia:', err);
+  }
+}
+
+export function subscribeTareasMantenimiento(
+  callback: (items: TareaMantenimiento[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<TareaMantenimiento>(
+    TAREAS_MANTENIMIENTO_COL,
+    callback,
+    scope,
+    'tareas_mantenimiento'
+  );
+}
+export async function saveTareaMantenimientoFirestore(item: TareaMantenimiento) {
+  try {
+    await setDoc(doc(db, 'tareas_mantenimiento', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving tarea mantenimiento:', err);
+  }
+}
+export async function deleteTareaMantenimientoFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'tareas_mantenimiento', id));
+  } catch (err) {
+    console.error('Error deleting tarea mantenimiento:', err);
+  }
+}
+
+export function subscribeGarantiasReparacion(
+  callback: (items: GarantiaReparacion[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<GarantiaReparacion>(
+    GARANTIAS_REPARACION_COL,
+    callback,
+    scope,
+    'garantias_reparacion'
+  );
+}
+
+export async function saveGarantiaReparacionFirestore(item: GarantiaReparacion) {
+  try {
+    await setDoc(doc(db, 'garantias_reparacion', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving garantia reparacion:', err);
+  }
+}
+
+export async function deleteGarantiaReparacionFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'garantias_reparacion', id));
+  } catch (err) {
+    console.error('Error deleting garantia reparacion:', err);
+  }
+}
+
+// =========================================================================
+// REFORMAS: NECESIDADES Y PROYECTOS DE REFORMA
+// =========================================================================
+
+export function subscribeNecesidadesReforma(
+  callback: (items: NecesidadReforma[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<NecesidadReforma>(
+    NECESIDADES_REFORMA_COL,
+    callback,
+    scope,
+    'necesidades_reforma'
+  );
+}
+
+export async function saveNecesidadReformaFirestore(item: NecesidadReforma) {
+  try {
+    await setDoc(doc(db, 'necesidades_reforma', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving necesidad de reforma:', err);
+    throw err;
+  }
+}
+
+export async function deleteNecesidadReformaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'necesidades_reforma', id));
+  } catch (err) {
+    console.error('Error deleting necesidad de reforma:', err);
+    throw err;
+  }
+}
+
+export function subscribeProyectosReforma(
+  callback: (items: ProyectoReforma[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<ProyectoReforma>(
+    PROYECTOS_REFORMA_COL,
+    callback,
+    scope,
+    'proyectos_reforma'
+  );
+}
+
+export async function saveProyectoReformaFirestore(item: ProyectoReforma) {
+  try {
+    await setDoc(doc(db, 'proyectos_reforma', item.id), sanitizeObjectForFirestore(item), {
+      merge: true,
+    });
+  } catch (err) {
+    console.error('Error saving proyecto de reforma:', err);
+    throw err;
+  }
+}
+
+export async function deleteProyectoReformaFirestore(id: string) {
+  try {
+    await deleteDoc(doc(db, 'proyectos_reforma', id));
+  } catch (err) {
+    console.error('Error deleting proyecto de reforma:', err);
+    throw err;
+  }
+}
+
+export async function uploadReformaAdjuntoStorage(
+  proyectoId: string,
+  file: File | Blob,
+  fileName: string,
+  propietarioId?: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `reformas_documentos/${ownerSeg}/${proyectoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+  } catch (err) {
+    console.warn('Storage upload error / timeout, using fallback data URL:', err);
+  }
+
+  // Fallback seguro a data URL local
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ url: reader.result as string, storagePath });
+    reader.onerror = () => resolve({ url: '', storagePath });
+    reader.readAsDataURL(file);
+  });
+}
+
+// ============================================================
+// FASE 2.2 — FACTURAS / JUSTIFICANTES DE GASTOS en Storage
+// Ruta: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
+// ============================================================
+
+export async function uploadFacturaGasto(
+  gastoId: string,
+  file: File | Blob,
+  fileName: string,
+  propietarioId?: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `gastos_facturas/${ownerSeg}/${gastoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+    console.warn('Timeout subiendo la factura del gasto a Firebase Storage.');
+  } catch (err) {
+    console.warn('Firebase Storage no disponible para la factura del gasto:', err);
+  }
+
+  // Respaldo por el endpoint del servidor (igual que los justificantes de cobro).
+  try {
+    const dataURL = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch('/api/upload-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileBase64: dataURL, filename: fileName, mimeType: mime, itemId: gastoId }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.url) {
+        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Falló también la subida de la factura por servidor:', serverErr);
+  }
+
+  throw new Error('No se ha podido almacenar la factura. Revisa la conexión e inténtalo de nuevo.');
+}
+
+export async function deleteFacturaGastoStorage(storagePath?: string): Promise<void> {
+  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar la factura de Storage:', err);
   }
 }
 
@@ -851,38 +1543,9 @@ export function subscribeSolicitudesSeguro(callback: (solicitudes: SolicitudSegu
 export async function saveSolicitudSeguroFirestore(solicitud: SolicitudSeguroImpago) {
   try {
     const cleanSol = sanitizeObjectForFirestore(solicitud);
-    const docRef = doc(db, 'solicitudes_seguro_impago', solicitud.id);
-
-    await runTransaction(db, async (transaction) => {
-      const existingSnap = await transaction.get(docRef);
-      if (existingSnap.exists()) {
-        const existingData = existingSnap.data() as SolicitudSeguroImpago;
-        // Keep immutable reference code and existing history if concurrent save occurs
-        const existingHist = Array.isArray(existingData.historial) ? existingData.historial : [];
-        const incomingHist = Array.isArray(cleanSol.historial) ? cleanSol.historial : [];
-        const mergedHist = incomingHist.length >= existingHist.length ? incomingHist : existingHist;
-
-        transaction.set(
-          docRef,
-          {
-            ...cleanSol,
-            referenciaUnica: existingData.referenciaUnica || cleanSol.referenciaUnica,
-            historial: mergedHist,
-          },
-          { merge: true }
-        );
-      } else {
-        transaction.set(docRef, cleanSol);
-      }
-    });
+    await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
   } catch (err) {
-    console.error('Error saving solicitud seguro impago with transaction:', err);
-    try {
-      const cleanSol = sanitizeObjectForFirestore(solicitud);
-      await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
-    } catch (fallbackErr) {
-      console.error('Fallback setDoc also failed:', fallbackErr);
-    }
+    console.error('Error saving solicitud seguro impago to Firestore:', err);
   }
 }
 
@@ -1085,6 +1748,207 @@ export async function uploadInmuebleImageToStorage(
     console.warn('Firebase Storage upload failed, using compressed Data URL fallback:', err);
     const dataURL = await getDataUrlFallback();
     return { downloadURL: dataURL || URL.createObjectURL(blob), storagePath: `local_${imageId}` };
+  }
+}
+
+// ============================================================
+// FASE 3.2 — FOTOGRAFÍAS DE INSPECCIÓN (recomercialización)
+// Ruta privada por propietario y expediente:
+//   recomercializacion_fotos/{propietarioId}/{expedienteId}/{archivo}
+// A diferencia de las imágenes de catálogo, estas fotos son documentos de
+// trabajo internos (estado/deterioro) y NO se leen públicamente. Tampoco se
+// usa fallback base64: un expediente acumula muchas fotos y un data URL
+// inflaría el documento de Firestore por encima de su límite de 1 MB. Si
+// Storage falla, se lanza el error y la UI ofrece reintentar.
+// ============================================================
+
+export async function uploadFotoInspeccionStorage(
+  propietarioId: string,
+  expedienteId: string,
+  estancia: string,
+  blob: Blob,
+  fileName: string
+): Promise<{ url: string; storagePath: string }> {
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const expSeg = (expedienteId || 'exp').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const estSeg = (estancia || 'otro').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = (fileName || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const rand = Math.random().toString(36).substring(2, 6);
+  const storagePath = `recomercializacion_fotos/${ownerSeg}/${expSeg}/${estSeg}_${Date.now()}_${rand}_${safeName}`;
+
+  const fileRef = ref(storage, storagePath);
+  const uploadWork = (async () => {
+    await uploadBytes(fileRef, blob, { contentType: blob.type || 'image/jpeg' });
+    return getDownloadURL(fileRef);
+  })();
+
+  // 20 s: las inspecciones pueden incluir varias fotos con conexión lenta.
+  const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000));
+  const url = await Promise.race([uploadWork, timeoutGuard]);
+  if (!url || typeof url !== 'string') {
+    throw new Error('La subida de la fotografía ha tardado demasiado. Revisa la conexión e inténtalo de nuevo.');
+  }
+  return { url, storagePath };
+}
+
+export async function deleteFotoInspeccionStorage(storagePath?: string): Promise<void> {
+  if (!storagePath) return;
+  // Nunca borrar referencias locales/efímeras ni URLs http directas.
+  if (
+    storagePath.startsWith('local_') ||
+    storagePath.startsWith('server_') ||
+    storagePath.startsWith('data:') ||
+    storagePath.startsWith('http')
+  ) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    // El objeto puede ya no existir; no debe bloquear la baja del metadato.
+    console.warn('No se pudo eliminar la foto de inspección de Storage:', err);
+  }
+}
+
+// ============================================================
+// BLOQUE 4 — FOTOGRAFÍAS DE INCIDENCIAS
+// Ruta privada: incidencias_fotos/{propietarioId}/{incidenciaId}/{archivo}
+// Documentos internos de trabajo (desperfectos), nunca públicos.
+// ============================================================
+export async function uploadFotoIncidenciaStorage(
+  propietarioId: string,
+  incidenciaId: string,
+  blob: Blob,
+  fileName: string
+): Promise<{ url: string; storagePath: string }> {
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const incSeg = (incidenciaId || 'inc').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = (fileName || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const rand = Math.random().toString(36).substring(2, 6);
+  const storagePath = `incidencias_fotos/${ownerSeg}/${incSeg}/${Date.now()}_${rand}_${safeName}`;
+
+  const fileRef = ref(storage, storagePath);
+  const uploadWork = (async () => {
+    await uploadBytes(fileRef, blob, { contentType: blob.type || 'image/jpeg' });
+    return getDownloadURL(fileRef);
+  })();
+  const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000));
+  const url = await Promise.race([uploadWork, timeoutGuard]);
+  if (!url || typeof url !== 'string') {
+    throw new Error('La subida de la fotografía ha tardado demasiado. Revisa la conexión e inténtalo de nuevo.');
+  }
+  return { url, storagePath };
+}
+
+export async function deleteFotoIncidenciaStorage(storagePath?: string): Promise<void> {
+  if (!storagePath) return;
+  if (
+    storagePath.startsWith('local_') ||
+    storagePath.startsWith('server_') ||
+    storagePath.startsWith('data:') ||
+    storagePath.startsWith('http')
+  ) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar la foto de incidencia de Storage:', err);
+  }
+}
+
+/**
+ * Sube el justificante mensual de un cobro (transferencia / ingreso) a Firebase Storage.
+ * Regla arquitectónica: Firestore guarda SOLO metadatos y la URL; el PDF/imagen va a Storage.
+ * Nunca se codifica el documento en base64 dentro del documento económico.
+ *
+ * Estrategia resilente:
+ *  1) Firebase Storage (almacenamiento duradero).
+ *  2) Si Storage falla o tarda demasiado, se intenta mediante el endpoint del servidor.
+ *  3) Si ambos fallan, se lanza un error para no guardar una referencia efímera/rota.
+ */
+export async function uploadJustificanteCobro(
+  cobroPeriodoId: string,
+  file: File | Blob,
+  fileName: string,
+  propietarioId?: string
+): Promise<{ url: string; storagePath: string }> {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  // FASE 1.4: se segmenta por propietario para que Storage Rules pueda aislar
+  // los justificantes (datos económicos). Si no hay propietarioId se usa la
+  // carpeta genérica "sin_asignar".
+  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `cobros_justificantes/${ownerSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
+  const mime =
+    (file as File).type ||
+    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+  // 1) Firebase Storage
+  try {
+    const fileRef = ref(storage, storagePath);
+    const uploadWork = (async () => {
+      await uploadBytes(fileRef, file, { contentType: mime });
+      return await getDownloadURL(fileRef);
+    })();
+
+    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const url = await Promise.race([uploadWork, timeoutGuard]);
+
+    if (url && typeof url === 'string') {
+      return { url, storagePath };
+    }
+    console.warn('Timeout subiendo justificante a Firebase Storage; se intenta por servidor.');
+  } catch (err) {
+    console.warn('Firebase Storage no disponible para el justificante; se intenta por servidor:', err);
+  }
+
+  // 2) Respaldo mediante el endpoint del servidor (almacén de proceso)
+  try {
+    const dataURL = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+      reader.readAsDataURL(file);
+    });
+
+    const res = await fetch('/api/upload-document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileBase64: dataURL,
+        filename: fileName,
+        mimeType: mime,
+        itemId: cobroPeriodoId,
+      }),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      if (json.url) {
+        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Fallo también la subida del justificante por servidor:', serverErr);
+  }
+
+  throw new Error(
+    'No se ha podido almacenar el justificante. Revisa la conexión o Firebase Storage e inténtalo de nuevo.'
+  );
+}
+
+/**
+ * Elimina un justificante de Firebase Storage. Las referencias del almacén temporal
+ * del servidor (server_*) no se eliminan de Storage.
+ */
+export async function deleteJustificanteCobro(storagePath?: string): Promise<void> {
+  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch (err) {
+    console.warn('No se pudo eliminar el justificante de Storage:', err);
   }
 }
 
@@ -1477,217 +2341,38 @@ export async function seedAuthAndRolesIfEmpty() {
         resultado: 'EXITO',
       });
     }
-
-    // 6. Seed sample Polizas and Incidencia if collections are empty
-    const polizasSnap = await getDocs(POLIZAS_COL);
-    if (polizasSnap.empty) {
-      const pBatch = writeBatch(db);
-      const samplePoliza1: PolizaSeguro = {
-        id: 'pol_hogar_001',
-        aseguradora: 'Mapfre Seguros',
-        numeroPoliza: 'MAP-8492048-H',
-        tipo: 'HOGAR',
-        propietarioId: 'prop_carlos',
-        inmuebleId: '1',
-        inmuebleDireccion: 'C/ Gran Vía 45, 3ºB, Madrid',
-        fechaInicio: '2025-01-01',
-        fechaVencimiento: '2026-01-01',
-        estado: 'VIGENTE',
-        coberturas: [
-          'Daños por agua',
-          'Rotura de tuberías e instalaciones',
-          'Filtraciones',
-          'Responsabilidad Civil inmobiliaria (300.000€)',
-          'Cerrajería urgente 24h',
-          'Daños eléctricos y sobretensión',
-          'Rotura de cristales y sanitarios',
-          'Defensa jurídica',
-        ],
-        franquicia: 0,
-        primaAnual: 245.5,
-        contacto: {
-          telefono: '918 365 365',
-          email: 'siniestros.hogar@mapfre.com',
-          asistencia24h: '900 101 010',
-        },
-        observaciones: 'Póliza Multirriesgo Hogar con asistencia 24h contratada.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      const samplePoliza2: PolizaSeguro = {
-        id: 'pol_arrendador_002',
-        aseguradora: 'Caser Seguros',
-        numeroPoliza: 'CAS-9923812-P',
-        tipo: 'ARRENDADOR',
-        propietarioId: 'prop_laura',
-        inmuebleId: '2',
-        inmuebleDireccion: 'Paseo de la Castellana 120, 5ºA, Madrid',
-        fechaInicio: '2025-02-01',
-        fechaVencimiento: '2026-02-01',
-        estado: 'VIGENTE',
-        coberturas: [
-          'Daños por agua',
-          'Responsabilidad Civil arrendador',
-          'Actos vandálicos del inquilino',
-          'Asistencia urgente 24h',
-          'Defensa jurídica y desahucio',
-        ],
-        franquicia: 150,
-        primaAnual: 210,
-        contacto: {
-          telefono: '915 955 000',
-          email: 'partes.arrendador@caser.es',
-          asistencia24h: '900 365 240',
-        },
-        observaciones: 'Protección integral arrendador con cobertura de vandalismo.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      pBatch.set(doc(db, 'polizas_seguros', samplePoliza1.id), sanitizeObjectForFirestore(samplePoliza1));
-      pBatch.set(doc(db, 'polizas_seguros', samplePoliza2.id), sanitizeObjectForFirestore(samplePoliza2));
-      await pBatch.commit();
-    }
-
-    const incidenciasSnap = await getDocs(INCIDENCIAS_COL);
-    if (incidenciasSnap.empty) {
-      const sampleInc: Incidencia = {
-        id: 'inc_sample_001',
-        propietarioId: 'prop_carlos',
-        inmuebleId: '1',
-        inmuebleDireccion: 'C/ Gran Vía 45, 3ºB, Madrid',
-        inmuebleCiudad: 'Madrid',
-        contratoId: 'contrato_1',
-        inquilinoId: 'cand_1',
-        inquilinoNombre: 'Ana Gómez Fernández',
-        inquilinoTelefono: '612 345 678',
-        titulo: 'Fuga de agua en latiguillo del fregadero de la cocina',
-        descripcion: 'El inquilino reporta goteo continuo bajo el fregadero tras usar el grifo monomando. Se ha colocado un cubo provisionalmente pero empieza a humedecer el mueble bajo encimera.',
-        categoria: 'AGUA',
-        prioridad: 'ALTA',
-        estado: 'ABIERTA',
-        origen: 'INQUILINO',
-        fechaCreacion: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-        fechaActualizacion: new Date().toISOString(),
-        responsabilidad: 'POSIBLE_PROPIETARIO',
-        responsabilidadNotas: 'Instalación de fontanería fija vinculada al inmueble (Art. 21.1 LAU). Se verificará si es desgaste natural o aflojamiento.',
-        seguroEstado: 'POSIBLEMENTE_CUBIERTA',
-        seguroComprobacionNotas: 'Póliza Mapfre Nº MAP-8492048-H cubre Daños por agua y fontanería de urgencia.',
-        viaActuacion: 'PROFESIONAL',
-        polizaId: 'pol_hogar_001',
-        creadoPor: 'Ana Gómez Fernández (Inquilino)',
-        actualizadoPor: 'Administrador Principal',
-        fotografias: [
-          {
-            id: 'adj_001',
-            incidenciaId: 'inc_sample_001',
-            inmuebleId: '1',
-            propietarioId: 'prop_carlos',
-            nombre: 'fuga_fregadero.jpg',
-            tipo: 'imagen',
-            mimeType: 'image/jpeg',
-            url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
-            storagePath: 'incidencias/inc_sample_001/fuga_fregadero.jpg',
-            fechaSubida: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-            subidoPor: 'Inquilino',
-          },
-        ],
-        documentos: [],
-        historial: [
-          {
-            id: 'hist_001',
-            fecha: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-            usuario: 'Ana Gómez Fernández',
-            accion: 'INCIDENCIA_CREADA',
-            valorNuevo: 'ABIERTA',
-            observacion: 'Reportada vía portal del inquilino.',
-          },
-        ],
-      };
-      await setDoc(doc(db, 'incidencias', sampleInc.id), sanitizeObjectForFirestore(sampleInc));
-    }
   } catch (err) {
     console.error('Error seeding auth and roles:', err);
   }
 }
 
 // =========================================================================
-// REAL-TIME LISTENERS & CRUD PARA INCIDENCIAS, PÓLIZAS Y SINIESTROS
+// PÓLIZAS DE SEGUROS Y SINIESTROS
 // =========================================================================
 
-/**
- * Escucha en tiempo real de Incidencias
- */
-export function subscribeIncidencias(callback: (incidencias: Incidencia[]) => void) {
+export function subscribePolizas(callback: (items: PolizaSeguro[]) => void): Unsubscribe {
   return onSnapshot(
-    INCIDENCIAS_COL,
-    (snapshot) => {
-      const items: Incidencia[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as Incidencia);
-      });
-      // Ordenar por fechaCreacion descendente
-      items.sort((a, b) => new Date(b.fechaCreacion).getTime() - new Date(a.fechaCreacion).getTime());
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore incidencias snapshot error:', err);
-    }
-  );
-}
-
-/**
- * Guarda o actualiza una Incidencia en Firestore
- */
-export async function saveIncidenciaFirestore(incidencia: Incidencia) {
-  try {
-    const cleanInc = sanitizeObjectForFirestore(incidencia);
-    await setDoc(doc(db, 'incidencias', incidencia.id), cleanInc, { merge: true });
-  } catch (err) {
-    console.error('Error saving incidencia to Firestore:', err);
-    throw err;
-  }
-}
-
-/**
- * Elimina una Incidencia de Firestore
- */
-export async function deleteIncidenciaFirestore(incidenciaId: string) {
-  try {
-    await deleteDoc(doc(db, 'incidencias', incidenciaId));
-  } catch (err) {
-    console.error('Error deleting incidencia from Firestore:', err);
-    throw err;
-  }
-}
-
-/**
- * Escucha en tiempo real de Pólizas de Seguro
- */
-export function subscribePolizas(callback: (polizas: PolizaSeguro[]) => void) {
-  return onSnapshot(
-    POLIZAS_COL,
+    POLIZAS_SEGUROS_COL,
     (snapshot) => {
       const items: PolizaSeguro[] = [];
       snapshot.forEach((docSnap) => {
         items.push({ id: docSnap.id, ...docSnap.data() } as PolizaSeguro);
       });
-      items.sort((a, b) => (a.inmuebleDireccion || '').localeCompare(b.inmuebleDireccion || ''));
+      items.sort((a, b) => new Date(b.createdAt || b.fechaInicio).getTime() - new Date(a.createdAt || a.fechaInicio).getTime());
       callback(items);
     },
     (err) => {
-      console.error('Firestore polizas snapshot error:', err);
+      console.error('Firestore polizas_seguros snapshot error:', err);
     }
   );
 }
 
-/**
- * Guarda o actualiza una Póliza en Firestore
- */
-export async function savePolizaFirestore(poliza: PolizaSeguro) {
+export const subscribePolizasSeguras = subscribePolizas;
+export const subscribeGastosSeguros = subscribeGastos;
+
+export async function savePolizaFirestore(poliza: PolizaSeguro): Promise<void> {
   try {
-    const cleanPol = sanitizeObjectForFirestore(poliza);
+    const cleanPol = sanitizeObjectForFirestore({ ...poliza, updatedAt: new Date().toISOString() });
     await setDoc(doc(db, 'polizas_seguros', poliza.id), cleanPol, { merge: true });
   } catch (err) {
     console.error('Error saving poliza to Firestore:', err);
@@ -1695,10 +2380,7 @@ export async function savePolizaFirestore(poliza: PolizaSeguro) {
   }
 }
 
-/**
- * Elimina una Póliza de Firestore
- */
-export async function deletePolizaFirestore(polizaId: string) {
+export async function deletePolizaFirestore(polizaId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'polizas_seguros', polizaId));
   } catch (err) {
@@ -1707,10 +2389,7 @@ export async function deletePolizaFirestore(polizaId: string) {
   }
 }
 
-/**
- * Escucha en tiempo real de Siniestros
- */
-export function subscribeSiniestros(callback: (siniestros: Siniestro[]) => void) {
+export function subscribeSiniestros(callback: (items: Siniestro[]) => void): Unsubscribe {
   return onSnapshot(
     SINIESTROS_COL,
     (snapshot) => {
@@ -1727,12 +2406,9 @@ export function subscribeSiniestros(callback: (siniestros: Siniestro[]) => void)
   );
 }
 
-/**
- * Guarda o actualiza un Siniestro en Firestore
- */
-export async function saveSiniestroFirestore(siniestro: Siniestro) {
+export async function saveSiniestroFirestore(siniestro: Siniestro): Promise<void> {
   try {
-    const cleanSin = sanitizeObjectForFirestore(siniestro);
+    const cleanSin = sanitizeObjectForFirestore({ ...siniestro, updatedAt: new Date().toISOString() });
     await setDoc(doc(db, 'siniestros', siniestro.id), cleanSin, { merge: true });
   } catch (err) {
     console.error('Error saving siniestro to Firestore:', err);
@@ -1740,10 +2416,7 @@ export async function saveSiniestroFirestore(siniestro: Siniestro) {
   }
 }
 
-/**
- * Elimina un Siniestro de Firestore
- */
-export async function deleteSiniestroFirestore(siniestroId: string) {
+export async function deleteSiniestroFirestore(siniestroId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'siniestros', siniestroId));
   } catch (err) {
@@ -1752,52 +2425,36 @@ export async function deleteSiniestroFirestore(siniestroId: string) {
   }
 }
 
-/**
- * Sube una fotografía o documento de incidencia a Firebase Storage
- * Con timeout guard y fallback seguro para máxima fiabilidad.
- */
 export async function uploadIncidenciaAdjuntoStorage(
   incidenciaId: string,
   file: File | Blob,
   nombreArchivo: string,
-  tipo: 'imagen' | 'video' | 'documento'
+  tipo?: 'imagen' | 'video' | 'documento'
 ): Promise<string> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const path = `incidencias/${incidenciaId}/${Date.now()}_${sanitizedName}`;
-  const fileRef = ref(storage, path);
+  const storagePath = `incidencias/${incidenciaId}/${Date.now()}_${sanitizedName}`;
+  const fileRef = ref(storage, storagePath);
 
   try {
-    const uploadPromise = async () => {
-      const mimeType = file.type || (tipo === 'imagen' ? 'image/jpeg' : 'application/pdf');
-      await uploadBytes(fileRef, file, { contentType: mimeType });
-      return await getDownloadURL(fileRef);
-    };
-
-    const timeoutGuard = new Promise<string>((_, reject) =>
-      setTimeout(() => reject(new Error('Storage upload timeout')), 12000)
-    );
-
-    return await Promise.race([uploadPromise(), timeoutGuard]);
+    const mimeType = file.type || (tipo === 'imagen' ? 'image/jpeg' : 'application/pdf');
+    await uploadBytes(fileRef, file, { contentType: mimeType });
+    return await getDownloadURL(fileRef);
   } catch (err) {
-    console.warn('Firebase Storage upload failed/timed out, attempting data fallback:', err);
-    // Para imágenes, generar una URL rápida segura
+    console.warn('Firebase Storage upload failed for incidencia adjunto, fallback to data url:', err);
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80');
+      reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
     });
   }
 }
 
 // =========================================================================
-// BLOQUE 5: SERVICIOS, TRABAJOS PROFESIONALES, PRESUPUESTOS Y VALORACIONES
+// TRABAJOS PROFESIONALES, PRESUPUESTOS Y VALORACIONES
 // =========================================================================
 
-/**
- * Escucha en tiempo real de Trabajos Profesionales
- */
-export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfesional[]) => void) {
+export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfesional[]) => void): Unsubscribe {
   return onSnapshot(
     TRABAJOS_PROFESIONALES_COL,
     (snapshot) => {
@@ -1814,9 +2471,6 @@ export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfe
   );
 }
 
-/**
- * Guarda o actualiza un Trabajo Profesional en Firestore
- */
 export async function saveTrabajoProfesionalFirestore(trabajo: TrabajoProfesional): Promise<void> {
   try {
     const cleanTrabajo = sanitizeObjectForFirestore({
@@ -1830,9 +2484,6 @@ export async function saveTrabajoProfesionalFirestore(trabajo: TrabajoProfesiona
   }
 }
 
-/**
- * Elimina un Trabajo Profesional de Firestore
- */
 export async function deleteTrabajoProfesionalFirestore(trabajoId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'trabajos_profesionales', trabajoId));
@@ -1842,10 +2493,7 @@ export async function deleteTrabajoProfesionalFirestore(trabajoId: string): Prom
   }
 }
 
-/**
- * Escucha en tiempo real de Presupuestos de Profesionales
- */
-export function subscribePresupuestosProfesionales(callback: (presupuestos: PresupuestoProfesional[]) => void) {
+export function subscribePresupuestosProfesionales(callback: (presupuestos: PresupuestoProfesional[]) => void): Unsubscribe {
   return onSnapshot(
     PRESUPUESTOS_PROFESIONALES_COL,
     (snapshot) => {
@@ -1862,9 +2510,6 @@ export function subscribePresupuestosProfesionales(callback: (presupuestos: Pres
   );
 }
 
-/**
- * Guarda o actualiza un Presupuesto de Profesional en Firestore
- */
 export async function savePresupuestoProfesionalFirestore(presupuesto: PresupuestoProfesional): Promise<void> {
   try {
     const cleanPresupuesto = sanitizeObjectForFirestore({
@@ -1878,9 +2523,6 @@ export async function savePresupuestoProfesionalFirestore(presupuesto: Presupues
   }
 }
 
-/**
- * Elimina un Presupuesto de Profesional de Firestore
- */
 export async function deletePresupuestoProfesionalFirestore(presupuestoId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'presupuestos_profesionales', presupuestoId));
@@ -1891,35 +2533,32 @@ export async function deletePresupuestoProfesionalFirestore(presupuestoId: strin
 }
 
 /**
- * Escucha en tiempo real de Valoraciones de Profesionales
+ * Valoraciones de trabajos profesionales, aisladas por propietario (patrón
+ * `subscribeColeccionPropietario`): PROPIETARIO → where('propietarioId','==', pid)
+ * (única consulta compatible con la regla `list`); PROFESIONAL → sin datos;
+ * administrador/sin ámbito → colección completa. Sin orderBy: se ordena en cliente.
  */
-export function subscribeValoracionesProfesionales(callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void) {
-  return onSnapshot(
+export function subscribeValoracionesProfesionales(
+  callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<ValoracionProfesionalTrabajo & { id: string }>(
     VALORACIONES_PROFESIONALES_COL,
-    (snapshot) => {
-      const items: ValoracionProfesionalTrabajo[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as ValoracionProfesionalTrabajo);
-      });
-      items.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-      callback(items);
+    (items) => {
+      const ordenadas = [...items].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+      callback(ordenadas);
     },
-    (err) => {
-      console.error('Firestore valoraciones_profesionales snapshot error:', err);
-    }
+    scope,
+    'valoraciones_profesionales'
   );
 }
 
-/**
- * Guarda una Valoración de Profesional y recalcula la media del profesional en Firestore
- */
 export async function saveValoracionProfesionalFirestore(valoracion: ValoracionProfesionalTrabajo): Promise<void> {
   try {
     const valId = valoracion.id || `val_${valoracion.trabajoId}_${Date.now()}`;
     const cleanVal = sanitizeObjectForFirestore({ ...valoracion, id: valId });
     await setDoc(doc(db, 'valoraciones_profesionales', valId), cleanVal, { merge: true });
 
-    // También actualizar la valoración en el trabajo correspondiente si existe
     if (valoracion.trabajoId) {
       await setDoc(
         doc(db, 'trabajos_profesionales', valoracion.trabajoId),
@@ -1933,14 +2572,11 @@ export async function saveValoracionProfesionalFirestore(valoracion: ValoracionP
   }
 }
 
-/**
- * Sube un documento acreditativo o póliza de un profesional a Firebase Storage
- */
 export async function uploadProfesionalDocumentoStorage(
   profesionalId: string,
   file: File | Blob,
   nombreArchivo: string,
-  tipoDoc: string
+  _tipoDoc?: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `profesionales/${profesionalId}/documentos/${Date.now()}_${sanitizedName}`;
@@ -1963,9 +2599,6 @@ export async function uploadProfesionalDocumentoStorage(
   }
 }
 
-/**
- * Sube un archivo de presupuesto (PDF / factura proforma) a Firebase Storage
- */
 export async function uploadPresupuestoDocumentoStorage(
   presupuestoId: string,
   file: File | Blob,
@@ -1992,9 +2625,6 @@ export async function uploadPresupuestoDocumentoStorage(
   }
 }
 
-/**
- * Sube un adjunto fotográfico o informe a un Trabajo Profesional en Firebase Storage
- */
 export async function uploadTrabajoAdjuntoStorage(
   trabajoId: string,
   file: File | Blob,
@@ -2009,13 +2639,441 @@ export async function uploadTrabajoAdjuntoStorage(
     await uploadBytes(fileRef, file, { contentType: mimeType });
     return await getDownloadURL(fileRef);
   } catch (err) {
-    console.warn('Firebase Storage upload failed for trabajo adjunto, using data fallback:', err);
+    console.warn('Firebase Storage upload failed for trabajo adjunto, using fallback:', err);
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80');
+      reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
     });
+  }
+}
+
+// =========================================================================
+// INVENTARIO Y HABITACIONES (ARENA C)
+// =========================================================================
+
+export function subscribeInventarioInmueble(
+  inmuebleId: string,
+  callback: (items: ElementoInventario[]) => void
+) {
+  if (!inmuebleId) {
+    callback([]);
+    return () => undefined;
+  }
+  const qInv = query(INVENTARIO_COL, where('inmuebleId', '==', inmuebleId));
+  return onSnapshot(
+    qInv,
+    (snapshot) => {
+      const items: ElementoInventario[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as ElementoInventario);
+      });
+      items.sort(
+        (a, b) => new Date(b.fechaModificacion).getTime() - new Date(a.fechaModificacion).getTime()
+      );
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore inventario snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export async function saveElementoInventarioFirestore(item: ElementoInventario): Promise<void> {
+  const clean = sanitizeObjectForFirestore(item);
+  await setDoc(doc(db, 'inventario_inmuebles', item.id), clean, { merge: true });
+}
+
+export async function deleteElementoInventarioFirestore(inventarioId: string): Promise<void> {
+  await deleteDoc(doc(db, 'inventario_inmuebles', inventarioId));
+}
+
+export async function registrarHistorialInventarioFirestore(entry: {
+  id?: string;
+  inmuebleId: string;
+  inventarioId?: string;
+  fecha: string;
+  usuarioId?: string;
+  usuarioNombre: string;
+  accion: string;
+  elementoAfectado: string;
+  cambios?: string;
+}): Promise<void> {
+  const id = entry.id || `invh_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  await setDoc(
+    doc(db, 'inventario_historial', id),
+    sanitizeObjectForFirestore({ ...entry, id }),
+    { merge: false }
+  );
+}
+
+export function subscribeHistorialInventario(
+  inmuebleId: string,
+  callback: (items: any[]) => void
+) {
+  if (!inmuebleId) {
+    callback([]);
+    return () => undefined;
+  }
+  const qHist = query(INVENTARIO_HISTORIAL_COL, where('inmuebleId', '==', inmuebleId));
+  return onSnapshot(
+    qHist,
+    (snapshot) => {
+      const items: any[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      items.sort(
+        (a, b) => new Date(b.fecha || b.timestamp || 0).getTime() - new Date(a.fecha || a.timestamp || 0).getTime()
+      );
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore historial inventario snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export async function uploadInventarioAdjuntoStorage(
+  inmuebleId: string,
+  inventarioId: string,
+  file: File | Blob,
+  nombreArchivo: string
+): Promise<{ downloadURL: string; storagePath: string }> {
+  const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `inmuebles/${inmuebleId}/inventario/${inventarioId}/${Date.now()}_${sanitizedName}`;
+  const fileRef = ref(storage, storagePath);
+  try {
+    await uploadBytes(fileRef, file, { contentType: file.type || 'image/jpeg' });
+    const downloadURL = await getDownloadURL(fileRef);
+    return { downloadURL, storagePath };
+  } catch (err) {
+    console.warn('Storage inventario fallback:', err);
+    const downloadURL = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+    return { downloadURL, storagePath };
+  }
+}
+
+export function subscribeHabitacionesInmueble(
+  inmuebleId: string,
+  callback: (items: HabitacionInmueble[]) => void
+) {
+  if (!inmuebleId) {
+    callback([]);
+    return () => undefined;
+  }
+  const qHab = query(HABITACIONES_COL, where('inmuebleId', '==', inmuebleId));
+  return onSnapshot(
+    qHab,
+    (snapshot) => {
+      const items: HabitacionInmueble[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as HabitacionInmueble);
+      });
+      items.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore habitaciones snapshot error:', err);
+      callback([]);
+    }
+  );
+}
+
+export async function saveHabitacionFirestore(habitacion: HabitacionInmueble): Promise<void> {
+  const refH = doc(db, 'habitaciones_inmueble', habitacion.id);
+  const existing = await getDoc(refH);
+  if (existing.exists()) {
+    const prev = existing.data() as HabitacionInmueble;
+    if (prev.inmuebleId && prev.inmuebleId !== habitacion.inmuebleId) {
+      throw new Error('No se puede reasignar inmuebleId de una habitación.');
+    }
+  }
+  const clean = sanitizeObjectForFirestore(habitacion);
+  await setDoc(refH, clean, { merge: true });
+}
+
+/** Asignación atómica: solo un candidato puede quedar selectedCandidatoId. */
+export async function asignarCandidatoHabitacionFirestore(
+  habitacionId: string,
+  candidatoId: string,
+  usuarioNombre: string
+): Promise<HabitacionInmueble> {
+  const refH = doc(db, 'habitaciones_inmueble', habitacionId);
+  return runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(refH);
+    if (!snap.exists()) throw new Error('La habitación no existe.');
+    const prev = { id: snap.id, ...snap.data() } as HabitacionInmueble;
+    if (prev.selectedCandidatoId && prev.selectedCandidatoId !== candidatoId) {
+      throw new Error('Conflicto: la habitación ya está asignada a otro candidato.');
+    }
+    const next: HabitacionInmueble = {
+      ...prev,
+      selectedCandidatoId: candidatoId,
+      fechaModificacion: new Date().toISOString(),
+      actualizadoPor: usuarioNombre,
+    };
+    transaction.set(refH, sanitizeObjectForFirestore(next), { merge: true });
+    return next;
+  });
+}
+
+// =========================================================================
+// GAP4 — FINANCIACIÓN HIPOTECARIA AVANZADA
+// =========================================================================
+
+/**
+ * Suscripción en tiempo real de financiaciones.
+ * La autorización/aislamiento real la aplica Firestore rules; aquí se devuelve
+ * la lista y el ámbito (scoping) lo decide la UI igual que el resto de módulos.
+ */
+export function subscribeFinanciaciones(callback: (financiaciones: Financiacion[]) => void) {
+  return onSnapshot(
+    FINANCIACIONES_COL,
+    (snapshot) => {
+      const items: Financiacion[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Financiacion);
+      });
+      items.sort((a, b) => (b.fechaFormalizacion || '').localeCompare(a.fechaFormalizacion || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore financiaciones snapshot error:', err);
+    }
+  );
+}
+
+/**
+ * Guarda o actualiza una Financiación. Sin secretos: `sanitizeObjectForFirestore`
+ * elimina undefined y el modelo Financiacion no contempla credenciales.
+ */
+export async function saveFinanciacionFirestore(financiacion: Financiacion): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...financiacion,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'financiaciones', financiacion.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving financiacion to Firestore:', err);
+    throw err;
+  }
+}
+
+/**
+ * Elimina una financiación. La cancelación lógica (estado CANCELADA) es la vía
+ * habitual; el borrado físico queda restringido por reglas a administrador.
+ */
+export async function deleteFinanciacionFirestore(financiacionId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'financiaciones', financiacionId));
+  } catch (err) {
+    console.error('Error deleting financiacion from Firestore:', err);
+    throw err;
+  }
+}
+
+// =========================================================================
+// GAP7 — FACTURACIÓN Y VERI*FACTU (aislamiento por propietario; sin secretos)
+// =========================================================================
+
+export const FACTURAS_COL = collection(db, 'facturas');
+export const REGISTROS_FACTURACION_COL = collection(db, 'registros_facturacion');
+export const ENVIOS_VERIFACTU_COL = collection(db, 'envios_verifactu');
+export const SERIES_FACTURACION_COL = collection(db, 'series_facturacion');
+
+/**
+ * Suscripción en tiempo real de facturas. La autorización/aislamiento real la
+ * aplica Firestore rules; la UI aplica el ámbito igual que el resto de módulos.
+ */
+export function subscribeFacturas(callback: (facturas: Factura[]) => void) {
+  return onSnapshot(
+    FACTURAS_COL,
+    (snapshot) => {
+      const items: Factura[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Factura);
+      });
+      items.sort((a, b) => (b.fechaExpedicionUtc || '').localeCompare(a.fechaExpedicionUtc || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore facturas snapshot error:', err);
+    }
+  );
+}
+
+/** Guarda una factura. Sin secretos: modelo Factura no contempla credenciales. */
+export async function saveFacturaFirestore(factura: Factura): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...factura,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'facturas', factura.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving factura to Firestore:', err);
+    throw err;
+  }
+}
+
+export async function deleteFacturaFirestore(facturaId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'facturas', facturaId));
+  } catch (err) {
+    console.error('Error deleting factura from Firestore:', err);
+    throw err;
+  }
+}
+
+/** Suscripción en tiempo real de registros de facturación (RRSIF). */
+export function subscribeRegistrosFacturacion(callback: (registros: RegistroFacturacion[]) => void) {
+  return onSnapshot(
+    REGISTROS_FACTURACION_COL,
+    (snapshot) => {
+      const items: RegistroFacturacion[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as RegistroFacturacion);
+      });
+      items.sort((a, b) => a.fechaHoraHusoGenRegistro.localeCompare(b.fechaHoraHusoGenRegistro));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore registros_facturacion snapshot error:', err);
+    }
+  );
+}
+
+/**
+ * Guarda un registro de facturación. El registro es INALTERABLE: una vez
+ * existente, no se sobrescribe (merge: false) salvo que el documento no exista.
+ */
+export async function createRegistroFacturacionFirestore(registro: RegistroFacturacion): Promise<void> {
+  try {
+    const refReg = doc(db, 'registros_facturacion', registro.id);
+    const existente = await getDoc(refReg);
+    if (existente.exists()) {
+      throw new Error('El registro de facturación ya existe y es inalterable.');
+    }
+    const clean = sanitizeObjectForFirestore(registro);
+    await setDoc(refReg, clean, { merge: false });
+  } catch (err) {
+    console.error('Error creating registro_facturacion in Firestore:', err);
+    throw err;
+  }
+}
+
+/** Suscripción en tiempo real de envíos VERI*FACTU. */
+export function subscribeEnviosVerifactu(callback: (envios: EnvioVerifactu[]) => void) {
+  return onSnapshot(
+    ENVIOS_VERIFACTU_COL,
+    (snapshot) => {
+      const items: EnvioVerifactu[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as EnvioVerifactu);
+      });
+      items.sort((a, b) => (b.fechaCreacion || '').localeCompare(a.fechaCreacion || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore envios_verifactu snapshot error:', err);
+    }
+  );
+}
+
+/** Crea o actualiza un envío VERI*FACTU conservando su identidad idempotente. */
+export async function saveEnvioVerifactuFirestore(envio: EnvioVerifactu): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore(envio);
+    await setDoc(doc(db, 'envios_verifactu', envio.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving envio_verifactu to Firestore:', err);
+    throw err;
+  }
+}
+
+/** Suscripción en tiempo real de series de facturación. */
+export function subscribeSeriesFacturacion(callback: (series: SerieFacturacion[]) => void) {
+  return onSnapshot(
+    SERIES_FACTURACION_COL,
+    (snapshot) => {
+      const items: SerieFacturacion[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as SerieFacturacion);
+      });
+      items.sort((a, b) => `${b.ejercicio}-${b.codigo}`.localeCompare(`${a.ejercicio}-${a.codigo}`));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore series_facturacion snapshot error:', err);
+    }
+  );
+}
+
+/** Guarda o actualiza una serie de facturación (avanza la correlación). */
+export async function saveSerieFacturacionFirestore(serie: SerieFacturacion): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...serie,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'series_facturacion', serie.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving serie_facturacion to Firestore:', err);
+    throw err;
+  }
+}
+
+// =========================================================================
+// GAP8 — FACTURA ELECTRÓNICA B2B (RD 238/2026). Colección propia y aislada de
+// facturas / registros_facturacion / envios_verifactu. Sin secretos: el modelo
+// FacturaElectronicaB2B no contempla credenciales ni certificados.
+// =========================================================================
+
+export const FACTURAS_ELECTRONICAS_B2B_COL = collection(db, 'facturas_electronicas_b2b');
+
+/** Suscripción en tiempo real de representaciones electrónicas B2B. */
+export function subscribeFacturasElectronicasB2B(callback: (items: FacturaElectronicaB2B[]) => void) {
+  return onSnapshot(
+    FACTURAS_ELECTRONICAS_B2B_COL,
+    (snapshot) => {
+      const items: FacturaElectronicaB2B[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as FacturaElectronicaB2B);
+      });
+      items.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      callback(items);
+    },
+    (err) => {
+      console.error('Firestore facturas_electronicas_b2b snapshot error:', err);
+    }
+  );
+}
+
+/**
+ * Crea o actualiza una factura electrónica B2B. Idempotencia por id determinista
+ * (mismo factura+formato+versión ⇒ mismo id ⇒ no duplica documentos).
+ * El historial es append-only a nivel de motor; Firestore rules lo garantizan.
+ */
+export async function saveFacturaElectronicaB2BFirestore(feb: FacturaElectronicaB2B): Promise<void> {
+  try {
+    const clean = sanitizeObjectForFirestore({
+      ...feb,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, 'facturas_electronicas_b2b', feb.id), clean, { merge: true });
+  } catch (err) {
+    console.error('Error saving factura_electronica_b2b to Firestore:', err);
+    throw err;
   }
 }
 
@@ -2027,4 +3085,6 @@ export {
   deleteDoc,
   onSnapshot,
   writeBatch,
+  query,
+  where,
 };

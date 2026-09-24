@@ -21,8 +21,23 @@ import {
   Wrench,
   ArrowLeftRight,
   Receipt,
-  AlertTriangle,
+  Smartphone,
+  Zap,
+  TrendingDown,
+  TrendingUp,
+  RefreshCw,
+  Calculator,
+  BarChart3,
+  Landmark,
+  Banknote,
+  LayoutDashboard,
+  Wallet,
+  ShieldAlert,
+  Activity,
 } from 'lucide-react';
+
+import { AsistentePanel } from './experiencia/AsistentePanel';
+import type { AccionHost, ProveedorIA } from '../experiencia';
 
 interface MobileNavProps {
   activeSection: SectionType;
@@ -35,11 +50,15 @@ interface MobileNavProps {
   contratosCount?: number;
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
-  incidenciasCount?: number;
-  trabajosActivosCount?: number;
+  /** BLOQUE C: expedientes de morosidad con saldo pendiente. */
+  morosidadAbiertaCount?: number;
   currentUser?: UsuarioApp;
   onOpenAddCandidateModal?: () => void;
   onOpenAuthModal?: () => void;
+  /** §6 F4: asistente transversal (misma acción que el Header). */
+  onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
+  proveedorIA?: ProveedorIA;
+  accessibleSections?: SectionType[];
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -53,11 +72,13 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   contratosCount = 0,
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
-  incidenciasCount = 0,
-  trabajosActivosCount = 0,
+  morosidadAbiertaCount = 0,
   currentUser,
   onOpenAddCandidateModal,
   onOpenAuthModal,
+  onAccionAsistente,
+  proveedorIA,
+  accessibleSections,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -74,34 +95,62 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   }[] =
     perfil === 'PROPIETARIO'
       ? [
+          { id: 'dashboard', label: 'Centro de Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs, atención, financiero, operaciones' },
           { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck, description: 'Servicios y profesionales' },
           { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
-          { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
+          { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Compra, reforma, alquiler, rentabilidad' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
-          { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías y mantenimiento' },
+          { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet, description: 'Estado de cuenta mensual y neto transferido' },
+          { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
+          { id: 'financiacion', label: 'Financiación', icon: Landmark, description: 'Hipotecas y amortización' },
+          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos y conciliar cobros/gastos' },
+          { id: 'facturacion', label: 'Facturación', icon: FileText, description: 'Facturas y registro VERI*FACTU' },
+          { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
+          { id: 'informes', label: 'Informes & Export', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
+          { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
+          { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
+          { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
+          { id: 'operaciones', label: 'Operaciones', icon: Activity, description: 'Centro de operaciones y mantenimiento' },
+          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'Lecturas y consumos' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
+          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ]
       : perfil === 'PROFESIONAL'
       ? [
           { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
           { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
-          { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount, description: 'Reparaciones asignadas' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
+          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ]
       : [
+          { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs reales, atención prioritaria, financiero y operaciones' },
           { id: 'administracion', label: 'Centro de Control', icon: Shield, description: 'Gestión de usuarios, roles y seguridad' },
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
+          { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Analizador compra-reforma-alquiler' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
-          { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount, description: 'Técnicos, presupuestos y obras' },
-          { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount, description: 'Averías, peritajes IA y siniestros' },
+          { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet, description: 'Liquidaciones, gastos, SEPA PAIN.008/001 y movimientos' },
+          { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
+          { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },
+          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos CSV/OFX/MT940/Norma43 y conciliar' },
+          { id: 'morosidad', label: 'Morosidad y Recobro', icon: ShieldAlert, badge: morosidadAbiertaCount, description: 'Detección de deuda, recobro, compromisos y expediente legal' },
+          { id: 'facturacion', label: 'Facturación & VERI*FACTU', icon: FileText, description: 'Facturas y registro de facturación AEAT' },
+          { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
+          { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
+          { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
+          { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
+          { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone, description: 'Accesos, invitaciones y mensajes' },
+          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'CUPS, lecturas y reparto' },
           { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
           { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
           { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },
+          { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw, description: 'Salida, inspección y nueva comercialización' },
+          { id: 'operaciones', label: 'Operaciones', icon: Activity, description: 'Centro de operaciones y mantenimiento' },
           { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length, description: 'Listado completo' },
           { id: 'analisis', label: 'Análisis IA', icon: Sparkles, description: 'Puntuación e informes' },
           { id: 'configuracion', label: 'Configuración', icon: Settings, description: 'Ajustes del sistema' },
+          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ];
 
   const currentSectionItem = allSections.find((s) => s.id === activeSection) || allSections[0];
@@ -167,6 +216,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                   return (
                     <button
                       key={item.id}
+                      data-tour={`nav-${item.id}`}
                       onClick={() => handleSelect(item.id)}
                       className={`w-full flex items-center justify-between p-2 rounded-xl text-xs transition-colors cursor-pointer ${
                         isSelected ? 'bg-blue-600 text-white font-bold shadow-xs' : 'hover:bg-slate-800/80 text-slate-300'
@@ -209,6 +259,11 @@ export const MobileNav: React.FC<MobileNavProps> = ({
             </div>
           )}
         </div>
+
+        {/* §6 F4: asistente (móvil) */}
+        {currentUser && onAccionAsistente && (
+          <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} tema="oscuro" />
+        )}
 
         {/* User Profile on Mobile */}
         {onOpenAuthModal && (

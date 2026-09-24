@@ -97,6 +97,11 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
         trabajoId: trabajo.id,
         profesionalId: trabajo.profesionalId,
         inmuebleId: trabajo.inmuebleId,
+        // §10.9: clave de aislamiento; procede SIEMPRE del trabajo valorado (las reglas
+        // la contrastan con trabajos_profesionales). Nunca editable por el usuario.
+        propietarioId: trabajo.propietarioId,
+        // Trazabilidad (id interno del usuario del ERP; NO se usa para autorizar).
+        usuarioId: currentUser?.id,
         inmuebleDireccion: trabajo.inmuebleDireccion,
         puntuacion,
         calidad,

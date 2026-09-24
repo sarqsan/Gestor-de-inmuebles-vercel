@@ -4,6 +4,7 @@ import {
   Candidato,
   VisitSlot,
   InvitacionVisita,
+  DatosCatastrales,
   DatosFiscalesInmueble,
   PropietarioFiscal,
   Propietario,
@@ -12,25 +13,16 @@ import {
   CobroPeriodo,
   EstadoCobroAlquiler,
   UsuarioApp,
-  Incidencia,
-  TrabajoProfesional,
   Profesional,
-  PolizaSeguro,
-  Siniestro,
 } from '../../types';
+import { MantenimientoInmueblePanel } from '../mantenimiento/MantenimientoInmueblePanel';
+import { ReformasInmueblePanel } from '../reformas/ReformasInmueblePanel';
+import { FichaTecnicaInventarioPanel } from '../FichaTecnicaInventarioPanel';
+import { HabitacionesInmueblePanel } from '../HabitacionesInmueblePanel';
+import { PublicacionInmueblesPanel } from '../PublicacionInmueblesPanel';
 import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
-import { DetalleTrabajoProfesionalModal } from '../modals/DetalleTrabajoProfesionalModal';
-import { DetalleIncidenciaModal } from '../modals/DetalleIncidenciaModal';
-import {
-  subscribeIncidencias,
-  subscribeTrabajosProfesionales,
-  subscribeProfesionales,
-  subscribePolizas,
-  subscribeSiniestros,
-  saveIncidenciaFirestore,
-} from '../../lib/firebase';
 import { getInmuebleCoverUrl } from '../../utils/imageUtils';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
 import {
@@ -89,26 +81,23 @@ import {
   History,
   Calendar,
   Archive,
+  RefreshCw,
   UserCheck,
   Receipt,
   Banknote,
   AlertCircle,
   Paperclip,
-  Wrench,
-  Scale,
-  FileCheck,
 } from 'lucide-react';
 
 interface InmueblesSectionProps {
   inmuebles: Inmueble[];
   candidatos: Candidato[];
   propietarios?: Propietario[];
+  profesionales?: Profesional[];
   slots?: VisitSlot[];
   invitaciones?: InvitacionVisita[];
   contratos?: ContratoFormalizacion[];
   currentUser?: UsuarioApp | null;
-  incidencias?: Incidencia[];
-  trabajosProfesionales?: TrabajoProfesional[];
   onSelectCandidate: (candidato: Candidato) => void;
   onDeleteInmueble?: (inmuebleId: string) => void;
   onAddInmueble?: (inmueble: Inmueble) => void;
@@ -122,18 +111,19 @@ interface InmueblesSectionProps {
   onOpenFormalizarModal?: (candidato: Candidato, inmueble?: Inmueble, existingContrato?: ContratoFormalizacion) => void;
   onFinalizarContrato?: (contratoId: string) => Promise<void>;
   onSaveContrato?: (contrato: ContratoFormalizacion) => Promise<void> | void;
+  // FASE 3.1: abrir expediente de recomercialización desde el inmueble.
+  onRecomercializarInmueble?: (inmuebleId: string, contratoAnteriorId?: string) => void;
 }
 
 export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   inmuebles,
   candidatos,
   propietarios = [],
+  profesionales = [],
   slots = [],
   invitaciones = [],
   contratos = [],
   currentUser,
-  incidencias = [],
-  trabajosProfesionales = [],
   onSelectCandidate,
   onDeleteInmueble,
   onAddInmueble,
@@ -147,6 +137,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   onOpenFormalizarModal,
   onFinalizarContrato,
   onSaveContrato,
+  onRecomercializarInmueble,
 }) => {
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string | null>(null);
   const [filterState, setFilterState] = useState<'todos' | 'disponible' | 'alquilado'>('todos');
@@ -154,39 +145,6 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [inmuebleToDelete, setInmuebleToDelete] = useState<Inmueble | null>(null);
   const [gestionImagenesInmueble, setGestionImagenesInmueble] = useState<Inmueble | null>(null);
   const [verAgendaInmueble, setVerAgendaInmueble] = useState<Inmueble | null>(null);
-
-  // Estados reactivos para Histórico Operativo y Económico
-  const [incidenciasList, setIncidenciasList] = useState<Incidencia[]>(incidencias);
-  const [trabajosList, setTrabajosList] = useState<TrabajoProfesional[]>(trabajosProfesionales);
-  const [profesionalesList, setProfesionalesList] = useState<Profesional[]>([]);
-  const [polizasList, setPolizasList] = useState<PolizaSeguro[]>([]);
-  const [siniestrosList, setSiniestrosList] = useState<Siniestro[]>([]);
-  const [filtroOperativo, setFiltroOperativo] = useState<'todos' | 'finalizados' | 'en_curso' | 'propietario' | 'inquilino'>('todos');
-  const [selectedTrabajoForModal, setSelectedTrabajoForModal] = useState<TrabajoProfesional | null>(null);
-  const [selectedIncidenciaForModal, setSelectedIncidenciaForModal] = useState<Incidencia | null>(null);
-
-  React.useEffect(() => {
-    if (incidencias.length > 0) setIncidenciasList(incidencias);
-  }, [incidencias]);
-
-  React.useEffect(() => {
-    if (trabajosProfesionales.length > 0) setTrabajosList(trabajosProfesionales);
-  }, [trabajosProfesionales]);
-
-  React.useEffect(() => {
-    const unsubInc = subscribeIncidencias((data) => setIncidenciasList(data));
-    const unsubTrab = subscribeTrabajosProfesionales((data) => setTrabajosList(data));
-    const unsubProf = subscribeProfesionales((data) => setProfesionalesList(data));
-    const unsubPol = subscribePolizas((data) => setPolizasList(data));
-    const unsubSin = subscribeSiniestros((data) => setSiniestrosList(data));
-    return () => {
-      unsubInc();
-      unsubTrab();
-      unsubProf();
-      unsubPol();
-      unsubSin();
-    };
-  }, []);
 
   // Modal State for New Property
   const [showAddModal, setShowAddModal] = useState(false);
@@ -248,6 +206,10 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [editSelectedCuentaId, setEditSelectedCuentaId] = useState<string>('');
   const [editSelectedProp2Id, setEditSelectedProp2Id] = useState<string>('');
   const [editReferenciaCatastral, setEditReferenciaCatastral] = useState('');
+  // FASE 3.5.1 — detalle catastral
+  const [editCatastro, setEditCatastro] = useState<Partial<DatosCatastrales>>({});
+  const [catastroConsultando, setCatastroConsultando] = useState(false);
+  const [catastroAviso, setCatastroAviso] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
   const [editCodigoPostal, setEditCodigoPostal] = useState('');
   const [editIbanCobro, setEditIbanCobro] = useState('');
   const [editCertificadoEnergetico, setEditCertificadoEnergetico] = useState('');
@@ -657,6 +619,12 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
     const df = inm.datosFiscales;
     setEditReferenciaCatastral(inm.referenciaCatastral || df?.referenciaCatastral || '');
+    setEditCatastro(
+      inm.datosCatastrales
+        ? { ...inm.datosCatastrales }
+        : { referenciaCatastral: inm.referenciaCatastral || df?.referenciaCatastral || undefined }
+    );
+    setCatastroAviso(null);
     setEditCodigoPostal(inm.codigoPostal || df?.codigoPostal || '');
     const currentIban = df?.ibanCobro || inm.ibanCobro || '';
     setEditIbanCobro(currentIban);
@@ -703,6 +671,40 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setEditProp2EsPersonaJuridica(df?.segundoPropietario?.esPersonaJuridica || false);
   };
 
+  // FASE 3.5.1 — valida/localiza la referencia en el Catastro (servicio público OVC)
+  const handleConsultarCatastro = async () => {
+    const ref = editReferenciaCatastral.trim();
+    if (ref.replace(/[^a-zA-Z0-9]/g, '').length < 14) {
+      setCatastroAviso({ tipo: 'err', texto: 'Introduce una referencia catastral válida (14-20 caracteres).' });
+      return;
+    }
+    setCatastroConsultando(true);
+    setCatastroAviso(null);
+    try {
+      const resp = await fetch('/api/catastro/consultar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenciaCatastral: ref }),
+      });
+      const j = await resp.json();
+      if (j.ok) {
+        const refNormalizada = j.referenciaCatastral || ref;
+        setEditCatastro((prev) => ({ ...prev, ...j, referenciaCatastral: refNormalizada }));
+        setEditReferenciaCatastral(refNormalizada);
+        setCatastroAviso({
+          tipo: 'ok',
+          texto: `Referencia localizada${j.direccionCatastral ? `: ${j.direccionCatastral}` : ''}. El año de construcción, la superficie y el valor catastral se completan desde el IBI o la Sede Electrónica.`,
+        });
+      } else {
+        setCatastroAviso({ tipo: 'err', texto: j.error || 'No se pudo localizar la referencia; puedes completar los datos manualmente.' });
+      }
+    } catch {
+      setCatastroAviso({ tipo: 'err', texto: 'Servicio del Catastro no disponible ahora; puedes completar los datos manualmente.' });
+    } finally {
+      setCatastroConsultando(false);
+    }
+  };
+
   const handleSaveEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inmuebleToEdit || !onUpdateInmueble) return;
@@ -741,6 +743,22 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       segundoPropietario: segundoProp,
     };
 
+    const refCatEdit = editReferenciaCatastral.trim();
+    const numPos = (v: unknown): number | undefined => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+    const datosCatastrales: DatosCatastrales | undefined = refCatEdit
+      ? {
+          ...(editCatastro as DatosCatastrales),
+          referenciaCatastral: refCatEdit,
+          superficieCatastralConstruida: numPos(editCatastro.superficieCatastralConstruida),
+          anioConstruccion: numPos(editCatastro.anioConstruccion),
+          valorCatastral: numPos(editCatastro.valorCatastral),
+          planta: editCatastro.planta ? String(editCatastro.planta).trim() || undefined : undefined,
+        }
+      : undefined;
+
     const updated: Inmueble = {
       ...inmuebleToEdit,
       direccion: editDireccion,
@@ -755,6 +773,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       descripcion: editDescripcion.trim() || undefined,
       imagenUrl: editImagenUrl.trim() || inmuebleToEdit.imagenUrl,
       referenciaCatastral: editReferenciaCatastral.trim() || undefined,
+      datosCatastrales,
       codigoPostal: editCodigoPostal.trim() || undefined,
       propietarioId: editSelectedPropId || undefined,
       propietarioPrincipalId: editSelectedPropId || undefined,
@@ -777,149 +796,6 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
         df?.propietarioPrincipal?.nifDni
       )
     : false;
-
-  // Intervenciones del Inmueble (Incidencias y Órdenes de Trabajo)
-  const incidenciasInmueble = useMemo(() => {
-    if (!selectedInmueble) return [];
-    return incidenciasList.filter((i) => i.inmuebleId === selectedInmueble.id);
-  }, [incidenciasList, selectedInmueble]);
-
-  const trabajosInmueble = useMemo(() => {
-    if (!selectedInmueble) return [];
-    return trabajosList.filter((t) => t.inmuebleId === selectedInmueble.id);
-  }, [trabajosList, selectedInmueble]);
-
-  // Lista unificada de intervenciones para el historial del inmueble
-  interface IntervencionInmueble {
-    id: string;
-    tipo: 'ORDEN_TRABAJO' | 'INCIDENCIA';
-    fecha: string;
-    titulo: string;
-    descripcion: string;
-    estado: string;
-    responsabilidad: 'PROPIETARIO' | 'INQUILINO' | 'SEGURO' | 'SIN_DETERMINAR' | 'COMPARTIDA';
-    dictamenTexto?: string;
-    profesionalNombre?: string;
-    profesionalEspecialidad?: string;
-    profesionalTelefono?: string;
-    facturaNumero?: string;
-    costeReal?: number;
-    costeEstimado?: number;
-    esLiquidado: boolean;
-    incidenciaOriginal?: Incidencia;
-    trabajoOriginal?: TrabajoProfesional;
-  }
-
-  const intervencionesList = useMemo<IntervencionInmueble[]>(() => {
-    if (!selectedInmueble) return [];
-
-    const list: IntervencionInmueble[] = [];
-    const processedIncidenciaIds = new Set<string>();
-
-    // 1. Añadir Trabajos Profesionales (Órdenes de Trabajo)
-    trabajosInmueble.forEach((t) => {
-      const incLinked = incidenciasInmueble.find((i) => i.id === t.incidenciaId);
-      if (t.incidenciaId) processedIncidenciaIds.add(t.incidenciaId);
-
-      const profLinked = profesionalesList.find((p) => p.id === t.profesionalId);
-      const isFinished = t.estado === 'FINALIZADO' || t.estado === 'FINALIZADA';
-      const costeRealVal = t.importeFinal !== undefined ? t.importeFinal : (isFinished ? t.importeEstimado : undefined);
-
-      list.push({
-        id: t.id,
-        tipo: 'ORDEN_TRABAJO',
-        fecha: t.fechaSolicitud || t.createdAt || '',
-        titulo: t.titulo || (incLinked ? incLinked.titulo : 'Orden de Trabajo'),
-        descripcion: t.descripcion || (incLinked ? incLinked.descripcion : ''),
-        estado: t.estado,
-        responsabilidad: (incLinked?.responsabilidad as any) || 'PROPIETARIO',
-        dictamenTexto: incLinked?.dictamenResponsabilidad?.motivoLegal || incLinked?.dictamenResponsabilidad?.fundamento,
-        profesionalNombre: t.profesionalNombre || profLinked?.nombre,
-        profesionalEspecialidad: t.especialidad || profLinked?.especialidad,
-        profesionalTelefono: t.profesionalTelefono || profLinked?.telefono,
-        facturaNumero: t.facturaNumero || incLinked?.trabajoProfesional?.facturaNumero,
-        costeReal: costeRealVal,
-        costeEstimado: t.importeEstimado,
-        esLiquidado: isFinished && costeRealVal !== undefined,
-        incidenciaOriginal: incLinked,
-        trabajoOriginal: t,
-      });
-    });
-
-    // 2. Añadir Incidencias que no tengan una OT en la lista anterior
-    incidenciasInmueble.forEach((inc) => {
-      if (processedIncidenciaIds.has(inc.id)) return;
-
-      const isResolved = inc.estado === 'RESUELTA' || inc.estado === 'CERRADA';
-      const costeRealVal = inc.trabajoProfesional?.costeReal;
-      const profLinked = profesionalesList.find((p) => p.id === inc.trabajoProfesional?.profesionalId);
-
-      list.push({
-        id: inc.id,
-        tipo: 'INCIDENCIA',
-        fecha: inc.fechaCreacion || '',
-        titulo: inc.titulo,
-        descripcion: inc.descripcion,
-        estado: inc.estado,
-        responsabilidad: (inc.responsabilidad as any) || 'PROPIETARIO',
-        dictamenTexto: inc.dictamenResponsabilidad?.motivoLegal || inc.dictamenResponsabilidad?.fundamento,
-        profesionalNombre: inc.trabajoProfesional?.profesionalNombre || profLinked?.nombre,
-        profesionalEspecialidad: inc.trabajoProfesional?.especialidad || profLinked?.especialidad,
-        profesionalTelefono: inc.trabajoProfesional?.profesionalTelefono || profLinked?.telefono,
-        facturaNumero: inc.trabajoProfesional?.facturaNumero,
-        costeReal: costeRealVal,
-        costeEstimado: inc.trabajoProfesional?.importeEstimado,
-        esLiquidado: isResolved && costeRealVal !== undefined,
-        incidenciaOriginal: inc,
-        trabajoOriginal: undefined,
-      });
-    });
-
-    // Ordenar de más reciente a más antigua
-    list.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-    return list;
-  }, [selectedInmueble, trabajosInmueble, incidenciasInmueble, profesionalesList]);
-
-  // Totales económicos auditados
-  const totalCosteRealInvertido = useMemo(() => {
-    return intervencionesList
-      .filter((item) => item.esLiquidado && item.costeReal !== undefined)
-      .reduce((sum, item) => sum + (item.costeReal || 0), 0);
-  }, [intervencionesList]);
-
-  const gastoPorResponsabilidad = useMemo(() => {
-    let propietario = 0;
-    let inquilino = 0;
-    let seguro = 0;
-    let otros = 0;
-
-    intervencionesList.forEach((item) => {
-      if (!item.esLiquidado || item.costeReal === undefined) return;
-      const coste = item.costeReal;
-      if (item.responsabilidad === 'PROPIETARIO') propietario += coste;
-      else if (item.responsabilidad === 'INQUILINO') inquilino += coste;
-      else if (item.responsabilidad === 'SEGURO') seguro += coste;
-      else otros += coste;
-    });
-
-    return { propietario, inquilino, seguro, otros };
-  }, [intervencionesList]);
-
-  const intervencionesFiltradas = useMemo(() => {
-    if (filtroOperativo === 'finalizados') {
-      return intervencionesList.filter((item) => item.esLiquidado);
-    }
-    if (filtroOperativo === 'en_curso') {
-      return intervencionesList.filter((item) => !item.esLiquidado);
-    }
-    if (filtroOperativo === 'propietario') {
-      return intervencionesList.filter((item) => item.responsabilidad === 'PROPIETARIO');
-    }
-    if (filtroOperativo === 'inquilino') {
-      return intervencionesList.filter((item) => item.responsabilidad === 'INQUILINO');
-    }
-    return intervencionesList;
-  }, [intervencionesList, filtroOperativo]);
 
   return (
     <div className="space-y-6">
@@ -1189,6 +1065,27 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       </span>
                     </div>
 
+                    {selectedInmueble.datosCatastrales && (
+                      <div className="p-3 bg-white rounded-xl border border-indigo-200">
+                        <span className="text-[10px] uppercase font-bold text-indigo-400 block mb-0.5 flex items-center gap-1">
+                          <Landmark className="w-3 h-3" /> Datos catastrales
+                        </span>
+                        <span className="font-semibold text-slate-900 text-[11px] block">
+                          {selectedInmueble.datosCatastrales.anioConstruccion
+                            ? `Año ${selectedInmueble.datosCatastrales.anioConstruccion} (${new Date().getFullYear() - selectedInmueble.datosCatastrales.anioConstruccion} años)`
+                            : 'Año sin indicar'}
+                          {selectedInmueble.datosCatastrales.superficieCatastralConstruida
+                            ? ` · ${selectedInmueble.datosCatastrales.superficieCatastralConstruida} m² cat.`
+                            : ''}
+                        </span>
+                        {selectedInmueble.datosCatastrales.valorCatastral ? (
+                          <span className="text-[10px] text-slate-500 block">
+                            Valor catastral {selectedInmueble.datosCatastrales.valorCatastral.toLocaleString('es-ES')} € (no es valor de mercado)
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
+
                     <div className="p-3 bg-white rounded-xl border border-slate-200">
                       <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">IBAN Cobro de Renta</span>
                       <div className="flex items-center justify-between gap-1">
@@ -1380,6 +1277,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     >
                       <Edit className="w-3.5 h-3.5" />
                       <span>Ver / Editar Contrato</span>
+                    </button>
+                  )}
+
+                  {onRecomercializarInmueble && selectedInmueble && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onRecomercializarInmueble(selectedInmueble.id, activeContract?.id)
+                      }
+                      className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+                      title="El inquilino se va: abre un expediente de salida, inspección y nueva comercialización"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Recomercializar</span>
                     </button>
                   )}
 
@@ -1721,315 +1632,52 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
           )}
         </div>
 
-        {/* HISTÓRICO OPERATIVO Y ECONÓMICO DEL INMUEBLE (INCIDENCIAS, OT Y LIQUIDACIÓN) */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 flex items-center justify-center shrink-0">
-                <Wrench className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-slate-900 text-lg">Historial Operativo y Económico</h3>
-                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                    {intervencionesList.length} intervenciones
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Mantenimiento, incidencias, dictámenes LAU, órdenes de trabajo y costes reales liquidados
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 font-medium">Inversión acumulada:</span>
-              <span className="text-base font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
-                {formatEuro(totalCosteRealInvertido)}
-              </span>
-            </div>
+        {/* FASE 4: Mantenimiento Preventivo, Garantías e Historial Técnico */}
+        {selectedInmueble && (
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
+            <MantenimientoInmueblePanel
+              inmueble={selectedInmueble}
+              propietarios={propietarios}
+              profesionales={profesionales}
+              currentUser={currentUser || undefined}
+            />
           </div>
+        )}
 
-          {/* Tarjetas de Resumen Económico Imputado */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                Total Facturado
-              </span>
-              <p className="text-xl font-extrabold text-slate-900">{formatEuro(totalCosteRealInvertido)}</p>
-              <p className="text-[11px] text-slate-500">
-                {intervencionesList.filter((i) => i.esLiquidado).length} de {intervencionesList.length} liquidadas
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/40 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wider block">
-                  Propietario (Deducible)
-                </span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                  Art. 21.1 LAU
-                </span>
-              </div>
-              <p className="text-xl font-extrabold text-amber-900">{formatEuro(gastoPorResponsabilidad.propietario)}</p>
-              <p className="text-[11px] text-amber-700">Conservación y habitabilidad</p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-purple-200 bg-purple-50/40 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-purple-800 uppercase tracking-wider block">
-                  Inquilino (Repercutible)
-                </span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
-                  Art. 21.4 LAU
-                </span>
-              </div>
-              <p className="text-xl font-extrabold text-purple-900">{formatEuro(gastoPorResponsabilidad.inquilino)}</p>
-              <p className="text-[11px] text-purple-700">Pequeña reparación / Uso ordinario</p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-sky-200 bg-sky-50/40 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-sky-800 uppercase tracking-wider block">
-                  Seguro / Sin Coste
-                </span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-200">
-                  Póliza / Garantía
-                </span>
-              </div>
-              <p className="text-xl font-extrabold text-sky-900">
-                {formatEuro(gastoPorResponsabilidad.seguro + gastoPorResponsabilidad.otros)}
-              </p>
-              <p className="text-[11px] text-sky-700">Cubierto o sin repercusión directa</p>
-            </div>
+        {/* FASE 4.5: Circuito Operativo de Reformas y Revalorización */}
+        {selectedInmueble && (
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
+            <ReformasInmueblePanel
+              inmueble={selectedInmueble}
+              profesionales={profesionales}
+              currentUser={currentUser || undefined}
+            />
           </div>
+        )}
 
-          {/* Filtros de Lista */}
-          <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setFiltroOperativo('todos')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  filtroOperativo === 'todos'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Todas ({intervencionesList.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFiltroOperativo('finalizados')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  filtroOperativo === 'finalizados'
-                    ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Finalizadas con Coste ({intervencionesList.filter((i) => i.esLiquidado).length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFiltroOperativo('en_curso')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  filtroOperativo === 'en_curso'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                En Curso ({intervencionesList.filter((i) => !i.esLiquidado).length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFiltroOperativo('propietario')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  filtroOperativo === 'propietario'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Resp. Propietario ({intervencionesList.filter((i) => i.responsabilidad === 'PROPIETARIO').length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFiltroOperativo('inquilino')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  filtroOperativo === 'inquilino'
-                    ? 'bg-purple-600 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Resp. Inquilino ({intervencionesList.filter((i) => i.responsabilidad === 'INQUILINO').length})
-              </button>
-            </div>
-          </div>
+        {/* ARENA C: Ficha Técnica e Inventario del Inmueble */}
+        {selectedInmueble && (
+          <FichaTecnicaInventarioPanel
+            inmueble={selectedInmueble}
+            currentUser={currentUser}
+            profesional={null}
+            onUpdateInmueble={onUpdateInmueble}
+          />
+        )}
 
-          {/* Tabla / Lista de Intervenciones */}
-          {intervencionesFiltradas.length === 0 ? (
-            <div className="text-center py-10 text-slate-500 bg-slate-50/50 rounded-xl border border-slate-200/60">
-              <Wrench className="w-9 h-9 text-slate-300 mx-auto mb-2" />
-              <p className="font-semibold text-slate-700 text-sm">No hay intervenciones registradas en esta vista</p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Las incidencias, dictámenes y órdenes de trabajo de este inmueble se consolidarán automáticamente aquí.
-              </p>
-            </div>
-          ) : (
-            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left text-slate-600">
-                  <thead className="bg-slate-50 text-slate-700 font-semibold uppercase tracking-wider text-[10px] border-b border-slate-200">
-                    <tr>
-                      <th className="py-2.5 px-3">Fecha</th>
-                      <th className="py-2.5 px-3">Concepto & Tipo</th>
-                      <th className="py-2.5 px-3">Dictamen / Responsabilidad</th>
-                      <th className="py-2.5 px-3">Profesional</th>
-                      <th className="py-2.5 px-3">Factura Nº</th>
-                      <th className="py-2.5 px-3 text-right">Coste Real</th>
-                      <th className="py-2.5 px-3 text-center">Estado</th>
-                      <th className="py-2.5 px-3 text-right">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {intervencionesFiltradas.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-2.5 px-3 whitespace-nowrap font-medium text-slate-700">
-                          {item.fecha ? formatDate(item.fecha) : '—'}
-                        </td>
+        {/* ARENA C: Gestión de Habitaciones */}
+        {selectedInmueble && (
+          <HabitacionesInmueblePanel
+            inmueble={selectedInmueble}
+            currentUser={currentUser}
+            profesional={null}
+            contratos={contratos}
+            onUpdateInmueble={onUpdateInmueble}
+          />
+        )}
 
-                        <td className="py-2.5 px-3">
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                item.tipo === 'ORDEN_TRABAJO'
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : 'bg-amber-100 text-amber-800'
-                              }`}
-                            >
-                              {item.tipo === 'ORDEN_TRABAJO' ? 'OT' : 'INC'}
-                            </span>
-                            <span className="font-bold text-slate-900 truncate max-w-[200px]" title={item.titulo}>
-                              {item.titulo}
-                            </span>
-                          </div>
-                          {item.descripcion && (
-                            <p className="text-[11px] text-slate-400 truncate max-w-[220px] mt-0.5" title={item.descripcion}>
-                              {item.descripcion}
-                            </p>
-                          )}
-                        </td>
-
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                              item.responsabilidad === 'PROPIETARIO'
-                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                                : item.responsabilidad === 'INQUILINO'
-                                ? 'bg-purple-50 text-purple-800 border border-purple-200'
-                                : item.responsabilidad === 'SEGURO'
-                                ? 'bg-sky-50 text-sky-800 border border-sky-200'
-                                : 'bg-slate-100 text-slate-700 border border-slate-200'
-                            }`}
-                          >
-                            <Scale className="w-3 h-3" />
-                            <span>
-                              {item.responsabilidad === 'PROPIETARIO'
-                                ? 'Propietario'
-                                : item.responsabilidad === 'INQUILINO'
-                                ? 'Inquilino'
-                                : item.responsabilidad === 'SEGURO'
-                                ? 'Seguro'
-                                : 'Sin determinar'}
-                            </span>
-                          </span>
-                        </td>
-
-                        <td className="py-2.5 px-3">
-                          {item.profesionalNombre ? (
-                            <div>
-                              <p className="font-semibold text-slate-800 text-xs">{item.profesionalNombre}</p>
-                              <p className="text-[10px] text-slate-400">{item.profesionalEspecialidad || 'Especialista'}</p>
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 text-xs italic">Sin asignar</span>
-                          )}
-                        </td>
-
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          {item.facturaNumero ? (
-                            <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 text-[11px]">
-                              {item.facturaNumero}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 text-[11px]">—</span>
-                          )}
-                        </td>
-
-                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                          {item.costeReal !== undefined ? (
-                            <div>
-                              <span className="font-extrabold text-emerald-700 text-xs">
-                                {formatEuro(item.costeReal)}
-                              </span>
-                              {item.esLiquidado && (
-                                <span className="block text-[9px] uppercase font-bold text-emerald-600">
-                                  Liquidado
-                                </span>
-                              )}
-                            </div>
-                          ) : item.costeEstimado !== undefined ? (
-                            <div>
-                              <span className="font-semibold text-slate-500 text-xs">
-                                ~{formatEuro(item.costeEstimado)}
-                              </span>
-                              <span className="block text-[9px] text-amber-600 font-semibold">
-                                Estimado
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 text-xs">—</span>
-                          )}
-                        </td>
-
-                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                              item.estado === 'FINALIZADO' || item.estado === 'FINALIZADA' || item.estado === 'RESUELTA' || item.estado === 'CERRADA'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                : item.estado === 'EN_EJECUCION' || item.estado === 'EN_CURSO'
-                                ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                                : item.estado === 'ASIGNADO'
-                                ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                : 'bg-slate-100 text-slate-700 border border-slate-200'
-                            }`}
-                          >
-                            {item.estado}
-                          </span>
-                        </td>
-
-                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (item.trabajoOriginal) {
-                                setSelectedTrabajoForModal(item.trabajoOriginal);
-                              } else if (item.incidenciaOriginal) {
-                                setSelectedIncidenciaForModal(item.incidenciaOriginal);
-                              }
-                            }}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 font-bold rounded-lg text-[11px] transition-colors inline-flex items-center gap-1"
-                          >
-                            <FileText className="w-3 h-3" />
-                            <span>Ver Ficha</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* GAP 5: SINDICACIÓN Y PUBLICACIÓN MULTICANAL (capa desacoplada, solo exporta) */}
+        <PublicacionInmueblesPanel inmueble={selectedInmueble} currentUser={currentUser} />
 
         {/* Candidates Interested in this Property */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
@@ -2671,6 +2319,83 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs text-slate-900"
                       />
                     </div>
+                  </div>
+
+                  {/* FASE 3.5.1 — Detalle catastral para la valoración */}
+                  <div className="p-3.5 bg-indigo-50/40 border border-indigo-200 rounded-xl space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="block font-semibold text-indigo-900 text-xs flex items-center gap-1.5">
+                        <Landmark className="w-4 h-4 text-indigo-600" />
+                        <span>Datos catastrales (la IA de precio los usa para comparar viviendas de las mismas características y zona)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleConsultarCatastro}
+                        disabled={catastroConsultando}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 bg-white border border-indigo-300 rounded-lg hover:bg-indigo-50 disabled:opacity-60"
+                      >
+                        {catastroConsultando ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                        Validar con Catastro
+                      </button>
+                    </div>
+                    {catastroAviso && (
+                      <p className={`text-[11px] rounded-lg px-2 py-1 ${catastroAviso.tipo === 'ok' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                        {catastroAviso.texto}
+                      </p>
+                    )}
+                    {editCatastro.direccionCatastral && (
+                      <p className="text-[11px] text-indigo-900/80">
+                        Domicilio Catastro: <b>{editCatastro.direccionCatastral}</b>
+                        {editCatastro.latitud && editCatastro.longitud ? ` (${editCatastro.latitud.toFixed(5)}, ${editCatastro.longitud.toFixed(5)})` : ''}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Año construcción</label>
+                        <input
+                          type="number"
+                          placeholder="Ej. 1985"
+                          value={editCatastro.anioConstruccion ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, anioConstruccion: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">m² catastrales</label>
+                        <input
+                          type="number"
+                          placeholder="Ej. 92"
+                          value={editCatastro.superficieCatastralConstruida ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, superficieCatastralConstruida: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Valor catastral (€)</label>
+                        <input
+                          type="number"
+                          placeholder="Del IBI"
+                          value={editCatastro.valorCatastral ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, valorCatastral: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Planta</label>
+                        <input
+                          type="text"
+                          placeholder="Ej. 3º"
+                          value={editCatastro.planta ?? ''}
+                          onChange={(e) => setEditCatastro((p) => ({ ...p, planta: e.target.value }))}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                      El Catastro no publica por servicio abierto la superficie, el año ni el valor catastral (sólo localiza la
+                      referencia); transcríbelos del IBI o la Sede Electrónica. El valor catastral es administrativo y nunca
+                      se usa como valor de mercado.
+                    </p>
                   </div>
 
                   {/* IBAN Selection / Input */}
@@ -3845,43 +3570,6 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             </form>
           </div>
         </div>
-      )}
-
-      {/* Modal Detalle de Trabajo Profesional (Orden de Trabajo y Liquidación) */}
-      {selectedTrabajoForModal && (
-        <DetalleTrabajoProfesionalModal
-          isOpen={!!selectedTrabajoForModal}
-          onClose={() => setSelectedTrabajoForModal(null)}
-          trabajo={selectedTrabajoForModal}
-          presupuestos={[]}
-          profesionales={profesionalesList}
-          inmuebles={inmuebles}
-          incidencias={incidenciasList}
-          currentUser={currentUser || undefined}
-          onVerIncidencia={(inc) => {
-            setSelectedTrabajoForModal(null);
-            setSelectedIncidenciaForModal(inc);
-          }}
-        />
-      )}
-
-      {/* Modal Detalle de Incidencia (Dictamen, Responsabilidad y Seguro) */}
-      {selectedIncidenciaForModal && (
-        <DetalleIncidenciaModal
-          isOpen={!!selectedIncidenciaForModal}
-          onClose={() => setSelectedIncidenciaForModal(null)}
-          incidencia={selectedIncidenciaForModal}
-          polizas={polizasList}
-          siniestros={siniestrosList}
-          profesionales={profesionalesList}
-          inmuebles={inmuebles}
-          currentUser={currentUser || undefined}
-          onUpdateIncidencia={async (updated) => {
-            await saveIncidenciaFirestore(updated);
-            setSelectedIncidenciaForModal(updated);
-          }}
-          onOpenSiniestroModal={() => {}}
-        />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { UserPlus, X } from 'lucide-react';
 import {
   SectionType,
@@ -16,6 +16,13 @@ import {
   ItemDocumentoSolicitado,
   SolicitudDocPublicData,
   ContratoFormalizacion,
+  Gasto,
+  GastoRecurrente,
+  Prestamo,
+  ExpedienteRecomercializacion,
+  InmobiliariaDirectorio,
+  PropuestaInmobiliaria,
+  LeadInmobiliario,
   DocumentoAnalizado,
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
@@ -28,6 +35,7 @@ import {
   AuditLog,
   ModulosConfig,
   RolDefinicion,
+  TrabajoProfesional,
 } from './types';
 import {
   INITIAL_CANDIDATOS,
@@ -45,6 +53,21 @@ import {
 } from './data/mockData';
 import { generarInformeInteligente } from './utils/reportGenerator';
 import {
+  obtenerTodosCobros,
+  generarPeriodosParaContrato,
+  actualizarEstadosVencimiento,
+} from './utils/cobrosEngine';
+import {
+  crearGastoRecurrente,
+  generarGastosRecurrentes,
+  normalizarRecurrente,
+} from './utils/gastosEngine';
+import {
+  calcularCuotaConstante,
+  cuotaDelPeriodo,
+  generarTablaAmortizacion,
+} from './utils/prestamosEngine';
+import {
   seedInitialDataIfEmpty,
   subscribeInmuebles,
   subscribeCandidatos,
@@ -54,6 +77,15 @@ import {
   subscribeVisitSlots,
   subscribeSolicitudesDoc,
   subscribeContratos,
+  // BLOQUE B — trabajos para importación de gastos de tesorería
+  subscribeTrabajosProfesionales,
+  subscribeGastos,
+  subscribeGastosRecurrentes,
+  subscribePrestamos,
+  subscribeExpedientesRecomercializacion,
+  subscribeInmobiliarias,
+  subscribePropuestasInmobiliaria,
+  subscribeLeadsInmobiliarios,
   subscribeAseguradoras,
   subscribeSolicitudesSeguro,
   subscribeGmailConfig,
@@ -63,8 +95,6 @@ import {
   subscribeEspecialidades,
   subscribeAuditLogs,
   subscribeModulosConfig,
-  subscribeIncidencias,
-  subscribeTrabajosProfesionales,
   saveInmuebleFirestore,
   deleteInmuebleFirestore,
   saveCandidatoFirestore,
@@ -83,6 +113,19 @@ import {
   deleteSolicitudDocFirestore,
   saveContratoFirestore,
   deleteContratoFirestore,
+  saveGastoFirestore,
+  deleteGastoFirestore,
+  saveGastoRecurrenteFirestore,
+  deleteGastoRecurrenteFirestore,
+  savePrestamoFirestore,
+  deletePrestamoFirestore,
+  saveExpedienteRecomercializacionFirestore,
+  deleteExpedienteRecomercializacionFirestore,
+  saveInmobiliariaFirestore,
+  deleteInmobiliariaFirestore,
+  savePropuestaInmobiliariaFirestore,
+  saveLeadInmobiliarioFirestore,
+  deleteFotoInspeccionStorage,
   saveAseguradoraFirestore,
   deleteAseguradoraFirestore,
   saveSolicitudSeguroFirestore,
@@ -106,6 +149,12 @@ import { Header } from './components/Header';
 import { CandidateModal } from './components/CandidateModal';
 import { SmartReportModal } from './components/SmartReportModal';
 import { CrearAgendaVisitasModal } from './components/CrearAgendaVisitasModal';
+import {
+  adaptarFichaAInmuebleVista,
+  cargarFichaPublicaPorToken,
+  getFichaPublicaInmueble,
+  type FichaPublicaInmueble,
+} from './lib/fichaPublicaInmueble';
 import { CuestionarioPublicoView } from './components/CuestionarioPublicoView';
 import { EnviarCuestionarioModal } from './components/EnviarCuestionarioModal';
 
@@ -115,12 +164,13 @@ import { CrearEnlaceSolicitudModal } from './components/CrearEnlaceSolicitudModa
 import { PortalVisitaPublicaView } from './components/PortalVisitaPublicaView';
 import { CrearSolicitudDocModal } from './components/CrearSolicitudDocModal';
 import { DetalleSolicitudDocModal } from './components/DetalleSolicitudDocModal';
-import { PortalDocumentacionPublicaContainer } from './components/PortalDocumentacionPublicaContainer';
+import { PortalDocumentacionPublicaView } from './components/PortalDocumentacionPublicaView';
 import { FormalizarContratoModal } from './components/FormalizarContratoModal';
 import { CrearSolicitudSeguroModal } from './components/CrearSolicitudSeguroModal';
 import { DetalleSolicitudSeguroModal } from './components/DetalleSolicitudSeguroModal';
 import { ConfiguracionAseguradorasModal } from './components/ConfiguracionAseguradorasModal';
 
+import { DashboardEjecutivoSection } from './components/sections/DashboardEjecutivoSection';
 import { InicioSection } from './components/sections/InicioSection';
 import { InmueblesSection } from './components/sections/InmueblesSection';
 import { CandidatosSection } from './components/sections/CandidatosSection';
@@ -128,19 +178,92 @@ import { NuevoCandidatoSection } from './components/sections/NuevoCandidatoSecti
 import { CuestionarioSection } from './components/sections/CuestionarioSection';
 import { AnalisisSection } from './components/sections/AnalisisSection';
 import { ConfiguracionSection } from './components/sections/ConfiguracionSection';
+// CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda, ayuda contextual y tutoriales
+import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
+import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
+import { servicioProgresoTutoriales } from './lib/progresoTutorialesFirestore';
+import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, crearProveedorGeminiRemoto, type AccionHost } from './experiencia';
+import type { SesionTutorial } from './experiencia';
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
 import { CobrosSection } from './components/sections/CobrosSection';
-import { IncidenciasSection } from './components/sections/IncidenciasSection';
-import { ProfesionalesSection } from './components/sections/ProfesionalesSection';
+// BLOQUE B — Tesorería (integración canónica 2026-09-20)
+import { TesoreriaSection } from './components/sections/TesoreriaSection';
+// BLOQUE E (reconciliado): gestión de inquilinos y suministros (gestor)
+import { InquilinosSection } from './components/sections/InquilinosSection';
+import { SuministrosSection } from './components/sections/SuministrosSection';
+import {
+  // (saveGastoFirestore/deleteGastoFirestore ya provienen de ./lib/firebase
+  // para la colección canónica `gastos`: se renombran las de tesorería)
+  deleteGastoFirestore as deleteGastoTesoreriaFirestore,
+  saveFicheroSepaFirestore,
+  saveGastoFirestore as saveGastoTesoreriaFirestore,
+  saveLiquidacionFirestore,
+  saveMandatoSepaFirestore,
+  saveOrdenPagoFirestore,
+  subscribeFicherosSepa,
+  subscribeGastos as subscribeGastosTesoreria,
+  subscribeLiquidaciones,
+  subscribeMandatosSepa,
+  subscribeOrdenesPago,
+} from './lib/tesoreriaFirestore';
+import { configurarAuditWriter } from './tesoreria/notificaciones';
+// BLOQUE C — Morosidad avanzada (recobro + expediente): orquestador, repositorio Firestore y GAP 1
+import { MorosidadSection } from './components/sections/MorosidadSection';
+import {
+  cambiarEstado as cambiarEstadoMorosidad,
+  detectarYGestionar as detectarMorosidad,
+  escalar as escalarMorosidad,
+  registrarComunicacion as registrarComunicacionMorosidad,
+  registrarCompromiso as registrarCompromisoMorosidad,
+  registrarPago as registrarPagoMorosidad,
+  recalcularConceptosJuridicos as recalcularJuridicoMorosidad,
+  type ContextoCaso,
+} from './utils/morosidad/morosidadStore';
+import {
+  crearRepositorioMorosidadFirestore,
+  escritorNotificacionesGAP1,
+  savePoliticaMorosidadFirestore,
+  subscribeCompromisosMorosidad,
+  subscribeExpedientesMorosidad,
+  subscribePoliticasMorosidad,
+  subscribeResumenMorosidadPropietario,
+} from './lib/morosidadFirestore';
+import { contextoAutorizacionDesdeUsuario, repositorioNotificacionesFirestore } from './utils/morosidad/puenteGAP1';
+import { revisarCompromisosVigentes } from './utils/morosidad/morosidadStore';
+import type { CompromisoPago, ExpedienteMorosidad, PoliticaMorosidad, ResumenMorosidadPropietario } from './types/morosidad';
+import { suscribirMovimientosSesion } from './lib/conciliacionSession';
+import type { SesionConciliacion } from './lib/conciliacionSession';
+import type {
+  FicheroSEPA,
+  GastoInmueble,
+  LiquidacionPropietario,
+  MandatoSEPA,
+  OrdenPago,
+} from './tesoreria/tipos';
+import { FinanciacionSection } from './components/sections/FinanciacionSection';
+import { GastosSection } from './components/sections/GastosSection';
+import { FiscalidadSection } from './components/sections/FiscalidadSection';
+import { InformesSection } from './components/sections/InformesSection';
+import { ConciliacionBancariaSection } from './components/sections/ConciliacionBancariaSection';
+import { FacturacionSection } from './components/sections/FacturacionSection';
+import { PolizasSegurosSection } from './components/sections/PolizasSegurosSection';
+import { ActasSection } from './components/sections/ActasSection';
+import { RecomercializacionSection } from './components/sections/RecomercializacionSection';
+import type { ContextoNuevoExpediente } from './components/modals/RecomercializarModal';
 import { SeguroImpagoSection } from './components/sections/SeguroImpagoSection';
+import { IncidenciasSection } from './components/sections/IncidenciasSection';
+import { OperacionesSection } from './components/sections/OperacionesSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
 import { AdministracionSection } from './components/sections/AdministracionSection';
 import { PropietarioPortalSection } from './components/sections/PropietarioPortalSection';
 import { ProfesionalPortalSection } from './components/sections/ProfesionalPortalSection';
+import { InversionSection } from './components/sections/InversionSection';
 import { PortalRegistroView } from './components/PortalRegistroView';
+import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPortalShell';
+import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
 import { LoginView } from './components/LoginView';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
 import {
@@ -152,24 +275,44 @@ import {
   canAccessInmueble,
   canAccessContrato,
   canAccessCandidato,
+  syncAuthIndex,
 } from './lib/authService';
 import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
 import { CrearProfesionalModal } from './components/modals/CrearProfesionalModal';
 import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistroModal';
-import {
-  preseleccionarCandidatoParaVisita,
-  seleccionarCandidato,
-  tramitarSolicitudSeguroImpago,
-  registrarDictamenAseguradora,
-  registrarDecisionFinalPropietario,
-  agregarHistorialCandidato,
-} from './utils/candidateCircuitEngine';
+
+// Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
+const SECCIONES_PROPIETARIO: SectionType[] = [
+  'dashboard',
+  'propietarios',
+  'inmuebles',
+  'inversion',
+  'formalizacion',
+  'cobros',
+  // BLOQUE B — "Mis Liquidaciones" en el portal del propietario
+  'tesoreria',
+  'gastos',
+  'financiacion',
+  'conciliacion',
+  'facturacion',
+  'fiscal',
+  'informes',
+  'polizas',
+  'actas',
+  'incidencias',
+  'operaciones',
+  'recomercializacion',
+  // BLOQUE E (reconciliado): el propietario consulta los suministros de sus inmuebles
+  'suministros',
+  'configuracion',
+  // CAPA TRANSVERSAL §6: Centro de Ayuda (solo lectura)
+  'ayuda',
+];
+const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'inversion', 'configuracion', 'ayuda'];
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
-  const [incidenciasCount, setIncidenciasCount] = useState<number>(0);
-  const [trabajosActivosCount, setTrabajosActivosCount] = useState<number>(0);
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -226,6 +369,19 @@ export default function App() {
     } catch (e) {}
     return INITIAL_CONTRATOS;
   });
+  // FASE 2.0: gastos (explotación vs financiación). Colección nueva, sin caché local.
+  const [gastos, setGastos] = useState<Gasto[]>([]);
+  // FASE 2.2: plantillas de gastos recurrentes.
+  const [gastosRecurrentes, setGastosRecurrentes] = useState<GastoRecurrente[]>([]);
+  // FASE 2.3: préstamos / hipotecas.
+  const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
+  // FASE 3.0/3.1: expedientes de recomercialización y contexto de alta.
+  const [expedientesRecomerc, setExpedientesRecomerc] = useState<ExpedienteRecomercializacion[]>([]);
+  // FASE 3.6: bolsa de inmobiliarias, RFPs (propuestas) y leads.
+  const [inmobiliariasDirectorio, setInmobiliariasDirectorio] = useState<InmobiliariaDirectorio[]>([]);
+  const [propuestasInmobiliaria, setPropuestasInmobiliaria] = useState<PropuestaInmobiliaria[]>([]);
+  const [leadsInmobiliarios, setLeadsInmobiliarios] = useState<LeadInmobiliario[]>([]);
+  const [nuevoExpedienteCtx, setNuevoExpedienteCtx] = useState<ContextoNuevoExpediente | null>(null);
   const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
     try {
@@ -282,6 +438,9 @@ export default function App() {
 
   // State for Public/Standalone Questionnaire Token
   const [activePublicQuestionnaireToken, setActivePublicQuestionnaireToken] = useState<string | null>(null);
+  // R3: ficha pública mínima para las vistas anónimas (sin documento completo en memoria).
+  const [fichaPublicaVista, setFichaPublicaVista] = useState<FichaPublicaInmueble | null>(null);
+  const [cargandoFichaPublica, setCargandoFichaPublica] = useState(false);
 
   // State for Enviar Cuestionario Modal
   const [candidateForEnviarModal, setCandidateForEnviarModal] = useState<Candidato | null>(null);
@@ -296,6 +455,20 @@ export default function App() {
   const [especialidades, setEspecialidades] = useState<Especialidad[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [modulosConfig, setModulosConfig] = useState<ModulosConfig | null>(null);
+  // BLOQUE B — Tesorería (prefijo tesoreria* para no chocar con los estados canónicos)
+  const [tesoreriaLiquidaciones, setTesoreriaLiquidaciones] = useState<LiquidacionPropietario[]>([]);
+  const [tesoreriaGastos, setTesoreriaGastos] = useState<GastoInmueble[]>([]);
+  const [tesoreriaOrdenesPago, setTesoreriaOrdenesPago] = useState<OrdenPago[]>([]);
+  const [tesoreriaFicherosSepa, setTesoreriaFicherosSepa] = useState<FicheroSEPA[]>([]);
+  const [tesoreriaMandatosSepa, setTesoreriaMandatosSepa] = useState<MandatoSEPA[]>([]);
+  const [tesoreriaTrabajos, setTesoreriaTrabajos] = useState<TrabajoProfesional[]>([]);
+  // Espejo de sesión GAP 6 (movimientos + propuestas importados en Conciliación)
+  const [tesoreriaSesionConciliacion, setTesoreriaSesionConciliacion] = useState<SesionConciliacion>({ movimientos: [], propuestas: [] });
+  // BLOQUE C — Morosidad: expedientes, compromisos, política vigente y espejo del propietario
+  const [morosidadExpedientes, setMorosidadExpedientes] = useState<ExpedienteMorosidad[]>([]);
+  const [morosidadCompromisos, setMorosidadCompromisos] = useState<CompromisoPago[]>([]);
+  const [morosidadPoliticas, setMorosidadPoliticas] = useState<PoliticaMorosidad[]>([]);
+  const [morosidadResumenPropietario, setMorosidadResumenPropietario] = useState<ResumenMorosidadPropietario[]>([]);
 
   // Sesión y autenticación real con Firebase Authentication
   const [currentUser, setCurrentUser] = useState<UsuarioApp | null>(null);
@@ -348,12 +521,12 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = ['propietarios', 'inmuebles', 'formalizacion', 'configuracion'];
+      const allowedSections = SECCIONES_PROPIETARIO;
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
     } else if (perfil === 'PROFESIONAL') {
-      const allowedSections: SectionType[] = ['administracion', 'inmuebles', 'configuracion'];
+      const allowedSections = SECCIONES_PROFESIONAL;
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('administracion');
       }
@@ -406,6 +579,164 @@ export default function App() {
     return [];
   }, [currentUser, contratos, scopedInmuebles]);
 
+  // BLOQUE B — Liquidaciones con aislamiento por propietario (admin: todas)
+  // BLOQUE C — Contexto de caso del orquestador de morosidad (repositorio Firestore
+  // + dispatcher GAP 1). La UI nunca escribe colecciones directamente ni calcula importes.
+  const morosidadContexto = useMemo<ContextoCaso>(() => {
+    const repositorio = crearRepositorioMorosidadFirestore({
+      leerContratos: () => contratos,
+      guardarContrato: async (c) => {
+        await saveContratoFirestore(c);
+      },
+      audit: async (accion, descripcion, detalles) => {
+        if (!currentUser) return;
+        await saveAuditLogFirestore({
+          usuarioId: currentUser.id,
+          usuarioEmail: currentUser.email,
+          usuarioNombre: currentUser.nombre,
+          accion,
+          descripcion,
+          entidadAfectada: 'modulo',
+          idAfectado: String(detalles.expedienteId || detalles.contratoId || 'morosidad'),
+          resultado: 'EXITO',
+          detalles,
+        });
+      },
+      actor: currentUser ? { id: currentUser.id, nombre: currentUser.nombre, email: currentUser.email } : null,
+    });
+    return {
+      repositorio,
+      actor: currentUser ? { id: currentUser.id, nombre: currentUser.nombre, email: currentUser.email } : null,
+      dispatcher: {
+        autorizacion: contextoAutorizacionDesdeUsuario(currentUser),
+        repositorio: repositorioNotificacionesFirestore(escritorNotificacionesGAP1),
+        // Sin proveedor de email declarado ⇒ GAP 1 registra la comunicación pero
+        // NUNCA afirma entrega real (safe-mode). Lo mismo aplica a burofax/WhatsApp.
+        emailProvider: null,
+      },
+      destinatarios: {
+        propietario: null,
+        usuarioIdPropietario: currentUser?.id,
+      },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, contratos]);
+
+  const scopedMorosidad = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return morosidadExpedientes;
+    return []; // el propietario no lee `expedientes_morosidad`: usa el espejo recortado
+  }, [currentUser, morosidadExpedientes]);
+
+  const scopedMorosidadCompromisos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return morosidadCompromisos;
+    return [];
+  }, [currentUser, morosidadCompromisos]);
+
+  const morosidadAbiertaCount = useMemo(
+    () => scopedMorosidad.filter((e) => e.saldoPendiente > 0.009 && e.estado !== 'CERRADA').length,
+    [scopedMorosidad],
+  );
+
+  const handleSaveMorosidadPolitica = async (pol: PoliticaMorosidad) => {
+    setMorosidadPoliticas((prev) => {
+      const exists = prev.some((p) => p.id === pol.id);
+      return exists ? prev.map((p) => (p.id === pol.id ? pol : p)) : [pol, ...prev];
+    });
+    await savePoliticaMorosidadFirestore(pol);
+  };
+
+  const scopedLiquidaciones = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return tesoreriaLiquidaciones;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      return tesoreriaLiquidaciones.filter(
+        (l) => l.propietarioId && l.propietarioId === currentUser.propietarioId
+      );
+    }
+    return [];
+  }, [currentUser, tesoreriaLiquidaciones]);
+
+  // FASE 2.0: gastos visibles. La suscripción ya viene acotada para el propietario;
+  // aquí se refuerza el filtro (defensa en profundidad) y se entrega todo al admin.
+  const scopedGastos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return gastos;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return gastos.filter(
+        (g) =>
+          (currentUser.propietarioId && g.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(g.inmuebleId)
+      );
+    }
+    return []; // Los profesionales no acceden a datos económicos.
+  }, [currentUser, gastos, scopedInmuebles]);
+
+  // FASE 2.2: plantillas recurrentes visibles (la suscripción ya viene acotada).
+  const scopedRecurrentes = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return gastosRecurrentes;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return gastosRecurrentes.filter(
+        (r) =>
+          (currentUser.propietarioId && r.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(r.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, gastosRecurrentes, scopedInmuebles]);
+
+  // FASE 2.3: préstamos visibles (la suscripción ya viene acotada por propietario).
+  const scopedPrestamos = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return prestamos;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return prestamos.filter(
+        (p) =>
+          (currentUser.propietarioId && p.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(p.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, prestamos, scopedInmuebles]);
+
+  // FASE 3.0: expedientes de recomercialización visibles (la suscripción ya
+  // viene acotada por propietarioId; aquí se refuerza por inmueble asignado).
+  const scopedExpedientesRecomerc = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return expedientesRecomerc;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return expedientesRecomerc.filter(
+        (e) =>
+          (currentUser.propietarioId && e.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(e.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, expedientesRecomerc, scopedInmuebles]);
+
+  // Cobros derivados de los contratos visibles para el usuario (con su histórico por inmuebleId).
+  // El motor genera los periodos al vuelo cuando un contrato aún no los tiene persistidos.
+  const scopedCobros = useMemo(() => obtenerTodosCobros(scopedContratos), [scopedContratos]);
+
+  // Número de mensualidades que requieren atención: ya vencidas y no cobradas o en incidencia.
+  const cobrosPendientesCount = useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(23, 59, 59, 999);
+    return scopedCobros.filter((c) => {
+      if (c.estado === 'RETRASADO' || c.estado === 'INCIDENCIA') return true;
+      if (c.estado === 'PENDIENTE' && c.fechaVencimiento) {
+        return new Date(`${c.fechaVencimiento}T23:59:59`) <= hoy;
+      }
+      return false;
+    }).length;
+  }, [scopedCobros]);
+
   const scopedCandidatos = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') return candidatos;
@@ -427,6 +758,25 @@ export default function App() {
 
   // Modales de administración
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  // CAPA TRANSVERSAL §6: sesión de tutorial en memoria (estado UI); el progreso persiste vía servicioProgresoTutoriales (F3)
+  const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
+  const seccionesAccesibles = useMemo<SectionType[] | undefined>(() => {
+    if (currentUser?.tipoPerfil === 'PROPIETARIO') return SECCIONES_PROPIETARIO;
+    if (currentUser?.tipoPerfil === 'PROFESIONAL') return SECCIONES_PROFESIONAL;
+    return undefined; // ADMINISTRADOR: sin restricción de secciones
+  }, [currentUser?.tipoPerfil]);
+  const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
+  // §6 F4: proveedor IA (Gemini vía servidor; sin clave → el motor cae al resolutor local) y
+  // ejecución de acciones validadas del asistente con los medios del host (route guard intacto).
+  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  const ejecutarAccionAsistente = useCallback((accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => {
+    if (accion.tipo === 'NAVEGAR' || (accion.tipo === 'EXPLICAR' && accion.route)) {
+      setActiveSection(accion.route as SectionType);
+    } else if (accion.tipo === 'TUTORIAL') {
+      const t = obtenerTutorial(accion.tutorialId);
+      if (t) setSesionTutorial(iniciarTutorial(t));
+    }
+  }, []);
   const [showCrearUsuarioModal, setShowCrearUsuarioModal] = useState<boolean>(false);
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<UsuarioApp | undefined>(undefined);
   const [showCrearProfesionalModal, setShowCrearProfesionalModal] = useState<boolean>(false);
@@ -436,6 +786,7 @@ export default function App() {
 
   // Token de registro público (por enlace o invitación)
   const [activePublicRegistroToken, setActivePublicRegistroToken] = useState<string | null>(null);
+  const [activePublicRegistroInqId, setActivePublicRegistroInqId] = useState<string | null>(null); // BLOQUE E
 
   // Public subscriptions and URL token checking
   useEffect(() => {
@@ -453,6 +804,12 @@ export default function App() {
       }
       if (regToken) {
         setActivePublicRegistroToken(regToken);
+      }
+
+      // BLOQUE E: invitación de inquilino (?registroInq={enlaceId})
+      const regInq = params.get('registroInq');
+      if (regInq) {
+        setActivePublicRegistroInqId(regInq);
       }
 
       // Check Visita Public Token
@@ -507,20 +864,9 @@ export default function App() {
     checkUrlForTokens();
     window.addEventListener('hashchange', checkUrlForTokens);
 
-    const unsubscribeInm = subscribeInmuebles((data) => {
-      if (data && data.length > 0) {
-        setInmuebles(data);
-        try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(data)); } catch (e) {}
-      } else {
-        setInmuebles((current) => {
-          if (current.length > 0) {
-            current.forEach((inm) => saveInmuebleFirestore(inm));
-            return current;
-          }
-          return [];
-        });
-      }
-    });
+    // R3: `inmuebles` (documentos completos con datos privados) YA NO se
+    // suscribe aquí: vive en el efecto autenticado. Las vistas anónimas
+    // resuelven la ficha pública mínima por id (efecto R3 posterior).
 
     const unsubscribeInv = subscribeInvitaciones((data) => {
       if (data && data.length > 0) {
@@ -590,7 +936,6 @@ export default function App() {
 
     return () => {
       window.removeEventListener('hashchange', checkUrlForTokens);
-      unsubscribeInm();
       unsubscribeInv();
       unsubscribeSlot();
       unsubscribeDoc();
@@ -607,6 +952,32 @@ export default function App() {
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') {
       seedInitialDataIfEmpty();
     }
+
+    // FASE 1.4: ámbito de datos para que las escuchas nunca soliciten la
+    // colección completa a un propietario (defensa en profundidad; la UI ya
+    // filtraba, pero ahora la propia consulta queda acotada en origen).
+    const dataScope = {
+      tipoPerfil: currentUser.tipoPerfil,
+      propietarioId: currentUser.propietarioId,
+      inmuebleIds: currentUser.inmuebleIds || [],
+    };
+
+    // R3: suscripción completa de inmuebles, SOLO autenticada (las reglas §1
+    // deniegan get/list anónimos; el funnel público usa la ficha espejo).
+    const unsubscribeInm = subscribeInmuebles((data) => {
+      if (data && data.length > 0) {
+        setInmuebles(data);
+        try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(data)); } catch (e) {}
+      } else {
+        setInmuebles((current) => {
+          if (current.length > 0) {
+            current.forEach((inm) => saveInmuebleFirestore(inm));
+            return current;
+          }
+          return [];
+        });
+      }
+    });
 
     const unsubscribeCand = subscribeCandidatos((data) => {
       if (data && data.length > 0) {
@@ -628,7 +999,7 @@ export default function App() {
         setPropietarios(data);
         try { localStorage.setItem('rentselect_propietarios', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }, dataScope);
 
     const unsubscribeSol = subscribeSolicitudes((data) => {
       if (data && data.length > 0) {
@@ -642,30 +1013,93 @@ export default function App() {
         setContratos(data);
         try { localStorage.setItem('rentselect_contratos', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }, dataScope);
+
+    // FASE 2.0: gastos acotados por propietario (profesionales no reciben nada).
+    const unsubscribeGastos = subscribeGastos((data) => {
+      setGastos(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 2.2: plantillas recurrentes con el mismo ámbito.
+    const unsubscribeRecurrentes = subscribeGastosRecurrentes((data) => {
+      setGastosRecurrentes(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 2.3: préstamos/hipotecas con el mismo ámbito.
+    const unsubscribePrestamos = subscribePrestamos((data) => {
+      setPrestamos(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 3.0: expedientes de recomercialización con el mismo ámbito.
+    const unsubscribeExpedientes = subscribeExpedientesRecomercializacion((data) => {
+      setExpedientesRecomerc(Array.isArray(data) ? data : []);
+    }, dataScope);
+
+    // FASE 3.6: directorio de inmobiliarias (bolsa común) con RFPs y leads acotados por propietario.
+    const unsubscribeInmobiliarias = subscribeInmobiliarias((data) => {
+      setInmobiliariasDirectorio(Array.isArray(data) ? data : []);
+    }, dataScope);
+    const unsubscribePropuestas = subscribePropuestasInmobiliaria((data) => {
+      setPropuestasInmobiliaria(Array.isArray(data) ? data : []);
+    }, dataScope);
+    const unsubscribeLeads = subscribeLeadsInmobiliarios((data) => {
+      setLeadsInmobiliarios(Array.isArray(data) ? data : []);
+    }, dataScope);
 
     const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
       setProfesionales(data);
     });
 
+    let unsubscribeMorosidadExp: (() => void) | undefined;
+    let unsubscribeMorosidadCmp: (() => void) | undefined;
+    let unsubscribeMorosidadPol: (() => void) | undefined;
+    let unsubscribeMorosidadResumen: (() => void) | undefined;
+
+    // BLOQUE B — Tesorería (2026-09-20): liquidaciones, gastos de tesorería,
+    // órdenes de pago, ficheros SEPA, mandatos y trabajos (importación de gastos).
+    // La auditoría de tesorería se escribe en audit_logs (canal de auditoría
+    // canónico); el envío de notificaciones usa el dispatcher GAP 1 vía el
+    // adaptador eventoTesoreriaAEventoNotificacion (repositorio GAP 1 pendiente).
+    if (currentUser) {
+      configurarAuditWriter((accion, descripcion, detalles) => {
+        void saveAuditLogFirestore({
+          usuarioId: currentUser.id,
+          usuarioEmail: currentUser.email,
+          usuarioNombre: currentUser.nombre,
+          accion,
+          descripcion,
+          entidadAfectada: 'modulo',
+          idAfectado: String(detalles.entidadId || 'tesoreria'),
+          resultado: 'EXITO',
+          detalles,
+        });
+      });
+    }
+    const unsubscribeTesoreriaLiq = subscribeLiquidaciones((data) => setTesoreriaLiquidaciones(data || []));
+    const unsubscribeTesoreriaGastos = subscribeGastosTesoreria((data) => setTesoreriaGastos(data || []));
+    const unsubscribeTesoreriaOrdenes = subscribeOrdenesPago((data) => setTesoreriaOrdenesPago(data || []));
+    const unsubscribeTesoreriaFicheros = subscribeFicherosSepa((data) => setTesoreriaFicherosSepa(data || []));
+    const unsubscribeTesoreriaMandatos = subscribeMandatosSepa((data) => setTesoreriaMandatosSepa(data || []));
+    const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []));
+    // Puente GAP 6 → Tesorería: espejo de sesión de movimientos y propuestas
+    const unsubscribeTesoreriaMovSesion = suscribirMovimientosSesion((data) => setTesoreriaSesionConciliacion(data));
+
+    // BLOQUE C — Morosidad: el admin ve todos los expedientes; el propietario solo
+    // el espejo recortado (`morosidad_resumen_propietario`), nunca el expediente completo.
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') {
+      unsubscribeMorosidadExp = subscribeExpedientesMorosidad((data) => setMorosidadExpedientes(data || []));
+      unsubscribeMorosidadCmp = subscribeCompromisosMorosidad((data) => setMorosidadCompromisos(data || []));
+      unsubscribeMorosidadPol = subscribePoliticasMorosidad((data) => setMorosidadPoliticas(data || []));
+    } else if (currentUser.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId) {
+      unsubscribeMorosidadResumen = subscribeResumenMorosidadPropietario(currentUser.propietarioId, (data) =>
+        setMorosidadResumenPropietario(data || []),
+      );
+    }
+
     const unsubscribeSolicitudesSeguro = subscribeSolicitudesSeguro((data) => {
       if (data && data.length > 0) {
         setSolicitudesSeguro(data);
         try { localStorage.setItem('rentselect_solicitudes_seguro', JSON.stringify(data)); } catch (e) {}
-      }
-    });
-
-    const unsubscribeIncidenciasHook = subscribeIncidencias((data) => {
-      if (data) {
-        const abiertas = data.filter((i) => i.estado !== 'RESUELTA' && i.estado !== 'CANCELADA').length;
-        setIncidenciasCount(abiertas);
-      }
-    });
-
-    const unsubscribeTrabajosHook = subscribeTrabajosProfesionales((data) => {
-      if (data) {
-        const activos = data.filter((t) => t.estado !== 'FINALIZADO' && t.estado !== 'CANCELADO').length;
-        setTrabajosActivosCount(activos);
       }
     });
 
@@ -705,23 +1139,145 @@ export default function App() {
     }
 
     return () => {
+      unsubscribeInm();
       unsubscribeCand();
       unsubscribeProp();
       unsubscribeSol();
       unsubscribeContratos();
+      unsubscribeGastos();
+      unsubscribeRecurrentes();
+      unsubscribePrestamos();
+      unsubscribeExpedientes();
+      unsubscribeInmobiliarias();
+      unsubscribePropuestas();
+      unsubscribeLeads();
       unsubscribeProfesionalesHook();
+      unsubscribeTesoreriaLiq();
+      unsubscribeTesoreriaGastos();
+      unsubscribeTesoreriaOrdenes();
+      unsubscribeTesoreriaFicheros();
+      unsubscribeTesoreriaMandatos();
+      unsubscribeTesoreriaTrabajos();
+      unsubscribeTesoreriaMovSesion();
+      configurarAuditWriter(null);
       unsubscribeSolicitudesSeguro();
-      unsubscribeIncidenciasHook();
-      unsubscribeTrabajosHook();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
       if (unsubscribeGmail) unsubscribeGmail();
       if (unsubscribeUsuariosHook) unsubscribeUsuariosHook();
       if (unsubscribeAuditHook) unsubscribeAuditHook();
+      if (unsubscribeMorosidadExp) unsubscribeMorosidadExp();
+      if (unsubscribeMorosidadCmp) unsubscribeMorosidadCmp();
+      if (unsubscribeMorosidadPol) unsubscribeMorosidadPol();
+      if (unsubscribeMorosidadResumen) unsubscribeMorosidadResumen();
     };
   }, [currentUser?.id, currentUser?.tipoPerfil]);
 
   // Ref to track candidate questionnaires currently being auto-analyzed
   const autoAnalyzingSetRef = React.useRef<Set<string>>(new Set());
+
+  // Ref para evitar reescrituras innecesarias al materializar el calendario de cobros.
+  // Clave: contrato.id -> firma (día actual + nº periodos + nº retrasados + último periodo).
+  const cobrosEnsureRef = React.useRef<Map<string, string>>(new Map());
+
+  // Fases 1.1 y 1.3 — Materializa el calendario de cobros y sincroniza estados por fecha.
+  // Para cada contrato visible: se generan los periodos que falten y se pasa a RETRASADO
+  // de forma automática (con trazabilidad) toda mensualidad PENDIENTE vencida más el margen
+  // de cortesía. No se tocan RECIBIDO/VERIFICADO/INCIDENCIA ni los datos ya registrados.
+  useEffect(() => {
+    if (!currentUser) return;
+    const hoy = new Date();
+
+    scopedContratos.forEach((contrato) => {
+      const sincro = actualizarEstadosVencimiento(contrato, hoy);
+      if (sincro.periodos.length === 0) return;
+
+      const retrasados = sincro.periodos.filter((p) => p.estado === 'RETRASADO').length;
+      const firma = `${hoy.toISOString().slice(0, 10)}|${sincro.periodos.length}|${retrasados}|${sincro.periodos[sincro.periodos.length - 1].periodoMesAnio}`;
+      if (cobrosEnsureRef.current.get(contrato.id) === firma) return;
+      cobrosEnsureRef.current.set(contrato.id, firma);
+
+      if (sincro.necesitaGuardado) {
+        saveContratoFirestore(sincro.contratoActualizado);
+        setContratos((prev) =>
+          prev.map((c) => (c.id === sincro.contratoActualizado.id ? sincro.contratoActualizado : c))
+        );
+      }
+    });
+  }, [currentUser, scopedContratos]);
+
+  // FASE 2.2 — Materializa automáticamente los apuntes pendientes de las
+  // plantillas recurrentes (hasta el mes en curso). Es idempotente: los IDs son
+  // deterministas y nunca se pisan pagos/ediciones de apuntes ya existentes.
+  const recurrentesGenRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || scopedRecurrentes.length === 0) return;
+    const firma = scopedRecurrentes
+      .map((r) => `${r.id}:${r.activo ? 1 : 0}:${r.ultimoPeriodoGenerado || ''}`)
+      .sort()
+      .join('|');
+    if (recurrentesGenRef.current.has(firma)) return;
+
+    const { gastos: nuevos, plantillasActualizadas } = generarGastosRecurrentes(
+      scopedRecurrentes,
+      scopedGastos
+    );
+    if (nuevos.length === 0) {
+      recurrentesGenRef.current.add(firma);
+      return;
+    }
+    recurrentesGenRef.current.add(firma);
+
+    (async () => {
+      for (const g of nuevos) {
+        setGastos((prev) => (prev.some((x) => x.id === g.id) ? prev : [g, ...prev]));
+        await saveGastoFirestore(g);
+      }
+      for (const r of plantillasActualizadas) {
+        setGastosRecurrentes((prev) => prev.map((x) => (x.id === r.id ? r : x)));
+        await saveGastoRecurrenteFirestore(r);
+      }
+    })();
+  }, [currentUser, scopedRecurrentes, scopedGastos]);
+
+  // FASE 2.3 — Cuando un recibo de CUOTA_HIPOTECARIA procede de la plantilla
+  // vinculada a un préstamo, desglosa automáticamente capital e intereses según
+  // su cuadro de amortización. Solo rellena recibos sin desglose (no pisa
+  // ediciones manuales).
+  const prestamosSplitRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || scopedPrestamos.length === 0) return;
+    const pendientes: Gasto[] = [];
+    scopedPrestamos.forEach((p) => {
+      if (!p.gastoRecurrenteId || !p.activo) return;
+      scopedGastos.forEach((g) => {
+        if (
+          g.creadoPorId === p.gastoRecurrenteId &&
+          g.tipo === 'FINANCIACION' &&
+          g.periodoMesAnio &&
+          g.intereses === undefined &&
+          g.capitalAmortizado === undefined &&
+          !prestamosSplitRef.current.has(g.id)
+        ) {
+          const split = cuotaDelPeriodo(p, g.periodoMesAnio);
+          if (split) {
+            prestamosSplitRef.current.add(g.id);
+            // El importe del recibo se ajusta al cuadro (carencia: sólo intereses;
+            // mes con amortización anticipada: incluye esa salida de caja).
+            pendientes.push({
+              ...g,
+              importe: split.cuota,
+              capitalAmortizado: split.capital,
+              intereses: split.intereses,
+            });
+          }
+        }
+      });
+    });
+    pendientes.forEach((g) => {
+      setGastos((prev) => prev.map((x) => (x.id === g.id ? g : x)));
+      saveGastoFirestore(g);
+    });
+  }, [currentUser, scopedPrestamos, scopedGastos]);
 
   // Auto-analyze any candidate questionnaire that is completed but missing AI analysis
   useEffect(() => {
@@ -895,171 +1451,54 @@ export default function App() {
   };
 
   // Update candidate status handler
-  const handleUpdateStatus = async (candidateId: string, newStatus: CandidateStatus) => {
-    const cand = candidatos.find((c) => c.id === candidateId);
-    if (!cand) return;
-
-    if (newStatus === 'seleccionado') {
-      await handleSelectCandidate(cand);
-      return;
-    }
-
-    const prop = inmuebles.find((i) => i.id === cand.inmuebleId);
-    let updatedCand: Candidato;
-
-    if (newStatus === 'preseleccionado' && prop) {
-      const res = preseleccionarCandidatoParaVisita(cand, prop, 'propietario', userProfile?.nombre);
-      updatedCand = res.candidatoActualizado;
-    } else {
-      updatedCand = { ...cand, estado: newStatus };
-      updatedCand = agregarHistorialCandidato(updatedCand, {
-        autor: 'propietario',
-        autorNombre: userProfile?.nombre || 'Propietario',
-        fase:
-          newStatus.includes('seguro')
-            ? 'seguro'
-            : newStatus.includes('doc')
-            ? 'documentacion'
-            : newStatus.includes('analisis')
-            ? 'analisis_ia'
-            : newStatus.includes('decision')
-            ? 'decision_final'
-            : 'preseleccion',
-        accion: `Estado cambiado a ${newStatus}`,
-        detalle: `El propietario actualizó el estado de ${cand.estado} a ${newStatus}.`,
-        estadoAnterior: cand.estado,
-        estadoNuevo: newStatus,
-      });
-    }
-
+  const handleUpdateStatus = (candidateId: string, newStatus: CandidateStatus) => {
+    let updatedCandObj: Candidato | undefined;
     setCandidatos((prev) =>
-      prev.map((c) => (c.id === candidateId ? updatedCand : c))
+      prev.map((c) => {
+        if (c.id === candidateId) {
+          const updated = { ...c, estado: newStatus };
+          updatedCandObj = updated;
+          saveCandidatoFirestore(updated);
+          return updated;
+        }
+        return c;
+      })
     );
-    await saveCandidatoFirestore(updatedCand);
 
     if (selectedCandidateForModal && selectedCandidateForModal.id === candidateId) {
-      setSelectedCandidateForModal(updatedCand);
+      setSelectedCandidateForModal((prev) => (prev ? { ...prev, estado: newStatus } : null));
     }
 
     // Auto-create visit invitation if candidate is preselected
     if (newStatus === 'preseleccionado') {
-      const existingInv = invitaciones.find((i) => i.candidateId === candidateId);
-      if (!existingInv) {
-        const sol = solicitudes.find((s) => s.candidatoId === cand.id);
-        const tokenVal = cand.cuestionarioToken || `vst-${cand.id}-${Math.random().toString(36).substring(2, 7)}`;
-        const newInv: InvitacionVisita = {
-          id: `inv-${cand.id}`,
-          token: tokenVal,
-          candidateId: cand.id,
-          candidateNombre: cand.nombre,
-          candidateTelefono: cand.telefono,
-          candidateEmail: cand.email,
-          inmuebleId: cand.inmuebleId,
-          inmuebleNombre: cand.inmuebleNombre || 'Inmueble',
-          inmueblePrecio: sol?.inmueblePrecio || 900,
-          inmuebleCiudad: sol?.inmuebleCiudad || 'Ciudad',
-          solicitudEstado: sol?.estado || 'DOCUMENTACIÓN COMPLETA',
-          cuestionarioCompletado: !!cand.cuestionarioIncidencias?.completado,
-          scoreSolvencia: cand.scoreEstimado || sol?.scoreSolvencia || 80,
-          perfilOperativo: sol?.perfilOperativo || 80,
-          status: 'PENDIENTE DE ENVIAR',
-          fechaPreseleccion: new Date().toISOString().split('T')[0],
-          createdAt: new Date().toISOString(),
-        };
-        handleSaveInvitacion(newInv);
+      const cand = updatedCandObj || candidatos.find((c) => c.id === candidateId);
+      if (cand) {
+        const existingInv = invitaciones.find((i) => i.candidateId === candidateId);
+        if (!existingInv) {
+          const sol = solicitudes.find((s) => s.candidatoId === cand.id);
+          const tokenVal = cand.cuestionarioToken || `vst-${cand.id}-${Math.random().toString(36).substring(2, 7)}`;
+          const newInv: InvitacionVisita = {
+            id: `inv-${cand.id}`,
+            token: tokenVal,
+            candidateId: cand.id,
+            candidateNombre: cand.nombre,
+            candidateTelefono: cand.telefono,
+            candidateEmail: cand.email,
+            inmuebleId: cand.inmuebleId,
+            inmuebleNombre: cand.inmuebleNombre || 'Inmueble',
+            inmueblePrecio: sol?.inmueblePrecio || 900,
+            inmuebleCiudad: sol?.inmuebleCiudad || 'Ciudad',
+            solicitudEstado: sol?.estado || 'DOCUMENTACIÓN COMPLETA',
+            cuestionarioCompletado: !!cand.cuestionarioIncidencias?.completado,
+            scoreSolvencia: cand.scoreEstimado || sol?.scoreSolvencia || 80,
+            perfilOperativo: sol?.perfilOperativo || 80,
+            status: 'PENDIENTE DE ENVIAR',
+            fechaPreseleccion: new Date().toISOString().split('T')[0],
+            createdAt: new Date().toISOString(),
+          };
+          handleSaveInvitacion(newInv);
+        }
       }
-    }
-  };
-
-  // Selector idempotente de candidato (Circuito Completo)
-  const handleSelectCandidate = async (candidate: Candidato, motivo?: string) => {
-    const property = inmuebles.find((i) => i.id === candidate.inmuebleId) || (({
-      id: candidate.inmuebleId || `inm_${Date.now()}`,
-      direccion: candidate.inmuebleNombre || 'Inmueble en Alquiler',
-      ciudad: 'Ciudad',
-      propietarioId: userProfile?.id || 'prop_1',
-      precio: 1000,
-      fianza: 1000,
-      tipo: 'Piso',
-      estado: 'disponible',
-      habitaciones: 2,
-      banos: 1,
-      superficie: 75,
-      caracteristicas: [],
-      fotos: [],
-      fechaPublicacion: new Date().toISOString(),
-    } as unknown) as Inmueble);
-
-    const result = seleccionarCandidato(
-      candidate,
-      property,
-      solicitudesDoc,
-      'propietario',
-      userProfile?.nombre || 'Propietario',
-      motivo
-    );
-
-    // Save candidate
-    setCandidatos((prev) =>
-      prev.map((c) => (c.id === result.candidatoActualizado.id ? result.candidatoActualizado : c))
-    );
-    await saveCandidatoFirestore(result.candidatoActualizado);
-
-    // Save or update SolicitudDocumentacion
-    setSolicitudesDoc((prev) => {
-      const exists = prev.some((s) => s.id === result.solicitudDoc.id);
-      if (exists) {
-        return prev.map((s) => (s.id === result.solicitudDoc.id ? result.solicitudDoc : s));
-      }
-      return [result.solicitudDoc, ...prev];
-    });
-    await saveSolicitudDocFirestore(result.solicitudDoc);
-
-    if (selectedCandidateForModal && selectedCandidateForModal.id === candidate.id) {
-      setSelectedCandidateForModal(result.candidatoActualizado);
-    }
-  };
-
-  // Open modal para tramitar seguro de impago
-  const handleOpenTramitarSeguro = (cand: Candidato) => {
-    const prop = inmuebles.find((i) => i.id === cand.inmuebleId);
-    setCandidateForCrearSeguro(cand);
-    setInmuebleForCrearSeguro(prop || null);
-    setShowCrearSeguroModal(true);
-  };
-
-  // Registrar decisión final vinculante del propietario
-  const handleRegistrarDecisionFinal = async (
-    candidate: Candidato,
-    decision: 'ACEPTAR' | 'RECHAZAR',
-    motivo: string
-  ) => {
-    const solSeguro = solicitudesSeguro.find(
-      (s) => s.candidatoId === candidate.id || (candidate.solicitudSeguroId && s.id === candidate.solicitudSeguroId)
-    );
-
-    const { candidatoActualizado, solicitudSeguroActualizada } = registrarDecisionFinalPropietario(
-      candidate,
-      decision,
-      motivo,
-      userProfile?.nombre || 'Propietario',
-      solSeguro
-    );
-
-    setCandidatos((prev) =>
-      prev.map((c) => (c.id === candidatoActualizado.id ? candidatoActualizado : c))
-    );
-    await saveCandidatoFirestore(candidatoActualizado);
-
-    if (solicitudSeguroActualizada) {
-      setSolicitudesSeguro((prev) =>
-        prev.map((s) => (s.id === solicitudSeguroActualizada.id ? solicitudSeguroActualizada : s))
-      );
-      await saveSolicitudSeguroFirestore(solicitudSeguroActualizada);
-    }
-
-    if (selectedCandidateForModal && selectedCandidateForModal.id === candidate.id) {
-      setSelectedCandidateForModal(candidatoActualizado);
     }
   };
 
@@ -1743,31 +2182,12 @@ export default function App() {
 
     const estadoDoc = isComplete ? 'completa' : isPartial ? 'parcial' : targetCand.estadoDocumentacion || 'solicitada';
 
-    const shouldUpdateStatusToDocRecibida =
-      isComplete &&
-      (targetCand.estado === 'seleccionado' ||
-        targetCand.estado === 'pendiente_doc' ||
-        targetCand.estado === 'doc_solicitada');
-
-    let updatedCand: Candidato = {
+    const updatedCand: Candidato = {
       ...targetCand,
       documentosAnalizados: finalDocsAnalizados,
       documentos: updatedDocumentosList,
       estadoDocumentacion: estadoDoc,
-      estado: shouldUpdateStatusToDocRecibida ? 'doc_recibida' : targetCand.estado,
     };
-
-    if (shouldUpdateStatusToDocRecibida) {
-      updatedCand = agregarHistorialCandidato(updatedCand, {
-        autor: 'candidato',
-        autorNombre: targetCand.nombre,
-        fase: 'documentacion',
-        accion: 'Toda la documentación requerida ha sido aportada',
-        detalle: 'El candidato ha completado la subida de los documentos obligatorios requeridos.',
-        estadoAnterior: targetCand.estado,
-        estadoNuevo: 'doc_recibida',
-      });
-    }
 
     const updatedCandidates = candidateList.map((c) => (c.id === updatedCand.id ? updatedCand : c));
     return { updatedCandidates, targetCand: updatedCand };
@@ -1802,17 +2222,6 @@ export default function App() {
     updatedDocs: ItemDocumentoSolicitado[],
     isFinalSubmit: boolean
   ) => {
-    // 1. Siempre notificar al endpoint seguro del backend con verificación de token
-    try {
-      await fetch(`/api/public/solicitud-documentacion/${encodeURIComponent(targetToken)}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updatedDocs, isFinalSubmit }),
-      });
-    } catch (e) {
-      console.warn('Error sincronizando con backend público:', e);
-    }
-
     const existing = solicitudesDoc.find(
       (s) =>
         s.token === targetToken ||
@@ -1822,43 +2231,42 @@ export default function App() {
         s.id === activePublicDocToken ||
         (activePublicDocToken && (s.token.includes(activePublicDocToken) || activePublicDocToken.includes(s.token)))
     );
+    if (!existing) return;
 
-    if (existing) {
-      const allUploaded = updatedDocs.every(
-        (d) => (d.archivos && d.archivos.length > 0) || !d.obligatorio
-      );
+    const allUploaded = updatedDocs.every(
+      (d) => (d.archivos && d.archivos.length > 0) || !d.obligatorio
+    );
 
-      const newEstado = isFinalSubmit
-        ? allUploaded
-          ? 'COMPLETADA'
-          : 'PARCIALMENTE_APORTADA'
-        : existing.estado === 'PENDIENTE' || existing.estado === 'SOLICITADA'
-        ? 'PARCIALMENTE_APORTADA'
-        : existing.estado;
+    const newEstado = isFinalSubmit
+      ? allUploaded
+        ? 'COMPLETADA'
+        : 'PARCIALMENTE_APORTADA'
+      : existing.estado === 'PENDIENTE' || existing.estado === 'SOLICITADA'
+      ? 'PARCIALMENTE_APORTADA'
+      : existing.estado;
 
-      const newHistorial = [
-        ...existing.historial,
-        {
-          id: `h-${Date.now()}`,
-          fecha: new Date().toLocaleString('es-ES'),
-          autor: 'candidato' as const,
-          accion: isFinalSubmit ? 'Documentación enviada' : 'Documentos actualizados',
-          detalle: isFinalSubmit
-            ? 'El candidato finalizó y envió la documentación para su revisión'
-            : 'El candidato aportó o modificó archivos adjuntos',
-        },
-      ];
+    const newHistorial = [
+      ...existing.historial,
+      {
+        id: `h-${Date.now()}`,
+        fecha: new Date().toLocaleString('es-ES'),
+        autor: 'candidato' as const,
+        accion: isFinalSubmit ? 'Documentación enviada' : 'Documentos actualizados',
+        detalle: isFinalSubmit
+          ? 'El candidato finalizó y envió la documentación para su revisión'
+          : 'El candidato aportó o modificó archivos adjuntos',
+      },
+    ];
 
-      const updated: SolicitudDocumentacion = {
-        ...existing,
-        documentos: updatedDocs,
-        estado: newEstado,
-        fechaUltimaActividad: new Date().toISOString(),
-        historial: newHistorial,
-      };
+    const updated: SolicitudDocumentacion = {
+      ...existing,
+      documentos: updatedDocs,
+      estado: newEstado,
+      fechaUltimaActividad: new Date().toISOString(),
+      historial: newHistorial,
+    };
 
-      await handleSaveSolicitudDoc(updated);
-    }
+    await handleSaveSolicitudDoc(updated);
   };
 
   // Handlers for Formalización & Contratos LAU (Fase 3)
@@ -1881,14 +2289,33 @@ export default function App() {
     savedContrato: ContratoFormalizacion,
     marcarInmuebleAlquilado?: boolean
   ) => {
+    // FASE 1.4: si quien formaliza es un propietario, el contrato debe llevar
+    // SIEMPRE su propietarioId (clave de aislamiento y de las reglas de acceso),
+    // aunque el inmueble aún no lo tuviera informado.
+    let contratoAsegurado = savedContrato;
+    if (
+      currentUser?.tipoPerfil === 'PROPIETARIO' &&
+      currentUser.propietarioId &&
+      !savedContrato.propietarioId
+    ) {
+      contratoAsegurado = { ...savedContrato, propietarioId: currentUser.propietarioId };
+    }
+
+    // Garantiza que el contrato nazca ya con su calendario de cobros materializado,
+    // conservando cualquier periodo ya existente (pagos/justificantes no se tocan).
+    const contratoConCobros: ContratoFormalizacion =
+      contratoAsegurado.registroCobros && contratoAsegurado.registroCobros.length > 0
+        ? contratoAsegurado
+        : { ...contratoAsegurado, registroCobros: generarPeriodosParaContrato(contratoAsegurado) };
+
     setContratos((prev) => {
-      const exists = prev.some((c) => c.id === savedContrato.id);
+      const exists = prev.some((c) => c.id === contratoConCobros.id);
       if (exists) {
-        return prev.map((c) => (c.id === savedContrato.id ? savedContrato : c));
+        return prev.map((c) => (c.id === contratoConCobros.id ? contratoConCobros : c));
       }
-      return [savedContrato, ...prev];
+      return [contratoConCobros, ...prev];
     });
-    await saveContratoFirestore(savedContrato);
+    await saveContratoFirestore(contratoConCobros);
 
     if (marcarInmuebleAlquilado && savedContrato.inmuebleId) {
       setInmuebles((prev) =>
@@ -1961,6 +2388,289 @@ export default function App() {
     await deleteContratoFirestore(contratoId);
   };
 
+  // BLOQUE B — Handlers de Tesorería (aditivos; no alteran otros flujos)
+  const handleSaveTesoreriaLiquidacion = async (liq: LiquidacionPropietario) => {
+    setTesoreriaLiquidaciones((prev) => {
+      const exists = prev.some((l) => l.id === liq.id);
+      return exists ? prev.map((l) => (l.id === liq.id ? liq : l)) : [liq, ...prev];
+    });
+    await saveLiquidacionFirestore(liq);
+  };
+
+  const handleSaveTesoreriaGasto = async (gasto: GastoInmueble) => {
+    setTesoreriaGastos((prev) => {
+      const exists = prev.some((g) => g.id === gasto.id);
+      return exists ? prev.map((g) => (g.id === gasto.id ? gasto : g)) : [gasto, ...prev];
+    });
+    await saveGastoTesoreriaFirestore(gasto);
+  };
+
+  const handleDeleteTesoreriaGasto = async (gastoId: string) => {
+    setTesoreriaGastos((prev) => prev.filter((g) => g.id !== gastoId));
+    await deleteGastoTesoreriaFirestore(gastoId);
+  };
+
+  const handleSaveTesoreriaOrdenPago = async (orden: OrdenPago) => {
+    setTesoreriaOrdenesPago((prev) => {
+      const exists = prev.some((o) => o.id === orden.id);
+      return exists ? prev.map((o) => (o.id === orden.id ? orden : o)) : [orden, ...prev];
+    });
+    await saveOrdenPagoFirestore(orden);
+  };
+
+  const handleSaveTesoreriaFicheroSepa = async (fichero: FicheroSEPA) => {
+    setTesoreriaFicherosSepa((prev) => {
+      const exists = prev.some((f) => f.id === fichero.id);
+      return exists ? prev.map((f) => (f.id === fichero.id ? fichero : f)) : [fichero, ...prev];
+    });
+    await saveFicheroSepaFirestore(fichero);
+  };
+
+  const handleSaveTesoreriaMandatoSepa = async (mandato: MandatoSEPA) => {
+    setTesoreriaMandatosSepa((prev) => {
+      const exists = prev.some((m) => m.id === mandato.id);
+      return exists ? prev.map((m) => (m.id === mandato.id ? mandato : m)) : [mandato, ...prev];
+    });
+    await saveMandatoSepaFirestore(mandato);
+  };
+
+  const handleSaveContratosBatch = async (lista: ContratoFormalizacion[]) => {
+    setContratos(lista);
+    for (const c of lista) {
+      await saveContratoFirestore(c);
+    }
+  };
+
+  // FASE 2.0 — Handlers de gastos. Se garantiza SIEMPRE propietarioId (clave de
+  // aislamiento), resolviéndolo desde el inmueble o el propietario autenticado.
+  // Devuelve el documento final (lo necesita la subida de factura del modal).
+  const resolvePropietarioId = (inmuebleId: string, previo?: string): string => {
+    if (previo) return previo;
+    const inm = inmuebles.find((i) => i.id === inmuebleId);
+    return (
+      inm?.propietarioId ||
+      inm?.propietarioPrincipalId ||
+      (currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId || '' : '') ||
+      ''
+    );
+  };
+
+  const handleSaveGasto = async (gasto: Gasto): Promise<Gasto> => {
+    const finalGasto: Gasto = {
+      ...gasto,
+      propietarioId: resolvePropietarioId(gasto.inmuebleId, gasto.propietarioId),
+    };
+
+    setGastos((prev) => {
+      const exists = prev.some((g) => g.id === finalGasto.id);
+      return exists
+        ? prev.map((g) => (g.id === finalGasto.id ? finalGasto : g))
+        : [finalGasto, ...prev];
+    });
+    await saveGastoFirestore(finalGasto);
+    return finalGasto;
+  };
+
+  const handleDeleteGasto = async (gastoId: string) => {
+    setGastos((prev) => prev.filter((g) => g.id !== gastoId));
+    await deleteGastoFirestore(gastoId);
+  };
+
+  // FASE 2.2 — Plantillas de gastos recurrentes.
+  const handleSaveRecurrente = async (plantilla: GastoRecurrente): Promise<void> => {
+    const finalPlantilla: GastoRecurrente = {
+      ...plantilla,
+      propietarioId: resolvePropietarioId(plantilla.inmuebleId, plantilla.propietarioId),
+    };
+    setGastosRecurrentes((prev) => {
+      const exists = prev.some((r) => r.id === finalPlantilla.id);
+      return exists
+        ? prev.map((r) => (r.id === finalPlantilla.id ? finalPlantilla : r))
+        : [finalPlantilla, ...prev];
+    });
+    await saveGastoRecurrenteFirestore(finalPlantilla);
+  };
+
+  const handleDeleteRecurrente = async (plantillaId: string) => {
+    // Los apuntes ya materializados se conservan (histórico).
+    setGastosRecurrentes((prev) => prev.filter((r) => r.id !== plantillaId));
+    await deleteGastoRecurrenteFirestore(plantillaId);
+  };
+
+  // FASE 2.3 — Préstamos. Al guardar se crea/actualiza la plantilla recurrente
+  // de la cuota (importe = cuota constante francesa); al eliminar se desactiva
+  // esa plantilla, conservando los recibos ya generados.
+  const handleSavePrestamo = async (prestamo: Prestamo): Promise<void> => {
+    const propietarioId = resolvePropietarioId(prestamo.inmuebleId, prestamo.propietarioId);
+    const inm = inmuebles.find((i) => i.id === prestamo.inmuebleId);
+
+    // FASE 2.4: con carencia/tipo variable, la primera cuota debida y el mes de
+    // inicio de la plantilla se derivan del cuadro; en el caso simple coinciden
+    // con la cuota constante francesa y el mes de inicio del préstamo.
+    const tabla = generarTablaAmortizacion(prestamo);
+    const primeraConCuota = tabla.find((f) => f.cuota > 0);
+    const cuotaNominal =
+      primeraConCuota?.cuota ||
+      calcularCuotaConstante(prestamo.capitalInicial, prestamo.tasaInteresAnual, prestamo.plazoMeses);
+    const inicioPlantilla = primeraConCuota?.periodo || prestamo.fechaInicio;
+
+    const concepto = `Cuota ${prestamo.tipo === 'HIPOTECARIO' ? 'hipotecaria' : 'de préstamo'}${
+      inm ? ` · ${inm.direccion}` : ''
+    }`;
+
+    const recurrenteId = prestamo.gastoRecurrenteId;
+    const existente = recurrenteId
+      ? gastosRecurrentes.find((r) => r.id === recurrenteId)
+      : undefined;
+
+    const base = crearGastoRecurrente({
+      inmuebleId: prestamo.inmuebleId,
+      propietarioId,
+      categoria: 'CUOTA_HIPOTECARIA',
+      concepto,
+      importe: cuotaNominal,
+      frecuencia: 'MENSUAL',
+      diaVencimiento: prestamo.diaVencimiento,
+      fechaInicio: inicioPlantilla,
+      creadoPor: currentUser?.nombre,
+      creadoPorId: currentUser?.id,
+    });
+    const plantilla: GastoRecurrente = normalizarRecurrente({
+      ...base,
+      ...(recurrenteId ? { id: recurrenteId } : {}),
+      proveedor: prestamo.entidad?.trim() || undefined,
+      concepto,
+      importe: cuotaNominal,
+      aCargoDe: 'arrendador',
+      deducible: false,
+      metodoPago: 'domiciliacion',
+      notas: prestamo.descripcion?.trim() || undefined,
+      activo: prestamo.activo,
+      ...(existente
+        ? { ultimoPeriodoGenerado: existente.ultimoPeriodoGenerado, createdAt: existente.createdAt }
+        : {}),
+    });
+    await handleSaveRecurrente(plantilla);
+
+    const finalPrestamo: Prestamo = {
+      ...prestamo,
+      propietarioId,
+      gastoRecurrenteId: plantilla.id,
+      updatedAt: new Date().toISOString(),
+    };
+    setPrestamos((prev) => {
+      const exists = prev.some((p) => p.id === finalPrestamo.id);
+      return exists
+        ? prev.map((p) => (p.id === finalPrestamo.id ? finalPrestamo : p))
+        : [finalPrestamo, ...prev];
+    });
+    await savePrestamoFirestore(finalPrestamo);
+  };
+
+  const handleDeletePrestamo = async (prestamoId: string) => {
+    const prestamo = prestamos.find((p) => p.id === prestamoId);
+    if (prestamo?.gastoRecurrenteId) {
+      const plantilla = gastosRecurrentes.find((r) => r.id === prestamo.gastoRecurrenteId);
+      // Se desactiva la plantilla vinculada; los recibos históricos se conservan.
+      if (plantilla && plantilla.activo) {
+        await handleSaveRecurrente({
+          ...plantilla,
+          activo: false,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+    setPrestamos((prev) => prev.filter((p) => p.id !== prestamoId));
+    await deletePrestamoFirestore(prestamoId);
+  };
+
+  // FASE 3.1 — Expedientes de recomercialización.
+  const handleSaveExpedienteRecomerc = async (expediente: ExpedienteRecomercializacion) => {
+    const propietarioId = resolvePropietarioId(expediente.inmuebleId, expediente.propietarioId);
+    const finalExp: ExpedienteRecomercializacion = { ...expediente, propietarioId };
+    setExpedientesRecomerc((prev) => {
+      const exists = prev.some((e) => e.id === finalExp.id);
+      return exists
+        ? prev.map((e) => (e.id === finalExp.id ? finalExp : e))
+        : [finalExp, ...prev];
+    });
+    await saveExpedienteRecomercializacionFirestore(finalExp);
+  };
+  const handleDeleteExpedienteRecomerc = async (id: string) => {
+    // FASE 3.2: limpia también las fotos de inspección de Storage (best-effort).
+    const expediente = expedientesRecomerc.find((e) => e.id === id);
+    const fotos = expediente?.revisionFotografica?.fotografias ?? [];
+    await Promise.all(fotos.map((f) => deleteFotoInspeccionStorage(f.storagePath)));
+    setExpedientesRecomerc((prev) => prev.filter((e) => e.id !== id));
+    await deleteExpedienteRecomercializacionFirestore(id);
+  };
+  // Puntos de entrada desde la ficha del inmueble / el contrato.
+  const handleRecomercializarInmueble = (inmuebleId: string, contratoAnteriorId?: string) => {
+    setNuevoExpedienteCtx({ inmuebleId, contratoAnteriorId });
+    setActiveSection('recomercializacion');
+  };
+
+  // FASE 3.6 — directorio de inmobiliarias, propuestas (RFP) y leads.
+  const handleSaveInmobiliaria = async (agencia: InmobiliariaDirectorio) => {
+    setInmobiliariasDirectorio((prev) => {
+      const exists = prev.some((a) => a.id === agencia.id);
+      return exists ? prev.map((a) => (a.id === agencia.id ? agencia : a)) : [agencia, ...prev];
+    });
+    await saveInmobiliariaFirestore(agencia);
+  };
+  const handleDeleteInmobiliaria = async (id: string) => {
+    setInmobiliariasDirectorio((prev) => prev.filter((a) => a.id !== id));
+    await deleteInmobiliariaFirestore(id);
+  };
+  const handleSavePropuestaInmobiliaria = async (propuesta: PropuestaInmobiliaria) => {
+    setPropuestasInmobiliaria((prev) => {
+      const exists = prev.some((p) => p.id === propuesta.id);
+      return exists ? prev.map((p) => (p.id === propuesta.id ? propuesta : p)) : [propuesta, ...prev];
+    });
+    await savePropuestaInmobiliariaFirestore(propuesta);
+  };
+  const handleSaveLeadInmobiliario = async (lead: LeadInmobiliario) => {
+    setLeadsInmobiliarios((prev) => {
+      const exists = prev.some((l) => l.id === lead.id);
+      return exists ? prev.map((l) => (l.id === lead.id ? lead : l)) : [lead, ...prev];
+    });
+    await saveLeadInmobiliarioFirestore(lead);
+  };
+
+  // FASE 3.6 — cierre del ciclo: garantiza que el contrato anterior queda
+  // FINALIZADO y el inmueble liberado (disponible) para un nuevo anuncio o
+  // contrato, SIEMPRE sobre la misma ficha (mismo inmuebleId).
+  const handleCerrarExpedienteRecomerc = async (
+    expediente: ExpedienteRecomercializacion,
+    _resultado: 'REARRENDADO' | 'VENDIDO'
+  ) => {
+    await handleSaveExpedienteRecomerc(expediente);
+
+    const contratoVinculado =
+      (expediente.contratoAnteriorId && contratos.find((c) => c.id === expediente.contratoAnteriorId)) ||
+      contratos
+        .filter((c) => c.inmuebleId === expediente.inmuebleId && c.estado !== 'FINALIZADO')
+        .sort((a, b) => (b.fechaInicioContrato || '').localeCompare(a.fechaInicioContrato || ''))[0];
+
+    if (contratoVinculado && contratoVinculado.estado !== 'FINALIZADO') {
+      // Reutiliza el flujo oficial: finaliza el contrato y libera el inmueble.
+      await handleFinalizarContrato(contratoVinculado.id);
+    } else {
+      const inm = inmuebles.find((i) => i.id === expediente.inmuebleId);
+      if (inm && (inm.estado !== 'disponible' || inm.contratoActivoId || inm.inquilinoActualId)) {
+        const libre: Inmueble = {
+          ...inm,
+          estado: 'disponible',
+          inquilinoActualId: undefined,
+          inquilinoActualNombre: undefined,
+          contratoActivoId: undefined,
+        };
+        setInmuebles((prev) => prev.map((i) => (i.id === libre.id ? libre : i)));
+        await saveInmuebleFirestore(libre);
+      }
+    }
+  };
+
   // Handlers for Propietarios y Cuentas Bancarias
   const handleSavePropietario = async (propietario: Propietario) => {
     setPropietarios((prev) => {
@@ -2003,50 +2713,6 @@ export default function App() {
       return [sol, ...prev];
     });
     await saveSolicitudSeguroFirestore(sol);
-
-    // Synchronize status and dictamen to candidate profile
-    const targetCand = candidatos.find((c) => c.id === sol.candidatoId);
-    if (targetCand) {
-      let candActualizado: Candidato = {
-        ...targetCand,
-        solicitudSeguroId: sol.id,
-      };
-
-      if (sol.dictamenAseguradora) {
-        const dictamenRes = registrarDictamenAseguradora(
-          sol,
-          candActualizado,
-          sol.dictamenAseguradora,
-          {
-            importeMaximo: sol.importeMaximoAsegurable,
-            condiciones: sol.condicionesEstipuladas,
-            documentosExtra: sol.documentosSolicitadosExtra,
-            comentario: sol.comentariosAseguradora,
-          }
-        );
-        candActualizado = dictamenRes.candidatoActualizado;
-      } else if (candActualizado.estado !== 'seguro_solicitado') {
-        candActualizado.estado = 'seguro_solicitado';
-        candActualizado = agregarHistorialCandidato(candActualizado, {
-          autor: 'propietario',
-          autorNombre: userProfile?.nombre || 'Propietario',
-          fase: 'seguro',
-          accion: 'Expediente tramitado con aseguradora',
-          detalle: `Solicitud enviada a ${sol.aseguradoraNombre} con referencia [${sol.referenciaUnica}].`,
-          estadoAnterior: targetCand.estado,
-          estadoNuevo: 'seguro_solicitado',
-        });
-      }
-
-      setCandidatos((prev) =>
-        prev.map((c) => (c.id === candActualizado.id ? candActualizado : c))
-      );
-      await saveCandidatoFirestore(candActualizado);
-
-      if (selectedCandidateForModal && selectedCandidateForModal.id === candActualizado.id) {
-        setSelectedCandidateForModal(candActualizado);
-      }
-    }
   };
 
   const handleDeleteSolicitudSeguro = async (solId: string) => {
@@ -2278,6 +2944,11 @@ export default function App() {
     await saveUsuarioFirestore(nuevoUsuario);
     setUsuarios((prev) => [nuevoUsuario, ...prev]);
 
+    // FASE 1.4: crear el espejo de identidad usuarios_auth/{uid} ANTES de la
+    // ficha de propietario/profesional, porque las reglas de escritura de esas
+    // colecciones resuelven el rol/propietarioId a través de ese documento.
+    await syncAuthIndex(nuevoUsuario);
+
     if (propietarioData && nuevoUsuario.propietarioId) {
       const nuevoProp: Propietario = {
         id: nuevoUsuario.propietarioId,
@@ -2337,11 +3008,85 @@ export default function App() {
     );
   };
 
+  // BLOQUE E: tras el registro por invitación, el inquilino entra en su portal
+  const handleCompleteInquilinoRegistration = (usuario: UsuarioApp) => {
+    setActivePublicRegistroInqId(null);
+    window.history.pushState({}, '', window.location.pathname);
+    setCurrentUser(usuario);
+  };
+
   const handleLogout = async () => {
     await logoutUser();
     setCurrentUser(null);
     setShowAuthModal(false);
   };
+
+  // R3: resolución anónima de la ficha pública para /visita, /solicitud y
+  // /cuestionario. Solo se toca la colección espejo (un documento por id);
+  // la colección `inmuebles` jamás se lee sin sesión.
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      setFichaPublicaVista(null);
+      if (currentUser) {
+        setCargandoFichaPublica(false);
+        return;
+      }
+      if (!activePublicVisitaToken && !activePublicSolicitudToken && !activePublicQuestionnaireToken) {
+        setCargandoFichaPublica(false);
+        return;
+      }
+      setCargandoFichaPublica(true);
+      try {
+        let ficha: FichaPublicaInmueble | null = null;
+        if (activePublicVisitaToken) {
+          const inv = invitaciones.find((i) => i.token === activePublicVisitaToken);
+          if (inv?.inmuebleId) ficha = await getFichaPublicaInmueble(inv.inmuebleId);
+        } else if (activePublicSolicitudToken) {
+          ficha = await cargarFichaPublicaPorToken(activePublicSolicitudToken);
+        } else if (activePublicQuestionnaireToken) {
+          const cand = candidatos.find(
+            (c) => c.cuestionarioToken === activePublicQuestionnaireToken || c.id === activePublicQuestionnaireToken
+          );
+          if (cand?.inmuebleId) ficha = await getFichaPublicaInmueble(cand.inmuebleId);
+        }
+        if (!cancelado) setFichaPublicaVista(ficha);
+      } catch {
+        if (!cancelado) setFichaPublicaVista(null);
+      } finally {
+        if (!cancelado) setCargandoFichaPublica(false);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [
+    currentUser,
+    activePublicVisitaToken,
+    activePublicSolicitudToken,
+    activePublicQuestionnaireToken,
+    invitaciones,
+    candidatos,
+  ]);
+
+  // BLOQUE E: el perfil INQUILINO solo ve su portal (nunca el ERP)
+  if (currentUser?.tipoPerfil === 'INQUILINO') {
+    return <InquilinoPortalShell usuario={currentUser} onLogout={handleLogout} />;
+  }
+
+  // BLOQUE E: registro público de inquilino por invitación (?registroInq=)
+  if (activePublicRegistroInqId) {
+    return (
+      <RegistroInquilinoView
+        enlaceId={activePublicRegistroInqId}
+        onComplete={handleCompleteInquilinoRegistration}
+        onCancel={() => {
+          setActivePublicRegistroInqId(null);
+          window.history.pushState({}, '', window.location.pathname);
+        }}
+      />
+    );
+  }
 
   // Standalone Registration Portal View (Public Link or Token)
   if (activePublicRegistroToken) {
@@ -2362,16 +3107,44 @@ export default function App() {
 
   // Standalone Candidate Document Submission Portal View (Public URL - Fase 2)
   if (activePublicDocToken) {
-    const localPublicSolDoc = solicitudesDoc.find(
+    const publicSolDoc = solicitudesDoc.find(
       (s) => s.token === activePublicDocToken || s.id === activePublicDocToken
     );
 
+    if (!publicSolDoc) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 text-white p-6 rounded-2xl shadow-xl text-center space-y-3 max-w-md">
+            <p className="text-base font-bold text-white">Solicitud de documentación no encontrada o enlace caducado</p>
+            <p className="text-xs text-slate-400">
+              El enlace no es válido o ha expirado. Por favor, contacta con la propiedad o agencia inmobiliaria para solicitar un nuevo acceso.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // Isolated sanitized representation for candidate portal
+    // Guarantees zero leakage of private owner notes or internal scores
+    const sanitizedPublicDocData: SolicitudDocPublicData = {
+      id: publicSolDoc.id,
+      token: publicSolDoc.token,
+      candidatoNombre: publicSolDoc.candidatoNombre,
+      candidatoTelefono: publicSolDoc.candidatoTelefono,
+      inmuebleNombre: publicSolDoc.inmuebleNombre,
+      inmuebleCiudad: publicSolDoc.inmuebleCiudad,
+      fechaVisita: publicSolDoc.fechaVisita,
+      mensajePropietario: publicSolDoc.mensajePropietario,
+      documentos: publicSolDoc.documentos,
+      estado: publicSolDoc.estado,
+      fechaCreacion: publicSolDoc.fechaCreacion,
+    };
+
     return (
-      <PortalDocumentacionPublicaContainer
-        token={activePublicDocToken}
-        localSolicitud={localPublicSolDoc}
+      <PortalDocumentacionPublicaView
+        solicitud={sanitizedPublicDocData}
         onSubmit={async (updatedDocs, isFinalSubmit) => {
-          await handlePublicDocSubmit(activePublicDocToken, updatedDocs, isFinalSubmit);
+          await handlePublicDocSubmit(publicSolDoc.token, updatedDocs, isFinalSubmit);
         }}
       />
     );
@@ -2384,7 +3157,7 @@ export default function App() {
         token={activePublicVisitaToken}
         invitaciones={invitaciones}
         slots={slots}
-        inmuebles={inmuebles}
+        inmuebles={currentUser ? inmuebles : fichaPublicaVista ? [adaptarFichaAInmuebleVista(fichaPublicaVista)] : []}
         onUpdateInvitacion={(inv) => handleSaveInvitacion(inv)}
         onUpdateSlot={(slot) => handleSaveVisitSlot(slot)}
         onUpdateCandidateState={(candidateId, newState) => {
@@ -2396,11 +3169,25 @@ export default function App() {
 
   // Standalone Candidate Portal View (Public URL)
   if (activePublicSolicitudToken) {
-    const targetInmueble = inmuebles.find(
-      (i) => i.tokenSolicitud === activePublicSolicitudToken || i.id === activePublicSolicitudToken
-    );
+    // R3: anónimo resuelve SOLO la ficha pública (nunca el documento completo).
+    const targetInmueble = currentUser
+      ? inmuebles.find(
+          (i) => i.tokenSolicitud === activePublicSolicitudToken || i.id === activePublicSolicitudToken
+        )
+      : fichaPublicaVista
+        ? adaptarFichaAInmuebleVista(fichaPublicaVista)
+        : undefined;
 
     if (!targetInmueble) {
+      if (!currentUser && cargandoFichaPublica) {
+        return (
+          <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+            <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 text-center max-w-md">
+              <p className="text-sm font-semibold text-slate-700">Cargando ficha del inmueble…</p>
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
           <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-200 text-center space-y-3 max-w-md">
@@ -2429,7 +3216,12 @@ export default function App() {
       (c) => c.cuestionarioToken === activePublicQuestionnaireToken || c.id === activePublicQuestionnaireToken
     );
 
-    const publicInmueble = inmuebles.find((i) => i.id === publicCand?.inmuebleId);
+    // R3: anónimo usa la ficha pública mínima.
+    const publicInmueble = currentUser
+      ? inmuebles.find((i) => i.id === publicCand?.inmuebleId)
+      : fichaPublicaVista
+        ? adaptarFichaAInmuebleVista(fichaPublicaVista)
+        : undefined;
 
     if (!publicCand) {
       return (
@@ -2504,18 +3296,6 @@ export default function App() {
     );
   }
 
-  const cobrosPendientesCount = useMemo(() => {
-    let count = 0;
-    scopedContratos.forEach((c) => {
-      c.registroCobros?.forEach((cobro) => {
-        if (cobro.estado === 'PENDIENTE' || cobro.estado === 'RETRASADO' || cobro.estado === 'INCIDENCIA') {
-          count++;
-        }
-      });
-    });
-    return count;
-  }, [scopedContratos]);
-
   return (
     <div className="min-h-screen bg-slate-100/70 font-sans text-slate-800 flex flex-col md:flex-row pb-16 md:pb-0 antialiased">
       {/* Desktop Sidebar Navigation */}
@@ -2530,8 +3310,7 @@ export default function App() {
         contratosCount={scopedContratos.length}
         solicitudesSeguroCount={solicitudesSeguro.length}
         cobrosPendientesCount={cobrosPendientesCount}
-        incidenciasCount={incidenciasCount}
-        trabajosActivosCount={trabajosActivosCount}
+        morosidadAbiertaCount={morosidadAbiertaCount}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
@@ -2551,8 +3330,10 @@ export default function App() {
           contratosCount={scopedContratos.length}
           solicitudesSeguroCount={solicitudesSeguro.length}
           cobrosPendientesCount={cobrosPendientesCount}
-          incidenciasCount={incidenciasCount}
-          trabajosActivosCount={trabajosActivosCount}
+          morosidadAbiertaCount={morosidadAbiertaCount}
+          onAccionAsistente={ejecutarAccionAsistente}
+          proveedorIA={proveedorIA}
+          accessibleSections={seccionesAccesibles}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -2563,14 +3344,35 @@ export default function App() {
           activeSection={activeSection}
           userProfile={userProfile}
           onSelectSection={setActiveSection}
+          onIniciarTutorial={(id) => {
+            const t = obtenerTutorial(id);
+            if (t) setSesionTutorial(iniciarTutorial(t));
+          }}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
           onLogout={handleLogout}
+          onAccionAsistente={ejecutarAccionAsistente}
+          proveedorIA={proveedorIA}
+          accessibleSections={seccionesAccesibles}
         />
 
         {/* Dynamic Section Renderer */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          {activeSection === 'dashboard' && (
+            <DashboardEjecutivoSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              cobros={scopedCobros}
+              gastos={scopedGastos}
+              candidatos={scopedCandidatos}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+              onSelectSection={setActiveSection}
+              cobrosPendientesCount={cobrosPendientesCount}
+            />
+          )}
+
           {activeSection === 'inicio' && (
             <InicioSection
               candidatos={scopedCandidatos}
@@ -2590,11 +3392,14 @@ export default function App() {
                 contratos={scopedContratos}
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
+                liquidaciones={scopedLiquidaciones}
+                resumenMorosidad={morosidadResumenPropietario}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
                 }}
                 onSaveProfesional={handleSaveProfesional}
+                onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
               />
             ) : (
@@ -2653,8 +3458,11 @@ export default function App() {
               candidatos={scopedCandidatos}
               solicitudesDoc={solicitudesDoc}
               userProfile={userProfile}
+              currentUser={currentUser}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onDeleteContrato={handleDeleteContrato}
+              onRecomercializarContrato={(c) => handleRecomercializarInmueble(c.inmuebleId, c.id)}
+              onSaveContrato={async (c) => { await saveContratoFirestore(c); }}
             />
           )}
 
@@ -2665,11 +3473,192 @@ export default function App() {
               propietarios={scopedPropietarios}
               currentUser={currentUser}
               onSaveContrato={handleSaveContrato}
-              onNavigateToInmueble={(inmId) => {
-                setActiveSection('inmuebles');
-              }}
+              onNavigateToInmueble={() => setActiveSection('inmuebles')}
             />
           )}
+
+          {/* BLOQUE C — Morosidad: recobro y expediente (solo administración; el propietario
+              ve el resumen mínimo en su portal). */}
+          {activeSection === 'morosidad' && currentUser.tipoPerfil === 'ADMINISTRADOR' && (
+            <MorosidadSection
+              expedientes={scopedMorosidad}
+              compromisos={scopedMorosidadCompromisos}
+              politicas={morosidadPoliticas}
+              contratos={contratos}
+              inmuebles={scopedInmuebles}
+              propietarios={propietarios}
+              currentUser={currentUser}
+              contexto={morosidadContexto}
+              onSavePolitica={handleSaveMorosidadPolitica}
+              esAdmin
+              resumenPropietario={morosidadResumenPropietario}
+            />
+          )}
+
+          {/* BLOQUE B — Tesorería: administración completa / portal propietario */}
+          {activeSection === 'tesoreria' && (
+            currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
+              <TesoreriaSection
+                contratos={contratos}
+                inmuebles={scopedInmuebles}
+                propietarios={scopedPropietarios}
+                liquidaciones={tesoreriaLiquidaciones}
+                gastos={tesoreriaGastos}
+                ordenes={tesoreriaOrdenesPago}
+                ficheros={tesoreriaFicherosSepa}
+                mandatos={tesoreriaMandatosSepa}
+                trabajos={tesoreriaTrabajos}
+                movimientosBancarios={tesoreriaSesionConciliacion.movimientos}
+                propuestasConciliacion={tesoreriaSesionConciliacion.propuestas}
+                gastosCanonicos={scopedGastos}
+                currentUser={currentUser}
+                onSaveLiquidacion={handleSaveTesoreriaLiquidacion}
+                onSaveGasto={handleSaveTesoreriaGasto}
+                onDeleteGasto={handleDeleteTesoreriaGasto}
+                onSaveOrdenPago={handleSaveTesoreriaOrdenPago}
+                onSaveFicheroSepa={handleSaveTesoreriaFicheroSepa}
+                onSaveMandato={handleSaveTesoreriaMandatoSepa}
+                onSaveContratos={handleSaveContratosBatch}
+              />
+            ) : currentUser.tipoPerfil === 'PROPIETARIO' ? (
+              <PropietarioPortalSection
+                currentUser={currentUser}
+                inmuebles={scopedInmuebles}
+                profesionales={scopedProfesionales}
+                contratos={scopedContratos}
+                especialidades={especialidades}
+                propietarios={scopedPropietarios}
+                liquidaciones={scopedLiquidaciones}
+                resumenMorosidad={morosidadResumenPropietario}
+                onOpenCrearProfesionalModal={(prof) => {
+                  setSelectedProfForEdit(prof);
+                  setShowCrearProfesionalModal(true);
+                }}
+                onSaveProfesional={handleSaveProfesional}
+                onSavePropietario={handleSavePropietario}
+                onNavigateToInmueble={() => setActiveSection('inmuebles')}
+              />
+            ) : null
+          )}
+
+          {activeSection === 'gastos' && (
+            <GastosSection
+              gastos={scopedGastos}
+              cobros={scopedCobros}
+              recurrentes={scopedRecurrentes}
+              prestamos={scopedPrestamos}
+              inmuebles={scopedInmuebles}
+              currentUser={currentUser}
+              onSaveGasto={handleSaveGasto}
+              onDeleteGasto={handleDeleteGasto}
+              onSaveRecurrente={handleSaveRecurrente}
+              onDeleteRecurrente={handleDeleteRecurrente}
+              onSavePrestamo={handleSavePrestamo}
+              onDeletePrestamo={handleDeletePrestamo}
+            />
+          )}
+
+          {activeSection === 'financiacion' && (
+            <FinanciacionSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'fiscal' && (
+            <FiscalidadSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={scopedGastos}
+              currentUser={currentUser}
+              onNavigateToInmueble={() => setActiveSection('inmuebles')}
+            />
+          )}
+
+          {activeSection === 'informes' && (
+            <InformesSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={scopedGastos}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'conciliacion' && (
+            <ConciliacionBancariaSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              gastos={scopedGastos}
+              cobros={scopedCobros}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'facturacion' && (
+            <FacturacionSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeSection === 'polizas' && (
+            <PolizasSegurosSection
+              inmuebles={scopedInmuebles}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser || undefined}
+              modo={currentUser?.tipoPerfil === 'PROPIETARIO' ? 'PROPIETARIO' : 'ADMIN'}
+            />
+          )}
+
+          {activeSection === 'actas' && (
+            <ActasSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              currentUser={currentUser || undefined}
+            />
+          )}
+
+          {activeSection === 'recomercializacion' && (
+            <RecomercializacionSection
+              expedientes={scopedExpedientesRecomerc}
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              profesionales={scopedProfesionales}
+              currentUser={currentUser}
+              inmobiliarias={inmobiliariasDirectorio}
+              propuestas={propuestasInmobiliaria}
+              leads={leadsInmobiliarios}
+              contextoNuevo={nuevoExpedienteCtx}
+              onConsumirContexto={() => setNuevoExpedienteCtx(null)}
+              onCreate={handleSaveExpedienteRecomerc}
+              onGuardar={handleSaveExpedienteRecomerc}
+              onEliminar={handleDeleteExpedienteRecomerc}
+              onGuardarInmobiliaria={handleSaveInmobiliaria}
+              onEliminarInmobiliaria={handleDeleteInmobiliaria}
+              onGuardarPropuesta={handleSavePropuestaInmobiliaria}
+              onGuardarLead={handleSaveLeadInmobiliario}
+              onCerrarCiclo={handleCerrarExpedienteRecomerc}
+            />
+          )}
+
+          {activeSection === 'inquilinos' && currentUser.tipoPerfil === 'ADMINISTRADOR' && (
+            <InquilinosSection
+              currentUser={currentUser}
+              contratos={contratos}
+              inmuebles={inmuebles}
+              usuarios={usuarios}
+            />
+          )}
+
+          {activeSection === 'suministros' &&
+            (currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
+              <SuministrosSection currentUser={currentUser} inmuebles={inmuebles} />
+            ) : currentUser.tipoPerfil === 'PROPIETARIO' ? (
+              <SuministrosSection currentUser={currentUser} inmuebles={scopedInmuebles} />
+            ) : null)}
 
           {activeSection === 'incidencias' && (
             <IncidenciasSection
@@ -2681,13 +3670,22 @@ export default function App() {
             />
           )}
 
-          {activeSection === 'profesionales' && (
-            <ProfesionalesSection
+          {activeSection === 'operaciones' && (
+            <OperacionesSection
               inmuebles={scopedInmuebles}
               propietarios={scopedPropietarios}
+              profesionales={scopedProfesionales}
+              gastos={scopedGastos}
               currentUser={currentUser}
-              especialidadesDisponibles={especialidades}
-              onNavigateToIncidencias={() => setActiveSection('incidencias')}
+              onSelectSection={setActiveSection}
+            />
+          )}
+
+          {activeSection === 'inversion' && (
+            <InversionSection
+              inmuebles={scopedInmuebles}
+              currentUser={currentUser}
+              onAddInmueble={handleAddInmueble}
             />
           )}
 
@@ -2712,10 +3710,13 @@ export default function App() {
               onUpdateSlot={handleUpdateSlot}
               onNavigateToPropietarios={() => setActiveSection('propietarios')}
               contratos={scopedContratos}
+              profesionales={scopedProfesionales}
               currentUser={currentUser}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onFinalizarContrato={handleFinalizarContrato}
-              onSaveContrato={handleSaveContrato}
+              onRecomercializarInmueble={(inmuebleId, contratoAnteriorId) =>
+                handleRecomercializarInmueble(inmuebleId, contratoAnteriorId)
+              }
             />
           )}
 
@@ -2749,6 +3750,18 @@ export default function App() {
               onUpdateProfile={(updated) => setUserProfile(updated)}
               onImportData={handleImportData}
               onOpenConfigAseguradoras={() => setShowConfigAseguradorasModal(true)}
+            />
+          )}
+
+          {activeSection === 'ayuda' && (
+            <CentroAyudaSection
+              usuario={currentUser}
+              accessibleSections={seccionesAccesibles}
+              onIniciarTutorial={(id) => {
+                const t = obtenerTutorial(id);
+                if (t) setSesionTutorial(iniciarTutorial(t));
+              }}
+              onSelectSection={setActiveSection}
             />
           )}
 
@@ -2801,11 +3814,14 @@ export default function App() {
                 contratos={scopedContratos}
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
+                liquidaciones={scopedLiquidaciones}
+                resumenMorosidad={morosidadResumenPropietario}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
                 }}
                 onSaveProfesional={handleSaveProfesional}
+                onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
               />
             )
@@ -2818,18 +3834,10 @@ export default function App() {
         candidato={selectedCandidateForModal}
         inmuebles={scopedInmuebles}
         solicitudesDoc={solicitudesDoc}
-        solicitudesSeguro={solicitudesSeguro}
         contratos={scopedContratos}
         onClose={() => setSelectedCandidateForModal(null)}
         onUpdateStatus={handleUpdateStatus}
         onUpdateCandidateDocs={handleUpdateCandidateDocs}
-        onSelectCandidate={handleSelectCandidate}
-        onOpenTramitarSeguro={handleOpenTramitarSeguro}
-        onOpenDetalleSeguro={(sol) => {
-          setSelectedCandidateForModal(null);
-          setSelectedSolicitudSeguroForDetail(sol);
-        }}
-        onRegistrarDecisionFinal={handleRegistrarDecisionFinal}
         onGoToAnalysis={(cand) => {
           setSelectedCandidateForAnalysis(cand);
           setActiveSection('analisis');
@@ -3009,6 +4017,19 @@ export default function App() {
           onSaveInvitacion={(newInv) => {
             handleSaveInvitacion(newInv);
           }}
+        />
+      )}
+
+      {/* CAPA TRANSVERSAL §6 (Fase 1): reproductor de tutorial (no bloquea la pantalla) */}
+      {sesionTutorial && tutorialActivo && currentUser && (
+        <TutorialPlayer
+          tutorial={tutorialActivo}
+          sesion={sesionTutorial}
+          contexto={contextoDesdeUsuario(currentUser, activeSection, { accessibleSections: seccionesAccesibles })}
+          onCambio={setSesionTutorial}
+          onNavegar={(r) => setActiveSection(r as SectionType)}
+          onCerrar={() => setSesionTutorial(null)}
+          servicio={servicioProgresoTutoriales}
         />
       )}
 

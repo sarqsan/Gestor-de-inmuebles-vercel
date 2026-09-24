@@ -19,7 +19,20 @@ import {
   User,
   LogOut,
   Receipt,
-  AlertTriangle,
+  Smartphone,
+  Zap,
+  TrendingDown,
+  TrendingUp,
+  RefreshCw,
+  LifeBuoy,
+  Calculator,
+  BarChart3,
+  Landmark,
+  Banknote,
+  LayoutDashboard,
+  Wallet,
+  ShieldAlert,
+  Activity,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -33,8 +46,9 @@ interface SidebarProps {
   contratosCount?: number;
   solicitudesSeguroCount?: number;
   cobrosPendientesCount?: number;
-  incidenciasCount?: number;
-  trabajosActivosCount?: number;
+  incidenciasAbiertasCount?: number;
+  /** BLOQUE C: nº de expedientes de morosidad con saldo pendiente. */
+  morosidadAbiertaCount?: number;
   currentUser?: UsuarioApp;
   onOpenAuthModal?: () => void;
   onLogout?: () => void;
@@ -51,8 +65,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   contratosCount = 0,
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
-  incidenciasCount = 0,
-  trabajosActivosCount = 0,
+  incidenciasAbiertasCount = 0,
+  morosidadAbiertaCount = 0,
   currentUser,
   onOpenAuthModal,
   onLogout,
@@ -72,36 +86,66 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   if (perfil === 'PROPIETARIO') {
     navItems = [
+      { id: 'dashboard', label: 'Centro de Control', icon: LayoutDashboard },
       { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck },
       { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount },
-      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
+      { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
-      { id: 'incidencias', label: 'Mis Incidencias', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet },
+      { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
+      { id: 'financiacion', label: 'Financiación', icon: Landmark },
+      { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
+      { id: 'facturacion', label: 'Facturación', icon: FileText },
+      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
+      { id: 'informes', label: 'Informes & Export', icon: BarChart3 },
+      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
+      { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText },
+      { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
+      { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
+      { id: 'operaciones', label: 'Operaciones', icon: Activity },
+      { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   } else if (perfil === 'PROFESIONAL') {
     navItems = [
       { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
       { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
-      { id: 'incidencias', label: 'Órdenes de Trabajo', icon: AlertTriangle, badge: incidenciasCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   } else {
     // ADMINISTRADOR
     navItems = [
+      { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard },
       { id: 'administracion', label: 'Centro de Control', icon: Shield },
       { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
+      { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
-      { id: 'profesionales', label: 'Profesionales & Obras', icon: Wrench, badge: trabajosActivosCount },
-      { id: 'incidencias', label: 'Incidencias & Seguros', icon: AlertTriangle, badge: incidenciasCount },
+      { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet },
+      { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
+      { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark },
+      { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
+      { id: 'morosidad', label: 'Morosidad y Recobro', icon: ShieldAlert, badge: morosidadAbiertaCount },
+      { id: 'facturacion', label: 'Facturación & VERI*FACTU', icon: FileText },
+      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
+      { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3 },
+      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
+      { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText },
+      { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone },
+      { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
       { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
       { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },
+      { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw },
+      { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
+      { id: 'operaciones', label: 'Operaciones', icon: Activity },
       { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length },
       { id: 'analisis', label: 'Análisis IA', icon: Sparkles },
       { id: 'configuracion', label: 'Configuración', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   }
 
@@ -133,6 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <button
               key={item.id}
+              data-tour={`nav-${item.id}`}
               onClick={() => onSelectSection(item.id)}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
                 isActive

@@ -1,6 +1,10 @@
 import React from 'react';
 import { SectionType, UserProfile, GmailIntegracionConfig, UsuarioApp, EnlaceRegistro } from '../types';
 import { Plus, Database, User, ShieldCheck, Mail, LogOut, CheckCircle2, Shield, Home, Wrench, Link2, Copy, Check } from 'lucide-react';
+// CAPA TRANSVERSAL §6 (Fase 1): ayuda contextual de la pantalla activa
+import { ContextualHelp } from './experiencia/ContextualHelp';
+import { AsistentePanel } from './experiencia/AsistentePanel';
+import type { AccionHost, ProveedorIA } from '../experiencia';
 
 interface HeaderProps {
   activeSection: SectionType;
@@ -14,6 +18,13 @@ interface HeaderProps {
   onLogout?: () => void;
   onConnectGoogle?: () => void;
   onDisconnectGoogle?: () => void;
+  /** CAPA TRANSVERSAL §6: iniciar un tutorial desde la ayuda contextual. */
+  onIniciarTutorial?: (tutorialId: string) => void;
+  /** §6 F4: el host ejecuta la acción validada del asistente (navegar/tutorial). */
+  onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
+  proveedorIA?: ProveedorIA;
+  /** Secciones accesibles (route guard del host) para el asistente. */
+  accessibleSections?: SectionType[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,11 +39,17 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onConnectGoogle,
   onDisconnectGoogle,
+  onIniciarTutorial,
+  onAccionAsistente,
+  proveedorIA,
+  accessibleSections,
 }) => {
   const [copiedLink, setCopiedLink] = React.useState(false);
 
   const getSectionTitle = (section: SectionType) => {
     switch (section) {
+      case 'dashboard':
+        return { title: 'Centro de Control Ejecutivo', subtitle: 'KPIs reales, requiere tu atención, financiero, inmuebles, operaciones y actividad — sin datos ficticios' };
       case 'inicio':
         return { title: 'Inicio y Resumen General', subtitle: 'Panel de control de candidatos e inmuebles' };
       case 'inmuebles':
@@ -57,8 +74,18 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Análisis Gemini IA', subtitle: 'Evaluación automatizada de solvencia y documentación' };
       case 'administracion':
         return { title: 'Administración Global & Seguridad', subtitle: 'Usuarios, roles, módulos, invitaciones y registro de auditoría' };
+      case 'actas':
+        return { title: 'Actas de Entrada y Salida — BLOQUE D', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };
+      case 'operaciones':
+        return { title: 'Centro de Operaciones y Mantenimiento', subtitle: 'Coordinación de incidencias, mantenimiento, OOTT, reformas, garantías y seguros' };
+      case 'financiacion':
+        return { title: 'Financiación Hipotecaria', subtitle: 'LTV, cuadro francés, carencia y coste financiero' };
+      case 'inversion':
+        return { title: 'Inversión y Valoración', subtitle: 'Analizador COMPRA→COSTES→REFORMA→ALQUILER→RENTABILIDAD→ESCENARIOS — sin datos ficticios, todo estimado' };
       case 'configuracion':
         return { title: 'Configuración del Sistema', subtitle: 'Preferencias, aseguradoras y conexión Google Workspace' };
+      case 'ayuda':
+        return { title: 'Centro de Ayuda', subtitle: 'Explicaciones por pantalla y tutoriales guiados según tu perfil' };
       default:
         return { title: 'Gestión de Alquileres', subtitle: 'Preselección de candidatos' };
     }
@@ -82,7 +109,20 @@ export const Header: React.FC<HeaderProps> = ({
           <span>/</span>
           <span className="text-slate-600 capitalize">{activeSection.replace('_', ' ')}</span>
         </div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h2>
+          {currentUser && (
+            <ContextualHelp
+              usuario={currentUser}
+              section={activeSection}
+              onAbrirCentro={() => onSelectSection('ayuda')}
+              onIniciarTutorial={onIniciarTutorial}
+            />
+          )}
+          {currentUser && onAccionAsistente && (
+            <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} />
+          )}
+        </div>
         <p className="text-xs text-slate-500">{subtitle}</p>
       </div>
 

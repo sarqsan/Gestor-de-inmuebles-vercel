@@ -2,54 +2,424 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // =========================================================================
+    // FASE 1.4 — SEGURIDAD DE FICHEROS
+    // C-Security (2026-09-22, reformulado sobre la canónica; ver
+    // docs/AUDITORIA-SEGURIDAD-STORAGE-DOCUMENTOS-2026-09-22.md):
+    //   · `read` de los árboles internos separado en `get` (cuenta interna) y
+    //     `list` (sólo administración): sin `list` no se pueden ENUMERAR los
+    //     objetos de otro propietario. El cliente nunca usa listAll()/list().
+    //   · `hasSafeObjectName()` en toda subida cuyo cliente sanea el nombre
+    //     (`replace(/[^a-zA-Z0-9._-]/g, '_')`): último segmento acotado, sin
+    //     segmentos vacíos ni `.`/`..`, longitud total <= 1024.
+    //   · `update` (en Storage = SÓLO metadatos; una re-subida al mismo nombre
+    //     se evalúa como `create`) cerrado en las rutas cuyo nombre es único
+    //     por subida; conservado donde el flujo re-sube el mismo nombre
+    //     (actas_pdfs) y en los bloques validados R3/E.
+    // RESIDUALES (no resueltos aquí, decisión pendiente):
+    //   · R-1 `internalUser()` == cualquier cuenta autenticada (incluye el perfil
+    //     INQUILINO del bloque E): excluirlo exige `firestore.get` en cada
+    //     operación interna o custom claims. No se cambia sin orden.
+    //   · R-2 sin custom claims no hay aislamiento por `{propietarioId}` en
+    //     Storage; el aislamiento fino vive en Firestore.
+    //   · R-3 `isPdfOrImage()` acepta `application/octet-stream` (clientes
+    //     que suben blobs sin tipo).
+    //   · R-4 las downloadURL con token son enlaces de capacidad ajenos a las
+    //     reglas.
+    //   · R-5 `presupuestos/`, `trabajos/` y `profesionales/{id}/documentos/`
+    //     existen en el cliente pero NO tienen bloque: caen en la denegación
+    //     por defecto y el cliente degrada a data-URL (sin cambio: afectaría al
+    //     módulo Operaciones).
+    // =========================================================================
+
     function isSignedIn() {
       return request.auth != null;
     }
 
+    // Administrador principal por email verificado por Firebase.
     function isMasterAdmin() {
-      return request.auth != null && 
-             'email' in request.auth.token && 
-             request.auth.token.email == 'sarqsan2@gmail.com';
+      return isSignedIn()
+        && 'email' in request.auth.token
+        && request.auth.token.email == 'sarqsan2@gmail.com';
+    }
+
+    function internalUser() {
+      return isMasterAdmin() || isSignedIn();
     }
 
     // =========================================================================
-    // DOCUMENTOS SOLICITADOS (EXPEDIENTES PRIVADOS DE CANDIDATOS)
+    // E.0. BLOQUE E — HELPERS DE AISLAMIENTO DEL INQUILINO (vía Firestore)
     // =========================================================================
-    // Lectura: Únicamente usuarios autenticados (propietarios o administradores)
-    // Subida: Permitida para aportación de documentos en formatos válidos (PDF / imágenes)
-    // con límite estricto de tamaño a 25MB para evitar ataques de denegación de servicio.
-    // Propietarios de otros inmuebles no deben acceder a documentos ajenos.
+    function existeUsuarioActual() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function isTenant() {
+      return isSignedIn() && !isMasterAdmin() && existeUsuarioActual() &&
+        firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.tipoPerfil == 'INQUILINO';
+    }
+
+    function tenantContratoIds() {
+      return firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.contratoIds;
+    }
+
+    function tenantVeContrato(contratoId) {
+      return isTenant() && contratoId is string && contratoId in tenantContratoIds();
+    }
+
+    function existeIncidencia(incidenciaId) {
+      return firestore.exists(/databases/(default)/documents/incidencias/$(incidenciaId));
+    }
+
+    function contratoDeIncidencia(incidenciaId) {
+      return firestore.get(/databases/(default)/documents/incidencias/$(incidenciaId)).data.contratoId;
+    }
+
+    function existeSuministro(suministroId) {
+      return firestore.exists(/databases/(default)/documents/suministros/$(suministroId));
+    }
+
+    function inmuebleDeSuministro(suministroId) {
+      return firestore.get(/databases/(default)/documents/suministros/$(suministroId)).data.inmuebleId;
+    }
+
+    function existeInmueble(inmuebleId) {
+      return firestore.exists(/databases/(default)/documents/inmuebles/$(inmuebleId));
+    }
+
+    function contratoActivoDeInmueble(inmuebleId) {
+      return firestore.get(/databases/(default)/documents/inmuebles/$(inmuebleId)).data.contratoActivoId;
+    }
+
+    // El inquilino sube fotos de lectura si su contrato es el activo del inmueble.
+    function tenantEnSuministroPorInmueble(suministroId) {
+      return isTenant() && existeSuministro(suministroId) &&
+        existeInmueble(inmuebleDeSuministro(suministroId)) &&
+        tenantVeContrato(contratoActivoDeInmueble(inmuebleDeSuministro(suministroId)));
+    }
+
+    function existeLectura(lecturaId) {
+      return firestore.exists(/databases/(default)/documents/lecturas_suministro/$(lecturaId));
+    }
+
+    function contratoDeLectura(lecturaId) {
+      return firestore.get(/databases/(default)/documents/lecturas_suministro/$(lecturaId)).data.contratoId;
+    }
+
+    function esEvidenciaValida() {
+      return request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('application/pdf|image/(jpeg|jpg|png|webp)');
+    }
+
+    function isPdfOrImage() {
+      return request.resource.contentType.matches('application/pdf')
+        || request.resource.contentType.matches('application/octet-stream')
+        || request.resource.contentType.matches('image/.*');
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    // Forma segura del NOMBRE DE OBJETO subido. `request.resource.name` es la
+    // ruta completa (p. ej. `gastos_facturas/P1/G1/1700_factura.pdf`), por lo
+    // que se valida: longitud total, ausencia de segmentos vacíos (`//`) y de
+    // segmentos `.`/`..` (trayectos), y que el ÚLTIMO segmento (el fichero)
+    // empiece por alfanumérico, use sólo `[A-Za-z0-9._-]`, no termine en `.`
+    // y mida <= 255 caracteres. No se exige extensión: el tipo lo gobierna
+    // `contentType` (isImage / isPdfOrImage / esEvidenciaValida), no el nombre.
+    // Todos los clientes del repositorio sanean el nombre con
+    // `replace(/[^a-zA-Z0-9._-]/g, '_')`, así que ninguna subida legítima cambia.
+    function hasSafeObjectName() {
+      return request.resource.name.size() <= 1024
+        && !request.resource.name.matches('.*//.*')
+        && !request.resource.name.matches('.*/[.]{1,2}/.*')
+        && request.resource.name.matches('.*/([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]{0,253}[A-Za-z0-9_-])');
+    }
+
+    // -------------------------------------------------------------------------
+    // JUSTIFICANTES DE COBRO (datos económicos)
+    // Ruta por propietario: cobros_justificantes/{propietarioId}/{cobroId}/{archivo}
+    // Exige cuenta interna. Las URL de descarga con token que genera el SDK
+    // funcionan como enlace de capacidad para el destinatario (quien lo recibe
+    // puede abrirlo aunque no tenga sesión).
+    // RESIDUAL: sin custom claims, Storage no puede leer Firestore para comparar
+    // el segmento propietarioId con el usuario; se exige cuenta interna y el
+    // aislamiento fino por propietario queda para cuando se emitan claims.
+    // -------------------------------------------------------------------------
+    match /cobros_justificantes/{propietarioId}/{cobroPeriodoId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 12 * 1024 * 1024
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      // Nombre único por subida (`Date.now()_…`): sin caso de uso de metadatos.
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // Ruta heredada anterior (sin carpeta de propietario): sólo lectura interna;
+    // ya no se permiten nuevas subidas a este esquema.
+    match /cobros_justificantes/{cobroPeriodoId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create, update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // FACTURAS / JUSTIFICANTES DE GASTOS (FASE 2.2 — datos económicos)
+    // Ruta por propietario: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
+    // Cuenta interna; PDF o imagen; máximo 12 MB. Mismo residual de aislamiento
+    // fino que los justificantes de cobro (pendiente de custom claims).
+    // -------------------------------------------------------------------------
+    match /gastos_facturas/{propietarioId}/{gastoId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 12 * 1024 * 1024
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // DOCUMENTOS APORTADOS POR LOS CANDIDATOS (portal público por token)
+    // La SUBIDA (create) la realiza el candidato sin iniciar sesión (funnel de
+    // captación). Antes el comodín `{allFiles=**}` admitía la subida anónima a
+    // CUALQUIER profundidad y con cualquier nombre. Ahora:
+    //   · el árbol completo (`{allFiles=**}`) conserva `get`/`delete` internos
+    //     (ningún objeto ya existente deja de ser legible/borrable) pero NO
+    //     admite `create`/`update`;
+    //   · la subida anónima sólo se concede en la ruta plana
+    //     `documentos_solicitados/{sol}/{fichero}` (la única que construye el
+    //     cliente: `{itemId}_{ts}_{nombre}`), con nombre seguro, PDF/imagen y
+    //     < 15 MB. El candidato no recibe URL de lectura; `list` sólo admin.
+    // -------------------------------------------------------------------------
+    match /documentos_solicitados/{solicitudDocId}/{allFiles=**} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create, update: if false;
+      allow delete: if internalUser();
+    }
+
+    match /documentos_solicitados/{solicitudDocId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if request.resource.size < 15 * 1024 * 1024
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // IMÁGENES DE INMUEBLES (catálogo / listado público)
+    // Lectura pública (los listados son públicos); escritura interna.
+    // R3: el nivel público es SOLO el primer segmento (foto de catálogo
+    // `inmuebles/{id}/{fichero}`); la subruta `inventario/` (evidencia
+    // operativa interna: contenidos/estado del inmueble) es solo interna.
+    // -------------------------------------------------------------------------
+    match /inmuebles/{inmuebleId}/{fileName} {
+      // Público SÓLO el `get` del objeto (lo que proyecta la ficha R3); el
+      // listado de la carpeta del inmueble exige cuenta interna.
+      allow get: if true;
+      allow list: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage()
+        && hasSafeObjectName();
+      // Nombre único por subida (`{imageId}_…` con id aleatorio).
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // R3 — ADJUNTOS DE INVENTARIO (documentación interna de trabajo).
+    // Antes cubiertos por el comodín público; ahora lectura/escritura
+    // interna. Las downloadURL con token ya emitidas siguen funcionando
+    // como enlaces de capacidad para su tenedor legítimo.
+    match /inmuebles/{inmuebleId}/inventario/{allFiles=**} {
+      allow read: if internalUser();
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage()
+        && hasSafeObjectName();
+      allow update, delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // FOTOGRAFÍAS DE INSPECCIÓN DE RECOMERCIALIZACIÓN (FASE 3.2)
+    // Ruta PRIVADA por propietario y expediente:
+    //   recomercializacion_fotos/{propietarioId}/{expedienteId}/{archivo}
+    // Son documentos internos de trabajo (estado aparente / desperfectos previos
+    // a la nueva comercialización), por lo que NO son públicas como las del
+    // catálogo. Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
+    // RESIDUAL: sin custom claims, el aislamiento fino por propietario queda
+    // pendiente de emitir claims (igual que justificantes y facturas).
+    // -------------------------------------------------------------------------
+    match /recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // FOTOGRAFÍAS DE INCIDENCIAS (BLOQUE 4)
+    // Ruta PRIVADA por propietario e incidencia:
+    //   incidencias_fotos/{propietarioId}/{incidenciaId}/{archivo}
+    // Documentos internos de trabajo (desperfectos/reparaciones); no públicos.
+    // Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
+    // -------------------------------------------------------------------------
+    match /incidencias_fotos/{propietarioId}/{incidenciaId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // DOCUMENTOS Y FOTOGRAFÍAS DE REFORMAS (CIRCUITO DE REFORMAS)
+    // Rutas PRIVADAS por propietario y proyecto:
+    //   reformas_documentos/{propietarioId}/{proyectoId}/{archivo}
+    //   reformas_fotos/{propietarioId}/{proyectoId}/{archivo}
+    // Documentación contractual, planos, presupuestos y certificados técnicos.
+    // -------------------------------------------------------------------------
+    match /reformas_documentos/{propietarioId}/{proyectoId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    match /reformas_fotos/{propietarioId}/{proyectoId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    // ------------------------------------------------------------------------
+    // FOTOGRAFÍAS Y PDFS DE ACTAS DE ENTRADA/SALIDA (BLOQUE D)
+    // Ruta PRIVADA por propietario y acta:
+    //   actas_fotos/{propietarioId}/{actaId}/{archivo}
+    //   actas_pdfs/{propietarioId}/{actaId}/{archivo}
+    // Documentos internos de trabajo (estado vivienda, inventario, firma).
+    // Sólo cuentas internas; imágenes y PDFs; máximo 15-20 MB por archivo.
+    // NO base64 en Firestore, referencia persistente Storage.
+    // ------------------------------------------------------------------------
+    match /actas_fotos/{propietarioId}/{actaId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 15 * 1024 * 1024
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
+    }
+
+    match /actas_pdfs/{propietarioId}/{actaId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if internalUser()
+        && request.resource.size < 20 * 1024 * 1024
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      // `handleGenerarPdf` re-sube el MISMO nombre
+      // (`Acta_{tipo}_{fecha}_v{version}_{id8}.pdf`) al regenerar una versión:
+      // se conserva `update` interno para no romper ese flujo legítimo.
+      allow update: if internalUser();
+      allow delete: if internalUser();
+    }
+
+    // -------------------------------------------------------------------------
+    // DENEGACIÓN POR DEFECTO PARA CUALQUIER OTRA RUTA
+    // -------------------------------------------------------------------------
+
     // =========================================================================
-    match /documentos_solicitados/{solicitudDocId}/{allPaths=**} {
-      allow read: if isSignedIn();
-      allow write: if request.resource.size < 25 * 1024 * 1024 &&
-                      request.resource.contentType.matches('application/pdf|image/(jpeg|jpg|png|webp)');
+    // E.1. BLOQUE E — EVIDENCIAS DE INCIDENCIAS (fotos/documentos del expediente)
+    // El inquilino solo accede a las de incidencias de sus contratos.
+    // Subida: PDF/imágenes, máx. 10 MB. Solo el personal borra.
+    // =========================================================================
+    match /incidencias/{incidenciaId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() ||
+        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
+      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
+        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
+      allow delete: if isSignedIn() && !isTenant();
     }
 
     // =========================================================================
-    // FOTOGRAFÍAS Y MULTIMEDIA DE INMUEBLES
+    // E.2. BLOQUE E — FOTOS DE LECTURAS DE CONTADOR
+    // Ruta: suministros/{suministroId}/lecturas/{lecturaId}/{fichero}
+    // La lectura se crea primero en Firestore (inmutable); la foto la referencia.
     // =========================================================================
-    match /inmuebles/{inmuebleId}/{allPaths=**} {
-      allow read: if true;
-      allow write: if isSignedIn() && request.resource.size < 15 * 1024 * 1024;
+    match /suministros/{suministroId}/lecturas/{lecturaId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() ||
+        (existeLectura(lecturaId) && tenantVeContrato(contratoDeLectura(lecturaId))));
+      // Subida ANTES de crear la lectura (inmutable): alcance vía contrato activo del inmueble.
+      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
+        tenantEnSuministroPorInmueble(suministroId));
+      allow delete: if isSignedIn() && !isTenant();
     }
 
     // =========================================================================
-    // DOCUMENTACIÓN DE PROFESIONALES Y PRESUPUESTOS
+    // E.3. BLOQUE E — DOCUMENTOS DEL CONTRATO (PDF LAU, actas, anexos)
+    // El inquilino solo lee los de sus contratos; solo el personal publica.
     // =========================================================================
-    match /profesionales/{profesionalId}/{allPaths=**} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.resource.size < 25 * 1024 * 1024;
-    }
-
-    match /presupuestos/{presupuestoId}/{allPaths=**} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.resource.size < 25 * 1024 * 1024;
+    match /contratos/{contratoId}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
+      allow create, update, delete: if isSignedIn() && !isTenant();
     }
 
     // =========================================================================
-    // DEFAULT DENY
+    // E.4. BLOQUE E — RECIBOS Y JUSTIFICANTES DE COBRO
+    // Ruta: recibos/{contratoId}/{claveCobro}/{fichero}
     // =========================================================================
+    match /recibos/{contratoId}/{claveCobro}/{file=**} {
+      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
+      allow create, update, delete: if isSignedIn() && !isTenant();
+    }
+
+    // =========================================================================
+    // R2 — EVIDENCIAS DE MOROSIDAD (adjuntos del expediente, BLOQUE C)
+    // Ruta PRIVADA por propietario y expediente:
+    //   morosidad_evidencias/{propietarioId}/{expedienteId}/{archivo}
+    // Autorización espejo de Firestore §34 (`evidencias_morosidad`): SOLO la
+    // administración maestra opera; el propietario/inquilino nunca leen
+    // evidencias (el propietario solo ve el espejo recortado §37). Sin
+    // segmentos validados contra Firestore: innecesario, el master ve todo.
+    // Creación con `esEvidenciaValida()` (PDF/JPEG/PNG/WEBP, < 10 MB).
+    // Append-only: sin update ni delete (igual que el metadato en §34).
+    // Los metadatos (storagePath, nombre, MIME, tamaño) viven en Firestore;
+    // el binario jamás viaja en base64 ni en localStorage.
+    // =========================================================================
+    match /morosidad_evidencias/{propietarioId}/{expedienteId}/{fileName} {
+      allow read: if isMasterAdmin();
+      allow create: if isMasterAdmin() && esEvidenciaValida();
+      allow update, delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

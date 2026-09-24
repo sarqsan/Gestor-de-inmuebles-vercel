@@ -12,6 +12,7 @@ import {
   TrabajoProfesional,
   PresupuestoProfesional,
   Inmueble,
+  GarantiaReparacion,
 } from '../../types';
 import {
   ESTADOS_INCIDENCIA_LABELS,
@@ -23,11 +24,18 @@ import {
   canManageResponsabilidad,
 } from '../../utils/incidenciasEngine';
 import { evaluarCoberturaPolizas } from '../../utils/segurosEngine';
+import { detectarPosibleGarantiaIncidencia } from '../../utils/mantenimientoEngine';
 import {
   ESTADO_TRABAJO_LABELS,
   PRIORIDAD_TRABAJO_LABELS,
+  buscarProfesionalesCompatibles,
+  evaluarCompatibilidadProfesional,
 } from '../../utils/profesionalesEngine';
-import { subscribeTrabajosProfesionales, subscribePresupuestosProfesionales } from '../../lib/firebase';
+import {
+  subscribeTrabajosProfesionales,
+  subscribePresupuestosProfesionales,
+  subscribeGarantiasReparacion,
+} from '../../lib/firebase';
 import { TrabajoProfesionalModal } from './TrabajoProfesionalModal';
 import { DetalleTrabajoProfesionalModal } from './DetalleTrabajoProfesionalModal';
 import { PresupuestoProfesionalModal } from './PresupuestoProfesionalModal';
@@ -139,6 +147,16 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
   const [showPresupuestoModal, setShowPresupuestoModal] = useState<boolean>(false);
   const [presupuestoSeleccionadoDetalle, setPresupuestoSeleccionadoDetalle] = useState<PresupuestoProfesional | null>(null);
   const [trabajoParaPresupuesto, setTrabajoParaPresupuesto] = useState<TrabajoProfesional | null>(null);
+  const [garantias, setGarantias] = useState<GarantiaReparacion[]>([]);
+
+  useEffect(() => {
+    const unsubGarantias = subscribeGarantiasReparacion((items) => {
+      setGarantias(items);
+    });
+    return () => {
+      unsubGarantias();
+    };
+  }, []);
 
   // Sincronizar estados locales cuando cambie la incidencia
   useEffect(() => {
@@ -182,6 +200,26 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
   // Evaluar cobertura con las pólizas vigentes
   const evaluacionSeguro = evaluarCoberturaPolizas(incidencia, polizas);
+  const deteccionGarantia = detectarPosibleGarantiaIncidencia(incidencia, garantias);
+  const inmuebleActual = inmuebles.find((i) => i.id === incidencia.inmuebleId);
+  const candidatosCompatibles = inmuebleActual
+    ? buscarProfesionalesCompatibles({
+        inmueble: inmuebleActual,
+        profesionales,
+        categoria: incidencia.categoria,
+        servicioRequerido: incidencia.titulo,
+        incluirNoCompatibles: true,
+      })
+    : profesionales.map((p) => ({
+        profesional: p,
+        nivel: 'COMPATIBLE_CON_RESERVA' as const,
+        cumpleEspecialidad: true,
+        cumpleZona: false,
+        cumpleEstado: true,
+        estadoZona: 'ZONA_NO_DETERMINADA' as const,
+        motivo: 'Sin inmueble de referencia',
+        detalles: { especialidad: '', zona: '', estado: '' },
+      }));
   // Buscar siniestro vinculado a esta incidencia si existe
   const siniestroVinculado = siniestros.find((s) => s.incidenciaId === incidencia.id);
   // Pólizas asociadas a este inmueble
@@ -1085,6 +1123,57 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
           {/* TAB 3: RESPONSABILIDAD & LAU */}
           {activeTab === 'responsabilidad' && (
             <div className="space-y-6">
+              {/* Alerta consultiva de Posible Garantía Previa Detectada */}
+              {deteccionGarantia.tieneGarantia && (
+                <div className="p-4 bg-amber-500/10 border-2 border-amber-500/40 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
+                    <ShieldCheck className="w-5 h-5 text-amber-600" />
+                    <span>⚠️ Posible Reparación en Garantía Previa Detectada</span>
+                  </div>
+                  <p className="text-xs text-amber-900 leading-relaxed font-medium">
+                    {deteccionGarantia.sugerencia}
+                  </p>
+                  <div className="space-y-2 pt-1">
+                    {deteccionGarantia.garantiasAplicables.map((g) => (
+                      <div
+                        key={g.id}
+                        className="p-3 bg-white/90 rounded-lg border border-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs"
+                      >
+                        <div>
+                          <strong className="text-slate-900">{g.titulo}</strong>
+                          <span className="text-slate-500 block text-[11px]">
+                            Proveedor: {g.proveedor} • Válida hasta {new Date(g.fechaFin).toLocaleDateString('es-ES')}
+                          </span>
+                          {g.cobertura && (
+                            <span className="text-slate-600 text-[11px] block mt-0.5">
+                              Cobertura: {g.cobertura}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setResponsabilidad('GARANTIA');
+                              setResponsabilidadMotivo(
+                                `Reincidencia o daño cubierto por garantía previa: ${g.titulo} (Proveedor: ${g.proveedor}, Vence: ${new Date(g.fechaFin).toLocaleDateString('es-ES')})`
+                              );
+                              setResponsabilidadGarantiaRef(g.id);
+                              if (g.profesionalId) {
+                                setResponsabilidadProfesionalId(g.profesionalId);
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-[11px] transition-colors"
+                          >
+                            Asignar Responsabilidad: Garantía
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Tarjeta de Estado Actual de la Decisión */}
               {(!incidencia.responsabilidad || incidencia.responsabilidad === 'PENDIENTE_DE_DETERMINAR' || incidencia.responsabilidad === 'PENDIENTE_COMPROBACION' || incidencia.responsabilidad === 'INDETERMINADA') ? (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
@@ -1762,11 +1851,21 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
                     >
                       <option value="">Sin profesional asignado</option>
-                      {profesionales.map((prof) => (
-                        <option key={prof.id} value={prof.id}>
-                          {prof.nombreEmpresa || prof.nombreContacto} ({prof.especialidadPrincipal})
-                        </option>
-                      ))}
+                      {candidatosCompatibles.map((res) => {
+                        const prof = res.profesional;
+                        const nombre = prof.nombreComercial || prof.nombre || prof.contactoNombre;
+                        const badgeTxt =
+                          res.nivel === 'COMPATIBLE'
+                            ? '✅ Compatible'
+                            : res.nivel === 'COMPATIBLE_CON_RESERVA'
+                            ? '⚠️ Con Reserva'
+                            : '❌ No Compatible';
+                        return (
+                          <option key={prof.id} value={prof.id}>
+                            {badgeTxt} — {nombre} ({prof.especialidades?.join(', ') || 'General'})
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

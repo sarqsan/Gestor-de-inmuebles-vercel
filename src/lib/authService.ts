@@ -17,6 +17,12 @@ import {
 } from 'firebase/firestore';
 import { auth, db, USUARIOS_COL, ENLACES_REGISTRO_COL, saveAuditLogFirestore } from './firebase';
 import {
+  contratosDelInquilino,
+  puedeAccederContrato,
+  puedeAccederInmueble,
+  resolverAlcance,
+} from '../inquilino/scope';
+import {
   UsuarioApp,
   Inmueble,
   ContratoFormalizacion,
@@ -30,6 +36,40 @@ import {
 } from '../types';
 
 export const ADMIN_MASTER_EMAIL = 'sarqsan2@gmail.com';
+
+/**
+ * FASE 1.4 — Mantiene el espejo de identidad `usuarios_auth/{uid}` que las
+ * Security Rules usan para resolver el rol y el propietarioId a partir del UID
+ * de Firebase Authentication (las reglas no pueden hacer consultas, sólo una
+ * lectura puntual por ruta). El documento es reducido y el usuario sólo puede
+ * escribirlo si coincide con su perfil autoritativo de `usuarios/{id}` (la
+ * propia regla lo fuerza), por lo que no sirve para escalar privilegios.
+ * Es idempotente y nunca debe bloquear el inicio de sesión.
+ */
+export async function syncAuthIndex(
+  usuario: UsuarioApp,
+  authUser?: { uid: string } | null
+): Promise<void> {
+  try {
+    const fb = authUser || auth.currentUser;
+    if (!fb || !fb.uid || !usuario || !usuario.id) return;
+    const payload = {
+      uid: fb.uid,
+      usuarioId: usuario.id,
+      email: usuario.email || '',
+      tipoPerfil: usuario.tipoPerfil,
+      estado: usuario.estado,
+      roles: Array.isArray(usuario.roles) ? usuario.roles : [],
+      propietarioId: usuario.propietarioId || '',
+      profesionalId: usuario.profesionalId || '',
+      inmuebleIds: Array.isArray(usuario.inmuebleIds) ? usuario.inmuebleIds : [],
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, 'usuarios_auth', fb.uid), payload, { merge: true });
+  } catch (err) {
+    console.warn('No se pudo sincronizar el espejo de identidad usuarios_auth:', err);
+  }
+}
 
 /**
  * Genera un hash criptográfico SHA-256 seguro para verificación de credenciales directas.
@@ -262,6 +302,11 @@ export async function loginWithEmail(
     resultado: 'EXITO',
   });
 
+  // FASE 1.4: escribir el espejo de identidad para las Security Rules.
+  if (firebaseUser) {
+    await syncAuthIndex(usuario, firebaseUser);
+  }
+
   return { firebaseUser, usuarioApp: usuario };
 }
 
@@ -384,8 +429,17 @@ export async function registerWithInvitationLink(params: {
     throw new Error('Seguridad: Los enlaces públicos no pueden crear perfiles de administración.');
   }
 
-  const tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL' =
-    enlace.tipoPerfil === 'PROFESIONAL' ? 'PROFESIONAL' : 'PROPIETARIO';
+  const tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL' | 'INQUILINO' =
+    enlace.tipoPerfil === 'PROFESIONAL'
+      ? 'PROFESIONAL'
+      : enlace.tipoPerfil === 'INQUILINO'
+      ? 'INQUILINO'
+      : 'PROPIETARIO';
+
+  // BLOQUE E: la invitación de inquilino exige contrato vinculado (alcance del portal)
+  if (tipoPerfil === 'INQUILINO' && !enlace.contratoIdVinculado) {
+    throw new Error('Seguridad: esta invitación de inquilino no tiene contrato vinculado.');
+  }
 
   let firebaseUser: FirebaseUser | null = null;
   try {
@@ -405,10 +459,20 @@ export async function registerWithInvitationLink(params: {
   const rolDef = ROLES_PREDEFINIDOS.find((r) =>
     tipoPerfil === 'PROPIETARIO'
       ? r.id === 'PROPIETARIO_ESTANDAR'
+      : tipoPerfil === 'INQUILINO'
+      ? r.id === 'INQUILINO_PORTAL'
       : r.id === 'PROFESIONAL_MANTENIMIENTO'
   );
 
-  const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  // BLOQUE E: el inquilino usa su Auth UID como ID de documento, porque las reglas
+  // resuelven el alcance vía usuarios/{uid}. Sin Firebase Auth no hay aislamiento.
+  if (tipoPerfil === 'INQUILINO' && !firebaseUser) {
+    throw new Error('El registro de inquilino requiere Firebase Authentication (proveedor Email/Contraseña).');
+  }
+  const userId =
+    tipoPerfil === 'INQUILINO' && firebaseUser
+      ? firebaseUser.uid
+      : `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const pHash = await hashPassword(password);
 
   const nuevoUsuario: UsuarioApp = {
@@ -422,16 +486,37 @@ export async function registerWithInvitationLink(params: {
     estado: 'ACTIVO',
     roles: rolDef ? [rolDef.id] : [],
     permisos: rolDef ? rolDef.permisos : [],
+    ...(tipoPerfil === 'INQUILINO' && enlace.contratoIdVinculado
+      ? { contratoIds: [enlace.contratoIdVinculado], enlaceRegistroId: enlace.id }
+      : {}),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastLoginAt: new Date().toISOString(),
   };
 
-  // 3. Crear entidad relacionada (Propietario o Profesional)
+  // 3. Determinar el ID de la entidad relacionada y vincularlo al usuario
+  // BLOQUE E: el inquilino no crea entidad; su alcance es su contrato vinculado.
+  let propId: string | undefined;
+  let profId: string | undefined;
   if (tipoPerfil === 'PROPIETARIO') {
-    const propId = enlace.propietarioIdVinculado || `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    propId = enlace.propietarioIdVinculado || `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     nuevoUsuario.propietarioId = propId;
+  } else if (tipoPerfil === 'PROFESIONAL') {
+    profId = enlace.profesionalIdVinculado || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    nuevoUsuario.profesionalId = profId;
+  }
 
+  // 4. Guardar PRIMERO el registro de usuario (documento autoritativo)...
+  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario, passwordHash: pHash });
+
+  // 4b. ...y después el espejo de identidad que leen las Security Rules.
+  //     Debe existir antes de crear la ficha de propietario (su regla lo exige).
+  if (firebaseUser) {
+    await syncAuthIndex(nuevoUsuario, firebaseUser);
+  }
+
+  // 5. Crear la entidad relacionada (Propietario o Profesional)
+  if (tipoPerfil === 'PROPIETARIO' && propId) {
     const propietarioData: Propietario = {
       id: propId,
       nombre: `${nombre.trim()} ${apellidos?.trim() || ''}`.trim(),
@@ -448,10 +533,7 @@ export async function registerWithInvitationLink(params: {
       fechaActualizacion: new Date().toISOString(),
     };
     await setDoc(doc(db, 'propietarios', propId), propietarioData, { merge: true });
-  } else {
-    const profId = enlace.profesionalIdVinculado || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    nuevoUsuario.profesionalId = profId;
-
+  } else if (tipoPerfil === 'PROFESIONAL' && profId) {
     const profesionalData: Profesional = {
       id: profId,
       usuarioId: userId,
@@ -471,10 +553,7 @@ export async function registerWithInvitationLink(params: {
     await setDoc(doc(db, 'profesionales', profId), profesionalData, { merge: true });
   }
 
-  // 4. Guardar registro de usuario en Firestore
-  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario, passwordHash: pHash });
-
-  // 5. Incrementar usos del enlace
+  // 6. Incrementar usos del enlace
   await setDoc(
     doc(db, 'enlaces_registro', enlace.id),
     { usosActuales: (enlace.usosActuales || 0) + 1 },
@@ -608,6 +687,10 @@ export function subscribeAuthState(
         return;
       }
 
+      // FASE 1.4: asegurar que el espejo de identidad existe ANTES de que la
+      // aplicación abra las suscripciones de datos (las reglas lo necesitan).
+      await syncAuthIndex(usuarioApp, user);
+
       try {
         localStorage.setItem('rentselect_active_session', JSON.stringify(usuarioApp));
       } catch (e) {}
@@ -633,6 +716,75 @@ export function isPropietario(usuario?: UsuarioApp | null): boolean {
 
 export function isProfesional(usuario?: UsuarioApp | null): boolean {
   return usuario?.tipoPerfil === 'PROFESIONAL';
+}
+
+// =========================================================================
+// BLOQUE E — ALCANCE DEL PORTAL DEL INQUILINO
+// Aislamiento: inquilino → contrato(s) vinculado(s) → inmueble(s).
+// Estos helpers alimentan la UI; la aplicación real es deny-by-default
+// en las reglas de Firestore/Storage (sección E).
+// =========================================================================
+
+export function isInquilino(usuario?: UsuarioApp | null): boolean {
+  return usuario?.tipoPerfil === 'INQUILINO';
+}
+
+/** Contratos del inquilino (intersección de sus contratoIds con los contratos cargados). */
+export function getContratosDelInquilino(
+  usuario: UsuarioApp | null | undefined,
+  allContratos: ContratoFormalizacion[]
+): ContratoFormalizacion[] {
+  if (!usuario) return [];
+  return contratosDelInquilino(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    allContratos
+  );
+}
+
+/** ¿Puede el inquilino acceder a este contrato? (pertenencia estricta). */
+export function canTenantAccessContrato(
+  usuario: UsuarioApp | null | undefined,
+  contratoId: string
+): boolean {
+  if (!usuario) return false;
+  return puedeAccederContrato(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    contratoId
+  );
+}
+
+/**
+ * ¿Puede el inquilino acceder a este inmueble?
+ * Solo a través de un contrato vinculado que apunte al inmueble.
+ */
+export function canTenantAccessInmueble(
+  usuario: UsuarioApp | null | undefined,
+  inmuebleId: string,
+  allContratos: ContratoFormalizacion[]
+): boolean {
+  if (!usuario) return false;
+  return puedeAccederInmueble(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    inmuebleId,
+    allContratos
+  );
+}
+
+export interface TenantScope {
+  contratos: ContratoFormalizacion[];
+  inmuebleIds: string[];
+}
+
+/** Resuelve el alcance visible del inquilino (contratos + inmuebles derivados). */
+export function resolveTenantScope(
+  usuario: UsuarioApp | null | undefined,
+  allContratos: ContratoFormalizacion[]
+): TenantScope {
+  if (!usuario) return { contratos: [], inmuebleIds: [] };
+  return resolverAlcance(
+    { tipoPerfil: usuario.tipoPerfil, contratoIds: usuario.contratoIds },
+    allContratos
+  );
 }
 
 /**

@@ -1,12 +1,12 @@
 {
-  "projectId": "startup-sanctuary-sln7n",
-  "appId": "1:590446652750:web:cfe218b502b4fe8846421f",
-  "apiKey": "AIzaSyBxspQVfcvexPuyioGwNLiWxxLYnDuY58M",
-  "authDomain": "startup-sanctuary-sln7n.firebaseapp.com",
+  "projectId": "gestor-inmuebles-produccion",
+  "appId": "1:428136337242:web:7127479c3521111a2ead63",
+  "apiKey": "AIzaSyBV4a9kKpOmmAbF54AY3c1VGkZeYlfN5rA",
+  "authDomain": "gestor-inmuebles-produccion.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51",
-  "storageBucket": "startup-sanctuary-sln7n.firebasestorage.app",
-  "messagingSenderId": "590446652750",
+  "storageBucket": "gestor-inmuebles-produccion.firebasestorage.app",
+  "messagingSenderId": "428136337242",
   "measurementId": "",
-  "oAuthClientId": "590446652750-r5jk3c2mfame1ac47f7dg05s1fm5jage.apps.googleusercontent.com",
+  "oAuthClientId": "428136337242-9tgmcdi3vs5kqp2q8oll6oe0vqtfv65e.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

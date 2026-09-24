@@ -38,6 +38,38 @@ import {
 export const ADMIN_MASTER_EMAIL = 'sarqsan2@gmail.com';
 
 /**
+ * ¿Es un rechazo de las Security Rules de Firestore? (`FirestoreError` con
+ * código `permission-denied` / mensaje «Missing or insufficient permissions»).
+ */
+export function esErrorPermisosFirestore(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown } | null | undefined;
+  if (!e) return false;
+  const code = typeof e.code === 'string' ? e.code : '';
+  const msg = typeof e.message === 'string' ? e.message : '';
+  return (
+    code === 'permission-denied' ||
+    code === 'firestore/permission-denied' ||
+    /missing or insufficient permissions/i.test(msg)
+  );
+}
+
+/**
+ * Mensaje accionable para un rechazo de permisos durante el inicio de sesión.
+ * Las Security Rules exigen una sesión de Firebase Authentication para leer
+ * `usuarios/{id}`; sin ella (modo de acceso directo) Firestore deniega, y así debe
+ * seguir siendo: la solución es habilitar el proveedor, no relajar las reglas.
+ */
+export const MENSAJE_LOGIN_SIN_PERMISOS =
+  'No se pudo verificar tu perfil: Firestore ha denegado el acceso (Missing or insufficient permissions). ' +
+  'Las reglas de seguridad exigen una sesión de Firebase Authentication. ' +
+  'Comprueba que el proveedor «Correo electrónico/contraseña» está habilitado en Firebase Console › Authentication › Sign-in method ' +
+  'y que la cuenta existe en Firebase Authentication; si el problema persiste, contacta con el administrador.';
+
+export function mensajeErrorLogin(err: unknown): string | null {
+  return esErrorPermisosFirestore(err) ? MENSAJE_LOGIN_SIN_PERMISOS : null;
+}
+
+/**
  * FASE 1.4 — Mantiene el espejo de identidad `usuarios_auth/{uid}` que las
  * Security Rules usan para resolver el rol y el propietarioId a partir del UID
  * de Firebase Authentication (las reglas no pueden hacer consultas, sólo una
@@ -218,28 +250,35 @@ export async function loginWithEmail(
   if (firebaseUser) {
     usuario = await getUsuarioByAuthUid(firebaseUser.uid, firebaseUser.email);
   } else if (authProviderDisabled) {
-    const pHash = await hashPassword(passwordInput);
+    // Sin sesión de Firebase Auth las reglas deniegan la lectura de `usuarios/{id}`
+    // (incluido `user_admin_principal`). No se rodean: se traduce el rechazo.
+    try {
+      const pHash = await hashPassword(passwordInput);
 
-    if (email === ADMIN_MASTER_EMAIL) {
-      const adminSnap = await getDoc(doc(db, 'usuarios', 'user_admin_principal'));
-      if (adminSnap.exists()) {
-        const adminData = adminSnap.data() as any;
-        if (adminData.passwordHash && adminData.passwordHash !== pHash) {
-          throw new Error('Contraseña incorrecta para el Administrador Principal.');
+      if (email === ADMIN_MASTER_EMAIL) {
+        const adminSnap = await getDoc(doc(db, 'usuarios', 'user_admin_principal'));
+        if (adminSnap.exists()) {
+          const adminData = adminSnap.data() as any;
+          if (adminData.passwordHash && adminData.passwordHash !== pHash) {
+            throw new Error('Contraseña incorrecta para el Administrador Principal.');
+          }
+          usuario = { id: 'user_admin_principal', ...adminData } as UsuarioApp;
         }
-        usuario = { id: 'user_admin_principal', ...adminData } as UsuarioApp;
-      }
-    } else {
-      const qEmail = query(USUARIOS_COL, where('email', '==', email));
-      const snapEmail = await getDocs(qEmail);
-      if (!snapEmail.empty) {
-        const uDoc = snapEmail.docs[0];
-        const uData = uDoc.data() as any;
-        if (uData.passwordHash && uData.passwordHash !== pHash) {
-          throw new Error('Contraseña incorrecta.');
+      } else {
+        const qEmail = query(USUARIOS_COL, where('email', '==', email));
+        const snapEmail = await getDocs(qEmail);
+        if (!snapEmail.empty) {
+          const uDoc = snapEmail.docs[0];
+          const uData = uDoc.data() as any;
+          if (uData.passwordHash && uData.passwordHash !== pHash) {
+            throw new Error('Contraseña incorrecta.');
+          }
+          usuario = { id: uDoc.id, ...uData } as UsuarioApp;
         }
-        usuario = { id: uDoc.id, ...uData } as UsuarioApp;
       }
+    } catch (err) {
+      if (esErrorPermisosFirestore(err)) throw new Error(MENSAJE_LOGIN_SIN_PERMISOS);
+      throw err;
     }
   }
 
@@ -284,12 +323,19 @@ export async function loginWithEmail(
     localStorage.setItem('rentselect_current_user_id', usuario.id);
   } catch (e) {}
 
-  // 5. Actualizar timestamp de último acceso y registrar auditoría
-  await setDoc(
-    doc(db, 'usuarios', usuario.id),
-    { lastLoginAt: new Date().toISOString() },
-    { merge: true }
-  );
+  // 5. Actualizar timestamp de último acceso y registrar auditoría.
+  // `lastLoginAt` es informativo: la autenticación ya se ha validado, así que un
+  // rechazo de Firestore aquí NO debe bloquear el acceso (ni impedir escribir el
+  // espejo de identidad más abajo). Igual que la auditoría y `syncAuthIndex`.
+  try {
+    await setDoc(
+      doc(db, 'usuarios', usuario.id),
+      { lastLoginAt: new Date().toISOString() },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('No se pudo actualizar lastLoginAt (no bloquea el inicio de sesión):', err);
+  }
 
   await saveAuditLogFirestore({
     usuarioId: usuario.id,

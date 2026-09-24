@@ -15,6 +15,7 @@ import {
   loginWithEmail,
   initFirstAdminAccount,
   ADMIN_MASTER_EMAIL,
+  mensajeErrorLogin,
 } from '../lib/authService';
 import { UsuarioApp } from '../types';
 
@@ -58,6 +59,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
         setErrorMsg('No existe ningún usuario con este correo electrónico.');
       } else if (err?.code === 'auth/too-many-requests') {
         setErrorMsg('Demasiados intentos fallidos. Por favor inténtalo de nuevo en unos minutos.');
+      } else if (mensajeErrorLogin(err)) {
+        setErrorMsg(mensajeErrorLogin(err) as string);
       } else {
         setErrorMsg(err?.message || 'Error al iniciar sesión.');
       }

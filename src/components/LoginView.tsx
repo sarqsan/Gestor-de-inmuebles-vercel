@@ -15,20 +15,29 @@ import {
 import {
   loginWithEmail,
   initFirstAdminAccount,
+  enviarRecuperacionPassword,
   ADMIN_MASTER_EMAIL,
 } from '../lib/authService';
+
+export const MENSAJE_RECUPERACION_NEUTRAL =
+  'Si existe una cuenta asociada a ese correo, recibirás instrucciones para restablecer tu contraseña.';
+export const MENSAJE_RECUPERACION_GENERICO =
+  'No se pudo procesar la solicitud. Inténtalo de nuevo en unos minutos.';
 import { UsuarioApp } from '../types';
 
 interface LoginViewProps {
   onLoginSuccess: (usuario: UsuarioApp) => void;
   onOpenRegisterWithToken?: (token: string) => void;
   onOpenRegistroAutonomo?: () => void;
+  /** Solo tests: vista inicial (producción siempre empieza en login). */
+  vistaInicial?: 'login' | 'recuperacion';
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
   onLoginSuccess,
   onOpenRegisterWithToken,
   onOpenRegistroAutonomo,
+  vistaInicial,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,6 +49,9 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [adminSetupSuccess, setAdminSetupSuccess] = useState(false);
   const [invitationTokenInput, setInvitationTokenInput] = useState('');
   const [showInvitationPrompt, setShowInvitationPrompt] = useState(false);
+  const [showRecuperacion, setShowRecuperacion] = useState(vistaInicial === 'recuperacion');
+  const [recuperacionEmail, setRecuperacionEmail] = useState('');
+  const [recuperacionEnviada, setRecuperacionEnviada] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,6 +103,29 @@ export const LoginView: React.FC<LoginViewProps> = ({
     } catch (err: any) {
       console.error('Error configurando administrador:', err);
       setErrorMsg(err?.message || 'Error al inicializar la cuenta de administrador.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRecuperacionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recuperacionEmail.trim()) {
+      setErrorMsg('Indica tu correo electrónico para recuperar tu contraseña.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recuperacionEmail.trim())) {
+      setErrorMsg('El correo electrónico no es válido.');
+      return;
+    }
+    try {
+      setLoading(true);
+      setErrorMsg('');
+      await enviarRecuperacionPassword(recuperacionEmail);
+      setRecuperacionEnviada(true);
+    } catch (err: any) {
+      console.error('Error solicitando recuperación:', err);
+      setErrorMsg(MENSAJE_RECUPERACION_GENERICO);
     } finally {
       setLoading(false);
     }
@@ -165,7 +200,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
           )}
 
           {/* Formulario Estándar de Login */}
-          {!showAdminSetup && !showInvitationPrompt && (
+          {!showAdminSetup && !showInvitationPrompt && !showRecuperacion && (
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
@@ -327,9 +362,79 @@ export const LoginView: React.FC<LoginViewProps> = ({
             </form>
           )}
 
+          {/* Recuperación de contraseña (Firebase Auth, mensaje neutral) */}
+          {showRecuperacion && (
+            <div className="space-y-4">
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-start gap-2.5 mb-2">
+                <KeyRound className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <div>
+                  Introduce el correo de tu cuenta y te enviaremos instrucciones para restablecer
+                  tu contraseña.
+                </div>
+              </div>
+
+              {recuperacionEnviada ? (
+                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs leading-relaxed">
+                  {MENSAJE_RECUPERACION_NEUTRAL}
+                </div>
+              ) : (
+                <form onSubmit={handleRecuperacionSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Correo Electrónico
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={recuperacionEmail}
+                      onChange={(e) => setRecuperacionEmail(e.target.value)}
+                      placeholder="ejemplo@rentselect.com"
+                      className="block w-full px-3.5 py-2.5 bg-slate-950/70 border border-slate-700 rounded-xl text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {loading ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <span>Enviar instrucciones</span>
+                    )}
+                  </button>
+                </form>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMsg('');
+                  setRecuperacionEnviada(false);
+                  setShowRecuperacion(false);
+                }}
+                className="w-full text-xs text-slate-400 hover:text-slate-200 py-1.5 transition-colors cursor-pointer text-center"
+              >
+                Volver al inicio de sesión
+              </button>
+            </div>
+          )}
+
           {/* Opciones y accesos secundarios */}
-          {!showAdminSetup && !showInvitationPrompt && (
+          {!showAdminSetup && !showInvitationPrompt && !showRecuperacion && (
             <div className="mt-6 pt-6 border-t border-slate-800/80 space-y-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMsg('');
+                  setRecuperacionEnviada(false);
+                  setShowRecuperacion(true);
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-slate-950/50 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-medium flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                <span>¿Has olvidado tu contraseña?</span>
+              </button>
               {onOpenRegistroAutonomo && (
                 <button
                   type="button"

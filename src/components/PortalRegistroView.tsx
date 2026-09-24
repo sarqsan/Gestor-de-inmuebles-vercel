@@ -53,7 +53,9 @@ export const PortalRegistroView: React.FC<PortalRegistroViewProps> = ({
   onCancel,
 }) => {
   // Find matching link or invitation
-  const enlaceMatch = enlaces.find((e) => e.token === token && e.activo);
+  // ?registro= admite token público o ID directo (el ID llega por get() anónimo
+  // desde App; el token requiere listas cargadas). Nominal/inquilino intactos.
+  const enlaceMatch = enlaces.find((e) => (e.token === token || e.id === token) && e.activo);
   const profesionalMatch = profesionales.find((p) => p.tokenInvitacion === token);
 
   const tipoPerfilDeterminado: 'PROPIETARIO' | 'PROFESIONAL' = profesionalMatch

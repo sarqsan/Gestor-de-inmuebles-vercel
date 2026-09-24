@@ -258,6 +258,7 @@ import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPor
 import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
 import { LoginView } from './components/LoginView';
 import { RegistroAutonomoView } from './components/RegistroAutonomoView';
+import { getEnlaceById } from './lib/suministrosFirestore';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
 import {
   subscribeAuthState,
@@ -756,6 +757,24 @@ export default function App() {
   const [activePublicRegistroPropId, setActivePublicRegistroPropId] = useState<string | null>(null); // ACCESO-PROPIETARIOS: nominal (?registroProp={enlaceId})
   // REGISTRO AUTÓNOMO: alta sin invitación (propietario/profesional).
   const [showRegistroAutonomo, setShowRegistroAutonomo] = useState(false);
+  // ?registro= con ID directo: lectura puntual (get anónimo si el enlace está
+  // activo; sin listar la colección). Los tokens usan las listas cargadas.
+  const [enlaceDirectoRegistro, setEnlaceDirectoRegistro] = useState<EnlaceRegistro | null>(null);
+
+  useEffect(() => {
+    if (!activePublicRegistroToken || !activePublicRegistroToken.startsWith('enlace_')) {
+      setEnlaceDirectoRegistro(null);
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      const enl = await getEnlaceById(activePublicRegistroToken);
+      if (vivo) setEnlaceDirectoRegistro(enl);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [activePublicRegistroToken]);
 
   // Public subscriptions and URL token checking
   useEffect(() => {
@@ -3128,7 +3147,14 @@ export default function App() {
     return (
       <PortalRegistroView
         token={activePublicRegistroToken}
-        enlaces={enlacesRegistro}
+        enlaces={
+          enlaceDirectoRegistro
+            ? [
+                enlaceDirectoRegistro,
+                ...enlacesRegistro.filter((e) => e.id !== enlaceDirectoRegistro.id),
+              ]
+            : enlacesRegistro
+        }
         profesionales={profesionales}
         especialidades={especialidades}
         onCompleteRegistro={handleCompleteSelfRegistration}

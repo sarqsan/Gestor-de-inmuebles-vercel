@@ -2,6 +2,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
+  sendPasswordResetEmail,
   onAuthStateChanged,
   User as FirebaseUser,
   updateProfile,
@@ -298,6 +299,15 @@ export async function loginWithEmail(
   if (usuario.estado === 'BLOQUEADO') {
     if (firebaseUser) await signOut(auth);
     throw new Error('Esta cuenta ha sido bloqueada por la administración del sistema.');
+  }
+  // LOGIN ÚNICO §6: solo ACTIVO accede (mensajes comprensibles, sin internos).
+  if (usuario.estado === 'PENDIENTE') {
+    if (firebaseUser) await signOut(auth);
+    throw new Error('Tu cuenta está pendiente de activación. Revisa tu invitación o contacta con la administración.');
+  }
+  if (usuario.estado === 'INACTIVO') {
+    if (firebaseUser) await signOut(auth);
+    throw new Error('Tu cuenta está desactivada. Contacta con la administración si necesitas acceso.');
   }
 
   // 4. Guardar sesión activa local para persistencia segura
@@ -1069,6 +1079,27 @@ export async function registerAutonomo(
 }
 
 /**
+ * RECUPERACIÓN — Envía el correo de restablecimiento de Firebase Auth.
+ * Anti-enumeración: valida formato sin consultar Firestore y trata la
+ * inexistencia de cuenta como éxito neutral (mismo camino que el envío).
+ * Los errores técnicos se propagan para mostrar un mensaje genérico.
+ */
+export async function enviarRecuperacionPassword(emailInput: string): Promise<void> {
+  const email = emailInput.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Indica un correo electrónico válido para recuperar tu contraseña.');
+  }
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (err: any) {
+    if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-email') {
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
  * Cerrar sesión en la aplicación.
  */
 export async function logoutUser(): Promise<void> {
@@ -1133,7 +1164,7 @@ export function subscribeAuthState(
             const snap = await getDoc(doc(db, 'usuarios', parsed.id));
             if (snap.exists()) {
               const fresh = { id: snap.id, ...snap.data() } as UsuarioApp;
-              if (fresh.estado === 'BLOQUEADO' || fresh.estado === 'INACTIVO') {
+              if (fresh.estado === 'BLOQUEADO' || fresh.estado === 'PENDIENTE' || fresh.estado === 'INACTIVO') {
                 localStorage.removeItem('rentselect_active_session');
                 callback(null, null, false);
               } else {
@@ -1167,7 +1198,12 @@ export function subscribeAuthState(
         return;
       }
 
-      if (usuarioApp.estado === 'BLOQUEADO') {
+      // LOGIN ÚNICO §6: el listener tampoco admite estados no activos.
+      if (
+        usuarioApp.estado === 'BLOQUEADO' ||
+        usuarioApp.estado === 'PENDIENTE' ||
+        usuarioApp.estado === 'INACTIVO'
+      ) {
         await signOut(auth);
         localStorage.removeItem('rentselect_active_session');
         callback(null, null, false);

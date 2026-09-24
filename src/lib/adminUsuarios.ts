@@ -266,3 +266,75 @@ export function resumenCambiosUsuario(a: UsuarioApp, b: UsuarioApp): string {
   }
   return partes.length > 0 ? partes.join('; ') : 'sin cambios administrativos';
 }
+
+// ---------------------------------------------------------------------------
+// Baja segura de acceso (Bloque Borrado Seguro)
+// ---------------------------------------------------------------------------
+// El borrado FÍSICO (deleteDoc + Auth + espejo) no es seguro con la
+// arquitectura actual: no existe vía frontend para eliminar la cuenta de
+// Auth, y el espejo rancio + isStaff() dejarían acceso residual. La baja
+// segura retira el acceso pasando a INACTIVO (mecanismo que el modelo ya
+// soporta: login, listener y guardias rechazan no-ACTIVO), conserva todos
+// los datos patrimoniales e históricos, y sincroniza el espejo para revocar
+// el rol en las reglas. No inventa estados nuevos y nunca borra documentos.
+
+export interface ValidarBajaInput {
+  operador: OperadorAdmin | null | undefined;
+  objetivo: UsuarioApp;
+}
+
+/**
+ * Valida una baja de acceso. `null` si procede; mensaje de rechazo si no.
+ * Protege: auto-baja, master, SUPERADMIN, pendientes (invitación) y bajas
+ * repetidas. La ejecución efectiva sigue restringida al master por reglas.
+ */
+export function validarBajaUsuario(input: ValidarBajaInput): string | null {
+  const { operador, objetivo } = input;
+  if (!operador || !operador.id) {
+    return 'Operación no permitida: falta el operador autenticado.';
+  }
+  if (!objetivo || !objetivo.id) {
+    return 'Operación no permitida: falta el usuario objetivo.';
+  }
+  if (operador.id === objetivo.id) {
+    return 'No puedes dar de baja tu propia cuenta.';
+  }
+  if (esUsuarioMaster(objetivo)) {
+    return 'La cuenta maestra no puede darse de baja.';
+  }
+  if ((objetivo.roles || []).includes(ROL_SUPERADMIN)) {
+    return 'Un usuario SUPERADMIN no puede darse de baja desde este panel.';
+  }
+  if (objetivo.estado === 'PENDIENTE') {
+    return 'Un usuario pendiente de invitación no puede darse de baja desde este panel.';
+  }
+  if (objetivo.estado === 'INACTIVO') {
+    return 'Este usuario ya está de baja (inactivo).';
+  }
+  return null;
+}
+
+/**
+ * Construye el documento de baja: SOLO cambia el estado a INACTIVO.
+ * Preserva identidad, authUid, vínculos, contratos, roles, permisos y
+ * metadatos (el guardado usa merge, así nada se pierde).
+ */
+export function aplicarBajaUsuario(objetivo: UsuarioApp): UsuarioApp {
+  return { ...objetivo, estado: 'INACTIVO' };
+}
+
+/**
+ * Detalle de auditoría de la baja: quién, transición, qué se conserva y
+ * motivo (sin secretos: nunca contraseñas ni tokens).
+ */
+export function detalleBajaUsuario(
+  objetivo: UsuarioApp,
+  motivo: string | undefined,
+  estadoAnterior: string
+): string {
+  const base =
+    `Baja de acceso de ${objetivo.nombre} (${objetivo.email}): ` +
+    `${estadoAnterior}→INACTIVO. Se conserva ficha patrimonial, inmuebles, ` +
+    `contratos, documentos, históricos y auditoría.`;
+  return motivo && motivo.trim() ? `${base} Motivo: ${motivo.trim()}` : base;
+}

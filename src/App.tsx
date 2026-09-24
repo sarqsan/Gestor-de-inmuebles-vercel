@@ -227,7 +227,12 @@ import { contextoAutorizacionDesdeUsuario, repositorioNotificacionesFirestore } 
 import { revisarCompromisosVigentes } from './utils/morosidad/morosidadStore';
 import type { CompromisoPago, ExpedienteMorosidad, PoliticaMorosidad, ResumenMorosidadPropietario } from './types/morosidad';
 import { suscribirMovimientosSesion } from './lib/conciliacionSession';
-import { resumenCambiosUsuario } from './lib/adminUsuarios';
+import {
+  resumenCambiosUsuario,
+  validarBajaUsuario,
+  aplicarBajaUsuario,
+  detalleBajaUsuario,
+} from './lib/adminUsuarios';
 import type { SesionConciliacion } from './lib/conciliacionSession';
 import type {
   FicheroSEPA,
@@ -2809,6 +2814,37 @@ export default function App() {
     );
   };
 
+  // --- BAJA SEGURA DE ACCESO (Bloque Borrado Seguro; sin borrado patrimonial) ---
+  // Retira el acceso pasando a INACTIVO (reversible vía editor), conserva
+  // fichas/contratos/documentos/históricos/auditoría y sincroniza el espejo de
+  // identidad para revocar el rol en las reglas. Nunca borra documentos: no
+  // usa deleteDoc ni toca Auth (sin vía administrativa desde frontend).
+  const handleBajaUsuario = async (userId: string, motivo?: string) => {
+    const objetivo = usuarios.find((x) => x.id === userId);
+    if (!objetivo) throw new Error('Usuario no encontrado.');
+    const rechazo = validarBajaUsuario({
+      operador: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
+      objetivo,
+    });
+    if (rechazo) throw new Error(rechazo);
+    const estadoAnterior = objetivo.estado;
+    const deBaja = aplicarBajaUsuario(objetivo);
+    setUsuarios((prev) => prev.map((x) => (x.id === userId ? deBaja : x)));
+    await saveUsuarioFirestore(deBaja);
+    if (objetivo.authUid) {
+      await syncAuthIndex(
+        { ...deBaja, updatedAt: new Date().toISOString() },
+        { uid: objetivo.authUid }
+      );
+    }
+    await logAudit(
+      'BAJA_USUARIO',
+      'USUARIOS',
+      detalleBajaUsuario(objetivo, motivo, estadoAnterior),
+      userId
+    );
+  };
+
   // --- HANDLERS FOR PROFESIONALES ---
   const handleSaveProfesional = async (prof: Profesional) => {
     setProfesionales((prev) => {
@@ -3858,6 +3894,7 @@ export default function App() {
                 onLogout={handleLogout}
                 onSaveUsuario={handleSaveUsuario}
                 onDeleteUsuario={handleDeleteUsuario}
+                onBajaUsuario={handleBajaUsuario}
                 onSaveEnlaceRegistro={handleSaveEnlaceRegistro}
                 onDeleteEnlaceRegistro={handleDeleteEnlaceRegistro}
                 onSaveEspecialidad={handleSaveEspecialidad}

@@ -227,6 +227,7 @@ import { contextoAutorizacionDesdeUsuario, repositorioNotificacionesFirestore } 
 import { revisarCompromisosVigentes } from './utils/morosidad/morosidadStore';
 import type { CompromisoPago, ExpedienteMorosidad, PoliticaMorosidad, ResumenMorosidadPropietario } from './types/morosidad';
 import { suscribirMovimientosSesion } from './lib/conciliacionSession';
+import { resumenCambiosUsuario } from './lib/adminUsuarios';
 import type { SesionConciliacion } from './lib/conciliacionSession';
 import type {
   FicheroSEPA,
@@ -2773,6 +2774,7 @@ export default function App() {
 
   // --- HANDLERS FOR USERS & RBAC ---
   const handleSaveUsuario = async (user: UsuarioApp) => {
+    const previo = usuarios.find((u) => u.id === user.id);
     setUsuarios((prev) => {
       const idx = prev.findIndex((u) => u.id === user.id);
       if (idx >= 0) {
@@ -2783,10 +2785,14 @@ export default function App() {
       return [user, ...prev];
     });
     await saveUsuarioFirestore(user);
+    // Alta: mensaje clásico. Edición: acción MODIFICAR_USUARIO con diff de
+    // campos (sin secretos) para trazabilidad de la administración.
     await logAudit(
-      'GUARDAR_USUARIO',
+      previo ? 'MODIFICAR_USUARIO' : 'GUARDAR_USUARIO',
       'USUARIOS',
-      `Usuario ${user.nombre} (${user.email}) guardado con perfil ${user.tipoPerfil}`,
+      previo
+        ? `Usuario ${user.nombre} (${user.email}) modificado: ${resumenCambiosUsuario(previo, user)}`
+        : `Usuario ${user.nombre} (${user.email}) guardado con perfil ${user.tipoPerfil}`,
       user.id
     );
   };
@@ -4186,6 +4192,7 @@ export default function App() {
           usuarioParaEditar={selectedUserForEdit}
           inmuebles={inmuebles}
           propietarios={propietarios}
+          operador={currentUser ? { id: currentUser.id, email: currentUser.email } : null}
           onSave={async (u) => {
             await handleSaveUsuario(u);
             setShowCrearUsuarioModal(false);

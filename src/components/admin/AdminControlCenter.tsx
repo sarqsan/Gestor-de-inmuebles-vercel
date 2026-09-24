@@ -18,6 +18,7 @@ import {
   Plus,
   ExternalLink,
   Eye,
+  Pencil,
   FileText,
   ShieldCheck,
   Copy,
@@ -70,6 +71,8 @@ interface AdminControlCenterProps {
   onSaveModulosConfig?: (config: ModulosConfig) => Promise<void>;
   onOpenCrearUsuarioModal: (prefill?: Partial<UsuarioApp>) => void;
   onOpenCrearEnlaceModal: () => void;
+  /** Sección inicial (por defecto 'dashboard'). */
+  seccionInicial?: AdminSection;
 }
 
 type AdminSection =
@@ -102,8 +105,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   onSaveModulosConfig,
   onOpenCrearUsuarioModal,
   onOpenCrearEnlaceModal,
+  seccionInicial,
 }) => {
-  const [activeSection, setActiveSection] = useState<AdminSection>('dashboard');
+  const [activeSection, setActiveSection] = useState<AdminSection>(seccionInicial ?? 'dashboard');
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
@@ -616,6 +620,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <option value="ADMINISTRADOR">Administradores</option>
                   <option value="PROPIETARIO">Propietarios</option>
                   <option value="PROFESIONAL">Profesionales</option>
+                  <option value="INQUILINO">Inquilinos</option>
                 </select>
 
                 <select
@@ -625,6 +630,8 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 >
                   <option value="TODOS">Todos los Estados</option>
                   <option value="ACTIVO">Activos</option>
+                  <option value="PENDIENTE">Pendientes</option>
+                  <option value="INACTIVO">Inactivos</option>
                   <option value="BLOQUEADO">Bloqueados</option>
                 </select>
               </div>
@@ -686,10 +693,20 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>Activo</span>
                             </span>
-                          ) : (
+                          ) : u.estado === 'BLOQUEADO' ? (
                             <span className="inline-flex items-center gap-1 text-rose-400 font-semibold">
                               <XCircle className="w-3.5 h-3.5" />
                               <span>Bloqueado</span>
+                            </span>
+                          ) : u.estado === 'INACTIVO' ? (
+                            <span className="inline-flex items-center gap-1 text-amber-400 font-semibold">
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Inactivo</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-blue-400 font-semibold">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>Pendiente</span>
                             </span>
                           )}
                         </td>
@@ -697,6 +714,14 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                           {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
                         </td>
                         <td className="p-4 text-right">
+                          <button
+                            onClick={() => onOpenCrearUsuarioModal(u)}
+                            title="Editar usuario"
+                            data-testid={`editar-usuario-${u.id}`}
+                            className="px-2.5 py-1 mr-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer bg-blue-950/40 text-blue-400 border border-blue-800/60 hover:bg-blue-900/60"
+                          >
+                            <Pencil className="w-3.5 h-3.5 inline-block" />
+                          </button>
                           {u.id !== currentUser.id && (
                             <button
                               onClick={() => handleToggleBloqueoUsuario(u)}

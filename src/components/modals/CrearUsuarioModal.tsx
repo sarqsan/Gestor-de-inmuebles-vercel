@@ -9,6 +9,8 @@ import {
   Check,
   Building,
   Key,
+  Info,
+  Lock,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -19,6 +21,18 @@ import {
   Inmueble,
   Propietario,
 } from '../../types';
+import {
+  esUsuarioMaster,
+  validarEdicionAdmin,
+  ROL_SUPERADMIN,
+} from '../../lib/adminUsuarios';
+
+const ETIQUETA_PERFIL: Record<TipoPerfilUsuario, string> = {
+  ADMINISTRADOR: '👑 Administrador (Acceso Completo)',
+  PROPIETARIO: '🏠 Propietario (Acceso a sus viviendas)',
+  PROFESIONAL: '🔧 Profesional / Empresa Mantenimiento',
+  INQUILINO: '🔑 Inquilino (Acceso portal)',
+};
 
 interface CrearUsuarioModalProps {
   usuarioParaEditar?: UsuarioApp | null;
@@ -26,6 +40,8 @@ interface CrearUsuarioModalProps {
   propietarios: Propietario[];
   onSave: (usuario: UsuarioApp) => Promise<void>;
   onClose: () => void;
+  /** Cuenta autenticada que opera el editor (para protecciones de autoedición). */
+  operador?: { id: string; email: string } | null;
 }
 
 export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
@@ -34,8 +50,23 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
   propietarios,
   onSave,
   onClose,
+  operador,
 }) => {
-  const isEditing = !!usuarioParaEditar;
+  // Edición solo si hay un documento existente con id: el prefill de alta
+  // (sin id o con id vacío) y otras llamadas abren el modo creación.
+  const isEditing = !!usuarioParaEditar?.id;
+
+  // --- Reglas de edición administrativa (Bloque Administración) ---
+  const esMasterEditado = isEditing && esUsuarioMaster(usuarioParaEditar);
+  const esSelfEditado = isEditing && !!operador?.id && operador.id === usuarioParaEditar?.id;
+  const estadoInicialEsPendiente = (usuarioParaEditar?.estado || 'ACTIVO') === 'PENDIENTE';
+  const rolesBloqueados = esMasterEditado || esSelfEditado;
+  const permisosBloqueados = esMasterEditado || esSelfEditado;
+  const estadoBloqueado = estadoInicialEsPendiente || esMasterEditado;
+  const fichaPropietarioVinculada = isEditing
+    ? propietarios.find((p) => p.id === usuarioParaEditar?.propietarioId)
+    : undefined;
+  const numContratosPreservados = isEditing ? usuarioParaEditar?.contratoIds?.length || 0 : 0;
 
   const [nombre, setNombre] = useState(usuarioParaEditar?.nombre || '');
   const [apellidos, setApellidos] = useState(usuarioParaEditar?.apellidos || '');
@@ -124,24 +155,42 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
       setGuardando(true);
       setErrorMsg('');
 
+      // En edición se parte del documento existente para preservar authUid,
+      // vínculos (fichas/contratos/viviendas) y metadatos; los campos
+      // bloqueados se fuerzan al valor original como defensa en profundidad.
+      const original = isEditing ? usuarioParaEditar ?? undefined : undefined;
+      const ahora = new Date().toISOString();
       const usuarioActualizado: UsuarioApp = {
-        id: usuarioParaEditar?.id || `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        authUid: usuarioParaEditar?.authUid,
+        ...(original ? { ...original } : {}),
+        id: original?.id || `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         nombre: nombre.trim(),
         apellidos: apellidos.trim() || undefined,
-        email: email.trim().toLowerCase(),
+        email: original ? original.email : email.trim().toLowerCase(),
         telefono: telefono.trim() || undefined,
-        tipoPerfil,
+        tipoPerfil: original ? original.tipoPerfil : tipoPerfil,
         estado,
         roles: selectedRoles,
         permisos: selectedPermisos,
-        inmuebleIds: selectedInmuebleIds,
-        propietarioId: propietarioId || undefined,
-        profesionalId: usuarioParaEditar?.profesionalId,
-        createdAt: usuarioParaEditar?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        lastLoginAt: usuarioParaEditar?.lastLoginAt,
+        inmuebleIds: original ? original.inmuebleIds : selectedInmuebleIds,
+        propietarioId: original ? original.propietarioId : (propietarioId || undefined),
+        createdAt: original?.createdAt || ahora,
+        updatedAt: ahora,
       };
+
+      // Las reglas de adminUsuarios mandan sobre la UI: si algo viola las
+      // protecciones (master, autoedición, vínculos, estados), se rechaza.
+      if (original) {
+        const rechazo = validarEdicionAdmin({
+          operador: operador ?? null,
+          original,
+          editado: usuarioActualizado,
+        });
+        if (rechazo) {
+          setErrorMsg(rechazo);
+          setGuardando(false);
+          return;
+        }
+      }
 
       await onSave(usuarioActualizado);
       onClose();
@@ -166,11 +215,13 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
               <User className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900">
+              <h3 className="text-lg font-bold text-slate-900" data-testid="usuario-modal-titulo">
                 {isEditing ? 'Modificar Usuario y Permisos' : 'Dar de Alta Nuevo Usuario'}
               </h3>
               <p className="text-xs text-slate-500">
-                Asigna tipo de perfil, roles de acceso y ámbito de viviendas autorizadas
+                {isEditing && usuarioParaEditar
+                  ? `${usuarioParaEditar.nombre} · ${usuarioParaEditar.email} · ${usuarioParaEditar.tipoPerfil}`
+                  : 'Asigna tipo de perfil, roles de acceso y ámbito de viviendas autorizadas'}
               </p>
             </div>
           </div>
@@ -187,6 +238,29 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
           {errorMsg && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
               {errorMsg}
+            </div>
+          )}
+
+          {isEditing && esMasterEditado && (
+            <div data-testid="aviso-master" className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-medium flex items-start gap-2">
+              <Lock className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>Cuenta maestra protegida: solo pueden editarse nombre, apellidos y teléfono. Estado, perfil, roles, permisos y vínculos están bloqueados.</span>
+            </div>
+          )}
+          {isEditing && esSelfEditado && !esMasterEditado && (
+            <div data-testid="aviso-self" className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl text-xs font-medium flex items-start gap-2">
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>Estás editando tu propia cuenta: no puedes modificar tus roles, tus permisos ni desactivarla.</span>
+            </div>
+          )}
+          {isEditing && (
+            <div data-testid="auth-info" className="p-3 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-xs flex items-start gap-2">
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                Cuenta de acceso: {usuarioParaEditar?.authUid ? 'vinculada' : 'pendiente de vinculación'}
+                {numContratosPreservados > 0 && ` · ${numContratosPreservados} contrato(s) preservado(s)`}
+                {' '}· Fichas y vínculos preservados.
+              </span>
             </div>
           )}
 
@@ -234,9 +308,14 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="usuario@rentselect.es"
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                  readOnly={isEditing}
+                  title={isEditing ? 'El email de acceso no puede modificarse' : undefined}
+                  className={`w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden ${isEditing ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
                 />
               </div>
+              {isEditing && (
+                <p className="text-[11px] text-slate-400 mt-1">No modificable en edición.</p>
+              )}
             </div>
 
             <div>
@@ -262,6 +341,12 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Tipo de Perfil *
               </label>
+              {isEditing ? (
+                <div data-testid="perfil-badge" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-100 text-slate-700 font-medium flex items-center justify-between">
+                  <span>{ETIQUETA_PERFIL[tipoPerfil] ?? tipoPerfil}</span>
+                  <span className="text-[11px] text-slate-400 font-normal">No modificable</span>
+                </div>
+              ) : (
               <select
                 value={tipoPerfil}
                 onChange={(e) => {
@@ -286,6 +371,7 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
                 <option value="PROPIETARIO">🏠 Propietario (Acceso a sus viviendas)</option>
                 <option value="PROFESIONAL">🔧 Profesional / Empresa Mantenimiento</option>
               </select>
+              )}
             </div>
 
             <div>
@@ -295,18 +381,29 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
               <select
                 value={estado}
                 onChange={(e) => setEstado(e.target.value as EstadoUsuario)}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
+                disabled={estadoBloqueado}
+                data-testid="estado-select"
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
               >
                 <option value="ACTIVO">✅ Activo (Puede iniciar sesión)</option>
-                <option value="PENDIENTE">⏳ Pendiente de verificación / invitación</option>
+                {estadoInicialEsPendiente ? (
+                  <option value="PENDIENTE">⏳ Pendiente de verificación / invitación</option>
+                ) : null}
                 <option value="BLOQUEADO">⛔ Bloqueado por administración</option>
                 <option value="INACTIVO">⏸️ Inactivo</option>
               </select>
+              {estadoBloqueado && (
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {esMasterEditado
+                    ? 'La cuenta maestra no puede cambiar de estado.'
+                    : 'Gestionado por invitación: no modificable desde este editor.'}
+                </p>
+              )}
             </div>
           </div>
 
           {/* Vinculación con Propietario Existente (Si es Propietario) */}
-          {tipoPerfil === 'PROPIETARIO' && (
+          {tipoPerfil === 'PROPIETARIO' && !isEditing && (
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
               <div className="flex items-center space-x-2 text-slate-800 font-semibold text-sm">
                 <Building className="w-4 h-4 text-blue-600" />
@@ -329,8 +426,24 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
               </select>
             </div>
           )}
+          {isEditing && tipoPerfil === 'PROPIETARIO' && (
+            <div data-testid="vinculo-propietario" className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600">
+              <span className="font-semibold text-slate-800">Ficha de propietario vinculada: </span>
+              {fichaPropietarioVinculada
+                ? `${fichaPropietarioVinculada.nombre} (${fichaPropietarioVinculada.nifCif})`
+                : 'Sin vincular'}
+              <span className="text-slate-400"> — no modificable desde este editor.</span>
+            </div>
+          )}
 
           {/* Asignación de Inmuebles Autorizados */}
+          {isEditing ? (
+            <div data-testid="ambito-viviendas" className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600">
+              <span className="font-semibold text-slate-800">Ámbito de viviendas autorizadas: </span>
+              {selectedInmuebleIds.length} vivienda(s)
+              <span className="text-slate-400"> — no modificable desde este editor.</span>
+            </div>
+          ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2 text-slate-800 font-semibold text-sm">
@@ -393,6 +506,7 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
               )}
             </div>
           </div>
+          )}
 
           {/* Roles Asignados */}
           <div className="space-y-3 pt-2 border-t border-slate-100">
@@ -400,15 +514,21 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
               <Shield className="w-4 h-4 text-blue-600" />
               <span>Roles Predefinidos</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {ROLES_PREDEFINIDOS.map((rol) => {
+            {rolesBloqueados && (
+              <p className="text-[11px] text-slate-400">Roles bloqueados en esta cuenta.</p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="roles-group">
+              {ROLES_PREDEFINIDOS.filter((rol) => rol.id !== ROL_SUPERADMIN || selectedRoles.includes(ROL_SUPERADMIN)).map((rol) => {
                 const isSelected = selectedRoles.includes(rol.id);
+                const rolBloqueado = rolesBloqueados || rol.id === ROL_SUPERADMIN;
                 return (
                   <button
                     type="button"
                     key={rol.id}
                     onClick={() => handleRoleToggle(rol.id)}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    disabled={rolBloqueado}
+                    title={rol.id === ROL_SUPERADMIN ? 'No gestionable desde este editor' : undefined}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                       isSelected
                         ? 'bg-blue-50 border-blue-300 text-blue-900 ring-1 ring-blue-400'
                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -435,7 +555,10 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
                 <span>Permisos Granulares Activos ({selectedPermisos.length})</span>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-xl bg-slate-50">
+            {permisosBloqueados && (
+              <p className="text-[11px] text-slate-400">Permisos bloqueados en esta cuenta.</p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-xl bg-slate-50" data-testid="permisos-group">
               {PERMISOS_SISTEMA.map((perm) => {
                 const isChecked = selectedPermisos.includes(perm.codigo);
                 return (
@@ -451,7 +574,8 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
                       type="checkbox"
                       checked={isChecked}
                       onChange={() => handlePermisoToggle(perm.codigo)}
-                      className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 mt-0.5"
+                      disabled={permisosBloqueados}
+                      className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 mt-0.5 disabled:opacity-60 disabled:cursor-not-allowed"
                     />
                     <div>
                       <div className="font-semibold">{perm.nombre}</div>

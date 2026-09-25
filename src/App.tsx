@@ -18,6 +18,7 @@ import {
   ContratoFormalizacion,
   Gasto,
   GastoRecurrente,
+  Incidencia,
   Prestamo,
   ExpedienteRecomercializacion,
   InmobiliariaDirectorio,
@@ -83,6 +84,7 @@ import {
   subscribeGastosRecurrentes,
   subscribePrestamos,
   subscribeExpedientesRecomercializacion,
+  subscribeIncidencias,
   subscribeInmobiliarias,
   subscribePropuestasInmobiliaria,
   subscribeLeadsInmobiliarios,
@@ -383,6 +385,8 @@ export default function App() {
   const [gastosRecurrentes, setGastosRecurrentes] = useState<GastoRecurrente[]>([]);
   // FASE 2.3: préstamos / hipotecas.
   const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
+  // PORTAL PROPIETARIO: incidencias (la suscripción ya viene acotada por propietarioId).
+  const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
   // FASE 3.0/3.1: expedientes de recomercialización y contexto de alta.
   const [expedientesRecomerc, setExpedientesRecomerc] = useState<ExpedienteRecomercializacion[]>([]);
   // FASE 3.6: bolsa de inmobiliarias, RFPs (propuestas) y leads.
@@ -711,6 +715,22 @@ export default function App() {
     }
     return [];
   }, [currentUser, prestamos, scopedInmuebles]);
+
+  // PORTAL PROPIETARIO: incidencias visibles (la suscripción ya viene acotada;
+  // aquí se refuerza el filtro igual que en gastos — defensa en profundidad).
+  const scopedIncidencias = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return incidencias;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return incidencias.filter(
+        (x) =>
+          (currentUser.propietarioId && x.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(x.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, incidencias, scopedInmuebles]);
 
   // FASE 3.0: expedientes de recomercialización visibles (la suscripción ya
   // viene acotada por propietarioId; aquí se refuerza por inmueble asignado).
@@ -1070,6 +1090,11 @@ export default function App() {
       setExpedientesRecomerc(Array.isArray(data) ? data : []);
     }, dataScope);
 
+    // PORTAL PROPIETARIO: incidencias acotadas por propietario (mismo `where` que exigen las reglas).
+    const unsubscribeIncidencias = subscribeIncidencias((data) => {
+      setIncidencias(Array.isArray(data) ? data : []);
+    }, dataScope);
+
     // FASE 3.6: directorio de inmobiliarias (bolsa común) con RFPs y leads acotados por propietario.
     const unsubscribeInmobiliarias = subscribeInmobiliarias((data) => {
       setInmobiliariasDirectorio(Array.isArray(data) ? data : []);
@@ -1183,6 +1208,7 @@ export default function App() {
       unsubscribeRecurrentes();
       unsubscribePrestamos();
       unsubscribeExpedientes();
+      unsubscribeIncidencias();
       unsubscribeInmobiliarias();
       unsubscribePropuestas();
       unsubscribeLeads();
@@ -3543,6 +3569,8 @@ export default function App() {
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
+                gastos={scopedGastos}
+                incidencias={scopedIncidencias}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -3679,6 +3707,8 @@ export default function App() {
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
+                gastos={scopedGastos}
+                incidencias={scopedIncidencias}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);

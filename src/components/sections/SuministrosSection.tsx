@@ -635,7 +635,12 @@ function LecturaGestorModal({
 
   const guardar = async () => {
     const num = Number(String(valor).replace(',', '.'));
-    const v = validarLectura({ valor: num, unidad, fechaLectura: new Date(`${fecha}T12:00:00`).toISOString(), ultimoValor: ultima?.valor });
+    // La fecha elegida es un DÍA: si es hoy, el instante registrado es "ahora".
+    // (Fijar el mediodía convertía "hoy" en futuro por la mañana y el motor lo
+    // rechazaba con un falso "no puede ser futura" — mismo defecto que en el
+    // portal del inquilino.)
+    const fechaLecturaIso = fecha === hoy ? new Date().toISOString() : new Date(`${fecha}T12:00:00`).toISOString();
+    const v = validarLectura({ valor: num, unidad, fechaLectura: fechaLecturaIso, ultimoValor: ultima?.valor });
     if (!v.ok) {
       setError(v.errores[0]);
       return;
@@ -656,7 +661,7 @@ function LecturaGestorModal({
         contratoId: contratoId || undefined,
         valor: num,
         unidad,
-        fechaLectura: new Date(`${fecha}T12:00:00`).toISOString(),
+        fechaLectura: fechaLecturaIso,
         origen: esAdmin ? 'ADMIN' : 'PROPIETARIO',
         registradoPorUid: currentUser.authUid || currentUser.id,
         registradoPorEmail: currentUser.email,

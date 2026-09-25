@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Inmueble,
   Candidato,
@@ -113,6 +113,13 @@ interface InmueblesSectionProps {
   onSaveContrato?: (contrato: ContratoFormalizacion) => Promise<void> | void;
   // FASE 3.1: abrir expediente de recomercialización desde el inmueble.
   onRecomercializarInmueble?: (inmuebleId: string, contratoAnteriorId?: string) => void;
+  /**
+   * Si viene informado, el alta se abre con este propietario ya seleccionado
+   * (misma ruta que el desplegable). El alta general no lo envía.
+   */
+  propietarioContextoAltaId?: string | null;
+  /** El padre lo limpia después de aplicarlo, para no repetir la preselección. */
+  onContextoAltaConsumido?: () => void;
 }
 
 export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
@@ -138,6 +145,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   onFinalizarContrato,
   onSaveContrato,
   onRecomercializarInmueble,
+  propietarioContextoAltaId,
+  onContextoAltaConsumido,
 }) => {
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string | null>(null);
   const [filterState, setFilterState] = useState<'todos' | 'disponible' | 'alquilado'>('todos');
@@ -148,6 +157,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
   // Modal State for New Property
   const [showAddModal, setShowAddModal] = useState(false);
+  /** La preselección contextual no debe filtrarse al siguiente alta general. */
+  const altaAplicoContexto = useRef(false);
   const [newTab, setNewTab] = useState<'general' | 'fiscal'>('general');
   const [newDireccion, setNewDireccion] = useState('');
   const [newCiudad, setNewCiudad] = useState('');
@@ -387,6 +398,23 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     return matchesSearch && matchesState;
   });
 
+  const abrirAltaGeneral = () => {
+    setNewTab('general');
+    if (altaAplicoContexto.current) {
+      setNewSelectedPropId('');
+      setNewSelectedCuentaId('');
+      setNewIbanCobro('');
+      setNewPropNombre('');
+      setNewPropNif('');
+      setNewPropDireccion('');
+      setNewPropTelefono('');
+      setNewPropEmail('');
+      setNewPropEsPersonaJuridica(false);
+      altaAplicoContexto.current = false;
+    }
+    setShowAddModal(true);
+  };
+
   const handleSelectNewPropietario = (propId: string) => {
     setNewSelectedPropId(propId);
     if (!propId) {
@@ -414,6 +442,18 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       }
     }
   };
+
+  useEffect(() => {
+    if (!propietarioContextoAltaId) return;
+    if (!propietarios.some((p) => p.id === propietarioContextoAltaId)) return;
+    setNewTab('fiscal');
+    handleSelectNewPropietario(propietarioContextoAltaId);
+    altaAplicoContexto.current = true;
+    setShowAddModal(true);
+    onContextoAltaConsumido?.();
+    // Solo el id de contexto y la lista: la función de selección se reutiliza tal cual.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propietarioContextoAltaId, propietarios]);
 
   const handleSelectNewCuenta = (cuentaId: string) => {
     setNewSelectedCuentaId(cuentaId);
@@ -631,7 +671,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setEditCertificadoEnergetico(df?.certificadoEnergetico || '');
     setEditNumeroRegistroPropiedad(df?.numeroRegistroPropiedad || '');
 
-    // Resolve owner 1
+    // Pendiente aparte, no corregir en el alta: la edición no lee `propietarioId`.
+    // Resuelve por propietarioPrincipalId, id fiscal o NIF. Guardar desde aquí
+    // puede perder un propietarioId que solo exista en ese campo.
     const prop1Id =
       inm.propietarioPrincipalId ||
       df?.propietarioPrincipal?.propietarioId ||
@@ -1790,10 +1832,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
           {onAddInmueble && (
             <button
-              onClick={() => {
-                setNewTab('general');
-                setShowAddModal(true);
-              }}
+              onClick={abrirAltaGeneral}
               className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 shrink-0"
             >
               <Plus className="w-4 h-4" />

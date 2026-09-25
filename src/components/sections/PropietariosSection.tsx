@@ -31,6 +31,8 @@ interface PropietariosSectionProps {
   onSavePropietario: (propietario: Propietario) => void;
   onDeletePropietario: (propietarioId: string) => void;
   onSelectInmueble?: (inmuebleId: string) => void;
+  /** Abre el alta de inmueble ya en el contexto de este propietario. */
+  onCrearInmueble?: (propietarioId: string) => void;
 }
 
 export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
@@ -39,6 +41,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   onSavePropietario,
   onDeletePropietario,
   onSelectInmueble,
+  onCrearInmueble,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTipo, setFilterTipo] = useState<string>('todos');
@@ -653,11 +656,21 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
                   {/* Linked Properties */}
                   <div className="mt-4 pt-3.5 border-t border-slate-200/60">
-                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-2">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-2 gap-2">
                       <span className="flex items-center gap-1.5">
                         <Home className="w-3.5 h-3.5 text-slate-400" />
                         Inmuebles Asignados ({linkedProps.length})
                       </span>
+                      {onCrearInmueble && (
+                        <button
+                          type="button"
+                          onClick={() => onCrearInmueble(prop.id)}
+                          className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 hover:underline shrink-0"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Crear inmueble</span>
+                        </button>
+                      )}
                     </div>
 
                     {linkedProps.length > 0 ? (

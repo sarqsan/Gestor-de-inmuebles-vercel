@@ -313,6 +313,7 @@ const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'in
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
+  const [altaInmuebleDesdePropietarioId, setAltaInmuebleDesdePropietarioId] = useState<string | null>(null);
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -3409,6 +3410,10 @@ export default function App() {
                 onSavePropietario={handleSavePropietario}
                 onDeletePropietario={handleDeletePropietario}
                 onSelectInmueble={() => setActiveSection('inmuebles')}
+                onCrearInmueble={(propietarioId) => {
+                  setAltaInmuebleDesdePropietarioId(propietarioId);
+                  setActiveSection('inmuebles');
+                }}
               />
             )
           )}
@@ -3699,6 +3704,8 @@ export default function App() {
               onSelectCandidate={(cand) => setSelectedCandidateForModal(cand)}
               onDeleteInmueble={handleDeleteInmueble}
               onAddInmueble={handleAddInmueble}
+              propietarioContextoAltaId={altaInmuebleDesdePropietarioId}
+              onContextoAltaConsumido={() => setAltaInmuebleDesdePropietarioId(null)}
               onUpdateInmueble={handleUpdateInmueble}
               onOpenLinkModal={(inm) => setInmuebleForLinkModal(inm)}
               onOpenConfigurarAgenda={(inmId) => {

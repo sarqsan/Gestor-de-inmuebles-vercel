@@ -321,7 +321,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
             <div className="w-10 h-10 rounded-xl bg-purple-600 flex items-center justify-center text-white shadow-lg shadow-purple-600/30">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <div>
+            <div data-tour="admin-centro-marca">
               <h1 className="font-bold text-white text-base tracking-tight leading-tight">
                 RentSelect
               </h1>
@@ -533,7 +533,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
         {activeSection === 'dashboard' && (
           <div className="space-y-6">
             {/* KPIs Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-tour="admin-kpis">
               <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
                 <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-2">
                   <span>Usuarios Totales</span>

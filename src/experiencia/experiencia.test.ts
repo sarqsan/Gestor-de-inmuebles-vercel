@@ -248,8 +248,9 @@ describe('§6 · Tutoriales', () => {
   });
 
   it('tutoriales disponibles por rol: admin sí; propietario e inquilino no ven el de liquidaciones', () => {
-    expect(tutorialesDisponibles(contextoDesdeUsuario(admin, 'inicio')).map((x) => x.id)).toEqual([t.id, 'recorrido.inquilinos.invitar']);
-    expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio'))).toEqual([]);
+    expect(tutorialesDisponibles(contextoDesdeUsuario(admin, 'inicio')).map((x) => x.id)).toEqual([t.id, 'recorrido.inquilinos.invitar', 'recorrido.admin.centro-control']);
+    expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio')).map((x) => x.id)).toEqual(['recorrido.propietario.portal']);
+    expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio')).map((x) => x.id)).not.toContain(t.id);
     // El inquilino en el ERP (host por defecto) no ve nada; en su portal ve su recorrido (F2)
     expect(tutorialesDisponibles(contextoDesdeUsuario(inquilino, 'inicio'))).toEqual([]);
     expect(tutorialesDisponibles(contextoDesdeUsuario(inquilino, 'inicio', { host: 'PORTAL_INQUILINO' })).map((x) => x.id)).toEqual(['recorrido.portal.primeros-pasos']);

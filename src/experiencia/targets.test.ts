@@ -117,9 +117,10 @@ describe('§6 F2 · Targets: localizar, visibilidad y resaltado', () => {
 describe('§6 F2 · Recorridos reales', () => {
   const codigos = new Set(PERMISOS_SISTEMA.map((p) => p.codigo));
 
-  it('registro: 3 tutoriales con ids únicos; rutas y permisos reales según su host; targets con el atributo data-tour', () => {
+  it('registro: tutoriales con ids únicos; rutas y permisos reales según su host; targets con el atributo data-tour', () => {
     const ids = TUTORIALES_REGISTRO.map((t) => t.id);
-    expect(new Set(ids).size).toBe(3);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(expect.arrayContaining(['tutorial.tesoreria.liquidacion', 'recorrido.inquilinos.invitar', 'recorrido.portal.primeros-pasos']));
     for (const t of TUTORIALES_REGISTRO) {
       const rutas = (t.host ?? 'ERP') === 'PORTAL_INQUILINO' ? PANTALLAS_PORTAL : null;
       for (const p of t.steps) {
@@ -156,7 +157,7 @@ describe('§6 F2 · Recorridos reales', () => {
   it('recorrido ERP «invitar inquilino»: admin y gestor lo ejecutan; propietario/inquilino no lo ven; saltar en el último paso completa', () => {
     expect(evaluarTutorial(RECORRIDO_INVITAR_INQUILINO, contextoDesdeUsuario(admin, 'inicio')).every((p) => p.puedeEjecutar)).toBe(true);
     expect(evaluarTutorial(RECORRIDO_INVITAR_INQUILINO, contextoDesdeUsuario(gestor, 'inicio')).every((p) => p.puedeEjecutar)).toBe(true);
-    expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio'))).toEqual([]);
+    expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio')).map((t) => t.id)).not.toContain(RECORRIDO_INVITAR_INQUILINO.id);
     let s = iniciarTutorial(RECORRIDO_INVITAR_INQUILINO);
     for (let i = 0; i < 4; i++) s = avanzar(s, RECORRIDO_INVITAR_INQUILINO);
     const fin = saltar(s, RECORRIDO_INVITAR_INQUILINO);

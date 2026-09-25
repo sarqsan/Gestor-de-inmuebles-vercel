@@ -155,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
             />
           )}
           {currentUser && onAccionAsistente && (
-            <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} />
+            <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} tourId="asistente-erp" />
           )}
         </div>
         <p className="text-xs text-slate-500">{subtitle}</p>

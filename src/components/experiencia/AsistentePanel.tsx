@@ -29,6 +29,8 @@ export interface AsistentePanelProps {
   className?: string;
   /** Posición del panel. */
   posicion?: 'derecha' | 'centro';
+  /** Target de recorrido (`data-tour`). Solo se pinta si el botón existe. */
+  tourId?: string;
 }
 
 const ETIQUETA_ESTADO: Record<AIIntentResolution['estado'], string> = {
@@ -41,7 +43,7 @@ const ETIQUETA_ESTADO: Record<AIIntentResolution['estado'], string> = {
   ERROR: 'Error',
 };
 
-export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section, host = 'ERP' as HostExperiencia, contexto, accessibleSections, proveedor, onAccion, tema = 'claro', variante = 'icono', className = '', posicion = 'derecha' }) => {
+export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section, host = 'ERP' as HostExperiencia, contexto, accessibleSections, proveedor, onAccion, tema = 'claro', variante = 'icono', className = '', posicion = 'derecha', tourId }) => {
   const ctx = useMemo(() => contexto ?? contextoDesdeUsuario(usuario, section, { host, accessibleSections }), [contexto, usuario, section, host, accessibleSections]);
   const disponible = useMemo(() => capacidadesDisponibles(ctx).length > 0, [ctx]);
   const [abierto, setAbierto] = useState(false);
@@ -114,6 +116,7 @@ export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section
         type="button"
         onClick={() => setAbierto((v) => !v)}
         aria-label="Asistente"
+        data-tour={tourId}
         aria-expanded={abierto}
         aria-controls={panelId}
         title="Asistente: escribe qué necesitas"

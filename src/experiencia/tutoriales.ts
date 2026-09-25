@@ -176,7 +176,205 @@ export const RECORRIDO_INVITAR_INQUILINO: Tutorial = {
   ],
 };
 
-export const TUTORIALES_REGISTRO: Tutorial[] = [TUTORIAL_LIQUIDACION, RECORRIDO_INVITAR_INQUILINO, RECORRIDO_PORTAL_INQUILINO];
+// ---------------------------------------------------------------------------
+// UX-1A · Recorridos de entrada. Explican controles reales; no conceden permisos.
+// ---------------------------------------------------------------------------
+export const RECORRIDO_ADMIN_CENTRO: Tutorial = {
+  id: 'recorrido.admin.centro-control',
+  title: 'Conoce el Centro de Control',
+  description: 'Dónde estás, qué supervisa el panel, cómo llegar a las áreas de gestión, y dónde están el Centro de Ayuda y el asistente.',
+  module: 'administracion',
+  host: 'ERP',
+  roles: ['ADMINISTRADOR'],
+  minutes: 3,
+  steps: [
+    {
+      id: 'donde',
+      title: 'Estás en el Centro de Control',
+      description:
+        'El menú principal abre «Centro de Control». La marca interior identifica esta pantalla de supervisión. No es el listado operativo de viviendas: eso está en «Inmuebles».',
+      route: 'administracion',
+      target: selectorTour('admin-centro-marca'),
+    },
+    {
+      id: 'que-hay',
+      title: 'Qué puedes supervisar',
+      description:
+        'El panel inicial muestra usuarios, inmuebles en la plataforma, tasa de ocupación y eventos de auditoría, más la actividad reciente. El menú interior abre usuarios, el directorio de inmuebles, propietarios, profesionales, módulos y el registro de auditoría.',
+      route: 'administracion',
+      target: selectorTour('admin-kpis'),
+    },
+    {
+      id: 'areas',
+      title: 'Accede a las áreas de gestión',
+      description:
+        'El menú de la izquierda es el de gestión: «Inmuebles», «Tesorería & SEPA», «Gestión de Cobros», «Formalización & LAU» y el resto. «Inmuebles» abre el listado y el alta. Este menú solo navega a pantallas que tu perfil ya puede abrir.',
+      route: 'administracion',
+      target: selectorTour('nav-inmuebles'),
+    },
+    {
+      id: 'ayuda',
+      title: 'Centro de Ayuda',
+      description:
+        '«Ayuda» en el menú abre el Centro de Ayuda: explicaciones de cada pantalla y los tutoriales de tu perfil. El icono ? junto al título explica la pantalla en la que estás.',
+      route: 'administracion',
+      target: selectorTour('nav-ayuda'),
+    },
+    {
+      id: 'asistente',
+      title: 'Cómo usar el asistente',
+      description:
+        'El botón del asistente, junto al título, acepta una pregunta en lenguaje natural. Puede explicar una ayuda visible, llevarte a una pantalla a la que ya tienes acceso o iniciar un tutorial disponible. No concede permisos ni ejecuta altas o pagos.',
+      route: 'administracion',
+      target: selectorTour('asistente-erp'),
+    },
+  ],
+};
+
+export const RECORRIDO_PROPIETARIO_PORTAL: Tutorial = {
+  id: 'recorrido.propietario.portal',
+  title: 'Conoce tu portal',
+  description: 'Recorre tu portal: viviendas, cobros y liquidaciones, contratos y actas, Mi Perfil, y dónde están la ayuda y el asistente.',
+  module: 'propietarios',
+  host: 'ERP',
+  roles: ['PROPIETARIO'],
+  minutes: 4,
+  steps: [
+    {
+      id: 'inicio',
+      title: 'Tu pantalla principal',
+      description: 'Al entrar estás en el Portal del Propietario. La cabecera muestra tu nombre y las viviendas en cartera. Las pestañas de abajo son el recorrido de tu cuenta.',
+      route: 'propietarios',
+      target: selectorTour('propietario-portal-cabecera'),
+    },
+    {
+      id: 'viviendas',
+      title: 'Tus inmuebles',
+      description:
+        '«Mis Viviendas» lista solo tus inmuebles. Si no hay ninguno, «Nuevo inmueble» crea el primero vinculado a tu cuenta. El menú «Mis Viviendas» abre el listado completo, con el mismo alta y el selector de titular editable.',
+      route: 'propietarios',
+      target: selectorTour('propietario-tab-viviendas'),
+    },
+    {
+      id: 'liquidaciones',
+      title: 'Cobros y liquidaciones',
+      description:
+        '«Mis Liquidaciones» muestra lo que la gestión ha generado: periodo, líneas y neto. No puedes generarlas ni aprobarlas. La pestaña «Cobros» y el menú «Mis Cobros» consultan los recibos de tus contratos.',
+      route: 'propietarios',
+      target: selectorTour('propietario-tab-liquidaciones'),
+    },
+    {
+      id: 'contratos',
+      title: 'Contratos',
+      description:
+        '«Mis Contratos» lista los contratos de tus viviendas: inquilino, renta, fianza y vigencia. El menú «Mis Contratos» abre Formalización. Desde aquí no se invita a un inquilino: eso lo hace la administración.',
+      route: 'propietarios',
+      target: selectorTour('propietario-tab-contratos'),
+    },
+    {
+      id: 'actas',
+      title: 'Actas de entrada y salida',
+      description:
+        'En el menú, «Actas Entrada/Salida» abre las actas de tus viviendas: inventario, lecturas y estado de firma. Una acta firmada no se edita; una corrección es una versión nueva.',
+      route: 'actas',
+      target: selectorTour('nav-actas'),
+    },
+    {
+      id: 'perfil',
+      title: 'Mi Perfil',
+      description: 'La pestaña «Mi Perfil» guarda nombre, NIF, contacto y domicilio. El menú «Mi Cuenta» abre esta misma pestaña. No abre la configuración del sistema.',
+      route: 'propietarios',
+      target: selectorTour('propietario-tab-perfil'),
+    },
+    {
+      id: 'ayuda',
+      title: 'Centro de Ayuda',
+      description: '«Ayuda» en el menú abre el Centro de Ayuda con las explicaciones y tutoriales de tu perfil. El icono ? junto al título explica la pantalla actual.',
+      route: 'propietarios',
+      target: selectorTour('nav-ayuda'),
+    },
+    {
+      id: 'asistente',
+      title: 'Asistente',
+      description: 'El botón del asistente, junto al título, responde con la ayuda que ya puedes ver y puede llevarte a una pantalla de tu menú. No amplía tus permisos.',
+      route: 'propietarios',
+      target: selectorTour('asistente-erp'),
+    },
+  ],
+};
+
+export const RECORRIDO_PROFESIONAL_PORTAL: Tutorial = {
+  id: 'recorrido.profesional.portal',
+  title: 'Conoce tu portal profesional',
+  description: 'Tu pantalla de servicios: órdenes, viviendas asignadas, ficha, Centro de Ayuda y asistente.',
+  module: 'administracion',
+  host: 'ERP',
+  roles: ['PROFESIONAL'],
+  minutes: 3,
+  steps: [
+    {
+      id: 'inicio',
+      title: 'Tu pantalla principal',
+      description: 'Al entrar estás en el Portal de Servicios y Mantenimiento. La cabecera muestra tu nombre comercial y cuántas viviendas tienes asignadas.',
+      route: 'administracion',
+      target: selectorTour('profesional-portal-cabecera'),
+    },
+    {
+      id: 'funciones',
+      title: 'Qué puedes hacer aquí',
+      description:
+        'Las pestañas son Mi Ficha y Datos, Mis Especialidades, Mis Zonas de Cobertura, Viviendas Asignadas y Órdenes de Trabajo y Partes. Al entrar ves las órdenes. No administras la cartera ni las liquidaciones.',
+      route: 'administracion',
+      target: selectorTour('profesional-tab-incidencias'),
+    },
+    {
+      id: 'viviendas',
+      title: 'Viviendas asignadas',
+      description:
+        'La pestaña «Viviendas Asignadas» lista las viviendas donde estás autorizado. El menú del mismo nombre abre ese listado. Si está vacío, aún no te han designado. No das de alta la cartera ni cambias al titular.',
+      route: 'administracion',
+      target: selectorTour('profesional-tab-asignaciones'),
+    },
+    {
+      id: 'menu-viviendas',
+      title: 'El listado del menú',
+      description: '«Viviendas Asignadas» en el menú abre el listado de inmuebles vinculados a tu ficha. Es consulta: la asignación la hace quien gestiona la vivienda.',
+      route: 'inmuebles',
+      target: selectorTour('nav-inmuebles'),
+    },
+    {
+      id: 'ficha',
+      title: 'Mi Ficha y Datos',
+      description:
+        'Esta pestaña guarda el nombre comercial, el contacto y los datos que ven los propietarios al asignarte. El menú «Mi Cuenta» abre esta misma pestaña, no la configuración del sistema.',
+      route: 'administracion',
+      target: selectorTour('profesional-tab-ficha'),
+    },
+    {
+      id: 'ayuda',
+      title: 'Centro de Ayuda',
+      description: '«Ayuda» en el menú abre el Centro de Ayuda con las explicaciones y tutoriales de tu perfil.',
+      route: 'administracion',
+      target: selectorTour('nav-ayuda'),
+    },
+    {
+      id: 'asistente',
+      title: 'Asistente',
+      description: 'El botón del asistente, junto al título, responde con la ayuda visible para tu perfil y puede llevarte a una pantalla de tu menú. No añade capacidades.',
+      route: 'administracion',
+      target: selectorTour('asistente-erp'),
+    },
+  ],
+};
+
+export const TUTORIALES_REGISTRO: Tutorial[] = [
+  TUTORIAL_LIQUIDACION,
+  RECORRIDO_INVITAR_INQUILINO,
+  RECORRIDO_PORTAL_INQUILINO,
+  RECORRIDO_ADMIN_CENTRO,
+  RECORRIDO_PROPIETARIO_PORTAL,
+  RECORRIDO_PROFESIONAL_PORTAL,
+];
 
 export interface OpcionesTutoriales {
   registro?: Tutorial[];

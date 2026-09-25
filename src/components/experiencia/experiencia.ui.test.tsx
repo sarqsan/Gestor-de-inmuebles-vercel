@@ -108,7 +108,8 @@ describe('§6 · Centro de Ayuda', () => {
     render(<CentroAyudaSection usuario={propietario} onIniciarTutorial={iniciar} accessibleSections={['tesoreria', 'ayuda'] as SectionType[]} />);
     expect(screen.queryByRole('button', { name: 'Morosidad' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Portal de inquilinos' })).toBeNull();
-    expect(screen.getByText(/No hay tutoriales disponibles para tu perfil/)).toBeTruthy();
+    expect(screen.getByText('Conoce tu portal', { exact: true })).toBeTruthy();
+    expect(screen.queryByText('Conoce el Centro de Control')).toBeNull();
   });
 
   it('lista de tutoriales: admin total sin bloqueos; gestor ve el aviso de pasos que requieren otro permiso; «Iniciar» delega en el host', () => {

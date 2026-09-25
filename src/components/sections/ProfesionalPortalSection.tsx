@@ -365,7 +365,7 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
   return (
     <div id="profesional-portal-section" className="space-y-6">
       {/* Header Banner */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div data-tour="profesional-portal-cabecera" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
             <Wrench className="w-6 h-6" />
@@ -423,6 +423,11 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
             return (
               <button
                 key={tab.id}
+                data-tour={
+                  tab.id === 'incidencias' || tab.id === 'asignaciones' || tab.id === 'ficha'
+                    ? `profesional-tab-${tab.id}`
+                    : undefined
+                }
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`py-3.5 px-4 text-xs font-bold border-b-2 flex items-center space-x-2 whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
                   isActive

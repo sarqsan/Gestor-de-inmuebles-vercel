@@ -380,7 +380,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   return (
     <div id="propietario-portal-section" className="space-y-6">
       {/* Header Banner */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div data-tour="propietario-portal-cabecera" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700">
             <Home className="w-6 h-6" />
@@ -432,6 +432,11 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             return (
               <button
                 key={tab.id}
+                data-tour={
+                  tab.id === 'viviendas' || tab.id === 'liquidaciones' || tab.id === 'contratos' || tab.id === 'perfil'
+                    ? `propietario-tab-${tab.id}`
+                    : undefined
+                }
                 onClick={() => setActiveSubTab(tab.id as any)}
                 className={`py-3.5 px-4 text-xs font-bold border-b-2 flex items-center space-x-2 whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
                   isActive

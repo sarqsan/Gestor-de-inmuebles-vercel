@@ -2743,6 +2743,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             <div className="flex border-b border-slate-200 bg-slate-50 px-5 pt-3 gap-3 shrink-0">
               <button
                 type="button"
+                data-tour="inmuebles-alta-general"
                 onClick={() => setNewTab('general')}
                 className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 ${
                   newTab === 'general'
@@ -2755,6 +2756,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               </button>
               <button
                 type="button"
+                data-tour="inmuebles-alta-fiscal"
                 onClick={() => setNewTab('fiscal')}
                 className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 ${
                   newTab === 'fiscal'
@@ -3025,6 +3027,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
                     <div>
                       <select
+                        data-tour="inmuebles-alta-propietario"
                         value={newSelectedPropId}
                         onChange={(e) => handleSelectNewPropietario(e.target.value)}
                         className="w-full px-3.5 py-2.5 bg-white border border-blue-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 shadow-2xs"
@@ -3334,6 +3337,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                 </button>
                 <button
                   type="submit"
+                  data-tour="inmuebles-alta-guardar"
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md"
                 >
                   Guardar Inmueble

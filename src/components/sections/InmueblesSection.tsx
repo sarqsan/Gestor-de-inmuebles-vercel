@@ -115,7 +115,9 @@ interface InmueblesSectionProps {
   onRecomercializarInmueble?: (inmuebleId: string, contratoAnteriorId?: string) => void;
   /**
    * Si viene informado, el alta se abre con este propietario ya seleccionado
-   * (misma ruta que el desplegable). El alta general no lo envía.
+   * (misma ruta que el desplegable). El alta general no lo envía: si el
+   * usuario es PROPIETARIO y su propietarioId está en la lista, «Nuevo Inmueble»
+   * aplica esa misma selección como valor inicial.
    */
   propietarioContextoAltaId?: string | null;
   /** El padre lo limpia después de aplicarlo, para no repetir la preselección. */
@@ -411,6 +413,12 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       setNewPropEmail('');
       setNewPropEsPersonaJuridica(false);
       altaAplicoContexto.current = false;
+    }
+    // Mismo relleno que el alta desde ficha: solo valor inicial, selector editable.
+    const propIdPropietario =
+      currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId : undefined;
+    if (propIdPropietario && propietarios.some((p) => p.id === propIdPropietario)) {
+      handleSelectNewPropietario(propIdPropietario);
     }
     setShowAddModal(true);
   };

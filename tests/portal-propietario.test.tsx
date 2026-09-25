@@ -14,7 +14,7 @@
  * @vitest-environment jsdom
  */
 import React from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type {
   CobroPeriodo,
@@ -303,6 +303,31 @@ function spansCon(texto: string): HTMLElement[] {
 // ---------------------------------------------------------------------------
 // A. GASTOS
 // ---------------------------------------------------------------------------
+describe('Portal Propietario · alta de inmueble', () => {
+  it('el estado vacío no espera al administrador y el CTA reutiliza el callback de alta', () => {
+    const onCrear = vi.fn();
+    render(
+      <PropietarioPortalSection
+        currentUser={USER}
+        inmuebles={[]}
+        profesionales={[]}
+        contratos={[]}
+        especialidades={[]}
+        propietarios={[FICHA]}
+        onOpenCrearProfesionalModal={() => undefined}
+        onSaveProfesional={async () => undefined}
+        onCrearInmueble={onCrear}
+      />,
+    );
+
+    expect(screen.queryByText(/El administrador principal asignará/)).toBeNull();
+    expect(screen.getByText(/Puedes crear tu primer inmueble desde aquí/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: (nombre) => nombre === 'Nuevo inmueble' }));
+    expect(onCrear).toHaveBeenCalledTimes(1);
+    expect(onCrear).toHaveBeenCalledWith('PROP1');
+  });
+});
+
 describe('Portal Propietario · Gastos', () => {
   it('muestra los gastos propios (por propietarioId y por cartera) y excluye los ajenos', () => {
     renderPortal();

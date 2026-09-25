@@ -324,6 +324,10 @@ const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'in
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
   const [altaInmuebleDesdePropietarioId, setAltaInmuebleDesdePropietarioId] = useState<string | null>(null);
+  const abrirAltaInmuebleDesdePropietario = (propietarioId: string) => {
+    setAltaInmuebleDesdePropietarioId(propietarioId);
+    setActiveSection('inmuebles');
+  };
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -3579,6 +3583,7 @@ export default function App() {
                 onSaveProfesional={handleSaveProfesional}
                 onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
+                onCrearInmueble={abrirAltaInmuebleDesdePropietario}
               />
             ) : (
               <PropietariosSection
@@ -3587,10 +3592,7 @@ export default function App() {
                 onSavePropietario={handleSavePropietario}
                 onDeletePropietario={handleDeletePropietario}
                 onSelectInmueble={() => setActiveSection('inmuebles')}
-                onCrearInmueble={(propietarioId) => {
-                  setAltaInmuebleDesdePropietarioId(propietarioId);
-                  setActiveSection('inmuebles');
-                }}
+                onCrearInmueble={abrirAltaInmuebleDesdePropietario}
               />
             )
           )}
@@ -3721,6 +3723,7 @@ export default function App() {
                 onSaveProfesional={handleSaveProfesional}
                 onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
+                onCrearInmueble={abrirAltaInmuebleDesdePropietario}
               />
             ) : null
           )}
@@ -4012,6 +4015,7 @@ export default function App() {
                 onSaveProfesional={handleSaveProfesional}
                 onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
+                onCrearInmueble={abrirAltaInmuebleDesdePropietario}
               />
             )
           )}

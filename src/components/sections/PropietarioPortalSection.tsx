@@ -81,6 +81,8 @@ interface PropietarioPortalSectionProps {
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
   onSavePropietario?: (propietario: Propietario) => Promise<void>;
   onNavigateToInmueble?: (inmuebleId: string) => void;
+  /** Mismo callback que el alta desde la ficha de administración. */
+  onCrearInmueble?: (propietarioId: string) => void;
 }
 
 export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> = ({
@@ -98,6 +100,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   onSaveProfesional,
   onSavePropietario,
   onNavigateToInmueble,
+  onCrearInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
     'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'morosidad' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
@@ -465,8 +468,18 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                     No tienes viviendas asignadas todavía
                   </div>
                   <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    El administrador principal asignará tus inmuebles a tu cuenta. Contacta con la administración para vincular tus propiedades.
+                    Puedes crear tu primer inmueble desde aquí. Quedará vinculado a tu cuenta de propietario.
                   </p>
+                  {onCrearInmueble && currentUser.propietarioId && (
+                    <button
+                      type="button"
+                      onClick={() => onCrearInmueble(currentUser.propietarioId!)}
+                      className="inline-flex items-center gap-1.5 mt-3 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Nuevo inmueble
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

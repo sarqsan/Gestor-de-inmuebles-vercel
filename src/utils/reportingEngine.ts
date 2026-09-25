@@ -53,6 +53,35 @@ export function parseFechaSafe(s: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * D2 — fecha de referencia de un gasto para informes y exportación de rango.
+ *
+ * No es una regla fiscal nueva. Reutiliza el orden que `fiscalEngine`
+ * (`calcularGastosEjercicio`) ya aplica a estas tres fechas:
+ * 1. `fechaDevengo` — factura/período; la escriben GastoModal, crearGasto,
+ *    recurrentes y OT, y es la de agrupación del tipo `Gasto`.
+ * 2. `fechaPago` — solo si no hay devengo.
+ * 3. `fecha` — alias histórico de conveniencia. Conserva los informes que
+ *    solo traen este campo.
+ *
+ * Misma semántica `||` que el motor fiscal: la primera cadena no vacía se
+ * parsea; si no es válida, no se salta a la siguiente. Sin ninguna fecha
+ * operativa parseable, `undefined` (el gasto queda fuera del rango, igual
+ * que hoy cuando falta `fecha`). No usa `createdAt` ni `periodoMesAnio`.
+ */
+export function fechaReferenciaGasto(gasto: Pick<Gasto, 'fechaDevengo' | 'fechaPago' | 'fecha'>): string | undefined {
+  const cruda = gasto.fechaDevengo || gasto.fechaPago || gasto.fecha;
+  if (!cruda || !parseFechaSafe(cruda)) return undefined;
+  return cruda;
+}
+
+function gastoEnRangoFechas(gasto: Gasto, inicio: Date, fin: Date): boolean {
+  const cruda = fechaReferenciaGasto(gasto);
+  if (!cruda) return false;
+  const fecha = parseFechaSafe(cruda);
+  return !!fecha && fecha >= inicio && fecha <= fin;
+}
+
 export function formatFechaISO(d: Date): string {
   return d.toISOString().split('T')[0];
 }
@@ -219,11 +248,7 @@ export function generarInformeCartera(
   });
   const resumenCobros = calcularResumenCobros(cobrosRango);
 
-  const gastosRango = gastosPropietario.filter(g => {
-    const fecha = parseFechaSafe(g.fecha);
-    if (!fecha) return false;
-    return fecha >= inicioRango && fecha <= finRango;
-  });
+  const gastosRango = gastosPropietario.filter(g => gastoEnRangoFechas(g, inicioRango, finRango));
   const gastosTotales = gastosRango.reduce((sum, g) => sum + (g.importe || 0), 0);
   const gastosDeducibles = gastosRango.filter(g => esGastoDeducible(g)).reduce((sum, g) => sum + (g.importe || 0), 0);
 
@@ -405,10 +430,7 @@ export function generarEvolucionTemporal(
       });
       const resumenRaw = calcularResumenCobros(cobrosMes);
       const resumen = mapResumenCobros(resumenRaw);
-      const gastosMes = gastos.filter(g => {
-        const fecha = parseFechaSafe(g.fecha);
-        return fecha && fecha >= inicioEf && fecha <= finEf;
-      });
+      const gastosMes = gastos.filter(g => gastoEnRangoFechas(g, inicioEf, finEf));
       const totalGastos = gastosMes.reduce((sum, g) => sum + (g.importe || 0), 0);
 
       items.push({
@@ -444,10 +466,7 @@ export function generarEvolucionTemporal(
       });
       const resumenRaw2 = calcularResumenCobros(cobrosTrim);
       const resumen = mapResumenCobros(resumenRaw2);
-      const gastosTrim = gastos.filter(g => {
-        const fecha = parseFechaSafe(g.fecha);
-        return fecha && fecha >= inicioTrim && fecha <= finTrim;
-      });
+      const gastosTrim = gastos.filter(g => gastoEnRangoFechas(g, inicioTrim, finTrim));
       const totalGastos = gastosTrim.reduce((sum, g) => sum + (g.importe || 0), 0);
 
       items.push({
@@ -473,8 +492,9 @@ export function generarEvolucionTemporal(
       const resumenRaw3 = calcularResumenCobros(cobrosAnual);
       const resumen = mapResumenCobros(resumenRaw3);
       const gastosAnual = gastos.filter(g => {
-        const fecha = parseFechaSafe(g.fecha);
-        return fecha && fecha.getFullYear() === anio;
+        const cruda = fechaReferenciaGasto(g);
+        const fecha = cruda ? parseFechaSafe(cruda) : null;
+        return !!fecha && fecha.getFullYear() === anio;
       });
       const totalGastos = gastosAnual.reduce((sum, g) => sum + (g.importe || 0), 0);
 
@@ -606,10 +626,7 @@ export function generarInformeInmueble(
   });
   const resumenCobrosRaw = calcularResumenCobros(cobrosRango);
   const resumenCobros = mapResumenCobros(resumenCobrosRaw);
-  const gastosRango = gastosInmueble.filter(g => {
-    const fecha = parseFechaSafe(g.fecha);
-    return fecha && fecha >= inicioRango && fecha <= finRango;
-  });
+  const gastosRango = gastosInmueble.filter(g => gastoEnRangoFechas(g, inicioRango, finRango));
   const totalGastos = gastosRango.reduce((sum, g) => sum + (g.importe||0), 0);
   const totalGastosDeducibles = gastosRango.filter(g=>esGastoDeducible(g)).reduce((sum,g)=>sum+(g.importe||0),0);
 
@@ -684,7 +701,7 @@ export function generarInformeInmueble(
     gastos: {
       total: totalGastos,
       porCategoria: calcularTotalesPorCategoria(gastosRango),
-      lista: gastosRango.map(g=>({ id: g.id, fecha: g.fecha, concepto: g.concepto, importe: g.importe, categoria: g.categoria })),
+      lista: gastosRango.map(g=>({ id: g.id, fecha: fechaReferenciaGasto(g) || '', concepto: g.concepto, importe: g.importe, categoria: g.categoria })),
     },
     ingresos: {
       totalCobrado: resumenCobros.totalCobrado,
@@ -728,10 +745,7 @@ export function generarInformeRentabilidad(
   });
   const resumenCobrosRaw2 = calcularResumenCobros(cobros);
   const resumenCobros = mapResumenCobros(resumenCobrosRaw2);
-  const gastosRango = gastosFiltrados.filter(g=>{
-    const fecha = parseFechaSafe(g.fecha);
-    return fecha && fecha>=inicio && fecha<=fin;
-  });
+  const gastosRango = gastosFiltrados.filter(g => gastoEnRangoFechas(g, inicio, fin));
   const totalGastos = gastosRango.reduce((sum,g)=>sum+(g.importe||0),0);
   const totalGastosDeducibles = gastosRango.filter(g=>esGastoDeducible(g)).reduce((sum,g)=>sum+(g.importe||0),0);
 
@@ -771,7 +785,7 @@ export function generarInformeRentabilidad(
     });
     const resCobrosInmRaw = calcularResumenCobros(cobrosInm);
     const resCobrosInm = mapResumenCobros(resCobrosInmRaw);
-    const gastosInm = gastosFiltrados.filter(g=>g.inmuebleId===inm.id && (()=>{ const f=parseFechaSafe(g.fecha); return f && f>=inicio && f<=fin; })());
+    const gastosInm = gastosFiltrados.filter(g => g.inmuebleId === inm.id && gastoEnRangoFechas(g, inicio, fin));
     const totalGastosInm = gastosInm.reduce((sum,g)=>sum+(g.importe||0),0);
     const resultadoInm = resCobrosInm.totalCobrado - totalGastosInm;
     const rentInm = resCobrosInm.totalCobrado>0 ? Number(((resultadoInm/resCobrosInm.totalCobrado)*100).toFixed(2)) : 0;
@@ -923,20 +937,18 @@ export function generarExportacionFiscal(
       });
     }
 
-    const gastosInm = gastos.filter(g=>g.inmuebleId===inmueble.id).filter(g=>{
-      const fecha = parseFechaSafe(g.fecha);
-      return fecha && fecha>=inicio && fecha<=fin;
-    });
+    const gastosInm = gastos.filter(g => g.inmuebleId === inmueble.id && gastoEnRangoFechas(g, inicio, fin));
 
     for (const gasto of gastosInm) {
+      const fechaGasto = fechaReferenciaGasto(gasto)!;
       items.push({
         propietarioId,
         inmuebleId: inmueble.id,
         inmuebleDireccion: inmueble.direccion,
-        ejercicio: gasto.ejercicioFiscal || parseFechaSafe(gasto.fecha)?.getFullYear() || new Date().getFullYear(),
-        periodo: gasto.fecha.slice(0,7),
+        ejercicio: gasto.ejercicioFiscal || parseFechaSafe(fechaGasto)?.getFullYear() || new Date().getFullYear(),
+        periodo: fechaGasto.slice(0, 7),
         concepto: gasto.concepto,
-        fecha: gasto.fecha,
+        fecha: fechaGasto,
         importe: gasto.importe,
         categoria: gasto.categoria,
         tipo: 'GASTO',

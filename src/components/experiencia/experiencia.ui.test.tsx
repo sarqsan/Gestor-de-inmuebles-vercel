@@ -112,14 +112,14 @@ describe('§6 · Centro de Ayuda', () => {
     expect(screen.queryByText('Conoce el Centro de Control')).toBeNull();
   });
 
-  it('lista de tutoriales: admin total sin bloqueos; gestor ve el aviso de pasos que requieren otro permiso; «Iniciar» delega en el host', () => {
+  it('lista de tutoriales: admin total sin bloqueos; gestor ve el aviso de pasos que requieren otro permiso; «Comenzar» delega en el host', () => {
     const iniciar = vi.fn();
     render(<CentroAyudaSection usuario={admin} onIniciarTutorial={iniciar} />);
     const tut = screen.getByLabelText('Tutoriales');
     expect(within(tut).getByText('Liquidar a un propietario paso a paso')).toBeTruthy();
     expect(within(tut).queryByText(/requieren otro permiso/)).toBeNull();
     expect(within(tut).getByText('Dar acceso a un inquilino a su portal')).toBeTruthy();
-    fireEvent.click(within(tut).getAllByText('Iniciar')[0]);
+    fireEvent.click(within(tut).getAllByText('Comenzar')[0]);
     expect(iniciar).toHaveBeenCalledWith(TUTORIAL_LIQUIDACION.id);
     cleanup();
     render(<CentroAyudaSection usuario={gestor} onIniciarTutorial={iniciar} />);

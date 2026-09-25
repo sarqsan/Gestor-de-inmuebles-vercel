@@ -4,11 +4,11 @@
  * Lista, busca y filtra la ayuda visible para el usuario; abre el contenido ampliado y
  * enlaza con los tutoriales disponibles. Solo lectura; nunca concede permisos ni audita.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Search, BookOpen, ChevronRight, ArrowLeft, Clock, Lock, LifeBuoy } from 'lucide-react';
 import type { SectionType, UsuarioApp } from '../../types';
-import type { ExperienceContext, HelpEntry, ModuloERP, Tutorial } from '../../experiencia';
-import { NOMBRE_MODULO, buscarAyuda, contextoDesdeUsuario, evaluarTutorial, modulosConAyuda, obtenerTutorial, tutorialesDisponibles } from '../../experiencia';
+import type { ExperienceContext, HelpEntry, ModuloERP, ServicioProgresoTutoriales, Tutorial, TutorialProgress } from '../../experiencia';
+import { NOMBRE_MODULO, buscarAyuda, contextoDesdeUsuario, estadoRecorrido, etiquetaTutorial, evaluarTutorial, hostDeTutorial, modulosConAyuda, obtenerTutorial, tutorialesDisponibles } from '../../experiencia';
 
 interface CentroAyudaSectionProps {
   usuario: Pick<UsuarioApp, 'tipoPerfil' | 'roles' | 'permisos'> | null;
@@ -16,9 +16,11 @@ interface CentroAyudaSectionProps {
   accessibleSections?: SectionType[];
   onIniciarTutorial: (tutorialId: string) => void;
   onSelectSection?: (section: SectionType) => void;
+  /** Progreso ya existente. Sin él, los botones dicen «Comenzar». */
+  servicio?: ServicioProgresoTutoriales;
 }
 
-export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario, accessibleSections, onIniciarTutorial, onSelectSection }) => {
+export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario, accessibleSections, onIniciarTutorial, onSelectSection, servicio }) => {
   const ctx: ExperienceContext = useMemo(() => contextoDesdeUsuario(usuario, 'ayuda', { accessibleSections }), [usuario, accessibleSections]);
   const [consulta, setConsulta] = useState('');
   const [modulo, setModulo] = useState<ModuloERP | 'TODOS'>('TODOS');
@@ -30,6 +32,30 @@ export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario,
     return modulo === 'TODOS' ? base : base.filter((e) => e.module === modulo);
   }, [ctx, consulta, modulo]);
   const tutoriales = useMemo(() => tutorialesDisponibles(ctx), [ctx]);
+  const [progresos, setProgresos] = useState<Record<string, TutorialProgress | null>>({});
+
+  useEffect(() => {
+    if (!servicio || tutoriales.length === 0) {
+      setProgresos({});
+      return;
+    }
+    let vivo = true;
+    Promise.all(
+      tutoriales.map(async (t) => {
+        const r = await servicio.getTutorialProgress(t.id, hostDeTutorial(t));
+        return [t.id, r.ok ? r.data : null] as const;
+      })
+    ).then((pares) => {
+      if (!vivo) return;
+      setProgresos(Object.fromEntries(pares));
+    }).catch(() => {
+      if (!vivo) return;
+      setProgresos({});
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [servicio, tutoriales]);
 
   const resumenTutorial = (t: Tutorial) => {
     const ev = evaluarTutorial(t, ctx);
@@ -182,7 +208,7 @@ export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario,
                       onClick={() => onIniciarTutorial(t.id)}
                       className="shrink-0 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 cursor-pointer"
                     >
-                      Iniciar
+                      {etiquetaTutorial(progresos[t.id] ? estadoRecorrido(progresos[t.id], t) : 'NO_INICIADO')}
                     </button>
                   </div>
                 );

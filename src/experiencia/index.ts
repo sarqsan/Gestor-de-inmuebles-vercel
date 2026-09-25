@@ -42,6 +42,15 @@ export {
   sesionDesdeProgreso,
 } from './progreso';
 export type { TutorialProgress, MotivoProgreso, ResultadoProgreso, ServicioProgresoTutoriales } from './progreso';
+export {
+  tutorialDeBienvenida,
+  estadoRecorrido,
+  modoBienvenida,
+  sesionDescartada,
+  etiquetaTutorial,
+  textoBienvenida,
+} from './bienvenida';
+export type { EstadoRecorrido, ModoBienvenida } from './bienvenida';
 export { CAPACIDADES_ERP, capacidadesDisponibles, construirIntentRequest, resolverIntencionLocal } from './intenciones';
 export {
   INTENCIONES_IA,

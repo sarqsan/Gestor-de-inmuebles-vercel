@@ -183,6 +183,7 @@ import { ConfiguracionSection } from './components/sections/ConfiguracionSection
 // CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda, ayuda contextual y tutoriales
 import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
 import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
+import { BienvenidaHost } from './components/experiencia/BienvenidaRecorrido';
 import { servicioProgresoTutoriales } from './lib/progresoTutorialesFirestore';
 import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, crearProveedorGeminiRemoto, type AccionHost } from './experiencia';
 import type { SesionTutorial } from './experiencia';
@@ -3967,6 +3968,7 @@ export default function App() {
                 const t = obtenerTutorial(id);
                 if (t) setSesionTutorial(iniciarTutorial(t));
               }}
+              servicio={servicioProgresoTutoriales}
               onSelectSection={setActiveSection}
             />
           )}
@@ -4231,6 +4233,17 @@ export default function App() {
           }}
         />
       )}
+
+      {/* UX-1B: tarjeta sobre la pantalla de aterrizaje. No cambia la sección. */}
+      <BienvenidaHost
+        usuario={currentUser}
+        servicio={servicioProgresoTutoriales}
+        reproductorAbierto={!!sesionTutorial}
+        onIniciar={(id) => {
+          const t = obtenerTutorial(id);
+          if (t) setSesionTutorial(iniciarTutorial(t));
+        }}
+      />
 
       {/* CAPA TRANSVERSAL §6 (Fase 1): reproductor de tutorial (no bloquea la pantalla) */}
       {sesionTutorial && tutorialActivo && currentUser && (

@@ -32,6 +32,7 @@ import { PortalCuenta } from './PortalCuenta';
 // CAPA TRANSVERSAL §6 (Fase 2): ayuda contextual y recorridos guiados (misma infraestructura que el ERP)
 import { ContextualHelp } from '../experiencia/ContextualHelp';
 import { TutorialPlayer } from '../experiencia/TutorialPlayer';
+import { BienvenidaHost } from '../experiencia/BienvenidaRecorrido';
 import { AsistentePanel } from '../experiencia/AsistentePanel';
 import { servicioProgresoTutoriales } from '../../lib/progresoTutorialesFirestore';
 import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, PANTALLAS_PORTAL, crearProveedorGeminiRemoto } from '../../experiencia';
@@ -313,6 +314,15 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
             </>
           ) : null}
         </main>
+
+        <BienvenidaHost
+          usuario={usuario}
+          host="PORTAL_INQUILINO"
+          servicio={servicioProgresoTutoriales}
+          reproductorAbierto={!!sesionTutorial}
+          habilitada={!!contratoActivo}
+          onIniciar={iniciarRecorrido}
+        />
 
         {/* §6 F2: recorrido guiado (panel flotante; navega con `ir`, sin alterar el portal) */}
         {sesionTutorial && tutorialActivo && contratoActivo && (

@@ -64,7 +64,7 @@ describe('UX-1A · Centro de Ayuda', () => {
     const tut = screen.getByLabelText('Tutoriales');
     expect(within(tut).getByText('Conoce el Centro de Control')).toBeTruthy();
     expect(within(tut).queryByText('Conoce tu portal profesional')).toBeNull();
-    fireEvent.click(within(tut).getAllByRole('button', { name: 'Iniciar' })[0]);
+    fireEvent.click(within(tut).getAllByRole('button', { name: 'Comenzar' })[0]);
     // El primero del registro sigue siendo el de liquidaciones: no se reordena el centro.
     expect(iniciar).toHaveBeenCalledWith('tutorial.tesoreria.liquidacion');
     cleanup();

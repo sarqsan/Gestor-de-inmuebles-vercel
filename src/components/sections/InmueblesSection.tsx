@@ -671,10 +671,11 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setEditCertificadoEnergetico(df?.certificadoEnergetico || '');
     setEditNumeroRegistroPropiedad(df?.numeroRegistroPropiedad || '');
 
-    // Pendiente aparte, no corregir en el alta: la edición no lee `propietarioId`.
-    // Resuelve por propietarioPrincipalId, id fiscal o NIF. Guardar desde aquí
-    // puede perder un propietarioId que solo exista en ese campo.
+    // Misma prioridad que los motores. propietarioId gana para que abrir y
+    // guardar no sustituya el titular operativo por otra referencia desalineada.
+    // No se llama al selector: el snapshot fiscal escrito a mano se conserva.
     const prop1Id =
+      inm.propietarioId ||
       inm.propietarioPrincipalId ||
       df?.propietarioPrincipal?.propietarioId ||
       propietarios.find((p) => df?.propietarioPrincipal?.nifDni && p.nifCif.toLowerCase() === df.propietarioPrincipal.nifDni.toLowerCase())?.id ||

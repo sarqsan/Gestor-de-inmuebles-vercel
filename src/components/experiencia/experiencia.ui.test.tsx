@@ -56,7 +56,7 @@ describe('§6 · ContextualHelp', () => {
   });
 
   it('pantalla sin ayuda registrada o usuario sin permiso → no renderiza nada (no rompe la pantalla)', () => {
-    const { container: c1 } = render(<ContextualHelp usuario={admin} section="candidatos" />);
+    const { container: c1 } = render(<ContextualHelp usuario={admin} section="solicitudes" />);
     expect(c1.innerHTML).toBe('');
     const { container: c2 } = render(<ContextualHelp usuario={gestor} section="tesoreria" />);
     expect(c2.innerHTML).toBe('');
@@ -244,7 +244,7 @@ describe('§6 · Integración en la navegación existente (sin menú paralelo)',
     expect(nav).toHaveBeenCalledWith('ayuda');
     cleanup();
     // Pantalla sin ayuda: el header sigue funcionando y no aparece el botón
-    render(<Header activeSection="candidatos" userProfile={userProfile} currentUser={admin} onSelectSection={nav} />);
+    render(<Header activeSection="solicitudes" userProfile={userProfile} currentUser={admin} onSelectSection={nav} />);
     expect(screen.queryByRole('button', { name: /^Ayuda:/ })).toBeNull();
   });
 });

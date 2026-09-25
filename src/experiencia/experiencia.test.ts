@@ -130,7 +130,7 @@ describe('§6 · Ayuda', () => {
   });
 
   it('ausencia de ayuda: sección sin contenido o sin sección → lista vacía, sin error', () => {
-    expect(ayudaParaContexto(contextoDesdeUsuario(admin, 'candidatos'))).toEqual([]);
+    expect(ayudaParaContexto(contextoDesdeUsuario(admin, 'solicitudes'))).toEqual([]);
     expect(ayudaParaContexto(getExperienceContext({}))).toEqual([]);
     expect(obtenerAyuda('no.existe')).toBeUndefined();
   });

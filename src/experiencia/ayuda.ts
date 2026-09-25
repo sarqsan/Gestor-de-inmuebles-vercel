@@ -84,6 +84,7 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     summary: 'Ficha de suministro (CUPS/contador), lecturas inmutables, reparto y cambios de titular.',
     content:
       'Cada suministro pertenece a un inmueble e identifica tipo, comercializadora y CUPS/contador. Las lecturas son inmutables: una corrección se registra como nueva lectura que referencia a la anterior.\n\nEl reparto permite distribuir un consumo entre unidades; los cambios de titular quedan trazados con su estado.',
+    roles: ['ADMINISTRADOR'],
     keywords: ['suministro', 'luz', 'agua', 'gas', 'lectura', 'contador', 'cups', 'reparto', 'titular'],
   },
   {
@@ -94,6 +95,7 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     summary: 'Desde la avería hasta el gasto: incidencia → profesional → presupuesto → reparación → factura.',
     content:
       'Una incidencia describe una avería o necesidad en un inmueble, con prioridad y responsabilidad. Puede asignarse a un profesional, recibir presupuesto, ejecutarse y cerrarse con factura, que genera el gasto correspondiente.\n\nLas incidencias notificadas por inquilinos desde su portal aparecen con origen INQUILINO y quedan acotadas a su contrato.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
     keywords: ['incidencia', 'avería', 'reparación', 'profesional', 'presupuesto', 'factura'],
   },
   // ---------------------------------------------------------------- ERP · base y C/D
@@ -149,6 +151,7 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     summary: 'ABIERTA → EN_VALORACION/PRESUPUESTOS → ASIGNADA → EN_REPARACION → RESUELTA → CERRADA.',
     content:
       'ABIERTA/REGISTRADA: recibida (las del inquilino llegan con origen INQUILINO). EN_VALORACION y PRESUPUESTOS: se determina responsabilidad y coste. ASIGNADA: hay profesional. EN_REPARACION/EN_CURSO: trabajo en marcha. RESUELTA: terminada, pendiente de cierre. CERRADA: cerrada con factura/gasto si procede. CANCELADA/RECHAZADA: no prosperan, con motivo.\n\nEl inquilino ve en su portal el estado, el profesional asignado y las fechas; no ve teléfonos, costes ni facturas.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
     keywords: ['incidencia', 'estado', 'asignada', 'reparación', 'resuelta', 'cerrada', 'profesional'],
   },
   // ---------------------------------------------------------------- PORTAL DEL INQUILINO (BLOQUE E)
@@ -384,8 +387,210 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     title: 'Cómo usar el Centro de Ayuda',
     summary: 'Busca por palabras, filtra por módulo y sigue tutoriales guiados paso a paso.',
     content:
-      'El Centro de Ayuda reúne las explicaciones de cada pantalla y los tutoriales disponibles para tu perfil. Solo muestra contenido de funciones a las que ya tienes acceso: la ayuda nunca concede permisos.\n\nEl icono de ayuda de cada sección abre la explicación de esa pantalla concreta.',
+      'Qué es. El Centro de Ayuda reúne las explicaciones de cada pantalla y los tutoriales disponibles para tu perfil.\n\nQué puedes hacer. Busca por palabras, filtra por módulo y abre un tutorial. El icono de ayuda de cada sección abre la ficha de esa pantalla: para qué sirve, qué acciones tiene y por dónde seguir.\n\nQué hace falta. Nada que configurar. Solo muestra contenido de funciones a las que ya tienes acceso: la ayuda nunca concede permisos.\n\nDespués. Si una ficha enlaza un recorrido, lo inicias desde aquí o desde el icono de ayuda. El asistente usa estas mismas fichas; no es otro manual.',
     keywords: ['ayuda', 'tutorial', 'buscar', 'centro de ayuda'],
+  },
+  // ---------------------------------------------------------------- UX-1C · pantallas sin ficha (el rol filtra; no concede permisos)
+  // Sin ficha, a propósito: solicitudes/nuevo_candidato/cuestionario (no son destino de menú),
+  // mis_* y mi_perfil (UX-0B no navega ahí), morosidad del propietario (no está en su menú),
+  // portal `mas` (no se amplía el inquilino) e inversión del profesional (no está en su menú).
+  {
+    id: 'ayuda.dashboard.ejecutivo',
+    module: 'inicio',
+    section: 'dashboard',
+    title: 'Panel ejecutivo',
+    summary: 'Cifras reales de la cartera y atajos a cobros, gastos, incidencias e inmuebles.',
+    content:
+      'Qué es. Es el panel ejecutivo, no el Centro de Control de usuarios. Resume ocupación, cobros, gastos, incidencias y operaciones con los registros que ya existen.\n\nQué puedes hacer. Cambiar el periodo y saltar a Cobros, Gastos, Incidencias, Inmuebles, Contratos, Pólizas, Actas o Conciliación. Las tarjetas no crean registros.\n\nQué hace falta. Inmuebles, contratos, cobros o gastos ya registrados. Si no hay datos, el panel lo indica; no rellena cifras.\n\nDespués. Entra en la sección del atajo para revisar o registrar. Usuarios, auditoría y configuración están en Administración y Configuración.',
+    roles: ['ADMINISTRADOR'],
+    keywords: ['panel ejecutivo', 'dashboard', 'ocupación', 'atajos', 'centro de control ejecutivo'],
+  },
+  {
+    id: 'ayuda.dashboard.propietario',
+    module: 'inicio',
+    section: 'dashboard',
+    title: 'Resumen de tu cartera',
+    summary: 'Cifras de tus inmuebles y atajos a las secciones que ya tienes en el menú.',
+    content:
+      'Qué es. Resume tus viviendas, cobros, gastos e incidencias. No es el Centro de Control del administrador ni la pestaña Mi Perfil.\n\nQué puedes hacer. Cambiar el periodo y abrir los atajos de tu menú. Solo ves el ámbito de tu cuenta.\n\nQué hace falta. Que tus inmuebles y sus contratos, cobros o gastos ya estén registrados. Sin datos, el panel lo dice.\n\nDespués. El día a día sigue en Mi Portal Propietario o en la sección del atajo. Mi Cuenta abre Mi Perfil, no este panel.',
+    roles: ['PROPIETARIO'],
+    keywords: ['resumen', 'cartera', 'panel', 'atajos', 'mis inmuebles'],
+  },
+  {
+    id: 'ayuda.admin.propietarios',
+    module: 'propietarios',
+    section: 'propietarios',
+    title: 'Propietarios e IBAN',
+    summary: 'Fichas de titular, NIF, domicilio y cuentas de cobro. No crea el acceso al portal.',
+    content:
+      'Qué es. Directorio de propietarios y arrendadores, con sus cuentas de cobro.\n\nQué puedes hacer. Buscar y filtrar, crear o editar la ficha (datos fiscales, domicilio, representante, cuentas y notas), añadir un IBAN, marcarlo principal, copiarlo y eliminar con confirmación. Desde una ficha puedes abrir sus inmuebles o iniciar el alta de una vivienda en su contexto.\n\nQué hace falta. Nombre y NIF o CIF para que sirva de titular. El alta de la vivienda es la de Inmuebles: el selector de titular sigue editable.\n\nDespués. Ese titular se elige al guardar un inmueble. Esta pantalla no crea el usuario de acceso ni un pago al propietario.',
+    roles: ['ADMINISTRADOR'],
+    keywords: ['propietario', 'iban', 'nif', 'cuenta de cobro', 'arrendador', 'titular'],
+  },
+  {
+    id: 'ayuda.gastos.gestion',
+    module: 'finanzas',
+    section: 'gastos',
+    title: 'Gastos, recurrentes y préstamos',
+    summary: 'Apuntes de los inmuebles que ya puedes ver, con recurrentes, préstamos y cuadre.',
+    content:
+      'Qué es. Registro de gastos de explotación o financiación asociados a un inmueble.\n\nQué puedes hacer. Filtrar por inmueble, tipo, categoría, estado y año. Registrar, editar o eliminar un gasto. En Recurrentes y Préstamos das de alta esas fichas y consultas el cuadre de rentabilidad. La lista es la de los inmuebles de tu sesión.\n\nQué hace falta. Un inmueble ya creado. Un gasto no marca un recibo como cobrado ni aprueba un pago al propietario.\n\nDespués. Fiscalidad e Informes reutilizan estos apuntes. No calculan un impuesto desde aquí.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['gasto', 'recurrente', 'préstamo', 'explotación', 'rentabilidad', 'apuntes'],
+  },
+  {
+    id: 'ayuda.fiscal.alquileres',
+    module: 'finanzas',
+    section: 'fiscal',
+    title: 'Fiscalidad anual de alquileres',
+    summary: 'Ingresos y gastos del ejercicio, tomados de cobros y apuntes ya registrados. No calcula el IRPF.',
+    content:
+      'Qué es. Consulta anual por inmueble. No es una presentación a Hacienda.\n\nQué puedes hacer. Elegir ejercicio e inmueble, ver los ingresos del año tomados de los cobros existentes, los gastos del año tomados de los apuntes existentes, la sucesión de contratos y las referencias de documentación ya guardadas. El histórico no sobrescribe otros ejercicios.\n\nQué hace falta. Contratos, cobros o gastos ya registrados. El resultado de la pantalla no es la cuota de IRPF: debe revisarlo un asesor.\n\nDespués. Informes puede exportar el resumen fiscal del mismo origen. Para corregir una cifra, vuelve al cobro o al gasto.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['fiscalidad', 'ejercicio', 'irpf', 'ingresos', 'alquileres'],
+  },
+  {
+    id: 'ayuda.informes.cartera',
+    module: 'finanzas',
+    section: 'informes',
+    title: 'Informes y exportación',
+    summary: 'Cartera, inmueble, rentabilidad y resumen fiscal, en pantalla o en PDF y JSON.',
+    content:
+      'Qué es. Informes de los inmuebles que ya puedes ver, calculados con contratos, cobros, gastos y el resto de registros existentes.\n\nQué puedes hacer. Elegir periodo (mes, trimestre, año o fechas) y la vista: cartera, inmueble, rentabilidad, fiscal o exportación. Generar PDF de cartera, de inmueble o fiscal, y exportar JSON.\n\nQué hace falta. Datos ya registrados. Si no hay, el informe sale vacío. No presenta modelos fiscales ni crea otro libro contable.\n\nDespués. Para corregir una cifra, edítala en Cobros, Gastos o Fiscalidad. Esta pantalla no la cambia.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['informe', 'exportar', 'pdf', 'json', 'rentabilidad', 'cartera'],
+  },
+  {
+    id: 'ayuda.conciliacion.bancaria',
+    module: 'finanzas',
+    section: 'conciliacion',
+    title: 'Conciliación de extractos',
+    summary: 'Importa un extracto, revisa propuestas y deja trazabilidad. No cambia el importe histórico.',
+    content:
+      'Qué es. Cruza movimientos del extracto con cobros y gastos ya existentes.\n\nQué puedes hacer. Importar CSV, OFX, MT940 o Norma 43. Revisar la propuesta de cada movimiento: confirmar, rechazar, clasificarlo como comisión o transferencia interna, o dejarlo sin conciliar. Aplicar guarda la trazabilidad y no modifica el importe histórico.\n\nQué hace falta. Un extracto ya descargado y cobros o gastos con los que comparar. El estado se guarda por propietario. No hay conexión directa con la entidad ni cargo automático.\n\nDespués. Un movimiento confirmado puede servir de evidencia en Tesorería. El recibo se sigue en Cobros.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['conciliación', 'extracto', 'csv', 'ofx', 'mt940', 'norma 43', 'movimiento'],
+  },
+  {
+    id: 'ayuda.facturacion.registro',
+    module: 'finanzas',
+    section: 'facturacion',
+    title: 'Facturas y registro',
+    summary: 'Emite facturas, encadena el registro y prepara VERI*FACTU. Sin conexión a la AEAT.',
+    content:
+      'Qué es. Facturas de los inmuebles que ya puedes ver, con serie, número y estado.\n\nQué puedes hacer. Filtrar por estado y ejercicio, crear una factura, emitirla (genera el registro con huella encadenada y la preparación VERI*FACTU), rectificarla o anularla. El apartado de factura electrónica B2B es otro bloque, no forma parte de esa preparación.\n\nQué hace falta. Receptor y datos de la factura. Emitir no envía nada a la AEAT: la conexión oficial no está hecha y aquí no se carga un certificado.\n\nDespués. La factura queda en esta lista. No sustituye al recibo de alquiler ni a un pago al propietario.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['factura', 'verifactu', 'serie', 'anular', 'rectificar', 'aeat'],
+  },
+  {
+    id: 'ayuda.financiacion.hipotecas',
+    module: 'finanzas',
+    section: 'financiacion',
+    title: 'Financiación hipotecaria',
+    summary: 'Préstamos, LTV y cuadros de amortización. Sin conexión con la entidad.',
+    content:
+      'Qué es. Fichas de financiación vinculadas a un inmueble y a su titular.\n\nQué puedes hacer. Crear una financiación, ver el cuadro, registrar una amortización y consultar el LTV o una simulación. Solo aparecen las de los inmuebles de tu sesión.\n\nQué hace falta. Un inmueble. No pide credenciales ni se conecta con la entidad.\n\nDespués. Si existe un préstamo en Gastos, se consulta allí. Esta ficha no genera un pago.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['financiación', 'hipoteca', 'ltv', 'amortización', 'préstamo hipotecario'],
+  },
+  {
+    id: 'ayuda.polizas.gestion',
+    module: 'seguros',
+    section: 'polizas',
+    title: 'Pólizas de seguro',
+    summary: 'Alta, vencimiento, alerta y renovación de las pólizas que ya puedes ver.',
+    content:
+      'Qué es. Pólizas de los inmuebles de tu ámbito. Como propietario solo ves las de inmuebles sobre los que tienes autorización.\n\nQué puedes hacer. Buscar y filtrar, crear una póliza, abrir el detalle, renovar y consultar el histórico. Las alertas avisan a 60, 45, 30 y 15 días del vencimiento.\n\nQué hace falta. Un inmueble al que asociarla. Crear la ficha no contrata la póliza con la aseguradora.\n\nDespués. Los siniestros se siguen desde Incidencias u Operaciones. La renovación queda en la propia póliza.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['póliza', 'seguro', 'vencimiento', 'renovación', 'alerta'],
+  },
+  {
+    id: 'ayuda.inversion.analisis',
+    module: 'finanzas',
+    section: 'inversion',
+    title: 'Inversión y valoración',
+    summary: 'Análisis de compra o de un inmueble: valoración, comparables, coste y alquiler estimado.',
+    content:
+      'Qué es. Estudios guardados. No es el listado de la cartera.\n\nQué puedes hacer. Crear, ver, editar, duplicar o eliminar un análisis. Incluye valoración, comparables, coste de compra, financiación opcional y alquiler estimado, y puedes comparar escenarios. «Convertir en inmueble cartera» crea la vivienda en Inmuebles.\n\nQué hace falta. Las cifras del estudio. Convertir no crea contrato ni recibo.\n\nDespués. La vivienda nueva, si la conviertes, se gestiona en Inmuebles. El estudio no aprueba una compra.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['inversión', 'valoración', 'comparables', 'análisis', 'convertir en inmueble'],
+  },
+  {
+    id: 'ayuda.recomercializacion.expediente',
+    module: 'captacion',
+    section: 'recomercializacion',
+    title: 'Recomercialización',
+    summary: 'Expediente de salida, inspección, valoración y nueva comercialización del inmueble.',
+    content:
+      'Qué es. Un expediente por activo que sale de un alquiler y vuelve a comercializarse.\n\nQué puedes hacer. Abrir un expediente, buscar por dirección y anotar inmobiliarias, propuestas y leads. Cerrar el ciclo cuando el expediente termina. El botón de alta está desactivado si no hay inmuebles.\n\nQué hace falta. Un inmueble. Abrir el expediente no finaliza el contrato ni publica un anuncio.\n\nDespués. El contrato se cierra en Formalización o en la ficha del inmueble. La nueva comercialización sigue en este expediente.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['recomercialización', 'expediente', 'salida', 'inmobiliaria', 'lead'],
+  },
+  {
+    id: 'ayuda.operaciones.coordinacion',
+    module: 'incidencias',
+    section: 'operaciones',
+    title: 'Coordinación operativa',
+    summary: 'Vista conjunta de incidencias, trabajos, pólizas, siniestros y gastos ya registrados.',
+    content:
+      'Qué es. Pantalla de coordinación. No sustituye a Incidencias, Pólizas ni Gastos.\n\nQué puedes hacer. Revisar lo pendiente de tu ámbito y abrir el detalle con el formulario de su sección, incluida la póliza o el siniestro. También puedes ir a la sección de origen.\n\nQué hace falta. Que esos registros existan. Abrir esta pantalla no crea una incidencia ni un gasto.\n\nDespués. El cambio de estado de una avería se hace en Incidencias; el de una póliza, en Pólizas.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'],
+    keywords: ['operaciones', 'coordinación', 'mantenimiento', 'siniestro', 'trabajos'],
+  },
+  {
+    id: 'ayuda.captacion.preseleccionados',
+    module: 'captacion',
+    section: 'preseleccionados',
+    title: 'Preseleccionados y visitas',
+    summary: 'Candidatos ya preseleccionados o con invitación de visita, agenda y paso a contrato.',
+    content:
+      'Qué es. La cola posterior a Candidatos: quien está preseleccionado, tiene visita reservada o una invitación activa.\n\nQué puedes hacer. Filtrar por inmueble y estado, configurar la agenda de visitas, solicitar documentación económica y laboral, abrir la gestión de esa documentación y pasar a formalizar.\n\nQué hace falta. Un candidato en ese estado y un inmueble. Formalizar abre el alta de contrato; no lo deja firmado desde esta lista.\n\nDespués. El contrato sigue en Formalización. La valoración está en Análisis.',
+    roles: ['ADMINISTRADOR'],
+    keywords: ['preseleccionado', 'visita', 'agenda', 'documentación', 'formalizar'],
+  },
+  {
+    id: 'ayuda.captacion.seguro-impago',
+    module: 'seguros',
+    section: 'seguro_impago',
+    title: 'Seguro de impago',
+    summary: 'Expedientes de seguro de impago y catálogo de aseguradoras. No emite la póliza.',
+    content:
+      'Qué es. Seguimiento del expediente de seguro de impago de un alquiler, con su referencia.\n\nQué puedes hacer. Crear un expediente, abrir su detalle, eliminarlo y configurar las entidades aseguradoras. Esa configuración es el catálogo de aseguradoras, no el perfil del sistema.\n\nQué hace falta. Candidato e inmueble del expediente. Registrarlo no contrata el seguro.\n\nDespués. La póliza, si llega a existir, se consulta en Pólizas. El contrato, en Formalización.',
+    roles: ['ADMINISTRADOR'],
+    keywords: ['seguro de impago', 'aseguradora', 'expediente de seguro', 'impago'],
+  },
+  {
+    id: 'ayuda.captacion.candidatos',
+    module: 'captacion',
+    section: 'candidatos',
+    title: 'Candidatos',
+    summary: 'Busca, filtra, abre la ficha, cambia el estado y genera el informe.',
+    content:
+      'Qué es. Listado de personas interesadas en un inmueble, con su estado.\n\nQué puedes hacer. Buscar por nombre, correo, teléfono o inmueble. Filtrar por estado e inmueble. Abrir la ficha, actualizar el estado, generar el informe o eliminar el candidato. Añadir uno abre el alta ya existente.\n\nQué hace falta. Los datos del candidato. Cambiar el estado no crea el contrato.\n\nDespués. Si queda preseleccionado, sigue en Preseleccionados. La valoración está en Análisis.',
+    roles: ['ADMINISTRADOR'],
+    keywords: ['candidato', 'estado', 'informe', 'ficha', 'preselección'],
+  },
+  {
+    id: 'ayuda.captacion.analisis',
+    module: 'captacion',
+    section: 'analisis',
+    title: 'Valoración de candidatos',
+    summary: 'Índice de solvencia y comparador. No aprueba ni rechaza al candidato.',
+    content:
+      'Qué es. Valoración a partir de capacidad de pago, estabilidad, ingresos y documentación aportada.\n\nQué puedes hacer. Elegir un candidato y ver la valoración individual, comparar candidatos de un inmueble o abrir el análisis de documentación. Generar el informe usa el mismo informe del candidato.\n\nQué hace falta. Un candidato, y mejor con documentación ya cargada en su ficha. La decisión final no se toma en esta pantalla.\n\nDespués. Si continúas con esa persona, el estado se cambia en Candidatos y el contrato en Formalización.',
+    roles: ['ADMINISTRADOR'],
+    keywords: ['solvencia', 'valoración de candidatos', 'comparador', 'documentación', 'análisis'],
+  },
+  {
+    id: 'ayuda.propietario.suministros',
+    module: 'suministros',
+    section: 'suministros',
+    title: 'Suministros de tus viviendas',
+    summary: 'Consulta, lecturas y solicitud de cambio de titular. Sin alta ni borrado.',
+    content:
+      'Qué es. Luz, agua, gas y demás suministros de los inmuebles de tu cuenta.\n\nQué puedes hacer. Filtrar por inmueble, ver comercializadora, contador e histórico, registrar una lectura y solicitar un cambio de titular. La lectura guardada no se edita: una corrección es otra lectura.\n\nQué hace falta. Que la administración haya dado de alta el suministro. No puedes crearlo, editarlo, borrarlo ni confirmar el cambio: eso lo resuelve gestión.\n\nDespués. La lectura queda en el histórico. El inquilino, si tiene portal, puede ver el suministro de su contrato.',
+    roles: ['PROPIETARIO'],
+    keywords: ['suministro', 'lectura', 'contador', 'cambio de titular', 'luz', 'agua'],
   },
 ];
 

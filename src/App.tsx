@@ -98,6 +98,7 @@ import {
   subscribeAuditLogs,
   subscribeModulosConfig,
   saveInmuebleFirestore,
+  eliminarTitularSecundarioInmueble,
   deleteInmuebleFirestore,
   saveCandidatoFirestore,
   deleteCandidatoFirestore,
@@ -175,6 +176,7 @@ import { ConfiguracionAseguradorasModal } from './components/ConfiguracionAsegur
 import { DashboardEjecutivoSection } from './components/sections/DashboardEjecutivoSection';
 import { InicioSection } from './components/sections/InicioSection';
 import { InmueblesSection } from './components/sections/InmueblesSection';
+import type { PayloadEliminacionTitularSecundario } from './lib/eliminacionTitularSecundario';
 import { CandidatosSection } from './components/sections/CandidatosSection';
 import { NuevoCandidatoSection } from './components/sections/NuevoCandidatoSection';
 import { CuestionarioSection } from './components/sections/CuestionarioSection';
@@ -1780,6 +1782,14 @@ export default function App() {
       return next;
     });
     saveInmuebleFirestore(updatedInmueble);
+  };
+
+  // Solo la desactivación del segundo titular en edición. No forma parte del merge genérico.
+  const handleEliminarTitularSecundario = (
+    inmuebleId: string,
+    campos: PayloadEliminacionTitularSecundario,
+  ) => {
+    void eliminarTitularSecundarioInmueble(inmuebleId, campos);
   };
 
   // Slot Handlers
@@ -3907,6 +3917,7 @@ export default function App() {
               propietarioContextoAltaId={altaInmuebleDesdePropietarioId}
               onContextoAltaConsumido={() => setAltaInmuebleDesdePropietarioId(null)}
               onUpdateInmueble={handleUpdateInmueble}
+              onEliminarTitularSecundario={handleEliminarTitularSecundario}
               onOpenLinkModal={(inm) => setInmuebleForLinkModal(inm)}
               onOpenConfigurarAgenda={(inmId) => {
                 setSelectedInmuebleForAgenda(inmId);

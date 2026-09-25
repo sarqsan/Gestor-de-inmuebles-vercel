@@ -56,6 +56,7 @@ function renderAlta(opts: {
   contexto?: string | null;
   onConsumido?: () => void;
   currentUser?: UsuarioApp | null;
+  onEliminar?: (inmuebleId: string, campos: unknown) => void;
 }) {
   return render(
     <InmueblesSection
@@ -67,6 +68,7 @@ function renderAlta(opts: {
       propietarioContextoAltaId={opts.contexto}
       onContextoAltaConsumido={opts.onConsumido}
       currentUser={opts.currentUser}
+      onEliminarTitularSecundario={opts.onEliminar}
     />,
   );
 }
@@ -110,7 +112,8 @@ describe('alta de inmueble desde propietario', () => {
   it('A. el contexto preselecciona al propietario y rellena fiscal, cuenta y los tres ids', () => {
     const onAdd = vi.fn();
     const onConsumido = vi.fn();
-    renderAlta({ propietarios: [p1, p2], onAdd, contexto: 'P1', onConsumido });
+    const onEliminar = vi.fn();
+    renderAlta({ propietarios: [p1, p2], onAdd, contexto: 'P1', onConsumido, onEliminar });
 
     expect(screen.getByRole('heading', { name: /Añadir Nuevo Inmueble/ })).toBeTruthy();
     const selector = selectorTitular();
@@ -137,11 +140,13 @@ describe('alta de inmueble desde propietario', () => {
     });
     expect(creado.cuentaBancariaCobroId).toBe('cta-P1');
     expect(creado.ibanCobro).toBe('ES00P1');
+    expect(onEliminar).not.toHaveBeenCalled();
   });
 
   it('B. el selector sigue editable y el segundo titular no se toca al cambiar el principal', () => {
     const onAdd = vi.fn();
-    renderAlta({ propietarios: [p1, p2, p3], onAdd, contexto: 'P1' });
+    const onEliminar = vi.fn();
+    renderAlta({ propietarios: [p1, p2, p3], onAdd, contexto: 'P1', onEliminar });
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Inmueble con Segundo Propietario / Co-Arrendador' }));
     const segundo = selectorSegundo();
@@ -167,6 +172,7 @@ describe('alta de inmueble desde propietario', () => {
     expect(creado.datosFiscales?.segundoPropietario?.propietarioId).toBe('P2');
     expect(creado.datosFiscales?.segundoPropietario?.nombre).toBe('Nombre P2');
     expect(creado.datosFiscales?.tieneSegundoPropietario).toBe(true);
+    expect(onEliminar).not.toHaveBeenCalled();
   });
 
   it('C. el alta general sigue vacía y permite guardar sin propietario', () => {

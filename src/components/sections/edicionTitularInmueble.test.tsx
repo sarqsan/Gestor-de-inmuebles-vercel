@@ -2,11 +2,14 @@
  * @vitest-environment jsdom
  *
  * Carga del titular al editar: propietarioId gana sobre el resto.
- * No cubre deleteField, copropiedad ni motores fiscales.
+ * La desactivación del segundo titular pide deleteField solo de sus dos campos.
+ * No cubre copropiedad ni motores fiscales.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { deleteField } from 'firebase/firestore';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DatosFiscalesInmueble, Inmueble, Propietario, PropietarioFiscal } from '../../types';
+import type { PayloadEliminacionTitularSecundario } from '../../lib/eliminacionTitularSecundario';
 import { InmueblesSection } from './InmueblesSection';
 
 function propietario(id: string, extra: Partial<Propietario> = {}): Propietario {
@@ -64,7 +67,12 @@ function datos(principal?: PropietarioFiscal, segundo?: PropietarioFiscal, activ
   };
 }
 
-function renderEdicion(opts: { inmueble: Inmueble; propietarios: Propietario[]; onUpdate?: (inm: Inmueble) => void }) {
+function renderEdicion(opts: {
+  inmueble: Inmueble;
+  propietarios: Propietario[];
+  onUpdate?: (inm: Inmueble) => void;
+  onEliminar?: (inmuebleId: string, campos: PayloadEliminacionTitularSecundario) => void;
+}) {
   return render(
     <InmueblesSection
       inmuebles={[opts.inmueble]}
@@ -72,6 +80,7 @@ function renderEdicion(opts: { inmueble: Inmueble; propietarios: Propietario[]; 
       propietarios={opts.propietarios}
       onSelectCandidate={() => undefined}
       onUpdateInmueble={opts.onUpdate}
+      onEliminarTitularSecundario={opts.onEliminar}
     />,
   );
 }
@@ -215,9 +224,11 @@ describe('edición: carga del titular principal', () => {
 
   it('9 y 10. el cambio manual A → B actualiza las tres referencias y no toca al segundo', () => {
     const onUpdate = vi.fn();
+    const onEliminar = vi.fn();
     renderEdicion({
       propietarios: [a, b, c],
       onUpdate,
+      onEliminar,
       inmueble: inmueble({
         propietarioId: 'A',
         propietarioPrincipalId: 'B',
@@ -243,5 +254,113 @@ describe('edición: carga del titular principal', () => {
     expect(guardado.datosFiscales?.tieneSegundoPropietario).toBe(true);
     expect(guardado.datosFiscales?.segundoPropietario?.propietarioId).toBe('C');
     expect(guardado.datosFiscales?.segundoPropietario?.nombre).toBe('Segundo C');
+    expect(onEliminar).not.toHaveBeenCalled();
+  });
+});
+
+describe('edición: desactivar el segundo titular', () => {
+  afterEach(() => cleanup());
+
+  const p1 = propietario('P1');
+  const p2 = propietario('P2');
+
+  function conSegundo(): Inmueble {
+    return inmueble({
+      propietarioId: 'P1',
+      propietarioPrincipalId: 'P1',
+      propietarioSecundarioId: 'P2',
+      datosFiscales: datos(
+        fiscal('P1', 'Snapshot P1', p1.nifCif),
+        fiscal('P2', 'Snapshot P2', p2.nifCif),
+        true,
+      ),
+    });
+  }
+
+  it('desmarcar pide deleteField de los dos campos y deja la bandera en false', () => {
+    const onUpdate = vi.fn();
+    const onEliminar = vi.fn();
+    renderEdicion({
+      propietarios: [p1, p2],
+      onUpdate,
+      onEliminar,
+      inmueble: conSegundo(),
+    });
+    abrirFiscal();
+    const casilla = screen.getByRole('checkbox', { name: 'Inmueble con Segundo Propietario / Co-Arrendador' });
+    expect((casilla as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(casilla);
+    guardar();
+
+    expect(onEliminar).toHaveBeenCalledTimes(1);
+    const [id, campos] = onEliminar.mock.calls[0] as [string, PayloadEliminacionTitularSecundario];
+    expect(id).toBe('inm-1');
+    expect(campos.propietarioSecundarioId).toEqual(deleteField());
+    expect(campos['datosFiscales.segundoPropietario']).toEqual(deleteField());
+    expect(campos['datosFiscales.tieneSegundoPropietario']).toBe(false);
+    expect(campos).not.toHaveProperty('datosFiscales');
+    expect(Object.keys(campos).sort()).toEqual([
+      'datosFiscales.segundoPropietario',
+      'datosFiscales.tieneSegundoPropietario',
+      'propietarioSecundarioId',
+    ]);
+
+    const guardado = onUpdate.mock.calls[0][0] as Inmueble;
+    expect(guardado.propietarioId).toBe('P1');
+    expect(guardado.propietarioPrincipalId).toBe('P1');
+    expect(guardado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('P1');
+    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Snapshot P1');
+    expect(guardado.propietarioSecundarioId).toBeUndefined();
+    expect(guardado.datosFiscales?.segundoPropietario).toBeUndefined();
+    expect(guardado.datosFiscales?.tieneSegundoPropietario).toBe(false);
+  });
+
+  it('con la casilla activa, editar otro dato no emite deleteField y conserva al segundo', () => {
+    const onUpdate = vi.fn();
+    const onEliminar = vi.fn();
+    renderEdicion({
+      propietarios: [p1, p2],
+      onUpdate,
+      onEliminar,
+      inmueble: conSegundo(),
+    });
+    abrirFiscal();
+    const casilla = screen.getByRole('checkbox', { name: 'Inmueble con Segundo Propietario / Co-Arrendador' });
+    expect((casilla as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText('Ej. Calificación E (145 kWh/m² año)'), {
+      target: { value: 'Calificación C' },
+    });
+    guardar();
+
+    expect(onEliminar).not.toHaveBeenCalled();
+    const guardado = onUpdate.mock.calls[0][0] as Inmueble;
+    expect(guardado.propietarioSecundarioId).toBe('P2');
+    expect(guardado.datosFiscales?.segundoPropietario?.propietarioId).toBe('P2');
+    expect(guardado.datosFiscales?.segundoPropietario?.nombre).toBe('Snapshot P2');
+    expect(guardado.datosFiscales?.tieneSegundoPropietario).toBe(true);
+    expect(guardado.datosFiscales?.certificadoEnergetico).toBe('Calificación C');
+    expect(guardado.propietarioId).toBe('P1');
+  });
+
+  it('sin segundo titular previo, guardar no emite deleteField', () => {
+    const onUpdate = vi.fn();
+    const onEliminar = vi.fn();
+    renderEdicion({
+      propietarios: [p1, p2],
+      onUpdate,
+      onEliminar,
+      inmueble: inmueble({
+        propietarioId: 'P1',
+        propietarioPrincipalId: 'P1',
+        datosFiscales: datos(fiscal('P1', 'Snapshot P1', p1.nifCif)),
+      }),
+    });
+    abrirFiscal();
+    guardar();
+    expect(onEliminar).not.toHaveBeenCalled();
+    const guardado = onUpdate.mock.calls[0][0] as Inmueble;
+    expect(guardado.propietarioId).toBe('P1');
+    expect(guardado.propietarioSecundarioId).toBeUndefined();
+    expect(guardado.datosFiscales?.tieneSegundoPropietario).toBe(false);
   });
 });

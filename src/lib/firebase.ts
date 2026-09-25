@@ -368,6 +368,22 @@ export async function saveInmuebleFirestore(inmueble: Inmueble) {
 /**
  * Delete Inmueble from Firestore
  */
+/**
+ * Borra en Firestore solo el segundo titular. Lo llama el guardado de edición
+ * cuando la casilla se desmarca y el documento ya lo tenía. No altera el
+ * setDoc con merge de saveInmuebleFirestore.
+ */
+export async function eliminarTitularSecundarioInmueble(
+  inmuebleId: string,
+  campos?: PayloadEliminacionTitularSecundario,
+) {
+  try {
+    await escribirEliminacionTitularSecundario(db, inmuebleId, campos);
+  } catch (err) {
+    console.error('Error eliminando titular secundario del inmueble:', err);
+  }
+}
+
 export async function deleteInmuebleFirestore(inmuebleId: string) {
   try {
     await deleteDoc(doc(db, 'inmuebles', inmuebleId));
@@ -384,6 +400,10 @@ export async function deleteInmuebleFirestore(inmuebleId: string) {
 
 import { compressImageForUpload } from '../utils/fileCompressor';
 import { buildFichaPublicaInmueble, deleteFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
+import {
+  escribirEliminacionTitularSecundario,
+  type PayloadEliminacionTitularSecundario,
+} from './eliminacionTitularSecundario';
 
 /**
  * Recursively cleans any object or array to ensure it contains NO `undefined` values,

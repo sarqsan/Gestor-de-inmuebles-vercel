@@ -26,6 +26,11 @@ import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
 import { getInmuebleCoverUrl } from '../../utils/imageUtils';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
 import {
+  debeEliminarTitularSecundario,
+  payloadEliminacionTitularSecundario,
+  type PayloadEliminacionTitularSecundario,
+} from '../../lib/eliminacionTitularSecundario';
+import {
   obtenerCobrosInmueble,
   calcularResumenCobros,
   registrarPagoPeriodo,
@@ -104,6 +109,15 @@ interface InmueblesSectionProps {
   onOpenLinkModal?: (inmueble: Inmueble) => void;
   onOpenConfigurarAgenda?: (inmuebleId?: string) => void;
   onUpdateInmueble?: (inmueble: Inmueble) => void;
+  /**
+   * Solo el guardado de edición, y solo al desmarcar un segundo titular que
+   * ya existía. El payload pide deleteField de los dos campos; no sustituye
+   * el mapa fiscal ni el merge genérico.
+   */
+  onEliminarTitularSecundario?: (
+    inmuebleId: string,
+    campos: PayloadEliminacionTitularSecundario,
+  ) => void;
   onDeleteSlot?: (slotId: string) => void;
   onDeleteSlotsBatch?: (slotIds: string[]) => void;
   onUpdateSlot?: (slot: VisitSlot) => void;
@@ -139,6 +153,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   onOpenLinkModal,
   onOpenConfigurarAgenda,
   onUpdateInmueble,
+  onEliminarTitularSecundario,
   onDeleteSlot,
   onDeleteSlotsBatch,
   onUpdateSlot,
@@ -833,6 +848,10 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       ibanCobro: editIbanCobro.trim() || undefined,
       datosFiscales,
     };
+
+    if (debeEliminarTitularSecundario(inmuebleToEdit, editTieneSegundoProp)) {
+      onEliminarTitularSecundario?.(inmuebleToEdit.id, payloadEliminacionTitularSecundario());
+    }
 
     onUpdateInmueble(updated);
     setInmuebleToEdit(null);

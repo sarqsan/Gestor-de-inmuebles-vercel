@@ -19,6 +19,7 @@ import {
   User,
   LogOut,
   Receipt,
+  AlertTriangle,
   Smartphone,
   Zap,
   TrendingDown,
@@ -92,6 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
+
       { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet },
       { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
       { id: 'financiacion', label: 'Financiación', icon: Landmark },
@@ -124,6 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
       { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
+
       { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet },
       { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
       { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark },

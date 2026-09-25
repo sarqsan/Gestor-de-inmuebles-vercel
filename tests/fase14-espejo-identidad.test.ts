@@ -503,13 +503,20 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
     expect(sin1).toEqual(sin2);
   });
 
-  it('D.5 el espejo se escribe en los tres momentos del circuito de sesión y ANTES de abrir datos', async () => {
+  it('D.5 el espejo se escribe en los cinco momentos del circuito de sesión y ANTES de abrir datos', async () => {
     const fuente = readFileSync(path.resolve(__dirname, '../src/lib/authService.ts'), 'utf8');
     const sinComentarios = fuente.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, '');
-    expect(sinComentarios.match(/await syncAuthIndex\(/g) || []).toHaveLength(3);
-    // login, registro por invitación y restauración de sesión
-    for (const fn of ['loginWithEmail', 'registerWithInvitationLink', 'subscribeAuthState']) {
-      const i = sinComentarios.search(new RegExp(`export\\s+(async\\s+)?function\\s+${fn}\\b`));
+    // INTEGRACIÓN PR4 (2026-09-25): a los tres momentos canónicos (login,
+    // registro por invitación, restauración de sesión) se suman los dos altas
+    // nuevas de Arena B —activación nominal (`activarUsuarioVinculado`, privada
+    // de módulo) y registro autónomo (`registerAutonomo`)—, que también deben
+    // escribir el espejo (sin él, el recién registrado no supera las reglas).
+    // Ambas escrituras ocurren dentro del alta, antes de `onComplete`, luego
+    // antes de que `App` abra suscripciones de datos: la garantía se mantiene.
+    expect(sinComentarios.match(/await syncAuthIndex\(/g) || []).toHaveLength(5);
+    // login, activación nominal, registro por invitación, registro autónomo y restauración de sesión
+    for (const fn of ['loginWithEmail', 'activarUsuarioVinculado', 'registerWithInvitationLink', 'registerAutonomo', 'subscribeAuthState']) {
+      const i = sinComentarios.search(new RegExp(`(export\\s+)?(async\\s+)?function\\s+${fn}\\b`));
       expect(i, fn).toBeGreaterThan(-1);
       const siguiente = sinComentarios.slice(i + 10).search(/\nexport\s/);
       const cuerpo = sinComentarios.slice(i, siguiente > 0 ? i + 10 + siguiente : i + 8000);

@@ -210,6 +210,16 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 - **Dependencias externas:** archivos bancarios (hoy) / futura API bancaria.
 - **NO modificar accidentalmente:** la regla «no modificar silenciosamente contabilidad operativa» (todo cambio produce propuesta + evento de histórico); `registrarPagoPeriodo` como única interfaz de escritura a cobros; la idempotencia de importaciones (re-importar no duplica).
 
+### GAP-R1 — Persistencia Firestore de la conciliación bancaria (GAP6)
+- **Estado:** CERRADO. Implementación `415de41` (`feat(gap-r1)`, 2026-09-21); consolidación en esta rama: tests de query filtrada + invariantes estáticos §24 + control negativo de discriminación (commit `feat(reconciliation): persist bank reconciliation in Firestore`).
+- **Arquitectura adoptada:** motor canónico intacto (importar → proponer → confirmar → aplicar; sin segundo motor). `src/lib/conciliacionFirestore.ts`: carga acotada por propietario, guardado en batch atómico idempotente, transiciones con merge. La sección carga al montar con unión race-safe (lo local gana; modelo append-only) y persiste importación + 4 transiciones; banner de carga/error. `conciliacionSession.ts` queda como caché derivado solo para la evidencia de pago de Tesorería (no fuente de verdad).
+- **Colecciones (existentes, reutilizadas; reglas §24 sin cambios):** `movimientos_bancarios`, `conciliaciones_bancarias`, `importaciones_bancarias`. DocIds namespaced+saneados `${propietarioId}_${idDeterminista}` (`hashIdempotencia` no incluye propietario). Sin índices compuestos (3 equality mono-campo + orden client-side).
+- **Aislamiento:** las 3 consultas filtran `where(propietarioId == pid)`; reglas: master (email verificado) + propietario-sobre-lo-propio; `propietarioId` exigido en create e inmutable en update (`existing == incoming == myPropId`); delete solo master; `sinSecretosBancarios()`; profesional/inquilino/anónimo sin vía. Guard client-side anti-demo (`prop_demo` nunca toca Firestore).
+- **Persistencia real:** sobreviven movimientos, propuestas con transiciones e importaciones (disponibles tras cierre y en otro dispositivo al abrir). Efímero legítimo: filtros/búsqueda/selección UI. `ResumenConciliacion` se recalcula (`calcularResumenConciliacion`), no se almacena. Cero localStorage/sessionStorage en el circuito.
+- **Tests:** `tests/conciliacion-persistencia.test.ts` 27/27 (Firestore mockeado): 15 R1 (roundtrip, aislamiento A/B, inválidos, idempotencia, merge, guardas) + 12 consolidación (where demostrado en las 3 queries, recuperar-tras-actualizar, falsificación neutralizada, 8 invariantes §24 + extractor + control negativo §14 que falla ante reglas relajadas).
+- **Limitaciones reales:** carga one-shot al montar (sin live-sync entre pestañas; cada dispositivo recupera al abrir); validación de reglas contra Firebase real pendiente (sin emulator en el repo, por orden); defecto D2 conocido (matching de gastos no puntúa fecha por `g.fecha` vs `fechaDevengo`) — afecta puntuación, no persistencia; fuera de alcance R1.
+- **NO modificar accidentalmente:** el sellado `propietarioId` en escritura; los docIds namespaced (cambiar el esquema rompería idempotencia); las reglas §24 (los invariantes estáticos fallan si se relajan).
+
 ### GAP7 — Facturación / RRSIF / VERI*FACTU
 - **Qué existe:** `facturacionEngine.ts` (motor puro: series, numeración correlativa con control de duplicados/saltos, líneas, base/IVA/retención/total, **registro de facturación con huella SHA-256 encadenada** según spec AEAT v0.1.2, verificación independiente de cadena), `facturacionReporte.ts` (reporte RRSIF), `verifactuTransport.ts` (transporte **desacoplado**: cola PENDIENTE→PREPARADO→ENVIANDO→ACEPTADO/ACEPTADO_CON_ERRORES/RECHAZADO/ERROR, reintentos idempotentes), `sha256.ts`, `types/facturacion.ts`, `FacturacionSection.tsx`, colecciones `facturas`/`registros_facturacion`/`envios_verifactu`/`series_facturacion` + reglas.
 - **Probado:** 39 tests (`facturacion.test.ts` 28 + `facturacionReporte.test.ts` 6 + `facturacion-notificaciones.test.ts` 5): numeración, huella encadenada, verificación, reporte, notificaciones.
@@ -406,6 +416,13 @@ los DNI/adjuntos del funnel público ya son un residual documentado — no ampli
 > §39–§42 / E.1–E.4 (sin emulador ni Java en el sandbox; solo verificación
 > textual de `test:bloque-e`), Firebase Auth real, subida real a Storage, index
 > compuesto real. Sin defectos de E detectados.
+>
+> **REINTEGRACIÓN EN ARENA B (2026-09-25, merge PR4 `main`→`arena/01a0bfd3`).**
+> Unión del portal E canónico (experiencia §6, `data-tour`, suscripciones
+> acotadas §10.9) con la autenticación PR4 de Arena B (login único, registro
+> autónomo, invitaciones nominales, administración segura, baja de acceso,
+> fix `lastLoginAt`/permisos `94340ea`). Base `7d21d44`, sin segundas
+> implementaciones: un solo `authService`, un solo portal E, reglas unidas.
 
 ### 5.1 Naturaleza conceptual
 
@@ -983,7 +1000,7 @@ NOTIFICACIONES (GAP1) — consumidor: eventos GAP2, GAP7, GAP8
 INCIDENCIAS (incidenciasEngine) + MANTENIMIENTO + PROFESIONALES + SEGUROS
     └── BLOQUE C — detección de deuda, recobro, expediente, seguro impago
 
-BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS (INTEGRADO — §5)
+BLOQUE E — PORTAL DEL INQUILINO + SUMINISTROS (INTEGRADO — §5; re-unido con auth PR4 en Arena B 2026-09-25)
     ├── BLOQUE B (pagos / recibos / liquidación)
     ├── BLOQUE C (deuda / comunicaciones al inquilino)
     └── BLOQUE D (entrada/salida, actas, firma)

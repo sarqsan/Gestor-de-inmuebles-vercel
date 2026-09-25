@@ -1795,6 +1795,8 @@ export interface EnlaceRegistro {
   activo: boolean;
   profesionalIdVinculado?: string; // Si es una invitación para un profesional privado existente
   propietarioIdVinculado?: string; // Si es una invitación para un propietario existente
+  usuarioIdVinculado?: string; // ACCESO-PROPIETARIOS: usuario pendiente nominal (un solo uso, NO crear usuario)
+  emailInvitado?: string; // ACCESO-PROPIETARIOS: email nominal de la invitación (verificación previa a crear Auth)
   contratoIdVinculado?: string; // BLOQUE E: contrato LAU que da acceso (invitación INQUILINO)
   inmuebleIdVinculado?: string; // BLOQUE E: inmueble del contrato (invitación INQUILINO)
   fechaCaducidad?: string; // Opcional ISO
@@ -1873,6 +1875,7 @@ export const PERMISOS_SISTEMA: PermisoDefinicion[] = [
   { codigo: 'administracion.permisos', nombre: 'Gestión de Permisos', categoria: 'administracion', descripcion: 'Asignar roles y permisos granulares' },
   { codigo: 'administracion.configuracion', nombre: 'Configuración y Módulos', categoria: 'administracion', descripcion: 'Activar y desactivar módulos y enlaces' },
   { codigo: 'administracion.auditoria', nombre: 'Ver Auditoría', categoria: 'administracion', descripcion: 'Consultar logs de auditoría del sistema' },
+
 
   { codigo: 'inquilinos.ver', nombre: 'Ver Inquilinos', categoria: 'inquilinos', descripcion: 'Consultar accesos de inquilinos al portal' },
   { codigo: 'inquilinos.gestionar', nombre: 'Gestionar Inquilinos', categoria: 'inquilinos', descripcion: 'Invitar, vincular y revocar accesos de inquilinos' },

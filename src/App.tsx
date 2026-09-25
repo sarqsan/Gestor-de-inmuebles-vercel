@@ -18,6 +18,7 @@ import {
   ContratoFormalizacion,
   Gasto,
   GastoRecurrente,
+  Incidencia,
   Prestamo,
   ExpedienteRecomercializacion,
   InmobiliariaDirectorio,
@@ -83,6 +84,7 @@ import {
   subscribeGastosRecurrentes,
   subscribePrestamos,
   subscribeExpedientesRecomercializacion,
+  subscribeIncidencias,
   subscribeInmobiliarias,
   subscribePropuestasInmobiliaria,
   subscribeLeadsInmobiliarios,
@@ -234,6 +236,12 @@ import { contextoAutorizacionDesdeUsuario, repositorioNotificacionesFirestore } 
 import { revisarCompromisosVigentes } from './utils/morosidad/morosidadStore';
 import type { CompromisoPago, ExpedienteMorosidad, PoliticaMorosidad, ResumenMorosidadPropietario } from './types/morosidad';
 import { suscribirMovimientosSesion } from './lib/conciliacionSession';
+import {
+  resumenCambiosUsuario,
+  validarBajaUsuario,
+  aplicarBajaUsuario,
+  detalleBajaUsuario,
+} from './lib/adminUsuarios';
 import type { SesionConciliacion } from './lib/conciliacionSession';
 import type {
   FicheroSEPA,
@@ -265,6 +273,8 @@ import { PortalRegistroView } from './components/PortalRegistroView';
 import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPortalShell';
 import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
 import { LoginView } from './components/LoginView';
+import { RegistroAutonomoView } from './components/RegistroAutonomoView';
+import { getEnlaceById } from './lib/suministrosFirestore';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
 import {
   subscribeAuthState,
@@ -375,6 +385,8 @@ export default function App() {
   const [gastosRecurrentes, setGastosRecurrentes] = useState<GastoRecurrente[]>([]);
   // FASE 2.3: préstamos / hipotecas.
   const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
+  // PORTAL PROPIETARIO: incidencias (la suscripción ya viene acotada por propietarioId).
+  const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
   // FASE 3.0/3.1: expedientes de recomercialización y contexto de alta.
   const [expedientesRecomerc, setExpedientesRecomerc] = useState<ExpedienteRecomercializacion[]>([]);
   // FASE 3.6: bolsa de inmobiliarias, RFPs (propuestas) y leads.
@@ -704,6 +716,22 @@ export default function App() {
     return [];
   }, [currentUser, prestamos, scopedInmuebles]);
 
+  // PORTAL PROPIETARIO: incidencias visibles (la suscripción ya viene acotada;
+  // aquí se refuerza el filtro igual que en gastos — defensa en profundidad).
+  const scopedIncidencias = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return incidencias;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
+      return incidencias.filter(
+        (x) =>
+          (currentUser.propietarioId && x.propietarioId === currentUser.propietarioId) ||
+          allowedInmIds.has(x.inmuebleId)
+      );
+    }
+    return [];
+  }, [currentUser, incidencias, scopedInmuebles]);
+
   // FASE 3.0: expedientes de recomercialización visibles (la suscripción ya
   // viene acotada por propietarioId; aquí se refuerza por inmueble asignado).
   const scopedExpedientesRecomerc = useMemo(() => {
@@ -787,6 +815,27 @@ export default function App() {
   // Token de registro público (por enlace o invitación)
   const [activePublicRegistroToken, setActivePublicRegistroToken] = useState<string | null>(null);
   const [activePublicRegistroInqId, setActivePublicRegistroInqId] = useState<string | null>(null); // BLOQUE E
+  const [activePublicRegistroPropId, setActivePublicRegistroPropId] = useState<string | null>(null); // ACCESO-PROPIETARIOS: nominal (?registroProp={enlaceId})
+  // REGISTRO AUTÓNOMO: alta sin invitación (propietario/profesional).
+  const [showRegistroAutonomo, setShowRegistroAutonomo] = useState(false);
+  // ?registro= con ID directo: lectura puntual (get anónimo si el enlace está
+  // activo; sin listar la colección). Los tokens usan las listas cargadas.
+  const [enlaceDirectoRegistro, setEnlaceDirectoRegistro] = useState<EnlaceRegistro | null>(null);
+
+  useEffect(() => {
+    if (!activePublicRegistroToken || !activePublicRegistroToken.startsWith('enlace_')) {
+      setEnlaceDirectoRegistro(null);
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      const enl = await getEnlaceById(activePublicRegistroToken);
+      if (vivo) setEnlaceDirectoRegistro(enl);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [activePublicRegistroToken]);
 
   // Public subscriptions and URL token checking
   useEffect(() => {
@@ -810,6 +859,12 @@ export default function App() {
       const regInq = params.get('registroInq');
       if (regInq) {
         setActivePublicRegistroInqId(regInq);
+      }
+
+      // ACCESO-PROPIETARIOS: invitación nominal de propietario (?registroProp={enlaceId})
+      const regProp = params.get('registroProp');
+      if (regProp) {
+        setActivePublicRegistroPropId(regProp);
       }
 
       // Check Visita Public Token
@@ -1035,6 +1090,11 @@ export default function App() {
       setExpedientesRecomerc(Array.isArray(data) ? data : []);
     }, dataScope);
 
+    // PORTAL PROPIETARIO: incidencias acotadas por propietario (mismo `where` que exigen las reglas).
+    const unsubscribeIncidencias = subscribeIncidencias((data) => {
+      setIncidencias(Array.isArray(data) ? data : []);
+    }, dataScope);
+
     // FASE 3.6: directorio de inmobiliarias (bolsa común) con RFPs y leads acotados por propietario.
     const unsubscribeInmobiliarias = subscribeInmobiliarias((data) => {
       setInmobiliariasDirectorio(Array.isArray(data) ? data : []);
@@ -1148,6 +1208,7 @@ export default function App() {
       unsubscribeRecurrentes();
       unsubscribePrestamos();
       unsubscribeExpedientes();
+      unsubscribeIncidencias();
       unsubscribeInmobiliarias();
       unsubscribePropuestas();
       unsubscribeLeads();
@@ -2779,6 +2840,7 @@ export default function App() {
 
   // --- HANDLERS FOR USERS & RBAC ---
   const handleSaveUsuario = async (user: UsuarioApp) => {
+    const previo = usuarios.find((u) => u.id === user.id);
     setUsuarios((prev) => {
       const idx = prev.findIndex((u) => u.id === user.id);
       if (idx >= 0) {
@@ -2789,10 +2851,14 @@ export default function App() {
       return [user, ...prev];
     });
     await saveUsuarioFirestore(user);
+    // Alta: mensaje clásico. Edición: acción MODIFICAR_USUARIO con diff de
+    // campos (sin secretos) para trazabilidad de la administración.
     await logAudit(
-      'GUARDAR_USUARIO',
+      previo ? 'MODIFICAR_USUARIO' : 'GUARDAR_USUARIO',
       'USUARIOS',
-      `Usuario ${user.nombre} (${user.email}) guardado con perfil ${user.tipoPerfil}`,
+      previo
+        ? `Usuario ${user.nombre} (${user.email}) modificado: ${resumenCambiosUsuario(previo, user)}`
+        : `Usuario ${user.nombre} (${user.email}) guardado con perfil ${user.tipoPerfil}`,
       user.id
     );
   };
@@ -2805,6 +2871,37 @@ export default function App() {
       'ELIMINAR_USUARIO',
       'USUARIOS',
       `Usuario eliminado: ${u?.nombre || userId} (${u?.email || ''})`,
+      userId
+    );
+  };
+
+  // --- BAJA SEGURA DE ACCESO (Bloque Borrado Seguro; sin borrado patrimonial) ---
+  // Retira el acceso pasando a INACTIVO (reversible vía editor), conserva
+  // fichas/contratos/documentos/históricos/auditoría y sincroniza el espejo de
+  // identidad para revocar el rol en las reglas. Nunca borra documentos: no
+  // usa deleteDoc ni toca Auth (sin vía administrativa desde frontend).
+  const handleBajaUsuario = async (userId: string, motivo?: string) => {
+    const objetivo = usuarios.find((x) => x.id === userId);
+    if (!objetivo) throw new Error('Usuario no encontrado.');
+    const rechazo = validarBajaUsuario({
+      operador: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
+      objetivo,
+    });
+    if (rechazo) throw new Error(rechazo);
+    const estadoAnterior = objetivo.estado;
+    const deBaja = aplicarBajaUsuario(objetivo);
+    setUsuarios((prev) => prev.map((x) => (x.id === userId ? deBaja : x)));
+    await saveUsuarioFirestore(deBaja);
+    if (objetivo.authUid) {
+      await syncAuthIndex(
+        { ...deBaja, updatedAt: new Date().toISOString() },
+        { uid: objetivo.authUid }
+      );
+    }
+    await logAudit(
+      'BAJA_USUARIO',
+      'USUARIOS',
+      detalleBajaUsuario(objetivo, motivo, estadoAnterior),
       userId
     );
   };
@@ -2941,6 +3038,34 @@ export default function App() {
     profesionalData?: Partial<Profesional>,
     enlaceUtilizado?: EnlaceRegistro
   ) => {
+    // ACCESO-PROPIETARIOS: si el registro ya lo persistió el servicio
+    // canónico (registerWithInvitationLink), aquí solo se sincroniza el
+    // estado local y la sesión — sin re-guardar ni re-consumir.
+    // (La auditoría ya la escribió el servicio.)
+    if (!propietarioData && !profesionalData) {
+      setUsuarios((prev) => {
+        const idx = prev.findIndex((u) => u.id === nuevoUsuario.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = nuevoUsuario;
+          return next;
+        }
+        return [nuevoUsuario, ...prev];
+      });
+      if (enlaceUtilizado) {
+        setEnlacesRegistro((prev) =>
+          prev.map((e) =>
+            e.id === enlaceUtilizado.id
+              ? { ...e, usosActuales: (e.usosActuales || 0) + 1 }
+              : e
+          )
+        );
+      }
+      setCurrentUser(nuevoUsuario);
+      return;
+    }
+
+    // Camino histórico: profesional invitado por token de ficha (sin enlace).
     await saveUsuarioFirestore(nuevoUsuario);
     setUsuarios((prev) => [nuevoUsuario, ...prev]);
 
@@ -3013,6 +3138,19 @@ export default function App() {
     setActivePublicRegistroInqId(null);
     window.history.pushState({}, '', window.location.pathname);
     setCurrentUser(usuario);
+  };
+
+  // REGISTRO AUTÓNOMO: tras el alta sin invitación, el usuario entra
+  // directamente en su portal (misma puerta de entrada que el login).
+  const handleCompleteRegistroAutonomo = async (usuario: UsuarioApp) => {
+    setShowRegistroAutonomo(false);
+    window.history.pushState({}, '', window.location.pathname);
+    await handleCompleteSelfRegistration(usuario);
+    if (usuario.tipoPerfil === 'PROPIETARIO') {
+      setActiveSection('propietarios');
+    } else if (usuario.tipoPerfil === 'PROFESIONAL') {
+      setActiveSection('administracion');
+    }
   };
 
   const handleLogout = async () => {
@@ -3088,12 +3226,38 @@ export default function App() {
     );
   }
 
+  // ACCESO-PROPIETARIOS: activación nominal de propietario (?registroProp=).
+  // Lectura directa por ID; no requiere listas cargadas.
+  if (activePublicRegistroPropId) {
+    return (
+      <PortalRegistroView
+        token=""
+        enlaceId={activePublicRegistroPropId}
+        enlaces={[]}
+        profesionales={[]}
+        especialidades={[]}
+        onCompleteRegistro={handleCompleteSelfRegistration}
+        onCancel={() => {
+          setActivePublicRegistroPropId(null);
+          window.history.pushState({}, '', window.location.pathname);
+        }}
+      />
+    );
+  }
+
   // Standalone Registration Portal View (Public Link or Token)
   if (activePublicRegistroToken) {
     return (
       <PortalRegistroView
         token={activePublicRegistroToken}
-        enlaces={enlacesRegistro}
+        enlaces={
+          enlaceDirectoRegistro
+            ? [
+                enlaceDirectoRegistro,
+                ...enlacesRegistro.filter((e) => e.id !== enlaceDirectoRegistro.id),
+              ]
+            : enlacesRegistro
+        }
         profesionales={profesionales}
         especialidades={especialidades}
         onCompleteRegistro={handleCompleteSelfRegistration}
@@ -3277,6 +3441,16 @@ export default function App() {
   }
 
   if (!currentUser) {
+    // REGISTRO AUTÓNOMO: alta sin invitación (convive con registro/registroProp/registroInq).
+    if (showRegistroAutonomo) {
+      return (
+        <RegistroAutonomoView
+          especialidades={especialidades}
+          onComplete={handleCompleteRegistroAutonomo}
+          onCancel={() => setShowRegistroAutonomo(false)}
+        />
+      );
+    }
     return (
       <LoginView
         onLoginSuccess={(usuario) => {
@@ -3292,6 +3466,7 @@ export default function App() {
         onOpenRegisterWithToken={(token) => {
           setActivePublicRegistroToken(token);
         }}
+        onOpenRegistroAutonomo={() => setShowRegistroAutonomo(true)}
       />
     );
   }
@@ -3394,6 +3569,8 @@ export default function App() {
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
+                gastos={scopedGastos}
+                incidencias={scopedIncidencias}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -3530,6 +3707,8 @@ export default function App() {
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
+                gastos={scopedGastos}
+                incidencias={scopedIncidencias}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -3781,6 +3960,7 @@ export default function App() {
                 onLogout={handleLogout}
                 onSaveUsuario={handleSaveUsuario}
                 onDeleteUsuario={handleDeleteUsuario}
+                onBajaUsuario={handleBajaUsuario}
                 onSaveEnlaceRegistro={handleSaveEnlaceRegistro}
                 onDeleteEnlaceRegistro={handleDeleteEnlaceRegistro}
                 onSaveEspecialidad={handleSaveEspecialidad}
@@ -3789,8 +3969,10 @@ export default function App() {
                   setModulosConfig(cfg);
                   await saveModulosConfigFirestore(cfg);
                 }}
-                onOpenCrearUsuarioModal={() => {
-                  setSelectedUserForEdit(undefined);
+                onOpenCrearUsuarioModal={(prefill) => {
+                  // ACCESO-PROPIETARIOS §1: conservar el propietario
+                  // seleccionado (prefill) al abrir el alta de usuario.
+                  setSelectedUserForEdit(prefill as UsuarioApp | undefined);
                   setShowCrearUsuarioModal(true);
                 }}
                 onOpenCrearEnlaceModal={() => {
@@ -4126,6 +4308,7 @@ export default function App() {
           usuarioParaEditar={selectedUserForEdit}
           inmuebles={inmuebles}
           propietarios={propietarios}
+          operador={currentUser ? { id: currentUser.id, email: currentUser.email } : null}
           onSave={async (u) => {
             await handleSaveUsuario(u);
             setShowCrearUsuarioModal(false);
@@ -4161,6 +4344,8 @@ export default function App() {
       {showCrearEnlaceModal && (
         <CrearEnlaceRegistroModal
           enlaceParaEditar={selectedEnlaceForEdit}
+          usuarios={usuarios}
+          propietarios={propietarios}
           onSave={async (e) => {
             await handleSaveEnlaceRegistro(e);
             setShowCrearEnlaceModal(false);

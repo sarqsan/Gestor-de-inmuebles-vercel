@@ -1,6 +1,6 @@
 # BLOQUE E — Portal del Inquilino + Suministros (Arena B)
 
-Origen: `arena/01a0bfd3-gestor-de-inmuebles-vercel` (reconciliado `97ea0cb`) · Estado: **INTEGRADO EN LA CANÓNICA** (`arena/01a0bfbe-gestor-de-inmuebles-vercel`, 2026-09-21, integración selectiva sobre `7d21d44`).
+Origen: `arena/01a0bfd3-gestor-de-inmuebles-vercel` (reconciliado `97ea0cb`) · Estado: **INTEGRADO EN LA CANÓNICA** (`arena/01a0bfbe-gestor-de-inmuebles-vercel`, 2026-09-21, integración selectiva sobre `7d21d44`) → **REINTEGRADO EN ARENA B** (merge PR4 `main`→`arena/01a0bfd3`, base `7d21d44`, 2026-09-25: unión portal-inquilino + experiencia §6 + auth PR4).
 
 ## 1. Auditoría previa (obligatoria, ejecutada)
 

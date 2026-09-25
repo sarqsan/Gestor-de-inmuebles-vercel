@@ -2,6 +2,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
+  sendPasswordResetEmail,
   onAuthStateChanged,
   User as FirebaseUser,
   updateProfile,
@@ -12,10 +13,12 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
   query,
   where,
 } from 'firebase/firestore';
 import { auth, db, USUARIOS_COL, ENLACES_REGISTRO_COL, saveAuditLogFirestore } from './firebase';
+import { validarActivacionPendiente } from './accesoPropietarios';
 import {
   contratosDelInquilino,
   puedeAccederContrato,
@@ -30,12 +33,46 @@ import {
   EnlaceRegistro,
   Propietario,
   Profesional,
+  TipoProfesional,
+  TipoPropietario,
   CobroPeriodo,
   ROLES_PREDEFINIDOS,
   PERMISOS_SISTEMA,
 } from '../types';
 
 export const ADMIN_MASTER_EMAIL = 'sarqsan2@gmail.com';
+
+/**
+ * ¿Es un rechazo de las Security Rules de Firestore? (`FirestoreError` con
+ * código `permission-denied` / mensaje «Missing or insufficient permissions»).
+ */
+export function esErrorPermisosFirestore(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown } | null | undefined;
+  if (!e) return false;
+  const code = typeof e.code === 'string' ? e.code : '';
+  const msg = typeof e.message === 'string' ? e.message : '';
+  return (
+    code === 'permission-denied' ||
+    code === 'firestore/permission-denied' ||
+    /missing or insufficient permissions/i.test(msg)
+  );
+}
+
+/**
+ * Mensaje accionable para un rechazo de permisos durante el inicio de sesión.
+ * Las Security Rules exigen una sesión de Firebase Authentication para leer
+ * `usuarios/{id}`; sin ella (modo de acceso directo) Firestore deniega, y así debe
+ * seguir siendo: la solución es habilitar el proveedor, no relajar las reglas.
+ */
+export const MENSAJE_LOGIN_SIN_PERMISOS =
+  'No se pudo verificar tu perfil: Firestore ha denegado el acceso (Missing or insufficient permissions). ' +
+  'Las reglas de seguridad exigen una sesión de Firebase Authentication. ' +
+  'Comprueba que el proveedor «Correo electrónico/contraseña» está habilitado en Firebase Console › Authentication › Sign-in method ' +
+  'y que la cuenta existe en Firebase Authentication; si el problema persiste, contacta con el administrador.';
+
+export function mensajeErrorLogin(err: unknown): string | null {
+  return esErrorPermisosFirestore(err) ? MENSAJE_LOGIN_SIN_PERMISOS : null;
+}
 
 /**
  * FASE 1.4 — Mantiene el espejo de identidad `usuarios_auth/{uid}` que las
@@ -136,6 +173,24 @@ export async function getUsuarioByAuthUid(
       }
     }
 
+    // 0b. ACCESO-PROPIETARIOS: resolución por espejo de identidad.
+    // Lecturas directas (permitidas al titular) en lugar de consultas
+    // globales, que las reglas solo permiten al administrador.
+    try {
+      const mirrorSnap = await getDoc(doc(db, 'usuarios_auth', authUid));
+      if (mirrorSnap.exists()) {
+        const usuarioId = (mirrorSnap.data() as { usuarioId?: unknown })?.usuarioId;
+        if (typeof usuarioId === 'string' && usuarioId.length > 0) {
+          const perfilSnap = await getDoc(doc(db, 'usuarios', usuarioId));
+          if (perfilSnap.exists()) {
+            return { id: perfilSnap.id, ...perfilSnap.data() } as UsuarioApp;
+          }
+        }
+      }
+    } catch (e) {
+      // Continuar con la resolución histórica
+    }
+
     // 1. Búsqueda directa por authUid
     const qAuth = query(USUARIOS_COL, where('authUid', '==', authUid));
     const snapAuth = await getDocs(qAuth);
@@ -218,28 +273,35 @@ export async function loginWithEmail(
   if (firebaseUser) {
     usuario = await getUsuarioByAuthUid(firebaseUser.uid, firebaseUser.email);
   } else if (authProviderDisabled) {
-    const pHash = await hashPassword(passwordInput);
+    // Sin sesión de Firebase Auth las reglas deniegan la lectura de `usuarios/{id}`
+    // (incluido `user_admin_principal`). No se rodean: se traduce el rechazo.
+    try {
+      const pHash = await hashPassword(passwordInput);
 
-    if (email === ADMIN_MASTER_EMAIL) {
-      const adminSnap = await getDoc(doc(db, 'usuarios', 'user_admin_principal'));
-      if (adminSnap.exists()) {
-        const adminData = adminSnap.data() as any;
-        if (adminData.passwordHash && adminData.passwordHash !== pHash) {
-          throw new Error('Contraseña incorrecta para el Administrador Principal.');
+      if (email === ADMIN_MASTER_EMAIL) {
+        const adminSnap = await getDoc(doc(db, 'usuarios', 'user_admin_principal'));
+        if (adminSnap.exists()) {
+          const adminData = adminSnap.data() as any;
+          if (adminData.passwordHash && adminData.passwordHash !== pHash) {
+            throw new Error('Contraseña incorrecta para el Administrador Principal.');
+          }
+          usuario = { id: 'user_admin_principal', ...adminData } as UsuarioApp;
         }
-        usuario = { id: 'user_admin_principal', ...adminData } as UsuarioApp;
-      }
-    } else {
-      const qEmail = query(USUARIOS_COL, where('email', '==', email));
-      const snapEmail = await getDocs(qEmail);
-      if (!snapEmail.empty) {
-        const uDoc = snapEmail.docs[0];
-        const uData = uDoc.data() as any;
-        if (uData.passwordHash && uData.passwordHash !== pHash) {
-          throw new Error('Contraseña incorrecta.');
+      } else {
+        const qEmail = query(USUARIOS_COL, where('email', '==', email));
+        const snapEmail = await getDocs(qEmail);
+        if (!snapEmail.empty) {
+          const uDoc = snapEmail.docs[0];
+          const uData = uDoc.data() as any;
+          if (uData.passwordHash && uData.passwordHash !== pHash) {
+            throw new Error('Contraseña incorrecta.');
+          }
+          usuario = { id: uDoc.id, ...uData } as UsuarioApp;
         }
-        usuario = { id: uDoc.id, ...uData } as UsuarioApp;
       }
+    } catch (err) {
+      if (esErrorPermisosFirestore(err)) throw new Error(MENSAJE_LOGIN_SIN_PERMISOS);
+      throw err;
     }
   }
 
@@ -277,6 +339,15 @@ export async function loginWithEmail(
     if (firebaseUser) await signOut(auth);
     throw new Error('Esta cuenta ha sido bloqueada por la administración del sistema.');
   }
+  // LOGIN ÚNICO §6: solo ACTIVO accede (mensajes comprensibles, sin internos).
+  if (usuario.estado === 'PENDIENTE') {
+    if (firebaseUser) await signOut(auth);
+    throw new Error('Tu cuenta está pendiente de activación. Revisa tu invitación o contacta con la administración.');
+  }
+  if (usuario.estado === 'INACTIVO') {
+    if (firebaseUser) await signOut(auth);
+    throw new Error('Tu cuenta está desactivada. Contacta con la administración si necesitas acceso.');
+  }
 
   // 4. Guardar sesión activa local para persistencia segura
   try {
@@ -284,12 +355,19 @@ export async function loginWithEmail(
     localStorage.setItem('rentselect_current_user_id', usuario.id);
   } catch (e) {}
 
-  // 5. Actualizar timestamp de último acceso y registrar auditoría
-  await setDoc(
-    doc(db, 'usuarios', usuario.id),
-    { lastLoginAt: new Date().toISOString() },
-    { merge: true }
-  );
+  // 5. Actualizar timestamp de último acceso y registrar auditoría.
+  // `lastLoginAt` es informativo: la autenticación ya se ha validado, así que un
+  // rechazo de Firestore aquí NO debe bloquear el acceso (ni impedir escribir el
+  // espejo de identidad más abajo). Igual que la auditoría y `syncAuthIndex`.
+  try {
+    await setDoc(
+      doc(db, 'usuarios', usuario.id),
+      { lastLoginAt: new Date().toISOString() },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('No se pudo actualizar lastLoginAt (no bloquea el inicio de sesión):', err);
+  }
 
   await saveAuditLogFirestore({
     usuarioId: usuario.id,
@@ -394,6 +472,87 @@ export async function initFirstAdminAccount(
 }
 
 /**
+ * ACCESO-PROPIETARIOS — Activa el usuario pendiente de una invitación nominal.
+ * Vincula el UID de Auth recién creado y pasa la ficha a ACTIVO. No crea
+ * usuario ni propietario; no toca identidad, roles, permisos ni vínculos.
+ */
+async function activarUsuarioVinculado(params: {
+  enlace: EnlaceRegistro;
+  email: string;
+  nombre: string;
+  apellidos?: string;
+  telefono?: string;
+  firebaseUser: FirebaseUser;
+}): Promise<{ firebaseUser: FirebaseUser | null; usuarioApp: UsuarioApp }> {
+  const { enlace, email, nombre, apellidos, telefono, firebaseUser } = params;
+  const emailNorm = email.trim().toLowerCase();
+
+  // 1. Leer la ficha pendiente por get() directo (firmado).
+  const pendienteSnap = await getDoc(doc(db, 'usuarios', enlace.usuarioIdVinculado as string));
+  const pendiente = (
+    pendienteSnap.exists() ? { id: pendienteSnap.id, ...pendienteSnap.data() } : null
+  ) as UsuarioApp | null;
+
+  // 2. Validar contra la invitación (perfil, estado, email, propietario).
+  const v = validarActivacionPendiente(pendiente, enlace, emailNorm);
+  if (!v.ok || !pendiente) {
+    throw new Error(v.errores[0] || 'No se puede activar esta cuenta.');
+  }
+
+  await updateProfile(firebaseUser, {
+    displayName: `${nombre} ${apellidos || ''}`.trim() || pendiente.nombre,
+  });
+
+  // 3. Vincular UID + activar. Solo claves permitidas por las reglas
+  //    (PENDIENTE→ACTIVO con email coincidente; lo demás queda intacto).
+  const ahora = new Date().toISOString();
+  const actualizacion: Record<string, unknown> = {
+    authUid: firebaseUser.uid,
+    estado: 'ACTIVO',
+    enlaceRegistroId: enlace.id,
+    updatedAt: ahora,
+    lastLoginAt: ahora,
+  };
+  if (nombre.trim()) actualizacion.nombre = nombre.trim();
+  if (apellidos?.trim()) actualizacion.apellidos = apellidos.trim();
+  if (telefono?.trim()) actualizacion.telefono = telefono.trim();
+  await updateDoc(doc(db, 'usuarios', pendiente.id), actualizacion);
+  const usuarioActivado: UsuarioApp = {
+    ...pendiente,
+    ...(actualizacion as Partial<UsuarioApp>),
+  };
+
+  // 4. Espejo de identidad (las reglas lo exigen veraz contra la ficha).
+  await syncAuthIndex(usuarioActivado, firebaseUser);
+
+  // 5. Consumir la invitación nominal (un solo uso).
+  await setDoc(
+    doc(db, 'enlaces_registro', enlace.id),
+    { usosActuales: (enlace.usosActuales || 0) + 1 },
+    { merge: true }
+  );
+
+  // 6. Sesión local + auditoría (mismo contrato que el alta clásica).
+  try {
+    localStorage.setItem('rentselect_active_session', JSON.stringify(usuarioActivado));
+    localStorage.setItem('rentselect_current_user_id', usuarioActivado.id);
+  } catch (e) {}
+
+  await saveAuditLogFirestore({
+    usuarioId: usuarioActivado.id,
+    usuarioEmail: usuarioActivado.email,
+    usuarioNombre: usuarioActivado.nombre,
+    accion: 'ACTIVACION_USUARIO_INVITACION',
+    descripcion: `Activación de cuenta PROPIETARIO pendiente mediante invitación nominal [${enlace.token}].`,
+    entidadAfectada: 'usuario',
+    idAfectado: usuarioActivado.id,
+    resultado: 'EXITO',
+  });
+
+  return { firebaseUser, usuarioApp: usuarioActivado };
+}
+
+/**
  * Registro de un usuario nuevo mediante un enlace de invitación oficial.
  * Restricción estricta: NUNCA permite crear privilegios de ADMINISTRADOR ni SUPERADMIN.
  */
@@ -453,6 +612,23 @@ export async function registerWithInvitationLink(params: {
     } else {
       throw err;
     }
+  }
+
+  // ACCESO-PROPIETARIOS: la invitación nominal activa el usuario pendiente
+  // vinculado (sin crear usuario ni propietario). Solo perfil PROPIETARIO;
+  // INQUILINO y PROFESIONAL conservan su flujo intacto.
+  if (tipoPerfil === 'PROPIETARIO' && enlace.usuarioIdVinculado) {
+    if (!firebaseUser) {
+      throw new Error('La activación nominal requiere Firebase Authentication (proveedor Email/Contraseña).');
+    }
+    return activarUsuarioVinculado({
+      enlace,
+      email,
+      nombre,
+      apellidos,
+      telefono,
+      firebaseUser,
+    });
   }
 
   // 2. Determinar rol predefinido según el enlace
@@ -517,6 +693,20 @@ export async function registerWithInvitationLink(params: {
 
   // 5. Crear la entidad relacionada (Propietario o Profesional)
   if (tipoPerfil === 'PROPIETARIO' && propId) {
+    // ACCESO-PROPIETARIOS: si el ID vino de la invitación y la ficha ya
+    // existe, reutilizarla sin sobrescribir datos reales con marcadores.
+    if (enlace.propietarioIdVinculado && propId === enlace.propietarioIdVinculado) {
+      try {
+        const fichaPrevia = await getDoc(doc(db, 'propietarios', propId));
+        if (fichaPrevia.exists()) {
+          propId = undefined;
+        }
+      } catch (e) {
+        // Sin lectura: mantener el alta clásica.
+      }
+    }
+  }
+  if (tipoPerfil === 'PROPIETARIO' && propId) {
     const propietarioData: Propietario = {
       id: propId,
       nombre: `${nombre.trim()} ${apellidos?.trim() || ''}`.trim(),
@@ -579,6 +769,380 @@ export async function registerWithInvitationLink(params: {
   });
 
   return { firebaseUser, usuarioApp: nuevoUsuario };
+}
+
+// =========================================================================
+// REGISTRO AUTÓNOMO — Alta sin invitación (PROPIETARIO / PROFESIONAL)
+// -------------------------------------------------------------------------
+// Núcleo interno de altas autónomas. La UI (formularios/selectores) llegará
+// en un bloque posterior; este servicio define el contrato y las garantías.
+// NO sustituye a `registerWithInvitationLink` (invitaciones intactas).
+// Orden de escrituras exigido por las reglas: usuarios → espejo → ficha.
+// =========================================================================
+
+export interface RegisterAutonomoBaseParams {
+  tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL';
+  email: string;
+  password: string;
+  nombre: string;
+  apellidos?: string;
+  telefono?: string;
+}
+
+export interface RegisterAutonomoPropietarioParams extends RegisterAutonomoBaseParams {
+  tipoPerfil: 'PROPIETARIO';
+  /** NIF/CIF/NIE real (obligatorio: el modelo Propietario no admite marcadores). */
+  nifCif: string;
+  /** Domicilio real a efectos de notificaciones. */
+  direccion: string;
+  ciudad: string;
+  codigoPostal: string;
+  provincia?: string;
+  tipoPropietario?: TipoPropietario;
+}
+
+export interface RegisterAutonomoProfesionalParams extends RegisterAutonomoBaseParams {
+  tipoPerfil: 'PROFESIONAL';
+  nombreComercial: string;
+  cifNif?: string;
+  /** Al menos una especialidad real (mismo criterio que el alta manual). */
+  especialidades: string[];
+  /** Provincia de la zona de servicio (obligatoria). */
+  provincia: string;
+  municipio?: string;
+  tipo?: TipoProfesional;
+  /** Zonas de cobertura adicionales (la principal va en provincia/municipio). */
+  zonasAdicionales?: Array<{ provincia: string; municipio?: string }>;
+}
+
+export type RegisterAutonomoParams =
+  | RegisterAutonomoPropietarioParams
+  | RegisterAutonomoProfesionalParams;
+
+/** Rol estándar exacto que corresponde a cada perfil autónomo (nunca admin). */
+const ROLES_AUTONOMOS: Record<'PROPIETARIO' | 'PROFESIONAL', string> = {
+  PROPIETARIO: 'PROPIETARIO_ESTANDAR',
+  PROFESIONAL: 'PROFESIONAL_MANTENIMIENTO',
+};
+
+/** IDs con el mismo formato que el resto de altas (`prefijo_timestamp_aleatorio`). */
+function generarIdAutonomo(prefijo: string): string {
+  return `${prefijo}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+}
+
+/** Email con el mismo criterio que el resto del sistema (ver notificaciones/resolucion). */
+function esEmailAutonomoValido(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function exigirTextoAutonomo(valor: unknown, campo: string): string {
+  if (typeof valor !== 'string' || valor.trim().length === 0) {
+    throw new Error(`Registro autónomo: el campo '${campo}' es obligatorio.`);
+  }
+  return valor.trim();
+}
+
+interface BaseAutonomaValidada {
+  tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL';
+  email: string;
+  password: string;
+  nombre: string;
+  apellidos?: string;
+  telefono?: string;
+  rolId: string;
+}
+
+/**
+ * Valida y normaliza los datos comunes ANTES de tocar Firebase Auth.
+ * Fija rol y permisos de forma inmutable: el llamante nunca puede indicarlos
+ * (ni siquiera con `as any`). Las reglas Firestore son la segunda barrera.
+ */
+function validarBaseAutonoma(params: RegisterAutonomoParams): BaseAutonomaValidada {
+  if (!params || typeof params !== 'object') {
+    throw new Error('Registro autónomo: faltan los datos del alta.');
+  }
+  const crudo = params as unknown as Record<string, unknown>;
+  if ('roles' in crudo || 'permisos' in crudo) {
+    throw new Error('Seguridad: no está permitido indicar roles ni permisos en el alta autónoma.');
+  }
+  const tipoPerfil = crudo.tipoPerfil;
+  if (tipoPerfil !== 'PROPIETARIO' && tipoPerfil !== 'PROFESIONAL') {
+    throw new Error('Seguridad: el alta autónoma solo admite perfiles PROPIETARIO o PROFESIONAL.');
+  }
+  const email = exigirTextoAutonomo(crudo.email, 'email').toLowerCase();
+  if (!esEmailAutonomoValido(email)) {
+    throw new Error('Registro autónomo: el email no es válido.');
+  }
+  if (typeof crudo.password !== 'string' || crudo.password.length < 6) {
+    throw new Error('Registro autónomo: la contraseña debe tener al menos 6 caracteres.');
+  }
+  const nombre = exigirTextoAutonomo(crudo.nombre, 'nombre');
+  const apellidos =
+    typeof crudo.apellidos === 'string' && crudo.apellidos.trim().length > 0
+      ? crudo.apellidos.trim()
+      : undefined;
+  const telefono =
+    typeof crudo.telefono === 'string' && crudo.telefono.trim().length > 0
+      ? crudo.telefono.trim()
+      : undefined;
+
+  // Rol exacto por perfil, verificado contra el catálogo (nunca admin).
+  const rolId = ROLES_AUTONOMOS[tipoPerfil];
+  const rolDef = ROLES_PREDEFINIDOS.find((r) => r.id === rolId);
+  if (!rolDef || rolDef.id === 'SUPERADMIN') {
+    throw new Error('Seguridad: rol no disponible para el alta autónoma.');
+  }
+  return { tipoPerfil, email, password: crudo.password, nombre, apellidos, telefono, rolId };
+}
+
+/**
+ * REGISTRO AUTÓNOMO — Alta sin invitación (PROPIETARIO o PROFESIONAL).
+ *
+ * Flujo: valida datos → crea Firebase Auth → genera IDs nuevos →
+ * `usuarios/{id}` (ACTIVO, rol exacto, sin permisos) → espejo
+ * `usuarios_auth/{uid}` → ficha `propietarios/{id}` o `profesionales/{id}`
+ * con los datos reales del formulario → auditoría → sesión local.
+ *
+ * Garantías: solo PROPIETARIO/PROFESIONAL; email válido ligado a la cuenta
+ * Auth; IDs siempre nuevos; sin roles/permisos administrativos (imposibles
+ * de inyectar); sin datos ficticios (los obligatorios se exigen).
+ * Email duplicado → error controlado (no toca la cuenta existente).
+ * Fallo tras crear Auth → error técnico controlado (sin auto-reparación).
+ */
+export async function registerAutonomo(
+  params: RegisterAutonomoParams
+): Promise<{ firebaseUser: FirebaseUser; usuarioApp: UsuarioApp }> {
+  // 0. Validación de servicio (antes de crear nada en Firebase Auth).
+  const base = validarBaseAutonoma(params);
+  const { tipoPerfil, email, password, nombre, apellidos, rolId } = base;
+
+  // Datos reales de la ficha (nunca marcadores ficticios).
+  let telefonoProp = '';
+  let nifCif = '';
+  let direccion = '';
+  let ciudad = '';
+  let codigoPostal = '';
+  let provinciaProp: string | undefined;
+  let tipoProp: TipoPropietario = 'persona_fisica';
+  let nombreComercial = '';
+  let cifNifProf: string | undefined;
+  let especialidades: string[] = [];
+  let provinciaProf = '';
+  let zonasAdicionales: Array<{ provincia: string; municipio?: string }> = [];
+  let municipioProf: string | undefined;
+  let tipoProf: TipoProfesional = 'AUTONOMO';
+
+  if (tipoPerfil === 'PROPIETARIO') {
+    const p = params as RegisterAutonomoPropietarioParams;
+    telefonoProp = exigirTextoAutonomo(base.telefono, 'telefono');
+    nifCif = exigirTextoAutonomo(p.nifCif, 'nifCif');
+    direccion = exigirTextoAutonomo(p.direccion, 'direccion');
+    ciudad = exigirTextoAutonomo(p.ciudad, 'ciudad');
+    codigoPostal = exigirTextoAutonomo(p.codigoPostal, 'codigoPostal');
+    provinciaProp =
+      typeof p.provincia === 'string' && p.provincia.trim().length > 0 ? p.provincia.trim() : undefined;
+    if (p.tipoPropietario !== undefined) {
+      if (
+        p.tipoPropietario !== 'persona_fisica' &&
+        p.tipoPropietario !== 'persona_juridica' &&
+        p.tipoPropietario !== 'comunidad_bienes'
+      ) {
+        throw new Error('Registro autónomo: el campo \'tipoPropietario\' no es válido.');
+      }
+      tipoProp = p.tipoPropietario;
+    }
+  } else {
+    const p = params as RegisterAutonomoProfesionalParams;
+    nombreComercial = exigirTextoAutonomo(p.nombreComercial, 'nombreComercial');
+    cifNifProf =
+      typeof p.cifNif === 'string' && p.cifNif.trim().length > 0 ? p.cifNif.trim() : undefined;
+    especialidades = (Array.isArray(p.especialidades) ? p.especialidades : [])
+      .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+      .map((e) => e.trim());
+    if (especialidades.length === 0) {
+      throw new Error('Registro autónomo: indica al menos una especialidad.');
+    }
+    provinciaProf = exigirTextoAutonomo(p.provincia, 'provincia');
+    municipioProf =
+      typeof p.municipio === 'string' && p.municipio.trim().length > 0 ? p.municipio.trim() : undefined;
+    if (p.zonasAdicionales !== undefined) {
+      if (!Array.isArray(p.zonasAdicionales)) {
+        throw new Error('Registro autónomo: el campo \'zonasAdicionales\' no es válido.');
+      }
+      zonasAdicionales = p.zonasAdicionales.map((z, i) => {
+        const zona = (z && typeof z === 'object' ? z : {}) as Record<string, unknown>;
+        const prov = exigirTextoAutonomo(zona.provincia, `provincia de la zona adicional ${i + 1}`);
+        const mun =
+          typeof zona.municipio === 'string' && zona.municipio.trim().length > 0
+            ? zona.municipio.trim()
+            : undefined;
+        return mun ? { provincia: prov, municipio: mun } : { provincia: prov };
+      });
+    }
+    if (p.tipo !== undefined) {
+      if (
+        p.tipo !== 'EMPRESA' &&
+        p.tipo !== 'AUTONOMO' &&
+        p.tipo !== 'PARTICULAR' &&
+        p.tipo !== 'PROFESIONAL_INDIVIDUAL' &&
+        p.tipo !== 'OTRO'
+      ) {
+        throw new Error('Registro autónomo: el campo \'tipo\' de profesional no es válido.');
+      }
+      tipoProf = p.tipo;
+    }
+  }
+
+  // 1-2. Crear la cuenta en Firebase Auth y obtener el UID real.
+  // A diferencia del flujo con invitación, aquí Auth es obligatorio: las
+  // reglas exigen authUid == UID y email == token.email en cada escritura.
+  let firebaseUser: FirebaseUser | null = null;
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    firebaseUser = cred.user;
+    await updateProfile(firebaseUser, { displayName: `${nombre} ${apellidos || ''}`.trim() });
+  } catch (err: any) {
+    if (err?.code === 'auth/email-already-in-use') {
+      throw new Error('Este correo electrónico ya tiene una cuenta. Inicia sesión con tu contraseña.');
+    }
+    if (err?.code === 'auth/operation-not-allowed' || err?.message?.includes('operation-not-allowed')) {
+      throw new Error('Registro autónomo no disponible: el proveedor Email/Contraseña no está habilitado.');
+    }
+    throw err;
+  }
+  if (!firebaseUser) {
+    throw new Error('Registro autónomo: no se pudo crear la cuenta de acceso.');
+  }
+
+  // 3. IDs completamente nuevos (nunca reutilizar entidades existentes).
+  const userId = generarIdAutonomo('user');
+  const entidadId = generarIdAutonomo(tipoPerfil === 'PROPIETARIO' ? 'prop' : 'prof');
+  const ahora = new Date().toISOString();
+
+  // 4. Documento autoritativo `usuarios/{id}` (rol exacto, sin permisos).
+  const nuevoUsuario: UsuarioApp = {
+    id: userId,
+    authUid: firebaseUser.uid,
+    nombre,
+    ...(apellidos ? { apellidos } : {}),
+    email,
+    ...(base.telefono ? { telefono: base.telefono } : {}),
+    tipoPerfil,
+    estado: 'ACTIVO',
+    roles: [rolId],
+    permisos: [],
+    ...(tipoPerfil === 'PROPIETARIO' ? { propietarioId: entidadId } : { profesionalId: entidadId }),
+    createdAt: ahora,
+    updatedAt: ahora,
+    lastLoginAt: ahora,
+  };
+
+  // 5-6. Espejo de identidad + ficha. Escrituras secuenciales (no batch):
+  // la regla de `propietarios/create` exige que el espejo ya exista.
+  // Si algo falla tras crear Auth: error técnico controlado, sin
+  // reparaciones silenciosas ni datos fabricados (§7).
+  try {
+    await setDoc(doc(db, 'usuarios', userId), nuevoUsuario);
+    await syncAuthIndex(nuevoUsuario, firebaseUser);
+    if (tipoPerfil === 'PROPIETARIO') {
+      const ficha: Propietario = {
+        id: entidadId,
+        nombre: `${nombre} ${apellidos || ''}`.trim(),
+        nifCif,
+        email,
+        telefono: telefonoProp,
+        direccion,
+        ciudad,
+        codigoPostal,
+        ...(provinciaProp ? { provincia: provinciaProp } : {}),
+        tipoPropietario: tipoProp,
+        cuentasBancarias: [],
+        fechaCreacion: ahora,
+        fechaActualizacion: ahora,
+      };
+      await setDoc(doc(db, 'propietarios', entidadId), ficha, { merge: true });
+    } else {
+      const ficha: Profesional = {
+        id: entidadId,
+        usuarioId: userId,
+        tipo: tipoProf,
+        nombreComercial,
+        contactoNombre: `${nombre} ${apellidos || ''}`.trim(),
+        ...(cifNifProf ? { cifNif: cifNifProf } : {}),
+        email,
+        ...(base.telefono ? { telefono: base.telefono } : {}),
+        especialidades,
+        zonasServicio: [
+          { id: 'z1', provincia: provinciaProf, ...(municipioProf ? { municipio: municipioProf } : {}) },
+          ...zonasAdicionales.map((z, i) => ({ id: `z${i + 2}`, ...z })),
+        ],
+        inmuebleIdsAsignados: [],
+        activo: true,
+        createdAt: ahora,
+        updatedAt: ahora,
+      };
+      await setDoc(doc(db, 'profesionales', entidadId), ficha, { merge: true });
+    }
+  } catch (err: any) {
+    await saveAuditLogFirestore({
+      usuarioId: userId,
+      usuarioEmail: email,
+      usuarioNombre: nombre,
+      accion: 'REGISTRO_AUTONOMO',
+      descripcion:
+        `Fallo parcial de alta autónoma ${tipoPerfil} [${email}]: cuenta Auth creada ` +
+        `(UID ${firebaseUser.uid}) pero la escritura de documentos falló ` +
+        `(${err?.code || err?.message || 'error desconocido'}).`,
+      entidadAfectada: 'usuario',
+      idAfectado: userId,
+      resultado: 'ERROR',
+    });
+    throw new Error(
+      `Alta incompleta: tu cuenta de acceso (${email}) se creó pero no se pudo completar el perfil. ` +
+        'No se ha creado ningún perfil válido. Contacta con soporte indicando tu email. ' +
+        `Detalle técnico: ${err?.code || err?.message || 'escritura denegada'}`
+    );
+  }
+
+  // 7-8. Sesión local + auditoría del alta + retorno para continuar el login.
+  try {
+    localStorage.setItem('rentselect_active_session', JSON.stringify(nuevoUsuario));
+    localStorage.setItem('rentselect_current_user_id', userId);
+  } catch (e) {}
+
+  await saveAuditLogFirestore({
+    usuarioId: userId,
+    usuarioEmail: email,
+    usuarioNombre: nombre,
+    accion: 'REGISTRO_AUTONOMO',
+    descripcion: `Alta autónoma exitosa de nuevo ${tipoPerfil} [${email}] sin invitación.`,
+    entidadAfectada: 'usuario',
+    idAfectado: userId,
+    resultado: 'EXITO',
+  });
+
+  return { firebaseUser, usuarioApp: nuevoUsuario };
+}
+
+/**
+ * RECUPERACIÓN — Envía el correo de restablecimiento de Firebase Auth.
+ * Anti-enumeración: valida formato sin consultar Firestore y trata la
+ * inexistencia de cuenta como éxito neutral (mismo camino que el envío).
+ * Los errores técnicos se propagan para mostrar un mensaje genérico.
+ */
+export async function enviarRecuperacionPassword(emailInput: string): Promise<void> {
+  const email = emailInput.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Indica un correo electrónico válido para recuperar tu contraseña.');
+  }
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (err: any) {
+    if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-email') {
+      return;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -646,7 +1210,7 @@ export function subscribeAuthState(
             const snap = await getDoc(doc(db, 'usuarios', parsed.id));
             if (snap.exists()) {
               const fresh = { id: snap.id, ...snap.data() } as UsuarioApp;
-              if (fresh.estado === 'BLOQUEADO' || fresh.estado === 'INACTIVO') {
+              if (fresh.estado === 'BLOQUEADO' || fresh.estado === 'PENDIENTE' || fresh.estado === 'INACTIVO') {
                 localStorage.removeItem('rentselect_active_session');
                 callback(null, null, false);
               } else {
@@ -680,7 +1244,12 @@ export function subscribeAuthState(
         return;
       }
 
-      if (usuarioApp.estado === 'BLOQUEADO') {
+      // LOGIN ÚNICO §6: el listener tampoco admite estados no activos.
+      if (
+        usuarioApp.estado === 'BLOQUEADO' ||
+        usuarioApp.estado === 'PENDIENTE' ||
+        usuarioApp.estado === 'INACTIVO'
+      ) {
         await signOut(auth);
         localStorage.removeItem('rentselect_active_session');
         callback(null, null, false);

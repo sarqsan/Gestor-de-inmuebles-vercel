@@ -277,10 +277,14 @@ function NuevaLecturaModal({
 
   const guardar = async () => {
     const num = Number(String(valor).replace(',', '.'));
+    // La fecha elegida es un DÍA: si es hoy, el instante registrado es "ahora".
+    // (Fijar el mediodía convertía "hoy" en futuro por la mañana y el motor lo
+    // rechazaba con un falso "no puede ser futura" — bloqueE.portal en rojo.)
+    const fechaLecturaIso = fecha === hoy ? new Date().toISOString() : new Date(`${fecha}T12:00:00`).toISOString();
     const v = validarLectura({
       valor: num,
       unidad,
-      fechaLectura: new Date(`${fecha}T12:00:00`).toISOString(),
+      fechaLectura: fechaLecturaIso,
       ultimoValor: !esCorreccion ? ultima?.valor : undefined,
     });
     if (!v.ok) {
@@ -309,7 +313,7 @@ function NuevaLecturaModal({
         contratoId: contrato.id,
         valor: num,
         unidad,
-        fechaLectura: new Date(`${fecha}T12:00:00`).toISOString(),
+        fechaLectura: fechaLecturaIso,
         origen: 'INQUILINO',
         registradoPorUid: usuario.authUid || usuario.id,
         registradoPorEmail: usuario.email,

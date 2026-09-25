@@ -27,8 +27,34 @@ import {
   ContratoFormalizacion,
   Especialidad,
   Propietario,
+  Gasto,
+  Incidencia,
+  EstadoCobroAlquiler,
 } from '../../types';
 import type { LiquidacionPropietario } from '../../tesoreria/tipos';
+// PORTAL PROPIETARIO — Gastos/Cobros/Incidencias: se reutilizan los MISMOS motores
+// puros que las secciones internas (sin lógica paralela): mismos resúmenes,
+// mismos filtros, mismas etiquetas y misma puerta de permisos.
+import {
+  resumenGastos,
+  ESTADO_GASTO_LABEL,
+  CATEGORIAS_GASTO,
+  categoriaDef,
+  etiquetaMesAnio,
+} from '../../utils/gastosEngine';
+import {
+  actualizarEstadosVencimiento,
+  obtenerTodosCobros,
+  calcularResumenCobros,
+} from '../../utils/cobrosEngine';
+import {
+  filtrarIncidencias,
+  canAccessIncidencia,
+  ESTADOS_INCIDENCIA_LABELS,
+  CATEGORIA_INCIDENCIA_LABEL,
+  PRIORIDADES_INCIDENCIA_LABELS,
+  ORIGEN_INCIDENCIA_LABEL,
+} from '../../utils/incidenciasEngine';
 // BLOQUE C — Morosidad: el portal del propietario SOLO consume el espejo recortado
 // (`morosidad_resumen_propietario`); nunca lee expedientes, comunicaciones internas ni estrategias.
 import type { ResumenMorosidadPropietario } from '../../types/morosidad';
@@ -46,6 +72,11 @@ interface PropietarioPortalSectionProps {
   liquidaciones?: LiquidacionPropietario[];
   /** BLOQUE C — resumen de morosidad ya recortado (sin datos del inquilino ni de estrategia). */
   resumenMorosidad?: ResumenMorosidadPropietario[];
+  /** PORTAL — gastos ya acotados desde App (`scopedGastos`, mismo origen que GastosSection). */
+  gastos?: Gasto[];
+  /** PORTAL — incidencias ya acotadas desde App (`scopedIncidencias`). Los cobros
+      no necesitan prop: derivan de `contratos` con el motor puro, como CobrosSection. */
+  incidencias?: Incidencia[];
   onOpenCrearProfesionalModal: (profesional?: Profesional) => void;
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
   onSavePropietario?: (propietario: Propietario) => Promise<void>;
@@ -61,6 +92,8 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   propietarios,
   liquidaciones = [],
   resumenMorosidad = [],
+  gastos = [],
+  incidencias = [],
   onOpenCrearProfesionalModal,
   onSaveProfesional,
   onSavePropietario,
@@ -95,6 +128,26 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const [guardandoFicha, setGuardandoFicha] = useState<boolean>(false);
   const [mensajeFicha, setMensajeFicha] = useState<string | null>(null);
 
+  // PORTAL — filtros y detalle de Gastos (solo lectura).
+  const [gastoSearch, setGastoSearch] = useState('');
+  const [gastoFiltroInmueble, setGastoFiltroInmueble] = useState<string>('TODOS');
+  const [gastoFiltroCategoria, setGastoFiltroCategoria] = useState<string>('TODAS');
+  const [gastoFiltroEstado, setGastoFiltroEstado] = useState<string>('TODOS');
+  const [gastoDetalleId, setGastoDetalleId] = useState<string | null>(null);
+  // PORTAL — filtros y detalle de Cobros (solo lectura).
+  const [cobroSearch, setCobroSearch] = useState('');
+  const [cobroFiltroInmueble, setCobroFiltroInmueble] = useState<string>('TODOS');
+  const [cobroFiltroEstado, setCobroFiltroEstado] = useState<string>('TODOS');
+  const [cobroDetalleId, setCobroDetalleId] = useState<string | null>(null);
+  // PORTAL — filtros y detalle de Incidencias (solo lectura; el filtrado lo
+  // hace el motor `filtrarIncidencias`, igual que IncidenciasSection).
+  const [incSearch, setIncSearch] = useState('');
+  const [incFiltroInmueble, setIncFiltroInmueble] = useState<string>('TODOS');
+  const [incFiltroCategoria, setIncFiltroCategoria] = useState<string>('TODAS');
+  const [incFiltroPrioridad, setIncFiltroPrioridad] = useState<string>('TODAS');
+  const [incFiltroEstado, setIncFiltroEstado] = useState<string>('TODOS');
+  const [incDetalleId, setIncDetalleId] = useState<string | null>(null);
+
   // Security check: Only filter properties that belong to this owner
   const misViviendas = inmuebles.filter((inm) => {
     const pid = currentUser.propietarioId;
@@ -124,6 +177,77 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
     .filter((l) => l.propietarioId && l.propietarioId === currentUser.propietarioId && l.estado !== 'ANULADA' && l.estado !== 'REVERSADA')
     .sort((a, b) => (a.periodo < b.periodo ? 1 : -1));
   const liqDetalle = misLiquidaciones.find((l) => l.id === liqDetalleId) || null;
+
+  // PORTAL — GASTOS: mismo origen que GastosSection + filtro defensivo en
+  // profundidad (propietarioId propio o inmueble de mi cartera).
+  const misGastos = (gastos || [])
+    .filter(
+      (g) =>
+        (!!currentUser?.propietarioId && g.propietarioId === currentUser.propietarioId) ||
+        misViviendasIds.includes(g.inmuebleId),
+    )
+    .sort((a, b) =>
+      (b.fechaDevengo || b.periodoMesAnio || b.createdAt || '').localeCompare(
+        a.fechaDevengo || a.periodoMesAnio || a.createdAt || '',
+      ),
+    );
+  const resumenMisGastos = resumenGastos(misGastos);
+  const gastosFiltrados = misGastos.filter((g) => {
+    if (gastoFiltroInmueble !== 'TODOS' && g.inmuebleId !== gastoFiltroInmueble) return false;
+    if (gastoFiltroCategoria !== 'TODAS' && g.categoria !== gastoFiltroCategoria) return false;
+    if (gastoFiltroEstado !== 'TODOS' && g.estado !== gastoFiltroEstado) return false;
+    const q = gastoSearch.trim().toLowerCase();
+    if (q) {
+      const hay = `${g.concepto || ''} ${g.proveedor || ''} ${g.notas || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const gastoDetalle = misGastos.find((g) => g.id === gastoDetalleId) || null;
+
+  // PORTAL — COBROS: derivación IDÉNTICA a CobrosSection (mismo motor, mismo
+  // orden: primero `actualizarEstadosVencimiento` por contrato, después
+  // `obtenerTodosCobros`). La fuente (`misContratos`) ya viene acotada.
+  const misCobros = obtenerTodosCobros(
+    misContratos.map((c) => actualizarEstadosVencimiento(c).contratoActualizado),
+  ).sort((a, b) => b.anio - a.anio || b.mes - a.mes);
+  const resumenMisCobros = calcularResumenCobros(misCobros);
+  const cobrosFiltrados = misCobros.filter((c) => {
+    if (cobroFiltroInmueble !== 'TODOS' && c.inmuebleId !== cobroFiltroInmueble) return false;
+    if (cobroFiltroEstado !== 'TODOS' && c.estado !== cobroFiltroEstado) return false;
+    const q = cobroSearch.trim().toLowerCase();
+    if (q) {
+      const hay = `${c.nombreMes || ''} ${c.inmuebleDireccion || ''} ${c.inquilinoNombre || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const cobroDetalle = misCobros.find((c) => c.id === cobroDetalleId) || null;
+  const cobrosAtencion = resumenMisCobros.countPendientes + resumenMisCobros.countRetrasados + resumenMisCobros.countIncidencias;
+
+  // PORTAL — INCIDENCIAS: `scopedIncidencias` de App + la MISMA puerta de
+  // permisos que la sección interna (`canAccessIncidencia`) + filtro por
+  // cartera. Nunca se muestran notas internas ni teléfonos de contacto.
+  const misIncidencias = (incidencias || [])
+    .filter(
+      (x) =>
+        canAccessIncidencia(x, currentUser) &&
+        ((!!currentUser?.propietarioId && x.propietarioId === currentUser.propietarioId) ||
+          misViviendasIds.includes(x.inmuebleId)),
+    )
+    .sort((a, b) => (b.fechaCreacion || b.createdAt || '').localeCompare(a.fechaCreacion || a.createdAt || ''));
+  const incidenciasFiltradas = filtrarIncidencias(
+    misIncidencias,
+    incSearch,
+    incFiltroInmueble,
+    incFiltroCategoria,
+    incFiltroPrioridad,
+    incFiltroEstado,
+  );
+  const incDetalle = misIncidencias.find((x) => x.id === incDetalleId) || null;
+  const incAbiertas = misIncidencias.filter(
+    (x) => !['RESUELTA', 'CERRADA', 'CANCELADA', 'RECHAZADA'].includes(x.estado),
+  ).length;
 
   useEffect(() => {
     setFormFicha({
@@ -206,6 +330,40 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
     });
   };
 
+  // PORTAL — helpers de presentación (la semántica vive en los motores).
+  const nombreVivienda = (inmuebleId?: string): string => {
+    const v = (inmuebles || []).find((i) => i.id === inmuebleId);
+    return v?.alias || v?.direccion || 'Vivienda';
+  };
+  // Insignia de estado de cobro (mismos colores que CobrosSection; incluye el
+  // valor heredado 'INCIDENCIA' que el motor aún contempla).
+  const badgeCobroClass = (estado: EstadoCobroAlquiler | string): string =>
+    (
+      {
+        RECIBIDO: 'bg-emerald-100 text-emerald-800',
+        VERIFICADO: 'bg-blue-100 text-blue-800',
+        PAGADO: 'bg-emerald-100 text-emerald-800',
+        PAGADO_PARCIAL: 'bg-amber-100 text-amber-800',
+        PENDIENTE: 'bg-slate-100 text-slate-700',
+        RETRASADO: 'bg-rose-100 text-rose-800',
+        IMPAGADO: 'bg-rose-100 text-rose-800',
+        RECLAMADO: 'bg-orange-100 text-orange-800',
+        DEVUELTO: 'bg-rose-100 text-rose-800',
+        ANULADO: 'bg-slate-100 text-slate-500',
+        INCIDENCIA: 'bg-amber-100 text-amber-800',
+      } as Record<string, string>
+    )[estado] || 'bg-slate-100 text-slate-700';
+  const etiquetaCobro = (estado: string): string =>
+    estado.charAt(0) + estado.slice(1).toLowerCase().replace(/_/g, ' ');
+  const badgeGastoClass = (estado: string): string =>
+    estado === 'PAGADO'
+      ? 'bg-emerald-100 text-emerald-800'
+      : estado === 'PENDIENTE'
+        ? 'bg-amber-100 text-amber-800'
+        : estado === 'EN_REVISION'
+          ? 'bg-blue-100 text-blue-800'
+          : 'bg-slate-100 text-slate-500';
+
   return (
     <div id="propietario-portal-section" className="space-y-6">
       {/* Header Banner */}
@@ -251,9 +409,9 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             { id: 'contratos', label: 'Mis Contratos', icon: FileCheck, count: misContratos.length },
             { id: 'liquidaciones', label: 'Mis Liquidaciones', icon: Wallet, count: misLiquidaciones.length },
             { id: 'morosidad', label: 'Morosidad', icon: AlertTriangle, count: morosidadConSaldo.length },
-            { id: 'gastos', label: 'Gastos', icon: TrendingDown, badge: 'Próximamente' },
-            { id: 'cobros', label: 'Cobros', icon: DollarSign, badge: 'Próximamente' },
-            { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, badge: 'Próximamente' },
+            { id: 'gastos', label: 'Gastos', icon: TrendingDown, count: misGastos.length },
+            { id: 'cobros', label: 'Cobros', icon: DollarSign, count: cobrosAtencion },
+            { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, count: incAbiertas },
             { id: 'perfil', label: 'Mi Perfil', icon: User },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -277,11 +435,6 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                     }`}
                   >
                     {tab.count}
-                  </span>
-                )}
-                {tab.badge && (
-                  <span className="text-[9px] px-1.5 py-0.2 rounded-sm font-semibold bg-amber-100 text-amber-800">
-                    {tab.badge}
                   </span>
                 )}
               </button>
@@ -816,51 +969,557 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             </div>
           )}
 
-          {/* SUBTAB 4: GASTOS (PRÓXIMAMENTE) */}
+          {/* SUBTAB: GASTOS — solo lectura sobre el mismo origen que GastosSection
+              (`scopedGastos`), con el resumen y las etiquetas del motor. */}
           {activeSubTab === 'gastos' && (
-            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
-              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto">
-                <TrendingDown className="w-6 h-6" />
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Gastos de Tus Viviendas ({gastosFiltrados.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Facturas de suministros, IBI, comunidad, seguros y reparaciones. El registro y la
+                  edición los realiza la administración; aquí consultas el estado y el detalle.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-slate-900">Módulo de Gastos (Próximamente)</h3>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Este módulo te permitirá llevar el control exacto de facturas de suministros, recibos de IBI, cuotas de comunidad de propietarios, seguros de hogar y deducciones fiscales de tus viviendas.
-              </p>
-              <div className="inline-block px-3 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-semibold">
-                Fase 2 de Desarrollo
+
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+                <div>
+                  <span className="text-slate-500 block">Apuntes</span>
+                  <span className="font-bold text-slate-800 text-base">{resumenMisGastos.numero}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Explotación pagada</span>
+                  <span className="font-mono font-bold text-slate-800 text-base">
+                    {formatoImporteSepa(resumenMisGastos.explotacionPagado)} €
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Pendiente de pago</span>
+                  <span className="font-mono font-bold text-amber-700 text-base">
+                    {formatoImporteSepa(resumenMisGastos.pendiente)} €
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Salida de caja pagada</span>
+                  <span className="font-mono font-bold text-slate-800 text-base">
+                    {formatoImporteSepa(resumenMisGastos.salidaCajaPagada)} €
+                  </span>
+                </div>
               </div>
+
+              <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                <div className="relative w-full lg:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={gastoSearch}
+                    onChange={(e) => setGastoSearch(e.target.value)}
+                    placeholder="Buscar por concepto, proveedor..."
+                    className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                  />
+                </div>
+                <select
+                  value={gastoFiltroInmueble}
+                  onChange={(e) => setGastoFiltroInmueble(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODOS">Todas las viviendas</option>
+                  {misViviendas.map((v) => (
+                    <option key={v.id} value={v.id}>{v.alias || v.direccion}</option>
+                  ))}
+                </select>
+                <select
+                  value={gastoFiltroCategoria}
+                  onChange={(e) => setGastoFiltroCategoria(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODAS">Todas las categorías</option>
+                  {CATEGORIAS_GASTO.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={gastoFiltroEstado}
+                  onChange={(e) => setGastoFiltroEstado(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODOS">Todos los estados</option>
+                  {Object.entries(ESTADO_GASTO_LABEL).map(([v, label]) => (
+                    <option key={v} value={v}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {gastosFiltrados.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
+                  <TrendingDown className="w-8 h-8 text-slate-400 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">Sin gastos que mostrar</div>
+                  <p className="text-xs text-slate-500">
+                    No hay gastos registrados en tus viviendas{gastoSearch || gastoFiltroInmueble !== 'TODOS' || gastoFiltroCategoria !== 'TODAS' || gastoFiltroEstado !== 'TODOS' ? ' con estos filtros' : ''}.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {gastosFiltrados.map((g) => (
+                    <div key={g.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                      <div className="flex items-start justify-between flex-wrap gap-2">
+                        <div>
+                          <div className="font-bold text-sm text-slate-900">{g.concepto}</div>
+                          <div className="text-[11px] text-slate-500">
+                            {categoriaDef(g.categoria).label} · {nombreVivienda(g.inmuebleId)}
+                            {g.periodoMesAnio ? ` · ${etiquetaMesAnio(g.periodoMesAnio)}` : g.fechaDevengo ? ` · ${g.fechaDevengo}` : ''}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-mono font-bold text-slate-900 text-base">
+                            {formatoImporteSepa(g.importe)} €
+                          </div>
+                          <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${badgeGastoClass(g.estado)}`}>
+                            {ESTADO_GASTO_LABEL[g.estado] || g.estado}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <button
+                          onClick={() => setGastoDetalleId(gastoDetalleId === g.id ? null : g.id)}
+                          className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold"
+                        >
+                          {gastoDetalleId === g.id ? 'Ocultar detalle' : 'Ver detalle'}
+                        </button>
+                      </div>
+                      {gastoDetalleId === g.id && gastoDetalle && gastoDetalle.id === g.id && (
+                        <div className="pt-2 border-t border-slate-100 grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Proveedor</span>
+                            <span className="font-semibold text-slate-800">{gastoDetalle.proveedor || '—'}</span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Tipo</span>
+                            <span className="font-semibold text-slate-800">
+                              {gastoDetalle.tipo === 'FINANCIACION' ? 'Financiación' : 'Explotación'}
+                            </span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">A cargo de</span>
+                            <span className="font-semibold text-slate-800">
+                              {gastoDetalle.aCargoDe === 'arrendatario' ? 'Arrendatario' : 'Arrendador'}
+                            </span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Deducible IRPF</span>
+                            <span className="font-semibold text-slate-800">
+                              {gastoDetalle.deducible === true ? 'Sí' : gastoDetalle.deducible === false ? 'No' : '—'}
+                            </span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Devengo / Pago</span>
+                            <span className="font-semibold text-slate-800">
+                              {gastoDetalle.fechaDevengo || '—'} / {gastoDetalle.fechaPago || '—'}
+                            </span>
+                          </div>
+                          <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500 block">Método de pago</span>
+                            <span className="font-semibold text-slate-800 capitalize">{gastoDetalle.metodoPago || '—'}</span>
+                          </div>
+                          {gastoDetalle.tipo === 'FINANCIACION' && (gastoDetalle.intereses || gastoDetalle.capitalAmortizado) ? (
+                            <>
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Intereses</span>
+                                <span className="font-mono font-semibold text-slate-800">
+                                  {formatoImporteSepa(gastoDetalle.intereses || 0)} €
+                                </span>
+                              </div>
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Capital amortizado</span>
+                                <span className="font-mono font-semibold text-slate-800">
+                                  {formatoImporteSepa(gastoDetalle.capitalAmortizado || 0)} €
+                                </span>
+                              </div>
+                            </>
+                          ) : null}
+                          {gastoDetalle.notas ? (
+                            <div className="border border-slate-100 rounded-lg px-2.5 py-1.5 col-span-2 md:col-span-3">
+                              <span className="text-slate-500 block">Notas</span>
+                              <span className="text-slate-700">{gastoDetalle.notas}</span>
+                            </div>
+                          ) : null}
+                          {(gastoDetalle.justificanteUrl || gastoDetalle.documento?.url) ? (
+                            <div className="col-span-2 md:col-span-3">
+                              <a
+                                href={(gastoDetalle.justificanteUrl || gastoDetalle.documento?.url) as string}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                              >
+                                Ver justificante / factura
+                              </a>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* SUBTAB 5: COBROS (PRÓXIMAMENTE) */}
+          {/* SUBTAB: COBROS — solo lectura; periodos derivados de mis contratos con
+              el motor (`actualizarEstadosVencimiento` + `obtenerTodosCobros`),
+              igual que CobrosSection. Sin datos de contacto del inquilino. */}
           {activeSubTab === 'cobros' && (
-            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center mx-auto">
-                <DollarSign className="w-6 h-6" />
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Cobros de Renta ({cobrosFiltrados.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Mensualidades previstas y recibidas por contrato. El registro de pagos lo realiza
+                  la administración; si un pago reciente aún no aparece, está pendiente de conciliar.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-slate-900">Módulo de Cobros y Liquidaciones (Próximamente)</h3>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Visualiza los cobros mensuales de tus inquilinos, genera recibos automáticos y recibe avisos inmediatos en caso de retraso en el pago de la renta.
-              </p>
-              <div className="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                Fase 2 de Desarrollo
+
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+                <div>
+                  <span className="text-slate-500 block">Previsto</span>
+                  <span className="font-mono font-bold text-slate-800 text-base">
+                    {formatoImporteSepa(resumenMisCobros.totalPrevisto)} €
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Recibido ({resumenMisCobros.porcentajeCobrado} %)</span>
+                  <span className="font-mono font-bold text-emerald-700 text-base">
+                    {formatoImporteSepa(resumenMisCobros.totalRecibido)} €
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Pendiente + retrasado</span>
+                  <span className="font-mono font-bold text-rose-700 text-base">
+                    {formatoImporteSepa(resumenMisCobros.totalPendiente + resumenMisCobros.totalRetrasado)} €
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Periodos que requieren atención</span>
+                  <span className="font-bold text-slate-800 text-base">{cobrosAtencion}</span>
+                </div>
               </div>
+
+              <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                <div className="relative w-full lg:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={cobroSearch}
+                    onChange={(e) => setCobroSearch(e.target.value)}
+                    placeholder="Buscar por mes, vivienda, inquilino..."
+                    className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  />
+                </div>
+                <select
+                  value={cobroFiltroInmueble}
+                  onChange={(e) => setCobroFiltroInmueble(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODOS">Todas las viviendas</option>
+                  {misViviendas.map((v) => (
+                    <option key={v.id} value={v.id}>{v.alias || v.direccion}</option>
+                  ))}
+                </select>
+                <select
+                  value={cobroFiltroEstado}
+                  onChange={(e) => setCobroFiltroEstado(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODOS">Todos los estados</option>
+                  {Array.from(new Set(misCobros.map((c) => c.estado))).sort().map((e) => (
+                    <option key={e} value={e}>{etiquetaCobro(e)}</option>
+                  ))}
+                </select>
+              </div>
+
+              {cobrosFiltrados.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
+                  <DollarSign className="w-8 h-8 text-slate-400 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">Sin periodos que mostrar</div>
+                  <p className="text-xs text-slate-500">
+                    No hay mensualidades generadas{cobroSearch || cobroFiltroInmueble !== 'TODOS' || cobroFiltroEstado !== 'TODOS' ? ' con estos filtros' : ' todavía'}.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {cobrosFiltrados.map((c) => {
+                    const pendiente = (c.importePrevisto || 0) - (c.importeRecibido || 0);
+                    return (
+                      <div key={c.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                        <div className="flex items-start justify-between flex-wrap gap-2">
+                          <div>
+                            <div className="font-bold text-sm text-slate-900">{c.nombreMes}</div>
+                            <div className="text-[11px] text-slate-500">
+                              {c.inmuebleDireccion || nombreVivienda(c.inmuebleId)}
+                              {c.inquilinoNombre ? ` · ${c.inquilinoNombre}` : ''}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-mono font-bold text-slate-900 text-base">
+                              {formatoImporteSepa(c.importeRecibido)} / {formatoImporteSepa(c.importePrevisto)} €
+                            </div>
+                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${badgeCobroClass(c.estado)}`}>
+                              {etiquetaCobro(c.estado)}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <button
+                            onClick={() => setCobroDetalleId(cobroDetalleId === c.id ? null : c.id)}
+                            className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold"
+                          >
+                            {cobroDetalleId === c.id ? 'Ocultar detalle' : 'Ver detalle'}
+                          </button>
+                        </div>
+                        {cobroDetalleId === c.id && cobroDetalle && cobroDetalle.id === c.id && (
+                          <div className="pt-2 border-t border-slate-100 grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                            <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                              <span className="text-slate-500 block">Vencimiento</span>
+                              <span className="font-semibold text-slate-800">{cobroDetalle.fechaVencimiento || '—'}</span>
+                            </div>
+                            <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                              <span className="text-slate-500 block">Fecha de pago</span>
+                              <span className="font-semibold text-slate-800">{cobroDetalle.fechaPago || '—'}</span>
+                            </div>
+                            <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                              <span className="text-slate-500 block">Pendiente del periodo</span>
+                              <span className={`font-mono font-semibold ${pendiente > 0.009 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                                {formatoImporteSepa(Math.max(pendiente, 0))} €
+                              </span>
+                            </div>
+                            <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                              <span className="text-slate-500 block">Método de pago</span>
+                              <span className="font-semibold text-slate-800 capitalize">{cobroDetalle.metodoPago || '—'}</span>
+                            </div>
+                            <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                              <span className="text-slate-500 block">Justificante</span>
+                              <span className="font-semibold text-slate-800">
+                                {cobroDetalle.justificante ? 'Aportado' : '—'}
+                              </span>
+                            </div>
+                            {cobroDetalle.observaciones ? (
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5 col-span-2 md:col-span-3">
+                                <span className="text-slate-500 block">Observaciones</span>
+                                <span className="text-slate-700">{cobroDetalle.observaciones}</span>
+                              </div>
+                            ) : null}
+                            {cobroDetalle.motivoIncidencia ? (
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5 col-span-2 md:col-span-3">
+                                <span className="text-slate-500 block">Motivo de incidencia</span>
+                                <span className="text-slate-700">{cobroDetalle.motivoIncidencia}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
-          {/* SUBTAB 6: INCIDENCIAS (PRÓXIMAMENTE) */}
+          {/* SUBTAB: INCIDENCIAS — solo lectura sobre `scopedIncidencias` con la
+              puerta `canAccessIncidencia` y el filtro `filtrarIncidencias` del
+              motor. No se muestran notas internas ni teléfonos de contacto. */}
           {activeSubTab === 'incidencias' && (
-            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 max-w-lg mx-auto">
-              <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center mx-auto">
-                <AlertTriangle className="w-6 h-6" />
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Incidencias de Tus Viviendas ({incidenciasFiltradas.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Avisos reportados, reparaciones en curso y resoluciones. La gestión (asignación,
+                  presupuestos y cierre) la realiza la administración con tus profesionales.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-slate-900">Sistema de Incidencias y Reparaciones (Próximamente)</h3>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Avisos en tiempo real reportados por inquilinos, asignación directa a tus profesionales autorizados, presupuestos y control fotográfico de fin de obra.
-              </p>
-              <div className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-semibold">
-                Fase 2 de Desarrollo
+
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+                <div>
+                  <span className="text-slate-500 block">Abiertas o en curso</span>
+                  <span className="font-bold text-slate-800 text-base">{incAbiertas}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Total registradas</span>
+                  <span className="font-bold text-slate-800 text-base">{misIncidencias.length}</span>
+                </div>
               </div>
+
+              <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                <div className="relative w-full lg:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={incSearch}
+                    onChange={(e) => setIncSearch(e.target.value)}
+                    placeholder="Buscar por título, descripción..."
+                    className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                  />
+                </div>
+                <select
+                  value={incFiltroInmueble}
+                  onChange={(e) => setIncFiltroInmueble(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODOS">Todas las viviendas</option>
+                  {misViviendas.map((v) => (
+                    <option key={v.id} value={v.id}>{v.alias || v.direccion}</option>
+                  ))}
+                </select>
+                <select
+                  value={incFiltroCategoria}
+                  onChange={(e) => setIncFiltroCategoria(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODAS">Todas las categorías</option>
+                  {Object.entries(CATEGORIA_INCIDENCIA_LABEL).map(([v, label]) => (
+                    <option key={v} value={v}>{label}</option>
+                  ))}
+                </select>
+                <select
+                  value={incFiltroPrioridad}
+                  onChange={(e) => setIncFiltroPrioridad(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODAS">Todas las prioridades</option>
+                  {Object.entries(PRIORIDADES_INCIDENCIA_LABELS).map(([v, meta]) => (
+                    <option key={v} value={v}>{meta.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={incFiltroEstado}
+                  onChange={(e) => setIncFiltroEstado(e.target.value)}
+                  className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-medium"
+                >
+                  <option value="TODOS">Todos los estados</option>
+                  {Object.entries(ESTADOS_INCIDENCIA_LABELS).map(([v, meta]) => (
+                    <option key={v} value={v}>{meta.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {incidenciasFiltradas.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
+                  <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">Sin incidencias que mostrar</div>
+                  <p className="text-xs text-slate-500">
+                    No hay incidencias registradas{incSearch || incFiltroInmueble !== 'TODOS' || incFiltroCategoria !== 'TODAS' || incFiltroPrioridad !== 'TODAS' || incFiltroEstado !== 'TODOS' ? ' con estos filtros' : ' en tus viviendas'}.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {incidenciasFiltradas.map((x) => {
+                    const est = ESTADOS_INCIDENCIA_LABELS[x.estado];
+                    const pri = PRIORIDADES_INCIDENCIA_LABELS[x.prioridad];
+                    return (
+                      <div key={x.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                        <div className="flex items-start justify-between flex-wrap gap-2">
+                          <div>
+                            <div className="font-bold text-sm text-slate-900">
+                              {x.numero ? `${x.numero} · ` : ''}{x.titulo}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {CATEGORIA_INCIDENCIA_LABEL[x.categoria] || x.categoria} ·{' '}
+                              {x.inmuebleDireccion || nombreVivienda(x.inmuebleId)}
+                              {x.fechaCreacion ? ` · ${String(x.fechaCreacion).slice(0, 10)}` : ''}
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5 flex-wrap justify-end">
+                            {est ? (
+                              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${est.badgeClass}`}>
+                                {est.label}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-700">
+                                {x.estado}
+                              </span>
+                            )}
+                            {pri ? (
+                              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${pri.badgeClass}`}>
+                                {pri.label}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div>
+                          <button
+                            onClick={() => setIncDetalleId(incDetalleId === x.id ? null : x.id)}
+                            className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold"
+                          >
+                            {incDetalleId === x.id ? 'Ocultar detalle' : 'Ver detalle'}
+                          </button>
+                        </div>
+                        {incDetalleId === x.id && incDetalle && incDetalle.id === x.id && (
+                          <div className="pt-2 border-t border-slate-100 space-y-2 text-[11px]">
+                            <p className="text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                              {incDetalle.descripcion}
+                            </p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Origen del aviso</span>
+                                <span className="font-semibold text-slate-800">
+                                  {ORIGEN_INCIDENCIA_LABEL[incDetalle.origen] || incDetalle.origen || '—'}
+                                </span>
+                              </div>
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Profesional asignado</span>
+                                <span className="font-semibold text-slate-800">
+                                  {incDetalle.profesionalAsignadoNombre ||
+                                    incDetalle.trabajoProfesional?.profesionalNombre ||
+                                    'Pendiente de asignar'}
+                                </span>
+                              </div>
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Inquilino</span>
+                                <span className="font-semibold text-slate-800">{incDetalle.inquilinoNombre || '—'}</span>
+                              </div>
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Compromiso / Inicio</span>
+                                <span className="font-semibold text-slate-800">
+                                  {incDetalle.fechaCompromiso ? String(incDetalle.fechaCompromiso).slice(0, 10) : '—'}
+                                  {' / '}
+                                  {incDetalle.fechaInicioReparacion ? String(incDetalle.fechaInicioReparacion).slice(0, 10) : '—'}
+                                </span>
+                              </div>
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Cierre</span>
+                                <span className="font-semibold text-slate-800">
+                                  {incDetalle.fechaCierre ? String(incDetalle.fechaCierre).slice(0, 10) : '—'}
+                                </span>
+                              </div>
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Evidencias</span>
+                                <span className="font-semibold text-slate-800">
+                                  {(incDetalle.fotografias?.length || 0) + (incDetalle.fotos?.length || 0)} foto(s) ·{' '}
+                                  {incDetalle.documentos?.length || 0} doc(s)
+                                </span>
+                              </div>
+                            </div>
+                            {typeof incDetalle.resolucion === 'string' && incDetalle.resolucion ? (
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Resolución</span>
+                                <span className="text-slate-700">{incDetalle.resolucion}</span>
+                              </div>
+                            ) : null}
+                            {incDetalle.observaciones ? (
+                              <div className="border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500 block">Observaciones</span>
+                                <span className="text-slate-700">{incDetalle.observaciones}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

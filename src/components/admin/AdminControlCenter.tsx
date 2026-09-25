@@ -18,6 +18,7 @@ import {
   Plus,
   ExternalLink,
   Eye,
+  Pencil,
   FileText,
   ShieldCheck,
   Copy,
@@ -43,6 +44,13 @@ import {
   ROLES_PREDEFINIDOS,
   PERMISOS_SISTEMA,
 } from '../../types';
+import {
+  buildPrefillUsuarioDesdePropietario,
+  buildUrlInvitacion,
+  esInvitacionNominalPropietario,
+} from '../../lib/accesoPropietarios';
+
+import { esUsuarioMaster } from '../../lib/adminUsuarios';
 import { DryRunFichasPublicasPanel } from './DryRunFichasPublicasPanel';
 
 interface AdminControlCenterProps {
@@ -59,13 +67,17 @@ interface AdminControlCenterProps {
   onLogout: () => void;
   onSaveUsuario: (usuario: UsuarioApp) => Promise<void>;
   onDeleteUsuario: (id: string) => Promise<void>;
+  /** Baja segura de acceso (INACTIVO + auditoría; nunca borra datos). */
+  onBajaUsuario?: (id: string, motivo?: string) => Promise<void>;
   onSaveEnlaceRegistro: (enlace: EnlaceRegistro) => Promise<void>;
   onDeleteEnlaceRegistro: (id: string) => Promise<void>;
   onSaveEspecialidad: (especialidad: Especialidad) => Promise<void>;
   onDeleteEspecialidad: (id: string) => Promise<void>;
   onSaveModulosConfig?: (config: ModulosConfig) => Promise<void>;
-  onOpenCrearUsuarioModal: () => void;
+  onOpenCrearUsuarioModal: (prefill?: Partial<UsuarioApp>) => void;
   onOpenCrearEnlaceModal: () => void;
+  /** Sección inicial (por defecto 'dashboard'). */
+  seccionInicial?: AdminSection;
 }
 
 type AdminSection =
@@ -76,6 +88,89 @@ type AdminSection =
   | 'profesionales'
   | 'configuracion'
   | 'auditoria';
+
+export interface BajaUsuarioConfirmacionProps {
+  usuario: UsuarioApp;
+  motivo: string;
+  onMotivoChange: (v: string) => void;
+  error: string;
+  guardando: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * Confirmación explícita de baja de acceso: retira el acceso (INACTIVO)
+ * conservando todos los datos patrimoniales e históricos. Nunca borra.
+ */
+export const BajaUsuarioConfirmacion: React.FC<BajaUsuarioConfirmacionProps> = ({
+  usuario,
+  motivo,
+  onMotivoChange,
+  error,
+  guardando,
+  onConfirm,
+  onCancel,
+}) => (
+  <div
+    data-testid="baja-confirmacion"
+    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+  >
+    <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 space-y-4">
+      <div>
+        <h3 className="text-base font-bold text-white">Dar de baja de acceso</h3>
+        <p className="text-xs text-slate-400 mt-1">
+          {usuario.nombre} · {usuario.email} · {usuario.tipoPerfil}
+        </p>
+      </div>
+      <p className="text-xs text-slate-300 leading-relaxed">
+        Esta operación retirará el acceso del usuario (pasará a INACTIVO), pero conservará
+        su ficha patrimonial, inmuebles, contratos, documentos, históricos y auditoría.
+        No se elimina ningún dato patrimonial.
+      </p>
+      <div>
+        <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+          Motivo (opcional)
+        </label>
+        <input
+          type="text"
+          value={motivo}
+          onChange={(e) => onMotivoChange(e.target.value)}
+          placeholder="Ej. Fin de la relación contractual"
+          data-testid="baja-motivo"
+          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+        />
+      </div>
+      {error && (
+        <div
+          data-testid="baja-error"
+          className="p-3 bg-red-950/40 border border-red-800/60 text-red-400 rounded-xl text-xs font-medium"
+        >
+          {error}
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={guardando}
+          className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white rounded-xl hover:bg-slate-800 transition-colors disabled:opacity-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={guardando}
+          data-testid="baja-confirmar"
+          className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-xl transition-colors disabled:opacity-50"
+        >
+          {guardando ? 'Tramitando baja…' : 'Confirmar baja'}
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   currentUser,
@@ -91,6 +186,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   onLogout,
   onSaveUsuario,
   onDeleteUsuario,
+  onBajaUsuario,
   onSaveEnlaceRegistro,
   onDeleteEnlaceRegistro,
   onSaveEspecialidad,
@@ -98,8 +194,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   onSaveModulosConfig,
   onOpenCrearUsuarioModal,
   onOpenCrearEnlaceModal,
+  seccionInicial,
 }) => {
-  const [activeSection, setActiveSection] = useState<AdminSection>('dashboard');
+  const [activeSection, setActiveSection] = useState<AdminSection>(seccionInicial ?? 'dashboard');
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
@@ -118,6 +215,12 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   // Specialty state
   const [nuevaEspecialidad, setNuevaEspecialidad] = useState('');
   const [copiedEnlaceId, setCopiedEnlaceId] = useState<string | null>(null);
+
+  // Baja segura de acceso (confirmación explícita + motivo)
+  const [bajaPendiente, setBajaPendiente] = useState<UsuarioApp | null>(null);
+  const [motivoBaja, setMotivoBaja] = useState('');
+  const [bajaError, setBajaError] = useState('');
+  const [bajaGuardando, setBajaGuardando] = useState(false);
 
   // Computed Indicators
   const totalUsuarios = usuarios.length;
@@ -171,9 +274,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     });
   };
 
-  // Copy link helper
+  // Copy link helper (nominal → URL por ID directo; genérica → URL por token)
   const handleCopyLink = (enlace: EnlaceRegistro) => {
-    const url = `${window.location.origin}?registro=${encodeURIComponent(enlace.token)}`;
+    const url = buildUrlInvitacion(enlace, window.location.origin);
     navigator.clipboard.writeText(url);
     setCopiedEnlaceId(enlace.id);
     setTimeout(() => setCopiedEnlaceId(null), 2500);
@@ -612,6 +715,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <option value="ADMINISTRADOR">Administradores</option>
                   <option value="PROPIETARIO">Propietarios</option>
                   <option value="PROFESIONAL">Profesionales</option>
+                  <option value="INQUILINO">Inquilinos</option>
                 </select>
 
                 <select
@@ -621,6 +725,8 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 >
                   <option value="TODOS">Todos los Estados</option>
                   <option value="ACTIVO">Activos</option>
+                  <option value="PENDIENTE">Pendientes</option>
+                  <option value="INACTIVO">Inactivos</option>
                   <option value="BLOQUEADO">Bloqueados</option>
                 </select>
               </div>
@@ -682,10 +788,20 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>Activo</span>
                             </span>
-                          ) : (
+                          ) : u.estado === 'BLOQUEADO' ? (
                             <span className="inline-flex items-center gap-1 text-rose-400 font-semibold">
                               <XCircle className="w-3.5 h-3.5" />
                               <span>Bloqueado</span>
+                            </span>
+                          ) : u.estado === 'INACTIVO' ? (
+                            <span className="inline-flex items-center gap-1 text-amber-400 font-semibold">
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Inactivo</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-blue-400 font-semibold">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>Pendiente</span>
                             </span>
                           )}
                         </td>
@@ -693,6 +809,31 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                           {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
                         </td>
                         <td className="p-4 text-right">
+                          <button
+                            onClick={() => onOpenCrearUsuarioModal(u)}
+                            title="Editar usuario"
+                            data-testid={`editar-usuario-${u.id}`}
+                            className="px-2.5 py-1 mr-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer bg-blue-950/40 text-blue-400 border border-blue-800/60 hover:bg-blue-900/60"
+                          >
+                            <Pencil className="w-3.5 h-3.5 inline-block" />
+                          </button>
+                          {u.id !== currentUser.id &&
+                            !esUsuarioMaster(u) &&
+                            !u.roles?.includes('SUPERADMIN') &&
+                            (u.estado === 'ACTIVO' || u.estado === 'BLOQUEADO') && (
+                              <button
+                                onClick={() => {
+                                  setBajaPendiente(u);
+                                  setMotivoBaja('');
+                                  setBajaError('');
+                                }}
+                                title="Dar de baja de acceso (conserva datos patrimoniales)"
+                                data-testid={`baja-usuario-${u.id}`}
+                                className="px-2.5 py-1 mr-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer bg-amber-950/40 text-amber-400 border border-amber-800/60 hover:bg-amber-900/60"
+                              >
+                                Dar de baja
+                              </button>
+                            )}
                           {u.id !== currentUser.id && (
                             <button
                               onClick={() => handleToggleBloqueoUsuario(u)}
@@ -713,6 +854,32 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 </table>
               </div>
             </div>
+            {bajaPendiente && (
+              <BajaUsuarioConfirmacion
+                usuario={bajaPendiente}
+                motivo={motivoBaja}
+                onMotivoChange={setMotivoBaja}
+                error={bajaError}
+                guardando={bajaGuardando}
+                onCancel={() => {
+                  setBajaPendiente(null);
+                  setBajaError('');
+                }}
+                onConfirm={async () => {
+                  setBajaGuardando(true);
+                  setBajaError('');
+                  try {
+                    await onBajaUsuario?.(bajaPendiente.id, motivoBaja.trim() || undefined);
+                    setBajaPendiente(null);
+                    setMotivoBaja('');
+                  } catch (err: any) {
+                    setBajaError(err?.message || 'No se pudo completar la baja.');
+                  } finally {
+                    setBajaGuardando(false);
+                  }
+                }}
+              />
+            )}
           </div>
         )}
 
@@ -1078,10 +1245,20 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                         ) : (
                           <span className="text-[10px] text-slate-500">Inactivo</span>
                         )}
+                        {esInvitacionNominalPropietario(enlace) && (
+                          <span
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                            title={`Nominal para ${enlace.emailInvitado || '—'}`}
+                          >
+                            NOMINAL 1 USO
+                          </span>
+                        )}
                       </div>
                       <div className="font-mono text-slate-500 text-[11px]">
                         Token: {enlace.token} · Usos: {enlace.usosActuales || 0}
                         {enlace.usosMaximos ? ` / ${enlace.usosMaximos}` : ' (Ilimitados)'}
+                        {esInvitacionNominalPropietario(enlace) &&
+                          ` · Para: ${enlace.emailInvitado || '—'}`}
                       </div>
                     </div>
 
@@ -1317,6 +1494,17 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
               </div>
 
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    // ACCESO-PROPIETARIOS §1: alta con el propietario ya vinculado.
+                    const prop = selectedPropietarioDetail;
+                    setSelectedPropietarioDetail(null);
+                    onOpenCrearUsuarioModal(buildPrefillUsuarioDesdePropietario(prop));
+                  }}
+                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold cursor-pointer"
+                >
+                  Crear Cuenta de Usuario
+                </button>
                 <button
                   onClick={() => {
                     const propId = selectedPropietarioDetail.id;

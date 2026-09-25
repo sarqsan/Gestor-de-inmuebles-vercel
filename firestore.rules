@@ -1091,6 +1091,15 @@ service cloud.firestore {
         && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
         && incoming().estado in ['ACTIVO', 'PENDIENTE']
         && (
+          // INTEGRACIÓN PR4 (2026-09-25): se conserva la rama canónica de
+          // autorregistro (la exige fase14 C.1 y la usan las invitaciones
+          // genéricas, que escriben permisos por defecto del rol). El alta
+          // autónoma (registerAutonomo) también satisface esta rama
+          // (ACTIVO + rol exacto sin privilegios + ficha nueva). NOTA: el
+          // endurecimiento estricto de Arena B (binding de email, permisos
+          // vacíos, anti-hijack de profesionalId) queda pendiente de
+          // reintroducir cuando invitaciones y fase14 se alineen con él;
+          // ver informe de integración. No se relaja nada respecto a main.
           (incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
             && (
               incoming().tipoPerfil == 'PROFESIONAL'
@@ -1118,7 +1127,22 @@ service cloud.firestore {
         )
         && incoming().tipoPerfil == existing().tipoPerfil
         && incoming().roles == existing().roles
-        && incoming().estado == existing().estado
+        // ACCESO-PROPIETARIOS: el estado es inmutable salvo la activación
+        // nominal — el titular del email invitado, tras crear su cuenta Auth
+        // con ese email, activa su ficha PENDIENTE al vincular su UID por
+        // primera vez. No puede re-activar, escalar ni tocar identidad,
+        // vínculos o permisos (claves vetadas más abajo).
+        && (
+          incoming().estado == existing().estado
+          || (
+            !('authUid' in existing())
+            && existing().estado == 'PENDIENTE'
+            && incoming().estado == 'ACTIVO'
+            && incoming().authUid == request.auth.uid
+            && existing().email is string
+            && request.auth.token.email == existing().email
+          )
+        )
         // El usuario no puede cambiar por sí mismo su identidad ni sus permisos.
         && !incoming().diff(existing()).affectedKeys().hasAny([
           'permisos',
@@ -1131,6 +1155,18 @@ service cloud.firestore {
           // BLOQUE E (reconciliado): el inquilino no puede auto-vincularse contratos
           'contratoIds'
         ])
+        // INTEGRACIÓN PR4 (2026-09-25): `authUid` NO se inmoviliza aquí.
+        // Lo exigen (a) fase14 C.2 —frontera deliberada: reescribir el propio
+        // authUid no otorga nada porque la identidad que leen las reglas es
+        // el espejo `usuarios_auth/{request.auth.uid}` con `indexIsTruthful()`
+        // (el espejo solo se escribe en la ruta del propio UID)— y (b) el
+        // cliente real `getUsuarioByAuthUid`, que re-vincula el authUid cuando
+        // cambia la cuenta Auth del mismo email. La activación nominal
+        // (fijar UID propio por primera vez + PENDIENTE→ACTIVO con email)
+        // sigue permitida por las ramas de arriba. Vetar aquí la reescritura
+        // rompería main (fase14) y el re-enlace legítimo, sin ganar seguridad
+        // real: la cartera (propietarioId/inmuebleIds/permisos/roles) sigue
+        // pinneada por los vetos de arriba.
       );
 
       allow delete: if isMasterAdmin();
@@ -1143,6 +1179,10 @@ service cloud.firestore {
     match /profesionales/{profesionalId} {
       allow read: if true;
       // BLOQUE E (reconciliado): el inquilino no escribe en el catálogo.
+      // INTEGRACIÓN PR4 (2026-09-25): se conserva la escritura staff
+      // canónica (el propietario/gestor gestiona sus profesionales via
+      // handleSaveProfesional; restringir update a master+ficha propia
+      // rompería ese flujo). Re-endurecer exige una vía de delegación.
       allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }

@@ -21,6 +21,7 @@ import {
   Wrench,
   ArrowLeftRight,
   Receipt,
+  AlertTriangle,
   Smartphone,
   Zap,
   TrendingDown,
@@ -101,6 +102,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Compra, reforma, alquiler, rentabilidad' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
+
           { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet, description: 'Estado de cuenta mensual y neto transferido' },
           { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
           { id: 'financiacion', label: 'Financiación', icon: Landmark, description: 'Hipotecas y amortización' },
@@ -130,6 +132,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
           { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Analizador compra-reforma-alquiler' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
+
           { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet, description: 'Liquidaciones, gastos, SEPA PAIN.008/001 y movimientos' },
           { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
           { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },

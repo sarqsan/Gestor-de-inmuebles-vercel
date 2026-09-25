@@ -138,17 +138,27 @@ export interface ResumenFiscalAnual {
 // =====================
 
 /**
- * Determina si un gasto es deducible según campo existente o categoría
- * Reutiliza campo esDeducible si existe, si no infiere por categoría
- * NO inventa categorías fiscales no soportadas
+ * Determina si un gasto es deducible.
+ *
+ * Coherencia D1 con el campo operativo `deducible` que escriben GastoModal,
+ * crearGasto, recurrentes y el puente OT. No inventa norma fiscal: reutiliza
+ * la decisión ya persistida y, solo si falta, infiere por categoría.
+ *
+ * Prioridad:
+ * 1. `esDeducible` si es booleano (alias fiscal explícito).
+ * 2. `tipoDeducible` si está informado.
+ * 3. `deducible` operativo si es booleano.
+ * 4. Inferencia por la lista cerrada. Incluye las categorías de explotación
+ *    del catálogo de gastosEngine que esta lista omitía (IBI, SEGURO_HOGAR,
+ *    ADMINISTRACION, OTRO_EXPLOTACION). OTRO y financiación no se infieren
+ *    como deducibles.
  */
 export function esGastoDeducible(gasto: Gasto): boolean {
   if (typeof gasto.esDeducible === 'boolean') return gasto.esDeducible;
   if (gasto.tipoDeducible) {
     return gasto.tipoDeducible === 'DEDUCIBLE';
   }
-  // Inferencia por categoría existente (conservadora, todo deducible salvo OTRO no claro)
-  // Según normativa española alquileres: mantenimiento, reparación, seguros, comunidad, impuestos, suministros, gestión, limpieza, reformas (amortización) son deducibles
+  if (typeof gasto.deducible === 'boolean') return gasto.deducible;
   const categoriasDeducibles: CategoriaGasto[] = [
     'MANTENIMIENTO',
     'REPARACION',
@@ -161,6 +171,10 @@ export function esGastoDeducible(gasto: Gasto): boolean {
     'REFORMAS', // amortizable
     'LIMPIEZA',
     'GESTION',
+    'IBI',
+    'SEGURO_HOGAR',
+    'ADMINISTRACION',
+    'OTRO_EXPLOTACION',
   ];
   return categoriasDeducibles.includes(gasto.categoria);
 }

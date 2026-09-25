@@ -6,9 +6,11 @@
  * de cálculo tal como están implementadas hoy (deducibilidad, ingresos/gastos por ejercicio,
  * ocupación, documentación, resumen anual, aislamiento por propietario y consistencia).
  *
- * NO se introducen reglas fiscales nuevas ni se afirma conformidad normativa: los tests fijan
- * el comportamiento actual del motor para detectar regresiones. Las dudas normativas
- * (p. ej. qué categorías son deducibles) quedan fuera del alcance (cuestión externa).
+ * NO se afirma conformidad normativa: los tests fijan el comportamiento del motor para
+ * detectar regresiones. D1 fija solo la coherencia de código entre el flag operativo
+ * `Gasto.deducible` (y las cuatro categorías de explotación que el catálogo de gastos
+ * ya marca deducibles por defecto) y `esGastoDeducible`. Qué sea deducible según la
+ * norma aplicable sigue siendo cuestión externa.
  *
  * Reloj congelado (2026-09-21 12:00 local) porque `obtenerTodosCobros` genera periodos
  * cuando un contrato no los trae, y `generadoEn` usa `new Date()`.
@@ -55,7 +57,8 @@ const gasto = (p: Partial<Gasto> = {}): Gasto =>
     fechaPago: '2026-03-10',
     periodoMesAnio: '2026-03',
     aCargoDe: 'arrendador',
-    deducible: true,
+    // Sin `deducible`: la inferencia por categoría solo aplica si el flag operativo
+    // está ausente. Los casos D1 lo fijan de forma explícita.
     createdAt: '2026-03-10T00:00:00.000Z',
     updatedAt: '2026-03-10T00:00:00.000Z',
     ...p,
@@ -185,9 +188,8 @@ describe('fiscalEngine · esGastoDeducible / clasificarGastosDeducibilidad', () 
     for (const categoria of noDeducibles) {
       expect(esGastoDeducible(gasto({ categoria })), categoria).toBe(false);
     }
-    // NOTA R4: las categorías del catálogo de gastosEngine IBI, SEGURO_HOGAR, ADMINISTRACION y
-    // OTRO_EXPLOTACION, y el flag operativo `deducible`, no se prueban aquí: su tratamiento actual
-    // se documenta como defecto D en el informe de la orden (no se fija con tests).
+    // IBI, SEGURO_HOGAR, ADMINISTRACION, OTRO_EXPLOTACION y el flag operativo
+    // `deducible` se fijan en el bloque D1, no en esta lista histórica.
   });
 
   it('clasificar: separa listas, suma totales y excluye ANULADOS', () => {
@@ -208,6 +210,58 @@ describe('fiscalEngine · esGastoDeducible / clasificarGastosDeducibilidad', () 
     const r = clasificarGastosDeducibilidad([gasto({ importe: undefined as unknown as number })]);
     expect(r.totalDeducible).toBe(0);
     expect(r.deducibles).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D1 — coherencia del flag operativo `deducible` con el motor fiscal
+// ---------------------------------------------------------------------------
+
+describe('fiscalEngine · D1 coherencia Gasto.deducible operativo', () => {
+  it('el flag operativo manda sobre la categoría: COMUNIDAD false no entra; IBI true sí', () => {
+    expect(esGastoDeducible(gasto({ categoria: 'COMUNIDAD', deducible: false }))).toBe(false);
+    expect(esGastoDeducible(gasto({ categoria: 'IBI', importe: 300, deducible: true }))).toBe(true);
+    expect(esGastoDeducible(gasto({ categoria: 'OTRO', deducible: true }))).toBe(true);
+    expect(esGastoDeducible(gasto({ categoria: 'CUOTA_HIPOTECARIA', tipo: 'FINANCIACION', deducible: false }))).toBe(false);
+    // El ERP puede persistir deducible=true también en financiación; el motor no lo contradice.
+    expect(esGastoDeducible(gasto({ categoria: 'CUOTA_HIPOTECARIA', tipo: 'FINANCIACION', deducible: true }))).toBe(true);
+  });
+
+  it('sin flag operativo, el catálogo de explotación omitido se infiere deducible; OTRO, financiación y alias ajenos no', () => {
+    const ahoraDeducibles: CategoriaGasto[] = ['IBI', 'SEGURO_HOGAR', 'ADMINISTRACION', 'OTRO_EXPLOTACION'];
+    for (const categoria of ahoraDeducibles) {
+      expect(esGastoDeducible(gasto({ categoria, deducible: undefined })), categoria).toBe(true);
+    }
+    expect(esGastoDeducible(gasto({ categoria: 'IBI', deducible: false }))).toBe(false);
+    expect(esGastoDeducible(gasto({ categoria: 'OTRO', deducible: undefined }))).toBe(false);
+    expect(esGastoDeducible(gasto({ categoria: 'INTERESES_PRESTAMO', deducible: undefined }))).toBe(false);
+    expect(esGastoDeducible(gasto({ categoria: 'OTRO_FINANCIACION', deducible: undefined }))).toBe(false);
+    expect(esGastoDeducible(gasto({ categoria: 'MANTENIMIENTO_REPARACION', deducible: undefined }))).toBe(false);
+  });
+
+  it('esDeducible y tipoDeducible siguen por encima del flag operativo', () => {
+    expect(esGastoDeducible(gasto({ esDeducible: false, deducible: true, categoria: 'IBI' }))).toBe(false);
+    expect(esGastoDeducible(gasto({ esDeducible: true, deducible: false, categoria: 'OTRO' }))).toBe(true);
+    expect(esGastoDeducible(gasto({ tipoDeducible: 'NO_DEDUCIBLE', deducible: true, categoria: 'COMUNIDAD' }))).toBe(false);
+    expect(esGastoDeducible(gasto({ tipoDeducible: 'DEDUCIBLE', deducible: false, categoria: 'OTRO' }))).toBe(true);
+  });
+
+  it('el caso observado (IBI 300 del ERP vs COMUNIDAD marcada no deducible) cuadra en clasificar y en el ejercicio', () => {
+    const gastos = [
+      gasto({ id: 'ibi', categoria: 'IBI', importe: 300, deducible: true }),
+      gasto({ id: 'com', categoria: 'COMUNIDAD', importe: 80, deducible: false }),
+      gasto({ id: 'anulado', categoria: 'IBI', importe: 999, deducible: true, estado: 'ANULADO' }),
+    ];
+    const clasificado = clasificarGastosDeducibilidad(gastos);
+    expect(clasificado.deducibles.map((g) => g.id)).toEqual(['ibi']);
+    expect(clasificado.noDeducibles.map((g) => g.id)).toEqual(['com']);
+    expect(clasificado.totalDeducible).toBe(300);
+    expect(clasificado.totalNoDeducible).toBe(80);
+
+    const ejercicio = calcularGastosEjercicio(gastos, 2026);
+    expect(ejercicio.totalDeducible).toBe(300);
+    expect(ejercicio.totalNoDeducible).toBe(80);
+    expect(ejercicio.total).toBe(380);
   });
 });
 

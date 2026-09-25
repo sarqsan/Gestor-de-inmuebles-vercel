@@ -60,6 +60,8 @@ interface MobileNavProps {
   onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
   proveedorIA?: ProveedorIA;
   accessibleSections?: SectionType[];
+  /** Propietario/profesional: «Mi Cuenta» abre su perfil real, no la configuración del sistema. */
+  onAbrirMiCuenta?: () => void;
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -80,6 +82,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onAccionAsistente,
   proveedorIA,
   accessibleSections,
+  onAbrirMiCuenta,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -171,6 +174,11 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   }, []);
 
   const handleSelect = (sectionId: SectionType) => {
+    if (sectionId === 'configuracion' && (perfil === 'PROPIETARIO' || perfil === 'PROFESIONAL') && onAbrirMiCuenta) {
+      onAbrirMiCuenta();
+      setIsOpen(false);
+      return;
+    }
     onSelectSection(sectionId);
     setIsOpen(false);
   };

@@ -83,6 +83,9 @@ interface PropietarioPortalSectionProps {
   onNavigateToInmueble?: (inmuebleId: string) => void;
   /** Mismo callback que el alta desde la ficha de administración. */
   onCrearInmueble?: (propietarioId: string) => void;
+  /** «Mi Cuenta»: abre la pestaña de perfil y se consume. */
+  pestanaInicial?: 'perfil' | null;
+  onPestanaInicialConsumida?: () => void;
 }
 
 export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> = ({
@@ -101,10 +104,17 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   onSavePropietario,
   onNavigateToInmueble,
   onCrearInmueble,
+  pestanaInicial,
+  onPestanaInicialConsumida,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
     'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'morosidad' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
-  >('viviendas');
+  >(pestanaInicial === 'perfil' ? 'perfil' : 'viviendas');
+  useEffect(() => {
+    if (pestanaInicial !== 'perfil') return;
+    setActiveSubTab('perfil');
+    onPestanaInicialConsumida?.();
+  }, [pestanaInicial, onPestanaInicialConsumida]);
   // BLOQUE C: aislamiento defensivo en profundidad — aunque el prop incoming contuviera
   // otra fila, el propietario solo ve las suyas (la regla de Firestore ya lo garantiza).
   const miMorosidad = (resumenMorosidad || []).filter(

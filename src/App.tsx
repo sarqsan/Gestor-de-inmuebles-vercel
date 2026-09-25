@@ -328,6 +328,19 @@ export default function App() {
     setAltaInmuebleDesdePropietarioId(propietarioId);
     setActiveSection('inmuebles');
   };
+  const [pestanaCuentaPropietario, setPestanaCuentaPropietario] = useState<'perfil' | null>(null);
+  const [pestanaCuentaProfesional, setPestanaCuentaProfesional] = useState<'ficha' | null>(null);
+  const abrirMiCuenta = () => {
+    if (currentUser?.tipoPerfil === 'PROPIETARIO') {
+      setPestanaCuentaPropietario('perfil');
+      setActiveSection('propietarios');
+      return;
+    }
+    if (currentUser?.tipoPerfil === 'PROFESIONAL') {
+      setPestanaCuentaProfesional('ficha');
+      setActiveSection('administracion');
+    }
+  };
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -3494,6 +3507,7 @@ export default function App() {
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
+        onAbrirMiCuenta={abrirMiCuenta}
       />
 
       {/* Main App Workspace */}
@@ -3517,6 +3531,7 @@ export default function App() {
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
+          onAbrirMiCuenta={abrirMiCuenta}
         />
 
         {/* Desktop Header */}
@@ -3584,6 +3599,8 @@ export default function App() {
                 onSavePropietario={handleSavePropietario}
                 onNavigateToInmueble={() => setActiveSection('inmuebles')}
                 onCrearInmueble={abrirAltaInmuebleDesdePropietario}
+                pestanaInicial={pestanaCuentaPropietario}
+                onPestanaInicialConsumida={() => setPestanaCuentaPropietario(null)}
               />
             ) : (
               <PropietariosSection
@@ -3997,6 +4014,8 @@ export default function App() {
                 inmuebles={scopedInmuebles}
                 especialidades={especialidades}
                 onSaveProfesional={handleSaveProfesional}
+                pestanaInicial={pestanaCuentaProfesional}
+                onPestanaInicialConsumida={() => setPestanaCuentaProfesional(null)}
               />
             ) : (
               <PropietarioPortalSection

@@ -53,6 +53,8 @@ interface SidebarProps {
   currentUser?: UsuarioApp;
   onOpenAuthModal?: () => void;
   onLogout?: () => void;
+  /** Propietario/profesional: «Mi Cuenta» abre su perfil real, no la configuración del sistema. */
+  onAbrirMiCuenta?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -71,6 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   onOpenAuthModal,
   onLogout,
+  onAbrirMiCuenta,
 }) => {
   const pendingReviewCount = candidatos.filter((c) => c.estado === 'nuevo').length;
   const pendingDocCount = candidatos.filter((c) => c.estado === 'pendiente_doc').length;
@@ -177,11 +180,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           const Icon = item.icon;
           const isActive = activeSection === item.id;
 
+          const abrir = () => {
+            if (item.id === 'configuracion' && (perfil === 'PROPIETARIO' || perfil === 'PROFESIONAL') && onAbrirMiCuenta) {
+              onAbrirMiCuenta();
+              return;
+            }
+            onSelectSection(item.id);
+          };
+
           return (
             <button
               key={item.id}
               data-tour={`nav-${item.id}`}
-              onClick={() => onSelectSection(item.id)}
+              onClick={abrir}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
                 isActive
                   ? 'bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/30'

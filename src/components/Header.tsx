@@ -55,7 +55,39 @@ export const Header: React.FC<HeaderProps> = ({
       case 'inmuebles':
         return { title: 'Gestión de Inmuebles', subtitle: 'Listado de viviendas en alquiler' };
       case 'propietarios':
+        if (currentUser?.tipoPerfil === 'PROPIETARIO') {
+          return { title: 'Portal del Propietario', subtitle: 'Viviendas, contratos, liquidaciones y perfil' };
+        }
         return { title: 'Gestión de Propietarios e IBAN', subtitle: 'Base de datos de arrendadores, domicilios fiscales y cuentas bancarias' };
+      case 'cobros':
+        return { title: 'Cobros', subtitle: 'Control mensual de rentas: previsto, recibido y justificante' };
+      case 'tesoreria':
+        if (currentUser?.tipoPerfil === 'PROPIETARIO') {
+          return { title: 'Portal del Propietario', subtitle: 'Viviendas, contratos, liquidaciones y perfil' };
+        }
+        return { title: 'Tesorería y Liquidaciones', subtitle: 'Cobro, banco, liquidación y SEPA' };
+      case 'gastos':
+        return { title: 'Gestión de Gastos', subtitle: 'Explotación del alquiler y financiación hipotecaria' };
+      case 'conciliacion':
+        return { title: 'Conciliación Bancaria Automática', subtitle: 'Extractos bancarios y conciliación de cobros y gastos' };
+      case 'morosidad':
+        return { title: 'Morosidad, recobro y expediente', subtitle: 'Detección, recobro y expediente' };
+      case 'facturacion':
+        return { title: 'Facturación', subtitle: 'Facturas y registro de facturación' };
+      case 'fiscal':
+        return { title: 'Fiscalidad Anual de Alquileres', subtitle: 'Ejercicio, contratos e ingresos del alquiler' };
+      case 'informes':
+        return { title: 'Informes Ejecutivos, Rentabilidad y Exportación', subtitle: 'Patrimonio, rentabilidad y exportación' };
+      case 'polizas':
+        return { title: 'Gestión de Pólizas de Seguro', subtitle: 'Pólizas, vencimientos y renovaciones' };
+      case 'inquilinos':
+        return { title: 'Portal de inquilinos', subtitle: 'Accesos, invitaciones y mensajes' };
+      case 'suministros':
+        return { title: 'Suministros', subtitle: 'CUPS, lecturas y cambios de titular' };
+      case 'recomercializacion':
+        return { title: 'Recomercialización', subtitle: 'Salida, inspección y nueva comercialización' };
+      case 'incidencias':
+        return { title: 'Incidencias, Mantenimiento & Seguros', subtitle: 'Averías, mantenimiento y seguros' };
       case 'preseleccionados':
         return { title: 'Preseleccionados e Invitaciones', subtitle: 'Agenda de visitas a viviendas y citaciones por WhatsApp' };
       case 'solicitudes':
@@ -73,6 +105,9 @@ export const Header: React.FC<HeaderProps> = ({
       case 'analisis':
         return { title: 'Análisis Gemini IA', subtitle: 'Evaluación automatizada de solvencia y documentación' };
       case 'administracion':
+        if (currentUser?.tipoPerfil === 'PROFESIONAL') {
+          return { title: 'Portal de Servicios y Mantenimiento', subtitle: 'Ficha, especialidades, zonas y viviendas asignadas' };
+        }
         return { title: 'Administración Global & Seguridad', subtitle: 'Usuarios, roles, módulos, invitaciones y registro de auditoría' };
       case 'actas':
         return { title: 'Actas de Entrada y Salida — BLOQUE D', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };

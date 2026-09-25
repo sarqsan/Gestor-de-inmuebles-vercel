@@ -59,6 +59,9 @@ interface ProfesionalPortalSectionProps {
   inmuebles: Inmueble[];
   especialidades: Especialidad[];
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
+  /** «Mi Cuenta»: abre la ficha y se consume. */
+  pestanaInicial?: 'ficha' | null;
+  onPestanaInicialConsumida?: () => void;
 }
 
 export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> = ({
@@ -67,10 +70,18 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
   inmuebles,
   especialidades,
   onSaveProfesional,
+  pestanaInicial,
+  onPestanaInicialConsumida,
 }) => {
   const [activeTab, setActiveTab] = useState<
     'ficha' | 'especialidades' | 'zonas' | 'asignaciones' | 'incidencias'
-  >('incidencias');
+  >(pestanaInicial === 'ficha' ? 'ficha' : 'incidencias');
+
+  useEffect(() => {
+    if (pestanaInicial !== 'ficha') return;
+    setActiveTab('ficha');
+    onPestanaInicialConsumida?.();
+  }, [pestanaInicial, onPestanaInicialConsumida]);
 
   // Real-time Firestore subscriptions for Work Orders and Incidences
   const [trabajos, setTrabajos] = useState<TrabajoProfesional[]>([]);

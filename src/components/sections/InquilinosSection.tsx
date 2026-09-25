@@ -111,6 +111,7 @@ export const InquilinosSection: React.FC<Props> = ({ currentUser, contratos, inm
         ).map((t) => (
           <button
             key={t.id}
+            data-tour={`inquilinos-tab-${t.id}`}
             onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer ${
               tab === t.id ? 'bg-white shadow text-indigo-800' : 'text-slate-500'

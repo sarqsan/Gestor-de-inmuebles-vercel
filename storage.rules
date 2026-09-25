@@ -4,6 +4,32 @@ service firebase.storage {
 
     // =========================================================================
     // FASE 1.4 — SEGURIDAD DE FICHEROS
+    // C-Security (2026-09-22, reformulado sobre la canónica; ver
+    // docs/AUDITORIA-SEGURIDAD-STORAGE-DOCUMENTOS-2026-09-22.md):
+    //   · `read` de los árboles internos separado en `get` (cuenta interna) y
+    //     `list` (sólo administración): sin `list` no se pueden ENUMERAR los
+    //     objetos de otro propietario. El cliente nunca usa listAll()/list().
+    //   · `hasSafeObjectName()` en toda subida cuyo cliente sanea el nombre
+    //     (`replace(/[^a-zA-Z0-9._-]/g, '_')`): último segmento acotado, sin
+    //     segmentos vacíos ni `.`/`..`, longitud total <= 1024.
+    //   · `update` (en Storage = SÓLO metadatos; una re-subida al mismo nombre
+    //     se evalúa como `create`) cerrado en las rutas cuyo nombre es único
+    //     por subida; conservado donde el flujo re-sube el mismo nombre
+    //     (actas_pdfs) y en los bloques validados R3/E.
+    // RESIDUALES (no resueltos aquí, decisión pendiente):
+    //   · R-1 `internalUser()` == cualquier cuenta autenticada (incluye el perfil
+    //     INQUILINO del bloque E): excluirlo exige `firestore.get` en cada
+    //     operación interna o custom claims. No se cambia sin orden.
+    //   · R-2 sin custom claims no hay aislamiento por `{propietarioId}` en
+    //     Storage; el aislamiento fino vive en Firestore.
+    //   · R-3 `isPdfOrImage()` acepta `application/octet-stream` (clientes
+    //     que suben blobs sin tipo).
+    //   · R-4 las downloadURL con token son enlaces de capacidad ajenos a las
+    //     reglas.
+    //   · R-5 `presupuestos/`, `trabajos/` y `profesionales/{id}/documentos/`
+    //     existen en el cliente pero NO tienen bloque: caen en la denegación
+    //     por defecto y el cliente degrada a data-URL (sin cambio: afectaría al
+    //     módulo Operaciones).
     // =========================================================================
 
     function isSignedIn() {
@@ -96,6 +122,22 @@ service firebase.storage {
       return request.resource.contentType.matches('image/.*');
     }
 
+    // Forma segura del NOMBRE DE OBJETO subido. `request.resource.name` es la
+    // ruta completa (p. ej. `gastos_facturas/P1/G1/1700_factura.pdf`), por lo
+    // que se valida: longitud total, ausencia de segmentos vacíos (`//`) y de
+    // segmentos `.`/`..` (trayectos), y que el ÚLTIMO segmento (el fichero)
+    // empiece por alfanumérico, use sólo `[A-Za-z0-9._-]`, no termine en `.`
+    // y mida <= 255 caracteres. No se exige extensión: el tipo lo gobierna
+    // `contentType` (isImage / isPdfOrImage / esEvidenciaValida), no el nombre.
+    // Todos los clientes del repositorio sanean el nombre con
+    // `replace(/[^a-zA-Z0-9._-]/g, '_')`, así que ninguna subida legítima cambia.
+    function hasSafeObjectName() {
+      return request.resource.name.size() <= 1024
+        && !request.resource.name.matches('.*//.*')
+        && !request.resource.name.matches('.*/[.]{1,2}/.*')
+        && request.resource.name.matches('.*/([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]{0,253}[A-Za-z0-9_-])');
+    }
+
     // -------------------------------------------------------------------------
     // JUSTIFICANTES DE COBRO (datos económicos)
     // Ruta por propietario: cobros_justificantes/{propietarioId}/{cobroId}/{archivo}
@@ -107,17 +149,22 @@ service firebase.storage {
     // aislamiento fino por propietario queda para cuando se emitan claims.
     // -------------------------------------------------------------------------
     match /cobros_justificantes/{propietarioId}/{cobroPeriodoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 12 * 1024 * 1024
-        && isPdfOrImage();
-      allow update, delete: if internalUser();
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      // Nombre único por subida (`Date.now()_…`): sin caso de uso de metadatos.
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // Ruta heredada anterior (sin carpeta de propietario): sólo lectura interna;
     // ya no se permiten nuevas subidas a este esquema.
     match /cobros_justificantes/{cobroPeriodoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create, update: if false;
       allow delete: if internalUser();
     }
@@ -129,23 +176,44 @@ service firebase.storage {
     // fino que los justificantes de cobro (pendiente de custom claims).
     // -------------------------------------------------------------------------
     match /gastos_facturas/{propietarioId}/{gastoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 12 * 1024 * 1024
-        && isPdfOrImage();
-      allow update, delete: if internalUser();
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
     // DOCUMENTOS APORTADOS POR LOS CANDIDATOS (portal público por token)
     // La SUBIDA (create) la realiza el candidato sin iniciar sesión (funnel de
-    // captación), por lo que se permite anónimo con límite de tipo y tamaño;
-    // lectura/modificación/borrado quedan reservados a usuarios internos.
+    // captación). Antes el comodín `{allFiles=**}` admitía la subida anónima a
+    // CUALQUIER profundidad y con cualquier nombre. Ahora:
+    //   · el árbol completo (`{allFiles=**}`) conserva `get`/`delete` internos
+    //     (ningún objeto ya existente deja de ser legible/borrable) pero NO
+    //     admite `create`/`update`;
+    //   · la subida anónima sólo se concede en la ruta plana
+    //     `documentos_solicitados/{sol}/{fichero}` (la única que construye el
+    //     cliente: `{itemId}_{ts}_{nombre}`), con nombre seguro, PDF/imagen y
+    //     < 15 MB. El candidato no recibe URL de lectura; `list` sólo admin.
     // -------------------------------------------------------------------------
     match /documentos_solicitados/{solicitudDocId}/{allFiles=**} {
-      allow read: if internalUser();
-      allow create: if request.resource.size < 15 * 1024 * 1024 && isPdfOrImage();
-      allow update, delete: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create, update: if false;
+      allow delete: if internalUser();
+    }
+
+    match /documentos_solicitados/{solicitudDocId}/{fileName} {
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
+      allow create: if request.resource.size < 15 * 1024 * 1024
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
@@ -156,11 +224,17 @@ service firebase.storage {
     // operativa interna: contenidos/estado del inmueble) es solo interna.
     // -------------------------------------------------------------------------
     match /inmuebles/{inmuebleId}/{fileName} {
-      allow read: if true;
+      // Público SÓLO el `get` del objeto (lo que proyecta la ficha R3); el
+      // listado de la carpeta del inmueble exige cuenta interna.
+      allow get: if true;
+      allow list: if internalUser();
       allow create: if internalUser()
         && request.resource.size < 15 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && isImage()
+        && hasSafeObjectName();
+      // Nombre único por subida (`{imageId}_…` con id aleatorio).
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // R3 — ADJUNTOS DE INVENTARIO (documentación interna de trabajo).
@@ -171,7 +245,8 @@ service firebase.storage {
       allow read: if internalUser();
       allow create: if internalUser()
         && request.resource.size < 15 * 1024 * 1024
-        && isImage();
+        && isImage()
+        && hasSafeObjectName();
       allow update, delete: if internalUser();
     }
 
@@ -186,11 +261,14 @@ service firebase.storage {
     // pendiente de emitir claims (igual que justificantes y facturas).
     // -------------------------------------------------------------------------
     match /recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 15 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
@@ -201,11 +279,14 @@ service firebase.storage {
     // Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
     // -------------------------------------------------------------------------
     match /incidencias_fotos/{propietarioId}/{incidenciaId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 15 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
@@ -216,19 +297,25 @@ service firebase.storage {
     // Documentación contractual, planos, presupuestos y certificados técnicos.
     // -------------------------------------------------------------------------
     match /reformas_documentos/{propietarioId}/{proyectoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 20 * 1024 * 1024
-        && isPdfOrImage();
-      allow update, delete: if internalUser();
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     match /reformas_fotos/{propietarioId}/{proyectoId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 20 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     // ------------------------------------------------------------------------
@@ -241,19 +328,28 @@ service firebase.storage {
     // NO base64 en Firestore, referencia persistente Storage.
     // ------------------------------------------------------------------------
     match /actas_fotos/{propietarioId}/{actaId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 15 * 1024 * 1024
-        && isImage();
-      allow update, delete: if internalUser();
+        && isImage()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if internalUser();
     }
 
     match /actas_pdfs/{propietarioId}/{actaId}/{fileName} {
-      allow read: if internalUser();
+      allow get: if internalUser();
+      allow list: if isMasterAdmin();
       allow create: if internalUser()
         && request.resource.size < 20 * 1024 * 1024
-        && isPdfOrImage();
-      allow update, delete: if internalUser();
+        && isPdfOrImage()
+        && hasSafeObjectName();
+      // `handleGenerarPdf` re-sube el MISMO nombre
+      // (`Acta_{tipo}_{fecha}_v{version}_{id8}.pdf`) al regenerar una versión:
+      // se conserva `update` interno para no romper ese flujo legítimo.
+      allow update: if internalUser();
+      allow delete: if internalUser();
     }
 
     // -------------------------------------------------------------------------
@@ -268,7 +364,7 @@ service firebase.storage {
     match /incidencias/{incidenciaId}/{file=**} {
       allow read: if isSignedIn() && (!isTenant() ||
         (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
-      allow create, update: if esEvidenciaValida() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
+      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
         (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
       allow delete: if isSignedIn() && !isTenant();
     }
@@ -282,7 +378,7 @@ service firebase.storage {
       allow read: if isSignedIn() && (!isTenant() ||
         (existeLectura(lecturaId) && tenantVeContrato(contratoDeLectura(lecturaId))));
       // Subida ANTES de crear la lectura (inmutable): alcance vía contrato activo del inmueble.
-      allow create, update: if esEvidenciaValida() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
+      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
         tenantEnSuministroPorInmueble(suministroId));
       allow delete: if isSignedIn() && !isTenant();
     }

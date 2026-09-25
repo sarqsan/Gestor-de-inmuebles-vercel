@@ -2532,20 +2532,24 @@ export async function deletePresupuestoProfesionalFirestore(presupuestoId: strin
   }
 }
 
-export function subscribeValoracionesProfesionales(callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void): Unsubscribe {
-  return onSnapshot(
+/**
+ * Valoraciones de trabajos profesionales, aisladas por propietario (patrón
+ * `subscribeColeccionPropietario`): PROPIETARIO → where('propietarioId','==', pid)
+ * (única consulta compatible con la regla `list`); PROFESIONAL → sin datos;
+ * administrador/sin ámbito → colección completa. Sin orderBy: se ordena en cliente.
+ */
+export function subscribeValoracionesProfesionales(
+  callback: (valoraciones: ValoracionProfesionalTrabajo[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  return subscribeColeccionPropietario<ValoracionProfesionalTrabajo & { id: string }>(
     VALORACIONES_PROFESIONALES_COL,
-    (snapshot) => {
-      const items: ValoracionProfesionalTrabajo[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as ValoracionProfesionalTrabajo);
-      });
-      items.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-      callback(items);
+    (items) => {
+      const ordenadas = [...items].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+      callback(ordenadas);
     },
-    (err) => {
-      console.error('Firestore valoraciones_profesionales snapshot error:', err);
-    }
+    scope,
+    'valoraciones_profesionales'
   );
 }
 

@@ -690,10 +690,23 @@ describe('firestore.rules — update de usuarios reutiliza la vía segura', () =
 // 9. Regresión: catálogo de permisos/roles
 // ---------------------------------------------------------------------------
 describe('Catálogo — regresión (sin inventar ni limpiar)', () => {
-  it('duplicados de tesorería documentados (se reportan, no se limpian)', () => {
-    for (const codigo of ['tesoreria.ver', 'tesoreria.sepa', 'tesoreria.liquidar']) {
+  it('duplicados de tesorería resueltos en la integración (definición canónica única)', () => {
+    // INTEGRACIÓN PR4 (2026-09-25): este test documentaba (n=2, "se reportan,
+    // no se limpian") una duplicación real del catálogo introducida en Arena B.
+    // La resolución funcional del conflicto types.ts la elimina porque:
+    //  1) `codigo` es la identidad del permiso: duplicarlo es un defecto
+    //     funcional (filas repetidas en el selector, SUPERADMIN con códigos
+    //     repetidos), no un comportamiento a preservar;
+    //  2) la rama canónica (main) define cada código una sola vez y su test
+    //     `bloqueE.navegacion.test.tsx` ("sin duplicar tesoreria.*") exige
+    //     cero duplicados: ambos contratos eran mutuamente excluyentes;
+    //  3) ningún código depende de las definiciones duplicadas
+    //     ('tesoreria.aprobar' no tiene referencias; las búsquedas resuelven
+    //     por `codigo` a la definición canónica BLOQUE B).
+    // Se conserva el juego de códigos canónicos (ver/pagar/liquidar/sepa).
+    for (const codigo of ['tesoreria.ver', 'tesoreria.sepa', 'tesoreria.liquidar', 'tesoreria.pagar']) {
       const n = PERMISOS_SISTEMA.filter((p) => p.codigo === codigo).length;
-      expect(n, codigo).toBe(2);
+      expect(n, codigo).toBe(1);
     }
   });
 

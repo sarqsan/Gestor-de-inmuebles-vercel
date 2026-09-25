@@ -25,15 +25,20 @@ import {
   Smartphone,
   Zap,
   TrendingDown,
+  TrendingUp,
   RefreshCw,
   Calculator,
   BarChart3,
   Landmark,
   Banknote,
+  LayoutDashboard,
   Wallet,
   ShieldAlert,
   Activity,
 } from 'lucide-react';
+
+import { AsistentePanel } from './experiencia/AsistentePanel';
+import type { AccionHost, ProveedorIA } from '../experiencia';
 
 interface MobileNavProps {
   activeSection: SectionType;
@@ -51,6 +56,10 @@ interface MobileNavProps {
   currentUser?: UsuarioApp;
   onOpenAddCandidateModal?: () => void;
   onOpenAuthModal?: () => void;
+  /** §6 F4: asistente transversal (misma acción que el Header). */
+  onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
+  proveedorIA?: ProveedorIA;
+  accessibleSections?: SectionType[];
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -68,6 +77,9 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   currentUser,
   onOpenAddCandidateModal,
   onOpenAuthModal,
+  onAccionAsistente,
+  proveedorIA,
+  accessibleSections,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -84,8 +96,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   }[] =
     perfil === 'PROPIETARIO'
       ? [
+          { id: 'dashboard', label: 'Centro de Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs, atención, financiero, operaciones' },
           { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck, description: 'Servicios y profesionales' },
           { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
+          { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Compra, reforma, alquiler, rentabilidad' },
           { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
           { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
 
@@ -102,17 +116,21 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'operaciones', label: 'Operaciones', icon: Activity, description: 'Centro de operaciones y mantenimiento' },
           { id: 'suministros', label: 'Suministros', icon: Zap, description: 'Lecturas y consumos' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
+          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ]
       : perfil === 'PROFESIONAL'
       ? [
           { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
           { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
+          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ]
       : [
+          { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs reales, atención prioritaria, financiero y operaciones' },
           { id: 'administracion', label: 'Centro de Control', icon: Shield, description: 'Gestión de usuarios, roles y seguridad' },
           { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
           { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
+          { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Analizador compra-reforma-alquiler' },
           { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
 
           { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet, description: 'Liquidaciones, gastos, SEPA PAIN.008/001 y movimientos' },
@@ -135,6 +153,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length, description: 'Listado completo' },
           { id: 'analisis', label: 'Análisis IA', icon: Sparkles, description: 'Puntuación e informes' },
           { id: 'configuracion', label: 'Configuración', icon: Settings, description: 'Ajustes del sistema' },
+          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ];
 
   const currentSectionItem = allSections.find((s) => s.id === activeSection) || allSections[0];
@@ -200,6 +219,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                   return (
                     <button
                       key={item.id}
+                      data-tour={`nav-${item.id}`}
                       onClick={() => handleSelect(item.id)}
                       className={`w-full flex items-center justify-between p-2 rounded-xl text-xs transition-colors cursor-pointer ${
                         isSelected ? 'bg-blue-600 text-white font-bold shadow-xs' : 'hover:bg-slate-800/80 text-slate-300'
@@ -242,6 +262,11 @@ export const MobileNav: React.FC<MobileNavProps> = ({
             </div>
           )}
         </div>
+
+        {/* §6 F4: asistente (móvil) */}
+        {currentUser && onAccionAsistente && (
+          <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} tema="oscuro" />
+        )}
 
         {/* User Profile on Mobile */}
         {onOpenAuthModal && (

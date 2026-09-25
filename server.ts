@@ -9,7 +9,21 @@ import type { EnviadorCanal, RepositorioNotificaciones } from './src/notificacio
 import { CanalEmail, CanalInApp, CanalWebhook, EmailProviderSafeMode } from './src/notificaciones/canales';
 import type { TransporteWebhook } from './src/notificaciones/canales';
 import { resolverAutorizacion } from './src/notificaciones/autorizacion';
+// Auditoría de acceso a documentos (2026-09-22): id inenumerable, tipos de
+// contenido seguros, cabeceras anti-caché y almacén acotado para los documentos
+// que sirve este propio servidor (fuera del alcance de las reglas de Storage).
+import {
+  AlmacenDocumentosEfimeros,
+  cabecerasDocumento,
+  decodificarBase64Documento,
+  generarIdDocumento,
+  idDeDocumentoValido,
+  nombreMostrable,
+  normalizarTipoContenido,
+} from './src/lib/documentosServidor';
 import { idempotenciaDeEvento } from './src/types/notificaciones';
+import { construirPromptAsistente, parsearRespuestaModelo } from './src/experiencia/proveedorGemini';
+import type { CuerpoInterpretar } from './src/experiencia/proveedorGemini';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -89,36 +103,51 @@ const PORT = 3000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// In-memory document storage for persistent, fast serving of uploaded candidate documents
-const documentsStore = new Map<
-  string,
-  { buffer: Buffer; mimeType: string; filename: string; uploadedAt: string }
->();
+// ---------------------------------------------------------------------------
+// Almacén EFÍMERO y ACOTADO de los documentos que sirve esta ruta. NO es
+// Firebase Storage (las reglas de Storage no aplican aquí): la única defensa es
+// un id inenumerable, tipos de contenido seguros y cabeceras anti-caché.
+// Justificación y hallazgos: src/lib/documentosServidor.ts y
+// docs/AUDITORIA-SEGURIDAD-STORAGE-DOCUMENTOS-2026-09-22.md.
+// Se conserva la semántica original: el documento ya era volátil (se perdía al
+// reiniciar el proceso) y seguía sirviéndose por URL de capacidad.
+// ---------------------------------------------------------------------------
+const documentsStore = new AlmacenDocumentosEfimeros();
 
 // Endpoint to upload and store documents reliably
 app.post('/api/upload-document', async (req, res) => {
   try {
     const { fileBase64, filename, mimeType, itemId, solicitudId } = req.body;
-    if (!fileBase64) {
-      return res.status(400).json({ error: 'No file data provided' });
+
+    // S-4: nada de `Buffer.from` a ciegas sobre una cadena arbitraria ni de
+    // reservar memoria sin límite: se valida la forma y el tamaño primero.
+    const decodificado = decodificarBase64Documento(fileBase64);
+    if (!decodificado.ok) {
+      return res.status(400).json({ error: decodificado.error || 'Documento no válido' });
     }
+    const buffer = decodificado.buffer as Buffer;
+    // S-1: el Content-Type declarado por el cliente no se sirve tal cual.
+    const { tipo, permitirInline } = normalizarTipoContenido(mimeType, filename);
+    const safeFilename = nombreMostrable(filename || (tipo === 'application/pdf' ? 'documento.pdf' : 'documento'));
 
-    let rawBase64 = fileBase64;
-    if (fileBase64.includes(';base64,')) {
-      rawBase64 = fileBase64.split(';base64,')[1];
-    }
+    // S-3: 128 bits criptográficos en lugar de fecha + Math.random(): un id
+    //      basado en el reloj y en un generador predecible era enumerable a fuerza bruto.
+    const fileId = generarIdDocumento();
 
-    const buffer = Buffer.from(rawBase64, 'base64');
-    const safeFilename = filename || 'documento.pdf';
-    const safeMime = mimeType || (safeFilename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-    const fileId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    documentsStore.set(fileId, {
+    const guardado = documentsStore.set(fileId, {
       buffer,
-      mimeType: safeMime,
+      mimeType: tipo,
       filename: safeFilename,
       uploadedAt: new Date().toISOString(),
+      permitirInline,
+      bytes: buffer.length,
     });
+    if (!guardado.ok) {
+      // El cliente degrada con elegancia: intenta Firebase Storage y si no, vista local.
+      return res
+        .status(503)
+        .json({ error: `Almacén de documentos no disponible (${guardado.motivo}). Reintenta en unos minutos.` });
+    }
 
     const fileUrl = `/api/documents/${fileId}`;
 
@@ -129,7 +158,7 @@ app.post('/api/upload-document', async (req, res) => {
       downloadURL: fileUrl,
       storagePath: `server_${fileId}`,
       filename: safeFilename,
-      mimeType: safeMime,
+      mimeType: tipo,
       size: buffer.length,
     });
   } catch (err: any) {
@@ -138,17 +167,25 @@ app.post('/api/upload-document', async (req, res) => {
   }
 });
 
-// Endpoint to retrieve and display stored documents
+// Endpoint to retrieve and display stored documents.
+// Documentación PRIVADA: se sirve a quien posee la URL de capacidad, nunca a
+// cachés compartidos (S-2) y nunca con un tipo que el navegador pueda ejecutar
+// desde el origen de la aplicación (S-1).
 app.get('/api/documents/:fileId', (req, res) => {
   const { fileId } = req.params;
+  // S-3bis: forma estricta del identificador (sondeos y rutas arbitrarias → 404).
+  if (!idDeDocumentoValido(fileId)) {
+    return res.status(404).send('Documento no encontrado.');
+  }
   const item = documentsStore.get(fileId);
   if (!item) {
     return res.status(404).send('Documento no encontrado o sesión expirada.');
   }
 
-  res.setHeader('Content-Type', item.mimeType);
-  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(item.filename)}"`);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  const cabeceras = cabecerasDocumento(item.mimeType, item.permitirInline === true, item.filename);
+  for (const [cabecera, valor] of Object.entries(cabeceras)) {
+    res.setHeader(cabecera, valor);
+  }
   res.send(item.buffer);
 });
 
@@ -784,6 +821,53 @@ Responde ÚNICAMENTE en JSON válido con este formato:
   } catch (err: any) {
     console.error('Error analizando respuesta de aseguradora:', err);
     return res.status(500).json({ error: 'Error analizando respuesta de la aseguradora.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CAPA TRANSVERSAL §6 — FASE 4 · Asistente: interpretación de intención con Gemini.
+// Reutiliza el cliente y el modelo canónicos (getGeminiClient / gemini-3.7-flash).
+// El servidor NO conoce permisos ni ejecuta nada: recibe la lista de capacidades YA
+// filtradas por el cliente y devuelve una propuesta que el cliente valida
+// deterministamente (validarResolucionIA). Sin clave → { disponible: false } y el
+// cliente usa el resolutor local. Sin escrituras en Firestore ni auditoría.
+// ---------------------------------------------------------------------------
+const MODELO_ASISTENTE = 'gemini-3.7-flash';
+app.post('/api/asistente/interpretar', async (req, res) => {
+  try {
+    const cuerpo = req.body as Partial<CuerpoInterpretar> | undefined;
+    if (!cuerpo || typeof cuerpo.input !== 'string' || !cuerpo.input.trim() || !Array.isArray(cuerpo.capabilities)) {
+      return res.status(400).json({ disponible: true, error: 'Petición inválida: se requiere input y capabilities.' });
+    }
+    if (cuerpo.input.length > 500 || cuerpo.capabilities.length > 100) {
+      return res.status(400).json({ disponible: true, error: 'Petición demasiado grande.' });
+    }
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json({ disponible: false, proveedor: 'gemini', modelo: MODELO_ASISTENTE });
+    }
+    const prompt = construirPromptAsistente({
+      input: cuerpo.input,
+      host: typeof cuerpo.host === 'string' ? cuerpo.host : 'ERP',
+      module: typeof cuerpo.module === 'string' ? cuerpo.module : undefined,
+      section: typeof cuerpo.section === 'string' ? cuerpo.section : undefined,
+      role: typeof cuerpo.role === 'string' ? cuerpo.role : undefined,
+      capabilities: cuerpo.capabilities,
+      helpEntries: Array.isArray(cuerpo.helpEntries) ? cuerpo.helpEntries : [],
+      tutorials: Array.isArray(cuerpo.tutorials) ? cuerpo.tutorials : [],
+      routes: Array.isArray(cuerpo.routes) ? cuerpo.routes : [],
+    });
+    const response = await generateGeminiWithRetry(ai, {
+      model: MODELO_ASISTENTE,
+      contents: prompt,
+      config: { responseMimeType: 'application/json', temperature: 0.1 },
+    });
+    const propuesta = parsearRespuestaModelo(response?.text);
+    if (!propuesta) return res.json({ disponible: true, proveedor: 'gemini', modelo: MODELO_ASISTENTE, propuesta: null, error: 'RESPUESTA_NO_PARSEABLE' });
+    return res.json({ disponible: true, proveedor: 'gemini', modelo: MODELO_ASISTENTE, propuesta });
+  } catch (err: any) {
+    console.warn('Asistente §6 F4: error consultando Gemini, el cliente usará el resolutor local.', err?.message || err);
+    return res.status(502).json({ disponible: true, proveedor: 'gemini', error: 'PROVEEDOR_ERROR' });
   }
 });
 

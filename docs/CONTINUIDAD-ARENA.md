@@ -56,7 +56,9 @@ programador automático de detección, adjuntos en Storage, gancho BLOQUE B solo
   merge de alineación `d24ab1f` (árbol ≡ `91da820`) + el paquete de
   continuidad + **BLOQUE B** (merge `5ff8448`, 2026-09-20) + **BLOQUE C**
   (merge `5293c3c` + docs `7ed7f59`, 2026-09-21) + **BLOQUE D** (commit
-  `d606ff8` + docs, 2026-09-21).
+  `d606ff8` + docs, 2026-09-21) + BLOQUE E (`10f07b3`) + §6 (`f836a70`…`2c47332`)
+  + GAP-R4 (`c39f183`) + **GAP-R1/R2/R3** integrados desde Arena B
+  (`a18967f`, `92c8185`, `5e47fc2`). **HEAD canónico actual: `5e47fc2`.**
 - Estado completo y actualizado: `docs/ESTADO-GIT-ERP.md`.
 
 ## 4. ¿Cómo comprobar el estado al llegar? (FASE 0, 5 minutos)

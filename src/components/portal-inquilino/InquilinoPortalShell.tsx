@@ -29,6 +29,13 @@ import { PortalMensajes } from './PortalMensajes';
 import { PortalDocumentos } from './PortalDocumentos';
 import { PortalHistorial } from './PortalHistorial';
 import { PortalCuenta } from './PortalCuenta';
+// CAPA TRANSVERSAL §6 (Fase 2): ayuda contextual y recorridos guiados (misma infraestructura que el ERP)
+import { ContextualHelp } from '../experiencia/ContextualHelp';
+import { TutorialPlayer } from '../experiencia/TutorialPlayer';
+import { AsistentePanel } from '../experiencia/AsistentePanel';
+import { servicioProgresoTutoriales } from '../../lib/progresoTutorialesFirestore';
+import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, PANTALLAS_PORTAL, crearProveedorGeminiRemoto } from '../../experiencia';
+import type { AccionHost, SesionTutorial } from '../../experiencia';
 
 type PantallaPortal =
   | 'inicio'
@@ -64,6 +71,19 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
   const [pantalla, setPantalla] = useState<PantallaPortal>('inicio');
   const [contratoSel, setContratoSel] = useState<string | null>(null);
   const portal = usePortalInquilino(usuario);
+  // §6 F2/F3: sesión de recorrido en memoria (estado UI); progreso persistido por servicioProgresoTutoriales
+  const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
+  const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
+  const iniciarRecorrido = (id: string) => {
+    const t = obtenerTutorial(id);
+    if (t) setSesionTutorial(iniciarTutorial(t));
+  };
+  // §6 F4: asistente del portal (host PORTAL_INQUILINO; solo capacidades del portal). Ejecuta con `ir()`.
+  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  const ejecutarAccionAsistente = (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => {
+    if (accion.tipo === 'NAVEGAR' || (accion.tipo === 'EXPLICAR' && accion.route)) ir(accion.route as PantallaPortal);
+    else if (accion.tipo === 'TUTORIAL') iniciarRecorrido(accion.tutorialId);
+  };
 
   const contratos = portal.contratos;
   const contratoActivo = useMemo(
@@ -110,6 +130,30 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {contratoActivo && (
+                <ContextualHelp
+                  usuario={usuario}
+                  host="PORTAL_INQUILINO"
+                  section={pantalla}
+                  entityType="contrato"
+                  entityId={contratoActivo.id}
+                  state={contratoActivo.estado}
+                  onIniciarTutorial={iniciarRecorrido}
+                  tema="oscuro"
+                />
+              )}
+              {contratoActivo && (
+                <AsistentePanel
+                  usuario={usuario}
+                  host="PORTAL_INQUILINO"
+                  section={pantalla}
+                  accessibleSections={[...PANTALLAS_PORTAL]}
+                  proveedor={proveedorIA}
+                  onAccion={ejecutarAccionAsistente}
+                  tema="oscuro"
+                  posicion="centro"
+                />
+              )}
               <button
                 onClick={() => portal.recargar()}
                 className="p-2 rounded-full hover:bg-white/10 cursor-pointer"
@@ -246,6 +290,7 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
                   ).map((op) => (
                     <button
                       key={op.id}
+                      data-tour={`portal-mas-${op.id}`}
                       onClick={() => ir(op.id)}
                       className="w-full flex items-center gap-3 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm text-left cursor-pointer active:scale-[0.99] transition-transform"
                     >
@@ -269,6 +314,20 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
           ) : null}
         </main>
 
+        {/* §6 F2: recorrido guiado (panel flotante; navega con `ir`, sin alterar el portal) */}
+        {sesionTutorial && tutorialActivo && contratoActivo && (
+          <TutorialPlayer
+            tutorial={tutorialActivo}
+            sesion={sesionTutorial}
+            contexto={contextoDesdeUsuario(usuario, pantalla, { host: 'PORTAL_INQUILINO', accessibleSections: [...PANTALLAS_PORTAL], entityType: 'contrato', entityId: contratoActivo.id })}
+            onCambio={setSesionTutorial}
+            onNavegar={(r) => ir(r as PantallaPortal)}
+            onCerrar={() => setSesionTutorial(null)}
+            posicion="abajo-centro"
+            servicio={servicioProgresoTutoriales}
+          />
+        )}
+
         {/* Navegación inferior */}
         <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] z-20">
           <div className="grid grid-cols-5 px-2 py-2">
@@ -285,6 +344,7 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
               return (
                 <button
                   key={t.id}
+                  data-tour={`portal-tab-${t.id}`}
                   onClick={() => ir(t.id)}
                   className={`relative flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[10px] font-bold cursor-pointer ${
                     activo ? 'text-indigo-700' : 'text-slate-400'

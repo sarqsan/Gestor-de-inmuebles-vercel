@@ -23,12 +23,14 @@ import {
   Smartphone,
   Zap,
   TrendingDown,
+  TrendingUp,
   RefreshCw,
   LifeBuoy,
   Calculator,
   BarChart3,
   Landmark,
   Banknote,
+  LayoutDashboard,
   Wallet,
   ShieldAlert,
   Activity,
@@ -85,8 +87,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   if (perfil === 'PROPIETARIO') {
     navItems = [
+      { id: 'dashboard', label: 'Centro de Control', icon: LayoutDashboard },
       { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck },
       { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount },
+      { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
       { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
       { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
 
@@ -104,19 +108,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'operaciones', label: 'Operaciones', icon: Activity },
       { id: 'suministros', label: 'Suministros', icon: Zap },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   } else if (perfil === 'PROFESIONAL') {
     navItems = [
       { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
       { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   } else {
     // ADMINISTRADOR
     navItems = [
+      { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard },
       { id: 'administracion', label: 'Centro de Control', icon: Shield },
       { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
       { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
+      { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
       { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
 
       { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet },
@@ -140,6 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length },
       { id: 'analisis', label: 'Análisis IA', icon: Sparkles },
       { id: 'configuracion', label: 'Configuración', icon: Settings },
+      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];
   }
 
@@ -171,6 +180,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <button
               key={item.id}
+              data-tour={`nav-${item.id}`}
               onClick={() => onSelectSection(item.id)}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
                 isActive

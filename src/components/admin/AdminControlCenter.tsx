@@ -51,6 +51,7 @@ import {
 } from '../../lib/accesoPropietarios';
 
 import { esUsuarioMaster } from '../../lib/adminUsuarios';
+import { DryRunFichasPublicasPanel } from './DryRunFichasPublicasPanel';
 
 interface AdminControlCenterProps {
   currentUser: UsuarioApp;
@@ -1332,6 +1333,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* R3 · DRY-RUN de fichas públicas (solo lectura; solo master) */}
+            <DryRunFichasPublicasPanel currentUser={currentUser} />
           </div>
         )}
 

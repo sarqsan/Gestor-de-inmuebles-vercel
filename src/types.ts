@@ -1,4 +1,5 @@
 export type SectionType =
+  | 'dashboard'
   | 'inicio'
   | 'inmuebles'
   | 'propietarios'
@@ -29,6 +30,7 @@ export type SectionType =
   | 'nuevo_candidato'
   | 'cuestionario'
   | 'analisis'
+  | 'inversion'
   | 'configuracion'
   | 'administracion'
   | 'mis_profesionales'
@@ -36,7 +38,9 @@ export type SectionType =
   | 'mis_servicios'
   | 'mis_zonas'
   | 'mis_asignaciones'
-  | 'mi_perfil';
+  | 'mi_perfil'
+  // CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda
+  | 'ayuda';
 
 export type CandidateStatus =
   | 'nuevo'
@@ -1872,10 +1876,6 @@ export const PERMISOS_SISTEMA: PermisoDefinicion[] = [
   { codigo: 'administracion.configuracion', nombre: 'Configuración y Módulos', categoria: 'administracion', descripcion: 'Activar y desactivar módulos y enlaces' },
   { codigo: 'administracion.auditoria', nombre: 'Ver Auditoría', categoria: 'administracion', descripcion: 'Consultar logs de auditoría del sistema' },
 
-  { codigo: 'tesoreria.ver', nombre: 'Ver Tesorería', categoria: 'tesoreria', descripcion: 'Consultar liquidaciones, gastos y movimientos' },
-  { codigo: 'tesoreria.liquidar', nombre: 'Generar Liquidaciones', categoria: 'tesoreria', descripcion: 'Generar y recalcular borradores de liquidación' },
-  { codigo: 'tesoreria.aprobar', nombre: 'Aprobar y Pagar', categoria: 'tesoreria', descripcion: 'Aprobar liquidaciones y registrar pagos' },
-  { codigo: 'tesoreria.sepa', nombre: 'Generar SEPA', categoria: 'tesoreria', descripcion: 'Generar ficheros pain.008 y pain.001' },
 
   { codigo: 'inquilinos.ver', nombre: 'Ver Inquilinos', categoria: 'inquilinos', descripcion: 'Consultar accesos de inquilinos al portal' },
   { codigo: 'inquilinos.gestionar', nombre: 'Gestionar Inquilinos', categoria: 'inquilinos', descripcion: 'Invitar, vincular y revocar accesos de inquilinos' },
@@ -2912,6 +2912,8 @@ export interface ValoracionProfesionalTrabajo {
   trabajoId: string;
   profesionalId: string;
   inmuebleId: string;
+  /** Propietario del trabajo valorado (clave de aislamiento en reglas y consulta). Opcional: documentos históricos carecen de él. */
+  propietarioId?: string;
   inmuebleDireccion?: string;
   createdAt?: string;
 }

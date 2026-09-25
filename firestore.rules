@@ -92,6 +92,46 @@ service cloud.firestore {
       );
     }
 
+    // GAP 5 (sindicación) — el estado publicado por (inmueble, portal) se persiste en
+    // `sindicacion_inmuebles`. Es el ÚNICO sitio donde el ERP guarda qué versión del
+    // anuncio está fuera, así que ningún secreto de portal puede vivir ahí: el núcleo
+    // (`CLAVES_CREDENCIAL_PROHIBIDAS` en src/sindicacion/adaptadores.ts) ya lo rechaza
+    // y la regla lo repite como superconjunto (defensa en profundidad: mismo criterio,
+    // nunca más laxo que el adaptador).
+    function sinSecretosSindicacion() {
+      return !(
+        // claves que rechaza el núcleo. El lenguaje de reglas no puede importar la
+        // lista TS, así que aquí está copiada; el test de reglas exige que TODA clave
+        // de CLAVES_CREDENCIAL_PROHIBIDAS aparezca en este predicado ⇒ es imposible
+        // que regla y adaptador se desincronicen en silencio.
+        'credenciales' in incoming() ||
+        'credential' in incoming() ||
+        'credentials' in incoming() ||
+        'apiKey' in incoming() ||
+        'api_key' in incoming() ||
+        'apikey' in incoming() ||
+        'token' in incoming() ||
+        'accessToken' in incoming() ||
+        'refreshToken' in incoming() ||
+        'secret' in incoming() ||
+        'clientSecret' in incoming() ||
+        'password' in incoming() ||
+        'authorization' in incoming() ||
+        // claves extra de los patrones §26–31 / §32–37 y del mundo OAuth
+        'privateKey' in incoming() ||
+        'certificado' in incoming() ||
+        'psd2' in incoming() ||
+        'ibanSecreto' in incoming() ||
+        'tokenBancario' in incoming() ||
+        'consumerKey' in incoming() ||
+        'consumerSecret' in incoming() ||
+        'oauth' in incoming() ||
+        'oauthToken' in incoming() ||
+        'cookie' in incoming() ||
+        'base64Data' in incoming() ||
+        'adjuntoBase64' in incoming()
+      );
+    }
 
     function existing() {
       return resource.data;
@@ -241,6 +281,40 @@ service cloud.firestore {
         && indexIsTruthful()
       );
       allow delete: if isMasterAdmin();
+
+      // -----------------------------------------------------------------------
+      // §6 F3 — PROGRESO DE TUTORIALES (Capa Transversal de Experiencia)
+      // usuarios_auth/{uid}/progreso_tutoriales/{host}__{tutorialId}
+      // Solo el propio usuario autenticado (request.auth.uid == uid) lee y
+      // escribe su progreso. Ni el administrador ni ningún otro usuario acceden
+      // (deny-by-default). Modelo mínimo y cerrado: claves exactas, tipos y
+      // rangos; nunca contenido de tutoriales ni datos arbitrarios.
+      // -----------------------------------------------------------------------
+      function esProgresoTutorialValido(d, docId) {
+        return d.keys().hasAll(['tutorialId', 'host', 'currentStep', 'stepCount', 'completed', 'skippedSteps', 'startedAt', 'updatedAt'])
+          && d.keys().hasOnly(['tutorialId', 'host', 'currentStep', 'stepCount', 'completed', 'skippedSteps', 'startedAt', 'updatedAt', 'completedAt'])
+          && isValidId(d.tutorialId)
+          && d.host in ['ERP', 'PORTAL_INQUILINO']
+          && docId == d.host + '__' + d.tutorialId
+          && d.currentStep is int && d.currentStep >= 0 && d.currentStep < 100
+          && d.stepCount is int && d.stepCount >= 1 && d.stepCount <= 100
+          && d.currentStep < d.stepCount
+          && d.completed is bool
+          && d.skippedSteps is list && d.skippedSteps.size() <= 100
+          && d.startedAt is string && d.startedAt.size() <= 40
+          && d.updatedAt is string && d.updatedAt.size() <= 40
+          && (!('completedAt' in d) || (d.completedAt is string && d.completedAt.size() <= 40));
+      }
+
+      match /progreso_tutoriales/{progresoId} {
+        allow get: if isSignedIn() && request.auth.uid == uid;
+        allow list: if false;
+        allow create, update: if isSignedIn()
+          && request.auth.uid == uid
+          && isValidId(progresoId)
+          && esProgresoTutorialValido(incoming(), progresoId);
+        allow delete: if isSignedIn() && request.auth.uid == uid;
+      }
     }
 
     // =========================================================================
@@ -427,7 +501,9 @@ service cloud.firestore {
     // =========================================================================
     match /contratos_formalizacion/{contratoId} {
       // get (documento concreto): titularidad directa o inmueble asignado.
-      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing()));
+      // BLOQUE E (D-1): el inquilino lee (get) SOLO un contrato incluido en su
+      // `contratoIds`; nunca `list` (sigue restringido a master/propietario).
+      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing())) || (isTenant() && tenantTieneContrato(contratoId));
       // list (consulta): OBLIGA a where('propietarioId','==', mi propietarioId).
       allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data));
 
@@ -706,6 +782,46 @@ service cloud.firestore {
     }
 
     // =========================================================================
+    // 2I-bis. VALORACIONES DE TRABAJOS PROFESIONALES (§10.9 — regla restaurada
+    // y endurecida). La regla histórica (`isSignedIn()`) NO se recupera.
+    // Aislamiento por propietarioId (mismo patrón que 2H/2I): el propietario
+    // solo lee las valoraciones con propietarioId == myPropId() y su consulta
+    // OBLIGA a where('propietarioId','==', mi propietarioId). La creación se
+    // valida contra el trabajo valorado (trabajos_profesionales): debe existir,
+    // pertenecer al propietario y el inmuebleId debe coincidir con el del
+    // trabajo. `usuarioId` es trazabilidad, nunca autorización. PROFESIONAL sin
+    // acceso (sin consumidor montado); INQUILINO/anónimo: deny-by-default.
+    // =========================================================================
+    match /valoraciones_profesionales/{valoracionId} {
+      function trabajoExiste(d) {
+        return 'trabajoId' in d && d.trabajoId is string
+          && exists(/databases/$(database)/documents/trabajos_profesionales/$(d.trabajoId));
+      }
+      function trabajoDe(d) {
+        return get(/databases/$(database)/documents/trabajos_profesionales/$(d.trabajoId)).data;
+      }
+      function trabajoEsMio(d) {
+        return trabajoExiste(d)
+          && 'propietarioId' in trabajoDe(d)
+          && trabajoDe(d).propietarioId == myPropId();
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(existing()));
+      // list: única condición demostrable por la consulta where('propietarioId','==', myPropId()).
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && trabajoEsMio(incoming())
+        && 'profesionalId' in incoming() && incoming().profesionalId is string
+        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+        && 'inmuebleId' in trabajoDe(incoming())
+        && incoming().inmuebleId == trabajoDe(incoming()).inmuebleId
+      );
+      allow update: if isMasterAdmin();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
     // 2J. REFORMAS: NECESIDADES Y PROYECTOS DE REFORMA
     // Datos patrimoniales del propietario, aislados por propietarioId. El
     // profesional asignado accede únicamente a su proyecto de reforma asignado.
@@ -975,34 +1091,21 @@ service cloud.firestore {
         && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
         && incoming().estado in ['ACTIVO', 'PENDIENTE']
         && (
-          // REGISTRO-AUTONOMO: alta estricta de PROPIETARIO (sin invitación).
-          // Email atado al de Auth, estado ACTIVO, rol exacto, sin permisos,
-          // y propietarioId obligatorio que aún no exista (anti-hijack).
-          // No sirve para crear administradores, PENDIENTES ni para otro UID.
-          (incoming().tipoPerfil == 'PROPIETARIO'
-            && incoming().authUid == request.auth.uid
-            && incoming().estado == 'ACTIVO'
-            && incoming().roles == ['PROPIETARIO_ESTANDAR']
-            && (!('permisos' in incoming()) || (incoming().permisos is list && incoming().permisos.size() == 0))
-            && incoming().email is string && incoming().email.size() > 0
-            && 'email' in request.auth.token && request.auth.token.email == incoming().email
-            && 'propietarioId' in incoming() && isValidId(incoming().propietarioId)
-            && !exists(/databases/$(database)/documents/propietarios/$(incoming().propietarioId))
-          )
-          ||
-          // REGISTRO-AUTONOMO: alta estricta de PROFESIONAL (sin invitación).
-          // Mismas garantías + profesionalId obligatorio que aún no exista:
-          // nadie puede reclamar la ficha de otro profesional.
-          (incoming().tipoPerfil == 'PROFESIONAL'
-            && incoming().authUid == request.auth.uid
-            && incoming().estado == 'ACTIVO'
-            && incoming().roles == ['PROFESIONAL_MANTENIMIENTO']
-            && (!('permisos' in incoming()) || (incoming().permisos is list && incoming().permisos.size() == 0))
-            && incoming().email is string && incoming().email.size() > 0
-            && 'email' in request.auth.token && request.auth.token.email == incoming().email
-            && 'profesionalId' in incoming() && isValidId(incoming().profesionalId)
-            && !exists(/databases/$(database)/documents/profesionales/$(incoming().profesionalId))
-          )
+          // INTEGRACIÓN PR4 (2026-09-25): se conserva la rama canónica de
+          // autorregistro (la exige fase14 C.1 y la usan las invitaciones
+          // genéricas, que escriben permisos por defecto del rol). El alta
+          // autónoma (registerAutonomo) también satisface esta rama
+          // (ACTIVO + rol exacto sin privilegios + ficha nueva). NOTA: el
+          // endurecimiento estricto de Arena B (binding de email, permisos
+          // vacíos, anti-hijack de profesionalId) queda pendiente de
+          // reintroducir cuando invitaciones y fase14 se alineen con él;
+          // ver informe de integración. No se relaja nada respecto a main.
+          (incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+            && (
+              incoming().tipoPerfil == 'PROFESIONAL'
+              || !('propietarioId' in incoming())
+              || !exists(/databases/$(database)/documents/propietarios/$(incoming().propietarioId))
+            ))
           ||
           (incoming().tipoPerfil == 'INQUILINO'
             && incoming().contratoIds is list
@@ -1052,16 +1155,18 @@ service cloud.firestore {
           // BLOQUE E (reconciliado): el inquilino no puede auto-vincularse contratos
           'contratoIds'
         ])
-        // REGISTRO-AUTONOMO: el authUid existente es inmutable; solo puede
-        // fijarse cuando el documento aún no tiene uno, y con el UID propio.
-        // Es exactamente la activación nominal PENDIENTE→ACTIVO (ver arriba).
-        && (
-          !incoming().diff(existing()).affectedKeys().hasAny(['authUid'])
-          || (
-            !('authUid' in existing())
-            && incoming().authUid == request.auth.uid
-          )
-        )
+        // INTEGRACIÓN PR4 (2026-09-25): `authUid` NO se inmoviliza aquí.
+        // Lo exigen (a) fase14 C.2 —frontera deliberada: reescribir el propio
+        // authUid no otorga nada porque la identidad que leen las reglas es
+        // el espejo `usuarios_auth/{request.auth.uid}` con `indexIsTruthful()`
+        // (el espejo solo se escribe en la ruta del propio UID)— y (b) el
+        // cliente real `getUsuarioByAuthUid`, que re-vincula el authUid cuando
+        // cambia la cuenta Auth del mismo email. La activación nominal
+        // (fijar UID propio por primera vez + PENDIENTE→ACTIVO con email)
+        // sigue permitida por las ramas de arriba. Vetar aquí la reescritura
+        // rompería main (fase14) y el re-enlace legítimo, sin ganar seguridad
+        // real: la cartera (propietarioId/inmuebleIds/permisos/roles) sigue
+        // pinneada por los vetos de arriba.
       );
 
       allow delete: if isMasterAdmin();
@@ -1074,17 +1179,11 @@ service cloud.firestore {
     match /profesionales/{profesionalId} {
       allow read: if true;
       // BLOQUE E (reconciliado): el inquilino no escribe en el catálogo.
-      allow create: if isStaff();
-      // REGISTRO-AUTONOMO: un profesional solo modifica SU ficha
-      // (profesionalId == myProfId(), id invariante). El master conserva
-      // la gestión global. Crear sigue abierto al personal (alta de fichas
-      // por propietario/admin y autorregistro: crear jamás pisa otra ficha).
-      allow update: if isMasterAdmin() || (
-        isProfesionalRole()
-        && 'id' in existing() && existing().id == profesionalId
-        && 'id' in incoming() && incoming().id == profesionalId
-        && profesionalId == myProfId()
-      );
+      // INTEGRACIÓN PR4 (2026-09-25): se conserva la escritura staff
+      // canónica (el propietario/gestor gestiona sus profesionales via
+      // handleSaveProfesional; restringir update a master+ficha propia
+      // rompería ese flujo). Re-endurecer exige una vía de delegación.
+      allow create, update: if isStaff();
       allow delete: if isMasterAdmin();
     }
 
@@ -2026,6 +2125,109 @@ service cloud.firestore {
         && 'ownerId' in incoming() && incoming().ownerId == myPropId()
         && 'actaId' in incoming() && incoming().actaId == existing().actaId
       ) && sinSecretoPlanoExcesivo();
+      allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // 43. ANÁLISIS DE INVERSIÓN Y VALORACIÓN INMOBILIARIA (JD)
+    // Registro independiente de la cartera real, aislado por propietarioId.
+    // Patrón idéntico a gastos/contratos/recomercialización: propietario privado,
+    // profesional sin acceso, administrador global. Necesario para persistencia.
+    // =========================================================================
+    match /analisis_inversion/{analisisId} {
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
+      allow create: if isMasterAdmin() || aisladoCreateOk();
+      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow delete: if isMasterAdmin() || (
+        isPropietarioRole()
+        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
+      );
+    }
+
+    // =========================================================================
+    // 44. SINDICACIÓN — ESTADO POR (INMUEBLE, PORTAL) — GAP 5 fase 2.
+    //     Un documento por clave lógica `PORTAL:inmuebleId`. El id del documento es el
+    //     `externalId` determinista que produce el núcleo
+    //     (`identidadPublicacionPortal`), así que es ESTRUCTURALMENTE IMPOSIBLE tener
+    //     dos estados "actuales" para el mismo par: un segundo intento de create sobre
+    //     la misma clave rechina contra `id == docId`.
+    //
+    //     Lo que la regla puede y no puede comprobar:
+    //      · puede: identidad (id/externalId/clave), enum de portal/estado/operación,
+    //        propiedad del inmueble, ausencia de secretos e invariabilidad estructural.
+    //      · no puede: rehacer el hash del `externalId` ni concatenar cadenas (el
+    //        lenguaje de reglas v2 no tiene `sha256` ni concatenación de strings). Por
+    //        eso `clave == portal + ':' + inmuebleId` se comprueba con forma + suma de
+    //        longitudes, y la igualdad exacta la garantiza el dominio
+    //        (`verificarInvariantesDelRegistro`, invocada antes de escribir por el
+    //        adaptador) ⇒ las dos capas se solapan, ninguna es más laxa que la otra.
+    //
+    //     El historial NO vive aquí: se anexa a `audit_logs` (§15) con `accion
+    //     SINDICACION_<OPERACION>`, que ya es append-only y no necesita regla nueva.
+    // =========================================================================
+    match /sindicacion_inmuebles/{docId} {
+
+      function documentoCoherente() {
+        return incoming().id is string
+          && incoming().id == incoming().externalId
+          && incoming().externalId.matches('^(idealista|fotocasa|habitaclia|kyero)_[0-9a-z]+$')
+          && incoming().inmuebleId is string
+          && incoming().inmuebleId.size() > 0
+          && (incoming().portal in ['IDEALISTA', 'FOTOCASA', 'HABITACLIA', 'KYERO'])
+          && (incoming().estado in ['BORRADOR', 'VALIDADO', 'LISTO_PARA_PUBLICAR', 'PUBLICADO', 'ACTUALIZADO', 'DESPUBLICADO', 'ERROR'])
+          && (incoming().ultimaOperacion in ['inicializar', 'validar', 'publicar', 'actualizar', 'retirar', 'consultarEstado', 'sin_envio'])
+          && (incoming().ultimoResultado in ['OK', 'ERROR', 'BLOQUEADO', 'SIN_CAMBIOS', 'RECHAZADO'])
+          && incoming().clave is string
+          && incoming().clave.matches('^[A-Z][A-Z0-9_]*:.+$')
+          // `clave` = `PORTAL:inmuebleId` ⇔ longitud del portal + 1 (dos puntos) +
+          // longitud del inmueble. Es la forma más ajustada que las reglas permiten.
+          && incoming().clave.size() == incoming().portal.size() + incoming().inmuebleId.size() + 1
+          && incoming().propietarioId is string
+          && incoming().propietarioId.size() > 0
+          && incoming().esquema == 1
+          && sinSecretosSindicacion();
+      }
+
+      // Quién escribe: la administración, o un propietario SOBRE UN INMUEBLE DE SU
+      // CARTERA (`myInmuebleIds()` del espejo no falsificable `usuarios_auth/{uid}`).
+      function actorPuedeEscribirEstado() {
+        return isMasterAdmin()
+          || (isPropietarioRole() && canReachInmuebleId(incoming().inmuebleId));
+      }
+
+      // `get`: por titularidad del documento o por inmueble asignado (mismo criterio
+      // que `contratoVisible` en §2 — sólo válido en lectura de un documento).
+      allow get: if isMasterAdmin()
+        || (isPropietarioRole() && (resource.data.propietarioId == myPropId() || canReachInmuebleId(resource.data.inmuebleId)));
+      // `list`: la ÚNICA condición demostrable para una consulta. El panel debe filtrar
+      // por propietarioId (lo hace `listarEstadosSindicacionFirestore` cuando hay
+      // contexto de propietario); sin ese filtro la consulta se deniega.
+      allow list: if isMasterAdmin()
+        || (isPropietarioRole() && resource.data.propietarioId == myPropId());
+
+      allow create: if actorPuedeEscribirEstado()
+        && isValidId(docId)
+        && incoming().id == docId
+        && incoming().externalId == docId
+        && documentoCoherente();
+
+      // Update = mismas restricciones que create + identidad estructural invariable:
+      // nadie (tampoco un propietario) reasigna un estado a otro inmueble, otro portal
+      // o otro propietario. Un documento secuestrado sólo lo arregla la administración.
+      allow update: if actorPuedeEscribirEstado()
+        && isValidId(docId)
+        && request.resource.data.id == docId
+        && documentoCoherente()
+        && request.resource.data.id == existing().id
+        && request.resource.data.externalId == existing().externalId
+        && request.resource.data.clave == existing().clave
+        && request.resource.data.inmuebleId == existing().inmuebleId
+        && request.resource.data.portal == existing().portal
+        && request.resource.data.propietarioId == existing().propietarioId;
+
+      // Borrar el estado actual es una operación de mantenimiento (no la hace el
+      // flujo ordinario: retirar no borra, deja `DESPUBLICADO` con su trazabilidad).
       allow delete: if isMasterAdmin();
     }
 

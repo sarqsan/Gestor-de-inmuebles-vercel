@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { UserPlus, X } from 'lucide-react';
 import {
   SectionType,
@@ -170,6 +170,7 @@ import { CrearSolicitudSeguroModal } from './components/CrearSolicitudSeguroModa
 import { DetalleSolicitudSeguroModal } from './components/DetalleSolicitudSeguroModal';
 import { ConfiguracionAseguradorasModal } from './components/ConfiguracionAseguradorasModal';
 
+import { DashboardEjecutivoSection } from './components/sections/DashboardEjecutivoSection';
 import { InicioSection } from './components/sections/InicioSection';
 import { InmueblesSection } from './components/sections/InmueblesSection';
 import { CandidatosSection } from './components/sections/CandidatosSection';
@@ -177,6 +178,12 @@ import { NuevoCandidatoSection } from './components/sections/NuevoCandidatoSecti
 import { CuestionarioSection } from './components/sections/CuestionarioSection';
 import { AnalisisSection } from './components/sections/AnalisisSection';
 import { ConfiguracionSection } from './components/sections/ConfiguracionSection';
+// CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda, ayuda contextual y tutoriales
+import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
+import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
+import { servicioProgresoTutoriales } from './lib/progresoTutorialesFirestore';
+import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, crearProveedorGeminiRemoto, type AccionHost } from './experiencia';
+import type { SesionTutorial } from './experiencia';
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
 import { FormalizacionSection } from './components/sections/FormalizacionSection';
@@ -259,6 +266,7 @@ import { PropietariosSection } from './components/sections/PropietariosSection';
 import { AdministracionSection } from './components/sections/AdministracionSection';
 import { PropietarioPortalSection } from './components/sections/PropietarioPortalSection';
 import { ProfesionalPortalSection } from './components/sections/ProfesionalPortalSection';
+import { InversionSection } from './components/sections/InversionSection';
 import { PortalRegistroView } from './components/PortalRegistroView';
 import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPortalShell';
 import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
@@ -281,6 +289,35 @@ import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
 import { CrearProfesionalModal } from './components/modals/CrearProfesionalModal';
 import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistroModal';
+
+// Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
+const SECCIONES_PROPIETARIO: SectionType[] = [
+  'dashboard',
+  'propietarios',
+  'inmuebles',
+  'inversion',
+  'formalizacion',
+  'cobros',
+  // BLOQUE B — "Mis Liquidaciones" en el portal del propietario
+  'tesoreria',
+  'gastos',
+  'financiacion',
+  'conciliacion',
+  'facturacion',
+  'fiscal',
+  'informes',
+  'polizas',
+  'actas',
+  'incidencias',
+  'operaciones',
+  'recomercializacion',
+  // BLOQUE E (reconciliado): el propietario consulta los suministros de sus inmuebles
+  'suministros',
+  'configuracion',
+  // CAPA TRANSVERSAL §6: Centro de Ayuda (solo lectura)
+  'ayuda',
+];
+const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'inversion', 'configuracion', 'ayuda'];
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
@@ -492,33 +529,12 @@ export default function App() {
     const perfil = currentUser.tipoPerfil;
 
     if (perfil === 'PROPIETARIO') {
-      const allowedSections: SectionType[] = [
-        'propietarios',
-        'inmuebles',
-        'formalizacion',
-        'cobros',
-        // BLOQUE B — "Mis Liquidaciones" en el portal del propietario
-        'tesoreria',
-        'gastos',
-        'financiacion',
-        'conciliacion',
-        'facturacion',
-        'fiscal',
-        'informes',
-        'polizas',
-        'actas',
-        'incidencias',
-        'operaciones',
-        'recomercializacion',
-        // BLOQUE E (reconciliado): el propietario consulta los suministros de sus inmuebles
-        'suministros',
-        'configuracion',
-      ];
+      const allowedSections = SECCIONES_PROPIETARIO;
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('propietarios');
       }
     } else if (perfil === 'PROFESIONAL') {
-      const allowedSections: SectionType[] = ['administracion', 'inmuebles', 'configuracion'];
+      const allowedSections = SECCIONES_PROFESIONAL;
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('administracion');
       }
@@ -750,6 +766,25 @@ export default function App() {
 
   // Modales de administración
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  // CAPA TRANSVERSAL §6: sesión de tutorial en memoria (estado UI); el progreso persiste vía servicioProgresoTutoriales (F3)
+  const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
+  const seccionesAccesibles = useMemo<SectionType[] | undefined>(() => {
+    if (currentUser?.tipoPerfil === 'PROPIETARIO') return SECCIONES_PROPIETARIO;
+    if (currentUser?.tipoPerfil === 'PROFESIONAL') return SECCIONES_PROFESIONAL;
+    return undefined; // ADMINISTRADOR: sin restricción de secciones
+  }, [currentUser?.tipoPerfil]);
+  const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
+  // §6 F4: proveedor IA (Gemini vía servidor; sin clave → el motor cae al resolutor local) y
+  // ejecución de acciones validadas del asistente con los medios del host (route guard intacto).
+  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  const ejecutarAccionAsistente = useCallback((accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => {
+    if (accion.tipo === 'NAVEGAR' || (accion.tipo === 'EXPLICAR' && accion.route)) {
+      setActiveSection(accion.route as SectionType);
+    } else if (accion.tipo === 'TUTORIAL') {
+      const t = obtenerTutorial(accion.tutorialId);
+      if (t) setSesionTutorial(iniciarTutorial(t));
+    }
+  }, []);
   const [showCrearUsuarioModal, setShowCrearUsuarioModal] = useState<boolean>(false);
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<UsuarioApp | undefined>(undefined);
   const [showCrearProfesionalModal, setShowCrearProfesionalModal] = useState<boolean>(false);
@@ -3445,6 +3480,9 @@ export default function App() {
           solicitudesSeguroCount={solicitudesSeguro.length}
           cobrosPendientesCount={cobrosPendientesCount}
           morosidadAbiertaCount={morosidadAbiertaCount}
+          onAccionAsistente={ejecutarAccionAsistente}
+          proveedorIA={proveedorIA}
+          accessibleSections={seccionesAccesibles}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
@@ -3455,14 +3493,35 @@ export default function App() {
           activeSection={activeSection}
           userProfile={userProfile}
           onSelectSection={setActiveSection}
+          onIniciarTutorial={(id) => {
+            const t = obtenerTutorial(id);
+            if (t) setSesionTutorial(iniciarTutorial(t));
+          }}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
           currentUser={currentUser}
           onOpenAuthModal={() => setShowAuthModal(true)}
           onLogout={handleLogout}
+          onAccionAsistente={ejecutarAccionAsistente}
+          proveedorIA={proveedorIA}
+          accessibleSections={seccionesAccesibles}
         />
 
         {/* Dynamic Section Renderer */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          {activeSection === 'dashboard' && (
+            <DashboardEjecutivoSection
+              inmuebles={scopedInmuebles}
+              contratos={scopedContratos}
+              cobros={scopedCobros}
+              gastos={scopedGastos}
+              candidatos={scopedCandidatos}
+              propietarios={scopedPropietarios}
+              currentUser={currentUser}
+              onSelectSection={setActiveSection}
+              cobrosPendientesCount={cobrosPendientesCount}
+            />
+          )}
+
           {activeSection === 'inicio' && (
             <InicioSection
               candidatos={scopedCandidatos}
@@ -3734,49 +3793,6 @@ export default function App() {
             />
           )}
 
-          {activeSection === 'tesoreria' && (
-            currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
-              <TesoreriaSection
-                contratos={contratos}
-                inmuebles={scopedInmuebles}
-                propietarios={scopedPropietarios}
-                liquidaciones={tesoreriaLiquidaciones}
-                gastos={tesoreriaGastos}
-                ordenes={tesoreriaOrdenesPago}
-                ficheros={tesoreriaFicherosSepa}
-                mandatos={tesoreriaMandatosSepa}
-                trabajos={tesoreriaTrabajos}
-                movimientosBancarios={tesoreriaSesionConciliacion.movimientos}
-                propuestasConciliacion={tesoreriaSesionConciliacion.propuestas}
-                gastosCanonicos={scopedGastos}
-                currentUser={currentUser}
-                onSaveLiquidacion={handleSaveTesoreriaLiquidacion}
-                onSaveGasto={handleSaveTesoreriaGasto}
-                onDeleteGasto={handleDeleteTesoreriaGasto}
-                onSaveOrdenPago={handleSaveTesoreriaOrdenPago}
-                onSaveFicheroSepa={handleSaveTesoreriaFicheroSepa}
-                onSaveMandato={handleSaveTesoreriaMandatoSepa}
-                onSaveContratos={handleSaveContratosBatch}
-              />
-            ) : currentUser.tipoPerfil === 'PROPIETARIO' ? (
-              <PropietarioPortalSection
-                currentUser={currentUser}
-                inmuebles={scopedInmuebles}
-                profesionales={scopedProfesionales}
-                contratos={scopedContratos}
-                especialidades={especialidades}
-                propietarios={scopedPropietarios}
-                liquidaciones={scopedLiquidaciones}
-                onOpenCrearProfesionalModal={(prof) => {
-                  setSelectedProfForEdit(prof);
-                  setShowCrearProfesionalModal(true);
-                }}
-                onSaveProfesional={handleSaveProfesional}
-                onNavigateToInmueble={() => setActiveSection('inmuebles')}
-              />
-            ) : null
-          )}
-
           {activeSection === 'inquilinos' && currentUser.tipoPerfil === 'ADMINISTRADOR' && (
             <InquilinosSection
               currentUser={currentUser}
@@ -3811,6 +3827,14 @@ export default function App() {
               gastos={scopedGastos}
               currentUser={currentUser}
               onSelectSection={setActiveSection}
+            />
+          )}
+
+          {activeSection === 'inversion' && (
+            <InversionSection
+              inmuebles={scopedInmuebles}
+              currentUser={currentUser}
+              onAddInmueble={handleAddInmueble}
             />
           )}
 
@@ -3875,6 +3899,18 @@ export default function App() {
               onUpdateProfile={(updated) => setUserProfile(updated)}
               onImportData={handleImportData}
               onOpenConfigAseguradoras={() => setShowConfigAseguradorasModal(true)}
+            />
+          )}
+
+          {activeSection === 'ayuda' && (
+            <CentroAyudaSection
+              usuario={currentUser}
+              accessibleSections={seccionesAccesibles}
+              onIniciarTutorial={(id) => {
+                const t = obtenerTutorial(id);
+                if (t) setSesionTutorial(iniciarTutorial(t));
+              }}
+              onSelectSection={setActiveSection}
             />
           )}
 
@@ -4133,6 +4169,19 @@ export default function App() {
           onSaveInvitacion={(newInv) => {
             handleSaveInvitacion(newInv);
           }}
+        />
+      )}
+
+      {/* CAPA TRANSVERSAL §6 (Fase 1): reproductor de tutorial (no bloquea la pantalla) */}
+      {sesionTutorial && tutorialActivo && currentUser && (
+        <TutorialPlayer
+          tutorial={tutorialActivo}
+          sesion={sesionTutorial}
+          contexto={contextoDesdeUsuario(currentUser, activeSection, { accessibleSections: seccionesAccesibles })}
+          onCambio={setSesionTutorial}
+          onNavegar={(r) => setActiveSection(r as SectionType)}
+          onCerrar={() => setSesionTutorial(null)}
+          servicio={servicioProgresoTutoriales}
         />
       )}
 

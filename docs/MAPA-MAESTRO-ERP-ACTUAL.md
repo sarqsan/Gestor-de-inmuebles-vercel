@@ -6,7 +6,12 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: 2026-09-23 — **cierre definitivo de GAP 5 (SINDICACIÓN)** integrado
+> Última actualización: 2026-09-26 — **§13 (documental, sin cambios de código)**: registro
+> transversal de la **auditoría funcional histórica pendiente** (inventario funcional NO cerrado)
+> y de cuatro capacidades estratégicas a conservar con procedencia —
+> `IA_CARTERA_TRANSVERSAL`, `INCIDENCIA_IA_END_TO_END`, `ESCANER_FACTURAS_IA`,
+> `FICHA_ECONOMICA_INMUEBLE`— ninguna marcada como implementada. Sin GAP ni fase nueva.
+> Anterior: 2026-09-23 — **cierre definitivo de GAP 5 (SINDICACIÓN)** integrado
 > en la canónica A desde el snapshot preservado de C (`14dac26`): §2.1 y §3 pasan a
 > `CERRADO ✅`; reglas `sindicacion_inmuebles` como **§44**; verificación real en A: 164/164
 > GAP 5, 27/27 identidad, suite **1286/1286 (52 ficheros)**, 82/82 mutaciones, `tsc` 0, build
@@ -102,6 +107,8 @@ Distribución actual de tests:
 
 Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJORAS` ·
 `PENDIENTE` · `NO_IMPLEMENTADO` · `DEPENDENCIA_EXTERNA`.
+Para hallazgos de la recuperación funcional histórica se usa además la clasificación
+obligatoria de §13.7 (`IMPLEMENTADO_CANONICO` … `DESCARTADO_EXPLICITAMENTE`).
 
 ---
 
@@ -249,7 +256,8 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 >
 > Navegación: BLOQUE B/C/D/F aquí (§4) · **BLOQUE E** (§5) · **Capa Transversal
 > Experiencia/Ayuda/Tutoriales/IA** (§6, sin numeración GAP) · **Roadmap de
-> evolución** (§7) · dependencias entre bloques (§8).
+> evolución** (§7) · dependencias entre bloques (§8) · **Recuperación funcional
+> histórica y capacidades estratégicas a conservar** (§13, sin numeración GAP).
 
 ### BLOQUE B — Tesorería + liquidaciones de propietarios + SEPA — **IMPLEMENTADO (2026-09-20)**
 
@@ -1028,6 +1036,12 @@ reales, sensibles con doble confirmación); publicación externa del endpoint
 (despliegue en Vercel con `GEMINI_API_KEY`); métricas de uso. Reglas
 Firestore/Storage **sin cambios** en F4.
 
+> **Registro estratégico relacionado (2026-09-26):** la evolución de esta capa hacia una IA
+> contextual que consulte y razone sobre los datos autorizados de la cartera queda registrada como
+> `IA_CARTERA_TRANSVERSAL` (§13.3, **PENDIENTE / DISEÑO ESTRATÉGICO**), y el circuito de
+> incidencia inteligente como `INCIDENCIA_IA_END_TO_END` (§13.4, **RECUPERAR / VERIFICAR**). Los
+> pendientes anteriores de esta sección se conservan sin cambios.
+
 ---
 
 ## 7. EVOLUCIÓN DEL ERP — ROADMAP (capacidades, no «órdenes pequeñas»)
@@ -1043,6 +1057,7 @@ presentan como cinco órdenes pequeñas:
 | **E** | **Portal del Inquilino + suministros** (depende de B, C, D — §5) | **INTEGRADO (2026-09-21, Arena A — `10f07b3`; validación automatizada `7dcb3ea`, 73/73)** — ver §5 (NV: reglas reales sin emulador) |
 | **Transversal** | **Experiencia, Ayuda, Tutoriales e IA Asistente** (sin numeración GAP — §6) | **FASES 1, 2, 3 y 4 IMPLEMENTADAS (2026-09-21)**: motor de contexto + ayuda contextual (ERP y Portal del Inquilino) + Centro de Ayuda + 23 contenidos + recorridos guiados con resaltado real (3 tutoriales) + progreso persistido por usuario en `usuarios_auth/{uid}/progreso_tutoriales` (regla real NV) + **asistente IA transversal controlado** (28 capacidades reales, validación determinista RBAC, confirmación previa en escritura, adaptador Gemini canónico + proveedor local; §6.5–6.8). Pendiente: **validación real de Gemini** (NV), capacidades futuras, publicación externa |
 | **Después** | **Integración global**: pruebas end-to-end de circuitos completos, UX, seguridad, rendimiento y endurecimiento final | Cierre de oleada |
+| **Transversal (registro)** | **Recuperación funcional histórica** + capacidades estratégicas a conservar (`IA_CARTERA_TRANSVERSAL`, `INCIDENCIA_IA_END_TO_END`, `ESCANER_FACTURAS_IA`, `FICHA_ECONOMICA_INMUEBLE`) — sin numeración GAP ni fase nueva (§13) | **PENDIENTE** — auditoría funcional histórica completa tras la integración B/C en `main` y la recuperación histórica/importación; inventario funcional **no cerrado** hasta realizarla (orden estratégico en §13.8) |
 
 Dependencias entre fases: §8.
 
@@ -1257,6 +1272,11 @@ asistente) · Seguridad perimetral (reglas deny-by-default) · **BLOQUE B** ·
 **D — DESARROLLO REAL PENDIENTE** → §12.2 (fichas). Son los únicos elementos que
 justifican una orden de desarrollo.
 
+> **Nota 2026-09-26:** esta clasificación reconcilia el **código custodiado** (ORDEN 15); no
+> cierra el inventario funcional. Las capacidades estratégicas registradas en §13 y la
+> auditoría funcional histórica pendiente (§13.1) quedan fuera de esta reconciliación y se
+> gestionan en §13 sin reabrir ningún GAP cerrado.
+
 **E — DUPLICADO / ABSORBIDO (no volver a desarrollar)**
 | Referencia histórica | Absorbido en |
 |---|---|
@@ -1412,3 +1432,223 @@ Trazabilidad Git (ver `docs/ESTADO-GIT-ERP.md`): R1 `415de41` → `a18967f` · R
 - **Resultado en A:** GAP 5 164/164 · identidad 27/27 · suite 1286/1286 (52 ficheros) · mutaciones
   82/82 · `tsc` 0 · build OK. **GAP 5 CERRADO; no se reabre.** La conexión efectiva con
   portales/APIs de terceros es una integración externa independiente (categoría C de §12.1).
+
+---
+
+## 13. CAPA TRANSVERSAL — RECUPERACIÓN FUNCIONAL HISTÓRICA Y CAPACIDADES ESTRATÉGICAS A CONSERVAR (2026-09-26)
+
+> **Naturaleza de esta sección.** Registro **exclusivamente documental**. **No** es un GAP
+> (no hay GAP9/10/11), **no** es una fase nueva ni un bloque de desarrollo: es un registro
+> transversal —igual que §6 está fuera de la numeración GAP— cuya finalidad es que **ninguna
+> funcionalidad estratégica se pierda** antes y durante la futura recuperación histórica del
+> proyecto. En esta actuación **no se ha modificado código, reglas, Firestore, modelos ni UI**.
+>
+> **Regla de honestidad:** nada de lo registrado aquí se marca como IMPLEMENTADO. Los «indicios
+> preliminares» citados son resultado de una búsqueda rápida por palabras clave sobre el código
+> canónico (2026-09-26, base `37341c6`) y **no constituyen auditoría**; solo sirven de punto de
+> partida para la auditoría específica.
+>
+> **Regla transversal de procedencia (vigente para todo el proyecto):** todo lo que se recupere de
+> conversaciones, especificaciones, órdenes, Arenas o aplicaciones anteriores **conserva su
+> origen/procedencia** (fuente, fecha, rama/commit o aplicación, y evidencia) y queda **trazable**
+> hasta su integración o descarte en la canónica.
+
+### 13.1 Auditoría funcional histórica — TRABAJO PENDIENTE (inventario funcional NO cerrado)
+
+El proyecto realizará una **auditoría histórica posterior de TODAS las conversaciones,
+especificaciones, órdenes, Arenas y aplicaciones relacionadas con el ERP** (incluidas las ramas de
+sesión y de recuperación listadas en §9, la línea paralela de `main` y las aplicaciones externas
+como la de Gestión Patrimonial). Finalidad:
+
+1. **recuperar requisitos funcionales** definidos al inicio del proyecto que pudieron quedar fuera
+   del desarrollo posterior;
+2. **localizar funcionalidades que existieron en otras Arenas/aplicaciones**;
+3. **clasificar** cada funcionalidad según el vocabulario de §13.7 (equivalente ampliado de
+   IMPLEMENTADO / PARCIAL / PREPARADO / PENDIENTE / RECUPERAR / NO VERIFICADO);
+4. **conservar el origen** de cada funcionalidad (regla transversal de procedencia);
+5. **evitar que una funcionalidad desaparezca** simplemente porque no figure en el código actual;
+6. **comparar la intención funcional original** con la implementación actualmente custodiada.
+
+> **ESTADO: PENDIENTE.** El inventario funcional del ERP **NO se debe considerar cerrado** hasta
+> realizar esta auditoría histórica. En particular, la afirmación de §12.2 («solo hay cuatro
+> pendientes que requieren código») se refiere a la reconciliación de ORDEN 15 sobre el código
+> custodiado y **no** equivale a un inventario funcional cerrado. Esta auditoría **no puede quedar
+> absorbida dentro de un GAP genérico** ni desaparecer del plan (§13.8).
+
+### 13.2 Registro de capacidades estratégicas (resumen)
+
+| ID | Capacidad | Tipo | Procedencia | Estado (vocabulario §13.7) | Detalle |
+|---|---|---|---|---|---|
+| `IA_CARTERA_TRANSVERSAL` | IA transversal de cartera | Requisito estratégico transversal | Decisión de producto registrada 2026-09-26 (evolución de §6.2/§6.8) | **PENDIENTE / DISEÑO ESTRATÉGICO** | §13.3 |
+| `INCIDENCIA_IA_END_TO_END` | Incidencia inteligente end-to-end | Requisito estratégico **histórico** prioritario | **Planteamiento funcional original del ERP** (evidencia a localizar en la auditoría histórica) | **RECUPERAR / VERIFICAR IMPLEMENTACIÓN ACTUAL** | §13.4 |
+| `ESCANER_FACTURAS_IA` | Escáner inteligente de facturas | Funcionalidad existente en otra aplicación | **OTRA APLICACIÓN / GESTIÓN PATRIMONIAL — FUNCIONALIDAD EXISTENTE SEGÚN INVENTARIO FUNCIONAL DEL PROYECTO** | **RECUPERAR / INTEGRAR DESDE APLICACIÓN DE ORIGEN** | §13.5 |
+| `FICHA_ECONOMICA_INMUEBLE` | Ficha económica/fiscal del inmueble | Requisito canónico de la Ficha del Inmueble | Requisito canónico del centro operativo del inmueble | **REQUISITO CANÓNICO — AUDITAR IMPLEMENTACIÓN ACTUAL Y CERRAR GAPS EXISTENTES** | §13.6 |
+
+Ninguna de las cuatro está marcada como IMPLEMENTADA. **La lista no es exhaustiva** (§13.7).
+
+### 13.3 `IA_CARTERA_TRANSVERSAL` — IA transversal de cartera
+
+- **Descripción:** asistente de IA **integrado en el propio ERP**, contextualizado por **usuario,
+  permisos y cartera**, capaz de **consultar y razonar sobre la información autorizada** del propio
+  ERP.
+- **Ámbito objetivo de consulta/razonamiento:** inmuebles · propietarios · contratos · cobros ·
+  gastos · fiscalidad · seguros · incidencias · mantenimiento · documentación · histórico ·
+  rentabilidad · operaciones · alertas y situaciones pendientes.
+- **Naturaleza:** IA **contextual del ERP**, **NO** un chatbot decorativo independiente. Se apoya en
+  los motores oficiales (filosofía §6.4) y no crea una segunda lógica de negocio.
+- **Requisito fundamental (autorización):** la IA debe respetar **exactamente** el modelo de
+  autorización existente (RBAC `authService` + reglas Firestore/Storage + scoping por
+  `propietarioId` + modelo Cuenta/Propietario/Gestor/Carteras de BLOQUE F §4, incl.
+  `gestiones_cartera` cuando se implemente). **Nunca** debe revelar información de otra cartera o
+  propietario por el simple hecho de que pueda consultarla técnicamente. Aplican íntegros los
+  límites ineludibles de §6.3.
+- **Relación con lo existente (sin duplicar):** el asistente F4 (§6.8) es hoy una capa de
+  **interpretación y navegación** sobre 28 capacidades, que **no accede a datos de negocio** (el
+  endpoint recibe solo el `AIIntentRequest`). `IA_CARTERA_TRANSVERSAL` amplía ese alcance a
+  consulta/razonamiento sobre datos autorizados; **no sustituye** el pendiente de §6.8
+  («diagnóstico guiado del §6.2 sobre datos del usuario»), que se conserva y queda subsumido como
+  parte de este objetivo.
+- **Estado:** **PENDIENTE / DISEÑO ESTRATÉGICO.** No se marcará como implementada hasta realizar
+  una **auditoría específica del código existente** (§6 F1–F4, endpoints IA de `server.ts`,
+  capacidades de consulta ERP) y un diseño de acceso a datos que garantice el aislamiento.
+
+### 13.4 `INCIDENCIA_IA_END_TO_END` — Incidencia inteligente end-to-end
+
+> **Procedencia:** este concepto **NO es una idea inventada en esta revisión**. Forma parte del
+> **planteamiento funcional original del ERP**. Durante la auditoría histórica (§13.1) deberá
+> buscarse **evidencia de cuándo y cómo fue especificado, diseñado o implementado** (conversaciones,
+> órdenes, Arenas, `main`/AI Studio, otras aplicaciones), conservando su origen.
+
+**Flujo objetivo a conservar:**
+
+```
+TENANT → comunica incidencia
+  → IA realiza triaje inicial
+  → IA pregunta/comprueba soluciones sencillas cuando proceda
+  → IA determina gravedad/prioridad
+  → IA consulta contrato y contexto para determinar responsabilidad probable
+  → PROPIETARIO recibe aviso desde el inicio y puede conocer el estado durante el diagnóstico
+  → IA consulta seguros, garantías y pólizas del inmueble/electrodoméstico/equipamiento
+      ├─ si existe cobertura → orientar apertura de siniestro
+      │                        (compañía, póliza, contacto y datos necesarios)
+      └─ si no existe cobertura → proveedores/servicios
+  → solicitud/comparación de presupuestos
+  → autorización
+  → reparación
+  → factura
+  → gasto/documentación
+  → actualización del histórico del inmueble
+  → trazabilidad completa
+```
+
+**Valor diferencial (explícito):** la inteligencia **no termina en «diagnosticar la avería»**. El
+valor está en **conectar** incidencia + contrato + responsabilidad + seguro/garantía + propietario
++ proveedor + autorización + reparación + factura + histórico en un único circuito trazable.
+
+- **Relación con lo existente (sin duplicar):** §6.2 describe el **guiado de navegación** del
+  asistente ante una avería (Incidencia → … → gasto → rentabilidad); este registro describe el
+  **circuito de negocio end-to-end** que el ERP debe ejecutar. Subsistemas implicados ya
+  inventariados: §2.1 fila 8 (incidencias/mantenimiento/profesionales, «IA pericial»), fila 9
+  (pólizas/siniestros + Gmail), fila 6 (gastos), BLOQUE E (incidencias del portal del inquilino),
+  GAP1 (avisos).
+- **Indicios preliminares (NO auditados):** existe el endpoint `POST /api/analizar-incidencia-ia`
+  (`server.ts`) que recibe contexto contractual y pólizas y devuelve una responsabilidad orientativa
+  (`posibleResponsabilidad`) y un ramo recomendado; y el circuito operativo-económico «Incidencia →
+  Dictamen → OT → Profesional → Coste Real → Gasto → Histórico»
+  (`incidenciaCircuitoOperativoEconomico.test.ts`, 9 tests, motor sin I/O). **No** se ha verificado
+  el triaje conversacional con el inquilino, el aviso temprano al propietario durante el
+  diagnóstico, la orientación de apertura de siniestro con datos de compañía/póliza, la
+  comparación de presupuestos ni el cierre en histórico como circuito único.
+- **Estado:** **RECUPERAR / VERIFICAR IMPLEMENTACIÓN ACTUAL.** No se marcará como implementado
+  hasta auditar el código actual y, posteriormente, la documentación histórica.
+
+### 13.5 `ESCANER_FACTURAS_IA` — Escáner inteligente de facturas
+
+- **Origen / procedencia:** **OTRA APLICACIÓN / GESTIÓN PATRIMONIAL — FUNCIONALIDAD EXISTENTE
+  SEGÚN INVENTARIO FUNCIONAL DEL PROYECTO.** **No** es una funcionalidad nueva que haya que diseñar
+  desde cero.
+- **Funcionalidad conocida:** OCR/IA sobre la factura · extracción de **importe**, **fecha**,
+  **concepto**, **categoría**, **inmueble** y otros campos relevantes · el usuario **confirma/
+  corrige** lo extraído · **selección manual del inmueble** cuando la IA no puede determinarlo con
+  seguridad.
+- **Requisito de recuperación:** durante la recuperación histórica se localizará el **código/origen
+  exacto** en la aplicación correspondiente, se auditará y se determinará:
+  1. qué está realmente implementado;
+  2. qué componentes son reutilizables;
+  3. qué modelo de datos utiliza;
+  4. qué integración necesita con el modelo canónico actual (`gastos`/`gastosEngine`, facturas en
+     Storage `gastos_facturas/`, `propietarioId`/cartera de BLOQUE F, importación con destino
+     explícito F.5);
+  5. qué parte debe conservarse como origen/procedencia;
+  6. qué parte debe adaptarse.
+- **Indicio preliminar (NO auditado):** la búsqueda por palabras clave (`ocr`, `escane*`) en el
+  código canónico no localiza un escáner de facturas de gasto. Esto **NO significa que «no exista»**:
+  solo que no se ha encontrado en el código canónico actual; la funcionalidad consta en otra
+  aplicación.
+- **Estado:** **RECUPERAR / INTEGRAR DESDE APLICACIÓN DE ORIGEN.** No se marcará como implementado
+  en la aplicación canónica hasta que exista evidencia de integración.
+
+### 13.6 `FICHA_ECONOMICA_INMUEBLE` — Ficha económica/fiscal del inmueble
+
+- **Requisito:** dentro del **centro operativo del inmueble** debe existir una visión
+  económica/fiscal contextual que permita consultar, al menos: **IBI** · **basura/tasas** · **gastos
+  deducibles** · **otros gastos** · **ingresos/cobros de arrendamiento** · **resultado
+  económico/fiscal disponible** · **histórico por ejercicios**.
+- **Doble visión simultánea:** (a) **contextual dentro de cada inmueble**; (b) **sección fiscal
+  global del ERP** para consultar todos los inmuebles y filtrar.
+- **Restricción de arquitectura:** **no** se crea como aplicación ni módulo paralelo. Queda
+  **integrada en el centro operativo del inmueble** y **conectada con la fiscalidad global**,
+  reutilizando los motores oficiales (`fiscalEngine`, `gastosEngine`, `cobrosEngine`,
+  `rentabilidadEngine`, GAP3) sin duplicar cálculos.
+- **Indicios preliminares (NO auditados):** existen `FiscalidadSection.tsx` (visión global),
+  `fiscalEngine` con resumen anual por inmueble e histórico (43 tests, GAP-R4), pestaña «fiscal» de
+  datos fiscales en `InmueblesSection.tsx`, categoría `IBI` en `gastosEngine` y el expediente
+  fiscal B6 (`src/lib/expedienteFiscal/*`, `docs/FASE6-B6-EXPEDIENTE-FISCAL-EXPORT-ZIP.md`). No se
+  observa una categoría específica de basura/tasas en el catálogo de `gastosEngine` (a verificar).
+- **GAPs existentes que afectan directamente a este requisito (se conservan, no se sustituyen):**
+  hallazgos **D1** (deducibilidad divergente `gastosEngine`/`fiscalEngine`, p. ej. IBI tratado como
+  no deducible), **D2** (reporting/matching por `g.fecha`) y **D3** (rangos dependientes de zona
+  horaria) de GAP-R4 (§12.2).
+- **Estado:** **REQUISITO CANÓNICO — AUDITAR IMPLEMENTACIÓN ACTUAL Y CERRAR GAPS EXISTENTES.**
+
+### 13.7 La lista NO es exhaustiva — clasificación obligatoria de hallazgos
+
+> **«La lista anterior NO se considera exhaustiva. Durante la recuperación histórica deberán
+> revisarse las conversaciones y trabajos desde el inicio del proyecto para localizar otras
+> funcionalidades, reglas de negocio, flujos, automatizaciones, ideas o requisitos que hayan sido
+> definidos y posteriormente hayan quedado fuera, parcializados o sustituidos.»**
+
+Clasificación **obligatoria** de cada hallazgo (una por hallazgo, con su procedencia):
+
+| Clasificación | Significado |
+|---|---|
+| `IMPLEMENTADO_CANONICO` | Demostrado en el código de la rama canónica (con fichero/commit/test) |
+| `IMPLEMENTADO_OTRA_ARENA` | Implementado en otra Arena/rama, no integrado en la canónica |
+| `IMPLEMENTADO_OTRA_APP` | Implementado en otra aplicación del proyecto (p. ej. Gestión Patrimonial) |
+| `PARCIAL` | Existe parte del circuito; se documenta qué falta |
+| `PREPARADO` | Punto de enganche/modelo/interfaz listo, sin circuito funcional |
+| `PENDIENTE` | Definido y aceptado, sin implementación |
+| `RECUPERAR` | Definido históricamente, perdido/fuera del desarrollo actual; debe recuperarse |
+| `NO_VERIFICADO` | Sin evidencia suficiente todavía en ningún sentido |
+| `DESCARTADO_EXPLICITAMENTE` | Descartado por decisión expresa y documentada (con referencia) |
+
+**Prohibido** utilizar simplemente «no existe» cuando lo único comprobado sea que **no aparece en el
+código canónico actual** (en ese caso: `NO_VERIFICADO`, `RECUPERAR` o `IMPLEMENTADO_OTRA_*` según la
+evidencia). Este vocabulario complementa —no sustituye— el de §1 (`COMPLETO`,
+`FUNCIONAL_CON_MEJORAS`, …) y las categorías A–F de §12.1.
+
+### 13.8 Relación con el plan general (orden estratégico acordado)
+
+```
+🟡 Terminar y cerrar los trabajos actuales
+🟢 Dejar los bloques actuales validados
+→ Integración B/C en `main`
+→ Recuperación histórica / importación (Rentasync y fuentes: FASE2/FASE3, BLOQUE F.5)
+→ AUDITORÍA FUNCIONAL HISTÓRICA COMPLETA (§13.1) — hito propio, no absorbible en un GAP genérico
+→ Recuperación / integración de funcionalidades descubiertas (incl. §13.3–§13.6 y nuevos hallazgos §13.7)
+→ Nueva auditoría global
+```
+
+Este orden **no altera** el estado de ningún bloque, GAP ni pendiente anterior (§3, §4, §5, §6,
+§10, §12): todos se conservan tal cual. La integración global de §7 («Después») y la fase 5 de §12.4
+siguen vigentes; esta secuencia las enmarca sin sustituirlas.

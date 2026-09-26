@@ -1,0 +1,672 @@
+{
+  "__ARTEFACTO__": "FASE 2 — Anexo de evidencia externa reconstruida (Rentasync → ERP BASE)",
+  "__FECHA__": "2026-09-26",
+  "__PROVENANCE__": {
+    "origen": "FUENTE EXTERNA — OTRA APP (Rentasync/AEAT). NO son datos internos de la app BASE.",
+    "ficheros_originales": [
+      "inmuebles_rentasync_2026-09-25.json (pegado completo en chat)",
+      "gastos_e_ingresos_Todos_Inmuebles_Todas_Anualidades_2026-09-26.json (dos pegados parciales A y B, contradictorios entre sí; final nunca recibido)"
+    ],
+    "resets_del_sandbox": [
+      "Reset 1 y 2: borraron /home/user/datos-externos/ con los ficheros custodiados y verificados.",
+      "Reset 3 (este turno, 2026-09-26): volvió a borrar /home/user/datos-externos/ ANTES de empezar FASE 2. PROVENANCE.md y ambos JSON custodiados PERDIDOS de nuevo."
+    ],
+    "reconstruccion": "Este anexo reconstruye la evidencia SOLO con datos verificados en sesiones anteriores (inventarios y conciliaciones ejecutadas con script sobre los ficheros custodiados entonces). Todo lo no recuperable está marcado __NO_DISPONIBLE__. NO se ha inventado ningún valor. Los números se re-verifican con script contra este anexo (ver sección __VERIFICACION__).",
+    "limitacion_clave": "Los valores por-campo de los inmuebles (direcciones, precios, porcentajes concretos, subcampos de contract/mortgage/tenantHistory/yearlyFinancials) NO son recuperables: solo sobreviven los agregados y hechos de inventario verificados. El fichero original sigue siendo la fuente canónica."
+  },
+  "inmuebles_esquema": {
+    "registros": 7,
+    "ids_verificados": [
+      "prop_1783441481122_0",
+      "prop_1783441481122_1",
+      "prop_1783441481122_2",
+      "prop_1783441481122_3",
+      "prop_1783442545992",
+      "prop_1783442822113",
+      "prop_1783443421833"
+    ],
+    "campos": [
+      "id",
+      "address",
+      "cadastralReference",
+      "registrationDate",
+      "purchasePrice",
+      "currentValue",
+      "monthlyRent",
+      "landValuePercent",
+      "amortizationAmount",
+      "expenses{Community,IBI,Insurance,Repairs}",
+      "ownershipPercentageUser1",
+      "ownershipPercentageUser2",
+      "owner",
+      "contract (5/7)",
+      "tenantName",
+      "tenantDni",
+      "tenantHistory[] (solo prop_...122_1)",
+      "mortgage* (2/7)",
+      "yearlyFinancials{'2026'} (6/7)"
+    ],
+    "hechos_inventario_verificados": [
+      "ids únicos en los 7 registros",
+      "cadastralReference: 2 vacías; '9388505YH1498G0006QK' aparece DUPLICADA en dos inmuebles",
+      "registrationDate en formato '7/7/2026' (D/M/YYYY)",
+      "ownershipPercentageUser1+User2 suman 100 en los 7",
+      "contract presente en 5 de 7; yearlyFinancials['2026'] en 6 de 7; tenantHistory solo en prop_1783441481122_1 (fechas invertidas: salida 2026-10-03 > entrada 2026-09-07)",
+      "mortgage* presente en 2 de 7",
+      "tenantName/tenantDni: multi-inquilino en string plano separado por comas (4 inmuebles); mezcla DNI y NIE",
+      "'José Gregorio' figura como inquilino de prop_1783442822113, pero el 'Seguro impago José Gregorio' está cargado en prop_1783441481122_1",
+      "una dirección con espacio final; un agregado con float 1933.6999999999998"
+    ],
+    "agregados_expenses_por_inmueble_VERIFICADOS": {
+      "prop_1783441481122_0": {
+        "IBI": 170.59,
+        "Insurance": 216.19,
+        "Community": 0,
+        "Repairs": 0
+      },
+      "prop_1783441481122_1": {
+        "IBI": 207.97,
+        "Community": 420,
+        "Insurance": 892.65,
+        "Repairs": 0
+      },
+      "prop_1783441481122_2": {
+        "IBI": 238.46,
+        "Community": 360.36,
+        "Insurance": 202.41,
+        "Repairs": 0
+      },
+      "prop_1783441481122_3": {
+        "IBI": 205.6,
+        "Community": 1933.7,
+        "Insurance": 372.72,
+        "Repairs": 521.7
+      },
+      "prop_1783442545992": {
+        "IBI": 418.27,
+        "Community": 445.68,
+        "Insurance": 723.72,
+        "Repairs": 0
+      },
+      "prop_1783442822113": {
+        "IBI": 0,
+        "Community": 0,
+        "Insurance": 0,
+        "Repairs": 0
+      },
+      "prop_1783443421833": {
+        "IBI": 0,
+        "Community": 0,
+        "Insurance": 0,
+        "Repairs": 0
+      }
+    },
+    "renta_mensual_por_contrato_verificada_en_FASE1": {
+      "prop_1783441481122_0": 500,
+      "prop_1783441481122_1": 730,
+      "prop_1783441481122_2": 500,
+      "prop_1783441481122_3": 620,
+      "prop_1783442545992": 550,
+      "prop_1783442822113": 730
+    },
+    "valores_no_recuperables": [
+      "address (valores exactos)",
+      "purchasePrice",
+      "currentValue",
+      "landValuePercent",
+      "amortizationAmount",
+      "owner (nombre)",
+      "subcampos de contract",
+      "subcampos de mortgage",
+      "tenantHistory completo",
+      "yearlyFinancials completo",
+      "tenantName/tenantDni valores"
+    ]
+  },
+  "gastos_ingresos_registros": [
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783448839031",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 6000,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler año completo"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783448858030",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 8400,
+      "propertyId": "prop_1783441481122_1",
+      "date": "2026-07-07",
+      "description": "Alquiler año completo"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783448876049",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 6000,
+      "propertyId": "prop_1783441481122_2",
+      "date": "2026-07-07",
+      "description": "Alquiler año completo"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783448904731",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 7440,
+      "propertyId": "prop_1783441481122_3",
+      "date": "2026-07-07",
+      "description": "Alquiler año completo"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783448925807",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 6600,
+      "propertyId": "prop_1783442545992",
+      "date": "2026-07-07",
+      "description": "Alquiler año completo"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783448964360",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 8760,
+      "propertyId": "prop_1783442822113",
+      "date": "2026-07-07",
+      "description": "Alquiler año completo"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783449009963",
+      "type": "gasto",
+      "category": "community",
+      "amount": 420,
+      "propertyId": "prop_1783441481122_1",
+      "date": "2026-07-07",
+      "description": "Comunidad año completo"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_c1__",
+      "type": "gasto",
+      "category": "community",
+      "amount": 360.36,
+      "propertyId": "prop_1783441481122_2",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_c2__",
+      "type": "gasto",
+      "category": "community",
+      "amount": 445.68,
+      "propertyId": "prop_1783442545992",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_c3__",
+      "type": "gasto",
+      "category": "community",
+      "amount": 723.84,
+      "propertyId": "prop_1783441481122_3",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_c4__",
+      "type": "gasto",
+      "category": "community",
+      "amount": 521.7,
+      "propertyId": "prop_1783441481122_3",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Derrama comunidad"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_i1__",
+      "type": "gasto",
+      "category": "ibi",
+      "amount": 205.6,
+      "propertyId": "prop_1783441481122_3",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Basuras"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_i2__",
+      "type": "gasto",
+      "category": "ibi",
+      "amount": 251.65,
+      "propertyId": "prop_1783442545992",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_i3__",
+      "type": "gasto",
+      "category": "ibi",
+      "amount": 166.62,
+      "propertyId": "prop_1783442545992",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Basuras"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_i4__",
+      "type": "gasto",
+      "category": "ibi",
+      "amount": 77.41,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Basuras"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_i5__",
+      "type": "gasto",
+      "category": "ibi",
+      "amount": 130.56,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_i6__",
+      "type": "gasto",
+      "category": "ibi",
+      "amount": 111.86,
+      "propertyId": "prop_1783441481122_0",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Basuras"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_i7__",
+      "type": "gasto",
+      "category": "ibi",
+      "amount": 238.46,
+      "propertyId": "prop_1783441481122_2",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783449377775",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 354.78,
+      "propertyId": "prop_1783441481122_1",
+      "date": "2026-07-07",
+      "description": "Seguro impago José Gregorio"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_s1__",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 248.52,
+      "propertyId": "prop_1783442545992",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_s2__",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 372.72,
+      "propertyId": "prop_1783441481122_3",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_s3__",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 216.19,
+      "propertyId": "prop_1783441481122_0",
+      "date": "__NO_DISPONIBLE__",
+      "description": "__NO_DISPONIBLE__"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "__ID_NO_RECUPERADO_R3_s4__",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 142.21,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "linea directa"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783449544140",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 202.41,
+      "propertyId": "prop_1783441481122_2",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Seguro hogar hasta 1 octubre"
+    },
+    {
+      "_fuente": "B_pegado_2026-09-26",
+      "id": "exp_1783510062146",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 40.88,
+      "propertyId": "prop_1783441481122_1",
+      "date": "2026-07-08",
+      "description": "tuio"
+    },
+    {
+      "_fuente": "ambos_pegados",
+      "id": "exp_1785785627424",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 237.6,
+      "propertyId": "prop_1783442545992",
+      "date": "2026-09-01",
+      "description": "Seguro de impago",
+      "receiptType": "application/pdf",
+      "receiptName": "Factura Proforma_2520549_.pdf",
+      "receiptUrl_estado": "base64 ÍNTEGRO recibido en pegado B (cabecera %PDF-1.7 y cola 'startxref 74095 %%EOF' decodificadas y verificadas); BINARIO NO disponible en disco tras reset 3; metadatos: Author 'Victor Bosch Bea', Producer 'Aspose.PDF for .NET 24.3.0', CreationDate 2026-03-09, ModDate 2026-07-28"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636927",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler julio 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636928",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler agosto 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636929",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler septiembre 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636930",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler octubre 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636931",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler noviembre 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636932",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler diciembre 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636933",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler enero 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636934",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "2026-07-07",
+      "description": "Alquiler febrero 2026"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636935",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler marzo 2026 (patrón secuencial verificado hasta febrero)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636936",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler abril 2026 (patrón secuencial verificado hasta febrero)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636937",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler mayo 2026 (patrón secuencial verificado hasta febrero)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783451636938",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 500,
+      "propertyId": "prop_1783441481122_0",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler junio 2026 (patrón secuencial verificado hasta febrero)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824685",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler julio 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824686",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler agosto 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824687",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler septiembre 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824688",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler octubre 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824689",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler noviembre 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824690",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler diciembre 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824691",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler enero 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824692",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler febrero 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824693",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler marzo 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824694",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler abril 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824695",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler mayo 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783452824696",
+      "type": "ingreso",
+      "category": "rent",
+      "amount": 730,
+      "propertyId": "prop_1783441481122_1",
+      "date": "__NO_DISPONIBLE__",
+      "description": "Alquiler junio 2026 (serie mensual; descripción exacta por mes NO_DISPONIBLE)"
+    },
+    {
+      "_fuente": "A_pegado_anterior",
+      "id": "exp_1783461510013",
+      "type": "gasto",
+      "category": "insurance",
+      "amount": 354.78,
+      "propertyId": "prop_1783441481122_1",
+      "date": "2026-07-08",
+      "description": "Seguro impago José Gregorio", "_nota_custodia": "DUPLICADO de exp_1783449377775 con otro id y fecha; se conserva, NO se elimina (INC-05)"
+    },
+    {
+      "__TRUNCADO__": "Último registro recibido TRUNCADO en mitad de receiptUrl (en AMBOS pegados). Solo se conoce: type=gasto + recibo PDF 1.4 FIRMADO (widget /Sig 'Firmarze1'; certificado de Sello Electrónico — detalle verificado en sesión previa, no re-verificable tras reset 3). id, amount, propertyId, category, date, description y receiptName DESCONOCIDOS = PENDIENTE. Se desconoce si hay más registros después: limitación de evidencia documentada."
+    }
+  ],
+  "__CONTRADICCION_A_B__": "Ambos pegados colocan registros distintos inmediatamente antes de exp_1785785627424 (B: ...exp_1783449544140 → exp_1783510062146 → ancla; A: ...mensuales → exp_1783461510013 → ancla). Hipótesis 1: dos exports (regenerado: anuales sustituyen mensuales, duplicado eliminado). Hipótesis 2: un fichero con omisión central en un pegado. REQUIERE VALIDACIÓN con el usuario. Consecuencia directa: si es UN fichero, las rentas p_0 (6000+6000) y p_1 (8400+8760) estarían DOBLEMENTE computadas.",
+  "__VERIFICACION_ESPERADA__": {
+    "descripcion": "Conciliación recalculada con script sobre ESTE anexo. Debe reproducir EXACTAMENTE los resultados verificados en FASE 1 sobre los ficheros custodiados originales.",
+    "union_descuadres_esperados": {
+      "prop_1783441481122_0.IBI": 58.73,
+      "prop_1783441481122_3.Community": 688.16,
+      "prop_1783441481122_3.Repairs": 521.7,
+      "prop_1783442545992.Insurance": 237.6
+    },
+    "union_rent_total_esperado": {
+      "prop_1783441481122_0": 12000,
+      "prop_1783441481122_1": 17160,
+      "prop_1783441481122_2": 6000,
+      "prop_1783441481122_3": 7440,
+      "prop_1783442545992": 6600,
+      "prop_1783442822113": 8760
+    },
+    "soloB_descuadre_extra_esperado": {
+      "prop_1783441481122_1.Insurance": 354.78
+    },
+    "conteos_esperados": {
+      "total_registros": 51,
+      "B": 25,
+      "A": 25,
+      "ambos": 1
+    },
+    "convencion": "delta = agregado_inmueble − suma_detalle (positivo: el agregado del inmueble EXCEDE al detalle recibido)"
+  }
+}

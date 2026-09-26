@@ -126,6 +126,12 @@ export async function generarExpedienteFiscal(
         inmueble.id, ejercicio, entrada.inmuebles, entrada.contratos, entrada.gastos
       );
       if (!resumen) continue;
+      // Determinismo (contrato B6): el motor fiscal reutilizado estampa un
+      // `generadoEn: new Date()` volátil en sus metadatos (fiscalEngine.ts
+      // L624). No se modifica el motor existente: se normaliza aquí al
+      // `generatedAt` explícito del llamante, que es el único campo temporal
+      // permitido. Sin esto, dos generaciones idénticas difieren por ms.
+      (resumen as { generadoEn?: string }).generadoEn = opciones.generatedAt;
       resumenes.push(resumen);
 
       // Ingresos = cobros existentes (DERIVADO: sin cálculo nuevo del importe).

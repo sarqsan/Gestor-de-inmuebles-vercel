@@ -149,6 +149,8 @@ import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
 import { Header } from './components/Header';
+// INC-06 — pantalla patrimonial de producción (módulo C + persistencia real).
+import { PantallaPatrimonial } from './patrimonial/PantallaPatrimonial';
 import { CandidateModal } from './components/CandidateModal';
 import { SmartReportModal } from './components/SmartReportModal';
 import { CrearAgendaVisitasModal } from './components/CrearAgendaVisitasModal';
@@ -3567,39 +3569,48 @@ export default function App() {
           )}
 
           {activeSection === 'propietarios' && (
-            currentUser.tipoPerfil === 'PROPIETARIO' ? (
-              <PropietarioPortalSection
-                currentUser={currentUser}
-                inmuebles={scopedInmuebles}
-                profesionales={scopedProfesionales}
-                contratos={scopedContratos}
-                especialidades={especialidades}
+            <>
+              {currentUser.tipoPerfil === 'PROPIETARIO' ? (
+                <PropietarioPortalSection
+                  currentUser={currentUser}
+                  inmuebles={scopedInmuebles}
+                  profesionales={scopedProfesionales}
+                  contratos={scopedContratos}
+                  especialidades={especialidades}
+                  propietarios={scopedPropietarios}
+                  liquidaciones={scopedLiquidaciones}
+                  resumenMorosidad={morosidadResumenPropietario}
+                  gastos={scopedGastos}
+                  incidencias={scopedIncidencias}
+                  onOpenCrearProfesionalModal={(prof) => {
+                    setSelectedProfForEdit(prof);
+                    setShowCrearProfesionalModal(true);
+                  }}
+                  onSaveProfesional={handleSaveProfesional}
+                  onSavePropietario={handleSavePropietario}
+                  onNavigateToInmueble={() => setActiveSection('inmuebles')}
+                />
+              ) : (
+                <PropietariosSection
+                  propietarios={scopedPropietarios}
+                  inmuebles={scopedInmuebles}
+                  onSavePropietario={handleSavePropietario}
+                  onDeletePropietario={handleDeletePropietario}
+                  onSelectInmueble={() => setActiveSection('inmuebles')}
+                  onCrearInmueble={(propietarioId) => {
+                    setAltaInmuebleDesdePropietarioId(propietarioId);
+                    setActiveSection('inmuebles');
+                  }}
+                />
+              )}
+              {/* INC-06 — fichas patrimoniales persistentes e importación
+                  controlada (destino explícito, preview dry-run, auditoría). */}
+              <PantallaPatrimonial
                 propietarios={scopedPropietarios}
-                liquidaciones={scopedLiquidaciones}
-                resumenMorosidad={morosidadResumenPropietario}
-                gastos={scopedGastos}
-                incidencias={scopedIncidencias}
-                onOpenCrearProfesionalModal={(prof) => {
-                  setSelectedProfForEdit(prof);
-                  setShowCrearProfesionalModal(true);
-                }}
-                onSaveProfesional={handleSaveProfesional}
-                onSavePropietario={handleSavePropietario}
-                onNavigateToInmueble={() => setActiveSection('inmuebles')}
+                usuarioActual={currentUser}
+                onCrearPropietario={handleSavePropietario}
               />
-            ) : (
-              <PropietariosSection
-                propietarios={scopedPropietarios}
-                inmuebles={scopedInmuebles}
-                onSavePropietario={handleSavePropietario}
-                onDeletePropietario={handleDeletePropietario}
-                onSelectInmueble={() => setActiveSection('inmuebles')}
-                onCrearInmueble={(propietarioId) => {
-                  setAltaInmuebleDesdePropietarioId(propietarioId);
-                  setActiveSection('inmuebles');
-                }}
-              />
-            )
+            </>
           )}
 
           {activeSection === 'preseleccionados' && (

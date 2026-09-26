@@ -515,6 +515,19 @@ export function crearEvaluadorReglas(RULES: string) {
           if (base === MISSING || !Array.isArray(base)) return false;
           return otros.some((x) => base.includes(x));
         }
+        // INC-06 — cobertura de `hasOnly` (semántica Firestore: todo elemento
+        // del conjunto está en la lista; duplicados irrelevantes). Lo usan
+        // clavesFichaPublicaOk, progreso_tutoriales y las reglas INC-06.
+        if (nombre === 'hasOnly') {
+          const permitidos = evaluar(nodo.args[0], req, funciones, frame) as unknown[];
+          if (base === MISSING || !Array.isArray(base)) return false;
+          return base.every((x) => permitidos.includes(x));
+        }
+        if (nombre === 'hasAll') {
+          const requeridos = evaluar(nodo.args[0], req, funciones, frame) as unknown[];
+          if (base === MISSING || !Array.isArray(base)) return false;
+          return requeridos.every((x) => base.includes(x));
+        }
         if (nombre === 'keys') {
           if (base === MISSING || !base || typeof base !== 'object') return MISSING;
           return Object.keys(base as object);

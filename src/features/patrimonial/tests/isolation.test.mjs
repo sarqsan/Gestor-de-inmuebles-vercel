@@ -84,22 +84,35 @@ test('núcleo de completitud/preview sin reloj, aleatoriedad ni inferencia de id
 // Ficheros permitidos de la integración (además del módulo y su documento):
 // el puente arquitectónico, su test y la exclusión de vitest para los tests
 // nativos de C. Nada más puede diferir de la base.
+// INC-06 — la lista crece con la superficie EXACTA del bloque de persistencia
+// (núcleo puro + adaptador Firestore + pantalla de producción + conexión mínima
+// en App.tsx + tipos de auditoría + reglas + tests + extensión fail-loud del
+// harness de reglas). Cualquier otro fichero que difiera de la base sigue
+// haciendo fallar este test: la semántica de aislamiento se conserva.
 const PERMITIDOS_INTEGRACION = [
   'src/features/patrimonial/',
   'docs/patrimonial-ux/alcance-fase-1.md',
   'src/lib/patrimonialIntegracion.ts',
   'tests/patrimonial-integracion.test.ts',
   'vite.config.ts',
+  // bloque INC-06 (persistencia de fichas + ejecución controlada):
+  'src/lib/patrimonialPersistencia.ts',
+  'src/lib/patrimonialPersistenciaFirebase.ts',
+  'src/patrimonial/',
+  'tests/patrimonial-persistencia.test.ts',
+  'tests/seguridad-firestore-patrimonial.test.ts',
+  'tests/harness/firestoreRulesEval.ts',
+  'src/App.tsx',
+  'src/types.ts',
+  'firestore.rules',
 ];
 const permitido = (path) => PERMITIDOS_INTEGRACION.some((p) => path === p || path.startsWith(p));
 
-test('ningún archivo productivo difiere de la base: solo el módulo, su documento y el puente', async () => {
+test('ningún archivo productivo difiere de la base fuera de la superficie de integración documentada', async () => {
   const { execFileSync } = await import('node:child_process');
+  const exclusiones = PERMITIDOS_INTEGRACION.map((p) => `:!${p.replace(/\/$/, '')}`);
   const diff = execFileSync('git', [
-    'diff', '--name-only', BASE_INTEGRACION, '--', '.',
-    ':!src/features/patrimonial', ':!docs/patrimonial-ux/alcance-fase-1.md',
-    ':!src/lib/patrimonialIntegracion.ts', ':!tests/patrimonial-integracion.test.ts',
-    ':!vite.config.ts',
+    'diff', '--name-only', BASE_INTEGRACION, '--', '.', ...exclusiones,
   ], { cwd: repo, encoding: 'utf8' });
   assert.equal(diff.trim(), '');
   const sinSeguimiento = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' });

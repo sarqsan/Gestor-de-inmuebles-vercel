@@ -498,11 +498,26 @@ service cloud.firestore {
     // 0B. PROPIETARIOS — DATOS FISCALES Y CUENTAS BANCARIAS (máxima sensibilidad)
     // =========================================================================
     match /propietarios/{propietarioId} {
+      // INC-06 — ¿El propietario es una cartera que gestiono (proyección D2b
+      // carterasL ∪ carterasE del espejo, que SOLO el master escribe)? Da
+      // LECTURA de la ficha; la escritura exige carterasE y queda acotada.
+      function carteraGestionadaPorMi(pid) {
+        return activeUser() && pid is string && (
+          carterasLectura().hasAny([pid]) || carterasEscritura().hasAny([pid])
+        );
+      }
+
       // Cada propietario sólo puede leer su propia ficha. El Administrador, todas.
-      allow get: if isMasterAdmin() || ownsPropietario(propietarioId);
+      // INC-06: el gestor con relación de cartera vigente (L o E) lee la ficha
+      // del propietario gestionado (mismo alcance D2b que ya tiene sobre los
+      // inmuebles de esa cartera). Sin relación, nada cambia.
+      allow get: if isMasterAdmin() || ownsPropietario(propietarioId)
+        || carteraGestionadaPorMi(propietarioId);
       allow list: if isMasterAdmin();
 
       // El propietario puede crear/editar únicamente SU ficha (id coincidente).
+      // (INC-06 no amplía la creación: crear propietario sigue siendo del
+      // titular o del master; el gestor NO crea propietarios — S3.)
       allow create: if isMasterAdmin() || (
         isPropietarioRole()
         && propietarioId == myPropId()
@@ -512,6 +527,16 @@ service cloud.firestore {
         isPropietarioRole()
         && propietarioId == myPropId()
         && 'id' in existing() && existing().id == propietarioId
+      ) || (
+        // INC-06 — el gestor con cartera de ESCRITURA (carterasE: ACTIVA +
+        // LECTURA_ESCRITURA + responsableActual GESTOR, proyectadas por el
+        // master) puede actualizar SOLO el subobjeto `fichaPatrimonial`.
+        // carterasL (lectura histórica, S7) NO escribe. Ningún otro campo del
+        // propietario (datos, cuentas bancarias, notas) queda al alcance del
+        // gestor: la firma de la actualización es exactamente una clave.
+        activeUser()
+        && carterasEscritura().hasAny([propietarioId])
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fichaPatrimonial'])
       );
       allow delete: if isMasterAdmin();
     }
@@ -592,6 +617,61 @@ service cloud.firestore {
       allow get: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
       allow list: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
       allow create, update, delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // INC-06 — REGISTROS PATRIMONIALES IMPORTADOS (`registros_patrimoniales`):
+    // persistencia trazable de la ejecución confirmada de importaciones del
+    // módulo patrimonial (núcleo en src/lib/patrimonialPersistencia.ts).
+    //  · Cada documento es un registro importado con procedencia completa
+    //    (sistema, origenId, fuente, lote), evaluación de datos e incidencias
+    //    conservadas: nunca una incidencia se convierte en éxito silencioso.
+    //  · LECTURA: ámbito administrativo legítimo, titular del propietario
+    //    destino o gestor con cartera gestionada (D2b, carterasL ∪ carterasE).
+    //  · ESCRITURA: master, titular, o gestor con carterasE sobre el
+    //    propietario destino; el documento debe cumplir la forma exacta del
+    //    contrato persistido (lista cerrada de claves, id == docId, estados
+    //    del vocabulario del módulo).
+    //  · Historial: update/delete SOLO master. Ni el flujo normal ni el gestor
+    //    ni el titular pueden editar o borrar retrospectivamente lo importado.
+    // =========================================================================
+    match /registros_patrimoniales/{registroId} {
+      function registroPatrimonialOk() {
+        return incoming().keys().hasOnly([
+          'id', 'propietarioId', 'loteId', 'indiceOrigen', 'datosOrigen',
+          'estadoDatos', 'camposFaltantes', 'politicaId', 'decision',
+          'incidencias', 'procedencia', 'creadaEn', 'creadaPor'
+        ])
+        && incoming().keys().hasAll([
+          'id', 'propietarioId', 'loteId', 'indiceOrigen', 'datosOrigen',
+          'estadoDatos', 'camposFaltantes', 'politicaId', 'decision',
+          'incidencias', 'procedencia', 'creadaEn', 'creadaPor'
+        ])
+        && registroId == incoming().id
+        && incoming().propietarioId is string && incoming().propietarioId.size() > 0
+        && incoming().loteId is string && incoming().loteId.size() > 0
+        && incoming().indiceOrigen is int && incoming().indiceOrigen >= 0
+        && incoming().datosOrigen is map
+        && incoming().estadoDatos in ['COMPLETO', 'INCOMPLETO', 'BLOQUEADO']
+        && incoming().camposFaltantes is list
+        && (incoming().politicaId is string || incoming().politicaId == null)
+        && incoming().decision in ['CREARIA', 'REVISAR']
+        && incoming().incidencias is list
+        && incoming().procedencia is map
+        && incoming().creadaEn is string && incoming().creadaPor is string;
+      }
+      allow get, list: if esAdminInmuebles()
+        || ownsPropietario(resource.data.propietarioId)
+        || (activeUser() && (
+          carterasLectura().hasAny([resource.data.propietarioId])
+          || carterasEscritura().hasAny([resource.data.propietarioId])
+        ));
+      allow create: if registroPatrimonialOk() && (
+        esAdminInmuebles()
+        || ownsPropietario(incoming().propietarioId)
+        || (activeUser() && carterasEscritura().hasAny([incoming().propietarioId]))
+      );
+      allow update, delete: if isMasterAdmin();
     }
 
 

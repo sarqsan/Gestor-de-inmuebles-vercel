@@ -184,6 +184,38 @@ service cloud.firestore {
       return isPropietarioRole() && myInmuebleIds().hasAny([inmId]);
     }
 
+    // D2a — acotación server-side de LECTURA de `inmuebles` (cierre de F5-1).
+    // Ámbito administrativo legítimo: el master reconocido por email, o el
+    // perfil ADMINISTRADOR en `usuarios/{uid}` (el espejo y el perfil nunca
+    // pueden auto-afirmar ADMINISTRADOR: sólo el master puede escribirlo, así
+    // que no se amplían privilegios; se retira el "isStaff() ⇒ acceso global").
+    function esAdminInmuebles() {
+      return isMasterAdmin() ||
+        (existeUsuarioActual() && getUsuarioActual().tipoPerfil == 'ADMINISTRADOR');
+    }
+
+    // Titularidad jurídica del inmueble (titular o copropietario principal).
+    // En un `list` sólo la igualdad `propietarioId == myPropId()` es
+    // demostrable por el motor con `where('propietarioId','==', pid)` (el
+    // valor sale de un `get` de ruta fija que se trata como constante; mismo
+    // criterio que `contratoEsMio`).
+    function inmuebleEsMio(d) {
+      return isPropietarioRole() && (
+        ('propietarioId' in d && d.propietarioId == myPropId()) ||
+        ('propietarioPrincipalId' in d && d.propietarioPrincipalId == myPropId())
+      );
+    }
+
+    // Autorización explícita vía `inmuebleIds` del espejo de identidad, para
+    // cualquier usuario activo (propietario o profesional asignado). Es de
+    // SOLO LECTURA: la escritura (`update`) sigue gobernada por
+    // `canReachInmuebleId`, que no se modifica en D2a.
+    function inmuebleAutorizadoExplicito(inmId) {
+      return activeUser()
+        && 'inmuebleIds' in me() && me().inmuebleIds is list
+        && myInmuebleIds().hasAny([inmId]);
+    }
+
     // ¿El contrato pertenece a este propietario? Es la ÚNICA condición
     // demostrable para una CONSULTA (list): el cliente debe filtrar con
     // where('propietarioId','==', propietarioId). El valor propietarioId se
@@ -442,12 +474,27 @@ service cloud.firestore {
     // sin sesión). Escrituras: sin cambios.
     // =========================================================================
     match /inmuebles/{inmuebleId} {
-      allow get: if isStaff()
+      // D2a — LECTURA acotada server-side (cierre de F5-1): se retira el
+      // "isStaff() ⇒ cualquier inmueble". Ahora get exige autorización real:
+      //   1. ámbito administrativo legítimo ya existente (master por email o
+      //      perfil ADMINISTRADOR, que sólo el master puede escribir);
+      //   2. titularidad jurídica (propietarioId / propietarioPrincipalId);
+      //   3. autorización explícita (inmuebleIds del espejo de identidad);
+      //   4. tenant con contrato activo/autorizado (rama INTACTA).
+      allow get: if esAdminInmuebles()
+        || inmuebleEsMio(resource.data)
+        || inmuebleAutorizadoExplicito(inmuebleId)
         || (isTenant() && (
           tenantVeContratos(campoListaActual('contratoIdsAutorizados'))
           || ('contratoActivoId' in resource.data && tenantTieneContrato(resource.data.contratoActivoId))
         ));
-      allow list: if isStaff();
+      // D2a — list: un usuario ordinario NO puede listar la colección. La
+      // única consulta demostrable por el motor es
+      // `where('propietarioId','==', myPropId())` (inmuebleEsMio); la
+      // autorización explícita se sirve por `get` documento a documento
+      // (nunca por list) y la colección completa queda reservada al ámbito
+      // administrativo legítimo.
+      allow list: if esAdminInmuebles() || inmuebleEsMio(resource.data);
 
       allow create: if isMasterAdmin() || (
         isPropietarioRole() && (

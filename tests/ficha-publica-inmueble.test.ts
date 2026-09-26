@@ -372,18 +372,27 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
     expect(b).not.toContain('if true');
   });
 
-  it('§1 get: personal autenticado o inquilino vinculado a SU vivienda', () => {
+  it('§1 get (D2a): autorización real (admin legítimo, titularidad o autorización explícita) o inquilino vinculado a SU vivienda', () => {
     const b = bloqueFs(INM);
-    expect(b).toContain('allow get: if isStaff()');
+    // D2a: se retira el "isStaff() ⇒ cualquier inmueble" (cierre de F5-1).
+    expect(b).not.toContain('allow get: if isStaff()');
+    expect(b).toContain('allow get: if esAdminInmuebles()');
+    expect(b).toContain('inmuebleEsMio(resource.data)');
+    expect(b).toContain('inmuebleAutorizadoExplicito(inmuebleId)');
+    // La rama tenant sigue INTACTA:
     expect(b).toContain('isTenant()');
     expect(b).toContain("contratoIdsAutorizados");
     expect(b).toContain('contratoActivoId');
     expect(b).toContain('tenantTieneContrato');
   });
 
-  it('§1 list: solo personal autenticado (sin enumeración anónima)', () => {
+  it('§1 list (D2a): sin enumeración anónima ni ordinaria (consulta acotada o admin legítimo)', () => {
     const b = bloqueFs(INM);
-    expect(b).toContain('allow list: if isStaff();');
+    // D2a: el list deja de ser "cualquier staff"; sólo la consulta
+    // demostrable del titular (where propietarioId ==) o el ámbito
+    // administrativo legítimo.
+    expect(b).not.toContain('allow list: if isStaff();');
+    expect(b).toContain('allow list: if esAdminInmuebles() || inmuebleEsMio(resource.data);');
   });
 
   it('§1 escrituras INTACTAS (create/update/delete sin cambios R3)', () => {

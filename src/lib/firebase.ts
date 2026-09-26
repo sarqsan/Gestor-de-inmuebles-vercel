@@ -183,6 +183,14 @@ export interface DataAccessScope {
   tipoPerfil?: string;
   propietarioId?: string;
   inmuebleIds?: string[];
+  /**
+   * D2b — RESERVADO, sin efecto en D2a. Propietarios cuyas carteras están en
+   * gestión ACTIVA (`gestiones_cartera`). Cuando D2b se implemente, los
+   * suscriptores con ámbito añadirán
+   * `where('propietarioId', 'in', scope.propietariosGestionados)` a la unión
+   * sin rehacer el suscriptor. D2a NO resuelve `gestiones_cartera` aquí.
+   */
+  propietariosGestionados?: string[];
 }
 
 /**
@@ -255,9 +263,126 @@ export async function deletePropietarioFirestore(propietarioId: string) {
 }
 
 /**
- * Real-time listener for Inmuebles
+ * D2a — Fusión "propios ∪ autorizados explícitos" sin duplicados.
+ *
+ * · `propietarioIds` (0..1 en D2a): consulta server-side
+ *   `where('propietarioId','==', pid)` — la ÚNICA condición que las reglas
+ *   pueden demostrar para un `list` (mismo criterio que `contratoEsMio` en
+ *   `contratos_formalizacion`: el valor se obtiene con un `get` de ruta fija
+ *   que el motor trata como constante).
+ * · `autorizadoIds`: listeners DOCUMENTO A DOCUMENTO (`onSnapshot(doc(...))`).
+ *   La pertenencia a un array (`inmuebleIds`) no es demostrable por el motor
+ *   para una consulta `list`, así que los inmuebles autorizados se leen por
+ *   `get`, que sí admite `hasAny([...])` sobre el espejo de identidad.
+ *
+ * D2b (carteras): añadir una segunda fuente
+ * `where('propietarioId','in', propietariosGestionados)` a esta unión; el
+ * merge por id ya deduplica. No se implementa en D2a.
  */
-export function subscribeInmuebles(callback: (inmuebles: Inmueble[]) => void) {
+function subscribeUnionInmuebles(
+  callback: (inmuebles: Inmueble[]) => void,
+  propietarioIds: string[],
+  autorizadoIds: string[]
+): Unsubscribe {
+  const porFuente = new Map<string, Map<string, Inmueble>>();
+  const fuentes: Unsubscribe[] = [];
+
+  const notificar = () => {
+    const union = new Map<string, Inmueble>();
+    porFuente.forEach((fuente) => fuente.forEach((v, k) => union.set(k, v)));
+    callback(Array.from(union.values()));
+  };
+
+  if (propietarioIds.length > 0) {
+    const scopedQuery =
+      propietarioIds.length === 1
+        ? query(INMUEBLES_COL, where('propietarioId', '==', propietarioIds[0]))
+        : query(INMUEBLES_COL, where('propietarioId', 'in', propietarioIds));
+    fuentes.push(
+      onSnapshot(
+        scopedQuery,
+        (snap) => {
+          const propios = new Map<string, Inmueble>();
+          snap.forEach((ds) => propios.set(ds.id, { id: ds.id, ...ds.data() } as Inmueble));
+          porFuente.set('propios', propios);
+          notificar();
+        },
+        (err) => {
+          console.error('Firestore inmuebles (propios) snapshot error:', err);
+        }
+      )
+    );
+  }
+
+  autorizadoIds.forEach((inmuebleId) => {
+    fuentes.push(
+      onSnapshot(
+        doc(db, 'inmuebles', inmuebleId),
+        (ds) => {
+          const autorizados = porFuente.get('autorizados') ?? new Map<string, Inmueble>();
+          if (ds.exists()) {
+            autorizados.set(inmuebleId, { id: ds.id, ...ds.data() } as Inmueble);
+          } else {
+            autorizados.delete(inmuebleId);
+          }
+          porFuente.set('autorizados', autorizados);
+          notificar();
+        },
+        (err) => {
+          console.error(`Firestore inmueble autorizado ${inmuebleId} snapshot error:`, err);
+        }
+      )
+    );
+  });
+
+  return () => fuentes.forEach((unsub) => unsub());
+}
+
+/**
+ * Real-time listener for Inmuebles.
+ *
+ * D2a — suscripción con ámbito (cierre de F5-1): el acceso server-side deja
+ * de ser "autenticado no-tenant ⇒ colección completa".
+ * · PROPIETARIO: propios (`where propietarioId ==`) ∪ autorizados explícitos
+ *   (`inmuebleIds`, documento a documento). Nunca recibe inmuebles de otros.
+ * · PROFESIONAL (y cualquier perfil no titular): SOLO autorizados explícitos;
+ *   sin ellos, vacío. Nunca recibe la colección completa.
+ * · ADMINISTRADOR / sin ámbito: colección completa (ámbito administrativo
+ *   legítimo ya existente, sin ampliación).
+ * · D2b — RESERVADO: `scope.propietariosGestionados` (carteras en gestión
+ *   ACTIVA de `gestiones_cartera`) se incorporará como una fuente más de
+ *   `subscribeUnionInmuebles` sin rehacer este suscriptor. D2a no lo resuelve.
+ */
+export function subscribeInmuebles(
+  callback: (inmuebles: Inmueble[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  const autorizados = Array.from(
+    new Set((scope?.inmuebleIds ?? []).filter((id) => typeof id === 'string' && id.length > 0))
+  );
+
+  // A) PROPIETARIO — propios ∪ autorizados.
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    const pid = scope.propietarioId;
+    if (!pid && autorizados.length === 0) {
+      callback([]);
+      return () => {};
+    }
+    return subscribeUnionInmuebles(callback, pid ? [pid] : [], autorizados);
+  }
+
+  // B) Cualquier otro perfil conocido no administrativo (PROFESIONAL,
+  //    INQUILINO, …): sin acceso a la colección; solo autorización explícita.
+  if (scope?.tipoPerfil && scope.tipoPerfil !== 'ADMINISTRADOR') {
+    if (autorizados.length === 0) {
+      callback([]);
+      return () => {};
+    }
+    return subscribeUnionInmuebles(callback, [], autorizados);
+  }
+
+  // C) ADMINISTRADOR / sin ámbito — colección completa (comportamiento
+  //    administrativo legítimo conservado tal cual).
   return onSnapshot(
     INMUEBLES_COL,
     (snapshot) => {

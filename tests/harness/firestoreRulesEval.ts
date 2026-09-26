@@ -195,6 +195,7 @@ export function crearEvaluadorReglas(RULES: string) {
     | { k: 'path'; partes: (string | Nodo)[] }
     | { k: 'ident'; nombre: string }
     | { k: 'field'; obj: Nodo; nombre: string }
+    | { k: 'index'; obj: Nodo; idx: Nodo }
     | { k: 'call'; obj: Nodo | null; nombre: string; args: Nodo[] }
     | { k: 'bin'; op: string; l: Nodo; r: Nodo }
     | { k: 'not'; e: Nodo }
@@ -313,6 +314,15 @@ export function crearEvaluadorReglas(RULES: string) {
           continue;
         }
         if (peek() === '(') { p++; const args = argumentos(); nodo = { k: 'call', obj: null, nombre: t, args }; continue; }
+        // acceso dinámico por índice: `existing()[nombre]` (usado por
+        // `campoListaActual` y compañía). Sigue el mismo criterio fail-loud.
+        if (peek() === '[') {
+          p++;
+          const idx = expr();
+          eat(']');
+          nodo = { k: 'index', obj: nodo, idx };
+          continue;
+        }
         break;
       }
       return nodo;
@@ -346,7 +356,7 @@ export function crearEvaluadorReglas(RULES: string) {
       if (t === '>' || t === '<' || t === '>=' || t === '<=') { p++; return { k: 'bin', op: t, l, r: aditivo() }; }
       if (t === 'in') { p++; return { k: 'bin', op: 'in', l, r: aditivo() }; }
       if (t === 'matches') { p++; return { k: 'bin', op: 'matches', l, r: aditivo() }; }
-      if (t === 'is') { p++; const tipo = toks[p++]; if (peek() === '&&' || peek() === '||' || !peek() || peek() === ')') return { k: 'is', e: l, tipo }; throw new Error(`HARNESS NO CUBRE: tras is ${tipo}: ${JSON.stringify(peek())}`); }
+      if (t === 'is') { p++; const tipo = toks[p++]; if (!peek() || peek() === '&&' || peek() === '||' || peek() === ')' || peek() === '?' || peek() === ',' || peek() === ']' || peek() === ':') return { k: 'is', e: l, tipo }; throw new Error(`HARNESS NO CUBRE: tras is ${tipo}: ${JSON.stringify(peek())}`); }
       return l;
     }
 
@@ -428,6 +438,26 @@ export function crearEvaluadorReglas(RULES: string) {
           return nodo.nombre === 'data' ? mapa : (nodo.nombre in mapa ? (mapa as Record<string, unknown>)[nodo.nombre] : MISSING);
         }
         if (typeof base === 'object' && nodo.nombre in (base as object)) return (base as Record<string, unknown>)[nodo.nombre];
+        return MISSING;
+      }
+      case 'index': {
+        // Acceso dinámico `base[índice]` (p. ej. `existing()[nombre]`):
+        // mismo criterio que `field` — base ausente ⇒ MISSING (fail-closed).
+        const base = evaluar(nodo.obj, req, funciones, frame);
+        if (base === MISSING || base === undefined || base === null) return MISSING;
+        const idx = evaluar(nodo.idx, req, funciones, frame);
+        if (idx === MISSING || idx === undefined || idx === null) return MISSING;
+        if (esDoc(base)) {
+          const mapa = base.__doc;
+          return mapa && String(idx) in mapa ? (mapa as Record<string, unknown>)[String(idx)] : MISSING;
+        }
+        if (Array.isArray(base)) {
+          const n = Number(idx);
+          return Number.isInteger(n) && n >= 0 && n < base.length ? base[n] : MISSING;
+        }
+        if (typeof base === 'object' && String(idx) in (base as object)) {
+          return (base as Record<string, unknown>)[String(idx)];
+        }
         return MISSING;
       }
       case 'call': {

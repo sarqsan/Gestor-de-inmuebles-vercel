@@ -144,6 +144,7 @@ import {
   saveAuditLogFirestore,
   saveModulosConfigFirestore,
 } from './lib/firebase';
+import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
@@ -1018,22 +1019,22 @@ export default function App() {
       inmuebleIds: currentUser.inmuebleIds || [],
     };
 
-    // R3: suscripción completa de inmuebles, SOLO autenticada (las reglas §1
-    // deniegan get/list anónimos; el funnel público usa la ficha espejo).
+    // D2a: suscripción de inmuebles CON ÁMBITO (propios ∪ autorizados
+    // explícitos; colección completa sólo para el ámbito administrativo
+    // legítimo). Las reglas ya no permiten a un usuario ordinario listar o
+    // leer la colección completa (cierre de F5-1).
+    //
+    // FASE 4 D2a: un snapshot vacío (consulta legítimamente acotada a cero
+    // resultados) NUNCA dispara restauración caché -> Firestore; la única
+    // dirección automática es Firestore -> caché de lectura.
     const unsubscribeInm = subscribeInmuebles((data) => {
-      if (data && data.length > 0) {
-        setInmuebles(data);
-        try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(data)); } catch (e) {}
-      } else {
-        setInmuebles((current) => {
-          if (current.length > 0) {
-            current.forEach((inm) => saveInmuebleFirestore(inm));
-            return current;
-          }
-          return [];
-        });
-      }
-    });
+      procesarSnapshotInmuebles(data, {
+        setInmuebles,
+        escribirCacheLectura: (items) => {
+          try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(items)); } catch (e) {}
+        },
+      });
+    }, dataScope);
 
     const unsubscribeCand = subscribeCandidatos((data) => {
       if (data && data.length > 0) {

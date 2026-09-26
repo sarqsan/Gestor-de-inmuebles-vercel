@@ -1630,6 +1630,41 @@ permisos · persistencia · auditoría · documentos · lectura/escritura · err
 parciales · recuperación. **NO declarar este bloque terminado por tener
 únicamente tests unitarios.**
 
+#### RETENCIÓN ≥ 5 AÑOS — CIERRE DOCUMENTAL (auditoría 2026-09-26)
+
+Los dos conceptos siguientes están **expresamente separados** y no deben
+mezclarse nunca:
+
+- 🟢 **RETENCIÓN FUNCIONAL SIN PURGA AUTOMÁTICA Y CON PROTECCIÓN CONTRA
+  BORRADO EN LAS COLECCIONES CRÍTICAS.** Verificado sobre el repo:
+  - Sin TTL de Firestore: `firebase.json` y `firestore.indexes.json` no
+    declaran ninguna política TTL; el código no configura TTL
+    (`POLITICA_RETENCION.ttlConfigurado: false` en el expediente B3).
+  - Sin purga automática: ningún mecanismo programado
+    (`setInterval`/cron/limpieza) borra datos; los `deleteDoc` existentes en
+    `firebase.ts` son operaciones manuales explícitas de administración,
+    acotadas por reglas.
+  - Sin lifecycle de Storage declarada en el repositorio.
+  - Protección contra borrado por reglas: `audit_logs`
+    (`allow update, delete: if false` — nadie, ni el master) e
+    `inventario_historial`, `mensajes_portal`, `lecturas_suministro` y las
+    colecciones de morosidad/histórico; adicionalmente `registros_patrimoniales`
+    y `gestiones_cartera` con update/delete reservados al master, y
+    `propietarios`/`inmuebles` con delete sólo master.
+  - `documentosServidor.ts` es un almacén **efímero en memoria** del proceso
+    de servicio (sin imports de Firebase): su TTL interno no afecta a la
+    persistencia de Firestore/Storage.
+- 🟡 **CUSTODIA/RETENCIÓN DE INFRAESTRUCTURA GCP A LARGO PLAZO**
+  (dependencia operativa futura): la conservación **física** a 5+ años depende
+  de la administración del proyecto Firebase/GCP (ciclo de vida del bucket de
+  Storage, copias de seguridad/exportaciones de Firestore, estado de
+  facturación y no eliminación del proyecto). La aplicación **no la garantiza
+  ni puede garantizarla**, y por tanto **no se afirma ninguna «garantía
+  técnica de 5 años»** por parte del ERP.
+- Requisito funcional del ERP (inalterado): conservar el histórico ≥ 5 años y
+  **no** implementar TTL ni borrado automático de documentos, movimientos,
+  auditoría, pólizas ni registros patrimoniales.
+
 ### BLOQUE 5 — RECUPERACIÓN HISTÓRICA / IMPORTACIÓN — **PENDIENTE**
 
 Recuperar/integrar cuando exista fuente verificable: datos históricos · AEAT ·

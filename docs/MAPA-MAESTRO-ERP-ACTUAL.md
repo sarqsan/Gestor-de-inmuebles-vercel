@@ -6,8 +6,13 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: **2026-09-26 — RECONCILIACIÓN GLOBAL CERRADA Y `main`
-> PUBLICADA**: `main = origin/main = 37341c6` (cadena lineal `5f7754b → … →
+> Última actualización: **2026-09-26 — §16 RECUPERACIÓN FUNCIONAL HISTÓRICA Y
+> CAPACIDADES ESTRATÉGICAS** (registro documental, sin cambios de código):
+> auditoría funcional histórica declarada trabajo pendiente ·
+> `IA_CARTERA_TRANSVERSAL` · `INCIDENCIA_IA_END_TO_END` ·
+> `ESCANER_FACTURAS_IA` · `FICHA_ECONOMICA_INMUEBLE`.
+> Anterior: 2026-09-26 — RECONCILIACIÓN GLOBAL CERRADA Y `main`
+> PUBLICADA: `main = origin/main = 37341c6` (cadena lineal `5f7754b → … →
 > 8a2fb20 → 37341c6`: FASE 2–7, D1R, integración del modelo propietario/gestor,
 > D2, D2a, D2b/D3, integración de Arena C e INC-06). Estado consolidado: **§13**.
 > Nuevo roadmap por bloques grandes (0–6) con trabajo paralelo Arena B/Arena C:
@@ -1673,6 +1678,9 @@ discrepancias detectadas · rentas ambiguas (A/B) · IBI/comunidad/reparaciones/
 seguros pendientes de validar. **Regla: NO inventar ni corregir históricamente
 sin evidencia.** Los datos incompletos pueden entrar como `INCOMPLETO`
 conservando origen · incidencia · campos faltantes · trazabilidad.
+> La **auditoría funcional histórica completa** se registra de forma
+> independiente en **§16** — NO queda absorbida por este bloque ni por
+> ningún GAP genérico.
 
 ### BLOQUE 6 — IMPORTACIÓN / EXPORTACIÓN GLOBAL DEL ERP — **PENDIENTE**
 
@@ -1715,3 +1723,181 @@ Seguros)** · **Arena C: Bloque 2 (Operaciones + Mantenimiento)**.
 9. La integración se hará posteriormente desde un estado validado.
 10. No tocar `main` directamente durante el desarrollo de estos bloques salvo
     mediante el proceso de integración autorizado.
+
+---
+
+## 16. RECUPERACIÓN FUNCIONAL HISTÓRICA Y CAPACIDADES ESTRATÉGICAS (registro 2026-09-26)
+
+> **Bloque exclusivamente documental.** No implementa nada: registra requisitos
+> estratégicos e históricos con trazabilidad y prioridad de recuperación, para
+> que no se pierdan durante la futura recuperación histórica completa del
+> proyecto. Ningún estado de esta sección marca como IMPLEMENTADO lo que no
+> esté demostrado en el código actual.
+
+### 16.1 AUDITORÍA FUNCIONAL HISTÓRICA — TRABAJO PENDIENTE
+
+El proyecto tendrá una **auditoría histórica posterior de TODAS las
+conversaciones, especificaciones, órdenes, Arenas y aplicaciones relacionadas
+con el ERP**. Finalidad:
+
+- recuperar requisitos funcionales definidos al inicio que pudieron quedar
+  fuera del desarrollo posterior;
+- localizar funcionalidades que existieron en otras Arenas/aplicaciones;
+- distinguir por cada hallazgo: IMPLEMENTADO / PARCIAL / PREPARADO /
+  PENDIENTE / RECUPERAR / NO VERIFICADO;
+- conservar el **origen/procedencia** de cada funcionalidad (regla transversal
+  del proyecto: todo lo recuperado de conversaciones, Arenas o aplicaciones
+  anteriores queda trazable);
+- evitar que una funcionalidad desaparezca simplemente porque no figure en el
+  código actual;
+- comparar la **intención funcional original** con la implementación
+  actualmente custodiada.
+
+**Queda expresamente escrito:** esta auditoría histórica es un **trabajo
+pendiente** y el **inventario funcional del ERP NO se considera cerrado**
+hasta realizarla.
+
+### 16.2 `IA_CARTERA_TRANSVERSAL` — IA TRANSVERSAL DE CARTERA
+
+**Estado: PENDIENTE / DISEÑO ESTRATÉGICO** (no se marca como implementada
+hasta realizar una auditoría específica del código existente).
+
+Asistente de IA integrado en el propio ERP, contextualizado por **usuario,
+permisos y cartera**, capaz de consultar y razonar sobre la información
+autorizada del propio ERP. Ámbito objetivo: inmuebles · propietarios ·
+contratos · cobros · gastos · fiscalidad · seguros · incidencias ·
+mantenimiento · documentación · histórico · rentabilidad · operaciones ·
+alertas y situaciones pendientes. Debe ser una **IA contextual del ERP, NO un
+chatbot decorativo independiente**.
+
+**Requisito fundamental:** la IA debe respetar **exactamente** el modelo de
+autorización existente (contrato canónico:
+`docs/arquitectura/CONTRATO_CANONICO_AUTORIZACION_AUDITORIA_B_C.md`). Nunca
+debe revelar información de otra cartera o propietario por el simple hecho de
+que pueda consultarla técnicamente.
+
+**Base ya custodiada (no duplicar):** la **§6.2 y §6.5–§6.8** existe una capa
+de IA asistente transversal con FASES 1–4 IMPLEMENTADAS (motor de contexto,
+28 capacidades, validación determinista RBAC, confirmación previa en
+escritura, adaptador Gemini + proveedor local; validación real de Gemini
+pendiente, §12). Este requisito estratégico la **extiende** hacia la
+cobertura completa de cartera arriba listada; la auditoría de §16.1
+determinará qué parte del objetivo está ya cubierta.
+
+### 16.3 `INCIDENCIA_IA_END_TO_END` — INCIDENCIA INTELIGENTE END-TO-END
+
+**Estado: RECUPERAR / VERIFICAR IMPLEMENTACIÓN ACTUAL** (no marcar como
+implementado hasta auditar el código actual y, posteriormente, la
+documentación histórica).
+
+**Este concepto NO es una idea inventada en esta revisión:** forma parte del
+planteamiento funcional original del ERP. Durante la auditoría histórica
+(§16.1) deberá buscarse **evidencia de cuándo y cómo fue especificado,
+diseñado o implementado**.
+
+Flujo objetivo que debe conservarse en el mapa:
+
+```
+TENANT → COMUNICA INCIDENCIA
+→ IA realiza triaje inicial
+→ IA pregunta/comprueba soluciones sencillas cuando proceda
+→ IA determina gravedad/prioridad
+→ IA consulta contrato y contexto → responsabilidad probable
+→ PROPIETARIO recibe aviso desde el inicio y puede seguir el estado
+   durante el diagnóstico
+→ IA consulta seguros, garantías y pólizas relacionadas con
+   inmueble/electrodoméstico/equipamiento
+→ SI existe cobertura: orientar la apertura de siniestro y proporcionar
+   compañía/póliza/contacto/datos necesarios
+→ SI NO existe cobertura: continuar hacia proveedores/servicios
+→ solicitud/comparación de presupuestos
+→ autorización
+→ reparación
+→ factura
+→ gasto/documentación
+→ actualización del histórico del inmueble
+→ trazabilidad completa
+```
+
+La inteligencia **no termina en «diagnosticar la avería»**: el valor
+diferencial está en conectar incidencia + contrato + responsabilidad +
+seguro/garantía + propietario + proveedor + autorización + reparación +
+factura + histórico.
+
+Piezas actuales relacionadas (como contexto, no como implementación de este
+flujo): módulo de seguros del Bloque 1 (pólizas/siniestros/garantías),
+enlaces de reparaciones e índice documental del Bloque 3, y la orientación de
+flujo de averías de la §6.2. La cadena completa con triaje IA está por
+verificar/recuperar.
+
+### 16.4 `ESCANER_FACTURAS_IA` — ESCÁNER INTELIGENTE DE FACTURAS
+
+**Estado: RECUPERAR / INTEGRAR DESDE APLICACIÓN DE ORIGEN** (no marcar como
+implementado en la aplicación canónica actual hasta que exista evidencia de
+integración).
+
+**Origen: OTRA APLICACIÓN / GESTIÓN PATRIMONIAL — FUNCIONALIDAD EXISTENTE
+SEGÚN INVENTARIO FUNCIONAL DEL PROYECTO.** NO es una funcionalidad nueva que
+haya que diseñar desde cero.
+
+Funcionalidad conocida: OCR/IA sobre factura · extracción de importe · fecha ·
+concepto · categoría · inmueble · otros campos relevantes · confirmación/
+corrección por el usuario · selección manual del inmueble cuando la IA no
+pueda determinarlo con seguridad.
+
+**Requisito de recuperación:** durante la recuperación histórica deberá
+localizarse el **código/origen exacto** de esta funcionalidad en la
+aplicación correspondiente, auditarlo y determinar: qué está realmente
+implementado · qué componentes son reutilizables · qué modelo de datos
+utiliza · qué integración necesita con el modelo canónico actual · qué parte
+debe conservarse como origen/procedencia · qué parte debe adaptarse.
+
+### 16.5 `FICHA_ECONOMICA_INMUEBLE` — FICHA ECONÓMICA/FISCAL DEL INMUEBLE
+
+**Estado: REQUISITO CANÓNICO — AUDITAR IMPLEMENTACIÓN ACTUAL Y CERRAR GAPS
+EXISTENTES.**
+
+Dentro del **centro operativo del inmueble** debe existir una visión
+económica/fiscal contextual que permita consultar, al menos: IBI ·
+basura/tasas · gastos deducibles · otros gastos · ingresos/cobros de
+arrendamiento · resultado económico/fiscal disponible · histórico por
+ejercicios. Simultáneamente debe existir una **sección fiscal global del ERP**
+para consultar todos los inmuebles y filtrar.
+
+**IMPORTANTE:** no crear esto como aplicación o módulo paralelo: debe quedar
+integrado en el centro operativo del inmueble y conectado con la fiscalidad
+global. Base ya custodiada a auditar (no duplicar): motor `fiscalEngine`
+(FASE 6), sub-pestaña «Expediente» del Centro Operativo (Bloque 3, con
+métricas fiscales/tributos/índice documental) y exportación B6.
+
+### 16.6 NOTA TRANSVERSAL — LA LISTA NO ES EXHAUSTIVA
+
+> «La lista anterior NO se considera exhaustiva. Durante la recuperación
+> histórica deberán revisarse las conversaciones y trabajos desde el inicio
+> del proyecto para localizar otras funcionalidades, reglas de negocio,
+> flujos, automatizaciones, ideas o requisitos que hayan sido definidos y
+> posteriormente hayan quedado fuera, parcializados o sustituidos.»
+
+Clasificación **obligatoria** de cada hallazgo de la auditoría:
+
+`IMPLEMENTADO_CANONICO` · `IMPLEMENTADO_OTRA_ARENA` ·
+`IMPLEMENTADO_OTRA_APP` · `PARCIAL` · `PREPARADO` · `PENDIENTE` ·
+`RECUPERAR` · `NO_VERIFICADO` · `DESCARTADO_EXPLICITAMENTE`.
+
+**Nunca utilizar simplemente «no existe»** cuando lo único que se haya
+comprobado sea que no aparece en el código canónico actual.
+
+### 16.7 RELACIÓN CON EL PLAN GENERAL
+
+Se mantiene el orden estratégico ya acordado:
+
+1. 🟡 terminar y cerrar los trabajos actuales;
+2. 🟢 dejar los bloques actuales validados;
+3. → integración B/C en `main`;
+4. → recuperación histórica/importación (§14 BLOQUE 5);
+5. → **AUDITORÍA FUNCIONAL HISTÓRICA COMPLETA (§16.1)**;
+6. → recuperación/integración de funcionalidades descubiertas (§16.2–§16.6);
+7. → nueva auditoría global.
+
+La auditoría histórica **no desaparece ni queda absorbida** dentro de un GAP
+genérico ni del BLOQUE 5 (ver nota en §14).

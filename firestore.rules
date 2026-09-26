@@ -1157,12 +1157,23 @@ service cloud.firestore {
     // =========================================================================
     // 2L. PÓLIZAS DE SEGURO Y SINIESTROS (ARENA D)
     // Aislados por propietarioId.
+    // BLOQUE 1: el gestor accede con el mismo alcance que sobre los inmuebles
+    // de la cartera (D2a/D2b/D3): lectura carterasL∪carterasE, escritura SOLO
+    // carterasE y sin cambiar la titularidad (propietarioId inmutable para el
+    // gestor). El borrado sigue reservado a master/titular. Sin bypass global.
     // =========================================================================
     match /polizas_seguros/{polizaId} {
-      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
-      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
-      allow create: if isMasterAdmin() || aisladoCreateOk();
-      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))
+        || inmuebleEnCarteraGestionada(existing());
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || inmuebleEnCarteraGestionada(resource.data);
+      allow create: if isMasterAdmin() || aisladoCreateOk()
+        || (activeUser() && 'propietarioId' in incoming()
+            && carterasEscritura().hasAny([incoming().propietarioId]));
+      allow update: if isMasterAdmin() || aisladoUpdateOk()
+        || (inmuebleEnCarteraEscritura(existing())
+            && 'propietarioId' in incoming()
+            && incoming().propietarioId == existing().propietarioId);
       allow delete: if isMasterAdmin() || (
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
@@ -1170,10 +1181,17 @@ service cloud.firestore {
     }
 
     match /siniestros/{siniestroId} {
-      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
-      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
-      allow create: if isMasterAdmin() || aisladoCreateOk();
-      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))
+        || inmuebleEnCarteraGestionada(existing());
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || inmuebleEnCarteraGestionada(resource.data);
+      allow create: if isMasterAdmin() || aisladoCreateOk()
+        || (activeUser() && 'propietarioId' in incoming()
+            && carterasEscritura().hasAny([incoming().propietarioId]));
+      allow update: if isMasterAdmin() || aisladoUpdateOk()
+        || (inmuebleEnCarteraEscritura(existing())
+            && 'propietarioId' in incoming()
+            && incoming().propietarioId == existing().propietarioId);
       allow delete: if isMasterAdmin() || (
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()

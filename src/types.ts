@@ -1837,7 +1837,7 @@ export interface AuditLog {
   accion: string; // Ej: "ADMIN_CREO_USUARIO", "ADMIN_BLOQUEO_USUARIO", "PROPIETARIO_ASIGNO_PROFESIONAL"
   descripcion: string;
   fechaHora: string;
-  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial';
+  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial' | 'poliza_seguro';
   idAfectado: string;
   resultado: 'EXITO' | 'ERROR';
   detalles?: Record<string, any>;
@@ -2591,8 +2591,32 @@ export type TipoDocumentoPoliza =
   | 'POLIZA_RENOVACION'
   | 'CARTA_RENOVACION'
   | 'CONDICIONES_PARTICULARES'
+  | 'CONDICIONES_GENERALES'
+  | 'ANEXO'
+  | 'MODIFICACION'
+  | 'COMUNICACION'
   | 'RECIBO_PRIMA'
+  | 'DOCUMENTACION_ADICIONAL'
   | 'OTRO';
+
+/**
+ * Periodicidad de pago de la prima (BLOQUE 1 — centro operativo + seguros).
+ * Campo opcional en la póliza: las pólizas antiguas siguen siendo válidas.
+ */
+export type PeriodicidadPagoPoliza = 'ANUAL' | 'SEMESTRAL' | 'TRIMESTRAL' | 'MENSUAL' | 'UNICO';
+
+/**
+ * Procedencia/origen de un registro de seguro (BLOQUE 1). Permite distinguir
+ * dato creado a mano, importado, migrado o sugerido por IA (que siempre
+ * requiere confirmación humana antes de considerarse dato documental).
+ */
+export interface ProcedenciaSeguro {
+  origen: 'MANUAL' | 'IMPORTACION' | 'MIGRACION' | 'IA_SUGERIDA';
+  detalle?: string;
+  actorId?: string;
+  actorNombre?: string;
+  fecha?: string; // ISO
+}
 
 export interface DocumentoPoliza {
   id: string;
@@ -2601,6 +2625,20 @@ export interface DocumentoPoliza {
   storagePath?: string;
   tipo?: string;
   fechaSubida: string;
+
+  // --- BLOQUE 1: trazabilidad documental (opcionales; 1 póliza → N documentos).
+  // Adjuntar un documento NUNCA reemplaza ni elimina los anteriores: la relación
+  // histórica se conserva y `reemplazaA` es sólo una referencia informativa.
+  categoria?: TipoDocumentoPoliza;
+  version?: number;
+  origen?: string;
+  subidoPor?: string;
+  subidoPorId?: string;
+  referencia?: string;
+  observaciones?: string;
+  tamanoBytes?: number;
+  mimeType?: string;
+  reemplazaA?: string; // id del documento al que sucede (informativo; el anterior sigue recuperable)
 }
 
 export interface DocumentoRenovacionPoliza {
@@ -2731,6 +2769,18 @@ export interface PolizaSeguro {
   observaciones?: string;
   createdAt: string;
   updatedAt: string;
+
+  // --- BLOQUE 1 (centro operativo + seguros): extensiones opcionales.
+  // No sustituyen ningún campo existente; las pólizas antiguas siguen válidas.
+  periodicidadPago?: PeriodicidadPagoPoliza;
+  exclusiones?: string[];
+  condiciones?: string; // Resumen de condiciones registradas (el documento original manda)
+  avisoRenovacionDias?: number; // Ventana propia de aviso; si falta, INTERVALOS_ALERTA_RENOVACION
+  procedencia?: ProcedenciaSeguro;
+  creadoPor?: string;
+  creadoPorId?: string;
+  actualizadoPor?: string;
+  actualizadoPorId?: string;
 
   // --- CIRCUITO DE RENOVACIÓN ARENA D ---
   estadoRenovacion?: EstadoRenovacionPoliza;

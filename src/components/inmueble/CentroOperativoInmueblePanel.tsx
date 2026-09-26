@@ -43,6 +43,17 @@ import {
 } from '../../utils/segurosCentro';
 import { evaluarCoberturaPolizas } from '../../utils/segurosEngine';
 import {
+  registrarAuditoriaFirestore,
+} from '../../lib/firebase';
+import { generarExpedienteFiscal, empaquetarExpediente } from '../../lib/expedienteFiscal/motor';
+import { utf8Bytes } from '../../lib/expedienteFiscal/zip';
+import {
+  construirExpedienteDocumentalInmueble,
+  prepararEntradaIndiceParaExportacion,
+} from '../../lib/expedienteDocumental/expediente';
+import { construirAuditoriaExpediente } from '../../lib/expedienteDocumental/auditoria';
+import type { ExpedienteDocumentalInmueble } from '../../lib/expedienteDocumental/tipos';
+import {
   LayoutDashboard,
   ShieldCheck,
   FileText,
@@ -58,7 +69,7 @@ import {
   Ban,
 } from 'lucide-react';
 
-type SubTab = 'resumen' | 'seguros' | 'averias' | 'historico';
+type SubTab = 'resumen' | 'seguros' | 'averias' | 'expediente' | 'historico';
 
 interface CentroOperativoInmueblePanelProps {
   inmueble: Inmueble;
@@ -99,6 +110,10 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
   const [analisisIncidenciaId, setAnalisisIncidenciaId] = useState<string | null>(null);
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [accionEnCurso, setAccionEnCurso] = useState(false);
+  // BLOQUE 3 — expediente documental/fiscal
+  const [ejercicioExpediente, setEjercicioExpediente] = useState<number>(() => new Date().getFullYear());
+  const [exportandoExpediente, setExportandoExpediente] = useState(false);
+  const [mensajeExpediente, setMensajeExpediente] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -177,10 +192,73 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
     }
   };
 
+  // BLOQUE 3 — expediente documental/fiscal (motor puro, reutiliza fiscalEngine)
+  const expediente: ExpedienteDocumentalInmueble | null = useMemo(
+    () =>
+      construirExpedienteDocumentalInmueble({
+        inmueble,
+        ejercicio: ejercicioExpediente,
+        cobros,
+        gastos,
+        contratos,
+        polizas,
+        incidencias,
+        tareasMantenimiento: tareas,
+        garantias,
+        generadoEl: new Date().toISOString(),
+      }),
+    [inmueble, ejercicioExpediente, cobros, gastos, contratos, polizas, incidencias, tareas, garantias]
+  );
+
+  const handleExportarExpediente = async () => {
+    if (exportandoExpediente || !expediente) return;
+    setExportandoExpediente(true);
+    setErrorAccion(null);
+    setMensajeExpediente(null);
+    try {
+      const generatedAt = new Date().toISOString();
+      const exp = await generarExpedienteFiscal(
+        { inmuebles: [inmueble], contratos, gastos },
+        { seleccion: 'UN_INMUEBLE', inmuebleId: inmueble.id, periodo: { tipo: 'ANIO', anio: ejercicioExpediente } },
+        { actor: currentUser?.id || 'desconocido', propietarioId: inmueble.propietarioId, incluirPII: false },
+        { generatedAt }
+      );
+      const entradaIndice = await prepararEntradaIndiceParaExportacion(expediente.indiceDocumental);
+      const { zip, entradas } = await empaquetarExpediente(exp, undefined, [
+        { ruta: entradaIndice.rutaLogica, contenido: utf8Bytes(entradaIndice.contenido) },
+      ]);
+      const blob = new Blob([zip as unknown as ArrayBuffer], { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `expediente-fiscal_${inmueble.id}_${ejercicioExpediente}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      // Auditoría única (audit_logs) de la exportación:
+      await registrarAuditoriaFirestore({
+        ...construirAuditoriaExpediente(
+          { id: currentUser?.id, email: currentUser?.email, nombre: currentUser?.nombre || currentUser?.email || 'Usuario' },
+          'EXPEDIENTE_EXPORTACION',
+          'expediente_fiscal',
+          inmueble.id,
+          `Exportación ZIP interna del expediente fiscal ${ejercicioExpediente} de ${inmueble.direccion} (exportId ${exp.manifest.exportId.slice(0, 12)}…). NO es presentación oficial AEAT.`,
+          { exportId: exp.manifest.exportId, ejercicio: ejercicioExpediente, entradas: entradas.map((e) => e.ruta), indiceSha256: entradaIndice.sha256 }
+        ),
+      });
+      setMensajeExpediente('Exportación generada (ZIP interno determinista). No es un formato oficial de presentación AEAT.');
+    } catch (err) {
+      console.error('Error exportando expediente:', err);
+      setErrorAccion('No se pudo generar la exportación del expediente.');
+    } finally {
+      setExportandoExpediente(false);
+    }
+  };
+
   const tabs: { id: SubTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'resumen', label: 'Resumen', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'seguros', label: 'Seguros', icon: <ShieldCheck className="w-4 h-4" />, badge: resumen.polizas.total },
     { id: 'averias', label: 'Averías ↔ Pólizas', icon: <Wrench className="w-4 h-4" />, badge: resumen.incidenciasAbiertas.length },
+    { id: 'expediente', label: 'Expediente', icon: <FileText className="w-4 h-4" />, badge: expediente?.indiceDocumental.estadisticas.total },
     { id: 'historico', label: 'Histórico', icon: <History className="w-4 h-4" /> },
   ];
 
@@ -547,6 +625,171 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
                     </div>
                   ))}
                 </div>
+              )}
+            </>
+          )}
+
+          {/* ====================== EXPEDIENTE (BLOQUE 3) ====================== */}
+          {subTab === 'expediente' && (
+            <>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] font-bold text-slate-500 uppercase" htmlFor="ejercicio-expediente">
+                    Ejercicio
+                  </label>
+                  <select
+                    id="ejercicio-expediente"
+                    value={ejercicioExpediente}
+                    onChange={(e) => setEjercicioExpediente(Number(e.target.value))}
+                    className="px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white"
+                  >
+                    {[0, 1, 2, 3, 4].map((d) => {
+                      const anio = new Date().getFullYear() - d;
+                      return <option key={anio} value={anio}>{anio}</option>;
+                    })}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportarExpediente}
+                  disabled={exportandoExpediente || !expediente}
+                  className="self-start sm:self-auto px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  {exportandoExpediente ? 'Generando…' : 'Exportar expediente (ZIP interno)'}
+                </button>
+              </div>
+
+              {mensajeExpediente && (
+                <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-700 font-semibold">
+                  {mensajeExpediente}
+                </div>
+              )}
+              <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 font-semibold">
+                <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>
+                  Exportación de expediente interno ≠ presentación oficial AEAT. Conservación sin TTL
+                  (mínimo 5 años; auditoría append-only). Los datos históricos externos pendientes
+                  (AEAT/Libro Diario, registro 27) NO se incorporan: permanecen como pendientes documentados.
+                </span>
+              </div>
+
+              {!expediente ? (
+                <p className="text-xs text-slate-400 text-center py-6">
+                  Sin datos fiscales para el ejercicio {ejercicioExpediente} en este inmueble.
+                </p>
+              ) : (
+                <>
+                  {/* Resumen fiscal */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                    <Metrica label="Ingresos cobrados" valor={`${expediente.ingresos.importeRecibido.toLocaleString('es-ES', { maximumFractionDigits: 0 })} €`} sub={`${expediente.ingresos.cobrados}/${expediente.ingresos.totalCobros} cobros`} />
+                    <Metrica label="Gastos" valor={`${expediente.gastos.importeTotal.toLocaleString('es-ES', { maximumFractionDigits: 0 })} €`} sub={`${expediente.gastos.total} apuntes`} />
+                    <Metrica label="Deducibles" valor={`${expediente.gastos.importeDeducible.toLocaleString('es-ES', { maximumFractionDigits: 0 })} €`} sub={`${expediente.gastos.deducibles} (motor fiscal)`} />
+                    <Metrica label="Tributos/tasas" valor={String(expediente.tributos.length)} sub="IBI / tasas" />
+                    <Metrica label="Documentos" valor={String(expediente.indiceDocumental.estadisticas.total)} sub={`${expediente.indiceDocumental.estadisticas.pendientes} pendientes`} />
+                    <Metrica label="Incidencias" valor={String(expediente.incidenciasFiscales.filter((i) => i.codigo !== 'SUSTITUCION_EXPLICITA').length)} sub="señaladas, no decididas" />
+                  </div>
+
+                  {/* Tributos + seguros */}
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <BloqueResumen titulo={`Tributos y tasas ${ejercicioExpediente}`} icono={<Receipt className="w-4 h-4 text-slate-600" />}>
+                      {expediente.tributos.length === 0 ? (
+                        <p className="text-[11px] text-slate-400">Sin IBI/tasas registradas en el ejercicio.</p>
+                      ) : (
+                        expediente.tributos.map((t) => (
+                          <div key={t.gastoId} className="flex justify-between text-xs">
+                            <span className="font-semibold text-slate-700 truncate">{t.categoria} — {t.concepto}</span>
+                            <span className="font-mono text-slate-600 whitespace-nowrap ml-2">{t.importe.toFixed(2)} €</span>
+                          </div>
+                        ))
+                      )}
+                    </BloqueResumen>
+                    <BloqueResumen titulo="Seguros del expediente (refs. Bloque 1)" icono={<ShieldCheck className="w-4 h-4 text-indigo-600" />} onVer={onAbrirSeccionGlobal ? () => onAbrirSeccionGlobal('polizas', inmueble.id) : undefined}>
+                      {expediente.seguros.length === 0 ? (
+                        <p className="text-[11px] text-slate-400">Sin pólizas vinculadas.</p>
+                      ) : (
+                        expediente.seguros.map((s) => (
+                          <div key={s.polizaId} className="flex justify-between text-xs">
+                            <span className="font-semibold text-slate-700 truncate">{s.aseguradora} — {s.tipo}</span>
+                            <span className="text-slate-500 whitespace-nowrap ml-2">{s.documentoIds.length} doc(s)</span>
+                          </div>
+                        ))
+                      )}
+                    </BloqueResumen>
+                  </div>
+
+                  {/* Índice documental */}
+                  <div className="border border-slate-200 rounded-xl p-3 space-y-2">
+                    <div className="text-[11px] font-bold uppercase text-slate-500">
+                      Documentación ({expediente.indiceDocumental.estadisticas.total}) — origen, fecha, versión y relaciones
+                    </div>
+                    {expediente.indiceDocumental.entradas.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">Sin documentos referenciados para este inmueble.</p>
+                    ) : (
+                      <div className="max-h-72 overflow-y-auto pr-1 space-y-1.5">
+                        {expediente.indiceDocumental.entradas.map((d) => (
+                          <div key={d.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 px-2 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Paperclip className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="text-[11px] font-semibold text-slate-700 truncate">{d.nombre}</span>
+                              <span className="px-1.5 py-0.5 rounded-md bg-white border border-slate-200 text-[9px] font-bold text-slate-500 shrink-0">{d.tipo}</span>
+                              {d.version > 1 && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-[9px] font-bold text-indigo-600 shrink-0">v{d.version}</span>
+                              )}
+                              {d.sustituyeA && (
+                                <span className="text-[9px] text-slate-400 shrink-0" title={`Sustituye explícitamente a ${d.sustituyeA}`}>sustituye ↩</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-[10px] text-slate-400">{d.fechaDocumental || (d.fechaIncorporacion || '').slice(0, 10) || 'sin fecha'}</span>
+                              <span className="text-[10px] text-slate-400">{d.entidadOrigen}</span>
+                              <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${
+                                d.estado === 'DISPONIBLE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : d.estado === 'SUSTITUIDO' ? 'bg-slate-100 text-slate-500 border-slate-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}>
+                                {d.estado}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Incidencias del expediente */}
+                  {expediente.incidenciasFiscales.length > 0 && (
+                    <div className="border border-slate-200 rounded-xl p-3 space-y-1.5">
+                      <div className="text-[11px] font-bold uppercase text-slate-500">Incidencias y trazas</div>
+                      <div className="max-h-40 overflow-y-auto pr-1 space-y-1">
+                        {expediente.incidenciasFiscales.map((inc, i) => (
+                          <div key={`${inc.codigo}-${inc.id || i}`} className="flex items-start gap-2 text-[11px]">
+                            <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border shrink-0 ${
+                              inc.severidad === 'CRITICA' ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : inc.severidad === 'AVISO' ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-slate-100 text-slate-500 border-slate-200'
+                            }`}>
+                              {inc.codigo}
+                            </span>
+                            <span className="text-slate-600">{inc.descripcion}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Reparaciones/mantenimiento enlazados */}
+                  {expediente.reparaciones.length > 0 && (
+                    <BloqueResumen titulo="Reparaciones / mantenimiento enlazados" icono={<Wrench className="w-4 h-4 text-amber-600" />}>
+                      {expediente.reparaciones.slice(0, 5).map((r) => (
+                        <div key={`${r.tipo}-${r.id}`} className="flex justify-between text-xs">
+                          <span className="font-semibold text-slate-700 truncate">{r.tipo === 'GARANTIA' ? 'Garantía' : r.tipo === 'TAREA_MANTENIMIENTO' ? 'Mantenimiento' : 'Gasto reparación'} — {r.concepto}</span>
+                          <span className="text-slate-500 whitespace-nowrap ml-2">{typeof r.importe === 'number' ? `${r.importe.toFixed(2)} €` : (r.fecha || '')}</span>
+                        </div>
+                      ))}
+                    </BloqueResumen>
+                  )}
+                </>
               )}
             </>
           )}

@@ -152,7 +152,10 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 `facturas`, `registros_facturacion`, `envios_verifactu`, `series_facturacion`,
 `facturas_electronicas_b2b`,
 `liquidaciones_propietarios`, `gastos_inmuebles`, `ordenes_pago`,
-`ficheros_sepa`, `mandatos_sepa`, `config_liquidacion` (BLOQUE B).
+`ficheros_sepa`, `mandatos_sepa`, `config_liquidacion` (BLOQUE B),
+`gestiones_cartera` (BLOQUE F — **diseño aprobado 2026-09-26, NO implementada**;
+campos propuestos asociados: `propietarios.estadoAcceso`,
+`inmuebles.estadoDatos` + `inmuebles.camposFaltantes`).
 
 Storage (rutas con reglas): `cobros_justificantes/`, `gastos_facturas/`,
 `documentos_solicitados/`, `inmuebles/`, `incidencias/`, `profesionales/`,
@@ -244,7 +247,7 @@ y `docs/informe-GAP8-*` (enlazados, no duplicados).
 > jurídicas. Toda cuestión normativa se **verifica documentalmente antes de
 > implementarse**. Nada de lo siguiente está implementado en esta orden.
 >
-> Navegación: BLOQUE B/C/D aquí (§4) · **BLOQUE E** (§5) · **Capa Transversal
+> Navegación: BLOQUE B/C/D/F aquí (§4) · **BLOQUE E** (§5) · **Capa Transversal
 > Experiencia/Ayuda/Tutoriales/IA** (§6, sin numeración GAP) · **Roadmap de
 > evolución** (§7) · dependencias entre bloques (§8).
 
@@ -382,6 +385,95 @@ auditable.
 
 **Reglas de datos:** no almacenar datos sensibles innecesarios (DLP: minimizar;
 los DNI/adjuntos del funnel público ya son un residual documentado — no ampliarlo).
+
+---
+
+### BLOQUE F — GESTIÓN PATRIMONIAL (Cuenta / Propietario / Gestor + Carteras) — **DISEÑO APROBADO (2026-09-26), NO IMPLEMENTADO**
+
+> **Fuente contractual:** `docs/D1-REVISADA-MODELO-CUENTAS-PROPIETARIOS-GESTORES.md`
+> (D1 revisada; decisiones S1–S7 aprobadas formalmente el 2026-09-26, commit
+> `1415521`). Esta sección sintetiza el modelo aprobado para que el mapa sea
+> navegable; en caso de discrepancia prevalece el documento contractual.
+> Diseño relacionado: `docs/FASE5-INSPECCION-PERSISTENCIA-IDENTIDAD.md` y
+> `docs/FASE5B-DECISIONES-ARQUITECTURA-SEGURIDAD.md`.
+
+**F.1 — Modelo de identidad y acceso.**
+```
+Cuenta/Auth (Firebase Auth uid + espejo usuarios_auth/{uid})
+  ↓ 1:1
+Perfil/usuario (usuarios/{id}: tipoPerfil, roles, permisos)
+  ↓ 0..1
+Propietario legal (propietarios/{id}: identidad legal, fiscal, bancaria)
+```
+Conceptos separados: **cuenta de acceso ≠ perfil ≠ propietario legal ≠ gestor ≠
+cartera ≠ inmueble**. Reglas explícitas del modelo aprobado:
+- **UN PROPIETARIO NO NECESITA TENER CUENTA** (la ficha `propietarios/{id}` existe
+  y sostiene inmuebles/gastos/contratos/documentación sin usuario ni Auth;
+  `estadoAcceso: SIN_CUENTA|INVITADO|ACTIVO`).
+- **UNA CUENTA NO NECESITA TENER INMUEBLES** (p. ej. gestor/profesional nuevo).
+- Crear propietario ≠ crear cuenta ≠ dar acceso: el acceso posterior se da por
+  invitación nominal de un solo uso (flujo existente `accesoPropietarios.ts`) que
+  vincula al propietario existente **sin cambiar** propietarioId, titularidad,
+  histórico ni datos.
+- NO existe ni se creará una colección paralela `personas` (S2).
+
+**F.2 — `gestiones_cartera/{id}` (relación gestor ↔ propietario; N:M).**
+Campos: `titularId` (propietarioId), `gestorUsuarioId`, `inmuebleIds[]`
+(`[]` = cartera completa), `permiso: LECTURA|LECTURA_ESCRITURA`,
+`responsableActual: GESTOR|TITULAR`, `estado`, `fechaInicio/fechaFin?`,
+`eventos[{tipo, actorId, actorRol, fecha, motivo?}]` (append-only),
+`creadoPor/createdAt/updatedAt`.
+Estados: **`PENDIENTE_ACEPTACION` → `ACTIVA` ⇄ `SUSPENDIDA` → `REVOCADA`**
+(S5: `SUSPENDIDA` = interrupción temporal; no es eliminación ni cambio de
+titularidad). Ciclo: alta → aceptación (obligatoria si el titular tiene cuenta;
+S4) → activación → modificación de permisos/ámbito (auditada) → cesión al
+titular / devolución al gestor (transiciones sobre el mismo documento) →
+suspensión / revocación (inmediata). **La gestión NO modifica la titularidad
+legal**: `inmuebles.propietarioId` es invariante bajo cualquier transición.
+
+**F.3 — Propietarios múltiples.** Un usuario con capacidad patrimonial trabaja
+con N propietarios sin convertirlos en cuentas:
+```
+Gestor
+├── Santiago   (propietarios/… — sin cuenta)
+├── Yolanda    (propietarios/… — sin cuenta)
+└── Propietario N
+```
+
+**F.4 — Rol `GESTOR_PATRIMONIAL` (S1).** Rol patrimonial **independiente** para
+gestionar carteras/propietarios/inmuebles de terceros con permisos explícitos.
+**`GESTOR_INMUEBLES` se mantiene sin cambios** para su funcionalidad operativa
+existente (candidatos/visitas/contratos/seguros); no se sustituye ni renombra.
+
+**F.5 — Importación con destino explícito.** Toda importación (migración
+histórica Rentasync y futuras fuentes Excel/CSV/JSON) requiere
+**`propietarioDestinoId` explícito** por registro/lote, resuelto desde un mapa
+owner→`propietarios/{id}` confirmado por el usuario. **PROHIBIDO** resolver el
+destino como "propietario de la cuenta que ejecuta la importación": cuenta
+ejecutora y propietario destino son conceptos distintos.
+
+**F.6 — Datos incompletos (S6).** `inmuebles.estadoDatos: COMPLETO|INCOMPLETO|
+BLOQUEADO` + `camposFaltantes[]`. La ausencia de campos **no impeditivos** NO
+descarta datos válidos: un inmueble puede entrar `INCOMPLETO` y completarse
+después con guía contextual; `BLOQUEADO` solo ante impedimento real.
+
+**F.7 — Auditoría e histórico (invariantes).** Titularidad inmutable bajo
+gestión · histórico no borrable (`gestiones_cartera` nunca se elimina;
+`eventos[]` y `audit_logs` append-only) · auditadas: aceptación, transferencia
+(cesión), devolución, revocación, suspensión, cambios de permisos, creación de
+propietario, invitación posterior.
+
+**F.8 — No regresión (resumen; lista contractual en D1R §25).** Sin colección
+`personas` · propietario sin cuenta válido · cuenta sin propiedades válida ·
+gestión ≠ titularidad · revocar no elimina datos · dar acceso no crea
+propietario nuevo · importar nunca deduce el propietario por la cuenta.
+
+**F.9 — Estado y secuencia aprobada.** D1 APROBADA → integración en este mapa
+(realizada en esta actuación) → **implementación de `gestiones_cartera`** (fase
+independiente, pendiente) → D2 (endurecimiento servidor de `inmuebles`) → D3
+(claims/ámbito) → B4 dry-run sobre staging → revisión → autorización
+independiente. Archivos que se modificarán en la implementación: lista exacta
+en D1R §20.
 
 ---
 
@@ -1106,6 +1198,9 @@ endurecimiento final — §7)
 | `docs/informe-auditoria-D-global-2026-09-19.md` | Auditoría global D (habitaciones/inventario) (2026-09-19) |
 | `docs/auditoria/DIAGNOSTICO_FUNCIONAL_2026-09-16.md` | Diagnóstico funcional original vs main vs Arena (2026-09-16) |
 | `docs/arquitectura/FASE_*.md` (14) | Arquitectura por fases 1.4–3.6 (cobros, seguridad, gastos, préstamos, recomercialización) |
+| `docs/D1-REVISADA-MODELO-CUENTAS-PROPIETARIOS-GESTORES.md` | **BLOQUE F (§4)**: diseño D1 revisada APROBADO (S1–S7, 2026-09-26) — Cuenta/Propietario/Gestor/Carteras, `gestiones_cartera`, modelo contractual, reglas de no regresión y secuencia D1→mapa→implementación→D2→D3→B4 |
+| `docs/FASE5-INSPECCION-PERSISTENCIA-IDENTIDAD.md` · `docs/FASE5B-DECISIONES-ARQUITECTURA-SEGURIDAD.md` · `docs/FASE7-GATE-B4-DECISIONES.md` | Inspección de identidad/permisos (F5-1), decisiones D1–D6 y gate de autorización de B4 |
+| `docs/FASE2-MAPA-ORIGEN-DESTINO-RENTASYNC.md` (+ anexo JSON) · `docs/FASE3-ESTRATEGIA-MIGRACION-ARQUITECTURA-IMPORT-EXPORT.md` · `docs/FASE6-B6-EXPEDIENTE-FISCAL-EXPORT-ZIP.md` | Migración Rentasync→ERP: mapa de campos con evidencia, estrategia/pipeline de importación-exportación y motor de expediente fiscal (B6) |
 
 ---
 

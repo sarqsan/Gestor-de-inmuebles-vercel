@@ -1,0 +1,21 @@
+/** API reutilizable. La demo y sus fixtures se importan por separado, nunca desde aquí. */
+export * from './contracts.ts';
+export { crearBorrador, filtrarPropietarios } from './domain.ts';
+export { SelectorModalidadUso } from './components/SelectorModalidadUso.tsx';
+export type { SelectorModalidadUsoProps } from './components/SelectorModalidadUso.tsx';
+export { OnboardingPatrimonial } from './components/OnboardingPatrimonial.tsx';
+export type { OnboardingPatrimonialProps } from './components/OnboardingPatrimonial.tsx';
+export { ListaPropietarios } from './components/ListaPropietarios.tsx';
+export type { ListaPropietariosProps } from './components/ListaPropietarios.tsx';
+export { FormularioPropietario } from './components/FormularioPropietario.tsx';
+export type { FormularioPropietarioProps } from './components/FormularioPropietario.tsx';
+export { EstadoAccesoBadge } from './components/EstadoAccesoBadge.tsx';
+export { evaluarCompletitud } from './completeness.ts';
+export { resolverDestinoImportacion, previsualizarImportacion } from './importPreview.ts';
+export { EstadoDatosBadge } from './components/EstadoDatosBadge.tsx';
+export { RevisionDatosPropietario } from './components/RevisionDatosPropietario.tsx';
+export type { RevisionDatosPropietarioProps } from './components/RevisionDatosPropietario.tsx';
+export { SelectorPropietarioDestino } from './components/SelectorPropietarioDestino.tsx';
+export type { SelectorPropietarioDestinoProps } from './components/SelectorPropietarioDestino.tsx';
+export { RevisionImportacion } from './components/RevisionImportacion.tsx';
+export type { RevisionImportacionProps } from './components/RevisionImportacion.tsx';

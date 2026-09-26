@@ -21,5 +21,16 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
+    test: {
+      // Los tests nativos de la base patrimonial (Arena C) son `node --test`
+      // (.mjs con su propio tsx-loader) y se ejecutan con:
+      //   node --test src/features/patrimonial/tests/*.test.mjs
+      // Vitest no debe capturarlos: usan node:test/node:assert directamente.
+      exclude: [
+        '**/node_modules/**',
+        '**/dist/**',
+        'src/features/patrimonial/tests/**',
+      ],
+    },
   };
 });

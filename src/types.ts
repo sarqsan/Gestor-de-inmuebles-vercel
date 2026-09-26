@@ -1710,6 +1710,20 @@ export interface UsuarioApp {
   propietarioId?: string; // ID del propietario vinculado en colección 'propietarios'
   profesionalId?: string; // ID del profesional vinculado en colección 'profesionales'
   contratoIds?: string[]; // BLOQUE E: contratos LAU vinculados (alcance del perfil INQUILINO)
+  /**
+   * D3 (parcial) — contexto de autorización de carteras gestionadas. Se
+   * proyectan desde `gestiones_cartera` (dominio D1R) y residen en el espejo
+   * `usuarios_auth/{uid}`: SOLO el master puede escribirlas (las reglas
+   * impiden que un usuario las cree o modifique en su propio espejo). El
+   * cliente las ÚNICAMENTE LEE para acotar sus consultas; la autorización
+   * efectiva está en las reglas de Firestore.
+   * · carterasL: propietarioIds con lectura (ACTIVA, o REVOCADA con
+   *   conservarLecturaHistorica — S7: lectura histórica ≠ gestión activa).
+   * · carterasE: propietarioIds con lectura+escritura (ACTIVA +
+   *   LECTURA_ESCRITURA + responsableActual GESTOR).
+   */
+  carterasL?: string[];
+  carterasE?: string[];
   habitacionIdentificador?: string; // BLOQUE E: habitación arrendada (modalidad 'habitaciones')
   enlaceRegistroId?: string; // BLOQUE E: invitación que originó la cuenta (trazabilidad + verificación en reglas)
   createdAt: string;

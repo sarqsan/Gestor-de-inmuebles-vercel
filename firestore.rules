@@ -216,6 +216,57 @@ service cloud.firestore {
         && myInmuebleIds().hasAny([inmId]);
     }
 
+    // D2b/D3 — carteras gestionadas (proyección D1R en el espejo de
+    // identidad; SOLO el master puede escribirlas, ver reglas de
+    // `usuarios_auth`). carterasL = lectura (ACTIVA o REVOCADA con lectura
+    // histórica, S7); carterasE = lectura+escritura (ACTIVA +
+    // LECTURA_ESCRITURA + responsableActual GESTOR). La gestión NO altera la
+    // titularidad: sólo acota el acceso por `propietarioId`.
+    function carterasLectura() {
+      return (activeUser() && 'carterasL' in me() && me().carterasL is list)
+        ? me().carterasL : [];
+    }
+    function carterasEscritura() {
+      return (activeUser() && 'carterasE' in me() && me().carterasE is list)
+        ? me().carterasE : [];
+    }
+    // ¿El inmueble pertenece a una cartera que gestiono (L o E)? En un `list`
+    // es demostrable con `where('propietarioId','==', pid)` pid a pid (el
+    // motor evalúa la pertenencia del valor acotado contra la lista constante
+    // del espejo; mismo criterio que `contratoEsMio`).
+    function inmuebleEnCarteraGestionada(d) {
+      return activeUser() && 'propietarioId' in d && (
+        carterasLectura().hasAny([d.propietarioId]) ||
+        carterasEscritura().hasAny([d.propietarioId])
+      );
+    }
+    // Escritura: SOLO carterasE (S7: la escritura nunca se concede por el
+    // mero hecho de existir la gestión).
+    function inmuebleEnCarteraEscritura(d) {
+      return activeUser() && 'propietarioId' in d
+        && carterasEscritura().hasAny([d.propietarioId]);
+    }
+    // Involucración en una gestión de cartera (lectura del registro
+    // trazable): el titular de la cartera o el gestor designado.
+    function gestionInvolucraAMi(d) {
+      return activeUser() && (
+        (isPropietarioRole() && 'propietarioId' in d && d.propietarioId == myPropId()) ||
+        ('gestorUsuarioId' in d && 'usuarioId' in me() && d.gestorUsuarioId == me().usuarioId)
+      );
+    }
+    // D3 — los campos de carteras del espejo son SOLO del master: un usuario
+    // no puede crearlos ni modificarlos en su propio espejo (anti-
+    // autoasignación). El master queda fuera de estas guardas.
+    function carterasNoAutoasignadasEnCreacion() {
+      return !('carterasL' in incoming()) && !('carterasE' in incoming());
+    }
+    function carterasSinCambiarPorUsuario() {
+      return ((!('carterasL' in incoming()) ||
+               ('carterasL' in existing() && incoming().carterasL == existing().carterasL)) &&
+              (!('carterasE' in incoming()) ||
+               ('carterasE' in existing() && incoming().carterasE == existing().carterasE)));
+    }
+
     // ¿El contrato pertenece a este propietario? Es la ÚNICA condición
     // demostrable para una CONSULTA (list): el cliente debe filtrar con
     // where('propietarioId','==', propietarioId). El valor propietarioId se
@@ -300,17 +351,22 @@ service cloud.firestore {
       // El espejo sólo puede crearse/actualizarse para el UID propio y debe
       // reflejar exactamente el perfil autoritativo. Nunca puede afirmar que es
       // ADMINISTRADOR por sí mismo (la administración se reconoce por email).
+      // D3 — anti-autoasignación: `carterasL`/`carterasE` son campos SOLO
+      // del master (proyección de `gestiones_cartera`). Un usuario no puede
+      // crearlos ni alterar su propio ámbito de autorización de carteras.
       allow create: if isMasterAdmin() || (
         isSignedIn()
         && request.auth.uid == uid
         && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
         && indexIsTruthful()
+        && carterasNoAutoasignadasEnCreacion()
       );
       allow update: if isMasterAdmin() || (
         isSignedIn()
         && request.auth.uid == uid
         && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
         && indexIsTruthful()
+        && carterasSinCambiarPorUsuario()
       );
       allow delete: if isMasterAdmin();
 
@@ -480,10 +536,13 @@ service cloud.firestore {
       //      perfil ADMINISTRADOR, que sólo el master puede escribir);
       //   2. titularidad jurídica (propietarioId / propietarioPrincipalId);
       //   3. autorización explícita (inmuebleIds del espejo de identidad);
-      //   4. tenant con contrato activo/autorizado (rama INTACTA).
+      //   4. D2b: cartera gestionada (carterasL ∪ carterasE del espejo,
+      //      proyección D1R que sólo el master escribe);
+      //   5. tenant con contrato activo/autorizado (rama INTACTA).
       allow get: if esAdminInmuebles()
         || inmuebleEsMio(resource.data)
         || inmuebleAutorizadoExplicito(inmuebleId)
+        || inmuebleEnCarteraGestionada(resource.data)
         || (isTenant() && (
           tenantVeContratos(campoListaActual('contratoIdsAutorizados'))
           || ('contratoActivoId' in resource.data && tenantTieneContrato(resource.data.contratoActivoId))
@@ -493,8 +552,11 @@ service cloud.firestore {
       // `where('propietarioId','==', myPropId())` (inmuebleEsMio); la
       // autorización explícita se sirve por `get` documento a documento
       // (nunca por list) y la colección completa queda reservada al ámbito
-      // administrativo legítimo.
-      allow list: if esAdminInmuebles() || inmuebleEsMio(resource.data);
+      // administrativo legítimo. D2b: el gestor consulta pid a pid
+      // (`where('propietarioId','==', pid)`) las carteras que gestiona.
+      allow list: if esAdminInmuebles()
+        || inmuebleEsMio(resource.data)
+        || inmuebleEnCarteraGestionada(resource.data);
 
       allow create: if isMasterAdmin() || (
         isPropietarioRole() && (
@@ -502,7 +564,10 @@ service cloud.firestore {
           ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
         )
       );
-      allow update: if isMasterAdmin() || (
+      // D2b: la escritura se amplía ÚNICAMENTE a las carterasE (ACTIVA +
+      // LECTURA_ESCRITURA + responsableActual GESTOR, proyectadas por el
+      // master). carterasL (lectura histórica o permiso LECTURA) NO escribe.
+      allow update: if isMasterAdmin() || inmuebleEnCarteraEscritura(existing()) || (
         isPropietarioRole() && (
           ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
           ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId()) ||
@@ -511,6 +576,24 @@ service cloud.firestore {
       );
       allow delete: if isMasterAdmin();
     }
+
+    // =========================================================================
+    // D2b/D3 — GESTIONES DE CARTERA (`gestiones_cartera`): registro trazable
+    // del modelo D1R (dominio puro en src/lib/gestionesCartera.ts).
+    //  · LECTURA: ámbito administrativo legítimo, titular de la cartera o
+    //    gestor designado (consultas demostrables: where('propietarioId','==')
+    //    del titular o where('gestorUsuarioId','==') del gestor).
+    //  · ESCRITURA: SOLO el master. Ni el gestor ni el titular pueden crear,
+    //    modificar ni borrar gestiones desde el cliente (la cesión/revocación
+    //    y sus eventos append-only se administran por el ámbito master, que
+    //    proyecta carterasL/carterasE al espejo). Sin autoasignación.
+    // =========================================================================
+    match /gestiones_cartera/{gestionId} {
+      allow get: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
+      allow list: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
+      allow create, update, delete: if isMasterAdmin();
+    }
+
 
     // =========================================================================
     // R3 — FICHA PÚBLICA DE INMUEBLE (espejo mínimo para accesos anónimos)

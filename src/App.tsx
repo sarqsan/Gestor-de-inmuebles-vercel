@@ -1017,6 +1017,12 @@ export default function App() {
       tipoPerfil: currentUser.tipoPerfil,
       propietarioId: currentUser.propietarioId,
       inmuebleIds: currentUser.inmuebleIds || [],
+      // D2b: carteras gestionadas (proyección D1R leída del espejo por
+      // authService). Sólo acota las CONSULTAS: la autorización efectiva
+      // está en las reglas (carterasL/carterasE sólo las escribe el master).
+      propietariosGestionados: Array.from(
+        new Set([...(currentUser.carterasL || []), ...(currentUser.carterasE || [])])
+      ),
     };
 
     // D2a: suscripción de inmuebles CON ÁMBITO (propios ∪ autorizados

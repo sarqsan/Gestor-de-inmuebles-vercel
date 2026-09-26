@@ -101,6 +101,10 @@ export async function syncAuthIndex(
       profesionalId: usuario.profesionalId || '',
       inmuebleIds: Array.isArray(usuario.inmuebleIds) ? usuario.inmuebleIds : [],
       updatedAt: new Date().toISOString(),
+      // D3: `carterasL`/`carterasE` NO se incluyen deliberadamente: son
+      // campos exclusivos del master (proyección de gestiones_cartera) y las
+      // reglas rechazan cualquier intento de autoasignación. `merge: true`
+      // los preserva intactos.
     };
     await setDoc(doc(db, 'usuarios_auth', fb.uid), payload, { merge: true });
   } catch (err) {
@@ -179,11 +183,27 @@ export async function getUsuarioByAuthUid(
     try {
       const mirrorSnap = await getDoc(doc(db, 'usuarios_auth', authUid));
       if (mirrorSnap.exists()) {
-        const usuarioId = (mirrorSnap.data() as { usuarioId?: unknown })?.usuarioId;
+        const mirrorData = mirrorSnap.data() as {
+          usuarioId?: unknown;
+          carterasL?: unknown;
+          carterasE?: unknown;
+        };
+        const usuarioId = mirrorData?.usuarioId;
         if (typeof usuarioId === 'string' && usuarioId.length > 0) {
           const perfilSnap = await getDoc(doc(db, 'usuarios', usuarioId));
           if (perfilSnap.exists()) {
-            return { id: perfilSnap.id, ...perfilSnap.data() } as UsuarioApp;
+            const usuario = { id: perfilSnap.id, ...perfilSnap.data() } as UsuarioApp;
+            // D3 (parcial): las carteras gestionadas residen en el espejo
+            // (proyección D1R que sólo el master escribe). El cliente las
+            // LEE únicamente para acotar sus consultas (dataScope); la
+            // autorización efectiva está en las reglas de Firestore.
+            usuario.carterasL = Array.isArray(mirrorData.carterasL)
+              ? (mirrorData.carterasL as string[])
+              : [];
+            usuario.carterasE = Array.isArray(mirrorData.carterasE)
+              ? (mirrorData.carterasE as string[])
+              : [];
+            return usuario;
           }
         }
       }

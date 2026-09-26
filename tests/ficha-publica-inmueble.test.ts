@@ -392,14 +392,20 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
     // demostrable del titular (where propietarioId ==) o el ámbito
     // administrativo legítimo.
     expect(b).not.toContain('allow list: if isStaff();');
-    expect(b).toContain('allow list: if esAdminInmuebles() || inmuebleEsMio(resource.data);');
+    // D2b: a la consulta demostrable del titular y al ámbito administrativo
+    // se suma la cartera gestionada (carterasL ∪ carterasE del espejo).
+    expect(b).toContain('allow list: if esAdminInmuebles()');
+    expect(b).toContain('|| inmuebleEsMio(resource.data)');
+    expect(b).toContain('|| inmuebleEnCarteraGestionada(resource.data);');
   });
 
   it('§1 escrituras INTACTAS (create/update/delete sin cambios R3)', () => {
     const b = bloqueFs(INM);
     expect(b).toContain('allow create: if isMasterAdmin() || (');
     expect(b).toContain("'propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId()");
-    expect(b).toContain('allow update: if isMasterAdmin() || (');
+    // D2b: la escritura sólo añade carterasE (S7); titularidad y
+    // canReachInmuebleId intactos, delete sigue siendo sólo master.
+    expect(b).toContain('allow update: if isMasterAdmin() || inmuebleEnCarteraEscritura(existing()) || (');
     expect(b).toContain('canReachInmuebleId(inmuebleId)');
     expect(b).toContain('allow delete: if isMasterAdmin();');
   });

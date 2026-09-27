@@ -26,4 +26,30 @@ export { ejecutarDryRun, calcularMigrationKey, jsonEstable } from './motor';
 export { derivarPlan } from './plan';
 export { responderPreguntas, generarInforme, idempotenciaVerificada, PREGUNTAS_CANONICAS } from './informe';
 export type { RespuestaPregunta } from './informe';
+export {
+  autorizarMigracion,
+  autorizacionVigente,
+  derivarTokenEjecucion,
+  ejecutarMigracion,
+  evaluarElegibilidad,
+  planificarEjecucion,
+  reconciliarCapas,
+  shaContenidoDryRun,
+  verificarBarrera,
+  fichaAutoDe,
+  decisionHumanaDe,
+} from './autorizacion';
+export type {
+  AutorizacionMigracion,
+  DecisionHumana,
+  EstadoAutorizacion,
+  FichaAuto,
+  LoteCanonica,
+  OperacionStaging,
+  PasoRollback,
+  PlanEjecucion,
+  VeredictoBarrera,
+  VeredictoElegibilidad,
+  VeredictoReconciliacion,
+} from './autorizacion';
 export { adaptarMovimientoRentasync, adaptarInmuebleRentasync } from './adaptadorRentasync';

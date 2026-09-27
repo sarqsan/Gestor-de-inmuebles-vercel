@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { UserProfile, Candidato, Inmueble } from '../../types';
+import { ImportExportPanel } from './ImportExportPanel';
 import {
   User,
   Settings,
@@ -269,6 +270,10 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
             </ol>
           </div>
         </div>
+
+        {/* Importación / Exportación canónica (erp-import-export-v1). El bloque
+            legacy de sincronización superior se conserva intacto. */}
+        <ImportExportPanel inmuebles={inmuebles} />
 
         {/* Módulo de Aseguradoras de Impago */}
         {onOpenConfigAseguradoras && (

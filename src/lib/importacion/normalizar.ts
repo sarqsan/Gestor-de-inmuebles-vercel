@@ -89,7 +89,8 @@ export function parseFechaDMY(v: unknown): { iso: string | null; ambigua: boolea
 
 // ---------- normalización de movimientos (gastos / rentas) ----------
 
-function mapaCategoriaGasto(
+/** Exportada para reutilización del importador canónico (misma tabla B1, sin duplicar). */
+export function mapaCategoriaGasto(
   category: string,
   concepto: string,
 ): { categoria: CategoriaGasto | null; regla: string; clasificacion: 'A' | 'B' | 'C'; ambigua?: string; incidenciaFase2?: string } {

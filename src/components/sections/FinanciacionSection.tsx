@@ -79,9 +79,15 @@ export const FinanciacionSection: React.FC<FinanciacionSectionProps> = ({
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = subscribeFinanciaciones(setFinanciaciones);
+    // D2 (E4): el list de Rules obliga a where('propietarioId','==', pid)
+    // para el propietario; el filtro `scoped` de abajo se conserva como
+    // defensa en profundidad de la vista.
+    const unsub = subscribeFinanciaciones(setFinanciaciones, {
+      tipoPerfil: currentUser?.tipoPerfil,
+      propietarioId: currentUser?.propietarioId,
+    });
     return () => unsub();
-  }, []);
+  }, [currentUser?.tipoPerfil, currentUser?.propietarioId]);
 
   // Ámbito RBAC idéntico al resto de módulos (la autorización dura la aplica Firestore).
   const scoped = useMemo(() => {

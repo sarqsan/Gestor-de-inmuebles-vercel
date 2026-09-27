@@ -1837,7 +1837,9 @@ export interface AuditLog {
   accion: string; // Ej: "ADMIN_CREO_USUARIO", "ADMIN_BLOQUEO_USUARIO", "PROPIETARIO_ASIGNO_PROFESIONAL"
   descripcion: string;
   fechaHora: string;
-  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial' | 'poliza_seguro' | 'documento_expediente' | 'expediente_fiscal';
+  // ORDEN 2 (gestiones_cartera, F.7): 'gestion_cartera' cubre la auditoría de las
+  // transiciones de gestión (GESTION_*). Aditivo: no altera ningún uso existente.
+  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial' | 'importacion_general' | 'poliza_seguro' | 'documento_expediente' | 'expediente_fiscal' | 'gestion_cartera';
   idAfectado: string;
   resultado: 'EXITO' | 'ERROR';
   detalles?: Record<string, any>;

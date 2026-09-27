@@ -56,7 +56,8 @@ function encontrarColumna(headers: string[], candidatos: string[], mapping?: str
   return undefined;
 }
 
-function parseImporteCSV(valor: string): number | null {
+/** Exportado para reutilización del importador canónico (mismo parseo ES/EN, sin duplicar). */
+export function parseImporteCSV(valor: string): number | null {
   if (!valor) return null;
   let v = valor.trim();
   // Limpiar símbolos €, espacios, etc.

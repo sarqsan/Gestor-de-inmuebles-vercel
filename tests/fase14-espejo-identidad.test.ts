@@ -546,7 +546,7 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
     const ficheros = caminar(dir).filter((f) => !/\.test\.tsx?$/.test(f));
     // se cuenta tanto el literal como la constante exportada por §6 F3 que lo encapsula
     // (`COLECCION_PADRE_PROGRESO = 'usuarios_auth'`): quien importe la constante accede a la ruta
-    const citan = ficheros.filter((f) => /['"]usuarios_auth['"]|`usuarios_auth`|\bCOLECCION_PADRE_PROGRESO\b/.test(readFileSync(f, 'utf8')));
+    const citan = ficheros.filter((f) => /['"]usuarios_auth['"]|`usuarios_auth`|\bCOLECCION_PADRE_PROGRESO\b|\bCOLECCION_ESPEJOS_AUTH\b/.test(readFileSync(f, 'utf8')));
     // §6 F3 (Capa Transversal de Experiencia) persiste el progreso de tutoriales en la
     // SUBCOLECCIÓN `usuarios_auth/{uid}/progreso_tutoriales/{id}`, regida por su propio
     // sub-match (solo el propio uid; nunca toca el documento padre). Es un consumidor
@@ -566,16 +566,43 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
     };
     // OPERACIONES (port de C, revisión explícita D.6): el adaptador de persistencia del
     // módulo lee el documento de binding usuarios_auth/{uid} (onSnapshot, SOLO lectura)
-    // para proyectar la identidad canónica. Nunca lo escribe: el único escritor del
-    // espejo sigue siendo authService.ts. Lista cerrada: un cuarto consumidor exige
-    // nueva revisión explícita aquí.
+    // para proyectar la identidad canónica. Nunca lo escribe. Lista cerrada: un
+    // nuevo lector de binding exige nueva revisión explícita aquí.
     const esLectorBindingOperaciones = (f: string): boolean =>
       /features[\\/]operaciones[\\/]persistence[\\/]firebase\.ts$/.test(f)
       && !/setDoc|updateDoc|deleteDoc|addDoc|writeBatch/.test(readFileSync(f, 'utf8'));
-    const escritoresDelEspejo = citan.filter((f) => !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f)).map((f) => path.basename(f));
-    // el ÚNICO fichero que escribe el documento del espejo es authService.ts
+    // ORDEN 2 · GESTIONES-CARTERA (revisión explícita D.6): la proyección D3
+    // (carterasL/carterasE) la escribe el master por reglas (C4: único escritor
+    // legítimo de esos campos; D1R §20.7 exige la sincronización del espejo).
+    // NO es un segundo sistema de identidad: jamás toca uid/perfil/estado/
+    // roles. Dos ficheros con condiciones estrictas:
+    //  · `gestionesCarteraServicio.ts` (núcleo): CITA la ruta solo como
+    //    constante de contrato (`COLECCION_ESPEJOS_AUTH`); CERO E/S sobre el
+    //    espejo (el núcleo no importa Firebase).
+    //  · `gestionesCarteraServicioFirebase.ts` (adaptador): escribe con merge
+    //    ÚNICAMENTE carterasL/carterasE (un solo setDoc, con merge:true).
+    // Lista cerrada: un segundo escritor de proyección exige nueva revisión
+    // explícita aquí (no pasa en silencio).
+    const esNucleoContratoGestiones = (f: string): boolean =>
+      /lib[\\/]gestionesCarteraServicio\.ts$/.test(f)
+      && !/from ['"]firebase/.test(readFileSync(f, 'utf8'))
+      && !/\bdoc\(|\bcollection\(|setDoc|updateDoc|deleteDoc/.test(readFileSync(f, 'utf8'));
+    const esEscritorProyeccionGestiones = (f: string): boolean => {
+      if (!/lib[\\/]gestionesCarteraServicioFirebase\.ts$/.test(f)) return false;
+      const src = readFileSync(f, 'utf8');
+      const sets = src.match(/setDoc\(/g) || [];
+      return /carterasL/.test(src) && /carterasE/.test(src)
+        && /\{\s*merge:\s*true\s*\}/.test(src)
+        && !/updateDoc|deleteDoc|addDoc|writeBatch/.test(src)
+        && sets.length === 1;
+    };
+    const escritoresDelEspejo = citan.filter((f) => !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f) && !esNucleoContratoGestiones(f) && !esEscritorProyeccionGestiones(f)).map((f) => path.basename(f));
+    // el ÚNICO fichero que escribe la IDENTIDAD del espejo es authService.ts
+    // (la proyección master carterasL/E tiene su excepción revisada aparte)
     expect(escritoresDelEspejo).toEqual(['authService.ts']);
     expect(citan.filter(esLectorBindingOperaciones).map((f) => path.basename(f))).toEqual(['firebase.ts']);
+    expect(citan.filter(esNucleoContratoGestiones).map((f) => path.basename(f))).toEqual(['gestionesCarteraServicio.ts']);
+    expect(citan.filter(esEscritorProyeccionGestiones).map((f) => path.basename(f))).toEqual(['gestionesCarteraServicioFirebase.ts']);
     // y los consumidores de la subcolección son exactamente los de §6 F3 (lista cerrada:
     // un tercer consumidor exige revisión explícita, no pasa en silencio)
     const subcoleccion = citan.filter(esConsumidorLegitimoDeSubcoleccion).map((f) => path.basename(f)).sort();

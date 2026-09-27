@@ -1377,10 +1377,22 @@ export function resolveTenantScope(
 }
 
 /**
+ * D2 (§2): pids de cartera con lectura (L ∪ E) del espejo del usuario.
+ * La UI los usa SOLO para acotar la vista; la autorización efectiva está en
+ * las Rules. S7: carterasL puede incluir lectura histórica de carteras
+ * revocadas (lectura ≠ gestión activa; la escritura la veta carterasE).
+ */
+function carterasLecturaDe(usuario: UsuarioApp): string[] {
+  return [...(usuario.carterasL ?? []), ...(usuario.carterasE ?? [])];
+}
+
+/**
  * Comprueba si un usuario tiene acceso autorizado a un inmueble determinado.
  * - Administrador: Acceso global de consulta.
  * - Propietario: Únicamente si es el propietario principal o está en sus inmuebleIds.
  * - Profesional: Únicamente si el inmueble está en sus asignaciones autorizadas.
+ * - D2 (§2): gestor (perfil propietario o profesional) con la cartera del
+ *   inmueble en su espejo (L o E) — sin mezcla entre carteras.
  */
 export function canAccessInmueble(
   usuario: UsuarioApp | null | undefined,
@@ -1395,6 +1407,10 @@ export function canAccessInmueble(
     if (usuario.propietarioId && propId === usuario.propietarioId) {
       return true;
     }
+    // D2 (§2): cartera gestionada (L o E) — sin mezcla entre carteras.
+    if (propId && carterasLecturaDe(usuario).includes(propId)) {
+      return true;
+    }
     if (usuario.inmuebleIds && usuario.inmuebleIds.includes(inmueble.id)) {
       return true;
     }
@@ -1403,6 +1419,11 @@ export function canAccessInmueble(
 
   if (isProfesional(usuario)) {
     if (profesional?.inmuebleIdsAsignados?.includes(inmueble.id)) {
+      return true;
+    }
+    // D2 (§2): gestor con perfil profesional — acceso por cartera.
+    const propIdGestor = inmueble.propietarioId || inmueble.propietarioPrincipalId;
+    if (propIdGestor && carterasLecturaDe(usuario).includes(propIdGestor)) {
       return true;
     }
     if (usuario.inmuebleIds && usuario.inmuebleIds.includes(inmueble.id)) {
@@ -1427,6 +1448,21 @@ export function canAccessContrato(
 
   if (isPropietario(usuario)) {
     if (usuario.propietarioId && contrato.propietarioId === usuario.propietarioId) {
+      return true;
+    }
+    // D2 (§2): contrato de una cartera gestionada (L o E).
+    if (contrato.propietarioId && carterasLecturaDe(usuario).includes(contrato.propietarioId)) {
+      return true;
+    }
+    const inmueble = allInmuebles.find((i) => i.id === contrato.inmuebleId);
+    if (!inmueble) return false;
+    return canAccessInmueble(usuario, inmueble);
+  }
+
+  // D2 (§2): gestor con perfil profesional — contrato de su cartera o del
+  // inmueble al que accede. El profesional operativo sin carteras sigue denegado.
+  if (isProfesional(usuario)) {
+    if (contrato.propietarioId && carterasLecturaDe(usuario).includes(contrato.propietarioId)) {
       return true;
     }
     const inmueble = allInmuebles.find((i) => i.id === contrato.inmuebleId);
@@ -1455,6 +1491,13 @@ export function canAccessCandidato(
     return canAccessInmueble(usuario, inmueble);
   }
 
+  // D2 (§2): gestor con perfil profesional — hereda por el inmueble.
+  if (isProfesional(usuario)) {
+    const inmueble = allInmuebles.find((i) => i.id === candidato.inmuebleId);
+    if (!inmueble) return false;
+    return canAccessInmueble(usuario, inmueble);
+  }
+
   // Los profesionales no tienen acceso a candidatos privados
   return false;
 }
@@ -1474,6 +1517,21 @@ export function canAccessCobro(
 
   if (isPropietario(usuario)) {
     if (usuario.propietarioId && cobro.propietarioId === usuario.propietarioId) {
+      return true;
+    }
+    // D2 (§2): cobro de una cartera gestionada (los cobros viven embebidos
+    // en el contrato y heredan su ámbito).
+    if (cobro.propietarioId && carterasLecturaDe(usuario).includes(cobro.propietarioId)) {
+      return true;
+    }
+    const inmueble = allInmuebles.find((i) => i.id === cobro.inmuebleId);
+    if (!inmueble) return false;
+    return canAccessInmueble(usuario, inmueble);
+  }
+
+  // D2 (§2): gestor con perfil profesional — hereda por cartera/inmueble.
+  if (isProfesional(usuario)) {
+    if (cobro.propietarioId && carterasLecturaDe(usuario).includes(cobro.propietarioId)) {
       return true;
     }
     const inmueble = allInmuebles.find((i) => i.id === cobro.inmuebleId);

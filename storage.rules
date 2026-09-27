@@ -16,12 +16,11 @@ service firebase.storage {
     //     se evalúa como `create`) cerrado en las rutas cuyo nombre es único
     //     por subida; conservado donde el flujo re-sube el mismo nombre
     //     (actas_pdfs) y en los bloques validados R3/E.
+    // D3 (ORDEN 4 §7) — RESUELTOS R-1/R-2 sin custom claims (ver helpers
+    // "D3 — ÁMBITO POR ESPEJO"): todo path con propietario (directo o
+    // derivable) se valida contra `usuarios_auth/{uid}` + administración.
+    // `internalUser()` solo queda en `inmuebles/.../list` (objetos públicos).
     // RESIDUALES (no resueltos aquí, decisión pendiente):
-    //   · R-1 `internalUser()` == cualquier cuenta autenticada (incluye el perfil
-    //     INQUILINO del bloque E): excluirlo exige `firestore.get` en cada
-    //     operación interna o custom claims. No se cambia sin orden.
-    //   · R-2 sin custom claims no hay aislamiento por `{propietarioId}` en
-    //     Storage; el aislamiento fino vive en Firestore.
     //   · R-3 `isPdfOrImage()` acepta `application/octet-stream` (clientes
     //     que suben blobs sin tipo).
     //   · R-4 las downloadURL con token son enlaces de capacidad ajenos a las
@@ -45,6 +44,129 @@ service firebase.storage {
 
     function internalUser() {
       return isMasterAdmin() || isSignedIn();
+    }
+
+    // =========================================================================
+    // D3 — ÁMBITO POR ESPEJO (cierre R-1/R-2 SIN custom claims).
+    // No existen custom claims en este sistema (sin firebase-admin ni backend
+    // que firme `setCustomUserClaims`, y la fuente de verdad de gestión es
+    // `gestiones_cartera`, no el token). Las reglas de Storage SÍ pueden leer
+    // Firestore (`firestore.get`, ya usado en E.0), luego el ámbito se
+    // resuelve contra el MISMO espejo canónico que Firestore
+    // (`usuarios_auth/{uid}`, ruta fija = uid): titularidad (`propietarioId`)
+    // + carteras (`carterasL`/`carterasE`, solo las escribe el master).
+    // Revocación: el espejo se evalúa EN CADA petición — un acceso revocado
+    // deniega de inmediato, sin ventana de token obsoleto (§12).
+    // Administración (master o perfil ADMINISTRADOR en la ficha
+    // autoritativa — el espejo nunca afirma ADMINISTRADOR) conserva la
+    // operativa global, igual que `esAdminInmuebles()` en Firestore.
+    // `get()` sobre un documento inexistente falla ⇒ deny (fail-closed).
+    // =========================================================================
+    function espejoExiste() {
+      return isSignedIn() && firestore.exists(/databases/(default)/documents/usuarios_auth/$(request.auth.uid));
+    }
+    function espejo() {
+      return firestore.get(/databases/(default)/documents/usuarios_auth/$(request.auth.uid)).data;
+    }
+    function espejoActivo() {
+      return espejoExiste() && espejo().estado == 'ACTIVO';
+    }
+    function adminStorage() {
+      return isMasterAdmin() || (isSignedIn()
+        && firestore.exists(/databases/(default)/documents/usuarios/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.tipoPerfil == 'ADMINISTRADOR');
+    }
+    // Pertenencia a cartera como predicado (sin ternario: el subconjunto que
+    // cubren los intérpretes de tests es `return`-puro; semántica idéntica).
+    function enCarteraL(pid) {
+      return espejoActivo() && 'carterasL' in espejo() && espejo().carterasL is list && pid in espejo().carterasL;
+    }
+    function enCarteraE(pid) {
+      return espejoActivo() && 'carterasE' in espejo() && espejo().carterasE is list && pid in espejo().carterasE;
+    }
+    function pidMio(pid) {
+      return espejoActivo() && 'propietarioId' in espejo() && espejo().propietarioId == pid;
+    }
+    // Lectura: titular, cartera L/E, administración.
+    function ambitoPidLectura(pid) {
+      return adminStorage() || pidMio(pid) || enCarteraL(pid) || enCarteraE(pid);
+    }
+    // Escritura: titular, cartera E, administración (L no escribe).
+    function ambitoPidEscritura(pid) {
+      return adminStorage() || pidMio(pid) || enCarteraE(pid);
+    }
+    // Borrado: titular y administración (el gestor no borra — coherencia D2).
+    function ambitoPidBorrado(pid) {
+      return adminStorage() || pidMio(pid);
+    }
+    function pidDeInmueble(inmuebleId) {
+      return firestore.get(/databases/(default)/documents/inmuebles/$(inmuebleId)).data.propietarioId;
+    }
+    // Derivación inmueble → propietario. `adminStorage()` cortocircuita
+    // primero: el admin opera también huérfanos (inmueble borrado); para el
+    // resto, un eslabón roto falla ⇒ deny.
+    function ambitoInmuebleLectura(inmuebleId) {
+      return adminStorage() || (espejoActivo() && ambitoPidLectura(pidDeInmueble(inmuebleId)));
+    }
+    function ambitoInmuebleEscritura(inmuebleId) {
+      return adminStorage() || (espejoActivo() && ambitoPidEscritura(pidDeInmueble(inmuebleId)));
+    }
+    function ambitoInmuebleBorrado(inmuebleId) {
+      return adminStorage() || (espejoActivo() && ambitoPidBorrado(pidDeInmueble(inmuebleId)));
+    }
+    function pidDeIncidencia(incidenciaId) {
+      return firestore.get(/databases/(default)/documents/incidencias/$(incidenciaId)).data.propietarioId;
+    }
+    function ambitoIncidenciaLectura(incidenciaId) {
+      return adminStorage() || (espejoActivo() && ambitoPidLectura(pidDeIncidencia(incidenciaId)));
+    }
+    function ambitoIncidenciaEscritura(incidenciaId) {
+      return adminStorage() || (espejoActivo() && ambitoPidEscritura(pidDeIncidencia(incidenciaId)));
+    }
+    function ambitoIncidenciaBorrado(incidenciaId) {
+      return adminStorage() || (espejoActivo() && ambitoPidBorrado(pidDeIncidencia(incidenciaId)));
+    }
+    // Profesional asignado a la incidencia (coherente con Firestore: lee y
+    // aporta evidencias de SU incidencia; no borra).
+    function profesionalAsignadoA(incidenciaId) {
+      return espejoActivo()
+        && 'profesionalId' in espejo() && espejo().profesionalId != ''
+        && 'profesionalAsignadoId' in firestore.get(/databases/(default)/documents/incidencias/$(incidenciaId)).data
+        && firestore.get(/databases/(default)/documents/incidencias/$(incidenciaId)).data.profesionalAsignadoId == espejo().profesionalId;
+    }
+    function pidDeContrato(contratoId) {
+      return firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.propietarioId;
+    }
+    function ambitoContratoLectura(contratoId) {
+      return adminStorage() || (espejoActivo() && ambitoPidLectura(pidDeContrato(contratoId)));
+    }
+    function ambitoContratoEscritura(contratoId) {
+      return adminStorage() || (espejoActivo() && ambitoPidEscritura(pidDeContrato(contratoId)));
+    }
+    function ambitoContratoBorrado(contratoId) {
+      return adminStorage() || (espejoActivo() && ambitoPidBorrado(pidDeContrato(contratoId)));
+    }
+    function inmuebleDeSuministroAmbito(suministroId) {
+      return firestore.get(/databases/(default)/documents/suministros/$(suministroId)).data.inmuebleId;
+    }
+    function ambitoSuministroLectura(suministroId) {
+      return adminStorage() || (espejoActivo() && ambitoInmuebleLectura(inmuebleDeSuministroAmbito(suministroId)));
+    }
+    function ambitoSuministroEscritura(suministroId) {
+      return adminStorage() || (espejoActivo() && ambitoInmuebleEscritura(inmuebleDeSuministroAmbito(suministroId)));
+    }
+    function ambitoSuministroBorrado(suministroId) {
+      return adminStorage() || (espejoActivo() && ambitoInmuebleBorrado(inmuebleDeSuministroAmbito(suministroId)));
+    }
+    function candidatoDeSolicitudDoc(solicitudDocId) {
+      return firestore.get(/databases/(default)/documents/solicitudes_documentacion/$(solicitudDocId)).data.candidatoId;
+    }
+    function inmuebleDeCandidato(candidatoId) {
+      return firestore.get(/databases/(default)/documents/candidatos/$(candidatoId)).data.inmuebleId;
+    }
+    function ambitoSolicitudDoc(solicitudDocId) {
+      return adminStorage() || (espejoActivo()
+        && ambitoInmuebleLectura(inmuebleDeCandidato(candidatoDeSolicitudDoc(solicitudDocId))));
     }
 
     // =========================================================================
@@ -144,46 +266,52 @@ service firebase.storage {
     // Exige cuenta interna. Las URL de descarga con token que genera el SDK
     // funcionan como enlace de capacidad para el destinatario (quien lo recibe
     // puede abrirlo aunque no tenga sesión).
-    // RESIDUAL: sin custom claims, Storage no puede leer Firestore para comparar
-    // el segmento propietarioId con el usuario; se exige cuenta interna y el
-    // aislamiento fino por propietario queda para cuando se emitan claims.
+    // D3 (§7): RESUELTO sin custom claims — el segmento propietarioId se
+    // valida contra el espejo vía `firestore.get` (ver helpers D3).
     // -------------------------------------------------------------------------
     match /cobros_justificantes/{propietarioId}/{cobroPeriodoId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): el segmento propietarioId se valida contra el espejo —
+      // titular, cartera (L lee, E escribe) y administración. Conocer el
+      // path ya no concede acceso transversal.
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 12 * 1024 * 1024
         && isPdfOrImage()
         && hasSafeObjectName();
       // Nombre único por subida (`Date.now()_…`): sin caso de uso de metadatos.
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     // Ruta heredada anterior (sin carpeta de propietario): sólo lectura interna;
     // ya no se permiten nuevas subidas a este esquema.
+    // D3 (§7): sin segmento de ámbito demostrable ⇒ fail-closed estricto
+    // (master + administración). Migración histórica pendiente: mover los
+    // objetos a la ruta con propietarioId.
     match /cobros_justificantes/{cobroPeriodoId}/{fileName} {
-      allow get: if internalUser();
+      allow get: if adminStorage();
       allow list: if isMasterAdmin();
       allow create, update: if false;
-      allow delete: if internalUser();
+      allow delete: if adminStorage();
     }
 
     // -------------------------------------------------------------------------
     // FACTURAS / JUSTIFICANTES DE GASTOS (FASE 2.2 — datos económicos)
     // Ruta por propietario: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
-    // Cuenta interna; PDF o imagen; máximo 12 MB. Mismo residual de aislamiento
-    // fino que los justificantes de cobro (pendiente de custom claims).
+    // Cuenta interna; PDF o imagen; máximo 12 MB. Mismo ámbito por espejo
+    // que los justificantes de cobro (D3 §7).
     // -------------------------------------------------------------------------
     match /gastos_facturas/{propietarioId}/{gastoId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): ámbito por espejo (ver cobros_justificantes).
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 12 * 1024 * 1024
         && isPdfOrImage()
         && hasSafeObjectName();
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     // -------------------------------------------------------------------------
@@ -200,20 +328,22 @@ service firebase.storage {
     //     < 15 MB. El candidato no recibe URL de lectura; `list` sólo admin.
     // -------------------------------------------------------------------------
     match /documentos_solicitados/{solicitudDocId}/{allFiles=**} {
-      allow get: if internalUser();
+      // D3 (§7): solicitud → candidato → inmueble → propietario. La subida
+      // anónima del plano queda intacta (funnel deliberado, §11).
+      allow get: if ambitoSolicitudDoc(solicitudDocId);
       allow list: if isMasterAdmin();
       allow create, update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoSolicitudDoc(solicitudDocId);
     }
 
     match /documentos_solicitados/{solicitudDocId}/{fileName} {
-      allow get: if internalUser();
+      allow get: if ambitoSolicitudDoc(solicitudDocId);
       allow list: if isMasterAdmin();
       allow create: if request.resource.size < 15 * 1024 * 1024
         && isPdfOrImage()
         && hasSafeObjectName();
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoSolicitudDoc(solicitudDocId);
     }
 
     // -------------------------------------------------------------------------
@@ -226,15 +356,18 @@ service firebase.storage {
     match /inmuebles/{inmuebleId}/{fileName} {
       // Público SÓLO el `get` del objeto (lo que proyecta la ficha R3); el
       // listado de la carpeta del inmueble exige cuenta interna.
+      // D3 (§7): la ESCRITURA (subir/borrar fotos conociendo el ID) queda
+      // acotada al ámbito del inmueble. El `get: true` es público
+      // deliberado (R3) y NO se toca (§11).
       allow get: if true;
       allow list: if internalUser();
-      allow create: if internalUser()
+      allow create: if ambitoInmuebleEscritura(inmuebleId)
         && request.resource.size < 15 * 1024 * 1024
         && isImage()
         && hasSafeObjectName();
       // Nombre único por subida (`{imageId}_…` con id aleatorio).
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoInmuebleBorrado(inmuebleId);
     }
 
     // R3 — ADJUNTOS DE INVENTARIO (documentación interna de trabajo).
@@ -242,12 +375,14 @@ service firebase.storage {
     // interna. Las downloadURL con token ya emitidas siguen funcionando
     // como enlaces de capacidad para su tenedor legítimo.
     match /inmuebles/{inmuebleId}/inventario/{allFiles=**} {
-      allow read: if internalUser();
-      allow create: if internalUser()
+      // D3 (§7): evidencia operativa interna — ámbito del inmueble.
+      allow read: if ambitoInmuebleLectura(inmuebleId);
+      allow create: if ambitoInmuebleEscritura(inmuebleId)
         && request.resource.size < 15 * 1024 * 1024
         && isImage()
         && hasSafeObjectName();
-      allow update, delete: if internalUser();
+      allow update: if ambitoInmuebleEscritura(inmuebleId);
+      allow delete: if ambitoInmuebleBorrado(inmuebleId);
     }
 
     // -------------------------------------------------------------------------
@@ -256,19 +391,18 @@ service firebase.storage {
     //   recomercializacion_fotos/{propietarioId}/{expedienteId}/{archivo}
     // Son documentos internos de trabajo (estado aparente / desperfectos previos
     // a la nueva comercialización), por lo que NO son públicas como las del
-    // catálogo. Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
-    // RESIDUAL: sin custom claims, el aislamiento fino por propietario queda
-    // pendiente de emitir claims (igual que justificantes y facturas).
+    // catálogo. Sólo ámbito por espejo (D3 §7); imágenes; máximo 15 MB por archivo.
     // -------------------------------------------------------------------------
     match /recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): ámbito por espejo (ver cobros_justificantes).
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 15 * 1024 * 1024
         && isImage()
         && hasSafeObjectName();
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     // -------------------------------------------------------------------------
@@ -279,14 +413,15 @@ service firebase.storage {
     // Sólo cuentas internas; imágenes; máximo 15 MB por archivo.
     // -------------------------------------------------------------------------
     match /incidencias_fotos/{propietarioId}/{incidenciaId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): ámbito por espejo (ver cobros_justificantes).
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 15 * 1024 * 1024
         && isImage()
         && hasSafeObjectName();
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     // -------------------------------------------------------------------------
@@ -297,25 +432,27 @@ service firebase.storage {
     // Documentación contractual, planos, presupuestos y certificados técnicos.
     // -------------------------------------------------------------------------
     match /reformas_documentos/{propietarioId}/{proyectoId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): ámbito por espejo (ver cobros_justificantes).
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 20 * 1024 * 1024
         && isPdfOrImage()
         && hasSafeObjectName();
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     match /reformas_fotos/{propietarioId}/{proyectoId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): ámbito por espejo (ver cobros_justificantes).
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 20 * 1024 * 1024
         && isImage()
         && hasSafeObjectName();
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     // ------------------------------------------------------------------------
@@ -328,28 +465,31 @@ service firebase.storage {
     // NO base64 en Firestore, referencia persistente Storage.
     // ------------------------------------------------------------------------
     match /actas_fotos/{propietarioId}/{actaId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): ámbito por espejo (ver cobros_justificantes).
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 15 * 1024 * 1024
         && isImage()
         && hasSafeObjectName();
       allow update: if false;
-      allow delete: if internalUser();
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     match /actas_pdfs/{propietarioId}/{actaId}/{fileName} {
-      allow get: if internalUser();
+      // D3 (§7): ámbito por espejo (ver cobros_justificantes).
+      allow get: if ambitoPidLectura(propietarioId);
       allow list: if isMasterAdmin();
-      allow create: if internalUser()
+      allow create: if ambitoPidEscritura(propietarioId)
         && request.resource.size < 20 * 1024 * 1024
         && isPdfOrImage()
         && hasSafeObjectName();
       // `handleGenerarPdf` re-sube el MISMO nombre
       // (`Acta_{tipo}_{fecha}_v{version}_{id8}.pdf`) al regenerar una versión:
-      // se conserva `update` interno para no romper ese flujo legítimo.
-      allow update: if internalUser();
-      allow delete: if internalUser();
+      // se conserva `update` (acotado al ámbito de escritura) para no romper
+      // ese flujo legítimo.
+      allow update: if ambitoPidEscritura(propietarioId);
+      allow delete: if ambitoPidBorrado(propietarioId);
     }
 
     // -------------------------------------------------------------------------
@@ -362,11 +502,15 @@ service firebase.storage {
     // Subida: PDF/imágenes, máx. 10 MB. Solo el personal borra.
     // =========================================================================
     match /incidencias/{incidenciaId}/{file=**} {
-      allow read: if isSignedIn() && (!isTenant() ||
-        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
-      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
-        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
-      allow delete: if isSignedIn() && !isTenant();
+      // D3 (§7): el personal genérico (`!isTenant()`) se sustituye por el
+      // ámbito de la incidencia (titular/cartera/admin) + profesional
+      // asignado (lee y aporta; no borra). Rama tenant intacta.
+      allow read: if ambitoIncidenciaLectura(incidenciaId) || profesionalAsignadoA(incidenciaId) ||
+        (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId)));
+      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (ambitoIncidenciaEscritura(incidenciaId)
+        || profesionalAsignadoA(incidenciaId)
+        || (existeIncidencia(incidenciaId) && tenantVeContrato(contratoDeIncidencia(incidenciaId))));
+      allow delete: if ambitoIncidenciaBorrado(incidenciaId);
     }
 
     // =========================================================================
@@ -375,12 +519,14 @@ service firebase.storage {
     // La lectura se crea primero en Firestore (inmutable); la foto la referencia.
     // =========================================================================
     match /suministros/{suministroId}/lecturas/{lecturaId}/{file=**} {
-      allow read: if isSignedIn() && (!isTenant() ||
-        (existeLectura(lecturaId) && tenantVeContrato(contratoDeLectura(lecturaId))));
+      // D3 (§7): ámbito suministro → inmueble → propietario (+carteras,
+      // +admin). Ramas tenant intactas.
+      allow read: if ambitoSuministroLectura(suministroId) ||
+        (existeLectura(lecturaId) && tenantVeContrato(contratoDeLectura(lecturaId)));
       // Subida ANTES de crear la lectura (inmutable): alcance vía contrato activo del inmueble.
-      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (isMasterAdmin() || (isSignedIn() && !isTenant()) ||
+      allow create, update: if esEvidenciaValida() && hasSafeObjectName() && (ambitoSuministroEscritura(suministroId) ||
         tenantEnSuministroPorInmueble(suministroId));
-      allow delete: if isSignedIn() && !isTenant();
+      allow delete: if ambitoSuministroBorrado(suministroId);
     }
 
     // =========================================================================
@@ -388,8 +534,11 @@ service firebase.storage {
     // El inquilino solo lee los de sus contratos; solo el personal publica.
     // =========================================================================
     match /contratos/{contratoId}/{file=**} {
-      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
-      allow create, update, delete: if isSignedIn() && !isTenant();
+      // D3 (§7): ámbito contrato → propietario (+carteras, +admin). El
+      // inquilino solo lee los de sus contratos; solo el ámbito publica.
+      allow read: if ambitoContratoLectura(contratoId) || tenantVeContrato(contratoId);
+      allow create, update: if ambitoContratoEscritura(contratoId);
+      allow delete: if ambitoContratoBorrado(contratoId);
     }
 
     // =========================================================================
@@ -397,8 +546,10 @@ service firebase.storage {
     // Ruta: recibos/{contratoId}/{claveCobro}/{fichero}
     // =========================================================================
     match /recibos/{contratoId}/{claveCobro}/{file=**} {
-      allow read: if isSignedIn() && (!isTenant() || tenantVeContrato(contratoId));
-      allow create, update, delete: if isSignedIn() && !isTenant();
+      // D3 (§7): mismo ámbito que E.3 (contrato → propietario).
+      allow read: if ambitoContratoLectura(contratoId) || tenantVeContrato(contratoId);
+      allow create, update: if ambitoContratoEscritura(contratoId);
+      allow delete: if ambitoContratoBorrado(contratoId);
     }
 
     // =========================================================================

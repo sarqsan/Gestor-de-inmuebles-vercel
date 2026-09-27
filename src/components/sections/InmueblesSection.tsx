@@ -25,6 +25,7 @@ import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
 import { getInmuebleCoverUrl } from '../../utils/imageUtils';
+import { validarCoherenciaTitularidad } from '../../lib/titularidadInmueble';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
 import {
   obtenerCobrosInmueble,
@@ -561,6 +562,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       datosFiscales,
     };
 
+    // D2 (§6): el secundario, si se informa, debe ser distinto del principal
+    // y del titular económico. Se valida en el editor (no en Rules) porque,
+    // sin auditoría histórica de datos reales, una prohibición en Rules
+    // bloquearía cualquier edición de fichas legacy incoherentes.
+    const erroresTitularidadAlta = validarCoherenciaTitularidad({
+      propietarioId: created.propietarioId,
+      propietarioPrincipalId: created.propietarioPrincipalId,
+      propietarioSecundarioId: created.propietarioSecundarioId,
+    });
+    if (erroresTitularidadAlta.length > 0) {
+      window.alert(erroresTitularidadAlta.join('\n'));
+      return;
+    }
+
     onAddInmueble(created);
     setShowAddModal(false);
     setNewIdPersonalizado('');
@@ -833,6 +848,17 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       ibanCobro: editIbanCobro.trim() || undefined,
       datosFiscales,
     };
+
+    // D2 (§6): misma coherencia estructural que en el alta.
+    const erroresTitularidadEdit = validarCoherenciaTitularidad({
+      propietarioId: updated.propietarioId,
+      propietarioPrincipalId: updated.propietarioPrincipalId,
+      propietarioSecundarioId: updated.propietarioSecundarioId,
+    });
+    if (erroresTitularidadEdit.length > 0) {
+      window.alert(erroresTitularidadEdit.join('\n'));
+      return;
+    }
 
     onUpdateInmueble(updated);
     setInmuebleToEdit(null);

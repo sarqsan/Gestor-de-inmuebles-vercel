@@ -1522,6 +1522,12 @@ puente nuevos). **No existe duplicación funcional intencionada.**
 
 ### 13.2 Fuera de `main` (deliberadamente)
 
+- `arena/01a0e2af-gestor-de-inmuebles-vercel` (2026-09-27): BLOQUE 6
+  importador/exportador canónicos `erp-import-export-v1` + cadena B4/O7 de
+  migración histórica (dry-run, validación, autorización). **NO integrada**;
+  pendiente de revisión e integración lineal en `main` (no merge).
+  Import/export **AUDITADO + corregido** (commit `fix(import-export): audit
+  and harden 3ac21a5`): dictamen APTO PARA INTEGRACIÓN.
 - `arena/01a0d832-gestor-de-inmuebles-vercel` @ `1e73995` (7 commits del
   2026-09-25: UX-0A/0B/1A/1B/1C, fix segundo titular, auditoría de deriva):
   **NO integrada**; pendiente de investigación independiente (no se asume que
@@ -1682,10 +1688,28 @@ conservando origen · incidencia · campos faltantes · trazabilidad.
 > independiente en **§16** — NO queda absorbida por este bloque ni por
 > ningún GAP genérico.
 
-### BLOQUE 6 — IMPORTACIÓN / EXPORTACIÓN GLOBAL DEL ERP — **PENDIENTE**
+### BLOQUE 6 — IMPORTACIÓN / EXPORTACIÓN GLOBAL DEL ERP — **IMPLEMENTADO EN RAMA (2026-09-27, pendiente de integración en `main`)**
 
 **No confundir con el INC-06 ya implementado** (INC-06 = base patrimonial +
 importación controlada, en `main`). Este bloque cierra el sistema global.
+Implementación: rama `arena/01a0e2af-gestor-de-inmuebles-vercel`, contrato
+`erp-import-export-v1` (`src/lib/importExport/` + `src/lib/importExportFirebase.ts` +
+panel en Configuración + `tests/import-export-canonico.test.ts`, 106 tests;
+tsc limpio; suite 2215 passed sin regresiones). Reutiliza B4 (resolución) y O7
+(autorización) sin tercera interpretación; DRY-RUN obligatorio 0 escrituras;
+XLSX = adaptador preparado (sin dependencia); DOCUMENTO/LEGACY_STORAGE y cobros
+excluidos de promoción v1 con motivo (puerta fiscal O7); fuentes históricas
+reales pendientes de reconciliación/custodia cuando estén disponibles como
+ficheros materializables. **AUDITADO 2026-09-27** (orden de auditoría integral
+sobre `3ac21a5`): diff forense verificado (21 ficheros, +3974/−4, 0 ocultos);
+9 defectos reales corregidos en el commit de auditoría (panel: Autorizar muerto
++ identidad/ámbito propios + anti-cuelgue; adaptador: verificación
+post-escritura anti-falso-CREADO; núcleo: doble-detalle de auditoría,
+trazabilidad con sourceId duplicado, filtro inmuebleIds en INMUEBLE, fallback
+de titular en exportación, importeRecibido por estado, fechaVencimiento de
+calendario) + 38 tests de regresión (núcleo/adaptador/panel); suite/tsc/build
+verdes. Dictamen: **APTO PARA INTEGRACIÓN** (pendiente revisión de
+integración lineal; **NO integrado en `main`**).
 
 **IMPORTACIÓN:** JSON · Excel/CSV · datos completos · datos parciales ·
 propietario destino explícito · preview/dry-run · validación · duplicados ·

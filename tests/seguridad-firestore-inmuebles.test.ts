@@ -270,14 +270,26 @@ describe('D2a · E — No regresión de escritura y tenants', () => {
     expect(list('inm_ct', AUTH.inq)).toBe(false);
     expect(get('inm_A', AUTH.inq)).toBe(false);
   });
-  it('E4 · las reglas de contratos/gastos/propietarios NO cambian en D2a', () => {
-    // Las condiciones de escritura/lectura de las otras colecciones siguen
-    // siendo las custodiadas (se prueban a fondo en sus propias suites:
-    // seguridad-firestore-tenant-contrato, fase14, login-admin-principal).
+  it('E4 · REVISIÓN EXPLÍCITA D2 (ORDEN 3 §2): contratos/gastos/recurrentes/ incidencias SÍ cambian — ramas de cartera del gestor', () => {
+    // D2a pineaba la invariancia de contratos/gastos. D2 (ORDEN 3 §2,
+    // "dependientes dentro del mismo ámbito") extiende la lectura a
+    // carterasL ∪ carterasE y la escritura a carterasE con el mismo patrón
+    // ya auditado de pólizas/siniestros (D2b). NO es debilitamiento: cada
+    // rama nueva exige espejo ACTIVO + pid en la lista de carteras del
+    // espejo (solo la escribe el master); el gestor no borra; la revocación
+    // (espejo vacío) deniega. Cobertura de comportamiento en
+    // seguridad-firestore-d2.test.ts (bloque C). `propietarios` intacto.
     const reglasContratos = EVAL.bloqueDe('contratos_formalizacion');
-    expect(reglasContratos).toContain('allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data))');
+    expect(reglasContratos).toContain('|| inmuebleEnCarteraGestionada(resource.data);');
+    expect(reglasContratos).toContain('|| inmuebleEnCarteraGestionada(existing());');
+    expect(reglasContratos).toContain('carterasEscritura().hasAny([incoming().propietarioId])');
     const reglasGastos = EVAL.bloqueDe('gastos');
-    expect(reglasGastos).toContain('allow list: if isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data))');
+    expect(reglasGastos).toContain('|| inmuebleEnCarteraGestionada(resource.data);');
+    expect(reglasGastos).toContain('carterasEscritura().hasAny([incoming().propietarioId])');
+    const reglasRec = EVAL.bloqueDe('gastos_recurrentes');
+    expect(reglasRec).toContain('|| inmuebleEnCarteraGestionada(resource.data);');
+    const reglasInc = EVAL.bloqueDe('incidencias');
+    expect(reglasInc).toContain('|| inmuebleEnCarteraGestionada(resource.data);');
     const reglasPropietarios = EVAL.bloqueDe('propietarios');
     expect(reglasPropietarios.length).toBeGreaterThan(0);
   });

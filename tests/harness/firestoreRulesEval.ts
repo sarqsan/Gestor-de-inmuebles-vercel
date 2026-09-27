@@ -98,8 +98,40 @@ export function crearEvaluadorReglas(RULES: string) {
     throw new Error('Bloque raíz sin cerrar');
   }
 
-  const SIN_COMENTARIOS = (src: string): string =>
-    src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+  // D3: respeta los literales de cadena (`storage.rules` usa `'.*//.*'`, con
+  // `//` dentro del literal; el regex ingenuo lo cortaba y descuadraba el
+  // resto del fichero). Comportamiento idéntico fuera de strings.
+  const SIN_COMENTARIOS = (src: string): string => {
+    let out = '';
+    let i = 0;
+    let comilla: string | null = null;
+    while (i < src.length) {
+      const c = src[i];
+      const n = src[i + 1];
+      if (comilla) {
+        out += c;
+        if (c === '\\') { out += n ?? ''; i += 2; continue; }
+        if (c === comilla) comilla = null;
+        i++;
+        continue;
+      }
+      if (c === "'" || c === '"') { comilla = c; out += c; i++; continue; }
+      if (c === '/' && n === '*') {
+        const fin = src.indexOf('*/', i + 2);
+        i = fin < 0 ? src.length : fin + 2;
+        out += ' ';
+        continue;
+      }
+      if (c === '/' && n === '/') {
+        while (i < src.length && src[i] !== '\n') i++;
+        out += ' ';
+        continue;
+      }
+      out += c;
+      i++;
+    }
+    return out;
+  };
 
   /** Todas las `function nombre(params) { return expr; }` visibles en el ámbito dado. */
   function funcionesDe(src: string): Map<string, { params: string[]; cuerpo: string }> {
@@ -244,7 +276,8 @@ export function crearEvaluadorReglas(RULES: string) {
         i = j + 1;
         continue;
       }
-      const ops = ['&&', '||', '==', '!=', '>=', '<=', '<', '>', '!', '(', ')', '[', ']', ',', '.', '+', '-', ':', '?'];
+      // D3: `*`/`/` para los límites de tamaño de storage.rules (`12 * 1024 * 1024`).
+      const ops = ['&&', '||', '==', '!=', '>=', '<=', '<', '>', '!', '(', ')', '[', ']', ',', '.', '+', '-', '*', '/', ':', '?'];
       const op = ops.find((o) => src.startsWith(o, i));
       if (op) { toks.push(op); i += op.length; continue; }
       const m = /^[A-Za-z_$][A-Za-z0-9_]*/.exec(src.slice(i)) || /^[0-9]+(\.[0-9]+)?/.exec(src.slice(i));
@@ -340,8 +373,18 @@ export function crearEvaluadorReglas(RULES: string) {
     }
 
     function aditivo(): Nodo {
-      let l = primario();
+      let l = multiplicativo();
       while (peek() === '+' || peek() === '-') {
+        const op = toks[p++];
+        l = { k: 'bin', op, l, r: multiplicativo() };
+      }
+      return l;
+    }
+
+    // D3: nivel multiplicativo (`*`/`/` ligan más que `+`/`-`).
+    function multiplicativo(): Nodo {
+      let l = primario();
+      while (peek() === '*' || peek() === '/') {
         const op = toks[p++];
         l = { k: 'bin', op, l, r: primario() };
       }
@@ -590,6 +633,13 @@ export function crearEvaluadorReglas(RULES: string) {
         }
         if (op === '+' || op === '-') {
           if (typeof lv === 'number' && typeof rv === 'number') return op === '+' ? lv + rv : lv - rv;
+          throw new Error(`HARNESS NO CUBRE: ${op} sobre ${typeof lv}/${typeof rv}`);
+        }
+        // D3: `storage.rules` expresa los límites de tamaño como
+        // `12 * 1024 * 1024`; sin `*` el evaluador Storage no podría decidir
+        // los `create`. Aditivo: antes lanzaba (ningún test lo esperaba).
+        if (op === '*' || op === '/') {
+          if (typeof lv === 'number' && typeof rv === 'number') return op === '*' ? lv * rv : lv / rv;
           throw new Error(`HARNESS NO CUBRE: ${op} sobre ${typeof lv}/${typeof rv}`);
         }
         if (op === '>' || op === '<' || op === '>=' || op === '<=') {

@@ -99,6 +99,7 @@ import {
   subscribeModulosConfig,
   saveInmuebleFirestore,
   deleteInmuebleFirestore,
+  registrarAuditoriaFirestore,
   saveCandidatoFirestore,
   deleteCandidatoFirestore,
   savePropietarioFirestore,
@@ -145,6 +146,20 @@ import {
   saveModulosConfigFirestore,
 } from './lib/firebase';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
+import { propietariosGestionadosDe } from './lib/carterasGestion';
+import { detectarCambioTitularidad } from './lib/titularidadInmueble';
+import { resolverTokensPublicos } from './lib/tokensPublicos';
+import {
+  persistirMejorEsfuerzo,
+  planificarAltaCandidato,
+  planificarGuardadoInvitacion,
+} from './lib/invitacionesCandidatos';
+import {
+  CLAVE_STORAGE_CANDIDATOS,
+  CLAVE_STORAGE_INVITACIONES,
+  CLAVE_STORAGE_SLOTS,
+  reconciliarDesdeStorage,
+} from './lib/sincronizacionPestanas';
 
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
@@ -875,52 +890,17 @@ export default function App() {
       }
 
       // Check Visita Public Token
-      let visitaToken = params.get('visita') || params.get('visitaToken');
-      if (pathname.includes('/visita/')) {
-        visitaToken = pathname.split('/visita/')[1];
-      } else if (hash.includes('visita/')) {
-        visitaToken = hash.split('visita/')[1];
-      }
-
-      if (visitaToken) {
-        setActivePublicVisitaToken(visitaToken);
-      }
-
-      // Check Solicitud Public Token
-      let solToken = params.get('solicitud') || params.get('solicitudToken');
-      if (pathname.includes('/solicitud/')) {
-        solToken = pathname.split('/solicitud/')[1];
-      } else if (hash.includes('solicitud/')) {
-        solToken = hash.split('solicitud/')[1];
-      }
-
-      if (solToken) {
-        setActivePublicSolicitudToken(solToken);
-      }
-
-      // Check Documentación Public Token (Fase 2)
-      let docToken = params.get('documentacion') || params.get('docToken') || params.get('doc');
-      if (pathname.includes('/documentacion/')) {
-        docToken = pathname.split('/documentacion/')[1];
-      } else if (hash.includes('documentacion/')) {
-        docToken = hash.split('documentacion/')[1];
-      }
-
-      if (docToken) {
-        setActivePublicDocToken(docToken);
-      }
-
-      // Check Cuestionario Token
-      let tokenFromUrl = params.get('cuestionario') || params.get('cuestionarioToken');
-      if (pathname.includes('/cuestionario/')) {
-        tokenFromUrl = pathname.split('/cuestionario/')[1];
-      } else if (hash.includes('cuestionario/')) {
-        tokenFromUrl = hash.split('cuestionario/')[1];
-      }
-
-      if (tokenFromUrl) {
-        setActivePublicQuestionnaireToken(tokenFromUrl);
-      }
+      // DELTA-C (tokens): los 4 tokens heredados se resuelven con el helper
+      // puro (montaje + hashchange, sistema de navegación de main intacto).
+      // Token presente → se conserva; ausente → se limpia (null), de modo que
+      // cambiar de superficie pública no conserva un token incompatible.
+      // Las rutas nuevas de main (?registro/?registroInq/?registroProp) siguen
+      // set-only más arriba y no se tocan.
+      const tokensPublicos = resolverTokensPublicos(window.location);
+      setActivePublicVisitaToken(tokensPublicos.visita);
+      setActivePublicSolicitudToken(tokensPublicos.solicitud);
+      setActivePublicDocToken(tokensPublicos.documentacion);
+      setActivePublicQuestionnaireToken(tokensPublicos.cuestionario);
     };
 
     checkUrlForTokens();
@@ -1007,6 +987,26 @@ export default function App() {
     };
   }, []);
 
+  // DELTA-C (pestañas): coherencia local entre pestañas para candidatos,
+  // invitaciones y slots (merge por id ante eventos `storage`). NUNCA toca
+  // inmuebles (clave ignorada), no escribe en Firestore y no usa la caché
+  // antigua de C: respeta `snapshotInmueblesCache.ts` como única vía
+  // Firestore → estado/caché de lectura para inmuebles.
+  useEffect(() => {
+    const sincronizarDesdeOtraPestana = (e: StorageEvent) => {
+      if (e.key === CLAVE_STORAGE_CANDIDATOS) {
+        setCandidatos((prev) => reconciliarDesdeStorage(e.key, e.newValue, prev) ?? prev);
+      } else if (e.key === CLAVE_STORAGE_INVITACIONES) {
+        setInvitaciones((prev) => reconciliarDesdeStorage(e.key, e.newValue, prev) ?? prev);
+      } else if (e.key === CLAVE_STORAGE_SLOTS) {
+        setSlots((prev) => reconciliarDesdeStorage(e.key, e.newValue, prev) ?? prev);
+      }
+      // Cualquier otra clave (incluida `rentselect_inmuebles`) se ignora.
+    };
+    window.addEventListener('storage', sincronizarDesdeOtraPestana);
+    return () => window.removeEventListener('storage', sincronizarDesdeOtraPestana);
+  }, []);
+
   // Authenticated subscriptions (attached strictly when a user is authenticated)
   useEffect(() => {
     if (!currentUser) return;
@@ -1025,9 +1025,11 @@ export default function App() {
       // D2b: carteras gestionadas (proyección D1R leída del espejo por
       // authService). Sólo acota las CONSULTAS: la autorización efectiva
       // está en las reglas (carterasL/carterasE sólo las escribe el master).
-      propietariosGestionados: Array.from(
-        new Set([...(currentUser.carterasL || []), ...(currentUser.carterasE || [])])
-      ),
+      // ORDEN 2: unión canónica (única derivación autorizada L ∪ E).
+      propietariosGestionados: propietariosGestionadosDe({
+        carterasL: currentUser.carterasL || [],
+        carterasE: currentUser.carterasE || [],
+      }),
     };
 
     // D2a: suscripción de inmuebles CON ÁMBITO (propios ∪ autorizados
@@ -1507,21 +1509,20 @@ export default function App() {
   };
 
   // Add candidate handler
+  // DELTA-C (invitaciones/candidatos): alta con defensa local contra
+  // duplicados por id y contador seguro ante valor inexistente/null
+  // (ver src/lib/invitacionesCandidatos.ts). Defensas de estado local:
+  // no son idempotencia transaccional.
   const handleAddCandidato = (newCand: Candidato) => {
-    setCandidatos((prev) => [newCand, ...prev]);
-    saveCandidatoFirestore(newCand);
-
-    // Update candidate count on corresponding property
-    setInmuebles((prevInm) =>
-      prevInm.map((inm) => {
-        if (inm.id === newCand.inmuebleId) {
-          const updatedInm = { ...inm, candidatosCount: inm.candidatosCount + 1 };
-          saveInmuebleFirestore(updatedInm);
-          return updatedInm;
-        }
-        return inm;
-      })
-    );
+    const plan = planificarAltaCandidato(candidatos, inmuebles, newCand);
+    setCandidatos(plan.candidatos);
+    const tareas: Array<() => unknown> = [() => saveCandidatoFirestore(newCand)];
+    if (plan.inmuebleAPersistir) {
+      const inmuebleActualizado = plan.inmuebleAPersistir;
+      setInmuebles(plan.inmuebles);
+      tareas.push(() => saveInmuebleFirestore(inmuebleActualizado));
+    }
+    void persistirMejorEsfuerzo(tareas);
   };
 
   // Update candidate status handler
@@ -1577,17 +1578,20 @@ export default function App() {
   };
 
   // Save / Update invitation handler
+  // DELTA-C (invitaciones/candidatos): al guardar la invitación, el candidato
+  // en estado `nuevo` pasa explícitamente a `preseleccionado` (sólo desde
+  // `nuevo`; otros estados se respetan). Persistencia best-effort: si falla,
+  // el estado local ya coherente no se revierte (no es transaccional).
   const handleSaveInvitacion = (inv: InvitacionVisita) => {
-    setInvitaciones((prev) => {
-      const idx = prev.findIndex((i) => i.id === inv.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = inv;
-        return next;
-      }
-      return [...prev, inv];
-    });
-    saveInvitacionFirestore(inv);
+    const plan = planificarGuardadoInvitacion(invitaciones, candidatos, inv);
+    setInvitaciones(plan.invitaciones);
+    const tareas: Array<() => unknown> = [() => saveInvitacionFirestore(inv)];
+    if (plan.candidatoAPersistir) {
+      const candidatoActualizado = plan.candidatoAPersistir;
+      setCandidatos(plan.candidatos);
+      tareas.push(() => saveCandidatoFirestore(candidatoActualizado));
+    }
+    void persistirMejorEsfuerzo(tareas);
   };
 
   // Save / Update visit slot handler
@@ -1734,12 +1738,31 @@ export default function App() {
 
   // Delete inmueble handler
   const handleDeleteInmueble = (inmuebleId: string) => {
+    // D2 (§2): auditoría del borrado (solo si tuvo éxito).
+    const previoBorrado = inmuebles.find((i) => i.id === inmuebleId);
     setInmuebles((prev) => {
       const next = prev.filter((i) => i.id !== inmuebleId);
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-    deleteInmuebleFirestore(inmuebleId);
+    void deleteInmuebleFirestore(inmuebleId).then((ok) => {
+      if (!ok) return;
+      void registrarAuditoriaFirestore({
+        usuarioId: currentUser?.id || 'system',
+        usuarioEmail: currentUser?.email || 'sistema',
+        usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
+        accion: 'INMUEBLE_ELIMINADO',
+        descripcion: `Inmueble ${inmuebleId} eliminado`,
+        entidadAfectada: 'inmueble',
+        idAfectado: inmuebleId,
+        resultado: 'EXITO',
+        detalles: {
+          propietarioId: previoBorrado?.propietarioId || '',
+          propietarioPrincipalId: previoBorrado?.propietarioPrincipalId || '',
+          propietarioSecundarioId: previoBorrado?.propietarioSecundarioId || '',
+        },
+      });
+    });
 
     // Safely update candidates associated with this property
     setCandidatos((prev) => {
@@ -1768,12 +1791,30 @@ export default function App() {
 
   // Update inmueble handler
   const handleUpdateInmueble = (updatedInmueble: Inmueble) => {
+    // D2 (§2): los cambios sensibles de titularidad son auditables — el
+    // registro se escribe SOLO si la escritura tuvo éxito (save→boolean).
+    const previoTitularidad = inmuebles.find((i) => i.id === updatedInmueble.id);
     setInmuebles((prev) => {
       const next = prev.map((i) => (i.id === updatedInmueble.id ? updatedInmueble : i));
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-    saveInmuebleFirestore(updatedInmueble);
+    void saveInmuebleFirestore(updatedInmueble).then((ok) => {
+      if (!ok || !previoTitularidad) return;
+      const diff = detectarCambioTitularidad(previoTitularidad, updatedInmueble);
+      if (!diff.cambio) return;
+      void registrarAuditoriaFirestore({
+        usuarioId: currentUser?.id || 'system',
+        usuarioEmail: currentUser?.email || 'sistema',
+        usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
+        accion: 'INMUEBLE_TITULARIDAD_CAMBIO',
+        descripcion: `Titularidad del inmueble ${updatedInmueble.id} modificada (${diff.campos.join(', ')})`,
+        entidadAfectada: 'inmueble',
+        idAfectado: updatedInmueble.id,
+        resultado: 'EXITO',
+        detalles: { campos: diff.campos, antes: diff.antes, despues: diff.despues },
+      });
+    });
   };
 
   // Slot Handlers

@@ -190,6 +190,8 @@ export interface ExportRun {
   /** sha256 del contenido generado (reproducibilidad). */
   sha256: string;
   contenido: string;
+  /** Avisos de ámbito de la exportación (auditoría 3ac21a5/D11: antes se descartaban). */
+  avisos: readonly string[];
 }
 
 /** Cabecera de exportación propia (permite reconocer versión al reimportar). */

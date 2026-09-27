@@ -234,9 +234,16 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
   });
 
   // 2) RESOLVE + DRY-RUN en B4 (motor reutilizado, sin cambios).
-  const porClave = new Map<string, RegistroPreparado>();
+  // Colas por clave (auditoría 3ac21a5/D9): dos registros con el mismo
+  // sourceId comparten migrationKey; B4 los procesa en orden de índice
+  // (mismo orden en su salida) y marca duplicadoEnLote al segundo. Un mapa
+  // 1:1 atribuía a ambas líneas la trazabilidad del ÚLTIMO preparado.
+  const colasPorClave = new Map<string, RegistroPreparado[]>();
   for (const p of preparados) {
-    porClave.set(calcularMigrationKey(p.historico.proveniencia, p.historico.entidad), p);
+    const k = calcularMigrationKey(p.historico.proveniencia, p.historico.entidad);
+    const cola = colasPorClave.get(k) ?? [];
+    cola.push(p);
+    colasPorClave.set(k, cola);
   }
   const dryRun = ejecutarDryRun({
     registros: preparados.map((p) => p.historico),
@@ -249,7 +256,7 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
 
   // 3) Envolver líneas B4 en ImportRecord.
   const registros: ImportRecord[] = dryRun.lineas.map((linea) => {
-    const prep = porClave.get(linea.migrationKey);
+    const prep = colasPorClave.get(linea.migrationKey)?.shift();
     const mapping = prep?.mapping;
     const dedup = clasificarDuplicadoImport(linea);
     const warnings = [...(mapping?.warnings ?? [])];

@@ -41,13 +41,37 @@ import type {
   PuertoPersistenciaImport,
 } from './importExport/ejecucion';
 
+/** Cota anti-cuelgue de lecturas únicas (los suscriptores tragan el error de Rules). */
+export const LECTURA_UNICA_TIMEOUT_MS = 25_000;
+
 /** Una lectura única a partir de un suscriptor existente (sin duplicar consultas). */
-function unaVez<T>(suscribir: (cb: (v: T) => void, scope?: DataAccessScope) => () => void, scope?: DataAccessScope): Promise<T> {
-  return new Promise<T>((resolver) => {
+function unaVez<T>(
+  suscribir: (cb: (v: T) => void, scope?: DataAccessScope) => () => void,
+  scope?: DataAccessScope,
+  timeoutMs = LECTURA_UNICA_TIMEOUT_MS,
+): Promise<T> {
+  return new Promise<T>((resolver, rechazar) => {
+    let fin = false;
     const off = suscribir((v) => {
+      if (fin) return;
+      fin = true;
+      clearTimeout(timer);
       queueMicrotask(() => off());
       resolver(v);
     }, scope);
+    // Anti-cuelgue (auditoría 3ac21a5/D2): si Rules deniega la consulta, el
+    // suscriptor solo hace console.error y jamás llama al callback. Sin cota,
+    // el panel se quedaba en "Analizando…" para siempre. Ahora falla honesto.
+    const timer = setTimeout(() => {
+      if (fin) return;
+      fin = true;
+      try { off(); } catch { /* noop */ }
+      rechazar(new Error(`lectura de catálogo sin respuesta en ${timeoutMs} ms (posible denegación de Rules por ámbito; no se continúa a ciegas)`));
+    }, timeoutMs);
+    // Evita que el timer retenga el proceso en Node/tests.
+    if (typeof (timer as unknown as { unref?: () => void }).unref === 'function') {
+      (timer as unknown as { unref: () => void }).unref();
+    }
   });
 }
 
@@ -58,12 +82,12 @@ export interface FuentesCatalogo {
   gastos: Gasto[];
 }
 
-export async function cargarFuentesCatalogo(scope?: DataAccessScope): Promise<FuentesCatalogo> {
+export async function cargarFuentesCatalogo(scope?: DataAccessScope, timeoutMs = LECTURA_UNICA_TIMEOUT_MS): Promise<FuentesCatalogo> {
   const [propietarios, inmuebles, contratos, gastos] = await Promise.all([
-    unaVez(subscribePropietarios, scope),
-    unaVez(subscribeInmuebles, scope),
-    unaVez(subscribeContratos, scope),
-    unaVez(subscribeGastos, scope),
+    unaVez(subscribePropietarios, scope, timeoutMs),
+    unaVez(subscribeInmuebles, scope, timeoutMs),
+    unaVez(subscribeContratos, scope, timeoutMs),
+    unaVez(subscribeGastos, scope, timeoutMs),
   ]);
   return { propietarios, inmuebles, contratos, gastos };
 }
@@ -124,7 +148,15 @@ export function crearPuertoFirebase(
       return (data.registroCobros ?? []).some((c) => c.id === cobroId);
     },
     async crearGasto(gasto: Gasto): Promise<void> {
+      // Verificación post-escritura (auditoría 3ac21a5/D12): saveGastoFirestore
+      // traga errores (catch+console.error sin rethrow, preexistente en
+      // firebase.ts y NO tocado aquí por radio de impacto). Sin verificar, una
+      // denegación de Rules se informaba como CREADO (+auditoría falsa EXITO).
       await saveGastoFirestore(gasto);
+      const verif = await getDoc(doc(db, 'gastos', gasto.id));
+      if (!verif.exists()) {
+        throw new Error(`escritura no verificada en 'gastos/${gasto.id}' (posible denegación de Rules o fallo de red; no se informa CREADO)`);
+      }
     },
     async anexarCobro(contratoId: string, cobro: CobroPeriodo): Promise<void> {
       const ref = doc(db, 'contratos_formalizacion', contratoId);

@@ -119,14 +119,22 @@ export function filtrarPorAmbito(
   const props = new Set(propietariosEfectivos);
   const inms = inmueblesEfectivos ? new Set(inmueblesEfectivos) : null;
   return registros.filter((r) => {
-    const pid = typeof r['propietarioId'] === 'string' ? (r['propietarioId'] as string) : null;
+    // Titular con el mismo fallback que la validación (auditoría 3ac21a5/D5):
+    // sin él, un inmueble con solo propietarioPrincipalId se omitía en silencio.
+    const pid = typeof r['propietarioId'] === 'string'
+      ? (r['propietarioId'] as string)
+      : typeof r['propietarioPrincipalId'] === 'string' ? (r['propietarioPrincipalId'] as string) : null;
     // PROPIETARIO se filtra por su propio id.
     if (entidad === 'PROPIETARIO') {
       if (typeof r['id'] !== 'string' || !props.has(r['id'] as string)) return false;
     } else if (!pid || !props.has(pid)) {
       return false;
     }
-    if (inms && typeof r['inmuebleId'] === 'string' && !inms.has(r['inmuebleId'] as string)) return false;
+    // INMUEBLE se filtra por su propio id (auditoría 3ac21a5/D4): antes se
+    // comparaba r['inmuebleId'] (que los inmuebles no tienen) y el filtro se
+    // ignoraba, sobre-incluyendo dentro del ámbito.
+    const claveInm = entidad === 'INMUEBLE' ? r['id'] : r['inmuebleId'];
+    if (inms && typeof claveInm === 'string' && !inms.has(claveInm)) return false;
     if (ejercicios && ejercicios.length > 0 && (entidad === 'GASTO' || entidad === 'COBRO')) {
       const ej = ejercicioDe(entidad, r);
       if (ej === null || !ejercicios.includes(ej)) return false;
@@ -194,7 +202,6 @@ export function ejecutarExportacion(p: {
   const contenido = p.solicitado.formato === 'JSON'
     ? serializarJson(p.solicitado.entidad, filtrados, { exportRunId, exportedAt: p.exportedAt, scope: p.solicitado })
     : serializarCsv(p.solicitado.entidad, filtrados);
-  void veredicto.avisos;
   return {
     exportRunId,
     exportedAt: p.exportedAt,
@@ -205,5 +212,6 @@ export function ejecutarExportacion(p: {
     formato: p.solicitado.formato,
     sha256: sha256Hex(new TextEncoder().encode(contenido)),
     contenido,
+    avisos: [...veredicto.avisos],
   };
 }

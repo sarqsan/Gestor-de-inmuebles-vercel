@@ -9,11 +9,17 @@
  * con decisiones humanas y barrera O7. Nunca upload → escritura automática.
  * Flujo exportar: entidad/ámbito/formato → previsualización → descarga.
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileJson, FileSpreadsheet, ShieldCheck, Upload } from 'lucide-react';
 import type { Inmueble, UsuarioApp } from '../../types';
 import type { GestionCartera } from '../../lib/gestionesCartera';
 import { sha256Hex } from '../../lib/importacion/hash';
+import { auth, type DataAccessScope } from '../../lib/firebase';
+import { getUsuarioByAuthUid } from '../../lib/authService';
+import { listarGestionesDeGestor } from '../../lib/gestionesCarteraServicio';
+import { dependenciasGestionesCarteraFirestore } from '../../lib/gestionesCarteraServicioFirebase';
+import { propietariosGestionadosDe, proyectarCarterasGestionadas } from '../../lib/carterasGestion';
+import type { ModalidadUsoB4 } from '../../lib/migracion/tipos';
 import {
   FUENTE_EXTERNA_SIN_VERSION,
   SOPORTE_ENTIDADES,
@@ -44,7 +50,6 @@ import {
   crearPuertoFirebase,
   type FuentesCatalogo,
 } from '../../lib/importExportFirebase';
-import type { DataAccessScope } from '../../lib/firebase';
 
 interface Props {
   inmuebles: Inmueble[];
@@ -101,8 +106,68 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   const [expInfo, setExpInfo] = useState<string | null>(null);
   const [expGenerando, setExpGenerando] = useState(false);
 
-  const ambito = useMemo(() => ambitoAutorizadoDesdeUsuario(usuario, gestiones), [usuario, gestiones]);
-  const identidad = usuario ? { usuarioId: usuario.id, usuarioEmail: usuario.email, usuarioNombre: usuario.nombre } : null;
+  // ---- identidad/ámbito (auditoría 3ac21a5/D2) ----
+  // El montaje en Configuración no pasa usuario/gestiones/scope y UserProfile
+  // no los contiene: sin esto, el ámbito quedaba vacío (dry-run bloqueado,
+  // promoción imposible, exportación vacía) y las lecturas sin scope colgaban
+  // al denegar Rules (el suscriptor jamás responde). Si hay props, mandan;
+  // si no, el panel carga su propio contexto y, sin identidad, se bloquea
+  // honesto (fail-closed) en vez de colgar o acotar a ciegas.
+  const [ctx, setCtx] = useState<{
+    usuario: UsuarioApp | null;
+    gestiones: GestionCartera[];
+    scope: DataAccessScope | undefined;
+    estado: 'props' | 'cargando' | 'listo' | 'error';
+    error: string | null;
+  }>({ usuario: null, gestiones: [], scope: undefined, estado: usuario ? 'props' : 'cargando', error: null });
+  useEffect(() => {
+    if (usuario) return; // identidad por props: sin carga
+    let vivo = true;
+    (async () => {
+      try {
+        const fb = auth.currentUser;
+        if (!fb) throw new Error('sin sesión de Firebase: inicia sesión para acotar el ámbito');
+        const u = await getUsuarioByAuthUid(fb.uid, fb.email ?? null);
+        if (!u) throw new Error('sin ficha de usuario para esta sesión (uid sin UsuarioApp)');
+        let gests: GestionCartera[] = [];
+        try {
+          const r = await listarGestionesDeGestor(dependenciasGestionesCarteraFirestore, u.id, 'ACTIVA');
+          if (r.ok) gests = [...r.gestiones];
+        } catch { /* sin gestiones legibles: se acota por espejo+ficha */ }
+        if (!vivo) return;
+        const proyectadas = proyectarCarterasGestionadas(gests, u.id);
+        setCtx({
+          usuario: u,
+          gestiones: gests,
+          scope: {
+            tipoPerfil: u.tipoPerfil,
+            ...(u.propietarioId ? { propietarioId: u.propietarioId } : {}),
+            ...(u.inmuebleIds ? { inmuebleIds: u.inmuebleIds } : {}),
+            propietariosGestionados: propietariosGestionadosDe(proyectadas),
+          },
+          estado: 'listo',
+          error: null,
+        });
+      } catch (e) {
+        if (!vivo) return;
+        setCtx({ usuario: null, gestiones: [], scope: undefined, estado: 'error', error: e instanceof Error ? e.message : String(e) });
+      }
+    })();
+    return () => { vivo = false; };
+    // Solo re-carga si aparece/desaparece la prop usuario (montaje estable).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usuario]);
+
+  const usuarioEf = usuario ?? ctx.usuario;
+  const gestionesEf = usuario ? gestiones : ctx.gestiones;
+  const scopeEf = scope ?? ctx.scope;
+  const identidadLista = usuarioEf !== null;
+  const modalidad: ModalidadUsoB4 = usuarioEf?.tipoPerfil === 'PROPIETARIO'
+    ? 'PROPIETARIO'
+    : usuarioEf?.tipoPerfil === 'PROFESIONAL' ? 'GESTOR_PROFESIONAL' : 'GESTOR_PROPIETARIO';
+
+  const ambito = useMemo(() => ambitoAutorizadoDesdeUsuario(usuarioEf, gestionesEf), [usuarioEf, gestionesEf]);
+  const identidad = usuarioEf ? { usuarioId: usuarioEf.id, usuarioEmail: usuarioEf.email, usuarioNombre: usuarioEf.nombre } : null;
 
   const onElegirFichero = async (f: File | undefined): Promise<void> => {
     setErrorImport(null); setRun(null); setInsumos(null); setAutorizacion(null); setResultadoPromo(null); setDecisiones({}); setSeleccion(null);
@@ -121,13 +186,15 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   };
 
   const onAnalizar = async (): Promise<void> => {
-    if (!fichero || !formato) return;
+    if (!fichero || !formato || !identidadLista) return;
     setAnalizando(true); setErrorImport(null);
     try {
-      const fuentes: FuentesCatalogo = await cargarFuentesCatalogo(scope);
+      const fuentes: FuentesCatalogo = await cargarFuentesCatalogo(scopeEf);
       const catalogos = catalogosDesdeFuentes(fuentes, {
         propietariosPermitidosIds: ambito.propietarioIdsEscribibles ?? undefined,
-        importador: identidad ? { uid: identidad.usuarioId, modalidad: 'PROPIETARIO' } : undefined,
+        // Metadato reservado (B4 aún no lo lee): uid real + modalidad derivada
+        // del perfil (antes: 'PROPIETARIO' fijo incluso para master/gestor).
+        importador: identidad ? { uid: identidad.usuarioId, modalidad } : undefined,
       });
       if (formato === 'XLSX') {
         const r = parseXlsx();
@@ -172,6 +239,16 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         actor: identidad?.usuarioId ?? null,
       });
       setRun(dry);
+      // Insumos para el re-dry-run de Autorizar (auditoría 3ac21a5/D1: este
+      // setInsumos faltaba y el botón Autorizar no hacía nada en silencio).
+      setInsumos({
+        crudos,
+        localizaciones: parseo.localizaciones,
+        entidadEfectiva,
+        tipoFuente,
+        versionFuente,
+        catalogos,
+      });
       if (parseo.errores.length > 0) setErrorImport(`avisos de parseo: ${parseo.errores.join(' | ')}`);
     } catch (e) {
       setErrorImport(e instanceof Error ? e.message : String(e));
@@ -244,9 +321,10 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   };
 
   const onExportar = async (): Promise<void> => {
+    if (!identidadLista) return;
     setExpError(null); setExpInfo(null); setExpGenerando(true);
     try {
-      const fuentes = await cargarFuentesCatalogo(scope);
+      const fuentes = await cargarFuentesCatalogo(scopeEf);
       const porProp = (p: string) => p.trim();
       const solicitado: AmbitoExportacionSolicitado = {
         entidad: expEntidad,
@@ -281,7 +359,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         exp.contenido,
         expFormato === 'JSON' ? 'application/json' : 'text/csv',
       );
-      setExpInfo(`${exp.recordCount} registro(s) · run ${exp.exportRunId} · sha256 ${exp.sha256.slice(0, 16)}…`);
+      setExpInfo(`${exp.recordCount} registro(s) · run ${exp.exportRunId} · sha256 ${exp.sha256.slice(0, 16)}…${exp.avisos.length > 0 ? ` · avisos: ${exp.avisos.join(' | ')}` : ''}`);
     } catch (e) {
       setExpError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -311,11 +389,21 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         </div>
       </div>
 
+      {ctx.estado === 'cargando' && (
+        <p className="text-xs text-slate-500 font-semibold">Cargando identidad para acotar el ámbito…</p>
+      )}
+      {ctx.estado === 'error' && (
+        <div className="p-3 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold">
+          Sin identidad ({ctx.error}): el panel se bloquea (no acota a ciegas ni cuelga).
+        </div>
+      )}
+
       {pestana === 'importar' && (
         <div className="space-y-3 text-xs">
           <p className="text-slate-600 leading-relaxed">
             PASO 1–3: elige archivo (JSON/CSV) y tipo de datos. PASO 4: <strong>Analizar</strong> ejecuta un dry-run
             puro (0 escrituras). PASO 5–6: revisa el resumen y los problemas. PASO 7: promociona solo autorizados.
+            Ámbito: {ambito.esMaster ? 'master' : identidadLista ? `${(ambito.propietarioIdsLegibles ?? []).length} propietario(s)` : 'sin identidad (bloqueado)'}.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => fileRef.current?.click()}
@@ -331,7 +419,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
                 {ENTIDADES.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
             </label>
-            <button type="button" onClick={() => void onAnalizar()} disabled={!fichero || analizando}
+            <button type="button" onClick={() => void onAnalizar()} disabled={!fichero || analizando || !identidadLista}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold">
               {analizando ? 'Analizando…' : 'Analizar (dry-run)'}
             </button>
@@ -504,7 +592,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
             Ámbito aplicado: {expProps.trim() === '' ? (ambito.esMaster ? '(master: indicar propietarios)' : 'todos los legibles') : expProps} ·
             inmuebles: {expInms.trim() === '' ? 'todos' : expInms} · {inmuebles.length} inmueble(s) en contexto.
           </p>
-          <button type="button" onClick={() => void onExportar()} disabled={expGenerando}
+          <button type="button" onClick={() => void onExportar()} disabled={expGenerando || !identidadLista}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-bold flex items-center gap-2">
             {expFormato === 'JSON' ? <FileJson className="w-4 h-4" /> : <FileSpreadsheet className="w-4 h-4" />}
             {expGenerando ? 'Generando…' : 'Generar y descargar'}

@@ -99,6 +99,18 @@ export function contratoIdDeDestinoCobro(destinoId: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Fecha de vencimiento válida: formato YYYY-MM-DD + fecha de calendario real
+ * (auditoría 3ac21a5/D7: el regex solo aceptaba '2024-13-99'). Pura y probada.
+ */
+export function esFechaVencimientoValida(v: unknown): v is string {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const [y, m, d] = v.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const f = new Date(Date.UTC(y, m - 1, d));
+  return f.getUTCFullYear() === y && f.getUTCMonth() === m - 1 && f.getUTCDate() === d;
+}
+
 function escribiblePorAmbito(propietarioId: string | null, ambito: AmbitoAutorizado): boolean {
   if (ambito.esMaster) return true;
   if (!propietarioId) return false;
@@ -174,8 +186,8 @@ export function planificarPromocion(p: {
       excluidas.push({ fingerprint: r.fingerprint, sourceRecordId: r.sourceRecordId, motivo: 'requiere decisión humana: estadoCobro + fechaVencimiento (no se inventan)' });
       continue;
     }
-    if (r.entityType === 'COBRO' && d?.fechaVencimiento && !/^\d{4}-\d{2}-\d{2}$/.test(d.fechaVencimiento)) {
-      excluidas.push({ fingerprint: r.fingerprint, sourceRecordId: r.sourceRecordId, motivo: `fechaVencimiento '${d.fechaVencimiento}' no ISO (YYYY-MM-DD)` });
+    if (r.entityType === 'COBRO' && d?.fechaVencimiento && !esFechaVencimientoValida(d.fechaVencimiento)) {
+      excluidas.push({ fingerprint: r.fingerprint, sourceRecordId: r.sourceRecordId, motivo: `fechaVencimiento '${d.fechaVencimiento}' no es fecha válida (YYYY-MM-DD de calendario)` });
       continue;
     }
     operaciones.push({
@@ -257,7 +269,7 @@ export function construirGastoDestino(
   };
 }
 
-/** Cobro destino (embebido en contrato). Reglas: previsto=importe (documentada); nombreMes derivado; vencimiento/estado por decisión. */
+/** Cobro destino (embebido en contrato). Reglas: previsto=importe (documentada); recibido=importe solo si PAGADO/RECIBIDO/VERIFICADO (0 en otro caso); nombreMes derivado; vencimiento/estado por decisión. */
 export function construirCobroDestino(
   r: ImportRecord,
   decision: DecisionPromocion,
@@ -269,6 +281,12 @@ export function construirCobroDestino(
   const importe = c['importe'] as number;
   const contratoId = contratoIdDeDestinoCobro(r.destinationId ?? '');
   if (!contratoId) throw new Error(`destino de cobro no determinista: '${r.destinationId}'`);
+  // Recibido solo cuando el estado afirma cobro total (auditoría 3ac21a5/D6):
+  // un PENDIENTE con importeRecibido=importe afirmaba un cobro inexistente.
+  // PARCIAL: el importe parcial se desconoce → 0 + nota explícita (revisar).
+  const estado = decision.estadoCobro as EstadoCobroAlquiler;
+  const cobradoTotal = estado === 'PAGADO' || estado === 'RECIBIDO' || estado === 'VERIFICADO';
+  const notaParcial = estado === 'PAGADO_PARCIAL' ? ' | parcial: importe recibido desconocido, revisar' : '';
   return {
     id: r.destinationId as string,
     inmuebleId: r.inmuebleDestinoId as string,
@@ -280,12 +298,12 @@ export function construirCobroDestino(
     periodoMesAnio: `${anio}-${String(mes).padStart(2, '0')}`,
     nombreMes: `${MESES_ES[mes] ?? ''} ${anio}`,
     importePrevisto: importe,
-    importeRecibido: importe,
+    importeRecibido: cobradoTotal ? importe : 0,
     fechaVencimiento: decision.fechaVencimiento as string,
     ...(typeof c['fechaPago'] === 'string' && c['fechaPago'] ? { fechaPago: c['fechaPago'] as string } : {}),
     estado: decision.estadoCobro as EstadoCobroAlquiler,
     ...(typeof c['metodoPago'] === 'string' && c['metodoPago'] ? { metodoPago: c['metodoPago'] as CobroPeriodo['metodoPago'] } : {}),
-    observaciones: `importacion:${r.provenance.source}:${r.sourceRecordId} run:${ctx.migrationRunId}${typeof c['observaciones'] === 'string' && c['observaciones'] ? ` | ${c['observaciones']}` : ''}`,
+    observaciones: `importacion:${r.provenance.source}:${r.sourceRecordId} run:${ctx.migrationRunId}${typeof c['observaciones'] === 'string' && c['observaciones'] ? ` | ${c['observaciones']}` : ''}${notaParcial}`,
     ...(ctx.actor ? { registradoPor: ctx.actor, registradoPorId: ctx.actor } : {}),
     fechaRegistro: ctx.fechaHora,
     historialCambios: [{
@@ -373,12 +391,17 @@ export async function ejecutarPromocion(p: {
         : await p.puerto.existeCobro(contratoId as string, op.destinoId);
       if (existe) {
         detalle.push({ fingerprint: op.fingerprint, resultado: 'YA_EXISTENTE' });
-        await p.puerto.auditar({
-          accion: 'IMPORTACION_YA_EXISTENTE', descripcion: `destino existente, no reescrito (${op.entidad})`,
-          entidad: op.entidad, entidadId: op.destinoId, propietarioId: op.propietarioDestinoId,
-          importRunId: p.plan.importRunId, migrationRunId: p.plan.migrationRunId,
-          source: r.provenance.source, sourceRecordId: r.sourceRecordId, resultado: 'YA_EXISTENTE',
-        });
+        // Best-effort (auditoría 3ac21a5/D3): si auditar falla, el resultado
+        // sobre DATOS sigue siendo YA_EXISTENTE; no se añade un FALLIDO
+        // fantasma que duplicaría la entrada e inflaría contadores.
+        try {
+          await p.puerto.auditar({
+            accion: 'IMPORTACION_YA_EXISTENTE', descripcion: `destino existente, no reescrito (${op.entidad})`,
+            entidad: op.entidad, entidadId: op.destinoId, propietarioId: op.propietarioDestinoId,
+            importRunId: p.plan.importRunId, migrationRunId: p.plan.migrationRunId,
+            source: r.provenance.source, sourceRecordId: r.sourceRecordId, resultado: 'YA_EXISTENTE',
+          });
+        } catch { /* auditoría best-effort */ }
         continue;
       }
       if (op.entidad === 'GASTO') {
@@ -387,13 +410,18 @@ export async function ejecutarPromocion(p: {
         await p.puerto.anexarCobro(contratoId as string, construirCobroDestino(r, decision, { fechaHora: p.fechaHora, actor: p.actor, migrationRunId: p.plan.migrationRunId }));
       }
       detalle.push({ fingerprint: op.fingerprint, resultado: 'CREADO' });
-      await p.puerto.auditar({
-        accion: 'IMPORTACION_CREADO', descripcion: `creado por importación (${op.entidad})`,
-        entidad: op.entidad, entidadId: op.destinoId, propietarioId: op.propietarioDestinoId,
-        ...(r.inmuebleDestinoId ? { inmuebleId: r.inmuebleDestinoId } : {}),
-        importRunId: p.plan.importRunId, migrationRunId: p.plan.migrationRunId,
-        source: r.provenance.source, sourceRecordId: r.sourceRecordId, resultado: 'CREADO',
-      });
+      // Best-effort (auditoría 3ac21a5/D3): la escritura YA ocurrió; un fallo
+      // de auditoría no convierte el resultado en FALLIDO (eso invitaría a
+      // reintentos y mentiría en el informe: CREADO+FALLIDO a la vez).
+      try {
+        await p.puerto.auditar({
+          accion: 'IMPORTACION_CREADO', descripcion: `creado por importación (${op.entidad})`,
+          entidad: op.entidad, entidadId: op.destinoId, propietarioId: op.propietarioDestinoId,
+          ...(r.inmuebleDestinoId ? { inmuebleId: r.inmuebleDestinoId } : {}),
+          importRunId: p.plan.importRunId, migrationRunId: p.plan.migrationRunId,
+          source: r.provenance.source, sourceRecordId: r.sourceRecordId, resultado: 'CREADO',
+        });
+      } catch { /* auditoría best-effort */ }
     } catch (e) {
       const motivo = e instanceof Error ? e.message : String(e);
       detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo });

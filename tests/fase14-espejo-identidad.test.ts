@@ -564,9 +564,18 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
       if (/collection\(\s*db\s*,\s*['"`]usuarios_auth['"`]\s*\)/.test(src)) return false;
       return true;
     };
-    const escritoresDelEspejo = citan.filter((f) => !esConsumidorLegitimoDeSubcoleccion(f)).map((f) => path.basename(f));
-    // el ÚNICO fichero que escribe/lee el documento del espejo es authService.ts
+    // OPERACIONES (port de C, revisión explícita D.6): el adaptador de persistencia del
+    // módulo lee el documento de binding usuarios_auth/{uid} (onSnapshot, SOLO lectura)
+    // para proyectar la identidad canónica. Nunca lo escribe: el único escritor del
+    // espejo sigue siendo authService.ts. Lista cerrada: un cuarto consumidor exige
+    // nueva revisión explícita aquí.
+    const esLectorBindingOperaciones = (f: string): boolean =>
+      /features[\\/]operaciones[\\/]persistence[\\/]firebase\.ts$/.test(f)
+      && !/setDoc|updateDoc|deleteDoc|addDoc|writeBatch/.test(readFileSync(f, 'utf8'));
+    const escritoresDelEspejo = citan.filter((f) => !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f)).map((f) => path.basename(f));
+    // el ÚNICO fichero que escribe el documento del espejo es authService.ts
     expect(escritoresDelEspejo).toEqual(['authService.ts']);
+    expect(citan.filter(esLectorBindingOperaciones).map((f) => path.basename(f))).toEqual(['firebase.ts']);
     // y los consumidores de la subcolección son exactamente los de §6 F3 (lista cerrada:
     // un tercer consumidor exige revisión explícita, no pasa en silencio)
     const subcoleccion = citan.filter(esConsumidorLegitimoDeSubcoleccion).map((f) => path.basename(f)).sort();

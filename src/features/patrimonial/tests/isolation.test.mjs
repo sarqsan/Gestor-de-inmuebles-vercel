@@ -105,6 +105,32 @@ const PERMITIDOS_INTEGRACION = [
   'src/App.tsx',
   'src/types.ts',
   'firestore.rules',
+  // bloque CANÓNICO B (commits propios 08d8f17..c4949a6, posteriores a la base
+  // 877494f: contrato canónico B/C, cierre de retención, §16 MAPA, expediente
+  // documental/fiscal, hash isomórfico, segurosCentro). Laguna preexistente del
+  // registro en la base — el test fallaba ya en c4949a6 antes del port de Operaciones:
+  'docs/MAPA-MAESTRO-ERP-ACTUAL.md',
+  'docs/arquitectura/CONTRATO_CANONICO_AUTORIZACION_AUDITORIA_B_C.md',
+  'src/components/sections/InmueblesSection.tsx',
+  'src/lib/expedienteDocumental/',
+  'src/lib/expedienteFiscal/',
+  'src/lib/firebase.ts',
+  'src/lib/importacion/hash.ts',
+  'src/utils/segurosCentro.ts',
+  'tests/centro-operativo.test.ts',
+  'tests/expediente-documental.test.ts',
+  'tests/hash-isomorfico.test.ts',
+  'tests/seguridad-expediente.test.ts',
+  'tests/seguridad-firestore-polizas.test.ts',
+  // bloque OPERACIONES (port funcional de C, Gestor-alquileres-vercel @ 1686b8e8):
+  // módulo autocontenido + auditoría transaccional + entrada en el Centro Operativo
+  // + bloque de Rules y revisión explícita de sus dos tripwires de tests:
+  'src/features/operaciones/',
+  'docs/operaciones/alcance.md',
+  'src/lib/auditoria.ts',
+  'src/components/inmueble/CentroOperativoInmueblePanel.tsx',
+  'tests/fase14-espejo-identidad.test.ts',
+  'tests/helpers/evaluadorReglasFirestore.ts',
 ];
 const permitido = (path) => PERMITIDOS_INTEGRACION.some((p) => path === p || path.startsWith(p));
 

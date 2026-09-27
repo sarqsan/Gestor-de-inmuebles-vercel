@@ -42,6 +42,7 @@ import {
   type ResumenOperativoInmueble,
 } from '../../utils/segurosCentro';
 import { evaluarCoberturaPolizas } from '../../utils/segurosEngine';
+import { OperacionesInmueble } from '../../features/operaciones/ui/OperacionesInmueble';
 import {
   registrarAuditoriaFirestore,
 } from '../../lib/firebase';
@@ -69,7 +70,7 @@ import {
   Ban,
 } from 'lucide-react';
 
-type SubTab = 'resumen' | 'seguros' | 'averias' | 'expediente' | 'historico';
+type SubTab = 'resumen' | 'seguros' | 'averias' | 'expediente' | 'historico' | 'operaciones';
 
 interface CentroOperativoInmueblePanelProps {
   inmueble: Inmueble;
@@ -260,6 +261,7 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
     { id: 'averias', label: 'Averías ↔ Pólizas', icon: <Wrench className="w-4 h-4" />, badge: resumen.incidenciasAbiertas.length },
     { id: 'expediente', label: 'Expediente', icon: <FileText className="w-4 h-4" />, badge: expediente?.indiceDocumental.estadisticas.total },
     { id: 'historico', label: 'Histórico', icon: <History className="w-4 h-4" /> },
+    { id: 'operaciones', label: 'Operaciones', icon: <Wrench className="w-4 h-4" /> },
   ];
 
   return (
@@ -827,6 +829,11 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
                 );
               })}
             </div>
+          )}
+
+          {/* ============================== OPERACIONES (port de C) ============================== */}
+          {subTab === 'operaciones' && (
+            <OperacionesInmueble inmueble={inmueble} onVolver={() => setSubTab('resumen')} />
           )}
         </div>
       )}

@@ -145,6 +145,7 @@ import {
   saveModulosConfigFirestore,
 } from './lib/firebase';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
+import { propietariosGestionadosDe } from './lib/carterasGestion';
 import { resolverTokensPublicos } from './lib/tokensPublicos';
 import {
   persistirMejorEsfuerzo,
@@ -1022,9 +1023,11 @@ export default function App() {
       // D2b: carteras gestionadas (proyección D1R leída del espejo por
       // authService). Sólo acota las CONSULTAS: la autorización efectiva
       // está en las reglas (carterasL/carterasE sólo las escribe el master).
-      propietariosGestionados: Array.from(
-        new Set([...(currentUser.carterasL || []), ...(currentUser.carterasE || [])])
-      ),
+      // ORDEN 2: unión canónica (única derivación autorizada L ∪ E).
+      propietariosGestionados: propietariosGestionadosDe({
+        carterasL: currentUser.carterasL || [],
+        carterasE: currentUser.carterasE || [],
+      }),
     };
 
     // D2a: suscripción de inmuebles CON ÁMBITO (propios ∪ autorizados

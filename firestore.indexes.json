@@ -113,6 +113,36 @@
         }
       ],
       "description": "BLOQUE D — OTP por acta y estado, usado por subscribeOtpPorActa"
+    },
+    {
+      "collectionGroup": "gestiones_cartera",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "propietarioId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        }
+      ],
+      "description": "ORDEN 2 (D1R §20.2) — gestiones de una cartera por estado: listarGestionesDePropietario where propietarioId== && estado=="
+    },
+    {
+      "collectionGroup": "gestiones_cartera",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "gestorUsuarioId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "estado",
+          "order": "ASCENDING"
+        }
+      ],
+      "description": "ORDEN 2 (D1R §20.2) — gestiones designadas a un gestor por estado: listarGestionesDeGestor where gestorUsuarioId== && estado=="
     }
   ],
   "fieldOverrides": [],

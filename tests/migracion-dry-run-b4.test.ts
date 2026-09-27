@@ -20,6 +20,7 @@ import {
   ejecutarDryRun,
   derivarPlan,
   generarInforme,
+  jsonEstable,
   responderPreguntas,
   PREGUNTAS_CANONICAS,
   resolverInmueble,
@@ -1044,5 +1045,342 @@ FIN DEL INFORME
     const sinLectura = { ...res, soloLectura: false as unknown as true };
     expect(responderPreguntas(sinLectura)[13].respuesta).toContain('No-escritura: FAIL');
     expect(generarInforme(sinLectura)).toContain('No-escritura: FAIL');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M · ORDEN 6 — Revisión adversa: 17 casos + invariantes + coherencia informe
+// ---------------------------------------------------------------------------
+describe('B4 · M — Revisión adversa ORDEN 6 (casos 1–17 + invariantes)', () => {
+  const mixtoRevision = () => ejecutarDryRun({
+    registros: [
+      gastoCompleto('exp_Mauto', { fechaDevengo: '2026-05-15', concepto: 'Cuota comunidad mayo' }),
+      gastoCompleto('exp_MrevA', { fechaDevengo: '2026-03-10' }),
+      gastoCompleto('exp_MrevB', { fechaDevengo: '2026-03-20' }),
+      gastoCompleto('exp_Minc', { propertyId: 'prop_sin_mapeo' }),
+      gastoCompleto('exp_Mbloq', { fechaDevengo: '2026-06-15', concepto: 'Cuota comunidad junio' }),
+      gastoCompleto('exp_Mbloq', { fechaDevengo: '2026-06-15', concepto: 'Cuota comunidad junio' }),
+      { entidad: 'CANDIDATO', proveniencia: prov('cand_M'), datos: {} },
+      {
+        entidad: 'DOCUMENTO', proveniencia: prov('doc_M'),
+        datos: { nombreOriginal: 'x.pdf', rutaOriginal: 'https://origen.test/x.pdf', propietarioId: 'prop_A' },
+      },
+      {
+        entidad: 'LEGACY_STORAGE',
+        proveniencia: { source: 'LEGACY_STORAGE', sourceCollection: 'cobros_justificantes', sourceId: '2024-03/h.pdf' },
+        datos: { rutaOrigen: 'cobros_justificantes/2024-03/h.pdf' },
+      },
+    ],
+    catalogos: catalogoBase(),
+  });
+
+  it('M1 · caso 1: propietario ambiguo (nif duplicado) ⇒ BLOQUEADO', () => {
+    const cat = catalogoBase();
+    const res = ejecutarDryRun({
+      registros: [{ entidad: 'PROPIETARIO', proveniencia: prov('owner_M1'), datos: { nombre: 'X', nifCif: '11111111A' } }],
+      catalogos: { ...cat, propietarios: [...cat.propietarios, { id: 'prop_X', nombre: 'Duplicado', nifCif: '11111111A' }] },
+    });
+    const l = lineaDe(res.lineas, 'owner_M1');
+    expect(l.decision).toBe('BLOQUEADO');
+    expect(l.motivo).toContain('nifCif duplicado');
+  });
+  it('M2 · caso 2: inmueble ambiguo (catastral duplicada) ⇒ BLOQUEADO', () => {
+    const cat = catalogoBase();
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M2', { propertyId: undefined, referenciaCatastral: 'CAT001' })],
+      catalogos: { ...cat, inmuebles: [...cat.inmuebles, { id: 'inm_X', direccion: 'Otra 9', referenciaCatastral: 'CAT001' }] },
+    });
+    const l = lineaDe(res.lineas, 'exp_M2');
+    expect(l.decision).toBe('BLOQUEADO');
+    expect(l.motivo).toContain('catastral duplicada');
+  });
+  it('M3 · caso 3: propietario inexistente ⇒ INCOMPLETO (no huérfano si hay padre)', () => {
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M3', { propietarioId: 'prop_X' })],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, 'exp_M3');
+    expect(l.decision).toBe('INCOMPLETO');
+    expect(l.motivo).toContain('NO_ENCONTRADO');
+    expect(l.huerfano.es).toBe(false);
+    expect(l.relaciones.padreResuelto).toBe(true);
+  });
+  it('M4 · caso 4: inmueble inexistente ⇒ INCOMPLETO + huérfano', () => {
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M4', { propertyId: undefined, inmuebleId: 'inm_X' })],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, 'exp_M4');
+    expect(l.decision).toBe('INCOMPLETO');
+    expect(l.motivo).toContain('sin inmueble');
+    expect(l.evidenciaInmueble).toContain('inexistente');
+    expect(l.huerfano.es).toBe(true);
+  });
+  it('M5 · caso 5: duplicado probable ⇒ REVISIÓN sin eliminar ni fusionar', () => {
+    const res = ejecutarDryRun({
+      registros: [
+        gastoCompleto('exp_M5a', { fechaDevengo: '2026-03-10' }),
+        gastoCompleto('exp_M5b', { fechaDevengo: '2026-03-20' }),
+      ],
+      catalogos: catalogoBase(),
+    });
+    expect(res.lineas).toHaveLength(2);
+    const rev = res.lineas.filter((x) => x.decision === 'REVISION');
+    expect(rev).toHaveLength(1);
+    expect(rev[0].duplicado.tipo).toBe('PROBABLE');
+    expect(rev[0].motivo).toContain('probable');
+  });
+  it('M6 · caso 6: duplicado exacto intra-lote ⇒ BLOQUEADO/EXACTO (ambos conservados)', () => {
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M6'), gastoCompleto('exp_M6')],
+      catalogos: catalogoBase(),
+    });
+    expect(res.lineas).toHaveLength(2);
+    const bloq = res.lineas.filter((x) => x.decision === 'BLOQUEADO');
+    expect(bloq).toHaveLength(1);
+    expect(bloq[0].duplicado.tipo).toBe('EXACTO');
+  });
+  it('M7 · caso 7: huérfano (gasto sin inmueble) ⇒ INCOMPLETO, nunca AUTO', () => {
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M7', { propertyId: undefined })],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, 'exp_M7');
+    expect(l.decision).toBe('INCOMPLETO');
+    expect(l.huerfano.es).toBe(true);
+    expect(l.decision).not.toBe('AUTO');
+  });
+  it('M8 · caso 8: conflicto de titularidad ⇒ BLOQUEADO (corrección ORDEN 6)', () => {
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M8', { propietarioId: 'prop_B' })],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, 'exp_M8');
+    expect(l.decision).toBe('BLOQUEADO');
+    expect(l.motivo).toContain('titularidad');
+    expect(l.motivo).toContain('prop_B');
+  });
+  it('M8b · incoherencia contrato↔inmueble ⇒ BLOQUEADO (corrección ORDEN 6)', () => {
+    const res = ejecutarDryRun({
+      registros: [{ entidad: 'CONTRATO', proveniencia: prov('ct_M8b'), datos: { id: 'ct_A', inmuebleId: 'inm_B' } }],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, 'ct_M8b');
+    expect(l.decision).toBe('BLOQUEADO');
+    expect(l.motivo).toContain('contrato↔inmueble');
+  });
+  it('M9 · caso 9: conflicto de cartera (destino no permitido) ⇒ BLOQUEADO', () => {
+    const cat = catalogoBase();
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M9')],
+      catalogos: { ...cat, propietariosPermitidosIds: ['prop_B'] },
+    });
+    const l = lineaDe(res.lineas, 'exp_M9');
+    expect(l.decision).toBe('BLOQUEADO');
+    expect(l.motivo).toContain('NO_PERMITIDO');
+  });
+  it('M10 · caso 10: documento legacy sin pid ⇒ INCOMPLETO, ruta conservada, sin destino inventado', () => {
+    const res = ejecutarDryRun({
+      registros: [{
+        entidad: 'LEGACY_STORAGE',
+        proveniencia: { source: 'LEGACY_STORAGE', sourceCollection: 'cobros_justificantes', sourceId: '2024-05/k.pdf' },
+        datos: { rutaOrigen: 'cobros_justificantes/2024-05/k.pdf' },
+      }],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, '2024-05/k.pdf');
+    expect(l.decision).toBe('INCOMPLETO');
+    expect(l.legacyStorage?.rutaOrigen).toBe('cobros_justificantes/2024-05/k.pdf');
+    expect(l.datoOriginal['rutaOrigen']).toBe('cobros_justificantes/2024-05/k.pdf');
+    expect(l.destinoPropuesto).toBeNull();
+    expect(l.legacyStorage?.destinoPropuesto).toBeNull();
+  });
+  it('M11 · caso 11: fiscalidad incompleta ⇒ INCOMPLETO; sin deducible ⇒ incidencia sin bloquear AUTO', () => {
+    const sinCat = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M11a', { categoria: undefined })],
+      catalogos: catalogoBase(),
+    });
+    const li = lineaDe(sinCat.lineas, 'exp_M11a');
+    expect(li.decision).toBe('INCOMPLETO');
+    expect(li.motivo).toContain('categoria');
+    const ok = ejecutarDryRun({ registros: [gastoCompleto('exp_M11b')], catalogos: catalogoBase() });
+    const la = lineaDe(ok.lineas, 'exp_M11b');
+    expect(la.decision).toBe('AUTO');
+    expect(la.fiscal?.deducible).toBeNull();
+    expect(generarInforme(ok)).toContain('Registros fiscales con incidencia: 1');
+  });
+  it('M12 · caso 12: padre inexistente (cobro→contrato ct_X) ⇒ INCOMPLETO + huérfano', () => {
+    const res = ejecutarDryRun({
+      registros: [{
+        entidad: 'COBRO', proveniencia: prov('cob_M12'),
+        datos: { propertyId: 'prop_ext_1', contratoId: 'ct_X', importe: 600, mes: 7, anio: 2026, concepto: 'Alquiler' },
+      }],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, 'cob_M12');
+    expect(l.decision).toBe('INCOMPLETO');
+    expect(l.huerfano.es).toBe(true);
+    expect(l.huerfano.motivo).toContain('contrato');
+  });
+  it('M13 · caso 13: A,B,C vs C,B,A ⇒ mismo resultado e informe', () => {
+    const a = gastoCompleto('exp_M13a');
+    const b = { entidad: 'CANDIDATO', proveniencia: prov('cand_M13'), datos: {} } as RegistroHistorico;
+    const c = gastoCompleto('exp_M13c', { fechaDevengo: '2026-04-15', concepto: 'Cuota comunidad abril' });
+    const r1 = ejecutarDryRun({ registros: [a, b, c], catalogos: catalogoBase() });
+    const r2 = ejecutarDryRun({ registros: [c, b, a], catalogos: catalogoBase() });
+    expect(r2.lineas).toEqual(r1.lineas);
+    expect(r2.resumen).toEqual(r1.resumen);
+    expect(generarInforme(r2)).toBe(generarInforme(r1));
+    expect(derivarPlan(r2)).toEqual(derivarPlan(r1));
+  });
+  it('M14 · caso 14: triple ejecución idéntica ⇒ mismo resultado, plan e informe', () => {
+    const lote = () => mixtoRevision().lineas.map((l) => ({
+      entidad: l.entidad, proveniencia: { ...l.proveniencia }, datos: { ...l.datoOriginal },
+    })) as RegistroHistorico[];
+    const r1 = ejecutarDryRun({ registros: lote(), catalogos: catalogoBase() });
+    const r2 = ejecutarDryRun({ registros: lote(), catalogos: catalogoBase() });
+    const r3 = ejecutarDryRun({ registros: lote(), catalogos: catalogoBase() });
+    expect(jsonEstable(r2)).toBe(jsonEstable(r1));
+    expect(jsonEstable(r3)).toBe(jsonEstable(r1));
+    expect(derivarPlan(r2)).toEqual(derivarPlan(r1));
+    expect(generarInforme(r3)).toBe(generarInforme(r1));
+  });
+  it('M15 · caso 15: el gestor que ejecuta NO se convierte en propietario destino', () => {
+    for (const modalidad of ['GESTOR_PROFESIONAL', 'GESTOR_PROPIETARIO'] as const) {
+      const cat = catalogoBase();
+      // Incluso si el uid del importador coincide textualmente con un id de
+      // catálogo, jamás se lee como destino: sin datos, INCOMPLETO.
+      const sinDatos = ejecutarDryRun({
+        registros: [gastoCompleto('exp_M15', { propertyId: undefined })],
+        catalogos: { ...cat, importador: { uid: 'prop_A', modalidad } },
+      });
+      const l = lineaDe(sinDatos.lineas, 'exp_M15');
+      expect(l.propietarioDestinoId).toBeNull();
+      expect(l.estadoPropietario).toBe('INCOMPLETO');
+      const conDatos = ejecutarDryRun({
+        registros: [gastoCompleto('exp_M15b')],
+        catalogos: { ...cat, importador: { uid: 'uid_gestor_x', modalidad } },
+      });
+      expect(lineaDe(conDatos.lineas, 'exp_M15b').propietarioDestinoId).toBe('prop_A');
+    }
+  });
+  it('M16 · caso 16: registro completamente migrable ⇒ AUTO inequívoco', () => {
+    const res = ejecutarDryRun({ registros: [gastoCompleto('exp_M16')], catalogos: catalogoBase() });
+    const l = lineaDe(res.lineas, 'exp_M16');
+    expect(l).toMatchObject({
+      estado: 'COMPLETO', decision: 'AUTO', confianza: 'ALTA',
+      propietarioDestinoId: 'prop_A', inmuebleDestinoId: 'inm_A',
+    });
+    expect(l.destinoPropuesto?.destinoId).toMatch(/^gas_inm_A_exp_M16/);
+    expect(l.huerfano.es).toBe(false);
+    expect(l.relaciones.padreResuelto).toBe(true);
+    expect(l.evidencias.length).toBeGreaterThan(0);
+  });
+  it('M17 · caso 17: registros no migrables (TRUNCADO + entidad rara) ⇒ NO_MIGRABLE', () => {
+    const res = ejecutarDryRun({
+      registros: [
+        {
+          entidad: 'GASTO', proveniencia: prov('tru_M17'), datos: { resto: 'ilegible' },
+          normalizado: {
+            entidad: 'TRUNCADO', destino: {}, transformaciones: [],
+            incidencias: [], camposRequierenValidacion: [], bloqueado: true,
+            motivoBloqueo: 'truncado en origen',
+          },
+        },
+        { entidad: 'SISTEMA_DESCONOCIDO_X', proveniencia: prov('raro_M17'), datos: { a: 1 } },
+      ],
+      catalogos: catalogoBase(),
+    });
+    expect(res.lineas.map((x) => x.decision)).toEqual(['NO_MIGRABLE', 'NO_MIGRABLE']);
+    expect(lineaDe(res.lineas, 'tru_M17').motivo).toContain('truncado');
+  });
+  it('M18 · invariante: toda línea AUTO ⇒ sin orfandad, padre resuelto, ALTA, destino computable', () => {
+    const res = mixtoRevision();
+    const autos = res.lineas.filter((x) => x.decision === 'AUTO');
+    expect(autos.length).toBeGreaterThan(0);
+    for (const l of autos) {
+      expect(l.huerfano.es).toBe(false);
+      expect(l.relaciones.padreResuelto).toBe(true);
+      expect(l.confianza).toBe('ALTA');
+      expect(l.destinoPropuesto?.destinoId).not.toBeNull();
+    }
+  });
+  it('M19 · coherencia DryRunResult → preguntas → informe (recomputación independiente)', () => {
+    const res = mixtoRevision();
+    const informe = generarInforme(res);
+    const LS = res.lineas;
+    const cuenta = (d: string): number => LS.filter((x) => x.decision === d).length;
+    const num = (etiqueta: string): number => {
+      const m = informe.match(new RegExp(`^${etiqueta}: (\\d+)$`, 'm'));
+      if (!m) throw new Error(`etiqueta ausente en informe: ${etiqueta}`);
+      return Number(m[1]);
+    };
+    const procOk = (l: (typeof LS)[number]): boolean =>
+      l.proveniencia.source.trim() !== '' && l.proveniencia.sourceId.trim() !== ''
+      && !l.proveniencia.sourceId.startsWith('__ID_NO_RECUPERADO_');
+    expect(num('Registros analizados')).toBe(LS.length);
+    expect(num('AUTO')).toBe(cuenta('AUTO'));
+    expect(num('REVISIÓN')).toBe(cuenta('REVISION'));
+    expect(num('INCOMPLETO')).toBe(cuenta('INCOMPLETO'));
+    expect(num('BLOQUEADO')).toBe(cuenta('BLOQUEADO'));
+    expect(num('NO_MIGRABLE')).toBe(cuenta('NO_MIGRABLE'));
+    expect(num('Fuentes analizadas')).toBe(new Set(LS.map((x) => x.proveniencia.source)).size);
+    expect(num('Registros con procedencia completa')).toBe(LS.filter(procOk).length);
+    expect(num('Registros con procedencia incompleta')).toBe(LS.filter((x) => !procOk(x)).length);
+    expect(num('Propietario resuelto')).toBe(LS.filter((x) => x.estadoPropietario === 'RESUELTO' && x.propietarioDestinoId !== null).length);
+    expect(num('Inmueble resuelto')).toBe(LS.filter((x) => x.estadoInmueble === 'RESUELTO' && x.inmuebleDestinoId !== null).length);
+    expect(num('Relaciones completas')).toBe(LS.filter((x) => x.relaciones.padreResuelto).length);
+    expect(num('Duplicados exactos')).toBe(LS.filter((x) => x.duplicado.tipo === 'EXACTO').length);
+    expect(num('Duplicados probables')).toBe(LS.filter((x) => x.duplicado.tipo === 'PROBABLE').length);
+    expect(num('Huérfanos')).toBe(LS.filter((x) => x.huerfano.es).length);
+    expect(num('Conflictos')).toBe(cuenta('BLOQUEADO'));
+    expect(num('Documentos completos')).toBe(LS.filter((x) => x.entidad === 'DOCUMENTO' && x.decision === 'AUTO').length);
+    expect(num('Documentos con incidencia')).toBe(LS.filter((x) => x.entidad === 'DOCUMENTO' && x.decision !== 'AUTO').length);
+    expect(num('Objetos legacy pendientes')).toBe(LS.filter((x) => x.entidad === 'LEGACY_STORAGE' && x.legacyStorage?.estado !== 'RESUELTO').length);
+    expect(num('Registros fiscales analizados')).toBe(LS.filter((x) => x.fiscal !== undefined).length);
+    expect(num('Registros fiscales con incidencia')).toBe(LS.filter((x) => x.fiscal !== undefined && (x.fiscal.deducible === null || x.fiscal.clasificacion === 'SIN_CLASIFICAR')).length);
+    expect(num('Registros potencialmente migrables')).toBe(cuenta('AUTO'));
+    expect(num('Registros que requieren revisión/autorización')).toBe(LS.length - cuenta('AUTO'));
+    // Las preguntas reflejan los mismos conteos.
+    const ps = responderPreguntas(res);
+    expect(ps).toHaveLength(14);
+    expect(ps[6].respuesta).toContain(`${cuenta('AUTO')} registro(s) AUTO`);
+    expect(ps[9].respuesta).toContain(`${cuenta('BLOQUEADO')} registro(s) BLOQUEADOS`);
+  });
+  it('M20 · alias `fecha` alimenta la huella: solo difieren en fecha ⇒ NO EXACTO', () => {
+    const res = ejecutarDryRun({
+      registros: [
+        gastoCompleto('exp_M20a', { fechaDevengo: undefined, fecha: '2026-03-10' }),
+        gastoCompleto('exp_M20b', { fechaDevengo: undefined, fecha: '2026-03-20' }),
+      ],
+      catalogos: catalogoBase(),
+    });
+    expect(res.lineas.filter((x) => x.duplicado.tipo === 'EXACTO')).toHaveLength(0);
+    expect(res.lineas.filter((x) => x.decision === 'BLOQUEADO')).toHaveLength(0);
+    // Mismo concepto+mes ⇒ el segundo es PROBABLE (tope REVISIÓN), no exacto.
+    expect(res.lineas.filter((x) => x.duplicado.tipo === 'PROBABLE')).toHaveLength(1);
+  });
+  it('M21 · proveniencia sin sourceId recuperable ⇒ REVISIÓN, nunca AUTO', () => {
+    const res = ejecutarDryRun({
+      registros: [{
+        entidad: 'GASTO',
+        proveniencia: { source: 'RENTASYNC', sourceFile: 'f.json', sourceId: '__ID_NO_RECUPERADO_9' },
+        datos: {
+          propertyId: 'prop_ext_1', importe: 120.5, fechaDevengo: '2026-03-15',
+          categoria: 'Comunidad', concepto: 'Cuota comunidad marzo',
+        },
+      }],
+      catalogos: catalogoBase(),
+    });
+    const l = lineaDe(res.lineas, '__ID_NO_RECUPERADO_9');
+    expect(l.decision).toBe('REVISION');
+    expect(l.motivo).toContain('proveniencia');
+  });
+  it('M22 · titularidad coherente explícita ⇒ AUTO (sin falso positivo de M8)', () => {
+    const res = ejecutarDryRun({
+      registros: [gastoCompleto('exp_M22', { propietarioId: 'prop_A' })],
+      catalogos: catalogoBase(),
+    });
+    expect(lineaDe(res.lineas, 'exp_M22').decision).toBe('AUTO');
   });
 });

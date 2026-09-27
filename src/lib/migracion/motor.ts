@@ -142,6 +142,24 @@ function decidirLinea(
   if (l.duplicado.tipo === 'EXACTO') conflictos.push(`duplicado exacto: ${l.duplicado.motivo}`);
   for (const i of incidenciasBloqueantes) conflictos.push(`B1 bloqueante [${i.codigo}]: ${i.detalle}`);
   if (n?.bloqueado && n.motivoBloqueo) conflictos.push(`B1: ${n.motivoBloqueo}`);
+  // ORDEN 6 (revisión): coherencia cruzada. Una contradicción entre señales
+  // resueltas NUNCA es AUTO: propietario ≠ titular del inmueble, o contrato
+  // de otro inmueble ⇒ BLOQUEADO. Solo salta con ambos lados resueltos y
+  // titular/contrato documentados (sin titular documentado no hay contradicción
+  // demostrable y no se bloquea).
+  if (l.propietario.id && l.inmueble.id && COHERENCIA_TITULAR.has(l.registro.entidad)) {
+    const fichas = catalogos.inmuebles.filter((i) => i.id === l.inmueble.id);
+    const titular = fichas.length === 1 ? textoPlano(fichas[0].propietarioId) : null;
+    if (titular && titular !== l.propietario.id) {
+      conflictos.push(`conflicto de titularidad: propietario destino '${l.propietario.id}' ≠ titular '${titular}' del inmueble '${l.inmueble.id}' (contradicción entre señales; requiere humano)`);
+    }
+  }
+  if (l.contrato?.id && l.inmueble.id && (l.registro.entidad === 'COBRO' || l.registro.entidad === 'CONTRATO')) {
+    const fichas = catalogos.contratos.filter((c) => c.id === l.contrato?.id);
+    if (fichas.length === 1 && fichas[0].inmuebleId !== l.inmueble.id) {
+      conflictos.push(`conflicto contrato↔inmueble: contrato '${l.contrato.id}' pertenece a '${fichas[0].inmuebleId}' pero la línea resuelve '${l.inmueble.id}' (contradicción; requiere humano)`);
+    }
+  }
   if (conflictos.length > 0) {
     fijar('BLOQUEADO', 'BLOQUEADO', conflictos.sort()[0], 'ALTA');
     l.evidencias.push(...conflictos.sort().slice(1, 4));
@@ -166,6 +184,11 @@ function decidirLinea(
   }
   // 5) Topes de REVISIÓN (propuesta razonable, requiere humano).
   const revisiones: string[] = [];
+  // ORDEN 6 (revisión §10): sin sourceId recuperable (o sin fuente) no hay
+  // trazabilidad suficiente para AUTO: la trazabilidad queda limitada al hash.
+  if (!l.origenId || !textoPlano(l.registro.proveniencia.source)) {
+    revisiones.push('proveniencia insuficiente para AUTO (sourceId no recuperable o fuente ausente; trazabilidad limitada al hash)');
+  }
   if (l.duplicado.tipo === 'PROBABLE') revisiones.push(`duplicado probable: ${l.duplicado.motivo}`);
   if (requiereValidacion) revisiones.push('B1 exige validación humana (camposRequierenValidacion o incidencia REQUIERE_VALIDACION)');
   if (l.inmueble.id && !viaInmuebleAptaAuto(l.inmueble.via)) revisiones.push(`inmueble por vía no determinista (${l.inmueble.via}): ${l.inmueble.evidencia}`);
@@ -214,6 +237,16 @@ function necesitaInmueble(entidad: string): boolean {
   return entidad === 'GASTO' || entidad === 'COBRO' || entidad === 'CONTRATO';
 }
 
+/**
+ * Entidades donde propietario e inmueble resueltos deben ser coherentes con
+ * la titularidad documentada (ORDEN 6). PROPIETARIO se excluye: una mención
+ * de dirección en la ficha de una persona es descriptiva, no titularidad.
+ * LEGACY_STORAGE se excluye: no resuelve inmueble (el pid ES el propietario).
+ */
+const COHERENCIA_TITULAR: ReadonlySet<string> = new Set([
+  'GASTO', 'COBRO', 'CONTRATO', 'INMUEBLE', 'DOCUMENTO',
+]);
+
 /** Id existente cuando la resolución fue por match determinista (VINCULAR). */
 function matchExistente(l: LineaEnConstruccion): string | null {
   if (l.registro.entidad === 'INMUEBLE') return l.inmueble.id;
@@ -235,11 +268,14 @@ function construirHuellas(
 ): HuellasLinea | null {
   const lec = l.lectura;
   if (l.registro.entidad === 'GASTO') {
+    // ORDEN 6 (revisión): el alias `fecha` que acepta completitud también
+    // alimenta la huella; ignorarlo producía falsos EXACTO entre gastos que
+    // solo difieren en `fecha`.
     return huellasGasto({
       inmuebleId: l.inmueble.id,
       importe: numeroValido(lec['importe']),
       categoria: textoPlano(lec['categoria']),
-      fechaDevengo: textoPlano(lec['fechaDevengo']),
+      fechaDevengo: textoPlano(lec['fechaDevengo'] ?? lec['fecha']),
       concepto: textoPlano(lec['concepto'] ?? lec['description']),
       claveOrigen: clave,
       idDestino,

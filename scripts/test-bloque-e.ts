@@ -298,18 +298,120 @@ assert(
   /match \/lecturas_suministro\/\{lecturaId\}[\s\S]*?allow update, delete: if false;/.test(FIRESTORE_RULES),
   61, 'Lecturas inmutables: update/delete denegados en reglas'
 );
+// ---------------------------------------------------------------- E-62 (reconciliado con D3, ORDEN 4 §9)
+// D3 sustituyó, en las colecciones E, el listado global `allow list: if isStaff();`
+// por un listado con ÁMBITO DERIVADO (inmueble/contrato → propietarioId, +carteras,
+// +administración). El criterio de seguridad de E-62 NO cambia: ningún listado se
+// concede a `isTenant()` (única excepción: actas D acotada por contrato).
+// El assert pasa a comprobar la ESTRUCTURA del acceso acotado vigente en lugar del
+// literal obsoleto; `firestore.rules` NO se modifica (se reconcilia el test).
+const COLECCIONES_E62: Array<{ coleccion: string; guarda: string; alcance: string }> = [
+  {
+    coleccion: 'mensajes_portal',
+    guarda: "'contratoId' in resource.data",
+    alcance: 'ambitoPorContratoLectura(resource.data.contratoId)',
+  },
+  {
+    coleccion: 'suministros',
+    guarda: "'inmuebleId' in resource.data",
+    alcance: 'ambitoPorInmuebleLectura(resource.data.inmuebleId)',
+  },
+  {
+    coleccion: 'lecturas_suministro',
+    guarda: "'inmuebleId' in resource.data",
+    alcance: 'ambitoPorInmuebleLectura(resource.data.inmuebleId)',
+  },
+  {
+    coleccion: 'cambios_titular',
+    guarda: "'inmuebleId' in resource.data",
+    alcance: 'ambitoPorInmuebleLectura(resource.data.inmuebleId)',
+  },
+];
+
+// Cuerpo de un bloque `match /<coleccion>/{...}` de primer nivel.
+function bloqueDeColeccion(coleccion: string): string {
+  const lineas = FIRESTORE_RULES.split('\n');
+  const inicio = lineas.findIndex((ln) => ln.includes(`match /${coleccion}/{`));
+  if (inicio < 0) return '';
+  const bloque: string[] = [];
+  for (let i = inicio + 1; i < lineas.length; i++) {
+    if (/^ {4}\}/.test(lineas[i])) break;
+    bloque.push(lineas[i]);
+  }
+  return bloque.join('\n');
+}
+
+// Cuerpo de una `function <nombre>(...)` de las reglas.
+function cuerpoDeFuncion(nombre: string): string {
+  const lineas = FIRESTORE_RULES.split('\n');
+  const inicio = lineas.findIndex((ln) => ln.trim().startsWith(`function ${nombre}(`));
+  if (inicio < 0) return '';
+  const cuerpo: string[] = [];
+  for (let i = inicio + 1; i < lineas.length; i++) {
+    if (/^ {4}\}/.test(lineas[i])) break;
+    cuerpo.push(lineas[i]);
+  }
+  return cuerpo.join('\n');
+}
+
+// (1) Cada colección E tiene UN único listado, acotado por el campo de ámbito y
+//     resuelto por el helper de ámbito: nunca `isStaff()` global ni `isTenant()`.
+const listadosAcotadosE62 = COLECCIONES_E62.map(({ coleccion, guarda, alcance }) => {
+  const bloque = bloqueDeColeccion(coleccion);
+  const listados = bloque.split('\n').filter((ln) => ln.includes('allow list:'));
+  return (
+    bloque.length > 0 &&
+    listados.length === 1 &&
+    listados[0].includes(guarda) &&
+    listados[0].includes(alcance) &&
+    !listados[0].includes('isStaff') &&
+    !listados[0].includes('isTenant')
+  );
+});
+
+// (2) Los helpers de ámbito existen, derivan el propietarioId real del inmueble /
+//     contrato y combinan administración + ámbito del usuario, sin `isTenant()`.
+const helpersAmbitoE62 = [
+  { funcion: 'ambitoPorInmuebleLectura', derivacion: 'pidDelInmuebleAmbito(' },
+  { funcion: 'ambitoPorContratoLectura', derivacion: 'pidDelContratoAmbito(' },
+].map(({ funcion, derivacion }) => {
+  const cuerpo = cuerpoDeFuncion(funcion);
+  return (
+    cuerpo.includes('esAdminInmuebles()') &&
+    cuerpo.includes('activeUser()') &&
+    cuerpo.includes(`pidEnAmbitoLectura(${derivacion}`) &&
+    !cuerpo.includes('isTenant')
+  );
+});
+
+// (3) El ámbito por propietarioId = titular + carteras de lectura/escritura, y la
+//     derivación del propietarioId sale del documento real (no de campo enumerable).
+const pidEnAmbitoE62 = cuerpoDeFuncion('pidEnAmbitoLectura');
+const ambitoPorPropietarioE62 =
+  pidEnAmbitoE62.includes('myPropId()') &&
+  pidEnAmbitoE62.includes('carterasLectura()') &&
+  pidEnAmbitoE62.includes('carterasEscritura()') &&
+  !pidEnAmbitoE62.includes('isTenant');
+const derivacionPropietarioE62 =
+  cuerpoDeFuncion('pidDelInmuebleAmbito').includes('documents/inmuebles/') &&
+  cuerpoDeFuncion('pidDelInmuebleAmbito').includes('.data.propietarioId') &&
+  cuerpoDeFuncion('pidDelContratoAmbito').includes('documents/contratos_formalizacion/') &&
+  cuerpoDeFuncion('pidDelContratoAmbito').includes('.data.propietarioId');
+
 assert(
-  // Reconciliado: el modelo canónico restringe listados por rol (master/propietario);
-  // las colecciones E mantienen list staff-only y NINGÚN listado concede acceso a isTenant().
-  ['mensajes_portal', 'suministros', 'lecturas_suministro', 'cambios_titular'].every((col) =>
-    new RegExp(`match \\/${col}\\/[\\s\\S]*?allow list: if isStaff\\(\\);`).test(FIRESTORE_RULES)
-  ) &&
-  // Única excepción reconciliada: lista de actas D acotada por igualdad en
-  // `contractId` de contratos vinculados (demostrable, sin enumeración).
+  listadosAcotadosE62.every(Boolean) &&
+  helpersAmbitoE62.every(Boolean) &&
+  ambitoPorPropietarioE62 &&
+  derivacionPropietarioE62 &&
+  // Cláusulas conservadas: la ÚNICA línea de listado que menciona isTenant() es la
+  // de actas D, acotada por igualdad en `contractId` de contratos vinculados
+  // (demostrable, sin enumeración); ninguna otra vía de listado tenant existe.
   FIRESTORE_RULES.split('\n').filter((ln) => ln.includes('allow list') && ln.includes('isTenant')).length === 1 &&
   FIRESTORE_RULES.split('\n').some((ln) => ln.includes('allow list') && ln.includes('resource.data.contractId in tenantContratoIds()')),
-  62, 'Deny list para inquilino: E staff-only + solo actas D acotadas por contrato'
+  62, 'Deny list para inquilino: E con ámbito D3 (sin isStaff() global, sin list para isTenant) + solo actas D acotadas por contrato',
+  `listados=${JSON.stringify(listadosAcotadosE62)} helpers=${JSON.stringify(helpersAmbitoE62)} ambitoPid=${ambitoPorPropietarioE62} derivacion=${derivacionPropietarioE62}`
 );
+
 assert(
   FIRESTORE_RULES.includes('enlaceInquilinoValido(incoming().enlaceRegistroId, incoming().contratoIds)'),
   63, 'Alta INQUILINO exige invitación válida vinculada al contrato'

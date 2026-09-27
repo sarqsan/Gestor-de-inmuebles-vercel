@@ -40,17 +40,28 @@ const REGLAS = parsearReglas(FUENTE);
 // Actores sintéticos
 // ---------------------------------------------------------------------------
 const ADMIN_EMAIL = 'sarqsan2@gmail.com';
+// D3 (ORDEN 4 §7): el criterio de los árboles internos ya no es "cualquiera
+// autenticado" sino el espejo `usuarios_auth/{uid}` (+ titularidad derivada).
+// El FS sintético refleja la realidad: espejos ACTIVOS para las cuentas que
+// los tienen (los inquilinos NO tienen espejo) y `propietarioId` en los
+// documentos de los que deriva el ámbito. Sin espejo ⇒ deny (R-1/R-2).
 const FS = {
   'usuarios/uid_propA': { tipoPerfil: 'PROPIETARIO', propietarioId: 'PROP_A' },
   'usuarios/uid_propB': { tipoPerfil: 'PROPIETARIO', propietarioId: 'PROP_B' },
   'usuarios/uid_prof': { tipoPerfil: 'PROFESIONAL' },
   'usuarios/uid_inqA': { tipoPerfil: 'INQUILINO', contratoIds: ['CON_A'] },
   'usuarios/uid_inqB': { tipoPerfil: 'INQUILINO', contratoIds: ['CON_B'] },
-  'incidencias/INC_A': { contratoId: 'CON_A' },
-  'incidencias/INC_B': { contratoId: 'CON_B' },
+  'usuarios_auth/uid_propA': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'PROP_A', profesionalId: '', inmuebleIds: [] },
+  'usuarios_auth/uid_propB': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'PROP_B', profesionalId: '', inmuebleIds: [] },
+  'usuarios_auth/uid_prof': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', propietarioId: '', profesionalId: 'PRO1', inmuebleIds: [] },
+  'incidencias/INC_A': { contratoId: 'CON_A', propietarioId: 'PROP_A', profesionalAsignadoId: 'PRO1' },
+  'incidencias/INC_B': { contratoId: 'CON_B', propietarioId: 'PROP_B' },
   'incidencias/INC_SIN_CONTRATO': {},
   'suministros/SUM_A': { inmuebleId: 'INM_A' },
-  'inmuebles/INM_A': { contratoActivoId: 'CON_A' },
+  'inmuebles/INM_A': { contratoActivoId: 'CON_A', propietarioId: 'PROP_A' },
+  'inmuebles/inm-1': { propietarioId: 'PROP_A' },
+  'contratos_formalizacion/CON_A': { propietarioId: 'PROP_A', inmuebleId: 'INM_A' },
+  'contratos_formalizacion/CON_B': { propietarioId: 'PROP_B' },
   'lecturas_suministro/LEC_A': { contratoId: 'CON_A' },
 } as const;
 
@@ -193,19 +204,23 @@ describe('B · aislamiento propietario A / B, enumeración y acceso anónimo', (
     }
   });
 
-  it('RESIDUAL R-2 (declarado, no corregido): sin custom claims, una cuenta interna de B puede hacer `get` de un objeto de A por su nombre exacto', () => {
-    expect(puede('propietarioB', 'get', OBJ_A)).toBe(true);
+  it('D3 RESUELVE R-2: ni por nombre exacto hay lectura transversal (ámbito por espejo, sin custom claims)', () => {
+    expect(puede('propietarioB', 'get', OBJ_A)).toBe(false);
+    expect(puede('propietarioB', 'create', OBJ_A, PDF(OBJ_A))).toBe(false);
+    expect(puede('propietarioB', 'delete', OBJ_A)).toBe(false);
     expect(puede('propietarioA', 'get', OBJ_A)).toBe(true);
-    // ...pero no puede descubrirlo enumerando (B) ni el anónimo abrirlo.
     expect(puede('propietarioB', 'list', OBJ_A)).toBe(false);
     expect(puede('anonimo', 'get', OBJ_A)).toBe(false);
-    expect(FUENTE).toMatch(/R-2 sin custom claims/);
+    expect(FUENTE).toMatch(/RESUELTOS R-1\/R-2 sin custom claims/);
   });
 
-  it('RESIDUAL R-1 (declarado, no corregido): `internalUser()` no excluye al perfil INQUILINO en los árboles internos', () => {
-    expect(puede('inquilinoA', 'get', OBJ_A)).toBe(true);
+  it('D3 RESUELVE R-1: el inquilino (sin espejo) no entra en los árboles internos', () => {
+    expect(puede('inquilinoA', 'get', OBJ_A)).toBe(false);
+    expect(puede('inquilinoA', 'create', OBJ_A, PDF(OBJ_A))).toBe(false);
+    expect(puede('inquilinoA', 'delete', OBJ_A)).toBe(false);
     expect(puede('inquilinoA', 'list', OBJ_A)).toBe(false);
-    expect(FUENTE).toMatch(/R-1 `internalUser\(\)` == cualquier cuenta autenticada/);
+    expect(puede('autenticadoSinFicha', 'get', OBJ_A)).toBe(false);
+    expect(FUENTE).toMatch(/RESUELTOS R-1\/R-2 sin custom claims/);
   });
 
   it('morosidad_evidencias (R2): sólo el master lee/crea; nadie actualiza ni borra; el propietario titular tampoco', () => {
@@ -253,17 +268,22 @@ describe('C · incidencias/{incidenciaId}/{file=**} (E.1) — aislamiento del in
     expect(decidir(REGLAS, EV_A, 'get', ctx('inquilinoA')).casan).toEqual(['/incidencias/{incidenciaId}/{file=**}', '/{allPaths=**}']);
   });
 
-  it('lectura: el inquilino sólo ve evidencias de incidencias de SUS contratos; el personal ve todas; anónimo nada', () => {
+  it('lectura: el inquilino sólo ve evidencias de incidencias de SUS contratos (intacto); el personal sólo las de SU ámbito (D3); anónimo nada', () => {
     expect(puede('inquilinoA', 'get', EV_A)).toBe(true);
     expect(puede('inquilinoA', 'get', EV_B)).toBe(false);
     expect(puede('inquilinoB', 'get', EV_A)).toBe(false);
     expect(puede('inquilinoB', 'get', EV_B)).toBe(true);
     expect(puede('inquilinoA', 'get', 'incidencias/INC_SIN_CONTRATO/ev.jpg')).toBe(false);
     expect(puede('inquilinoA', 'get', 'incidencias/INC_INEXISTENTE/ev.jpg')).toBe(false);
-    for (const actor of ['admin', 'propietarioA', 'propietarioB', 'profesional'] as Actor[]) {
-      expect(puede(actor, 'get', EV_A), actor).toBe(true);
-      expect(puede(actor, 'get', EV_B), actor).toBe(true);
-    }
+    // D3: titular en lo suyo, profesional asignado en la suya, admin global.
+    expect(puede('admin', 'get', EV_A)).toBe(true);
+    expect(puede('admin', 'get', EV_B)).toBe(true);
+    expect(puede('propietarioA', 'get', EV_A)).toBe(true);
+    expect(puede('propietarioA', 'get', EV_B)).toBe(false);
+    expect(puede('propietarioB', 'get', EV_A)).toBe(false);
+    expect(puede('propietarioB', 'get', EV_B)).toBe(true);
+    expect(puede('profesional', 'get', EV_A)).toBe(true); // asignado a INC_A
+    expect(puede('profesional', 'get', EV_B)).toBe(false);
     expect(puede('anonimo', 'get', EV_A)).toBe(false);
   });
 
@@ -288,20 +308,28 @@ describe('C · incidencias/{incidenciaId}/{file=**} (E.1) — aislamiento del in
     expect(crea('inquilinoA', JPG('incidencias/INC_A/ev con espacio.jpg'))).toBe(false);
   });
 
-  it('subida: el personal (no inquilino) puede aportar a cualquier incidencia con evidencia válida; anónimo nunca', () => {
+  it('subida: el personal aporta SÓLO en su ámbito con evidencia válida (D3); anónimo nunca', () => {
     for (const actor of ['admin', 'propietarioA', 'profesional'] as Actor[]) {
       expect(crea(actor, JPG(EV_A)), actor).toBe(true);
-      expect(crea(actor, JPG(EV_B)), actor).toBe(true);
       expect(crea(actor, { name: EV_A, size: 1024, contentType: 'text/html' }), `${actor} html`).toBe(false);
       expect(crea(actor, JPG(EV_A, 10 * MB)), `${actor} 10MB`).toBe(false);
     }
+    expect(crea('admin', JPG(EV_B))).toBe(true);
+    expect(crea('propietarioA', JPG(EV_B))).toBe(false); // transversal
+    expect(crea('profesional', JPG(EV_B))).toBe(false); // no asignado a INC_B
+    expect(crea('propietarioB', JPG(EV_A))).toBe(false); // transversal
+    expect(crea('propietarioB', JPG(EV_B))).toBe(true);
     expect(crea('anonimo', JPG(EV_A))).toBe(false);
   });
 
-  it('borrado: nunca el inquilino ni el anónimo; sí el personal', () => {
+  it('borrado: nunca el inquilino ni el anónimo; titular en lo suyo y admin (D3: el profesional no borra)', () => {
     expect(puede('inquilinoA', 'delete', EV_A)).toBe(false);
     expect(puede('anonimo', 'delete', EV_A)).toBe(false);
-    for (const actor of ['admin', 'propietarioA', 'profesional'] as Actor[]) expect(puede(actor, 'delete', EV_A), actor).toBe(true);
+    expect(puede('admin', 'delete', EV_A)).toBe(true);
+    expect(puede('propietarioA', 'delete', EV_A)).toBe(true);
+    expect(puede('propietarioA', 'delete', EV_B)).toBe(false);
+    expect(puede('propietarioB', 'delete', EV_A)).toBe(false);
+    expect(puede('profesional', 'delete', EV_A)).toBe(false);
   });
 
   it('el subárbol recursivo sigue cubierto (rutas más profundas heredan el mismo aislamiento, no la denegación)', () => {
@@ -320,7 +348,9 @@ describe('C · incidencias/{incidenciaId}/{file=**} (E.1) — aislamiento del in
     expect(puede('inquilinoA', 'get', foto)).toBe(true);
     expect(puede('inquilinoB', 'get', foto)).toBe(false);
     expect(puede('inquilinoA', 'delete', foto)).toBe(false);
-    expect(puede('profesional', 'delete', foto)).toBe(true);
+    expect(puede('profesional', 'delete', foto)).toBe(false); // D3: el profesional no borra
+    expect(puede('propietarioA', 'delete', foto)).toBe(true); // titular del inmueble del suministro
+    expect(puede('propietarioB', 'delete', foto)).toBe(false);
   });
 });
 
@@ -332,7 +362,9 @@ describe('D · actas_pdfs / actas_fotos — flujo legítimo del PDF de acta', ()
   const FOTO_ACTA = 'actas_fotos/PROP_A/acta_1/1758556800000_x9k2_evidencia.jpg';
 
   it('el personal sube el PDF con el nombre determinista que construye ActasSection.handleGenerarPdf', () => {
-    for (const actor of ['admin', 'propietarioA', 'profesional'] as Actor[]) expect(crea(actor, PDF(PDF_ACTA)), actor).toBe(true);
+    for (const actor of ['admin', 'propietarioA'] as Actor[]) expect(crea(actor, PDF(PDF_ACTA)), actor).toBe(true);
+    expect(crea('profesional', PDF(PDF_ACTA))).toBe(false); // D3: sin ámbito en PROP_A
+    expect(crea('propietarioB', PDF(PDF_ACTA))).toBe(false); // D3: transversal
     expect(crea('anonimo', PDF(PDF_ACTA))).toBe(false);
     expect(crea('propietarioA', PDF(PDF_ACTA, 20 * MB))).toBe(false);
     expect(crea('propietarioA', { name: PDF_ACTA, size: 1024, contentType: 'text/html' })).toBe(false);
@@ -347,11 +379,15 @@ describe('D · actas_pdfs / actas_fotos — flujo legítimo del PDF de acta', ()
     expect(puede('admin', 'update', FOTO_ACTA, JPG(FOTO_ACTA))).toBe(false);
   });
 
-  it('lectura interna, listado sólo admin, borrado interno', () => {
-    for (const actor of AUTENTICADOS) expect(puede(actor, 'get', PDF_ACTA), actor).toBe(true);
+  it('lectura en ámbito (D3), listado sólo admin, borrado titular/admin', () => {
+    for (const actor of ['admin', 'propietarioA'] as Actor[]) expect(puede(actor, 'get', PDF_ACTA), actor).toBe(true);
+    for (const actor of ['propietarioB', 'profesional', 'inquilinoA', 'inquilinoB', 'autenticadoSinFicha'] as Actor[]) {
+      expect(puede(actor, 'get', PDF_ACTA), actor).toBe(false);
+    }
     for (const actor of INTERNOS_NO_ADMIN) expect(puede(actor, 'list', PDF_ACTA), actor).toBe(false);
     expect(puede('admin', 'list', PDF_ACTA)).toBe(true);
     expect(puede('propietarioA', 'delete', PDF_ACTA)).toBe(true);
+    expect(puede('propietarioB', 'delete', PDF_ACTA)).toBe(false);
     expect(puede('anonimo', 'delete', PDF_ACTA)).toBe(false);
   });
 });
@@ -432,9 +468,16 @@ describe('E · update (metadatos) y delete por ruta — decisiones específicas,
     ]);
   });
 
-  it('delete: nunca anónimo; interno en árboles internos; nunca inquilino en E.1/E.2; nadie en morosidad', () => {
+  it('delete: nunca anónimo; titular en lo suyo (D3: B no borra lo de A); nunca inquilino en E.1/E.2; nadie en morosidad', () => {
     for (const ruta of [...SIN_UPDATE, ...CON_UPDATE_INTERNO]) expect(puede('anonimo', 'delete', ruta), ruta).toBe(false);
-    for (const ruta of SIN_UPDATE.filter((r) => !r.startsWith('morosidad_'))) expect(puede('propietarioB', 'delete', ruta), ruta).toBe(true);
+    // D3: propietarioB no es titular de nada de la matriz (todo PROP_A/S1/INM_A/CON_A) ⇒ deny.
+    for (const ruta of SIN_UPDATE.filter((r) => !r.startsWith('morosidad_'))) expect(puede('propietarioB', 'delete', ruta), ruta).toBe(false);
+    // ...mientras el titular sí borra lo suyo (sin pérdida de operativa legítima).
+    for (const ruta of SIN_UPDATE.filter((r) => r.includes('/PROP_A/') && !r.startsWith('morosidad_'))) {
+      expect(puede('propietarioA', 'delete', ruta), ruta).toBe(true);
+    }
+    expect(puede('propietarioA', 'delete', 'inmuebles/INM_A/img_1_a.jpg')).toBe(true); // titular del inmueble
+    expect(puede('propietarioB', 'delete', 'inmuebles/INM_A/img_1_a.jpg')).toBe(false);
     expect(puede('inquilinoA', 'delete', 'incidencias/INC_A/ev.jpg')).toBe(false);
     expect(puede('inquilinoA', 'delete', 'contratos/CON_A/contrato.pdf')).toBe(false);
     expect(puede('inquilinoA', 'delete', 'recibos/CON_A/k/recibo.pdf')).toBe(false);
@@ -466,10 +509,15 @@ describe('F · documentos_solicitados (portal anónimo), catálogo público e in
     }
   });
 
-  it('portal: los objetos anidados YA EXISTENTES siguen legibles y borrables por cuentas internas (sin pérdida)', () => {
-    for (const actor of AUTENTICADOS) {
-      expect(puede(actor, 'get', ANIDADO), `${actor} get`).toBe(true);
-      expect(puede(actor, 'delete', ANIDADO), `${actor} delete`).toBe(true);
+  it('portal: los objetos anidados YA EXISTENTES sólo en ámbito (D3: sol-1 no existe ⇒ sólo admin; sin pérdida donde hay solicitud)', () => {
+    // `sol-1` no existe en el FS sintético ⇒ sin ámbito derivado ⇒ deny,
+    // salvo el admin que opera huérfanos. Con solicitud real + espejo en
+    // ámbito, titular/carteras leen y borran (suite D3 §C).
+    expect(puede('admin', 'get', ANIDADO)).toBe(true);
+    expect(puede('admin', 'delete', ANIDADO)).toBe(true);
+    for (const actor of ['propietarioA', 'propietarioB', 'profesional', 'inquilinoA', 'inquilinoB', 'autenticadoSinFicha'] as Actor[]) {
+      expect(puede(actor, 'get', ANIDADO), `${actor} get`).toBe(false);
+      expect(puede(actor, 'delete', ANIDADO), `${actor} delete`).toBe(false);
     }
     expect(puede('anonimo', 'get', ANIDADO)).toBe(false);
     expect(puede('anonimo', 'get', PLANO)).toBe(false);
@@ -478,12 +526,15 @@ describe('F · documentos_solicitados (portal anónimo), catálogo público e in
     expect(puede('admin', 'list', PLANO)).toBe(true);
   });
 
-  it('catálogo: `get` público del objeto plano; `list` sólo con sesión; el inventario nunca público', () => {
+  it('catálogo: `get` público del objeto plano; `list` con sesión (excepción UX deliberada D3); el inventario nunca público', () => {
     const portada = 'inmuebles/inm-1/img_1_portada.jpg';
     const inventario = 'inmuebles/inm-1/inventario/doc_1/1_frigorifico.png';
     expect(puede('anonimo', 'get', portada)).toBe(true);
     expect(puede('anonimo', 'list', portada)).toBe(false);
+    // D3 endurece a master-only TODOS los listados SALVO este: listar la
+    // carpeta pública del catálogo con sesión es la única excepción (UX).
     expect(puede('propietarioA', 'list', portada)).toBe(true);
+    expect(puede('admin', 'list', portada)).toBe(true);
     expect(puede('anonimo', 'get', inventario)).toBe(false);
     expect(puede('anonimo', 'list', inventario)).toBe(false);
     expect(puede('propietarioA', 'get', inventario)).toBe(true);

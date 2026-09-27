@@ -485,14 +485,17 @@ describe('R3 storage.rules: catálogo público, inventario interno', () => {
     expect(ST_SRC).not.toContain('match /inmuebles/{inmuebleId}/{allFiles=**} {');
   });
 
-  it('inventario: lectura/escritura solo interna (sin `if true`)', () => {
+  it('inventario: lectura/escritura solo en ámbito del inmueble (D3; sin `if true`)', () => {
     const ini = ST_SRC.indexOf('match /inmuebles/{inmuebleId}/inventario/{allFiles=**}');
     expect(ini).toBeGreaterThan(0);
-    const fin = ST_SRC.indexOf('match /{allPaths=**}');
-    const zonaInventario = ST_SRC.slice(ini, ST_SRC.indexOf('}\n', ST_SRC.indexOf('allow update, delete', ini)) + 2);
-    expect(zonaInventario).toContain('allow read: if internalUser();');
+    // La zona es EXACTAMENTE el cuerpo del match (hasta su llave de cierre).
+    const zonaInventario = ST_SRC.slice(ini, ST_SRC.indexOf('\n    }\n', ini) + 6);
+    // D3 (§7): el criterio laxo `internalUser()` (cualquier cuenta
+    // autenticada, R-1) se sustituye por el ámbito del inmueble.
+    expect(zonaInventario).toContain('allow read: if ambitoInmuebleLectura(inmuebleId);');
+    expect(zonaInventario).toContain('allow delete: if ambitoInmuebleBorrado(inmuebleId);');
     expect(zonaInventario).not.toContain('if true');
-    void fin;
+    expect(zonaInventario).not.toContain('internalUser()');
   });
 
   it('R2 intacto: bloque morosidad_evidencias sin cambios', () => {

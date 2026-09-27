@@ -246,6 +246,42 @@ service cloud.firestore {
       return activeUser() && 'propietarioId' in d
         && carterasEscritura().hasAny([d.propietarioId]);
     }
+    // D3 (§9) — Ámbito derivado para entidades SIN `propietarioId` directo.
+    // La cadena es `inmuebleId → inmuebles/{id} → propietarioId` (o
+    // `contratoId → contratos_formalizacion/{id} → propietarioId`) y el pid
+    // resultante se valida contra el espejo (titular + carteras). Sin
+    // duplicar datos: el ámbito se deriva, no se almacena. `get()` sobre un
+    // documento inexistente falla ⇒ deny (fail-closed). La administración
+    // (`esAdminInmuebles()`) cortocircuita primero: conserva la operativa
+    // global (p. ej. SuministrosSection solo-admin) y opera huérfanos.
+    function pidEnAmbitoLectura(pid) {
+      return pid == myPropId() || carterasLectura().hasAny([pid]) || carterasEscritura().hasAny([pid]);
+    }
+    function pidEnAmbitoEscritura(pid) {
+      return pid == myPropId() || carterasEscritura().hasAny([pid]);
+    }
+    function pidDelInmuebleAmbito(inmuebleId) {
+      return get(/databases/$(database)/documents/inmuebles/$(inmuebleId)).data.propietarioId;
+    }
+    function ambitoPorInmuebleLectura(inmuebleId) {
+      return esAdminInmuebles() || (activeUser() && inmuebleId is string
+        && pidEnAmbitoLectura(pidDelInmuebleAmbito(inmuebleId)));
+    }
+    function ambitoPorInmuebleEscritura(inmuebleId) {
+      return esAdminInmuebles() || (activeUser() && inmuebleId is string
+        && pidEnAmbitoEscritura(pidDelInmuebleAmbito(inmuebleId)));
+    }
+    function pidDelContratoAmbito(contratoId) {
+      return get(/databases/$(database)/documents/contratos_formalizacion/$(contratoId)).data.propietarioId;
+    }
+    function ambitoPorContratoLectura(contratoId) {
+      return esAdminInmuebles() || (activeUser() && contratoId is string
+        && pidEnAmbitoLectura(pidDelContratoAmbito(contratoId)));
+    }
+    function ambitoPorContratoEscritura(contratoId) {
+      return esAdminInmuebles() || (activeUser() && contratoId is string
+        && pidEnAmbitoEscritura(pidDelContratoAmbito(contratoId)));
+    }
     // Involucración en una gestión de cartera (lectura del registro
     // trazable): el titular de la cartera o el gestor designado.
     function gestionInvolucraAMi(d) {
@@ -1419,7 +1455,14 @@ service cloud.firestore {
     // =========================================================================
     match /solicitudes_seguro_impago/{solicitudSeguroId} {
       // BLOQUE E (reconciliado): el inquilino no accede a solicitudes de seguro.
-      allow read, write: if isStaff();
+      // D3 (§9): `isStaff()` global ⇒ ámbito derivado inmueble → propietario
+      // (+carteras, +admin). El borrado queda en el ámbito de escritura.
+      allow get: if 'inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId);
+      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      allow create: if 'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId);
+      allow update: if (('inmuebleId' in existing() && 'inmuebleId' in incoming())
+        && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId));
+      allow delete: if 'inmuebleId' in existing() && ambitoPorInmuebleEscritura(existing().inmuebleId);
     }
 
     // =========================================================================
@@ -1909,10 +1952,12 @@ service cloud.firestore {
     // Sin borrado: el hilo es el registro de comunicaciones.
     // =========================================================================
     match /mensajes_portal/{mensajeId} {
-      allow get: if isStaff() || (isTenant() &&
+      // D3 (§9): ámbito derivado contrato → propietario (+carteras, +admin).
+      // Ramas tenant intactas.
+      allow get: if ('contratoId' in existing() && ambitoPorContratoLectura(existing().contratoId)) || (isTenant() &&
         ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
-      allow list: if isStaff();
-      allow create: if isStaff() || (isTenant() &&
+      allow list: if 'contratoId' in resource.data && ambitoPorContratoLectura(resource.data.contratoId);
+      allow create: if ('contratoId' in incoming() && ambitoPorContratoEscritura(incoming().contratoId)) || (isTenant() &&
         incoming().contratoId is string &&
         tenantTieneContrato(incoming().contratoId) &&
         incoming().inmuebleId is string &&
@@ -1922,7 +1967,8 @@ service cloud.firestore {
         incoming().texto.size() >= 1 &&
         incoming().texto.size() <= 4000);
       // Gestión actualiza (acuse de lectura); el inquilino solo marca su propio acuse.
-      allow update: if isStaff() || (isTenant() &&
+      allow update: if (('contratoId' in existing() && 'contratoId' in incoming())
+        && ambitoPorContratoEscritura(existing().contratoId) && ambitoPorContratoEscritura(incoming().contratoId)) || (isTenant() &&
         ('contratoId' in existing()) && tenantTieneContrato(existing().contratoId) &&
         incoming().diff(existing()).affectedKeys().hasOnly(['leidoPorInquilino']));
       allow delete: if false;
@@ -1933,11 +1979,16 @@ service cloud.firestore {
     // El inquilino lee (get) los de su inmueble y solo añade IDs a los índices.
     // =========================================================================
     match /suministros/{suministroId} {
-      allow get: if isStaff() || (isTenant() &&
+      // D3 (§9): `isStaff()` global ⇒ ámbito derivado
+      // inmueble → propietario (+carteras, +admin). Ramas tenant intactas.
+      // En `update`, existing Y incoming deben estar en ámbito (si el
+      // inmueble cambia, ambos deben ser legítimos).
+      allow get: if ('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() &&
         tenantVeContratos(campoListaActual('contratoIdsAutorizados')));
-      allow list: if isStaff();
-      allow create: if isStaff();
-      allow update: if isStaff() || (isTenant() &&
+      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      allow create: if 'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId);
+      allow update: if (('inmuebleId' in existing() && 'inmuebleId' in incoming())
+        && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() &&
         tenantVeContratos(campoListaActual('contratoIdsAutorizados')) &&
         incoming().diff(existing()).affectedKeys().hasOnly(['lecturaIds', 'cambioTitularIds', 'fechaActualizacion']) &&
         indiceInmutableOCrece('lecturaIds') &&
@@ -1950,10 +2001,12 @@ service cloud.firestore {
     // Sin update ni delete: la corrección es una nueva lectura (corrigeLecturaId).
     // =========================================================================
     match /lecturas_suministro/{lecturaId} {
-      allow get: if isStaff() || (isTenant() &&
+      // D3 (§9): ámbito derivado inmueble → propietario (+carteras, +admin).
+      // Ramas tenant intactas; inmutabilidad intacta.
+      allow get: if ('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() &&
         ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
-      allow list: if isStaff();
-      allow create: if isStaff() || (isTenant() &&
+      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      allow create: if ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() &&
         incoming().contratoId is string &&
         tenantTieneContrato(incoming().contratoId) &&
         incoming().suministroId is string &&
@@ -1969,10 +2022,12 @@ service cloud.firestore {
     // 42. BLOQUE E (reconciliado): CAMBIOS DE TITULARIDAD (solicita inquilino, resuelve gestión)
     // =========================================================================
     match /cambios_titular/{cambioId} {
-      allow get: if isStaff() || (isTenant() &&
+      // D3 (§9): ámbito derivado inmueble → propietario (+carteras, +admin).
+      // Ramas tenant intactas.
+      allow get: if ('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() &&
         ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
-      allow list: if isStaff();
-      allow create: if isStaff() || (isTenant() &&
+      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      allow create: if ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() &&
         incoming().contratoId is string &&
         tenantTieneContrato(incoming().contratoId) &&
         incoming().suministroId is string &&
@@ -1981,7 +2036,8 @@ service cloud.firestore {
         incoming().titularNuevoNombre.size() >= 3 &&
         incoming().fechaEfecto is string &&
         incoming().estado == 'SOLICITADO');
-      allow update: if isStaff();
+      allow update: if (('inmuebleId' in existing() && 'inmuebleId' in incoming())
+        && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId));
       allow delete: if isMasterAdmin();
     }
 

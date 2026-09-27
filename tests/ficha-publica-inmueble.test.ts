@@ -417,9 +417,14 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
     // titularidadInalterada()/soyTitularActual()/sigoSiendoTitular() sobre
     // las mismas ramas de autorización (master, carterasE, titular,
     // canReachInmuebleId). Ramas intactas; restricción añadida, no retirada.
+    // D2 (ORDEN 3 §2, E1 — REVISIÓN EXPLÍCITA): la rama del titular exige
+    // además propietarioCanonicoInalterado() — el titular edita su ficha
+    // fiscal solo si conserva el propietarioId canónico; la transmisión
+    // exige master. Endurecimiento (comportamiento probado en
+    // seguridad-firestore-d2.test.ts A), no debilitamiento.
     expect(b).toContain('allow update: if isMasterAdmin()');
     expect(b).toContain('inmuebleEnCarteraEscritura(existing()) && titularidadInalterada()');
-    expect(b).toContain('soyTitularActual() && (titularidadInalterada() || sigoSiendoTitular())');
+    expect(b).toContain('soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular())');
     expect(b).toContain('canReachInmuebleId(inmuebleId) && titularidadInalterada()');
     expect(b).toContain('allow delete: if isMasterAdmin();');
   });

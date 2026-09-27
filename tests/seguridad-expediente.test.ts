@@ -90,10 +90,17 @@ describe('BLOQUE 3 · gastos (fuente del expediente): aislamiento intacto', () =
     expect(listGasto(AUTH.propY)).toBe(false);
     expect(updateGasto(AUTH.propY)).toBe(false);
   });
-  it('E3 · gestor L/E: los gastos siguen fuera de su ámbito (el índice documental no concede acceso nuevo)', () => {
-    expect(getGasto(AUTH.gestorL)).toBe(false);
-    expect(getGasto(AUTH.gestorE)).toBe(false);
-    expect(updateGasto(AUTH.gestorE)).toBe(false);
+  it('E3 · REVISIÓN EXPLÍCITA D2 (ORDEN 3 §2): el gestor SÍ opera los gastos de su cartera', () => {
+    // Pre-D2 este test pineaba "gastos fuera del ámbito del gestor". D2
+    // (dependientes dentro del mismo ámbito) concede lectura (L/E) y
+    // escritura (E) sobre los gastos de la cartera gestionada con el patrón
+    // auditado de pólizas/contratos; el gestor no borra y la revocación
+    // deniega (cobertura completa en seguridad-firestore-d2.test.ts C).
+    // El aislamiento entre carteras (E2) y el resto del bloque siguen intactos.
+    expect(getGasto(AUTH.gestorL)).toBe(true);
+    expect(listGasto(AUTH.gestorL)).toBe(true);
+    expect(getGasto(AUTH.gestorE)).toBe(true);
+    expect(updateGasto(AUTH.gestorE)).toBe(true);
   });
   it('E4 · admin permitido; anónimo denegado', () => {
     expect(getGasto(AUTH.master)).toBe(true);

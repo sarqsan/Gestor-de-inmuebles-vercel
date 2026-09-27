@@ -99,6 +99,7 @@ import {
   subscribeModulosConfig,
   saveInmuebleFirestore,
   deleteInmuebleFirestore,
+  registrarAuditoriaFirestore,
   saveCandidatoFirestore,
   deleteCandidatoFirestore,
   savePropietarioFirestore,
@@ -146,6 +147,7 @@ import {
 } from './lib/firebase';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { propietariosGestionadosDe } from './lib/carterasGestion';
+import { detectarCambioTitularidad } from './lib/titularidadInmueble';
 import { resolverTokensPublicos } from './lib/tokensPublicos';
 import {
   persistirMejorEsfuerzo,
@@ -1736,12 +1738,31 @@ export default function App() {
 
   // Delete inmueble handler
   const handleDeleteInmueble = (inmuebleId: string) => {
+    // D2 (§2): auditoría del borrado (solo si tuvo éxito).
+    const previoBorrado = inmuebles.find((i) => i.id === inmuebleId);
     setInmuebles((prev) => {
       const next = prev.filter((i) => i.id !== inmuebleId);
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-    deleteInmuebleFirestore(inmuebleId);
+    void deleteInmuebleFirestore(inmuebleId).then((ok) => {
+      if (!ok) return;
+      void registrarAuditoriaFirestore({
+        usuarioId: currentUser?.id || 'system',
+        usuarioEmail: currentUser?.email || 'sistema',
+        usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
+        accion: 'INMUEBLE_ELIMINADO',
+        descripcion: `Inmueble ${inmuebleId} eliminado`,
+        entidadAfectada: 'inmueble',
+        idAfectado: inmuebleId,
+        resultado: 'EXITO',
+        detalles: {
+          propietarioId: previoBorrado?.propietarioId || '',
+          propietarioPrincipalId: previoBorrado?.propietarioPrincipalId || '',
+          propietarioSecundarioId: previoBorrado?.propietarioSecundarioId || '',
+        },
+      });
+    });
 
     // Safely update candidates associated with this property
     setCandidatos((prev) => {
@@ -1770,12 +1791,30 @@ export default function App() {
 
   // Update inmueble handler
   const handleUpdateInmueble = (updatedInmueble: Inmueble) => {
+    // D2 (§2): los cambios sensibles de titularidad son auditables — el
+    // registro se escribe SOLO si la escritura tuvo éxito (save→boolean).
+    const previoTitularidad = inmuebles.find((i) => i.id === updatedInmueble.id);
     setInmuebles((prev) => {
       const next = prev.map((i) => (i.id === updatedInmueble.id ? updatedInmueble : i));
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-    saveInmuebleFirestore(updatedInmueble);
+    void saveInmuebleFirestore(updatedInmueble).then((ok) => {
+      if (!ok || !previoTitularidad) return;
+      const diff = detectarCambioTitularidad(previoTitularidad, updatedInmueble);
+      if (!diff.cambio) return;
+      void registrarAuditoriaFirestore({
+        usuarioId: currentUser?.id || 'system',
+        usuarioEmail: currentUser?.email || 'sistema',
+        usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
+        accion: 'INMUEBLE_TITULARIDAD_CAMBIO',
+        descripcion: `Titularidad del inmueble ${updatedInmueble.id} modificada (${diff.campos.join(', ')})`,
+        entidadAfectada: 'inmueble',
+        idAfectado: updatedInmueble.id,
+        resultado: 'EXITO',
+        detalles: { campos: diff.campos, antes: diff.antes, despues: diff.despues },
+      });
+    });
   };
 
   // Slot Handlers

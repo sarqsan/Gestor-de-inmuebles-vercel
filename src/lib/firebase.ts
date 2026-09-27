@@ -489,7 +489,7 @@ export function sanitizeInmuebleForFirestore(inmueble: Inmueble): Inmueble {
 /**
  * Save / Update Inmueble in Firestore
  */
-export async function saveInmuebleFirestore(inmueble: Inmueble) {
+export async function saveInmuebleFirestore(inmueble: Inmueble): Promise<boolean> {
   try {
     const cleanInmueble = sanitizeInmuebleForFirestore(inmueble);
     await setDoc(doc(db, 'inmuebles', cleanInmueble.id), cleanInmueble, { merge: true });
@@ -500,15 +500,17 @@ export async function saveInmuebleFirestore(inmueble: Inmueble) {
     } catch (errMirror) {
       console.warn('No se pudo actualizar la ficha pública del inmueble:', errMirror);
     }
+    return true;
   } catch (err) {
     console.error('Error saving inmueble to Firestore:', err);
+    return false;
   }
 }
 
 /**
  * Delete Inmueble from Firestore
  */
-export async function deleteInmuebleFirestore(inmuebleId: string) {
+export async function deleteInmuebleFirestore(inmuebleId: string): Promise<boolean> {
   try {
     await deleteDoc(doc(db, 'inmuebles', inmuebleId));
     // R3: la ficha pública no debe sobrevivir al documento (mejor esfuerzo).
@@ -517,8 +519,10 @@ export async function deleteInmuebleFirestore(inmuebleId: string) {
     } catch (errMirror) {
       console.warn('No se pudo eliminar la ficha pública del inmueble:', errMirror);
     }
+    return true;
   } catch (err) {
     console.error('Error deleting inmueble from Firestore:', err);
+    return false;
   }
 }
 
@@ -879,10 +883,22 @@ export function subscribeContratos(
   callback: (contratos: ContratoFormalizacion[]) => void,
   scope?: DataAccessScope
 ): Unsubscribe {
-  // Profesionales: cero acceso a contratos/cobros.
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
+  // Profesionales: cero acceso a contratos/cobros, salvo gestor con
+  // carteras (D2 §2: une pid propio + carteras pid-a-pid).
+  const gestionadosContratos = scope?.propietariosGestionados ?? [];
+  if (scope?.tipoPerfil === 'PROFESIONAL' && gestionadosContratos.length === 0) {
     callback([]);
     return () => {};
+  }
+  if (
+    gestionadosContratos.length > 0 &&
+    (scope?.tipoPerfil === 'PROPIETARIO' || scope?.tipoPerfil === 'PROFESIONAL')
+  ) {
+    const pids =
+      scope.tipoPerfil === 'PROPIETARIO' && scope.propietarioId
+        ? [scope.propietarioId, ...gestionadosContratos]
+        : gestionadosContratos;
+    return subscribeUnionPorPropietario<ContratoFormalizacion>(CONTRATOS_COL, pids, callback, 'contratos_formalizacion');
   }
 
   // Administrador o sin ámbito: colección completa.
@@ -978,9 +994,23 @@ export function subscribeGastos(
   callback: (gastos: Gasto[]) => void,
   scope?: DataAccessScope
 ): Unsubscribe {
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
+  // D2 (§2): mismo aislamiento que contratos, con unión multicartera para
+  // el gestor (pid propio + carteras pid-a-pid; profesional sin carteras
+  // conserva cero acceso a datos económicos).
+  const gestionadosGastos = scope?.propietariosGestionados ?? [];
+  if (scope?.tipoPerfil === 'PROFESIONAL' && gestionadosGastos.length === 0) {
     callback([]);
     return () => {};
+  }
+  if (
+    gestionadosGastos.length > 0 &&
+    (scope?.tipoPerfil === 'PROPIETARIO' || scope?.tipoPerfil === 'PROFESIONAL')
+  ) {
+    const pids =
+      scope.tipoPerfil === 'PROPIETARIO' && scope.propietarioId
+        ? [scope.propietarioId, ...gestionadosGastos]
+        : gestionadosGastos;
+    return subscribeUnionPorPropietario<Gasto>(GASTOS_COL, pids, callback, 'gastos');
   }
 
   if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
@@ -1047,9 +1077,21 @@ export function subscribeGastosRecurrentes(
   callback: (plantillas: GastoRecurrente[]) => void,
   scope?: DataAccessScope
 ): Unsubscribe {
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
+  // D2 (§2): unión multicartera para el gestor (mismo patrón que gastos).
+  const gestionadosRecurrentes = scope?.propietariosGestionados ?? [];
+  if (scope?.tipoPerfil === 'PROFESIONAL' && gestionadosRecurrentes.length === 0) {
     callback([]);
     return () => {};
+  }
+  if (
+    gestionadosRecurrentes.length > 0 &&
+    (scope?.tipoPerfil === 'PROPIETARIO' || scope?.tipoPerfil === 'PROFESIONAL')
+  ) {
+    const pids =
+      scope.tipoPerfil === 'PROPIETARIO' && scope.propietarioId
+        ? [scope.propietarioId, ...gestionadosRecurrentes]
+        : gestionadosRecurrentes;
+    return subscribeUnionPorPropietario<GastoRecurrente>(GASTOS_RECURRENTES_COL, pids, callback, 'gastos_recurrentes');
   }
   if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
     return onSnapshot(
@@ -1171,6 +1213,55 @@ export async function deletePrestamoFirestore(prestamoId: string) {
 }
 
 // ============================================================
+// D2 (§2) — Unión de listeners pid-a-pid para el gestor multicartera.
+// Cada pid (propio + carteras gestionadas) se escucha con una consulta
+// demostrable where('propietarioId','==', pid); los resultados se fusionan
+// por id de documento. Un listener revocado falla cerrado (error aislado,
+// resto intacto); el gestor nunca consulta la colección completa.
+// ============================================================
+function subscribeUnionPorPropietario<T extends { id: string }>(
+  col: ReturnType<typeof collection>,
+  pids: Array<string | undefined>,
+  callback: (items: T[]) => void,
+  etiqueta: string
+): Unsubscribe {
+  const porFuente = new Map<string, Map<string, T>>();
+  const fuentes: Unsubscribe[] = [];
+  const notificar = () => {
+    const union = new Map<string, T>();
+    porFuente.forEach((fuente) => fuente.forEach((v, k) => union.set(k, v)));
+    callback(Array.from(union.values()));
+  };
+  const vistos = new Set<string>();
+  for (const pid of pids) {
+    if (!pid || vistos.has(pid)) continue;
+    vistos.add(pid);
+    const clave = `pid:${pid}`;
+    fuentes.push(
+      onSnapshot(
+        query(col, where('propietarioId', '==', pid)),
+        (snap) => {
+          const parcial = new Map<string, T>();
+          snap.forEach((ds) => parcial.set(ds.id, { id: ds.id, ...ds.data() } as unknown as T));
+          porFuente.set(clave, parcial);
+          notificar();
+        },
+        (err) => {
+          console.error(`Firestore ${etiqueta} (${clave}) snapshot error:`, err);
+        }
+      )
+    );
+  }
+  if (fuentes.length === 0) {
+    callback([]);
+    return () => {};
+  }
+  return () => {
+    fuentes.forEach((u) => u());
+  };
+}
+
+// ============================================================
 // FASE 3.0 — RECOMERCIALIZACIÓN INTELIGENTE
 // Suscripción genérica aislada por propietario (patrón de
 // contratos/gastos): profesionales sin datos, propietario con
@@ -1180,7 +1271,11 @@ function subscribeColeccionPropietario<T extends { id: string }>(
   col: ReturnType<typeof collection>,
   callback: (items: T[]) => void,
   scope: DataAccessScope | undefined,
-  etiqueta: string
+  etiqueta: string,
+  // D2 (§2): solo las colecciones cuyas Rules conceden lectura a carteras
+  // (hoy: incidencias) activan la unión multicartera. El resto conserva el
+  // aislamiento estricto por pid propio aunque el scope traiga carteras.
+  conCarteras?: boolean
 ): Unsubscribe {
   const mapear = (snap: QuerySnapshot) => {
     const items: T[] = [];
@@ -1189,9 +1284,22 @@ function subscribeColeccionPropietario<T extends { id: string }>(
   };
   const onError = (err: unknown) => console.error(`Firestore ${etiqueta} snapshot error:`, err);
 
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
+  // D2 (§2): gestor con carteras sobre una colección con lectura de cartera
+  // en Rules — une pid propio (si lo tiene) + carteras pid-a-pid.
+  const gestionados = conCarteras ? (scope?.propietariosGestionados ?? []) : [];
+  if (scope?.tipoPerfil === 'PROFESIONAL' && gestionados.length === 0) {
     callback([]);
     return () => {};
+  }
+  if (
+    gestionados.length > 0 &&
+    (scope?.tipoPerfil === 'PROPIETARIO' || scope?.tipoPerfil === 'PROFESIONAL')
+  ) {
+    const pids =
+      scope.tipoPerfil === 'PROPIETARIO' && scope.propietarioId
+        ? [scope.propietarioId, ...gestionados]
+        : gestionados;
+    return subscribeUnionPorPropietario<T>(col, pids, callback, etiqueta);
   }
   if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
     return onSnapshot(col, mapear, onError);
@@ -1345,7 +1453,8 @@ export function subscribeIncidencias(
     INCIDENCIAS_COL,
     callback,
     scope,
-    'incidencias'
+    'incidencias',
+    true // D2 (§2): Rules de incidencias con lectura de cartera.
   );
 }
 export async function saveIncidenciaFirestore(item: Incidencia) {
@@ -3023,21 +3132,41 @@ export async function asignarCandidatoHabitacionFirestore(
  * La autorización/aislamiento real la aplica Firestore rules; aquí se devuelve
  * la lista y el ámbito (scoping) lo decide la UI igual que el resto de módulos.
  */
-export function subscribeFinanciaciones(callback: (financiaciones: Financiacion[]) => void) {
-  return onSnapshot(
-    FINANCIACIONES_COL,
-    (snapshot) => {
-      const items: Financiacion[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as Financiacion);
-      });
-      items.sort((a, b) => (b.fechaFormalizacion || '').localeCompare(a.fechaFormalizacion || ''));
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore financiaciones snapshot error:', err);
+export function subscribeFinanciaciones(
+  callback: (financiaciones: Financiacion[]) => void,
+  scope?: DataAccessScope
+) {
+  const mapear = (snapshot: QuerySnapshot) => {
+    const items: Financiacion[] = [];
+    snapshot.forEach((docSnap) => {
+      items.push({ id: docSnap.id, ...docSnap.data() } as Financiacion);
+    });
+    items.sort((a, b) => (b.fechaFormalizacion || '').localeCompare(a.fechaFormalizacion || ''));
+    callback(items);
+  };
+  const onError = (err: unknown) => {
+    console.error('Firestore financiaciones snapshot error:', err);
+  };
+  // D2 (E4): el list de Rules obliga a where('propietarioId','==', pid).
+  // Profesional: cero acceso (datos hipotecarios). Sin ámbito (master/admin
+  // operativo): colección completa. Otros perfiles con scope: la colección
+  // completa la deniegan las Rules (fail-closed), como en contratos.
+  if (scope?.tipoPerfil === 'PROFESIONAL') {
+    callback([]);
+    return () => {};
+  }
+  if (scope?.tipoPerfil === 'PROPIETARIO') {
+    if (!scope.propietarioId) {
+      callback([]);
+      return () => {};
     }
-  );
+    return onSnapshot(
+      query(FINANCIACIONES_COL, where('propietarioId', '==', scope.propietarioId)),
+      mapear,
+      onError
+    );
+  }
+  return onSnapshot(FINANCIACIONES_COL, mapear, onError);
 }
 
 /**

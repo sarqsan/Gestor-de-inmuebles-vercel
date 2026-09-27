@@ -530,6 +530,29 @@ service cloud.firestore {
           getEnlaceE(enlaceId).usosActuales < getEnlaceE(enlaceId).usosMaximos);
     }
 
+    // ROADMAP-01: persona es identidad de dominio, NO fuente de autorización.
+    // Solo el master accede; el cliente ordinario ni lista ni altera identidad.
+    // No hay borrado: el vínculo histórico con titularidad nunca se purga.
+    match /personas/{personaId} {
+      function personaValida() {
+        return incoming().keys().hasOnly([
+          'id', 'nombre', 'estado', 'estadoDatos', 'roles', 'propietarioIds',
+          'usuarioId', 'createdAt', 'updatedAt'
+        ])
+        && incoming().id == personaId
+        && incoming().nombre is string
+        && incoming().estado in ['ACTIVA', 'BLOQUEADA']
+        && incoming().estadoDatos in ['COMPLETO', 'INCOMPLETO', 'BLOQUEADO']
+        && incoming().roles is list
+        && incoming().propietarioIds is list;
+      }
+      allow get, list: if isMasterAdmin();
+      allow create: if isMasterAdmin() && personaValida();
+      allow update: if isMasterAdmin() && personaValida()
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if false;
+    }
+
     // =========================================================================
     // 0B. PROPIETARIOS — DATOS FISCALES Y CUENTAS BANCARIAS (máxima sensibilidad)
     // =========================================================================
@@ -557,11 +580,13 @@ service cloud.firestore {
       allow create: if isMasterAdmin() || (
         isPropietarioRole()
         && propietarioId == myPropId()
+        && !('personaId' in incoming())
         && 'id' in incoming() && incoming().id == propietarioId
       );
       allow update: if isMasterAdmin() || (
         isPropietarioRole()
         && propietarioId == myPropId()
+        && !incoming().diff(existing()).affectedKeys().hasAny(['personaId'])
         && 'id' in existing() && existing().id == propietarioId
       ) || (
         // INC-06 — el gestor con cartera de ESCRITURA (carterasE: ACTIVA +
@@ -1491,6 +1516,7 @@ service cloud.firestore {
       allow create: if isMasterAdmin() || (
         isSignedIn()
         && incoming().authUid == request.auth.uid
+        && !('personaId' in incoming())
         && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
         && incoming().estado in ['ACTIVO', 'PENDIENTE']
         && (
@@ -1549,6 +1575,7 @@ service cloud.firestore {
         // El usuario no puede cambiar por sí mismo su identidad ni sus permisos.
         && !incoming().diff(existing()).affectedKeys().hasAny([
           'permisos',
+          'personaId',
           'propietarioId',
           'profesionalId',
           'inmuebleIds',

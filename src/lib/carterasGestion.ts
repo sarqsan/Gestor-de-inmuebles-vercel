@@ -55,6 +55,11 @@ export function proyectarCarterasGestionadas(
   const carterasE: string[] = [];
   for (const gestion of gestiones) {
     if (!gestion || !gestion.propietarioId) continue;
+    // El espejo sólo expresa propietarioIds, no inmuebleIds. Proyectar una
+    // delegación PARCIAL como cartera completa abriría todos los inmuebles y
+    // recursos del titular en Firestore/Storage. Hasta ROADMAP-03 (enforcement
+    // por inmueble), una relación limitada no concede acceso operativo.
+    if (!Array.isArray(gestion.inmuebleIds) || gestion.inmuebleIds.length !== 0) continue;
     if (puedeLeer(gestion, gestorUsuarioId) && !carterasL.includes(gestion.propietarioId)) {
       carterasL.push(gestion.propietarioId);
     }

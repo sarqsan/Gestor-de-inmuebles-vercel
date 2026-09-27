@@ -424,6 +424,8 @@ export interface CuentaBancariaPropietario {
 
 export interface Propietario {
   id: string;
+  /** Vínculo opcional con la persona; solo lo establece el master. No autoriza acceso. */
+  personaId?: string;
   nombre: string; // Nombre y apellidos o Razón Social
   nifCif: string; // NIF / CIF / NIE
   tipoPropietario: TipoPropietario;
@@ -1694,6 +1696,8 @@ export type EstadoUsuario = 'ACTIVO' | 'PENDIENTE' | 'BLOQUEADO' | 'INACTIVO';
 
 export interface UsuarioApp {
   id: string;
+  /** Persona del dominio (opcional en legacy); no sustituye authUid ni propietarioId. */
+  personaId?: string;
   uid?: string; // Alias auth
   authUid?: string;
   nombre: string;
@@ -1839,7 +1843,7 @@ export interface AuditLog {
   fechaHora: string;
   // ORDEN 2 (gestiones_cartera, F.7): 'gestion_cartera' cubre la auditoría de las
   // transiciones de gestión (GESTION_*). Aditivo: no altera ningún uso existente.
-  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial' | 'importacion_general' | 'poliza_seguro' | 'documento_expediente' | 'expediente_fiscal' | 'gestion_cartera';
+  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial' | 'importacion_general' | 'poliza_seguro' | 'documento_expediente' | 'expediente_fiscal' | 'gestion_cartera' | 'persona';
   idAfectado: string;
   resultado: 'EXITO' | 'ERROR';
   detalles?: Record<string, any>;

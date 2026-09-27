@@ -120,6 +120,7 @@ export function validarEdicionAdmin(input: ValidarEdicionInput): string | null {
     return 'El tipo de perfil no puede modificarse desde este editor.';
   }
   const escalaresVinculo: (keyof UsuarioApp)[] = [
+    'personaId',
     'propietarioId',
     'profesionalId',
     'enlaceRegistroId',
@@ -215,6 +216,7 @@ const CAMPOS_AUDITABLES: CampoAuditable[] = [
   { key: 'roles', etiqueta: 'roles', tipo: 'array' },
   { key: 'permisos', etiqueta: 'permisos', tipo: 'array' },
   { key: 'inmuebleIds', etiqueta: 'viviendas', tipo: 'array' },
+  { key: 'personaId', etiqueta: 'persona', tipo: 'scalar' },
   { key: 'propietarioId', etiqueta: 'ficha propietario', tipo: 'scalar' },
   { key: 'profesionalId', etiqueta: 'ficha profesional', tipo: 'scalar' },
   { key: 'contratoIds', etiqueta: 'contratos', tipo: 'array' },

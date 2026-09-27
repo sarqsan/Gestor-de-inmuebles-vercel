@@ -6,7 +6,7 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: **2026-09-27 — CADENA BLOQUE 6 INTEGRADA EN `main`
+> **Actualización de esta Arena (2026-09-27): ROADMAP-01 — IDENTIDAD + PERSONAS + ROLES + ACCESO, PARCIAL / PENDIENTE, NO CERRADO.** Base inspeccionada `3778a5a7add700a7e3824452d0a30db0e7eef50f` (`main = origin/main` al inicio); rama `arena/01a0e460-gestor-de-inmuebles-vercel`. Modelo `personas` opt-in master-only, vínculo no autorizante `personaId`, auditoría transaccional reutilizada, proyección de delegaciones parciales fail-closed. Sin migraciones, sin UI nueva, sin despliegue de Rules; dependencias y limitaciones en [ROADMAP-01](ROADMAP-01-IDENTIDAD-PERSONAS-ROLES-ACCESO.md). Las referencias de SHA/ramas a continuación son históricos y NO representan el punto de partida de esta Arena. La numeración de bloques históricos no cambia.\n>\n> Registro histórico anterior — última actualización: **2026-09-27 — CADENA BLOQUE 6 INTEGRADA EN `main`
 > (`64fd0b2`, PR #6) + RECONCILIACIÓN DEL ASSERT E-62 CON EL ÁMBITO D3**
 > (§13, §14): `main = origin/main = 64fd0b2`, merge commit del PR #6 (sin squash
 > ni rebase) que incorpora íntegra la cadena lineal de 9 commits

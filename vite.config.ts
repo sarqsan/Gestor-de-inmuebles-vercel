@@ -30,6 +30,11 @@ export default defineConfig(() => {
         '**/node_modules/**',
         '**/dist/**',
         'src/features/patrimonial/tests/**',
+        // Los tests .mjs de Operaciones (port de C) son `node --test` con tsx-loader
+        // y se ejecutan con:
+        //   node --import tsx --test src/features/operaciones/tests/*.test.mjs
+        // Vitest no debe capturarlos: usan node:test/node:assert directamente.
+        'src/features/operaciones/tests/**',
       ],
     },
   };

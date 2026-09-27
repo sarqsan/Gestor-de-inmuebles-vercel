@@ -1157,12 +1157,23 @@ service cloud.firestore {
     // =========================================================================
     // 2L. PÓLIZAS DE SEGURO Y SINIESTROS (ARENA D)
     // Aislados por propietarioId.
+    // BLOQUE 1: el gestor accede con el mismo alcance que sobre los inmuebles
+    // de la cartera (D2a/D2b/D3): lectura carterasL∪carterasE, escritura SOLO
+    // carterasE y sin cambiar la titularidad (propietarioId inmutable para el
+    // gestor). El borrado sigue reservado a master/titular. Sin bypass global.
     // =========================================================================
     match /polizas_seguros/{polizaId} {
-      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
-      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
-      allow create: if isMasterAdmin() || aisladoCreateOk();
-      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))
+        || inmuebleEnCarteraGestionada(existing());
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || inmuebleEnCarteraGestionada(resource.data);
+      allow create: if isMasterAdmin() || aisladoCreateOk()
+        || (activeUser() && 'propietarioId' in incoming()
+            && carterasEscritura().hasAny([incoming().propietarioId]));
+      allow update: if isMasterAdmin() || aisladoUpdateOk()
+        || (inmuebleEnCarteraEscritura(existing())
+            && 'propietarioId' in incoming()
+            && incoming().propietarioId == existing().propietarioId);
       allow delete: if isMasterAdmin() || (
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
@@ -1170,10 +1181,17 @@ service cloud.firestore {
     }
 
     match /siniestros/{siniestroId} {
-      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()));
-      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data));
-      allow create: if isMasterAdmin() || aisladoCreateOk();
-      allow update: if isMasterAdmin() || aisladoUpdateOk();
+      allow get: if isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))
+        || inmuebleEnCarteraGestionada(existing());
+      allow list: if isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))
+        || inmuebleEnCarteraGestionada(resource.data);
+      allow create: if isMasterAdmin() || aisladoCreateOk()
+        || (activeUser() && 'propietarioId' in incoming()
+            && carterasEscritura().hasAny([incoming().propietarioId]));
+      allow update: if isMasterAdmin() || aisladoUpdateOk()
+        || (inmuebleEnCarteraEscritura(existing())
+            && 'propietarioId' in incoming()
+            && incoming().propietarioId == existing().propietarioId);
       allow delete: if isMasterAdmin() || (
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
@@ -2354,6 +2372,296 @@ service cloud.firestore {
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
       );
     }
+
+    // ============================================================
+    // BLOQUE OPERACIONES — port funcional de C (Gestor-alquileres-vercel @ 1686b8e8).
+    // Helpers canónicos (me/isMasterAdmin/isSignedIn/authEmail) y match /audit_logs:
+    // se reutilizan los de este archivo canónico; no se redefinen ni se duplican.
+    // ============================================================
+    // Mismo contrato B, evaluado sobre un único espejo ya obtenido por el llamador.
+    function opAcceso(p, c, escritura) {
+      let l = c.get('carterasL', []);
+      let e = c.get('carterasE', []);
+      return l is list && e is list && l.hasAll(e) && c.get('estado', '') == 'ACTIVO'
+        && ((c.get('tipoPerfil', '') == 'PROPIETARIO' && p is string && p.size() > 0 && c.get('propietarioId', '') == p)
+          || p in (escritura ? e : l));
+    }
+    function opLectura(p) {
+      return isMasterAdmin() || (isSignedIn() && opAcceso(p,me(),false));
+    }
+    function opEscritura(p) {
+      return isMasterAdmin() || (isSignedIn() && opAcceso(p,me(),true));
+    }
+    function opActual(p, i) {
+      let inmueble = get(/databases/$(database)/documents/inmuebles/$(i)).data;
+      return inmueble.get('propietarioId', '') == p || inmueble.get('propietarioPrincipalId', '') == p
+        || inmueble.get('propietarioSecundarioId', '') == p;
+    }
+    function opEntidad(p, tipo, id) {
+      let key = tipo + '~' + id;
+      return /databases/$(database)/documents/operaciones/$(p)/entidades/$(key);
+    }
+    // Validadores de referencias puros: no hacen get/exists ni confían en el tipo almacenado.
+    function opRef(p, tipo, registro, i) {
+      return registro != null && (tipo == 'proveedor' ? registro.propietarioId == p
+        : registro.ambito == {'propietarioId': p, 'inmuebleId': i});
+    }
+    function opRefOpcional(p, e, campo, tipo, i, registro) {
+      return !(campo in e) || opRef(p, tipo, registro, i);
+    }
+    function opVinculo(p, v, i, r) {
+      return opRef(p,'incidencia',r.incidencia,i)
+        && (!('averiaId' in v) || (opRef(p,'averia',r.averia,i) && r.averia.incidenciaId == v.incidenciaId))
+        && (!('reparacionId' in v) || (opRef(p,'reparacion',r.reparacion,i) && r.reparacion.incidenciaId == v.incidenciaId
+          && (!('averiaId' in v) || r.reparacion.get('averiaId','') == v.averiaId)));
+    }
+    function opRelaciones(p, e, i, r) {
+      return opRefOpcional(p,e,'proveedorId','proveedor',i,r.proveedor) && opRefOpcional(p,e,'equipoId','equipo',i,r.equipo)
+        && opRefOpcional(p,e,'garantiaId','garantia',i,r.garantia)
+        && (!('incidenciaId' in e) || opRef(p,'incidencia',r.incidencia,i))
+        && (!('averiaId' in e) || (opRef(p,'averia',r.averia,i) && r.averia.incidenciaId == e.incidenciaId))
+        && (!('vinculo' in e) || e.vinculo == null || opVinculo(p,e.vinculo,i,r))
+        && (!('garantiaId' in e) || r.garantia.equipoId == e.get('equipoId',''))
+        && (!('contratoId' in e) || (r.contrato.inmuebleId == i
+          && (!('inquilinoId' in e) || r.contrato.candidatoId == e.inquilinoId)))
+        && (!('inquilinoId' in e) || r.inquilino.inmuebleId == i);
+    }
+    // Una lectura ANTERIOR por referencia presente. No se acepta un contexto enviado por cliente.
+    // ANOTAR no lee referencias; VINCULAR_DOCUMENTO solo lee el documento nuevo.
+    function opReferencias(p, e, cmd) {
+      let negocio = !(cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO']);
+      let v = ('incidenciaId' in e || 'averiaId' in e) ? e : e.get('vinculo',null);
+      return {
+        'proveedor': negocio && 'proveedorId' in e ? get(opEntidad(p,'proveedor',e.proveedorId)).data.registro : null,
+        'equipo': negocio && 'equipoId' in e ? get(opEntidad(p,'equipo',e.equipoId)).data.registro : null,
+        'garantia': negocio && 'garantiaId' in e ? get(opEntidad(p,'garantia',e.garantiaId)).data.registro : null,
+        'incidencia': negocio && v != null && 'incidenciaId' in v ? get(opEntidad(p,'incidencia',v.incidenciaId)).data.registro : null,
+        'averia': negocio && v != null && 'averiaId' in v ? get(opEntidad(p,'averia',v.averiaId)).data.registro : null,
+        'reparacion': negocio && v != null && 'reparacionId' in v ? get(opEntidad(p,'reparacion',v.reparacionId)).data.registro : null,
+        'contrato': negocio && 'contratoId' in e ? get(/databases/$(database)/documents/contratos_formalizacion/$(e.contratoId)).data : null,
+        'inquilino': negocio && 'inquilinoId' in e ? get(/databases/$(database)/documents/candidatos/$(e.inquilinoId)).data : null,
+        'documento': cmd.accion == 'VINCULAR_DOCUMENTO' ? get(opEntidad(p,'documento',cmd.documentoId)).data.registro : null
+      };
+    }
+    function opCampos(tipo) {
+      return tipo == 'incidencia' ? ['fecha', 'descripcion', 'prioridad', 'origen', 'alcance', 'contratoId', 'inquilinoId', 'responsable', 'proveedorId', 'equipoId']
+        : tipo == 'averia' ? ['incidenciaId', 'equipoId', 'descripcion', 'sintomas', 'fecha', 'proveedorId', 'garantiaId']
+        : tipo == 'reparacion' ? ['incidenciaId', 'averiaId', 'equipoId', 'descripcion', 'proveedorId', 'presupuestoId', 'fechaPrevista', 'fechaInicio', 'fechaFin', 'costeCentimos', 'moneda', 'materiales', 'resultado']
+        : tipo == 'proveedor' ? ['nombre', 'servicios', 'contacto', 'referenciaExterna', 'activo']
+        : tipo == 'equipo' ? ['tipoEquipo', 'marca', 'modelo', 'numeroSerie', 'fechaAdquisicion', 'fechaInstalacion', 'instalacion']
+        : tipo == 'garantia' ? ['equipoId', 'inicio', 'vencimiento', 'proveedorId', 'fabricante', 'condiciones', 'referenciaCompra']
+        : tipo == 'presupuesto' ? ['vinculo', 'proveedorId', 'fecha', 'referencia', 'moneda', 'importeCentimos', 'conceptos']
+        : tipo == 'factura' ? ['proveedorId', 'fecha', 'referencia', 'moneda', 'importeCentimos', 'conceptos', 'origen', 'vinculo', 'presupuestoId']
+        : tipo == 'documento' ? ['archivo', 'categoria', 'descripcion', 'referenciaExterna']
+        : [];
+    }
+    function opTexto(v) { return v is string && v.size() > 0; }
+    function opDinero(v) { return v is int && v >= 0 && v <= 9007199254740991; }
+    // Diez conceptos por registro de transporte: límite explícito, nunca truncar el original.
+    function opConcepto(c, i) {
+      return i >= c.size() || (c[i].keys().hasOnly(['descripcion','importeCentimos'])
+        && opTexto(c[i].descripcion) && opDinero(c[i].importeCentimos));
+    }
+    function opImporte(c, i) { return i < c.size() ? c[i].importeCentimos : 0; }
+    function opConceptos(e) {
+      let c = e.conceptos;
+      return c is list && c.size() > 0 && c.size() <= 10
+        && opConcepto(c,0) && opConcepto(c,1) && opConcepto(c,2) && opConcepto(c,3) && opConcepto(c,4) && opConcepto(c,5) && opConcepto(c,6) && opConcepto(c,7) && opConcepto(c,8) && opConcepto(c,9)
+        && e.importeCentimos == opImporte(c,0) + opImporte(c,1) + opImporte(c,2) + opImporte(c,3) + opImporte(c,4) + opImporte(c,5) + opImporte(c,6) + opImporte(c,7) + opImporte(c,8) + opImporte(c,9);
+    }
+    function opEsquema(e, campos) {
+      return e.keys().hasOnly(campos.concat(['id','tipo','version','creadoEn','actualizadoEn'])
+          .concat(e.tipo == 'proveedor' ? ['propietarioId'] : ['ambito','documentoIds'])
+          .concat(e.tipo in ['proveedor','garantia','documento'] ? [] : ['estado']))
+        && (e.tipo == 'proveedor' ? opTexto(e.nombre) && e.activo is bool && e.servicios is list && e.contacto is map : e.documentoIds is list)
+        && (e.tipo != 'incidencia' || (opTexto(e.descripcion) && opTexto(e.fecha) && opTexto(e.origen) && e.prioridad in ['BAJA','MEDIA','ALTA','URGENTE'] && e.alcance in ['INMUEBLE','ZONAS_COMUNES','MANTENIMIENTO_GENERAL']))
+        && (e.tipo != 'averia' || (opTexto(e.descripcion) && opTexto(e.fecha) && e.sintomas is list))
+        && (e.tipo != 'reparacion' || (opTexto(e.descripcion) && opTexto(e.proveedorId) && e.moneda == 'EUR' && e.materiales is list && (!('costeCentimos' in e) || opDinero(e.costeCentimos))))
+        && (e.tipo != 'equipo' || opTexto(e.tipoEquipo))
+        && (e.tipo != 'garantia' || opTexto(e.equipoId))
+        && (!(e.tipo in ['presupuesto','factura']) || (opTexto(e.fecha) && opTexto(e.referencia) && opDinero(e.importeCentimos) && opConceptos(e)))
+        && (e.tipo != 'factura' || opTexto(e.origen))
+        && (e.tipo != 'documento' || (opTexto(e.descripcion) && e.categoria in ['FOTO','PRESUPUESTO','FACTURA','GARANTIA','PARTE','COMUNICACION','OTRO']
+          && e.archivo.keys().hasOnly(['id','nombreArchivo','mimeType','fechaSubida','storagePath','tamañoBytes'])
+          && opTexto(e.archivo.id) && opTexto(e.archivo.nombreArchivo) && opTexto(e.archivo.mimeType) && opTexto(e.archivo.fechaSubida)
+          && (!('referenciaExterna' in e) || (e.referenciaExterna.keys().hasOnly(['sistemaExterno','referenciaExterna']) && opTexto(e.referenciaExterna.sistemaExterno) && opTexto(e.referenciaExterna.referenciaExterna)))));
+    }
+    function opComando(e, b, cmd, campos, cambios) {
+      return (cmd.accion != 'CREAR' || (cmd.datos.keys().hasOnly(campos)
+          && e.diff(cmd.datos).affectedKeys().hasOnly(['id','tipo','version','creadoEn','actualizadoEn','ambito','propietarioId','documentoIds','estado'])))
+        && (cmd.accion != 'MODIFICAR' || (cmd.cambios.keys().size() > 0 && cmd.cambios.keys().hasOnly(campos)
+          && e.diff(cmd.cambios).changedKeys().size() == 0 && cmd.cambios.keys().hasOnly(e.keys())
+          && cambios.hasOnly(cmd.cambios.keys().concat(['version','actualizadoEn']))))
+        && (cmd.accion != 'ANOTAR' || (opTexto(cmd.texto) && cmd.clase in ['DIAGNOSTICO','ACTUACION','COMUNICACION','NOTA']))
+        && (cmd.accion != 'ASOCIAR_FACTURA' || e.get('presupuestoId',null) == cmd.get('presupuestoId',b.get('presupuestoId',null)));
+    }
+    function opEconomia(p,e,r) {
+      return (!(e.tipo in ['presupuesto','factura']) || (e.moneda == 'EUR' && e.importeCentimos is int && e.importeCentimos >= 0 && e.conceptos is list && e.conceptos.size()>0
+        && 'proveedorId' in e
+        && (e.vinculo == null ? e.tipo == 'factura' : !('reparacionId' in e.vinculo) || r.reparacion.proveedorId == e.proveedorId)))
+        && (!(e.tipo in ['averia','reparacion'] && 'equipoId' in e) || r.incidencia.get('equipoId',e.equipoId) == e.equipoId)
+        && (!(e.tipo == 'reparacion' && 'averiaId' in e) || r.averia.get('equipoId',e.get('equipoId','')) == e.get('equipoId',''));
+    }
+    function opInicial(e) {
+      return e.tipo in ['proveedor','garantia','documento'] ? !('estado' in e) : e.estado == {'incidencia':'ABIERTA','averia':'PENDIENTE','reparacion':'PLANIFICADA','equipo':'OPERATIVO','presupuesto':'PENDIENTE','factura':'REGISTRADA'}[e.tipo];
+    }
+    function opDestinos(tipo, estado) {
+      return tipo == 'incidencia' ? {'ABIERTA': ['EN_REVISION', 'CANCELADA'], 'EN_REVISION': ['PRESUPUESTO', 'AUTORIZADA', 'RESUELTA', 'CANCELADA'], 'PRESUPUESTO': ['AUTORIZADA', 'EN_REVISION', 'CANCELADA'], 'AUTORIZADA': ['EN_REPARACION', 'RESUELTA', 'CANCELADA'], 'EN_REPARACION': ['RESUELTA', 'EN_REVISION'], 'RESUELTA': ['CERRADA', 'EN_REVISION'], 'CERRADA': ['EN_REVISION'], 'CANCELADA': []}[estado]
+        : tipo == 'averia' ? {'PENDIENTE': ['EN_DIAGNOSTICO', 'CANCELADA'], 'EN_DIAGNOSTICO': ['EN_REPARACION', 'RESUELTA', 'CANCELADA'], 'EN_REPARACION': ['RESUELTA', 'EN_DIAGNOSTICO'], 'RESUELTA': ['EN_DIAGNOSTICO'], 'CANCELADA': []}[estado]
+        : tipo == 'reparacion' ? {'PLANIFICADA': ['EN_CURSO', 'CANCELADA'], 'EN_CURSO': ['FINALIZADA', 'CANCELADA'], 'FINALIZADA': [], 'CANCELADA': []}[estado]
+        : tipo == 'equipo' ? {'OPERATIVO': ['AVERIADO', 'EN_REPARACION', 'RETIRADO'], 'AVERIADO': ['EN_REPARACION', 'OPERATIVO', 'RETIRADO'], 'EN_REPARACION': ['OPERATIVO', 'AVERIADO', 'RETIRADO'], 'RETIRADO': []}[estado]
+        : tipo == 'presupuesto' ? {'PENDIENTE': ['APROBADO', 'RECHAZADO', 'CANCELADO'], 'APROBADO': ['CANCELADO'], 'RECHAZADO': [], 'CANCELADO': []}[estado]
+        : tipo == 'factura' ? {'REGISTRADA': ['ANULADA'], 'ANULADA': []}[estado]
+        : [];
+    }
+    function opAbierta(e) {
+      return e != null && ((e.tipo == 'averia' && !(e.estado in ['RESUELTA','CANCELADA'])) || (e.tipo == 'reparacion' && !(e.estado in ['FINALIZADA','CANCELADA']))) ? 1 : 0;
+    }
+    function opUso(e) { return e != null && e.tipo == 'reparacion' && e.estado in ['EN_CURSO','FINALIZADA'] ? 1 : 0; }
+    function opContador(antes, despues, clave, delta) {
+      return clave == '' ? despues == antes : despues.diff(antes).affectedKeys().hasOnly([clave])
+        && despues.get(clave,0) == antes.get(clave,0) + delta && despues.get(clave,0) >= 0;
+    }
+    function opContadores(a, n, v) {
+      let e = v.despues;
+      let b = v.antes;
+      let delta = opAbierta(e)-opAbierta(b);
+      return opContador(a.get('abiertasPorIncidencia',{}),n.abiertasPorIncidencia,e.get('incidenciaId',''),delta)
+        && opContador(a.get('abiertasPorAveria',{}),n.abiertasPorAveria,e.tipo == 'reparacion' ? e.get('averiaId','') : '',delta)
+        && opContador(a.get('presupuestosEnUso',{}),n.presupuestosEnUso,e.tipo == 'reparacion' ? e.get('presupuestoId','') : '',opUso(e)-opUso(b));
+    }
+    function opInvariantes(p, e, h, r) {
+      return (!(e.tipo == 'incidencia' && e.estado in ['RESUELTA','CERRADA','CANCELADA']) || h.abiertasPorIncidencia.get(e.id,0) == 0)
+        && (!(e.tipo == 'averia' && e.estado in ['RESUELTA','CANCELADA']) || h.abiertasPorAveria.get(e.id,0) == 0)
+        && (!(e.tipo == 'presupuesto' && e.estado == 'CANCELADO') || h.presupuestosEnUso.get(e.id,0) == 0)
+        && (!(e.tipo in ['averia','reparacion'] && opAbierta(e) == 1) || !(r.incidencia.estado in ['CERRADA','CANCELADA']))
+        && (!(e.tipo == 'reparacion' && e.estado == 'FINALIZADA') || (e.fechaInicio is string && e.fechaFin is string && e.fechaFin >= e.fechaInicio && e.resultado is string && e.resultado.size()>0 && e.costeCentimos is int && e.costeCentimos >= 0));
+    }
+    function opCambio(p, e, b, cmd, i, cambios, r) {
+      return b == null ? cmd.accion == 'CREAR' && e.version == 1 && opInicial(e) && e.get('documentoIds',[]) == []
+        : cmd.accion != 'CREAR' && e.id == b.id && e.tipo == b.tipo && e.creadoEn == b.creadoEn && e.version == b.version + 1
+        && e.get('ambito',null) == b.get('ambito',null) && e.get('propietarioId',null) == b.get('propietarioId',null)
+        && e.get('incidenciaId',null) == b.get('incidenciaId',null) && e.get('averiaId',null) == b.get('averiaId',null)
+        && e.get('equipoId',null) == b.get('equipoId',null) && e.get('contratoId',null) == b.get('contratoId',null) && e.get('inquilinoId',null) == b.get('inquilinoId',null)
+        && (cmd.accion == 'CAMBIAR_ESTADO' ? e.estado == cmd.estado && e.estado in opDestinos(e.tipo,b.estado) : e.get('estado',null) == b.get('estado',null))
+        && (cmd.accion == 'VINCULAR_DOCUMENTO' ? !(e.tipo in ['proveedor','documento']) && opRef(p,'documento',r.documento,i) && e.documentoIds == b.documentoIds.concat([cmd.documentoId]) && !(cmd.documentoId in b.documentoIds)
+          : e.get('documentoIds',[]) == b.get('documentoIds',[]))
+        && (cmd.accion == 'ASOCIAR_FACTURA' ? e.tipo == 'factura' && e.estado != 'ANULADA' && e.vinculo == cmd.vinculo : e.get('vinculo',null) == b.get('vinculo',null))
+        && (cmd.accion != 'CAMBIAR_ESTADO' || cambios.hasOnly(['version','actualizadoEn','estado']))
+        && (cmd.accion != 'VINCULAR_DOCUMENTO' || cambios.hasOnly(['version','actualizadoEn','documentoIds']))
+        && (cmd.accion != 'ASOCIAR_FACTURA' || cambios.hasOnly(['version','actualizadoEn','vinculo','presupuestoId']))
+        && (!(e.tipo == 'reparacion' && b.estado != 'PLANIFICADA') || (e.proveedorId == b.proveedorId && e.get('presupuestoId','') == b.get('presupuestoId','')))
+        && (!(e.tipo == 'reparacion' && cmd.accion == 'CAMBIAR_ESTADO' && e.estado == 'EN_CURSO') || (r.proveedor.activo == true && e.fechaInicio is string
+          && (!('averiaId' in e) || !(r.averia.estado in ['RESUELTA','CANCELADA']))))
+        && (cmd.accion != 'ANOTAR' || cambios.hasOnly(['version','actualizadoEn']))
+        && (cmd.accion != 'MODIFICAR' || (!(e.tipo in ['documento','factura']) && !(e.tipo=='presupuesto' && b.estado!='PENDIENTE') && !(e.tipo=='reparacion' && b.estado in ['FINALIZADA','CANCELADA'])))
+        && (e.tipo != 'documento' || e.archivo == b.archivo)
+        && (e.tipo != 'factura' || cambios.hasOnly(['version','actualizadoEn','estado','documentoIds','vinculo','presupuestoId']));
+    }
+    // Acoplamiento bidireccional: un incremento observable obliga a escribir el otro
+    // documento en este commit. Su allow se evalúa entonces; getAfter solo no bastaría.
+    // La cabecera valida CAS/contadores; la entidad valida UNA vez el evento completo.
+    function opCabeceraValida(p, a, n) {
+      return n.keys().hasOnly(['propietarioId','revision','ultimoEventoId','abiertasPorIncidencia','abiertasPorAveria','presupuestosEnUso'])
+        && n.propietarioId == p && n.revision is int
+        && n.revision == (a == null ? 0 : a.revision) + 1
+        && opCabeceraEnlazada(p,a,n);
+    }
+    function opCabeceraEnlazada(p, a, n) {
+      let audit = getAfter(/databases/$(database)/documents/audit_logs/$(n.ultimoEventoId)).data;
+      let path = opEntidad(p,audit.detalles.tipo,audit.detalles.entidadId);
+      let vieja = exists(path) ? get(path).data : null;
+      let fila = getAfter(path).data;
+      return fila.auditId == n.ultimoEventoId && fila.registro.version is int
+        && fila.registro.version == (vieja == null ? 0 : vieja.registro.version) + 1
+        && opContadores(a == null ? {} : a,n,{'antes':vieja == null ? null : vieja.registro,'despues':fila.registro})
+        && (audit.accion in ['OPERACIONES_ANOTAR','OPERACIONES_VINCULAR_DOCUMENTO'] || !('presupuestoId' in fila.registro)
+          || opPresupuestoEnlazado(p,fila.registro,audit.detalles.inmuebleId));
+    }
+    // El testigo de versión obliga a validar esta MISMA entidad en el commit.
+    // La cabecera asume la referencia presupuesto: no se relee desde la entidad.
+    function opPresupuestoEnlazado(p, e, i) {
+      let q = get(opEntidad(p,'presupuesto',e.presupuestoId)).data.registro;
+      return opPresupuesto(p,e,i,q);
+    }
+    function opPresupuesto(p, e, i, q) {
+      return e.tipo in ['reparacion','factura'] && opRef(p,'presupuesto',q,i)
+        && q.proveedorId == e.proveedorId
+        && (e.tipo == 'factura' ? (e.vinculo != null && q.vinculo.incidenciaId == e.vinculo.incidenciaId
+          && q.vinculo.get('averiaId',e.vinculo.get('averiaId','')) == e.vinculo.get('averiaId','')
+          && q.vinculo.get('reparacionId',e.vinculo.get('reparacionId','')) == e.vinculo.get('reparacionId',''))
+          : (q.vinculo.incidenciaId == e.incidenciaId
+            && q.vinculo.get('averiaId',e.get('averiaId','')) == e.get('averiaId','')
+            && q.vinculo.get('reparacionId',e.id) == e.id))
+        && (e.tipo != 'reparacion' || !(e.estado in ['EN_CURSO','FINALIZADA']) || q.estado == 'APROBADO');
+    }
+    function opFilaAutorizada(p, key, fila, vieja) {
+      let c = me();
+      return (isMasterAdmin() || opAcceso(p,c,true))
+        && fila.keys().hasOnly(['registro','auditId','versiones']) && key == fila.registro.tipo + '~' + fila.registro.id
+        && opFilaValida(p,fila,vieja,c.usuarioId);
+    }
+    function opFilaValida(p, fila, vieja, usuarioId) {
+      let path = /databases/$(database)/documents/operaciones/$(p);
+      let anterior = exists(path) ? get(path).data : null;
+      let h = getAfter(path).data;
+      let auditPath = /databases/$(database)/documents/audit_logs/$(fila.auditId);
+      return h.revision is int && h.revision == (anterior == null ? 0 : anterior.revision) + 1
+        // El audit debe nacer en el mismo commit, no reutilizar uno autenticado previo.
+        && !exists(auditPath)
+        && opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,vieja,usuarioId);
+    }
+    function opEventoValido(p, id, data, h, fila, vieja, usuarioId) {
+      let e = fila.registro;
+      let version = fila.versiones[fila.versiones.size()-1];
+      let cmd = version.comando;
+      let antes = vieja == null ? null : vieja.registro;
+      let d = data.detalles;
+      let campos = opCampos(e.tipo);
+      let cambios = antes == null ? null : e.diff(antes).affectedKeys();
+      return data.keys().hasOnly(['id','usuarioId','usuarioEmail','usuarioNombre','accion','descripcion','fechaHora','entidadAfectada','idAfectado','resultado','detalles','registradoEn'])
+        && e.tipo in ['incidencia','averia','reparacion','proveedor','equipo','garantia','presupuesto','factura','documento'] && e.version is int
+        && cmd.accion in ['CREAR','MODIFICAR','CAMBIAR_ESTADO','ANOTAR','VINCULAR_DOCUMENTO','ASOCIAR_FACTURA']
+        && data.id == id && data.usuarioId == usuarioId && data.usuarioEmail == authEmail() && data.usuarioNombre is string
+        && data.entidadAfectada == 'inmueble' && data.idAfectado == version.ambito.inmuebleId && data.resultado == 'EXITO'
+        && d == {'modulo':'OPERACIONES','propietarioId':p,'inmuebleId':version.ambito.inmuebleId,'operacionId':cmd.operacionId,'revision':h.revision,'actorUid':request.auth.uid,'tipo':e.tipo,'entidadId':e.id,'version':e.version}
+        && cmd.actor == request.auth.uid && data.registradoEn == request.time
+        && data.fechaHora == cmd.fecha && data.descripcion == cmd.motivo && cmd.motivo is string && cmd.motivo.size()>0
+        && data.accion == 'OPERACIONES_' + cmd.accion && cmd.tipo == e.tipo && cmd.id == e.id
+        && cmd.operacionId.matches('^[^/~]{1,128}$') && p.matches('^[^/~]{1,128}$') && e.id.matches('^[^/~]{1,128}$')
+        && id == 'operaciones~' + p + '~' + cmd.operacionId
+        && h.ultimoEventoId == id && cmd.revisionEsperada == h.revision - 1
+        && fila.auditId == id && version.registro == e && version.ambito == {'propietarioId':p,'inmuebleId':data.idAfectado}
+        && version.keys().hasOnly(['ambito','comando','registro'])
+        && fila.versiones == (vieja == null ? [] : vieja.versiones).concat([version])
+        && e.actualizadoEn == cmd.fecha && (antes != null || e.creadoEn == cmd.fecha)
+        && (e.tipo == 'proveedor' ? e.propietarioId == p : e.ambito == version.ambito)
+        && opActual(p,data.idAfectado)
+        && opEsquema(e,campos) && opComando(e,antes,cmd,campos,cambios)
+        && opDominio(p,e,antes,cmd,data.idAfectado,cambios,h);
+    }
+    // Solo después de autorización, envelope, esquema y comando: cargar una vez, validar sin I/O.
+    function opDominio(p, e, antes, cmd, i, cambios, h) {
+      let r = opReferencias(p,e,cmd);
+      return (cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'] || opRelaciones(p,e,i,r))
+        && opCambio(p,e,antes,cmd,i,cambios,r)
+        && (cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'] || (opInvariantes(p,e,h,r) && opEconomia(p,e,r)));
+    }
+    // El match /audit_logs canónico de este archivo ya codifica el contrato B literal:
+    // create autenticado, read solo master, update/delete false (append-only).
+    match /operaciones/{propietarioId} {
+      allow read: if opLectura(propietarioId);
+      allow create, update: if opEscritura(propietarioId)
+        && opCabeceraValida(propietarioId,resource == null ? null : resource.data,incoming());
+      allow delete: if false;
+      match /entidades/{entidadKey} {
+        allow read: if opLectura(propietarioId);
+        allow create, update: if isSignedIn()
+          && opFilaAutorizada(propietarioId,entidadKey,incoming(),resource == null ? null : resource.data);
+        allow delete: if false;
+      }
+    }
+    // FIN BLOQUE OPERACIONES
 
     // =========================================================================
     // 44. SINDICACIÓN — ESTADO POR (INMUEBLE, PORTAL) — GAP 5 fase 2.

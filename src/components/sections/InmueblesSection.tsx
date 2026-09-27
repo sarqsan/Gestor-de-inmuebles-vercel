@@ -20,6 +20,7 @@ import { ReformasInmueblePanel } from '../reformas/ReformasInmueblePanel';
 import { FichaTecnicaInventarioPanel } from '../FichaTecnicaInventarioPanel';
 import { HabitacionesInmueblePanel } from '../HabitacionesInmueblePanel';
 import { PublicacionInmueblesPanel } from '../PublicacionInmueblesPanel';
+import { CentroOperativoInmueblePanel } from '../inmueble/CentroOperativoInmueblePanel';
 import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
@@ -108,6 +109,12 @@ interface InmueblesSectionProps {
   onDeleteSlotsBatch?: (slotIds: string[]) => void;
   onUpdateSlot?: (slot: VisitSlot) => void;
   onNavigateToPropietarios?: () => void;
+  /**
+   * BLOQUE 1 — navegación contextual desde el centro operativo del inmueble
+   * a secciones globales (pólizas, cobros, incidencias, gastos). Enlaza los
+   * módulos existentes; no los duplica.
+   */
+  onAbrirSeccionGlobal?: (seccion: string, inmuebleId?: string) => void;
   onOpenFormalizarModal?: (candidato: Candidato, inmueble?: Inmueble, existingContrato?: ContratoFormalizacion) => void;
   onFinalizarContrato?: (contratoId: string) => Promise<void>;
   onSaveContrato?: (contrato: ContratoFormalizacion) => Promise<void> | void;
@@ -141,6 +148,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   onDeleteSlotsBatch,
   onUpdateSlot,
   onNavigateToPropietarios,
+  onAbrirSeccionGlobal,
   onOpenFormalizarModal,
   onFinalizarContrato,
   onSaveContrato,
@@ -1509,6 +1517,17 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             )
           )}
         </div>
+
+        {/* BLOQUE 1: CENTRO OPERATIVO DEL INMUEBLE (resumen + seguros + averías + histórico) */}
+        {selectedInmueble && (
+          <CentroOperativoInmueblePanel
+            inmueble={selectedInmueble}
+            cobros={propertyCobros}
+            contratos={contratos}
+            currentUser={currentUser}
+            onAbrirSeccionGlobal={onAbrirSeccionGlobal}
+          />
+        )}
 
         {/* GESTIÓN DE COBROS DE ALQUILER (INMUEBLE → CONTRATO → INQUILINO) */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">

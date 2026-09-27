@@ -326,9 +326,16 @@ function movimientosCsv(movs: MovimientoExpediente[]): string {
   return [cab, ...filas].join('\n');
 }
 
+/**
+ * BLOQUE 3 — `entradasComplementarias` permite añadir material complementario
+ * determinista (p. ej. `indice-documental.json` del expediente documental por
+ * inmueble) SIN alterar el contenido canónico del exportId B6: cada entrada
+ * complementaria se registra con su propio hash en `manifest.hashes`.
+ */
 export async function empaquetarExpediente(
   expediente: ExpedienteFiscal,
-  resolverBinarios?: ResolverBinarios
+  resolverBinarios?: ResolverBinarios,
+  entradasComplementarias?: EntradaZip[]
 ): Promise<ResultadoEmpaquetado> {
   const docs = [...expediente.documentos];
   const binarios = new Map<string, Uint8Array>();
@@ -364,6 +371,7 @@ export async function empaquetarExpediente(
   // Hashes por entrada ANTES de fijar el manifest (el manifest se excluye a sí mismo).
   const hashes: Record<string, string> = {};
   for (const e of entradasTexto) hashes[e.ruta] = await sha256Hex(e.contenido);
+  for (const e of entradasComplementarias || []) hashes[e.ruta] = await sha256Hex(e.contenido);
   for (const [id, bin] of binarios) {
     const d = docs.find((x) => x.documentoId === id)!;
     hashes[d.rutaLogica] = await sha256Hex(bin);
@@ -374,6 +382,7 @@ export async function empaquetarExpediente(
   const entradas: EntradaZip[] = [
     { ruta: 'manifest.json', contenido: manifestBytes },
     ...entradasTexto,
+    ...(entradasComplementarias || []),
     ...docs.filter((d) => binarios.has(d.documentoId)).map((d) => ({ ruta: d.rutaLogica, contenido: binarios.get(d.documentoId)! })),
   ];
 

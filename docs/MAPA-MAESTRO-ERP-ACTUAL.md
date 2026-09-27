@@ -6,7 +6,19 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: 2026-09-23 — **cierre definitivo de GAP 5 (SINDICACIÓN)** integrado
+> Última actualización: **2026-09-26 — §16 RECUPERACIÓN FUNCIONAL HISTÓRICA Y
+> CAPACIDADES ESTRATÉGICAS** (registro documental, sin cambios de código):
+> auditoría funcional histórica declarada trabajo pendiente ·
+> `IA_CARTERA_TRANSVERSAL` · `INCIDENCIA_IA_END_TO_END` ·
+> `ESCANER_FACTURAS_IA` · `FICHA_ECONOMICA_INMUEBLE`.
+> Anterior: 2026-09-26 — RECONCILIACIÓN GLOBAL CERRADA Y `main`
+> PUBLICADA: `main = origin/main = 37341c6` (cadena lineal `5f7754b → … →
+> 8a2fb20 → 37341c6`: FASE 2–7, D1R, integración del modelo propietario/gestor,
+> D2, D2a, D2b/D3, integración de Arena C e INC-06). Estado consolidado: **§13**.
+> Nuevo roadmap por bloques grandes (0–6) con trabajo paralelo Arena B/Arena C:
+> **§14**; reglas de coordinación B+C: **§15**. BLOQUE F pasa a
+> `IMPLEMENTADO (D2/D2a/D2b/D3) + BASE PATRIMONIAL C + INC-06` (ver §4 F.10).
+> Anterior: 2026-09-23 — **cierre definitivo de GAP 5 (SINDICACIÓN)** integrado
 > en la canónica A desde el snapshot preservado de C (`14dac26`): §2.1 y §3 pasan a
 > `CERRADO ✅`; reglas `sindicacion_inmuebles` como **§44**; verificación real en A: 164/164
 > GAP 5, 27/27 identidad, suite **1286/1286 (52 ficheros)**, 82/82 mutaciones, `tsc` 0, build
@@ -17,8 +29,8 @@
 > (Portal del Inquilino consolidado como **BLOQUE E** con dependencias B/C/D y
 > **Capa Transversal de Experiencia, Ayuda, Tutoriales e IA Asistente**, sin
 > numeración GAP). 1.ª actualización: paquete de continuidad.
-> Rama `arena/01a0bfbe-gestor-de-inmuebles-vercel`, sobre el consolidado
-> canónico `91da820`.
+> Rama de sesión: `arena/01a0d97d-gestor-de-inmuebles-vercel`; `main` publicada
+> en `37341c6` (ver §13).
 
 ---
 
@@ -27,9 +39,9 @@
 | Campo | Valor |
 |---|---|
 | Repositorio canónico | `github.com/sarqsan/Gestor-de-inmuebles-vercel` |
-| Rama canónica | `arena/01a0a413-gestor-de-inmuebles-vercel` @ `91da820` (GAP 1–8 consolidados) |
-| Rama de sesión actual | `arena/01a0bfbe-gestor-de-inmuebles-vercel` — merge `d24ab1f` (árbol **byte-idéntico** a `91da820`) + este paquete de continuidad |
-| `main` | `4d420bd` — línea paralela (mantenimiento/candidatos/seguros por AI Studio). **No es la base del ERP**; su aportado sigue preservado (ver §9) |
+| Rama canónica histórica | `arena/01a0a413-gestor-de-inmuebles-vercel` @ `91da820` (GAP 1–8 consolidados; absorbida en la línea que culmina en `5f7754b`) |
+| Rama de sesión actual | `arena/01a0d97d-gestor-de-inmuebles-vercel` — cadena D1R/D2/D2a/D2b/D3 + integración Arena C (`8a2fb20`) + INC-06 (`37341c6`) |
+| `main` | **`37341c6` — PUBLICADA y custodiada (`main = origin/main`, 2026-09-26).** Contiene toda la cadena validada: ver §13. La antigua línea paralela `4d420bd` (AI Studio) fue reconciliada históricamente en `5f7754b` (ver §9) |
 | Deploy | Vercel (`vercel.json`: build → `dist`, función serverless `api/index.ts` → Express, rewrites SPA) |
 | Firebase | Proyecto `startup-sanctuary-sln7n` · Firestore `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` · Storage `startup-sanctuary-sln7n.firebasestorage.app` |
 | Base de datos | Firestore (~45 colecciones, ver §2.2) + Storage (rutas declaradas en `storage.rules`) |
@@ -99,6 +111,17 @@ Distribución actual de tests:
 >
 > **GAP-R1 / R2 / R3 (2026-09-21, desarrollo Arena B, integración Arena A)** — `tests/conciliacion-persistencia.test.ts` (15 → 27 tras el cierre de GAP-R1, 2026-09-23),
 > `tests/morosidad-evidencias-storage.test.ts` (20), `tests/ficha-publica-inmueble.test.ts` (29). Global 899/899 (38 ficheros).
+>
+> **ESTADO 2026-09-26 (`main = 37341c6`)** — batería vigente: **Vitest 1666 pass + 2 skip
+> (72 ficheros)** · tests nativos del módulo patrimonial (`node --test`) **87/87** ·
+> `test:bloque-b` **92/92** · `test:bloque-c` **82/82** · `test:bloque-e` **64/64** ·
+> `tsc --noEmit` **0** · `vite build` OK · `esbuild server` OK. Suites nuevas de la cadena:
+> `gestionesCartera` (16), `carterasGestion` (10), `importacion` (17), `expedienteFiscal` (19),
+> `seguridad-firestore-inmuebles` (29, D2a), `seguridad-firestore-carteras` (18, D2b/D3),
+> `patrimonial-integracion` (11), `patrimonial-persistencia` (29, INC-06),
+> `seguridad-firestore-patrimonial` (14, INC-06). Las reglas se validan con el harness
+> fail-loud `tests/harness/firestoreRulesEval.ts`; la validación contra emulador real de
+> Firebase sigue PENDIENTE (§13.3, BLOQUE 4 de §14).
 
 Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJORAS` ·
 `PENDIENTE` · `NO_IMPLEMENTADO` · `DEPENDENCIA_EXTERNA`.
@@ -153,9 +176,18 @@ Vocabulario de estados usado en este documento: `COMPLETO` · `FUNCIONAL_CON_MEJ
 `facturas_electronicas_b2b`,
 `liquidaciones_propietarios`, `gastos_inmuebles`, `ordenes_pago`,
 `ficheros_sepa`, `mandatos_sepa`, `config_liquidacion` (BLOQUE B),
-`gestiones_cartera` (BLOQUE F — **diseño aprobado 2026-09-26, NO implementada**;
-campos propuestos asociados: `propietarios.estadoAcceso`,
-`inmuebles.estadoDatos` + `inmuebles.camposFaltantes`).
+`gestiones_cartera` (BLOQUE F — **IMPLEMENTADA en D2b/D3, commit `877494f`, en
+`main` desde `37341c6`**: registro trazable gestor↔cartera, escritura SOLO
+master, eventos append-only; dominio puro en `src/lib/gestionesCartera.ts`;
+proyección `carterasL`/`carterasE` en el espejo `usuarios_auth` que solo el
+master escribe),
+`registros_patrimoniales` (**INC-06, commit `37341c6`, en `main`**: registros
+importados con procedencia completa, evaluación `COMPLETO|INCOMPLETO|BLOQUEADO`,
+incidencias conservadas, ids deterministas; update/delete SOLO master).
+Además: la ficha patrimonial vive como **subobjeto `fichaPatrimonial` dentro de
+`propietarios/{id}`** (modalidad, `estadoAcceso`, `estadoDatos`,
+`camposFaltantes[]`, procedencia, versión) — **NO existe colección paralela de
+propietarios ni colección `personas`** (S2).
 
 Storage (rutas con reglas): `cobros_justificantes/`, `gastos_facturas/`,
 `documentos_solicitados/`, `inmuebles/`, `incidencias/`, `profesionales/`,
@@ -388,7 +420,7 @@ los DNI/adjuntos del funnel público ya son un residual documentado — no ampli
 
 ---
 
-### BLOQUE F — GESTIÓN PATRIMONIAL (Cuenta / Propietario / Gestor + Carteras) — **DISEÑO APROBADO (2026-09-26), NO IMPLEMENTADO**
+### BLOQUE F — GESTIÓN PATRIMONIAL (Cuenta / Propietario / Gestor + Carteras) — **IMPLEMENTADO (D2/D2a/D2b/D3) + BASE PATRIMONIAL ARENA C + INC-06 — EN `main` (`37341c6`)**
 
 > **Fuente contractual:** `docs/D1-REVISADA-MODELO-CUENTAS-PROPIETARIOS-GESTORES.md`
 > (D1 revisada; decisiones S1–S7 aprobadas formalmente el 2026-09-26, commit
@@ -474,6 +506,39 @@ independiente, pendiente) → D2 (endurecimiento servidor de `inmuebles`) → D3
 (claims/ámbito) → B4 dry-run sobre staging → revisión → autorización
 independiente. Archivos que se modificarán en la implementación: lista exacta
 en D1R §20.
+
+**F.10 — ESTADO REAL (2026-09-26): IMPLEMENTADO Y EN `main`.** La secuencia F.9
+se ejecutó (salvo B4 sobre staging, que pasa al BLOQUE 4 de §14):
+- **D2 / D1R dominio** (`9a424fa`): `src/lib/gestionesCartera.ts` (máquina de
+  estados `PENDIENTE_ACEPTACION→ACTIVA⇄SUSPENDIDA→REVOCADA`, eventos
+  append-only, `ROL_GESTOR_PATRIMONIAL` nuevo con `GESTOR_INMUEBLES` intacto,
+  semántica CESION→responsable TITULAR / DEVOLUCION→responsable GESTOR) +
+  `src/lib/carterasGestion.ts` (proyección `carterasL`/`carterasE`).
+- **D2a** (`7a2710d`): lectura de `inmuebles` acotada server-side (sin
+  `isStaff()` como bypass: ámbito administrativo legítimo, titularidad,
+  autorización explícita, carteras, inquilino con contrato).
+- **D2b/D3** (`877494f`): reglas de `gestiones_cartera` (escritura SOLO master,
+  anti-autoasignación de `carterasL/E` en el espejo) + escritura de inmuebles
+  solo vía `carterasE` (S7: lectura histórica ≠ escritura).
+- **INC-06** (`37341c6`): ficha patrimonial persistente (`fichaPatrimonial` en
+  `propietarios/{id}`) + ejecución controlada de importaciones
+  (`registros_patrimoniales`, destino explícito, ids deterministas,
+  idempotencia, colisiones sin sobrescritura, auditoría `audit_logs`).
+
+**F.11 — BASE PATRIMONIAL DE ARENA C (procedencia).** El módulo
+`src/features/patrimonial/` (contratos D1/D1R de presentación, onboarding con
+modalidades `PROPIETARIO|GESTOR_PROPIETARIO|GESTOR_PROFESIONAL`,
+`estadoAcceso SIN_CUENTA|INVITADO|ACTIVO`, completitud determinista con
+política explícita, preview dry-run sin autoasignación, componentes React y
+demo aislada) procede del commit **`7657eea` de Arena C** (repo
+`sarqsan/Gestor-alquileres-vercel`, rama `arena/01a0dd70-gestor-alquileres-vercel`)
+y fue integrado en Arena B mediante **`8a2fb20`** (de sus 33 ficheros: **29
+byte-idénticos** a sus contrapartidas en `7657eea`; `isolation.test.mjs`
+adaptado al aislamiento de A; `vite.config.ts` es el propio de A ampliado;
++ 2 ficheros puente nuevos), con puente `src/lib/patrimonialIntegracion.ts`. **`7657eea` NO debe volver a integrarse
+como commit independiente: su contenido ya está incorporado en `8a2fb20`**
+(conservar su SHA como trazabilidad de origen). No existe duplicación
+funcional intencionada.
 
 ---
 
@@ -1032,6 +1097,14 @@ Firestore/Storage **sin cambios** en F4.
 
 ## 7. EVOLUCIÓN DEL ERP — ROADMAP (capacidades, no «órdenes pequeñas»)
 
+> **NOTA 2026-09-26:** la planificación operativa vigente es el **roadmap por
+> bloques grandes 0–6 de §14** (trabajo paralelo Arena B / Arena C). La tabla
+> histórica de esta sección se conserva íntegra como referencia: lo que sigue
+> pendiente aquí queda **absorbido** por los bloques de §14 (p. ej. «Integración
+> global / pruebas end-to-end» → BLOQUE 4; la evolución patrimonial → BLOQUES
+> 1–3; importación/exportación → BLOQUES 5–6). Ninguna entrada histórica se
+> borra.
+
 Estas fases son **capacidades funcionales de distinto tamaño** — no se
 presentan como cinco órdenes pequeñas:
 
@@ -1412,3 +1485,419 @@ Trazabilidad Git (ver `docs/ESTADO-GIT-ERP.md`): R1 `415de41` → `a18967f` · R
 - **Resultado en A:** GAP 5 164/164 · identidad 27/27 · suite 1286/1286 (52 ficheros) · mutaciones
   82/82 · `tsc` 0 · build OK. **GAP 5 CERRADO; no se reabre.** La conexión efectiva con
   portales/APIs de terceros es una integración externa independiente (categoría C de §12.1).
+
+---
+
+## 13. ESTADO CONSOLIDADO Y CUSTODIADO (2026-09-26) — `main = origin/main = 37341c6`
+
+### 13.1 Cadena publicada
+
+`main` fue reconciliada y **publicada** el 2026-09-26 (fast-forward lineal
+`5f7754b → 37341c6`, 14 commits, 0 merges, 0 conflictos). Forman parte de este
+estado custodiado:
+
+| Trabajo | Commit | Contenido |
+|---|---|---|
+| FASE 2 | `4975608` | Mapa de migración origen→destino Rentasync→ERP + anexo de evidencia externa |
+| FASE 3 | `f9b0379` | Estrategia de migración + arquitectura de importación/exportación preparada |
+| FASE 4 (B0–B3) | `9887cec` | Preparación PURA de importación (normalizar/dedup/preview/hash/contrato; 17 tests) |
+| FASE 5 | `5aa72d2` | Inspección de persistencia/identidad/seguridad pre-B4 |
+| FASE 5B | `2e1ad06` | Decisiones de arquitectura y seguridad (modelo propietario/gestor/cartera diseñado) |
+| FASE 6 (B6) | `c03d267` | Expediente fiscal + exportación fiscal ZIP determinista (19 tests) |
+| FASE 7 | `cc51955` | Gate de decisiones D1–D6 |
+| D1R (docs) | `1415521` + `360a1d0` | Modelo revisado cuenta/propietario/gestor + integración en este mapa |
+| D2 | `9a424fa` | Dominio `gestionesCartera` + proyección de carteras + fix fiscal determinista |
+| D2a | `7a2710d` | Aislamiento server-side de `inmuebles` (lectura acotada; sin `isStaff()` global) |
+| D2b/D3 | `877494f` | Carteras gestionadas + autorización explícita/contextual + anti-autoasignación |
+| Integración Arena C | `8a2fb20` | Módulo patrimonial de C integrado (ver §4 F.11) |
+| INC-06 | `37341c6` | Ficha patrimonial persistente + ejecución controlada de importaciones + reglas + auditoría |
+
+**Procedencia Arena C:** `7657eea2d08f1e66c480091c5b81ecfc16aac5a8` (repo
+`sarqsan/Gestor-alquileres-vercel`, rama `arena/01a0dd70-gestor-alquileres-vercel`)
+es la **fuente/origen** de la base patrimonial integrada. **NO debe volver a
+integrarse como commit independiente**: su contenido ya está incorporado en
+`8a2fb20` (29 blobs byte-idénticos a sus contrapartidas; únicas diferencias:
+`isolation.test.mjs` adaptado y `vite.config.ts` propio de A; más 2 ficheros
+puente nuevos). **No existe duplicación funcional intencionada.**
+
+### 13.2 Fuera de `main` (deliberadamente)
+
+- `arena/01a0d832-gestor-de-inmuebles-vercel` @ `1e73995` (7 commits del
+  2026-09-25: UX-0A/0B/1A/1B/1C, fix segundo titular, auditoría de deriva):
+  **NO integrada**; pendiente de investigación independiente (no se asume que
+  sea necesaria ni se descarta sin inspección).
+- `recovery/arena-a`, `recovery/arena-b-content` y ramas arena antiguas:
+  material histórico fuera de alcance.
+
+### 13.3 Pendientes de validación real (heredados, vigentes)
+
+La infraestructura real **todavía requiere validación posterior** (BLOQUE 4 de
+§14): Firestore real · Storage real · Auth/claims reales · persistencia real de
+extremo a extremo. Y como datos/fuentes: datos históricos pendientes · fuentes
+AEAT/Libro Diario pendientes · documentación/comprobantes pendientes ·
+**registro 27 incompleto pendiente de resolución documental** (INC-08 de
+FASE 2) · discrepancias A/B de rentas (INC-06 de FASE 2, ambigüedad de origen:
+no confundir con el INC-06 de persistencia ya implementado) · INC-01…INC-15
+abiertos como `REQUIERE_VALIDACION` (ninguna se resuelve automáticamente).
+
+---
+
+## 14. ROADMAP VIGENTE — BLOQUES GRANDES (0–6)
+
+> Sustituye operativamente a la planificación fragmentada (histórico en §7).
+> Cada bloque se cierra completo: inspección → implementación → tests →
+> autocorrección → revisión de aislamiento → commit → custodia cuando se autorice.
+
+### BLOQUE 0 — CIERRE Y CUSTODIA — **CERRADO ✅ (2026-09-26)**
+
+- Reconciliación de historia completada (grafo demostrado con Git).
+- Integración del trabajo válido (cadena lineal, sin duplicaciones).
+- `main` publicada: **`main = origin/main = 37341c6`**.
+- Working tree limpio · cero commits pendientes.
+- Arena `01a0d832`: NO integrada; permanece en `1e73995`; sus 7 commits quedan
+  pendientes de investigación independiente (ver §13.2).
+
+### BLOQUE 1 — ARENA B — INMUEBLE COMO CENTRO OPERATIVO DIARIO + SEGUROS — **PENDIENTE**
+
+**Objetivo:** convertir el inmueble en el centro operativo diario del ERP,
+evitando que el usuario salte entre módulos aislados para gestionar la vida
+real de cada propiedad.
+
+1. **Ficha operativa del inmueble** (sobre la ficha existente; no duplicar).
+2. **Acceso contextual desde el inmueble** a: contratos · inquilinos · cobros ·
+   gastos · incidencias · averías · reparaciones · equipos/electrodomésticos ·
+   garantías · documentación · fiscalidad relacionada · seguros.
+3. **Resumen operativo del inmueble:** situación actual · próximos vencimientos
+   · incidencias abiertas · reparaciones · documentos relevantes · contratos ·
+   cobros/gastos · seguros · alertas.
+4. **SEGUROS COMO ENTIDAD REAL, NO COMO SIMPLE BOOLEANO.** Base existente:
+   `segurosEngine.ts` + colecciones `polizas_seguros`/`siniestros` (§2.1 #9) —
+   ampliar, no duplicar. Relación principal: **Inmueble → Póliza → Documento**.
+   Debe soportar: múltiples pólizas por inmueble · seguro de hogar · seguro de
+   impago de alquiler · seguro de electrodomésticos/equipos · responsabilidad
+   civil · otros tipos extensibles · compañía · número de póliza · fechas de
+   efecto/vencimiento · renovación · ventana de renovación · prima · evolución
+   histórica de primas · cambios de compañía · modificaciones · estado/histórico
+   de la póliza · condiciones · exclusiones · franquicias · coberturas ·
+   observaciones · referencia documental.
+5. **DOCUMENTACIÓN DE PÓLIZAS.** Relación **1 Póliza → N Documentos** (NO
+   asumir 1 póliza → 1 PDF). Los documentos conservan histórico: subir un PDF
+   nuevo **NO reemplaza silenciosamente** el anterior — genera/registra una
+   nueva versión/documento con fecha, origen, actor y trazabilidad; los
+   documentos anteriores siguen recuperables. Ejemplos: póliza original ·
+   condiciones generales · condiciones particulares · anexos · recibos ·
+   renovaciones · modificaciones · comunicaciones · documentación relacionada.
+6. **RELACIÓN SEGURO ↔ AVERÍA/REPARACIÓN.** Preparar el vínculo
+   **Inmueble → Avería → Equipo → Garantía/Seguro → Póliza → Documentación**.
+   **El ERP NO afirma automáticamente que una reparación está cubierta**: la
+   póliza/documentación original es la fuente documental. La IA podrá ayudar a
+   interpretar coberturas, exclusiones, posibles condiciones, documentación
+   necesaria y relación avería↔póliza, distinguiendo siempre: **dato
+   documental · interpretación · hipótesis · conclusión pendiente de revisión**
+   (la IA es ayuda, no fuente jurídica; §6.4).
+7. **RENOVACIONES.** Arquitectura para: vencimiento · aviso previo · ventana de
+   renovación · histórico de renovaciones · evolución de precio · cambio de
+   compañía · documentación asociada. Preparar la posibilidad futura de detectar
+   oportunidades relacionadas con renovaciones de seguros, **SIN convertir el
+   ERP en una correduría ni introducir lógica comercial no solicitada**.
+
+### BLOQUE 2 — ARENA C — OPERACIONES DE ALQUILER + MANTENIMIENTO — **PENDIENTE**
+
+Se desarrolla **en paralelo e independiente** del Bloque 1. Cubre el
+funcionamiento operativo diario:
+
+1. Incidencias. 2. Averías. 3. Reparaciones. 4. Estados de reparación.
+5. Proveedores/profesionales. 6. Presupuestos. 7. Facturas relacionadas.
+8. Equipos/electrodomésticos. 9. Garantías. 10. Historial de actuaciones.
+11. Relación con: inmueble · contrato · inquilino · proveedor · equipo ·
+    garantía · documentación.
+12. Preparar la relación futura con seguros (interfaz hacia el Bloque 1).
+
+**Límite duro:** Arena C **NO debe duplicar ni redefinir el modelo patrimonial
+ya integrado en B** (`propietarios`/`fichaPatrimonial`/`gestiones_cartera`/
+`registros_patrimoniales`): trabaja sobre su ámbito funcional y deja
+interfaces/relaciones claras para integración posterior.
+
+### BLOQUE 3 — DOCUMENTACIÓN + FISCALIDAD + TRAZABILIDAD — **PENDIENTE**
+
+Consolidar: documentación general · facturas · recibos · IBI · tasas/basuras ·
+gastos · cobros · contratos · documentos fiscales · expediente fiscal (motor
+FASE 6 ya en `main`) · origen/procedencia · auditoría · historial · retención
+mínima prevista · búsqueda por inmueble/propietario/periodo/tipo.
+Preservar la distinción: **documento original · dato estructurado · dato
+calculado · interpretación IA**.
+
+### BLOQUE 4 — VALIDACIÓN REAL DE INFRAESTRUCTURA — **PENDIENTE**
+
+Validar sobre infraestructura real (no solo tests locales): Firebase Auth ·
+Firestore · Storage · reglas · claims · aislamiento por propietario/cartera ·
+permisos · persistencia · auditoría · documentos · lectura/escritura · errores
+parciales · recuperación. **NO declarar este bloque terminado por tener
+únicamente tests unitarios.**
+
+#### RETENCIÓN ≥ 5 AÑOS — CIERRE DOCUMENTAL (auditoría 2026-09-26)
+
+Los dos conceptos siguientes están **expresamente separados** y no deben
+mezclarse nunca:
+
+- 🟢 **RETENCIÓN FUNCIONAL SIN PURGA AUTOMÁTICA Y CON PROTECCIÓN CONTRA
+  BORRADO EN LAS COLECCIONES CRÍTICAS.** Verificado sobre el repo:
+  - Sin TTL de Firestore: `firebase.json` y `firestore.indexes.json` no
+    declaran ninguna política TTL; el código no configura TTL
+    (`POLITICA_RETENCION.ttlConfigurado: false` en el expediente B3).
+  - Sin purga automática: ningún mecanismo programado
+    (`setInterval`/cron/limpieza) borra datos; los `deleteDoc` existentes en
+    `firebase.ts` son operaciones manuales explícitas de administración,
+    acotadas por reglas.
+  - Sin lifecycle de Storage declarada en el repositorio.
+  - Protección contra borrado por reglas: `audit_logs`
+    (`allow update, delete: if false` — nadie, ni el master) e
+    `inventario_historial`, `mensajes_portal`, `lecturas_suministro` y las
+    colecciones de morosidad/histórico; adicionalmente `registros_patrimoniales`
+    y `gestiones_cartera` con update/delete reservados al master, y
+    `propietarios`/`inmuebles` con delete sólo master.
+  - `documentosServidor.ts` es un almacén **efímero en memoria** del proceso
+    de servicio (sin imports de Firebase): su TTL interno no afecta a la
+    persistencia de Firestore/Storage.
+- 🟡 **CUSTODIA/RETENCIÓN DE INFRAESTRUCTURA GCP A LARGO PLAZO**
+  (dependencia operativa futura): la conservación **física** a 5+ años depende
+  de la administración del proyecto Firebase/GCP (ciclo de vida del bucket de
+  Storage, copias de seguridad/exportaciones de Firestore, estado de
+  facturación y no eliminación del proyecto). La aplicación **no la garantiza
+  ni puede garantizarla**, y por tanto **no se afirma ninguna «garantía
+  técnica de 5 años»** por parte del ERP.
+- Requisito funcional del ERP (inalterado): conservar el histórico ≥ 5 años y
+  **no** implementar TTL ni borrado automático de documentos, movimientos,
+  auditoría, pólizas ni registros patrimoniales.
+
+### BLOQUE 5 — RECUPERACIÓN HISTÓRICA / IMPORTACIÓN — **PENDIENTE**
+
+Recuperar/integrar cuando exista fuente verificable: datos históricos · AEAT ·
+Libro Diario · facturas · comprobantes · documentos · registro 27 incompleto ·
+discrepancias detectadas · rentas ambiguas (A/B) · IBI/comunidad/reparaciones/
+seguros pendientes de validar. **Regla: NO inventar ni corregir históricamente
+sin evidencia.** Los datos incompletos pueden entrar como `INCOMPLETO`
+conservando origen · incidencia · campos faltantes · trazabilidad.
+> La **auditoría funcional histórica completa** se registra de forma
+> independiente en **§16** — NO queda absorbida por este bloque ni por
+> ningún GAP genérico.
+
+### BLOQUE 6 — IMPORTACIÓN / EXPORTACIÓN GLOBAL DEL ERP — **PENDIENTE**
+
+**No confundir con el INC-06 ya implementado** (INC-06 = base patrimonial +
+importación controlada, en `main`). Este bloque cierra el sistema global.
+
+**IMPORTACIÓN:** JSON · Excel/CSV · datos completos · datos parciales ·
+propietario destino explícito · preview/dry-run · validación · duplicados ·
+incidencias · `COMPLETO` · `INCOMPLETO` · `BLOQUEADO` · **no sobrescritura
+silenciosa** · provenance/procedencia · trazabilidad · idempotencia · auditoría.
+
+**EXPORTACIÓN** (según permisos): un inmueble · varios inmuebles · propietario ·
+cartera autorizada · periodo · datos patrimoniales · gastos · cobros ·
+contratos · documentación · seguros · incidencias · reparaciones · equipos ·
+garantías · historial · procedencia · auditoría de exportación.
+Formatos: estructurado · documentos · **ZIP** cuando corresponda.
+> **El ZIP del ERP NO se considera formato oficial AEAT salvo validación
+> específica posterior.**
+
+---
+
+## 15. REGLAS DE TRABAJO PARALELO — ARENA B + ARENA C
+
+**Trabajo paralelo permitido:** Arena B y Arena C pueden trabajar
+simultáneamente sobre bloques distintos — **Arena B: Bloque 1 (Inmueble +
+Seguros)** · **Arena C: Bloque 2 (Operaciones + Mantenimiento)**.
+
+1. Cada Arena trabaja exclusivamente su bloque.
+2. No modificar deliberadamente el motor crítico del otro bloque.
+3. No duplicar entidades/modelos ya existentes.
+4. Antes de crear una entidad nueva, inspeccionar primero si existe una
+   equivalente.
+5. Las relaciones entre bloques deben documentarse (en este mapa).
+6. Si ambos bloques necesitan modificar la misma pieza crítica: detener esa
+   modificación · documentar la dependencia · coordinar integración.
+7. Cada bloque cierra con: inspección → implementación → tests →
+   autocorrección → revisión de aislamiento → commit → custodia remota cuando
+   sea autorizado.
+8. No integrar directamente B y C entre sí durante su desarrollo paralelo.
+9. La integración se hará posteriormente desde un estado validado.
+10. No tocar `main` directamente durante el desarrollo de estos bloques salvo
+    mediante el proceso de integración autorizado.
+
+---
+
+## 16. RECUPERACIÓN FUNCIONAL HISTÓRICA Y CAPACIDADES ESTRATÉGICAS (registro 2026-09-26)
+
+> **Bloque exclusivamente documental.** No implementa nada: registra requisitos
+> estratégicos e históricos con trazabilidad y prioridad de recuperación, para
+> que no se pierdan durante la futura recuperación histórica completa del
+> proyecto. Ningún estado de esta sección marca como IMPLEMENTADO lo que no
+> esté demostrado en el código actual.
+
+### 16.1 AUDITORÍA FUNCIONAL HISTÓRICA — TRABAJO PENDIENTE
+
+El proyecto tendrá una **auditoría histórica posterior de TODAS las
+conversaciones, especificaciones, órdenes, Arenas y aplicaciones relacionadas
+con el ERP**. Finalidad:
+
+- recuperar requisitos funcionales definidos al inicio que pudieron quedar
+  fuera del desarrollo posterior;
+- localizar funcionalidades que existieron en otras Arenas/aplicaciones;
+- distinguir por cada hallazgo: IMPLEMENTADO / PARCIAL / PREPARADO /
+  PENDIENTE / RECUPERAR / NO VERIFICADO;
+- conservar el **origen/procedencia** de cada funcionalidad (regla transversal
+  del proyecto: todo lo recuperado de conversaciones, Arenas o aplicaciones
+  anteriores queda trazable);
+- evitar que una funcionalidad desaparezca simplemente porque no figure en el
+  código actual;
+- comparar la **intención funcional original** con la implementación
+  actualmente custodiada.
+
+**Queda expresamente escrito:** esta auditoría histórica es un **trabajo
+pendiente** y el **inventario funcional del ERP NO se considera cerrado**
+hasta realizarla.
+
+### 16.2 `IA_CARTERA_TRANSVERSAL` — IA TRANSVERSAL DE CARTERA
+
+**Estado: PENDIENTE / DISEÑO ESTRATÉGICO** (no se marca como implementada
+hasta realizar una auditoría específica del código existente).
+
+Asistente de IA integrado en el propio ERP, contextualizado por **usuario,
+permisos y cartera**, capaz de consultar y razonar sobre la información
+autorizada del propio ERP. Ámbito objetivo: inmuebles · propietarios ·
+contratos · cobros · gastos · fiscalidad · seguros · incidencias ·
+mantenimiento · documentación · histórico · rentabilidad · operaciones ·
+alertas y situaciones pendientes. Debe ser una **IA contextual del ERP, NO un
+chatbot decorativo independiente**.
+
+**Requisito fundamental:** la IA debe respetar **exactamente** el modelo de
+autorización existente (contrato canónico:
+`docs/arquitectura/CONTRATO_CANONICO_AUTORIZACION_AUDITORIA_B_C.md`). Nunca
+debe revelar información de otra cartera o propietario por el simple hecho de
+que pueda consultarla técnicamente.
+
+**Base ya custodiada (no duplicar):** la **§6.2 y §6.5–§6.8** existe una capa
+de IA asistente transversal con FASES 1–4 IMPLEMENTADAS (motor de contexto,
+28 capacidades, validación determinista RBAC, confirmación previa en
+escritura, adaptador Gemini + proveedor local; validación real de Gemini
+pendiente, §12). Este requisito estratégico la **extiende** hacia la
+cobertura completa de cartera arriba listada; la auditoría de §16.1
+determinará qué parte del objetivo está ya cubierta.
+
+### 16.3 `INCIDENCIA_IA_END_TO_END` — INCIDENCIA INTELIGENTE END-TO-END
+
+**Estado: RECUPERAR / VERIFICAR IMPLEMENTACIÓN ACTUAL** (no marcar como
+implementado hasta auditar el código actual y, posteriormente, la
+documentación histórica).
+
+**Este concepto NO es una idea inventada en esta revisión:** forma parte del
+planteamiento funcional original del ERP. Durante la auditoría histórica
+(§16.1) deberá buscarse **evidencia de cuándo y cómo fue especificado,
+diseñado o implementado**.
+
+Flujo objetivo que debe conservarse en el mapa:
+
+```
+TENANT → COMUNICA INCIDENCIA
+→ IA realiza triaje inicial
+→ IA pregunta/comprueba soluciones sencillas cuando proceda
+→ IA determina gravedad/prioridad
+→ IA consulta contrato y contexto → responsabilidad probable
+→ PROPIETARIO recibe aviso desde el inicio y puede seguir el estado
+   durante el diagnóstico
+→ IA consulta seguros, garantías y pólizas relacionadas con
+   inmueble/electrodoméstico/equipamiento
+→ SI existe cobertura: orientar la apertura de siniestro y proporcionar
+   compañía/póliza/contacto/datos necesarios
+→ SI NO existe cobertura: continuar hacia proveedores/servicios
+→ solicitud/comparación de presupuestos
+→ autorización
+→ reparación
+→ factura
+→ gasto/documentación
+→ actualización del histórico del inmueble
+→ trazabilidad completa
+```
+
+La inteligencia **no termina en «diagnosticar la avería»**: el valor
+diferencial está en conectar incidencia + contrato + responsabilidad +
+seguro/garantía + propietario + proveedor + autorización + reparación +
+factura + histórico.
+
+Piezas actuales relacionadas (como contexto, no como implementación de este
+flujo): módulo de seguros del Bloque 1 (pólizas/siniestros/garantías),
+enlaces de reparaciones e índice documental del Bloque 3, y la orientación de
+flujo de averías de la §6.2. La cadena completa con triaje IA está por
+verificar/recuperar.
+
+### 16.4 `ESCANER_FACTURAS_IA` — ESCÁNER INTELIGENTE DE FACTURAS
+
+**Estado: RECUPERAR / INTEGRAR DESDE APLICACIÓN DE ORIGEN** (no marcar como
+implementado en la aplicación canónica actual hasta que exista evidencia de
+integración).
+
+**Origen: OTRA APLICACIÓN / GESTIÓN PATRIMONIAL — FUNCIONALIDAD EXISTENTE
+SEGÚN INVENTARIO FUNCIONAL DEL PROYECTO.** NO es una funcionalidad nueva que
+haya que diseñar desde cero.
+
+Funcionalidad conocida: OCR/IA sobre factura · extracción de importe · fecha ·
+concepto · categoría · inmueble · otros campos relevantes · confirmación/
+corrección por el usuario · selección manual del inmueble cuando la IA no
+pueda determinarlo con seguridad.
+
+**Requisito de recuperación:** durante la recuperación histórica deberá
+localizarse el **código/origen exacto** de esta funcionalidad en la
+aplicación correspondiente, auditarlo y determinar: qué está realmente
+implementado · qué componentes son reutilizables · qué modelo de datos
+utiliza · qué integración necesita con el modelo canónico actual · qué parte
+debe conservarse como origen/procedencia · qué parte debe adaptarse.
+
+### 16.5 `FICHA_ECONOMICA_INMUEBLE` — FICHA ECONÓMICA/FISCAL DEL INMUEBLE
+
+**Estado: REQUISITO CANÓNICO — AUDITAR IMPLEMENTACIÓN ACTUAL Y CERRAR GAPS
+EXISTENTES.**
+
+Dentro del **centro operativo del inmueble** debe existir una visión
+económica/fiscal contextual que permita consultar, al menos: IBI ·
+basura/tasas · gastos deducibles · otros gastos · ingresos/cobros de
+arrendamiento · resultado económico/fiscal disponible · histórico por
+ejercicios. Simultáneamente debe existir una **sección fiscal global del ERP**
+para consultar todos los inmuebles y filtrar.
+
+**IMPORTANTE:** no crear esto como aplicación o módulo paralelo: debe quedar
+integrado en el centro operativo del inmueble y conectado con la fiscalidad
+global. Base ya custodiada a auditar (no duplicar): motor `fiscalEngine`
+(FASE 6), sub-pestaña «Expediente» del Centro Operativo (Bloque 3, con
+métricas fiscales/tributos/índice documental) y exportación B6.
+
+### 16.6 NOTA TRANSVERSAL — LA LISTA NO ES EXHAUSTIVA
+
+> «La lista anterior NO se considera exhaustiva. Durante la recuperación
+> histórica deberán revisarse las conversaciones y trabajos desde el inicio
+> del proyecto para localizar otras funcionalidades, reglas de negocio,
+> flujos, automatizaciones, ideas o requisitos que hayan sido definidos y
+> posteriormente hayan quedado fuera, parcializados o sustituidos.»
+
+Clasificación **obligatoria** de cada hallazgo de la auditoría:
+
+`IMPLEMENTADO_CANONICO` · `IMPLEMENTADO_OTRA_ARENA` ·
+`IMPLEMENTADO_OTRA_APP` · `PARCIAL` · `PREPARADO` · `PENDIENTE` ·
+`RECUPERAR` · `NO_VERIFICADO` · `DESCARTADO_EXPLICITAMENTE`.
+
+**Nunca utilizar simplemente «no existe»** cuando lo único que se haya
+comprobado sea que no aparece en el código canónico actual.
+
+### 16.7 RELACIÓN CON EL PLAN GENERAL
+
+Se mantiene el orden estratégico ya acordado:
+
+1. 🟡 terminar y cerrar los trabajos actuales;
+2. 🟢 dejar los bloques actuales validados;
+3. → integración B/C en `main`;
+4. → recuperación histórica/importación (§14 BLOQUE 5);
+5. → **AUDITORÍA FUNCIONAL HISTÓRICA COMPLETA (§16.1)**;
+6. → recuperación/integración de funcionalidades descubiertas (§16.2–§16.6);
+7. → nueva auditoría global.
+
+La auditoría histórica **no desaparece ni queda absorbida** dentro de un GAP
+genérico ni del BLOQUE 5 (ver nota en §14).

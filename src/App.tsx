@@ -327,6 +327,9 @@ const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'in
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
   const [altaInmuebleDesdePropietarioId, setAltaInmuebleDesdePropietarioId] = useState<string | null>(null);
+  // BLOQUE 1 — filtro contextual de pólizas cuando se navega desde el centro
+  // operativo de un inmueble (enlace, no duplicación de la sección de seguros).
+  const [filtroPolizasInmuebleId, setFiltroPolizasInmuebleId] = useState<string | undefined>(undefined);
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -3812,6 +3815,7 @@ export default function App() {
               propietarios={scopedPropietarios}
               currentUser={currentUser || undefined}
               modo={currentUser?.tipoPerfil === 'PROPIETARIO' ? 'PROPIETARIO' : 'ADMIN'}
+              inmuebleFiltro={filtroPolizasInmuebleId}
             />
           )}
 
@@ -3913,6 +3917,10 @@ export default function App() {
               onDeleteSlotsBatch={handleDeleteSlotsBatch}
               onUpdateSlot={handleUpdateSlot}
               onNavigateToPropietarios={() => setActiveSection('propietarios')}
+              onAbrirSeccionGlobal={(seccion, inmuebleId) => {
+                if (seccion === 'polizas') setFiltroPolizasInmuebleId(inmuebleId);
+                setActiveSection(seccion as SectionType);
+              }}
               contratos={scopedContratos}
               profesionales={scopedProfesionales}
               currentUser={currentUser}

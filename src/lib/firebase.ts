@@ -2529,6 +2529,44 @@ export async function deletePolizaFirestore(polizaId: string): Promise<void> {
   }
 }
 
+/**
+ * BLOQUE 1 — guarda la póliza (y opcionalmente su sucesora en
+ * renovaciones/sustituciones) y registra la operación sensible en
+ * `audit_logs`. REUTILIZA la auditoría existente: no crea un sistema
+ * paralelo. Si la escritura falla, no se audita éxito.
+ */
+export async function guardarPolizaConAuditoria(
+  poliza: PolizaSeguro,
+  contexto: {
+    accion: string; // p. ej. SEGUROS_ALTA_POLIZA | SEGUROS_MODIFICACION | SEGUROS_RENOVACION | SEGUROS_CAMBIO_COMPANIA | SEGUROS_DOCUMENTO_ADJUNTADO | SEGUROS_CANCELACION
+    descripcion: string;
+    actor: { id?: string; email?: string; nombre: string };
+    detalles?: Record<string, unknown>;
+    polizaNueva?: PolizaSeguro;
+  }
+): Promise<void> {
+  await savePolizaFirestore(poliza);
+  if (contexto.polizaNueva) {
+    await savePolizaFirestore(contexto.polizaNueva);
+  }
+  await registrarAuditoriaFirestore({
+    usuarioId: contexto.actor.id || 'desconocido',
+    usuarioEmail: contexto.actor.email || '',
+    usuarioNombre: contexto.actor.nombre,
+    accion: contexto.accion,
+    descripcion: contexto.descripcion,
+    entidadAfectada: 'poliza_seguro',
+    idAfectado: poliza.id,
+    resultado: 'EXITO',
+    detalles: {
+      ...(contexto.detalles || {}),
+      polizaId: poliza.id,
+      polizaNuevaId: contexto.polizaNueva?.id,
+      documentosTotales: (poliza.documentos?.length || 0),
+    },
+  });
+}
+
 export function subscribeSiniestros(callback: (items: Siniestro[]) => void): Unsubscribe {
   return onSnapshot(
     SINIESTROS_COL,

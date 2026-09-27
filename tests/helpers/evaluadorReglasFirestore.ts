@@ -178,6 +178,21 @@ class Parser {
       if (!this.esOp(']')) { items.push(this.expr()); while (this.esOp(',')) { this.next(); items.push(this.expr()); } }
       this.expectOp(']'); return { k: 'call', callee: { k: 'var', name: '__list' }, args: items };
     }
+    if (t.t === 'op' && t.v === '{') {
+      // Literal de mapa de Firestore: {'clave': expr, ...}. Clave string o
+      // identificador desnudo. Se aplana en argumentos clave/valor para __map.
+      const args: Expr[] = [];
+      if (!this.esOp('}')) {
+        for (;;) {
+          const kt = this.next();
+          if (kt.t !== 'str' && kt.t !== 'id') throw new Error(`Clave de mapa inválida «${(kt as { v: unknown }).v}»`);
+          this.expectOp(':'); args.push({ k: 'lit', v: kt.v }, this.expr());
+          if (this.esOp(',')) { this.next(); continue; }
+          break;
+        }
+      }
+      this.expectOp('}'); return { k: 'call', callee: { k: 'var', name: '__map' }, args };
+    }
     if (t.t === 'id') {
       if (t.v === 'true') return { k: 'lit', v: true };
       if (t.v === 'false') return { k: 'lit', v: false };
@@ -401,6 +416,11 @@ function evaluar(e: Expr, a: Ambito): unknown {
     }
     case 'call': {
       if (e.callee.k === 'var' && e.callee.name === '__list') return e.args.map((x) => evaluar(x, a));
+      if (e.callee.k === 'var' && e.callee.name === '__map') {
+        const m: Record<string, unknown> = {};
+        for (let i = 0; i < e.args.length; i += 2) m[String(evaluar(e.args[i], a))] = evaluar(e.args[i + 1], a);
+        return m;
+      }
       const callee = evaluar(e.callee, a) as Record<string, unknown>;
       const args = e.args.map((x) => evaluar(x, a));
       if (callee && callee.__fn) return llamarFuncion(callee.__fn as string, args, a);

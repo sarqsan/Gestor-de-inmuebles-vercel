@@ -351,8 +351,15 @@ const FS_SRC = readFileSync(resolve(__dirname, '../firestore.rules'), 'utf8');
 function bloqueFs(inicio: string): string {
   const pos = FS_SRC.indexOf(inicio);
   if (pos < 0) throw new Error(`No existe «${inicio}» en firestore.rules`);
+  // FASE 8A: corrección del extractor — antes empezaba a contar en la primera
+  // llave DESPUÉS del salto de línea (ignoraba la apertura del propio `match`
+  // y se rompía con llaves anidadas legítimas, como las `function` dentro del
+  // bloque de inmuebles). Ahora parte de la apertura real del `match` (última
+  // llave de su línea) y devuelve el bloque EXACTO, con anidamiento correcto.
+  const linea = FS_SRC.slice(pos, FS_SRC.indexOf(String.fromCharCode(10), pos));
+  const apertura = pos + linea.lastIndexOf('{');
   let nivel = 0;
-  for (let i = FS_SRC.indexOf('{', FS_SRC.indexOf('\n', pos)); i < FS_SRC.length; i++) {
+  for (let i = apertura; i < FS_SRC.length; i++) {
     if (FS_SRC[i] === '{') nivel++;
     else if (FS_SRC[i] === '}') {
       nivel--;
@@ -405,8 +412,15 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
     expect(b).toContain("'propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId()");
     // D2b: la escritura sólo añade carterasE (S7); titularidad y
     // canReachInmuebleId intactos, delete sigue siendo sólo master.
-    expect(b).toContain('allow update: if isMasterAdmin() || inmuebleEnCarteraEscritura(existing()) || (');
-    expect(b).toContain('canReachInmuebleId(inmuebleId)');
+    // FASE 8A (delta-C titularidad, cambio ordenado y probado en
+    // seguridad-firestore-deltas-c.test.ts): el update añade las guardas
+    // titularidadInalterada()/soyTitularActual()/sigoSiendoTitular() sobre
+    // las mismas ramas de autorización (master, carterasE, titular,
+    // canReachInmuebleId). Ramas intactas; restricción añadida, no retirada.
+    expect(b).toContain('allow update: if isMasterAdmin()');
+    expect(b).toContain('inmuebleEnCarteraEscritura(existing()) && titularidadInalterada()');
+    expect(b).toContain('soyTitularActual() && (titularidadInalterada() || sigoSiendoTitular())');
+    expect(b).toContain('canReachInmuebleId(inmuebleId) && titularidadInalterada()');
     expect(b).toContain('allow delete: if isMasterAdmin();');
   });
 
@@ -432,9 +446,16 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
     expect(clavesRegla).toEqual(new Set(CAMPOS_FICHA_PUBLICA));
   });
 
-  it('el total de `if true` no crece (10: ninguno nuevo fuera del espejo)', () => {
+  it('el total de `if true` no crece (7: ninguno nuevo fuera del espejo)', () => {
+    // FASE 8B/C/D (cambio ordenado): se retiraron los 3 `allow create, update:
+    // if true` abiertos (invitaciones, slots_visita, solicitudes_documentacion)
+    // y se sustituyeron por validación de forma (autenticado intacto, anónimo
+    // acotado). Los 7 restantes son sólo LECTURAS (get/read); queda prohibido
+    // añadir escrituras abiertas.
     const total = (FS_SRC.match(/if true/g) || []).length;
-    expect(total).toBe(10);
+    expect(total).toBe(7);
+    const escriturasAbiertas = (FS_SRC.match(/allow\s+(create|update|write|delete)[^;]*if true/g) || []).length;
+    expect(escriturasAbiertas).toBe(0);
   });
 
   it('el fichero está balanceado y el catch-all sigue último', () => {

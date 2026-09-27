@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { InvitacionVisita, VisitSlot, Inmueble } from '../types';
 import { bookSlotTransaction } from '../lib/firebase';
+import { confirmarReservaVisita } from '../lib/reservaVisita';
 import { PublicPropertyGallery } from './PublicPropertyGallery';
 
 interface PortalVisitaPublicaViewProps {
@@ -94,6 +95,10 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
 
   const isBooked = invitacion.status === 'HORARIO RESERVADO' && invitacion.reserva;
 
+  // DELTA-C (reserva pública): secuencia estricta — remoto primero y sólo
+  // ante éxito confirmado, actualización local + éxito. Ante fallo: error
+  // conservado, cero confirmación local y cero mensaje de éxito (ni el éxito
+  // incondicional de C ni el fallback-en-catch anterior de main).
   const handleConfirmBooking = async () => {
     if (!selectedSlotId) return;
     const targetSlot = slots.find((s) => s.id === selectedSlotId);
@@ -101,59 +106,38 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
 
     setIsSubmitting(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
 
-    const nowIso = new Date().toISOString();
     const fullAddress = inmueble
       ? `${inmueble.direccion}, ${inmueble.ciudad}`
       : invitacion.inmuebleNombre;
 
     try {
-      // 1. Attempt atomic booking via Firestore transaction
-      await bookSlotTransaction(
-        targetSlot.id,
+      await confirmarReservaVisita(
         {
-          id: invitacion.candidateId,
-          nombre: invitacion.candidateNombre,
-          telefono: invitacion.candidateTelefono,
-          email: invitacion.candidateEmail,
+          reservarRemoto: () =>
+            bookSlotTransaction(
+              targetSlot.id,
+              {
+                id: invitacion.candidateId,
+                nombre: invitacion.candidateNombre,
+                telefono: invitacion.candidateTelefono,
+                email: invitacion.candidateEmail,
+              },
+              invitacion.id,
+              fullAddress,
+              notas
+            ),
+          alConfirmarSlot: onUpdateSlot,
+          alConfirmarInvitacion: onUpdateInvitacion,
+          alConfirmarCandidato: onUpdateCandidateState,
+          alExito: (mensaje) => setSuccessMessage(mensaje),
+          alError: (mensaje) => setErrorMessage(mensaje),
         },
-        invitacion.id,
-        fullAddress,
-        notas
+        { invitacion, slot: targetSlot, direccionCompleta: fullAddress, notas }
       );
-    } catch (err: any) {
-      console.warn('Firestore transaction fallback to state updates:', err);
-      // Fallback local update if offline/mock
-      const updatedSlot: VisitSlot = {
-        ...targetSlot,
-        disponible: false,
-        reservaCandidateId: invitacion.candidateId,
-        reservaCandidateNombre: invitacion.candidateNombre,
-        reservaInvitationId: invitacion.id,
-      };
-      onUpdateSlot(updatedSlot);
-
-      const updatedInv: InvitacionVisita = {
-        ...invitacion,
-        status: 'HORARIO RESERVADO',
-        bookedAt: nowIso,
-        reserva: {
-          slotId: targetSlot.id,
-          fecha: targetSlot.fecha,
-          horaInicio: targetSlot.horaInicio,
-          horaFin: targetSlot.horaFin,
-          direccionCompleta: fullAddress,
-          notasCandidato: notas,
-        },
-      };
-      onUpdateInvitacion(updatedInv);
-
-      if (onUpdateCandidateState) {
-        onUpdateCandidateState(invitacion.candidateId, 'visita_reservada');
-      }
     } finally {
       setIsSubmitting(false);
-      setSuccessMessage('¡Reserva confirmada con éxito!');
     }
   };
 
@@ -285,6 +269,17 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
               <span className="font-medium">{successMessage}</span>
             </div>
             <button onClick={() => setSuccessMessage(null)} className="text-emerald-700 hover:text-emerald-900">
+              <XCircle className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        {errorMessage && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl p-4 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span className="font-medium">{errorMessage}</span>
+            </div>
+            <button onClick={() => setErrorMessage(null)} className="text-rose-700 hover:text-rose-900">
               <XCircle className="w-4 h-4" />
             </button>
           </div>

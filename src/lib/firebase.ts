@@ -2260,6 +2260,16 @@ export function subscribeAuditLogs(callback: (logs: AuditLog[]) => void) {
   );
 }
 
+/**
+ * Logger de auditoría BEST-EFFORT independiente (fuera de transacción).
+ * COEXISTENCIA (FASE 9, decisión NO consolidar): el módulo de operaciones usa
+ * OTRA `registrarAuditoriaFirestore` (`src/lib/auditoria.ts`), síncrona y
+ * transaccional, que escribe dentro de la misma transacción que la entidad.
+ * No son intercambiables: esta NO debe usarse donde la auditoría deba
+ * revertirse junto a los datos, y la transaccional NO debe sustituirse por
+ * esta (crearía auditorías fantasma ante abortos). Mismo libro mayor
+ * (`audit_logs`), dos transportes según el consumidor.
+ */
 export async function registrarAuditoriaFirestore(
   log: Omit<AuditLog, 'id' | 'fechaHora'> & { id?: string; fechaHora?: string }
 ): Promise<void> {

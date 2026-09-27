@@ -31,6 +31,20 @@ export function auditoriaDe(evento: EventoOperativo, identidad: IdentidadCanonic
 }
 /** Mismo envelope log-first que B; el puerto adicional mantiene la unidad transaccional de C.
  * No modifica el logger best-effort de B, ni crea otro servicio/colección.
+ *
+ * COEXISTENCIA (FASE 9, decisión NO consolidar): existe otra
+ * `registrarAuditoriaFirestore` en `src/lib/firebase.ts`, pero los contratos son
+ * incompatibles y ambas se conservan deliberadamente:
+ *  · ESTA (auditoria.ts): síncrona, TRANSACCIONAL — escribe DENTRO de la misma
+ *    transacción que la entidad y la cabecera (único consumidor: el repositorio
+ *    de operaciones). Un aborto revierte auditoría + datos juntos.
+ *  · La de firebase.ts: asíncrona, BEST-EFFORT independiente — `setDoc` fuera de
+ *    transacción, con id/fechaHora autogenerados y payload `AuditLog` genérico
+ *    (actas, seguros, patrimonial, sindicación, seeds).
+ * Unificarlas exigiría convertir escrituras transaccionales en best-effort
+ * (auditorías fantasma ante abortos: PROHIBIDO) o envolver en transacciones a
+ * todos los consumidores genéricos (cambio excesivo y riesgoso). Mismo libro
+ * mayor (`audit_logs`, envelope compatible con `AuditLog`), dos transportes.
  */
 export function registrarAuditoriaFirestore(log: RegistroAuditoriaOperativa, transaccion: {crearAuditoria: (id: string, registro: RegistroAuditoriaOperativa) => void}): void {
   transaccion.crearAuditoria(log.id, log);

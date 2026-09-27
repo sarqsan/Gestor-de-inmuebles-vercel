@@ -589,16 +589,36 @@ service cloud.firestore {
           ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
         )
       );
+      // DELTA-C (titularidad, FASE 8A): defensa adaptada de C (que congela
+      // propietarioPrincipalId/propietarioSecundarioId en todo update no-master).
+      // En main conviven TRES campos sin equivalencia entre sí: `propietarioId`
+      // (titular económico canónico), `propietarioPrincipalId` (fiscal
+      // principal) y `propietarioSecundarioId` (fiscal segundo; NO autoriza).
+      // Reglas: el gestor (carterasE) y el autorizado explícito no titular NO
+      // alteran la titularidad; el titular edita otros campos libremente y
+      // toca la titularidad sólo si SIGUE siendo titular (permite añadir al
+      // segundo propietario o corregir; la transmisión total —desvincularse—
+      // requiere el flujo canónico del master). Ramas de autorización intactas.
+      function titularidadInalterada() {
+        return (('propietarioId' in existing() ? existing().propietarioId : '') == ('propietarioId' in incoming() ? incoming().propietarioId : ''))
+          && (('propietarioPrincipalId' in existing() ? existing().propietarioPrincipalId : '') == ('propietarioPrincipalId' in incoming() ? incoming().propietarioPrincipalId : ''))
+          && (('propietarioSecundarioId' in existing() ? existing().propietarioSecundarioId : '') == ('propietarioSecundarioId' in incoming() ? incoming().propietarioSecundarioId : ''));
+      }
+      function soyTitularActual() {
+        return ('propietarioId' in existing() && existing().propietarioId == myPropId())
+          || ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId());
+      }
+      function sigoSiendoTitular() {
+        return ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+          || ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId());
+      }
       // D2b: la escritura se amplía ÚNICAMENTE a las carterasE (ACTIVA +
       // LECTURA_ESCRITURA + responsableActual GESTOR, proyectadas por el
       // master). carterasL (lectura histórica o permiso LECTURA) NO escribe.
-      allow update: if isMasterAdmin() || inmuebleEnCarteraEscritura(existing()) || (
-        isPropietarioRole() && (
-          ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
-          ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId()) ||
-          canReachInmuebleId(inmuebleId)
-        )
-      );
+      allow update: if isMasterAdmin()
+        || (inmuebleEnCarteraEscritura(existing()) && titularidadInalterada())
+        || (isPropietarioRole() && soyTitularActual() && (titularidadInalterada() || sigoSiendoTitular()))
+        || (isPropietarioRole() && canReachInmuebleId(inmuebleId) && titularidadInalterada());
       allow delete: if isMasterAdmin();
     }
 
@@ -1248,28 +1268,62 @@ service cloud.firestore {
 
     // =========================================================================
     // 5. INVITACIONES DE VISITA (confirmación/reserva pública por token)
+    // DELTA-C (FASE 8B): validación de forma adaptada de C. El personal
+    // autenticado conserva el acceso; el anónimo queda acotado a las formas
+    // del flujo público (reserva/apertura: status, bookedAt, reserva,
+    // confirmado, openedAt). Validación de campos ≠ aislamiento completo.
     // =========================================================================
     match /invitaciones/{invitacionId} {
       allow read: if true;
-      allow create, update: if true;
+      allow create: if isSignedIn() || (
+        incoming().keys().hasAll(['inmuebleId', 'status'])
+        && incoming().keys().hasAny(['candidatoId', 'candidateId'])
+        && incoming().status is string
+      );
+      allow update: if isSignedIn() || (
+        incoming().diff(existing()).affectedKeys().hasAny(['status', 'bookedAt', 'reserva', 'confirmado', 'openedAt'])
+        && (!('status' in incoming()) || incoming().status is string)
+        && (!('reserva' in incoming()) || incoming().reserva is map)
+      );
       allow delete: if isSignedIn();
     }
 
     // =========================================================================
     // 6. TURNOS / SLOTS DE VISITA (reserva atómica pública)
+    // DELTA-C (FASE 8C): validación de forma adaptada de C (reserva atómica:
+    // disponible + vínculo de reserva). Autenticado intacto; anónimo acotado.
     // =========================================================================
     match /slots_visita/{slotId} {
       allow read: if true;
-      allow create, update: if true;
+      allow create: if isSignedIn() || (
+        incoming().keys().hasAll(['inmuebleId', 'fecha', 'horaInicio', 'horaFin'])
+        && incoming().fecha is string && incoming().horaInicio is string && incoming().horaFin is string
+      );
+      allow update: if isSignedIn() || (
+        incoming().diff(existing()).affectedKeys().hasAny(['disponible', 'reservaCandidateId', 'reservaCandidateNombre', 'reservaInvitationId'])
+        && (!('disponible' in incoming()) || incoming().disponible is bool)
+      );
       allow delete: if isSignedIn();
     }
 
     // =========================================================================
     // 7. SOLICITUDES DE DOCUMENTACIÓN POST-VISITA (portal público por token)
+    // DELTA-C (FASE 8D): validación de forma adaptada de C, extendida con los
+    // campos que el portal anónimo de main escribe realmente
+    // (`fechaUltimaActividad`, `historial`) y con `token` (nombre del campo en
+    // el modelo de main) además de `tokenDoc` (nombre en C). Autenticado
+    // intacto; anónimo acotado a la aportación documental.
     // =========================================================================
     match /solicitudes_documentacion/{solicitudDocId} {
       allow read: if true;
-      allow create, update: if true;
+      allow create: if isSignedIn() || (
+        incoming().keys().hasAll(['candidatoId', 'inmuebleId'])
+        && incoming().keys().hasAny(['tokenDoc', 'token'])
+      );
+      allow update: if isSignedIn() || (
+        incoming().diff(existing()).affectedKeys().hasAny(['documentos', 'estado', 'fechaAportacion', 'comentariosCandidato', 'todosAportados', 'fechaUltimaActividad', 'historial'])
+        && (!('estado' in incoming()) || incoming().estado is string)
+      );
       allow delete: if isSignedIn();
     }
 

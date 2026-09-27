@@ -13,6 +13,10 @@ export const COLECCION_AUDITORIA = 'audit_logs';
 export const COLECCION_USUARIOS_CANONICOS = 'usuarios';
 export const COLECCION_BINDING_CANONICO = 'usuarios_auth';
 export const claveEntidad = (e: { tipo: string; id: string }) => `${e.tipo}~${e.id}`;
+/** Clasificador mínimo de denegación de Rules (código del SDK nativo). Solo esto degrada a vacío. */
+export function esDenegacionPermiso(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'permission-denied';
+}
 type SDK = Pick<typeof sdkNativo, 'collection'|'doc'|'getDoc'|'getDocs'|'query'|'runTransaction'|'serverTimestamp'|'where'>;
 export function crearTransporteFirebase(db: Firestore, auth: Auth, sdk: SDK = sdkNativo): TransporteOperativo {
   const {collection,doc,getDoc,getDocs,query,runTransaction,serverTimestamp,where}=sdk;
@@ -22,6 +26,24 @@ export function crearTransporteFirebase(db: Firestore, auth: Auth, sdk: SDK = sd
     const snapshot = await getDoc(doc(db, 'inmuebles', a.inmuebleId));
     if (!snapshot.exists()) throw new Error('Inmueble no disponible.');
     return { ...snapshot.data(), id: snapshot.id } as Inmueble;
+  }
+  /** FASE 7 — Contratos visibles según los permisos REALES de main.
+   * Las Rules canónicas exigen `where('propietarioId','==',myPropId())` para listar
+   * `contratos_formalizacion` (una consulta solo por `inmuebleId` se deniega a todo perfil
+   * no-master, incluido el titular). Se consulta por `propietarioId` del ámbito —el mismo
+   * patrón canónico de `subscribeContratos`— y se filtra por `inmuebleId` en memoria (sin
+   * índice compuesto nuevo). Si las Rules deniegan (gestor sin acceso, profesional,
+   * inquilino), se degrada a `[]`: la ausencia de contrato es válida cuando el dominio la
+   * permite y la validación falla en cerrado cuando una referencia no puede verificarse.
+   * No se abren permisos, no se concede acceso por cartera y otros errores se propagan. */
+  async function contratosAccesibles(a: AmbitoOperacion): Promise<ContratoFormalizacion[]> {
+    try {
+      const snap = await getDocs(query(collection(db, 'contratos_formalizacion'), where('propietarioId', '==', a.propietarioId)));
+      return snap.docs.map((d) => ({ ...d.data(), id: d.id } as ContratoFormalizacion)).filter((c) => c.inmuebleId === a.inmuebleId);
+    } catch (err) {
+      if (esDenegacionPermiso(err)) return [];
+      throw err;
+    }
   }
   return {
     async identidad() {
@@ -47,12 +69,12 @@ export function crearTransporteFirebase(db: Firestore, auth: Auth, sdk: SDK = sd
     async contexto(ambito) {
       const [i, p, c, inq] = await Promise.all([
         inmueble(ambito), getDoc(doc(db, 'propietarios', ambito.propietarioId)),
-        getDocs(query(collection(db, 'contratos_formalizacion'), where('inmuebleId', '==', ambito.inmuebleId))),
+        contratosAccesibles(ambito),
         getDocs(query(collection(db, 'candidatos'), where('inmuebleId', '==', ambito.inmuebleId))),
       ]);
       if (!p.exists()) throw new Error('Propietario no disponible. No se crea ni infiere titularidad.');
       return { ambito, ambitosPermitidos: [ambito], inmuebles: [i], propietarios: [{ ...p.data(), id: p.id } as Propietario],
-        contratos: c.docs.map((d) => ({ ...d.data(), id: d.id } as ContratoFormalizacion)),
+        contratos: c,
         inquilinos: inq.docs.map((d) => ({ ...d.data(), id: d.id } as Candidato)) };
     },
     transaccion(propietarioId, trabajo) {

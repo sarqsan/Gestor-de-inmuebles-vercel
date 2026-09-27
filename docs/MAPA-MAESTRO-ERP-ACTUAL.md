@@ -6,7 +6,18 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: **2026-09-26 — §16 RECUPERACIÓN FUNCIONAL HISTÓRICA Y
+> Última actualización: **2026-09-27 — CADENA BLOQUE 6 INTEGRADA EN `main`
+> (`64fd0b2`, PR #6) + RECONCILIACIÓN DEL ASSERT E-62 CON EL ÁMBITO D3**
+> (§13, §14): `main = origin/main = 64fd0b2`, merge commit del PR #6 (sin squash
+> ni rebase) que incorpora íntegra la cadena lineal de 9 commits
+> `414642b`→`c2b1087` (deltas-C · `gestiones_cartera` · D2 · D3 · B4 · B4-fix ·
+> O7 · Import/Export v1 · auditoría Import/Export). El árbol de `64fd0b2` es
+> byte-idéntico al del tip auditado. Batería `test:bloque-e` **64/64** tras
+> reconciliar el assert E-62: D3 sustituyó el listado global `isStaff()` de las
+> colecciones E por **ámbito derivado** inmueble/contrato (+carteras, +admin) y
+> el assert pasa a verificar esa estructura acotada (sin `isStaff()` global y sin
+> vía de listado para `isTenant()`); `firestore.rules` **intacto**.
+> Anterior: 2026-09-26 — §16 RECUPERACIÓN FUNCIONAL HISTÓRICA Y
 > CAPACIDADES ESTRATÉGICAS** (registro documental, sin cambios de código):
 > auditoría funcional histórica declarada trabajo pendiente ·
 > `IA_CARTERA_TRANSVERSAL` · `INCIDENCIA_IA_END_TO_END` ·
@@ -40,8 +51,8 @@
 |---|---|
 | Repositorio canónico | `github.com/sarqsan/Gestor-de-inmuebles-vercel` |
 | Rama canónica histórica | `arena/01a0a413-gestor-de-inmuebles-vercel` @ `91da820` (GAP 1–8 consolidados; absorbida en la línea que culmina en `5f7754b`) |
-| Rama de sesión actual | `arena/01a0d97d-gestor-de-inmuebles-vercel` — cadena D1R/D2/D2a/D2b/D3 + integración Arena C (`8a2fb20`) + INC-06 (`37341c6`) |
-| `main` | **`37341c6` — PUBLICADA y custodiada (`main = origin/main`, 2026-09-26).** Contiene toda la cadena validada: ver §13. La antigua línea paralela `4d420bd` (AI Studio) fue reconciliada históricamente en `5f7754b` (ver §9) |
+| Rama de sesión actual | `arena/01a0e437-gestor-de-inmuebles-vercel` — reconciliación del assert E-62 con el ámbito D3 tras la integración del PR #6 |
+| `main` | **`64fd0b2` — PUBLICADA y custodiada (`main = origin/main`, 2026-09-27).** Cadena D1R/D2/D2a/D2b/D3 + Arena C (`8a2fb20`) + INC-06 (`37341c6`) + cadena BLOQUE 6 (`414642b`→`c2b1087`, merge del PR #6): ver §13. La antigua línea paralela `4d420bd` (AI Studio) fue reconciliada históricamente en `5f7754b` (ver §9) |
 | Deploy | Vercel (`vercel.json`: build → `dist`, función serverless `api/index.ts` → Express, rewrites SPA) |
 | Firebase | Proyecto `startup-sanctuary-sln7n` · Firestore `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` · Storage `startup-sanctuary-sln7n.firebasestorage.app` |
 | Base de datos | Firestore (~45 colecciones, ver §2.2) + Storage (rutas declaradas en `storage.rules`) |
@@ -112,8 +123,12 @@ Distribución actual de tests:
 > **GAP-R1 / R2 / R3 (2026-09-21, desarrollo Arena B, integración Arena A)** — `tests/conciliacion-persistencia.test.ts` (15 → 27 tras el cierre de GAP-R1, 2026-09-23),
 > `tests/morosidad-evidencias-storage.test.ts` (20), `tests/ficha-publica-inmueble.test.ts` (29). Global 899/899 (38 ficheros).
 >
-> **ESTADO 2026-09-26 (`main = 37341c6`)** — batería vigente: **Vitest 1666 pass + 2 skip
-> (72 ficheros)** · tests nativos del módulo patrimonial (`node --test`) **87/87** ·
+> **ESTADO 2026-09-27 (`main = 64fd0b2`)** — batería vigente: **Vitest 2253 pass + 2 skip
+> (98 ficheros)** · tests nativos del módulo patrimonial (`node --test`) **87/87** en clon
+> completo (los 4 asserts de custodia histórica de las suites nativas — `isolation` /
+> `integration-boundaries` — resuelven commits base de B y de la base patrimonial y fallan
+> con `bad object` en un clon shallow: limitación de entorno, preexistente y no atribuible
+> a ningún commit) ·
 > `test:bloque-b` **92/92** · `test:bloque-c` **82/82** · `test:bloque-e` **64/64** ·
 > `tsc --noEmit` **0** · `vite build` OK · `esbuild server` OK. Suites nuevas de la cadena:
 > `gestionesCartera` (16), `carterasGestion` (10), `importacion` (17), `expedienteFiscal` (19),
@@ -1488,7 +1503,7 @@ Trazabilidad Git (ver `docs/ESTADO-GIT-ERP.md`): R1 `415de41` → `a18967f` · R
 
 ---
 
-## 13. ESTADO CONSOLIDADO Y CUSTODIADO (2026-09-26) — `main = origin/main = 37341c6`
+## 13. ESTADO CONSOLIDADO Y CUSTODIADO (2026-09-27) — `main = origin/main = 64fd0b2`
 
 ### 13.1 Cadena publicada
 
@@ -1512,6 +1527,17 @@ estado custodiado:
 | Integración Arena C | `8a2fb20` | Módulo patrimonial de C integrado (ver §4 F.11) |
 | INC-06 | `37341c6` | Ficha patrimonial persistente + ejecución controlada de importaciones + reglas + auditoría |
 
+**Ampliación 2026-09-27 — cadena BLOQUE 6 integrada en `main` (`64fd0b2`).**
+`main` avanzó de `6e543ce` a **`64fd0b2`** con el **PR #6 MERGED**
+(`arena/01a0e2af-gestor-de-inmuebles-vercel` → `main`), **merge commit** (sin
+squash ni rebase) que preserva íntegra la cadena lineal de 9 commits:
+`414642b` (deltas-C) → `7f40c40` (`gestiones_cartera`) → `b43b7ea` (D2 ámbito de
+inmueble) → `2292870` (D3 claims/ámbito) → `2162dd7` (B4 dry-run) → `819f1cb`
+(validación B4) → `6f68891` (autorización O7) → `3ac21a5` (Import/Export v1) →
+`c2b1087` (auditoría + hardening Import/Export). El árbol de `64fd0b2` es
+**byte-idéntico** al del tip auditado `c2b1087` (0 cambios ocultos). El bloque
+import/export deja de estar "fuera de `main`" (ficha en §14, BLOQUE 6).
+
 **Procedencia Arena C:** `7657eea2d08f1e66c480091c5b81ecfc16aac5a8` (repo
 `sarqsan/Gestor-alquileres-vercel`, rama `arena/01a0dd70-gestor-alquileres-vercel`)
 es la **fuente/origen** de la base patrimonial integrada. **NO debe volver a
@@ -1522,12 +1548,6 @@ puente nuevos). **No existe duplicación funcional intencionada.**
 
 ### 13.2 Fuera de `main` (deliberadamente)
 
-- `arena/01a0e2af-gestor-de-inmuebles-vercel` (2026-09-27): BLOQUE 6
-  importador/exportador canónicos `erp-import-export-v1` + cadena B4/O7 de
-  migración histórica (dry-run, validación, autorización). **NO integrada**;
-  pendiente de revisión e integración lineal en `main` (no merge).
-  Import/export **AUDITADO + corregido** (commit `fix(import-export): audit
-  and harden 3ac21a5`): dictamen APTO PARA INTEGRACIÓN.
 - `arena/01a0d832-gestor-de-inmuebles-vercel` @ `1e73995` (7 commits del
   2026-09-25: UX-0A/0B/1A/1B/1C, fix segundo titular, auditoría de deriva):
   **NO integrada**; pendiente de investigación independiente (no se asume que
@@ -1558,7 +1578,8 @@ abiertos como `REQUIERE_VALIDACION` (ninguna se resuelve automáticamente).
 
 - Reconciliación de historia completada (grafo demostrado con Git).
 - Integración del trabajo válido (cadena lineal, sin duplicaciones).
-- `main` publicada: **`main = origin/main = 37341c6`**.
+- `main` publicada: **`main = origin/main = 37341c6`** (ampliada después a
+  `64fd0b2` con la cadena BLOQUE 6 vía PR #6; ver §13.1).
 - Working tree limpio · cero commits pendientes.
 - Arena `01a0d832`: NO integrada; permanece en `1e73995`; sus 7 commits quedan
   pendientes de investigación independiente (ver §13.2).
@@ -1688,7 +1709,7 @@ conservando origen · incidencia · campos faltantes · trazabilidad.
 > independiente en **§16** — NO queda absorbida por este bloque ni por
 > ningún GAP genérico.
 
-### BLOQUE 6 — IMPORTACIÓN / EXPORTACIÓN GLOBAL DEL ERP — **IMPLEMENTADO EN RAMA (2026-09-27, pendiente de integración en `main`)**
+### BLOQUE 6 — IMPORTACIÓN / EXPORTACIÓN GLOBAL DEL ERP — **IMPLEMENTADO E INTEGRADO EN `main` (2026-09-27, merge `64fd0b2` del PR #6)**
 
 **No confundir con el INC-06 ya implementado** (INC-06 = base patrimonial +
 importación controlada, en `main`). Este bloque cierra el sistema global.
@@ -1708,8 +1729,9 @@ post-escritura anti-falso-CREADO; núcleo: doble-detalle de auditoría,
 trazabilidad con sourceId duplicado, filtro inmuebleIds en INMUEBLE, fallback
 de titular en exportación, importeRecibido por estado, fechaVencimiento de
 calendario) + 38 tests de regresión (núcleo/adaptador/panel); suite/tsc/build
-verdes. Dictamen: **APTO PARA INTEGRACIÓN** (pendiente revisión de
-integración lineal; **NO integrado en `main`**).
+verdes. Dictamen: **APTO PARA INTEGRACIÓN — INTEGRADO en `main`** el
+2026-09-27 (`64fd0b2`, merge commit del PR #6; cadena de 9 commits
+`414642b`→`c2b1087`, sin squash ni rebase; árbol byte-idéntico al tip auditado).
 
 **IMPORTACIÓN:** JSON · Excel/CSV · datos completos · datos parciales ·
 propietario destino explícito · preview/dry-run · validación · duplicados ·

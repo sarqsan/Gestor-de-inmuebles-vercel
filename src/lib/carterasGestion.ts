@@ -74,3 +74,22 @@ export function proyectarCarterasGestionadas(
 export function propietariosGestionadosDe(carteras: CarterasProyectadas): string[] {
   return Array.from(new Set([...carteras.carterasL, ...carteras.carterasE]));
 }
+
+/**
+ * Índice de resolución de gestiones vigentes por titular. A diferencia de
+ * carterasL/E, incluye delegaciones parciales: el índice solo permite a Rules
+ * localizar la relación canónica; inmuebleIds y el estado se revalidan en
+ * cada acceso. No es una proyección de permisos por sí mismo.
+ */
+export function indexarGestionesActivas(
+  gestiones: readonly GestionCartera[],
+  gestorUsuarioId: string
+): Record<string, string> {
+  const indice: Record<string, string> = {};
+  for (const gestion of gestiones) {
+    if (!gestion || !gestion.propietarioId || gestion.gestorUsuarioId !== gestorUsuarioId
+      || gestion.estado !== 'ACTIVA' || gestion.resolucionInvitacion !== 'ACEPTADA') continue;
+    indice[gestion.propietarioId] = gestion.id;
+  }
+  return indice;
+}

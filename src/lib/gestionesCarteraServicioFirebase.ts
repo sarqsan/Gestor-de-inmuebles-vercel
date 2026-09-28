@@ -46,7 +46,7 @@ import {
   type UsuarioGestionable,
 } from './gestionesCarteraServicio';
 import type { GestionCartera } from './gestionesCartera';
-import { proyectarCarterasGestionadas } from './carterasGestion';
+import { indexarGestionesActivas, proyectarCarterasGestionadas } from './carterasGestion';
 
 function eventoObligatorioGestion(ref: {id:string}, gestion: GestionCartera, auditId: string) {
   const actor = auth.currentUser;
@@ -107,7 +107,13 @@ export const puertoGestionesCarteraFirestore: PuertoGestionesCartera = {
       const mirror = mirrorSnap?.exists() ? mirrorSnap.data() : null;
       const oldIndex: Record<string,string> = mirror?.gestionesPorPropietario || {};
       const newIndex = { ...oldIndex };
-      if (confirmada.estado === 'ACTIVA' && confirmada.inmuebleIds.length === 0) newIndex[confirmada.propietarioId] = confirmada.id;
+      // El índice es una ruta de resolución de la relación, no una concesión
+      // de cartera completa. Incluye tanto delegaciones completas como
+      // parciales activas; las Rules verifican después estado, gestor y
+      // pertenencia del inmueble a inmuebleIds en cada lectura/escritura.
+      const indiceConfirmado = indexarGestionesActivas([confirmada], confirmada.gestorUsuarioId);
+      if (indiceConfirmado[confirmada.propietarioId])
+        newIndex[confirmada.propietarioId] = indiceConfirmado[confirmada.propietarioId];
       else if (newIndex[confirmada.propietarioId] === confirmada.id) delete newIndex[confirmada.propietarioId];
       const oldL = Array.isArray(mirror?.carterasL) ? mirror.carterasL as string[] : [];
       const oldE = Array.isArray(mirror?.carterasE) ? mirror.carterasE as string[] : [];
@@ -215,17 +221,15 @@ export const puertoEspejoCarterasFirestore: PuertoEspejoCarteras = {
       const owners = await Promise.all([...new Set(frescas.map(g => g.propietarioId))]
         .map(id => tx.get(doc(db, COLECCION_PROPIETARIOS, id))));
       const existentes = new Set(owners.filter(o => o.exists()).map(o => o.id));
-      const derivada = proyectarCarterasGestionadas(frescas.filter(g => existentes.has(g.propietarioId)), userId);
-      // El caller puede solicitar una reducción, jamás ampliar la derivación.
-      const indexadas: Record<string,string> = actual.data().gestionesPorPropietario || {};
+      const vigentes = frescas.filter(g => existentes.has(g.propietarioId));
+      const derivada = proyectarCarterasGestionadas(vigentes, userId);
+      // El caller puede solicitar una reducción de carteras completas, jamás
+      // ampliar la derivación. El índice también resuelve delegaciones
+      // parciales activas, que no aparecen en carterasL/E: Security Rules
+      // comprueban inmuebleIds por petición y no infieren acceso del índice.
       const carterasL = derivada.carterasL.filter(id => proyeccion.carterasL.includes(id));
       const carterasE = derivada.carterasE.filter(id => proyeccion.carterasE.includes(id));
-      const gestionesPorPropietario = { ...indexadas };
-      for (const pid of Object.keys(gestionesPorPropietario)) if (!derivada.carterasL.includes(pid) && !derivada.carterasE.includes(pid)) delete gestionesPorPropietario[pid];
-      for (const pid of new Set([...carterasL, ...carterasE])) {
-        const vigente = frescas.find(g => g.propietarioId === pid && g.estado === 'ACTIVA');
-        if (vigente) gestionesPorPropietario[pid] = vigente.id;
-      }
+      const gestionesPorPropietario = indexarGestionesActivas(vigentes, userId);
       const audit = doc(collection(db, 'audit_logs'));
       tx.set(mirrorRef, { carterasL, carterasE, gestionesPorPropietario, roadmap01AuditId: audit.id }, { merge: true });
       tx.set(audit, { id: audit.id, usuarioId: actor.uid, usuarioEmail: actor.email, usuarioNombre: actor.email,

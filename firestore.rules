@@ -293,11 +293,13 @@ service cloud.firestore {
     }
     function ambitoPorInmuebleLectura(inmuebleId) {
       return esAdminInmuebles() || (activeUser() && inmuebleId is string
-        && pidEnAmbitoLectura(pidDelInmuebleAmbito(inmuebleId)));
+        && (pidEnAmbitoLectura(pidDelInmuebleAmbito(inmuebleId))
+          || inmuebleParcialIndexado(pidDelInmuebleAmbito(inmuebleId), inmuebleId, false)));
     }
     function ambitoPorInmuebleEscritura(inmuebleId) {
       return esAdminInmuebles() || (activeUser() && inmuebleId is string
-        && pidEnAmbitoEscritura(pidDelInmuebleAmbito(inmuebleId)));
+        && (pidEnAmbitoEscritura(pidDelInmuebleAmbito(inmuebleId))
+          || inmuebleParcialIndexado(pidDelInmuebleAmbito(inmuebleId), inmuebleId, true)));
     }
     function pidDelContratoAmbito(contratoId) {
       return get(/databases/$(database)/documents/contratos_formalizacion/$(contratoId)).data.propietarioId;

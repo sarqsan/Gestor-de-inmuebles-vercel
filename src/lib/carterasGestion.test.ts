@@ -20,7 +20,7 @@ import {
   type ParametrosCrearGestion,
   type TipoEventoGestion,
 } from './gestionesCartera';
-import { proyectarCarterasGestionadas, propietariosGestionadosDe } from './carterasGestion';
+import { indexarGestionesActivas, proyectarCarterasGestionadas, propietariosGestionadosDe } from './carterasGestion';
 
 const F = '2026-09-26T10:00:00.000Z';
 const F2 = '2026-09-27T10:00:00.000Z';
@@ -110,9 +110,15 @@ describe('D3 · proyección de carteras gestionadas', () => {
   });
 
   it('ROADMAP-01 · una delegación parcial nunca se proyecta como cartera completa', () => {
-    const parcial = ev(alta({ inmuebleIds: ['inm_A'], permiso: 'LECTURA_ESCRITURA' }), 'ACTIVACION');
+    const parcial = { ...ev(alta({ inmuebleIds: ['inm_A'], permiso: 'LECTURA_ESCRITURA' }), 'ACTIVACION'), resolucionInvitacion: 'ACEPTADA' as const };
     expect(proyectarCarterasGestionadas([parcial], GESTOR)).toEqual({ carterasL: [], carterasE: [] });
     expect(proyectarCarterasGestionadas([parcial], OTRO)).toEqual({ carterasL: [], carterasE: [] });
+    expect(indexarGestionesActivas([parcial], GESTOR)).toEqual({ prop_X: parcial.id });
+    expect(indexarGestionesActivas([parcial], OTRO)).toEqual({});
+    expect(indexarGestionesActivas([{ ...parcial, estado: 'REVOCADA' }], GESTOR)).toEqual({});
+    const sinResolucion: GestionCartera = { ...parcial };
+    delete sinResolucion.resolucionInvitacion;
+    expect(indexarGestionesActivas([sinResolucion], GESTOR)).toEqual({});
   });
 
   it('P10 · varias carteras: deduplicadas y en orden; L ∪ E para el ámbito de consulta', () => {

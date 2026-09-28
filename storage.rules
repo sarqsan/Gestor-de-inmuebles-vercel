@@ -105,11 +105,31 @@ service firebase.storage {
     // Derivación inmueble → propietario. `adminStorage()` cortocircuita
     // primero: el admin opera también huérfanos (inmueble borrado); para el
     // resto, un eslabón roto falla ⇒ deny.
+    // ROADMAP-03: delegación parcial = SOLO inmuebles listados en la relación
+    // viva indexada (activa, aceptada, gestor = usuario del espejo). Nunca
+    // se amplía al resto de la cartera del titular.
+    function gestionIdx(pid) {
+      return firestore.get(/databases/(default)/documents/gestiones_cartera/$(espejo().gestionesPorPropietario[pid])).data;
+    }
+    function parcialVigente(pid, inmuebleId, escritura) {
+      return espejoActivo() && 'gestionesPorPropietario' in espejo()
+        && pid in espejo().gestionesPorPropietario
+        && gestionIdx(pid).propietarioId == pid
+        && gestionIdx(pid).gestorUsuarioId == espejo().usuarioId
+        && gestionIdx(pid).estado == 'ACTIVA'
+        && gestionIdx(pid).resolucionInvitacion == 'ACEPTADA'
+        // [] conserva el contrato de delegación de cartera completa; una
+        // lista no vacía solo habilita inmuebles enumerados explícitamente.
+        && (gestionIdx(pid).inmuebleIds.size() == 0 || inmuebleId in gestionIdx(pid).inmuebleIds)
+        && (!escritura || (gestionIdx(pid).permiso == 'LECTURA_ESCRITURA' && gestionIdx(pid).responsableActual == 'GESTOR'));
+    }
     function ambitoInmuebleLectura(inmuebleId) {
-      return adminStorage() || (espejoActivo() && ambitoPidLectura(pidDeInmueble(inmuebleId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidLectura(pidDeInmueble(inmuebleId))
+        || parcialVigente(pidDeInmueble(inmuebleId), inmuebleId, false)));
     }
     function ambitoInmuebleEscritura(inmuebleId) {
-      return adminStorage() || (espejoActivo() && ambitoPidEscritura(pidDeInmueble(inmuebleId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidEscritura(pidDeInmueble(inmuebleId))
+        || parcialVigente(pidDeInmueble(inmuebleId), inmuebleId, true)));
     }
     function ambitoInmuebleBorrado(inmuebleId) {
       return adminStorage() || (espejoActivo() && ambitoPidBorrado(pidDeInmueble(inmuebleId)));

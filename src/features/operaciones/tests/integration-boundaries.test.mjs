@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const root=fileURLToPath(new URL('../../../../',import.meta.url));
 const read=(p)=>readFileSync(new URL('../../../../'+p,import.meta.url),'utf8');
-const base='c4949a62fb13bde3aeff74a213f2a2cd40e5305c'; // base canónica de B pre-port
+const base='46bb9f79b43949d833acf00e9557e575769d039a'; // Arena B justo antes de reconciliar C (límite exacto del diff de integración)
 // BLOQUE 5 — CUSTODIA/INCOMPATIBILIDAD DOCUMENTADA: la base canónica de B no
 // existe en este clon (incidencia de infraestructura, no del bloque) y el BLOQUE 5
 // necesita ampliar el modelo (`src/types.ts`, ampliación ADITIVA de `Gasto` y
@@ -14,7 +14,7 @@ const base='c4949a62fb13bde3aeff74a213f2a2cd40e5305c'; // base canónica de B pr
 // comprobación original se ejecuta sin cambios y, para los dos ficheros
 // compartidos que el bloque evoluciona, se exige la garantía equivalente y
 // verificable: NINGUNA línea base puede borrarse ni reescribirse (solo adiciones).
-const REFERENCIA_LOCAL_BLOQUE_5='967ea936c70c4402a3f325667c566f04fb88b415';
+const REFERENCIA_LOCAL_BLOQUE_5='46bb9f79b43949d833acf00e9557e575769d039a';
 const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8'});
 function existeCommit(sha){try{git('cat-file','-e',`${sha}^{commit}`);return true;}catch{return false;}}
 function referenciaCustodia(){

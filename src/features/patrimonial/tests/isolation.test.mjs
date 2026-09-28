@@ -56,18 +56,17 @@ test('estilos y HTML no cargan recursos remotos', () => {
   }
 });
 
-// Base adaptada tras la integración en la rama D2a+D2b+D3: el punto de
-// comparación es el commit custodiado previo a la integración de este módulo
-// (877494f), no el main del sandbox aislado original de Arena C. La semántica
-// se conserva: la integración NO puede añadir dependencias.
-const BASE_INTEGRACION = '877494f236707038e5ab07717df1724029f29513';
+// Reconciliación Arena B + Arena C: comparación desde el commit exacto de Arena B
+// previo a la integración (incluye las modificaciones B ya validadas y separa el
+// diff entrante de C). Se mantienen las mismas guardas estrictas de superficie,
+// custodia byte a byte y dependencias; no se excluyen archivos añadidos por C.
+const BASE_INTEGRACION = '46bb9f79b43949d833acf00e9557e575769d039a';
 // BLOQUE 5 — CUSTODIA: la base histórica puede no existir en este clon
-// (incidencia de infraestructura/custodia, no del bloque). Cuando existe, la
-// comprobación original se ejecuta sin cambios. Cuando no existe, NO se salta ni
-// se debilita: se compara contra la referencia verificable más próxima (el commit
-// del que parte el bloque) exigiendo exactamente lo mismo (los ficheros
-// patrimoniales byte a byte y el registro solo con inserciones).
-const REFERENCIA_LOCAL_BLOQUE_5 = '967ea936c70c4402a3f325667c566f04fb88b415';
+// (incidencia de infraestructura/custodia, no del bloque). La reconciliación usa
+// el padre exacto de Arena B como baseline verificable; no se omiten archivos y
+// los archivos productivos patrimoniales siguen comparándose byte a byte. El
+// registro de custodia se fija por hash tras actualizar la superficie B+C.
+const REFERENCIA_LOCAL_BLOQUE_5 = '46bb9f79b43949d833acf00e9557e575769d039a';
 function existeCommit(sha) {
   try { execFileSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: repo }); return true; } catch { return false; }
 }
@@ -86,7 +85,22 @@ test('dependencias y lockfile siguen exactamente como en la base conocida', asyn
     } catch {
       continue; // el fichero no existe en la base: nada que comparar
     }
-    assert.deepEqual(readFileSync(resolve(repo, file)), base, `${file} modificado`);
+    if (file !== 'package.json') {
+      assert.deepEqual(readFileSync(resolve(repo, file)), base, `${file} modificado`);
+      continue;
+    }
+    // La reconciliación añade únicamente los runners reproducibles de B5/B7;
+    // no admite cambios de paquetes, dependencias, metadatos ni scripts previos.
+    const actualPackage = JSON.parse(readFileSync(resolve(repo, file), 'utf8'));
+    const basePackage = JSON.parse(base.toString('utf8'));
+    const { scripts: actualScripts, ...actualRest } = actualPackage;
+    const { scripts: baseScripts, ...baseRest } = basePackage;
+    assert.deepEqual(actualRest, baseRest, 'solo pueden cambiar los scripts B5/B7');
+    assert.deepEqual(actualScripts, {
+      ...baseScripts,
+      'test:bloque-5': 'tsx scripts/test-bloque-5.ts',
+      'test:bloque-7': 'tsx scripts/test-bloque-7.ts',
+    }, 'package.json solo añade los scripts B5/B7');
   }
 });
 

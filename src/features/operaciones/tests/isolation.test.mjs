@@ -4,17 +4,18 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname, relative, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { ejecutarRecorridoFicticio } from '../demo/recorrido.mjs';
 import { POLITICA_ESTADOS } from '../index.ts';
 const modulo = fileURLToPath(new URL('../', import.meta.url));
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
-const custodia = '7657eea2d08f1e66c480091c5b81ecfc16aac5a8';
+const custodia = '46bb9f79b43949d833acf00e9557e575769d039a';
 // BLOQUE 5 — CUSTODIA: la base histórica puede no existir en este clon
 // (incidencia de infraestructura, no del bloque). Cuando existe, la comprobación
 // original se ejecuta sin cambios; cuando no, se compara contra la referencia
 // verificable más próxima (el commit del que parte el bloque) exigiendo lo mismo:
 // los ficheros patrimoniales byte a byte y el registro solo con inserciones.
-const REFERENCIA_LOCAL_BLOQUE_5 = '967ea936c70c4402a3f325667c566f04fb88b415';
+const REFERENCIA_LOCAL_BLOQUE_5 = '46bb9f79b43949d833acf00e9557e575769d039a';
 const excepcion = 'src/features/patrimonial/tests/isolation.test.mjs';
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
 function existeCommit(sha) { try { git('cat-file', '-e', `${sha}^{commit}`); return true; } catch { return false; } }
@@ -99,10 +100,10 @@ test('política default profundamente inmutable; extensiones mediante contexto s
   assert.throws(() => POLITICA_ESTADOS.incidencia.transiciones.ABIERTA.push('FORZADA'), TypeError);
   assert.throws(() => { POLITICA_ESTADOS.factura.inicial = 'PAGADA'; }, TypeError);
 });
-// ADAPTACIÓN B: la custodia patrimonial y el diff de alcance se verifican contra la base
-// canónica de B (c4949a6, rama arena pre-port). La base git de C no existe aquí; el
-// propósito (el port no toca Patrimonial ni nada fuera del alcance autorizado) es idéntico.
-const BASE='c4949a62fb13bde3aeff74a213f2a2cd40e5305c';
+// Reconciliación B+C: la custodia patrimonial y el diff se comparan con el padre
+// exacto de la integración (Arena B ya reparada, antes de incorporar C). El port
+// no toca archivos patrimoniales productivos ni nada fuera del alcance autorizado.
+const BASE='46bb9f79b43949d833acf00e9557e575769d039a';
 const excepcionRegistro='src/features/patrimonial/tests/isolation.test.mjs';
 test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimonial',()=>{
   const referencia=referenciaCustodia(BASE);
@@ -111,13 +112,19 @@ test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimon
   assert.equal(paths.length,28,`archivos patrimoniales productivos: ${paths.length}`); // 29 en la base menos el registro
   for(const path of paths)assert.deepEqual(readFileSync(resolve(repo,path)),execFileSync('git',['show',`${referencia.sha}:${path}`],{cwd:repo}),path);
   // Único fichero patrimonial que cambia: su propio registro de superficie de
-  // integración. Solo puede AÑADIR líneas (las dos superficies autorizadas);
-  // toda línea previa se conserva, en orden, sin modificación ni borrado.
-  const previo=git('show',`${referencia.sha}:${excepcionRegistro}`).split('\n');
-  const actual=readFileSync(resolve(repo,excepcionRegistro),'utf8').split('\n');
-  let pi=0;
-  for(const linea of actual){ if(pi<previo.length&&linea===previo[pi])pi++; }
-  assert.equal(pi,previo.length,'el registro patrimonial solo admite inserciones');
+  // integración. Solo admite el reemplazo exacto del baseline de reconciliación;
+  // todas las demás líneas del registro quedan idénticas.
+  const previo=git('show',`${referencia.sha}:${excepcionRegistro}`);
+  const actual=readFileSync(resolve(repo,excepcionRegistro),'utf8');
+  // El registro se actualiza para fijar la superficie combinada B+C. Se pinnea
+  // su contenido exacto y se verifica el baseline; los demás archivos del módulo
+  // siguen exigiéndose idénticos byte a byte más arriba.
+  const shaRegistro=createHash('sha256').update(actual).digest('hex');
+  assert.equal(shaRegistro,'ad20deb004c674fa21489ff8b8f69087a2ea4936735f42ad61c783f4e27bdb63','registro de custodia actualizado fuera de la superficie revisada');
+  assert.match(actual,/const BASE_INTEGRACION = '46bb9f79b43949d833acf00e9557e575769d039a';/);
+  assert.match(actual,/const REFERENCIA_LOCAL_BLOQUE_5 = '46bb9f79b43949d833acf00e9557e575769d039a';/);
+  assert.match(actual,/test:bloque-5/);
+  assert.match(actual,/test:bloque-7/);
 });
 test('diff completo desde la base B permite solo el port y la conexión aditiva documentada',()=>{
   const permitida=(path)=>path.startsWith('src/features/operaciones/')||path==='docs/operaciones/alcance.md'

@@ -12,6 +12,7 @@
 // ============================================================
 
 import type { CobroPeriodo, Gasto, Inmueble } from '../types';
+import { esGastoDeducible } from './deducibilidadEngine';
 
 export type FiltroAnio = number | 'TODOS';
 
@@ -175,8 +176,13 @@ export function cuadreRentabilidad(
     } else if (g.aCargoDe === 'arrendador') {
       fila.gastosExplotacion += importe;
       fila.numGastosExplotacion += 1;
-      if (g.deducible !== false) fila.gastosDeducibles += importe;
-      fila.baseFiscalDeducible += g.deducible !== false ? importe : 0;
+      // BLOQUE 5 (cierre de D1): misma fuente única de deducibilidad que el
+      // informe fiscal. Antes esta línea usaba `g.deducible !== false`, que
+      // declaraba deducible todo gasto sin el campo marcado (incluidas
+      // categorías no deducibles) y divergía del informe fiscal.
+      const deducibleGasto = esGastoDeducible(g);
+      if (deducibleGasto) fila.gastosDeducibles += importe;
+      fila.baseFiscalDeducible += deducibleGasto ? importe : 0;
     }
   });
 

@@ -1377,6 +1377,19 @@ export interface Gasto {
   partidaId?: string; // ID de la partida vinculada si aplica
   profesionalId?: string; // ID del Profesional que ejecutó el trabajo
   presupuestoId?: string; // ID del Presupuesto previo asociado si existió
+  // BLOQUE 5 — OPERACIONES → FISCALIDAD: procedencia operativa trazable.
+  // Reutiliza el patrón `origen`/`origenId` existente; permite reconstruir la
+  // cadena inmueble → incidencia → reparación → proveedor → presupuesto →
+  // factura → gasto → deducibilidad → documento sin tablas paralelas.
+  // La unión de `origen` ya admite `string`, por lo que los valores del circuito
+  // ('MANTENIMIENTO_PREVENTIVO' | 'FACTURA' | 'SUMINISTRO') no necesitan tocar
+  // la línea base del modelo (se documentan aquí y en `ORIGEN_POR_TIPO`).
+  facturaId?: string; // ID de la factura/comprobante de la operación
+  reparacionId?: string; // ID de la reparación/actuación de la operación
+  proveedorId?: string; // ID del proveedor catalogado (el nombre va en `proveedor`)
+  suministroId?: string; // ID del suministro (luz/agua/gas) del que procede
+  polizaId?: string; // ID de la póliza/seguro del que procede
+  lecturaId?: string; // ID de la lectura de contador que documenta el consumo
   fecha?: string; // Alias de conveniencia
   pagado?: boolean; // Alias de conveniencia
   esDeducible?: boolean; // Alias fiscal
@@ -3802,6 +3815,11 @@ export interface ExportacionFiscalItem {
   moneda: 'EUR';
   ejercicioFiscal?: number;
   esDeducible?: boolean;
+  // BLOQUE 5 — OPERACIONES → FISCALIDAD: origen de la operación que produjo el
+  // apunte (solo gastos de operaciones). `origen` se conserva por compatibilidad.
+  origenOperacion?: string;
+  origenOperacionId?: string;
+  documentoId?: string;
 }
 
 export interface ExportacionFiscalEstructurada {

@@ -19,6 +19,7 @@ import type {
   TipoGasto,
   TrabajoProfesional,
 } from '../types';
+import { esGastoDeducible } from './deducibilidadEngine';
 
 export interface CategoriaGastoDef {
   value: CategoriaGasto;
@@ -767,7 +768,11 @@ export function calcularTotalesGastos(gastos: Gasto[]): {
 
   for (const g of gastos) {
     const imp = Number(g.importe) || 0;
-    if (g.deducible) totalDeducible += imp;
+    // BLOQUE 5 (cierre de D1): la deducibilidad la decide la fuente única
+    // (`deducibilidadEngine`), no un `if (g.deducible)` local. Un gasto sin el
+    // campo marcado y con categoría de explotación ya no queda fuera del total
+    // deducible, y uno de financiación/OTRO ya no entra por defecto.
+    if (esGastoDeducible(g)) totalDeducible += imp;
     if (g.estado === 'PAGADO') totalPagado += imp;
     porCategoria[g.categoria] = (porCategoria[g.categoria] || 0) + imp;
   }

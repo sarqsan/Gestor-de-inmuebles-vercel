@@ -940,6 +940,140 @@ service cloud.firestore {
         || (isPropietarioRole() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))
         || (isPropietarioRole() && canReachInmuebleId(inmuebleId) && titularidadInalterada());
       allow delete: if isMasterAdmin();
+
+      // BLOQUE 6 — el documento patrimonial es hijo del inmueble: IDs
+      // conocidos no autorizan lectura. Se resuelven titular, cartera y
+      // delegación parcial viva en cada acceso; gestión de lectura no escribe.
+      match /documentos_patrimoniales/{documentoId} {
+        function inmuebleDoc() {
+          return get(/databases/$(database)/documents/inmuebles/$(inmuebleId)).data;
+        }
+        function docLectura() {
+          return esAdminInmuebles() || inmuebleEsMio(inmuebleDoc())
+            || inmuebleEnCarteraGestionada(inmuebleDoc())
+            || inmuebleParcialIndexado(inmuebleDoc().propietarioId, inmuebleId, false);
+        }
+        function docEscritura() {
+          return esAdminInmuebles() || inmuebleEsMio(inmuebleDoc()) || inmuebleEnCarteraEscritura(inmuebleDoc())
+            || inmuebleParcialIndexado(inmuebleDoc().propietarioId, inmuebleId, true);
+        }
+        function docBorrado() {
+          return esAdminInmuebles() || inmuebleEsMio(inmuebleDoc());
+        }
+        function fuenteEnInmueble(col, id) {
+          return exists(/databases/$(database)/documents/$(col)/$(id));
+        }
+        function tipoDocumentoPatrimonialValido(tipo) {
+          return tipo in [
+            'FACTURA_GASTO', 'JUSTIFICANTE_PAGO_GASTO', 'JUSTIFICANTE_COBRO', 'CONTRATO',
+            'ANEXO_CONTRATO', 'POLIZA_SEGURO', 'DOCUMENTO_POLIZA', 'DOCUMENTO_RENOVACION_POLIZA',
+            'RECIBO', 'LIQUIDACION_IBI', 'TASA', 'FOTO_INCIDENCIA', 'DOCUMENTO_INCIDENCIA',
+            'DOCUMENTO_MANTENIMIENTO', 'DOCUMENTO_GARANTIA', 'DOCUMENTO_INVENTARIO', 'OTRO'
+          ];
+        }
+        function facturaEnInmueble(d) {
+          return fuenteEnInmueble('facturas', d.facturaId)
+            && get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.propietarioId == d.propietarioId
+            && (get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.inmuebleId == inmuebleId
+              || ('gastoId' in get(/databases/$(database)/documents/facturas/$(d.facturaId)).data
+                && fuenteEnInmueble('gastos', get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.gastoId)
+                && get(/databases/$(database)/documents/gastos/$(get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.gastoId)).data.inmuebleId == inmuebleId))
+            && (!('gastoId' in d) || get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.gastoId == d.gastoId);
+        }
+        function relacionesDocumentoValidas(d) {
+          return (!('contratoId' in d) || (fuenteEnInmueble('contratos_formalizacion', d.contratoId)
+              && get(/databases/$(database)/documents/contratos_formalizacion/$(d.contratoId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/contratos_formalizacion/$(d.contratoId)).data.propietarioId == d.propietarioId))
+            && (!('gastoId' in d) || (fuenteEnInmueble('gastos', d.gastoId)
+              && get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.propietarioId == d.propietarioId))
+            && (!('incidenciaId' in d) || (fuenteEnInmueble('incidencias', d.incidenciaId)
+              && get(/databases/$(database)/documents/incidencias/$(d.incidenciaId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/incidencias/$(d.incidenciaId)).data.propietarioId == d.propietarioId))
+            && (!('polizaId' in d) || (fuenteEnInmueble('polizas_seguros', d.polizaId)
+              && get(/databases/$(database)/documents/polizas_seguros/$(d.polizaId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/polizas_seguros/$(d.polizaId)).data.propietarioId == d.propietarioId))
+            && (!('tareaMantenimientoId' in d) || (fuenteEnInmueble('tareas_mantenimiento', d.tareaMantenimientoId)
+              && get(/databases/$(database)/documents/tareas_mantenimiento/$(d.tareaMantenimientoId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/tareas_mantenimiento/$(d.tareaMantenimientoId)).data.propietarioId == d.propietarioId))
+            && (!('garantiaId' in d) || (fuenteEnInmueble('garantias_reparacion', d.garantiaId)
+              && get(/databases/$(database)/documents/garantias_reparacion/$(d.garantiaId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/garantias_reparacion/$(d.garantiaId)).data.propietarioId == d.propietarioId))
+            && (!('inventarioId' in d) || (fuenteEnInmueble('inventario_inmuebles', d.inventarioId)
+              && get(/databases/$(database)/documents/inventario_inmuebles/$(d.inventarioId)).data.inmuebleId == inmuebleId))
+            && (!('movimientoId' in d) || ('gastoId' in d && d.movimientoId == 'GASTO:' + d.gastoId))
+            && (!('facturaId' in d) || facturaEnInmueble(d))
+            && (!('gastoId' in d && 'contratoId' in d)
+              || get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.contratoId == d.contratoId)
+            && (!('gastoId' in d && 'incidenciaId' in d)
+              || get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.incidenciaId == d.incidenciaId)
+            && (!('garantiaId' in d && 'incidenciaId' in d)
+              || get(/databases/$(database)/documents/garantias_reparacion/$(d.garantiaId)).data.incidenciaId == d.incidenciaId);
+        }
+        function documentoTieneForma(d) {
+          return d.keys().hasOnly([
+            'id', 'inmuebleId', 'propietarioId', 'tipo', 'nombre', 'nombreStorage',
+            'mimeType', 'tamanoBytes', 'sha256', 'storagePath', 'fechaDocumental',
+            'fechaIncorporacion', 'actorId', 'actorNombre', 'referencia', 'observaciones',
+            'version', 'sustituyeA', 'estado', 'contratoId', 'polizaId', 'gastoId', 'facturaId',
+            'incidenciaId', 'tareaMantenimientoId', 'garantiaId',
+            'inventarioId', 'movimientoId', 'actualizadoEl', 'eliminadoEl'
+          ])
+          && d.id == documentoId && d.inmuebleId == inmuebleId
+          && d.propietarioId == inmuebleDoc().propietarioId
+          && tipoDocumentoPatrimonialValido(d.tipo)
+          && d.nombre is string && d.nombre.size() > 0 && d.nombre.size() <= 200
+          && d.nombreStorage is string && d.nombreStorage.matches('^[A-Za-z0-9][A-Za-z0-9._-]{0,149}$')
+          && d.mimeType in ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+          && d.tamanoBytes is int && d.tamanoBytes > 0 && d.tamanoBytes <= 20971520
+          && d.sha256 is string && d.sha256.matches('^[a-f0-9]{64}$')
+          && d.storagePath == 'inmuebles/' + inmuebleId + '/documentos_patrimoniales/' + documentoId + '/' + d.nombreStorage
+          && d.fechaIncorporacion is string && d.actorId is string && d.actorNombre is string
+          && d.version is int && d.version > 0;
+        }
+        function sustitucionDocumentoValida(d) {
+          return (!('sustituyeA' in d) && d.version == 1)
+            || (d.sustituyeA is string && d.sustituyeA != documentoId
+              && exists(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA))
+              && get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.propietarioId == d.propietarioId
+              && get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.estado == 'DISPONIBLE'
+              && d.version == get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.version + 1);
+        }
+        function estadoInicialValido(d) {
+          return documentoTieneForma(d) && d.estado == 'PENDIENTE_STORAGE'
+            && relacionesDocumentoValidas(d) && sustitucionDocumentoValida(d);
+        }
+        function edicionMetadatosValida() {
+          return resource.data.estado == 'DISPONIBLE'
+            && request.resource.data.estado == 'DISPONIBLE'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'tipo', 'nombre', 'fechaDocumental', 'referencia', 'observaciones', 'actualizadoEl'
+            ])
+            && tipoDocumentoPatrimonialValido(request.resource.data.tipo)
+            && request.resource.data.nombre is string && request.resource.data.nombre.size() > 0
+            && request.resource.data.nombre.size() <= 200;
+        }
+        function transicionCargaValida() {
+          return resource.data.estado in ['PENDIENTE_STORAGE', 'ERROR_STORAGE']
+            && request.resource.data.estado in ['DISPONIBLE', 'ERROR_STORAGE', 'PENDIENTE_STORAGE']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'actualizadoEl']);
+        }
+        function transicionBorradoValida() {
+          return docBorrado()
+            && ((resource.data.estado in ['DISPONIBLE', 'PENDIENTE_STORAGE', 'ERROR_STORAGE']
+                 && request.resource.data.estado == 'PENDIENTE_ELIMINACION'
+                 && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'actualizadoEl']))
+              || (resource.data.estado == 'PENDIENTE_ELIMINACION'
+                 && request.resource.data.estado == 'ELIMINADO'
+                 && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'eliminadoEl', 'actualizadoEl'])));
+        }
+
+        allow get, list: if docLectura();
+        allow create: if docEscritura() && estadoInicialValido(request.resource.data);
+        allow update: if docEscritura() && (edicionMetadatosValida() || transicionCargaValida() || transicionBorradoValida());
+        allow delete: if false; // tombstone/auditoría conservados; se borra sólo el binario.
+      }
     }
 
     function leerGestionInvitada(g) {

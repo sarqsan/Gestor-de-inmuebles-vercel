@@ -25,9 +25,26 @@ const dbFor = (rel = gestion()): Peticion['db'] => ({
   'inmuebles/inm-b': { id: 'inm-b', propietarioId: 'prop-b' },
   'contratos_formalizacion/ct-a': { id: 'ct-a', propietarioId: 'prop-a', inmuebleId: 'inm-a' },
   'contratos_formalizacion/ct-b': { id: 'ct-b', propietarioId: 'prop-b', inmuebleId: 'inm-b' },
+  'inmuebles/inm-a/documentos_patrimoniales/doc-a': {
+    id: 'doc-a', inmuebleId: 'inm-a', propietarioId: 'prop-a', estado: 'PENDIENTE_STORAGE',
+    storagePath: 'inmuebles/inm-a/documentos_patrimoniales/doc-a/documento.pdf',
+    nombreStorage: 'documento.pdf', mimeType: 'application/pdf', tamanoBytes: 1024, sha256: 'a'.repeat(64),
+  },
+  'inmuebles/inm-b/documentos_patrimoniales/doc-b': {
+    id: 'doc-b', inmuebleId: 'inm-b', propietarioId: 'prop-b', estado: 'PENDIENTE_STORAGE',
+    storagePath: 'inmuebles/inm-b/documentos_patrimoniales/doc-b/documento.pdf',
+    nombreStorage: 'documento.pdf', mimeType: 'application/pdf', tamanoBytes: 1024, sha256: 'b'.repeat(64),
+  },
 });
-function op(db: Peticion['db'], verb: 'get' | 'create' | 'update' | 'delete', path: string): boolean {
-  const request: PeticionStorage = { auth: gestorAuth, db, path, metadata: verb === 'create' ? { size: 1024, contentType: 'application/pdf', name: path } : null };
+function op(db: Peticion['db'], verb: 'get' | 'create' | 'update' | 'delete', path: string, metadata?: Record<string, unknown>): boolean {
+  const request: PeticionStorage = {
+    auth: gestorAuth,
+    db,
+    path,
+    metadata: verb === 'create'
+      ? { size: 1024, contentType: 'application/pdf', name: path, metadata: { documentoId: 'doc-a', inmuebleId: 'inm-a', sha256: 'a'.repeat(64) }, ...metadata }
+      : null,
+  };
   return permiteStorage(verb, request);
 }
 
@@ -41,6 +58,17 @@ describe('ROADMAP-04 · documentos y recibos por contrato parcial', () => {
     }
     expect(op(db, 'get', 'contratos/ct-b/contrato.pdf')).toBe(false);
     expect(op(db, 'create', 'recibos/ct-b/cobro-1/recibo.pdf')).toBe(false);
+  });
+
+  it('BLOQUE 6 · autoriza subida documental sólo en los inmuebles enumerados por la delegación parcial vigente', () => {
+    const pathA = 'inmuebles/inm-a/documentos_patrimoniales/doc-a/documento.pdf';
+    const pathB = 'inmuebles/inm-b/documentos_patrimoniales/doc-b/documento.pdf';
+    expect(op(dbFor(), 'create', pathA)).toBe(true);
+    expect(op(dbFor(), 'create', pathB, {
+      metadata: { documentoId: 'doc-b', inmuebleId: 'inm-b', sha256: 'b'.repeat(64) },
+    })).toBe(false);
+    expect(op(dbFor(gestion({ estado: 'REVOCADA' })), 'create', pathA)).toBe(false);
+    expect(op(dbFor(gestion({ responsableActual: 'TITULAR' })), 'create', pathA)).toBe(false);
   });
 
   it('LECTURA concede descarga, pero no subida; revocación y titular incoherente deniegan', () => {

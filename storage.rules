@@ -276,6 +276,27 @@ service firebase.storage {
       return request.resource.contentType.matches('image/.*');
     }
 
+    function isDocumentoPatrimonialValido() {
+      return request.resource.size > 0
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType.matches('application/pdf|image/(jpeg|png|webp)');
+    }
+
+    function existeMetadataDocumentoPatrimonial(inmuebleId, documentoId) {
+      return firestore.exists(/databases/(default)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(documentoId));
+    }
+    function metadataDocumentoPatrimonial(inmuebleId, documentoId) {
+      return firestore.get(/databases/(default)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(documentoId)).data;
+    }
+    function metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName) {
+      return existeMetadataDocumentoPatrimonial(inmuebleId, documentoId)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).id == documentoId
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).inmuebleId == inmuebleId
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).storagePath == 'inmuebles/' + inmuebleId + '/documentos_patrimoniales/' + documentoId + '/' + fileName
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).nombreStorage == fileName
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).propietarioId == pidDeInmueble(inmuebleId);
+    }
+
     // Forma segura del NOMBRE DE OBJETO subido. `request.resource.name` es la
     // ruta completa (p. ej. `gastos_facturas/P1/G1/1700_factura.pdf`), por lo
     // que se valida: longitud total, ausencia de segmentos vacíos (`//`) y de
@@ -400,6 +421,32 @@ service firebase.storage {
       // Nombre único por subida (`{imageId}_…` con id aleatorio).
       allow update: if false;
       allow delete: if ambitoInmuebleBorrado(inmuebleId);
+    }
+
+    // BLOQUE 6 — binarios documentales patrimoniales. La metadata canónica
+    // vive en inmuebles/{id}/documentos_patrimoniales/{docId}; conocer el ID
+    // o una ruta no autoriza. Se exige ámbito actual por espejo y estado de
+    // metadata coherente; no se emiten URLs públicas ni se permite list/update.
+    match /inmuebles/{inmuebleId}/documentos_patrimoniales/{documentoId}/{fileName} {
+      allow get: if ambitoInmuebleLectura(inmuebleId)
+        && metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).estado == 'DISPONIBLE';
+      allow list: if false;
+      allow create: if ambitoInmuebleEscritura(inmuebleId)
+        && metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).estado == 'PENDIENTE_STORAGE'
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).mimeType == request.resource.contentType
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).tamanoBytes == request.resource.size
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).sha256 is string
+        && request.resource.metadata.documentoId == documentoId
+        && request.resource.metadata.inmuebleId == inmuebleId
+        && request.resource.metadata.sha256 == metadataDocumentoPatrimonial(inmuebleId, documentoId).sha256
+        && isDocumentoPatrimonialValido()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if ambitoInmuebleBorrado(inmuebleId)
+        && metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).estado == 'PENDIENTE_ELIMINACION';
     }
 
     // R3 — ADJUNTOS DE INVENTARIO (documentación interna de trabajo).

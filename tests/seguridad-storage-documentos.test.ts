@@ -40,6 +40,12 @@ const REGLAS = parsearReglas(FUENTE);
 // Actores sintéticos
 // ---------------------------------------------------------------------------
 const ADMIN_EMAIL = 'sarqsan2@gmail.com';
+const DOC_PENDING_ID = `doc_${'a'.repeat(64)}`;
+const DOC_DELETE_ID = `doc_${'b'.repeat(64)}`;
+const DOC_AVAILABLE_ID = `doc_${'c'.repeat(64)}`;
+const STORAGE_DOC_PENDING = `inmuebles/INM_A/documentos_patrimoniales/${DOC_PENDING_ID}/factura.pdf`;
+const STORAGE_DOC_DELETE = `inmuebles/INM_A/documentos_patrimoniales/${DOC_DELETE_ID}/factura.pdf`;
+const STORAGE_DOC_AVAILABLE = `inmuebles/INM_A/documentos_patrimoniales/${DOC_AVAILABLE_ID}/factura.pdf`;
 // D3 (ORDEN 4 §7): el criterio de los árboles internos ya no es "cualquiera
 // autenticado" sino el espejo `usuarios_auth/{uid}` (+ titularidad derivada).
 // El FS sintético refleja la realidad: espejos ACTIVOS para las cuentas que
@@ -53,6 +59,10 @@ const FS = {
   'usuarios/uid_inqB': { tipoPerfil: 'INQUILINO', contratoIds: ['CON_B'] },
   'usuarios_auth/uid_propA': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'PROP_A', profesionalId: '', inmuebleIds: [] },
   'usuarios_auth/uid_propB': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'PROP_B', profesionalId: '', inmuebleIds: [] },
+  'usuarios_auth/uid_managerL': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', propietarioId: '', profesionalId: 'M_L', carterasL: ['PROP_A'] },
+  'usuarios_auth/uid_managerE': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', propietarioId: '', profesionalId: 'M_E', carterasE: ['PROP_A'] },
+  'usuarios_auth/uid_partial': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', usuarioId: 'usr_partial', propietarioId: '', profesionalId: 'M_P', gestionesPorPropietario: { PROP_A: 'G_P' } },
+  'gestiones_cartera/G_P': { id: 'G_P', propietarioId: 'PROP_A', gestorUsuarioId: 'usr_partial', estado: 'ACTIVA', resolucionInvitacion: 'ACEPTADA', inmuebleIds: ['INM_A'], permiso: 'LECTURA_ESCRITURA', responsableActual: 'GESTOR' },
   'usuarios_auth/uid_prof': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', propietarioId: '', profesionalId: 'PRO1', inmuebleIds: [] },
   'incidencias/INC_A': { contratoId: 'CON_A', propietarioId: 'PROP_A', profesionalAsignadoId: 'PRO1' },
   'incidencias/INC_B': { contratoId: 'CON_B', propietarioId: 'PROP_B' },
@@ -60,12 +70,24 @@ const FS = {
   'suministros/SUM_A': { inmuebleId: 'INM_A' },
   'inmuebles/INM_A': { contratoActivoId: 'CON_A', propietarioId: 'PROP_A' },
   'inmuebles/inm-1': { propietarioId: 'PROP_A' },
+  [`inmuebles/INM_A/documentos_patrimoniales/${DOC_PENDING_ID}`]: {
+    id: DOC_PENDING_ID, inmuebleId: 'INM_A', propietarioId: 'PROP_A', estado: 'PENDIENTE_STORAGE',
+    storagePath: STORAGE_DOC_PENDING, nombreStorage: 'factura.pdf', mimeType: 'application/pdf', tamanoBytes: 1024, sha256: 'a'.repeat(64),
+  },
+  [`inmuebles/INM_A/documentos_patrimoniales/${DOC_AVAILABLE_ID}`]: {
+    id: DOC_AVAILABLE_ID, inmuebleId: 'INM_A', propietarioId: 'PROP_A', estado: 'DISPONIBLE',
+    storagePath: STORAGE_DOC_AVAILABLE, nombreStorage: 'factura.pdf', mimeType: 'application/pdf', tamanoBytes: 1024, sha256: 'c'.repeat(64),
+  },
+  [`inmuebles/INM_A/documentos_patrimoniales/${DOC_DELETE_ID}`]: {
+    id: DOC_DELETE_ID, inmuebleId: 'INM_A', propietarioId: 'PROP_A', estado: 'PENDIENTE_ELIMINACION',
+    storagePath: STORAGE_DOC_DELETE, nombreStorage: 'factura.pdf', mimeType: 'application/pdf', tamanoBytes: 1024, sha256: 'b'.repeat(64),
+  },
   'contratos_formalizacion/CON_A': { propietarioId: 'PROP_A', inmuebleId: 'INM_A' },
   'contratos_formalizacion/CON_B': { propietarioId: 'PROP_B' },
   'lecturas_suministro/LEC_A': { contratoId: 'CON_A' },
 } as const;
 
-type Actor = 'anonimo' | 'admin' | 'propietarioA' | 'propietarioB' | 'profesional' | 'inquilinoA' | 'inquilinoB' | 'autenticadoSinFicha';
+type Actor = 'anonimo' | 'admin' | 'propietarioA' | 'propietarioB' | 'gestorL' | 'gestorE' | 'gestorParcial' | 'profesional' | 'inquilinoA' | 'inquilinoB' | 'autenticadoSinFicha';
 
 function ctx(actor: Actor, resource?: ContextoPeticion['resource']): ContextoPeticion {
   const auth: Record<Actor, ContextoPeticion['auth']> = {
@@ -73,6 +95,9 @@ function ctx(actor: Actor, resource?: ContextoPeticion['resource']): ContextoPet
     admin: { uid: 'uid_admin', token: { email: ADMIN_EMAIL, email_verified: true } },
     propietarioA: { uid: 'uid_propA', token: { email: 'a@example.com' } },
     propietarioB: { uid: 'uid_propB', token: { email: 'b@example.com' } },
+    gestorL: { uid: 'uid_managerL', token: { email: 'gestor-l@example.com' } },
+    gestorE: { uid: 'uid_managerE', token: { email: 'gestor-e@example.com' } },
+    gestorParcial: { uid: 'uid_partial', token: { email: 'gestor-parcial@example.com' } },
     profesional: { uid: 'uid_prof', token: { email: 'p@example.com' } },
     inquilinoA: { uid: 'uid_inqA', token: { email: 'ia@example.com' } },
     inquilinoB: { uid: 'uid_inqB', token: { email: 'ib@example.com' } },
@@ -96,6 +121,46 @@ const INTERNOS_NO_ADMIN: Actor[] = ['propietarioA', 'propietarioB', 'profesional
 // ---------------------------------------------------------------------------
 // A · hasSafeObjectName(): forma del nombre de objeto sobre la ruta completa
 // ---------------------------------------------------------------------------
+describe('BLOQUE 6 · documentos patrimoniales: path, metadata y aislamiento por inmueble', () => {
+  const carga = {
+    name: STORAGE_DOC_PENDING, size: 1024, contentType: 'application/pdf',
+    metadata: { documentoId: DOC_PENDING_ID, inmuebleId: 'INM_A', sha256: 'a'.repeat(64) },
+  };
+
+  it('sólo sube bajo metadata pendiente, MIME/tamaño iguales y titular/gestor con escritura del inmueble', () => {
+    expect(crea('propietarioA', carga)).toBe(true);
+    expect(crea('propietarioB', carga)).toBe(false);
+    expect(crea('anonimo', carga)).toBe(false);
+    expect(crea('propietarioA', { ...carga, size: 2048 })).toBe(false);
+    expect(crea('propietarioA', { ...carga, contentType: 'image/png' })).toBe(false);
+    expect(crea('propietarioA', { ...carga, metadata: { ...carga.metadata, inmuebleId: 'INM_B' } })).toBe(false);
+  });
+
+  it('honra carteras: L sólo lee, E escribe y los gestores no borran', () => {
+    expect(puede('gestorL', 'get', STORAGE_DOC_AVAILABLE)).toBe(true);
+    expect(crea('gestorL', carga)).toBe(false);
+    expect(crea('gestorE', carga)).toBe(true);
+    expect(puede('gestorE', 'delete', STORAGE_DOC_DELETE)).toBe(false);
+  });
+
+  it('descarga exige el ID referenciado en metadata disponible y acceso al inmueble; no admite enumerar Storage', () => {
+    expect(puede('propietarioA', 'get', STORAGE_DOC_AVAILABLE)).toBe(true);
+    expect(puede('propietarioB', 'get', STORAGE_DOC_AVAILABLE)).toBe(false);
+    expect(puede('anonimo', 'get', STORAGE_DOC_AVAILABLE)).toBe(false);
+    expect(puede('propietarioA', 'get', STORAGE_DOC_PENDING)).toBe(false);
+    expect(puede('propietarioA', 'get', 'inmuebles/INM_A/documentos_patrimoniales/doc_desconocido/factura.pdf')).toBe(false);
+    expect(puede('propietarioA', 'list', STORAGE_DOC_AVAILABLE)).toBe(false);
+  });
+
+  it('sólo el titular/admin puede borrar el binario en estado PENDIENTE_ELIMINACION; nunca se actualiza ni se sobrescribe', () => {
+    expect(puede('propietarioA', 'delete', STORAGE_DOC_DELETE)).toBe(true);
+    expect(puede('propietarioB', 'delete', STORAGE_DOC_DELETE)).toBe(false);
+    expect(puede('profesional', 'delete', STORAGE_DOC_DELETE)).toBe(false);
+    expect(puede('propietarioA', 'update', STORAGE_DOC_AVAILABLE, PDF(STORAGE_DOC_AVAILABLE))).toBe(false);
+    expect(puede('propietarioA', 'delete', STORAGE_DOC_AVAILABLE)).toBe(false);
+  });
+});
+
 describe('A · hasSafeObjectName(): nombre de objeto seguro (validado sobre el nombre completo del objeto)', () => {
   // Nombres EXACTOS que construyen los clientes del repositorio (ver
   // src/lib/firebase.ts, firebaseActas.ts, suministrosFirestore.ts,
@@ -450,6 +515,7 @@ describe('E · update (metadatos) y delete por ruta — decisiones específicas,
       '/documentos_solicitados/{solicitudDocId}/{allFiles=**}',
       '/documentos_solicitados/{solicitudDocId}/{fileName}',
       '/inmuebles/{inmuebleId}/{fileName}',
+      '/inmuebles/{inmuebleId}/documentos_patrimoniales/{documentoId}/{fileName}',
       '/recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName}',
       '/incidencias_fotos/{propietarioId}/{incidenciaId}/{fileName}',
       '/reformas_documentos/{propietarioId}/{proyectoId}/{fileName}',

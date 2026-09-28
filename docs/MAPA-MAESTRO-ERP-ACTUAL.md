@@ -1,3 +1,5 @@
+> **Revalidación 2026-09-28: BLOQUEO EXTERNO DEMOSTRADO de Emulator.** CLI instalada y dependencias locales reparadas; JDK y JAR oficiales no descargables por fallos de red/TLS tras probar fuentes oficiales alternativas. Validación local 2.385/2.385 PASS; no certificación oficial. Evidencia e intentos en `docs/ROADMAP-02-ONBOARDING-CARTERAS-INVITACIONES.md`. Procedimiento permanente: `docs/operaciones/PRINCIPIO-RESOLUTIVO-ARENA.md`. No merge autorizado.
+
 # MAPA MAESTRO CANÓNICO DEL ERP — GESTOR DE INMUEBLES
 
 > **Documento principal de continuidad del proyecto.** Si el código cambia, este

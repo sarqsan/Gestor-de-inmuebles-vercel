@@ -5,6 +5,7 @@
  */
 import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, sanitizeObjectForFirestore } from './firebase';
+import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import type {
   ConfigFiscalLiquidacion,
   FicheroSEPA,
@@ -30,7 +31,7 @@ export function subscribeLiquidaciones(callback: (items: LiquidacionPropietario[
       items.sort((a, b) => (a.periodo < b.periodo ? 1 : a.periodo > b.periodo ? -1 : 0));
       callback(items);
     },
-    (err) => console.error('Firestore liquidaciones snapshot error:', err),
+    (err) => reportarErrorLectura('liquidaciones', err, 'Firestore liquidaciones snapshot error:'),
   );
 }
 
@@ -54,7 +55,7 @@ export function subscribeGastos(callback: (items: GastoInmueble[]) => void) {
       items.sort((a, b) => (a.fechaGasto < b.fechaGasto ? 1 : -1));
       callback(items);
     },
-    (err) => console.error('Firestore gastos snapshot error:', err),
+    (err) => reportarErrorLectura('tesoreria_gastos', err, 'Firestore gastos snapshot error:'),
   );
 }
 
@@ -77,7 +78,7 @@ export function subscribeOrdenesPago(callback: (items: OrdenPago[]) => void) {
       items.sort((a, b) => (a.fechaCreacion < b.fechaCreacion ? 1 : -1));
       callback(items);
     },
-    (err) => console.error('Firestore ordenes_pago snapshot error:', err),
+    (err) => reportarErrorLectura('ordenes_pago', err, 'Firestore ordenes_pago snapshot error:'),
   );
 }
 
@@ -96,7 +97,7 @@ export function subscribeFicherosSepa(callback: (items: FicheroSEPA[]) => void) 
       items.sort((a, b) => (a.fechaCreacion < b.fechaCreacion ? 1 : -1));
       callback(items);
     },
-    (err) => console.error('Firestore ficheros_sepa snapshot error:', err),
+    (err) => reportarErrorLectura('ficheros_sepa', err, 'Firestore ficheros_sepa snapshot error:'),
   );
 }
 
@@ -114,7 +115,7 @@ export function subscribeMandatosSepa(callback: (items: MandatoSEPA[]) => void) 
       snap.forEach((d) => items.push({ id: d.id, ...d.data() } as MandatoSEPA));
       callback(items);
     },
-    (err) => console.error('Firestore mandatos_sepa snapshot error:', err),
+    (err) => reportarErrorLectura('mandatos_sepa', err, 'Firestore mandatos_sepa snapshot error:'),
   );
 }
 
@@ -132,7 +133,7 @@ export function subscribeConfigLiquidacion(
   return onSnapshot(
     ref,
     (snap) => callback(snap.exists() ? (snap.data() as ConfigFiscalLiquidacion) : null),
-    (err) => console.error('Firestore config_liquidacion snapshot error:', err),
+    (err) => reportarErrorLectura('config_liquidacion', err, 'Firestore config_liquidacion snapshot error:'),
   );
 }
 

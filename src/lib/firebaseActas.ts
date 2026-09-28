@@ -10,6 +10,7 @@ import {
   type Unsubscribe,
   type QuerySnapshot,
 } from 'firebase/firestore';
+import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, sanitizeObjectForFirestore, type DataAccessScope } from './firebase';
 import type {
@@ -37,7 +38,7 @@ function subscribeColeccionPropietarioActas<T extends { id: string; ownerId?: st
     snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as unknown as T));
     callback(items);
   };
-  const onError = (err: unknown) => console.error(`Firestore ${etiqueta} snapshot error:`, err);
+  const onError = (err: unknown) => reportarErrorLectura(etiqueta, err, `Firestore ${etiqueta} snapshot error:`);
 
   if (scope?.tipoPerfil === 'PROFESIONAL') {
     callback([]);
@@ -121,7 +122,7 @@ export function subscribeEvidenciasActa(
     items.sort((a, b) => a.orden - b.orden);
     callback(items);
   };
-  const onError = (err: unknown) => console.error('Firestore actas_evidencias snapshot error:', err);
+  const onError = (err: unknown) => reportarErrorLectura('actas', err, 'Firestore actas_evidencias snapshot error:');
 
   // Profesionales sin acceso a datos económicos pero evidencias de actas podrían ser internas; se permite si tienen inmuebleIds?
   // Para simplicidad, mismo patrón ownerId
@@ -183,7 +184,7 @@ export function subscribeIncidenciasActa(
     items.sort((a, b) => new Date(b.fechaHora).getTime() - new Date(a.fechaHora).getTime());
     callback(items);
   };
-  const onError = (err: unknown) => console.error('Firestore actas_incidencias snapshot error:', err);
+  const onError = (err: unknown) => reportarErrorLectura('actas', err, 'Firestore actas_incidencias snapshot error:');
 
   if (scope?.tipoPerfil === 'PROFESIONAL') {
     callback([]);
@@ -242,7 +243,7 @@ export function subscribeOtpPorActa(
     snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as OtpActa));
     callback(items);
   };
-  const onError = (err: unknown) => console.error('Firestore actas_otp snapshot error:', err);
+  const onError = (err: unknown) => reportarErrorLectura('actas', err, 'Firestore actas_otp snapshot error:');
 
   if (scope?.tipoPerfil === 'PROFESIONAL') {
     callback([]);

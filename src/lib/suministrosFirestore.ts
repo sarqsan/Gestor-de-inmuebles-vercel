@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, saveAuditLogFirestore } from './firebase';
+import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import type {
   Suministro,
   LecturaSuministro,
@@ -98,7 +99,9 @@ function subscribeCol<T>(coleccion: string, cb: (items: T[]) => void): Unsubscri
   return onSnapshot(
     collection(db, coleccion),
     (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T)),
-    () => cb([])
+    // UX-2 C2: un fallo de lectura se informa como ERROR (canal de incidencias).
+    // Nunca se traduce en `cb([])`: eso convertía un error en un falso vacío.
+    (err) => reportarErrorLectura('suministros', err, `Firestore ${coleccion} snapshot error:`)
   );
 }
 
@@ -116,7 +119,8 @@ export function subscribeMensajesByContrato(contratoId: string, cb: (items: Mens
       items.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
       cb(items);
     },
-    () => cb([])
+    // UX-2 C2: sin `cb([])` ante error (no se convierte un fallo en un falso vacío).
+    (err) => reportarErrorLectura('suministros', err, 'Firestore mensajes_portal snapshot error:')
   );
 }
 
@@ -129,7 +133,7 @@ export function subscribeLecturasBySuministro(suministroId: string, cb: (items: 
       items.sort((a, b) => (a.fechaLectura < b.fechaLectura ? -1 : a.fechaLectura > b.fechaLectura ? 1 : 0));
       cb(items);
     },
-    () => cb([])
+    (err) => reportarErrorLectura('suministros', err, 'Firestore lecturas_suministro snapshot error:')
   );
 }
 

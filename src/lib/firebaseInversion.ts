@@ -14,6 +14,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
+import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import { db, sanitizeObjectForFirestore, type DataAccessScope } from './firebase';
 import type { AnalisisInversion } from '../types/inversion';
 
@@ -50,7 +51,7 @@ export function subscribeAnalisisInversion(
     return onSnapshot(
       qScoped,
       (snap) => callback(mapearAnalisis(snap)),
-      (err) => console.error('Firestore analisis_inversion (scoped) snapshot error:', err)
+      (err) => reportarErrorLectura('inversion', err, 'Firestore analisis_inversion (scoped) snapshot error:')
     );
   }
 
@@ -58,7 +59,7 @@ export function subscribeAnalisisInversion(
   return onSnapshot(
     ANALISIS_INVERSION_COL,
     (snap) => callback(mapearAnalisis(snap)),
-    (err) => console.error('Firestore analisis_inversion snapshot error:', err)
+    (err) => reportarErrorLectura('inversion', err, 'Firestore analisis_inversion snapshot error:')
   );
 }
 

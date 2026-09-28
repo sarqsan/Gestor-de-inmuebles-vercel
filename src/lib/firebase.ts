@@ -75,6 +75,7 @@ import type {
 import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
 import type { GestionCartera } from './gestionesCartera';
 import type { InmuebleDelegadoParcial } from './carterasGestion';
+import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -217,7 +218,7 @@ export function subscribePropietarios(
       if (snap.exists()) { if(index >= 0) entregados[index] = {id:snap.id,...snap.data()} as Propietario; else entregados.push({id:snap.id,...snap.data()} as Propietario); }
       else if(index >= 0) entregados.splice(index,1);
       notificar();
-    }, (err) => console.error(`Firestore propietario (${id}) snapshot error:`, err)));
+    }, (err) => reportarErrorLectura('propietarios', err, `Firestore propietario (${id}) snapshot error:`)));
     if (pid) escuchar(pid);
     for (const id of delegados) if (id && id !== pid) escuchar(id);
     if (!pid && !delegados.length) callback([]);
@@ -234,7 +235,7 @@ export function subscribePropietarios(
       callback(items);
     },
     (err) => {
-      console.error('Firestore propietarios snapshot error:', err);
+      reportarErrorLectura('propietarios', err, 'Firestore propietarios snapshot error:');
     }
   );
 }
@@ -303,7 +304,7 @@ function subscribeUnionInmuebles(
           notificar();
         },
         (err) => {
-          console.error(`Firestore inmuebles (${clave}) snapshot error:`, err);
+          reportarErrorLectura('inmuebles', err, `Firestore inmuebles (${clave}) snapshot error:`);
         }
       )
     );
@@ -332,7 +333,7 @@ function subscribeUnionInmuebles(
           notificar();
         },
         (err) => {
-          console.error(`Firestore inmueble autorizado ${inmuebleId} snapshot error:`, err);
+          reportarErrorLectura('inmuebles', err, `Firestore inmueble autorizado ${inmuebleId} snapshot error:`);
         }
       )
     );
@@ -353,7 +354,7 @@ export function subscribeGestionesCarteraGestor(
   return onSnapshot(
     query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', gestorUsuarioId)),
     (snap) => callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera))),
-    (err) => console.error('Firestore gestiones_cartera (gestor) snapshot error:', err)
+    (err) => reportarErrorLectura('gestiones_cartera', err, 'Firestore gestiones_cartera (gestor) snapshot error:')
   );
 }
 
@@ -421,7 +422,7 @@ export function subscribeInmuebles(
       callback(items);
     },
     (err) => {
-      console.error('Firestore inmuebles snapshot error:', err);
+      reportarErrorLectura('inmuebles', err, 'Firestore inmuebles snapshot error:');
     }
   );
 }
@@ -452,7 +453,7 @@ export function subscribeCandidatos(callback: (candidatos: Candidato[]) => void)
       callback(items);
     },
     (err) => {
-      console.error('Firestore candidatos snapshot error:', err);
+      reportarErrorLectura('candidatos', err, 'Firestore candidatos snapshot error:');
     }
   );
 }
@@ -471,7 +472,7 @@ export function subscribeSolicitudes(callback: (solicitudes: SolicitudAlquiler[]
       callback(items);
     },
     (err) => {
-      console.error('Firestore solicitudes snapshot error:', err);
+      reportarErrorLectura('solicitudes', err, 'Firestore solicitudes snapshot error:');
     }
   );
 }
@@ -668,7 +669,7 @@ export function subscribeInvitaciones(callback: (invitaciones: InvitacionVisita[
       callback(items);
     },
     (err) => {
-      console.error('Firestore invitaciones snapshot error:', err);
+      reportarErrorLectura('invitaciones', err, 'Firestore invitaciones snapshot error:');
     }
   );
 }
@@ -687,7 +688,7 @@ export function subscribeVisitSlots(callback: (slots: VisitSlot[]) => void) {
       callback(items);
     },
     (err) => {
-      console.error('Firestore visit slots snapshot error:', err);
+      reportarErrorLectura('slots_visita', err, 'Firestore visit slots snapshot error:');
     }
   );
 }
@@ -857,7 +858,7 @@ export function subscribeSolicitudesDoc(callback: (solicitudesDoc: SolicitudDocu
       callback(items);
     },
     (err) => {
-      console.error('Firestore solicitudes_documentacion snapshot error:', err);
+      reportarErrorLectura('solicitudes_documentacion', err, 'Firestore solicitudes_documentacion snapshot error:');
     }
   );
 }
@@ -901,7 +902,7 @@ export function subscribeContratos(
       const items: ContratoFormalizacion[] = [];
       snapshot.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion));
       callback(items);
-    }, (err) => console.error('Firestore contratos_formalizacion snapshot error:', err));
+    }, (err) => reportarErrorLectura('contratos', err, 'Firestore contratos_formalizacion snapshot error:'));
   }
 
   // Los contratos del inquilino se cargan por get de cada ID vinculado; nunca
@@ -1193,7 +1194,7 @@ export function subscribeGastos(
         callback(items);
       },
       (err) => {
-        console.error('Firestore gastos snapshot error:', err);
+        reportarErrorLectura('gastos', err, 'Firestore gastos snapshot error:');
       }
     );
   }
@@ -1215,7 +1216,7 @@ export function subscribeGastos(
       callback(items);
     },
     (err) => {
-      console.error('Firestore gastos (scoped) snapshot error:', err);
+      reportarErrorLectura('gastos', err, 'Firestore gastos (scoped) snapshot error:');
     }
   );
 }
@@ -1285,7 +1286,7 @@ export function subscribeGastosRecurrentes(
         callback(items);
       },
       (err) => {
-        console.error('Firestore gastos_recurrentes snapshot error:', err);
+        reportarErrorLectura('gastos_recurrentes', err, 'Firestore gastos_recurrentes snapshot error:');
       }
     );
   }
@@ -1305,7 +1306,7 @@ export function subscribeGastosRecurrentes(
       callback(items);
     },
     (err) => {
-      console.error('Firestore gastos_recurrentes (scoped) snapshot error:', err);
+      reportarErrorLectura('gastos_recurrentes', err, 'Firestore gastos_recurrentes (scoped) snapshot error:');
     }
   );
 }
@@ -1351,7 +1352,7 @@ export function subscribePrestamos(
         callback(items);
       },
       (err) => {
-        console.error('Firestore prestamos snapshot error:', err);
+        reportarErrorLectura('prestamos', err, 'Firestore prestamos snapshot error:');
       }
     );
   }
@@ -1371,7 +1372,7 @@ export function subscribePrestamos(
       callback(items);
     },
     (err) => {
-      console.error('Firestore prestamos (scoped) snapshot error:', err);
+      reportarErrorLectura('prestamos', err, 'Firestore prestamos (scoped) snapshot error:');
     }
   );
 }
@@ -1428,7 +1429,7 @@ function subscribeUnionPorPropietario<T extends { id: string }>(
           notificar();
         },
         (err) => {
-          console.error(`Firestore ${etiqueta} (${clave}) snapshot error:`, err);
+          reportarErrorLectura(etiqueta, err, `Firestore ${etiqueta} (${clave}) snapshot error:`);
         }
       )
     );
@@ -1477,7 +1478,7 @@ function subscribeUnionContratosPorAmbito(
         fuentesDatos.set(fuente.clave, datos);
         notificar();
       },
-      (err) => console.error(`Firestore contratos (${fuente.clave}) snapshot error:`, err)
+      (err) => reportarErrorLectura('contratos', err, `Firestore contratos (${fuente.clave}) snapshot error:`)
     ));
   }
   if (!fuentes.length) callback([]);
@@ -1505,7 +1506,7 @@ function subscribeColeccionPropietario<T extends { id: string }>(
     snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as unknown as T));
     callback(items);
   };
-  const onError = (err: unknown) => console.error(`Firestore ${etiqueta} snapshot error:`, err);
+  const onError = (err: unknown) => reportarErrorLectura(etiqueta, err, `Firestore ${etiqueta} snapshot error:`);
 
   // D2 (§2): gestor con carteras sobre una colección con lectura de cartera
   // en Rules — une pid propio (si lo tiene) + carteras pid-a-pid.
@@ -1584,7 +1585,7 @@ export function subscribeInmobiliarias(
       snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as InmobiliariaDirectorio));
       callback(items);
     },
-    (err) => console.error('Firestore inmobiliarias_directorio snapshot error:', err)
+    (err) => reportarErrorLectura('inmobiliarias', err, 'Firestore inmobiliarias_directorio snapshot error:')
   );
 }
 export async function saveInmobiliariaFirestore(item: InmobiliariaDirectorio) {
@@ -1979,7 +1980,7 @@ export function subscribeAseguradoras(callback: (aseguradoras: ConfiguracionAseg
       }
     },
     (err) => {
-      console.error('Firestore configuracion_aseguradoras snapshot error:', err);
+      reportarErrorLectura('aseguradoras', err, 'Firestore configuracion_aseguradoras snapshot error:');
       callback(INITIAL_ASEGURADORAS);
     }
   );
@@ -2022,7 +2023,7 @@ export function subscribeSolicitudesSeguro(callback: (solicitudes: SolicitudSegu
       callback(items);
     },
     (err) => {
-      console.error('Firestore solicitudes_seguro_impago snapshot error:', err);
+      reportarErrorLectura('solicitudes_seguro', err, 'Firestore solicitudes_seguro_impago snapshot error:');
     }
   );
 }
@@ -2065,7 +2066,7 @@ export function subscribeGmailConfig(callback: (config: GmailIntegracionConfig) 
       }
     },
     (err) => {
-      console.error('Firestore gmail_config snapshot error:', err);
+      reportarErrorLectura('gmail_config', err, 'Firestore gmail_config snapshot error:');
     }
   );
 }
@@ -2476,7 +2477,7 @@ export function subscribeUsuarios(callback: (usuarios: UsuarioApp[]) => void) {
       callback(items);
     },
     (err) => {
-      console.error('Firestore usuarios snapshot error:', err);
+      reportarErrorLectura('usuarios', err, 'Firestore usuarios snapshot error:');
     }
   );
 }
@@ -2522,7 +2523,7 @@ export function subscribeProfesionales(callback: (profesionales: Profesional[]) 
       callback(items);
     },
     (err) => {
-      console.error('Firestore profesionales snapshot error:', err);
+      reportarErrorLectura('profesionales', err, 'Firestore profesionales snapshot error:');
     }
   );
 }
@@ -2561,7 +2562,7 @@ export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) =
       callback(items);
     },
     (err) => {
-      console.error('Firestore enlaces_registro snapshot error:', err);
+      reportarErrorLectura('enlaces_registro', err, 'Firestore enlaces_registro snapshot error:');
     }
   );
 }
@@ -2592,7 +2593,7 @@ export function subscribeEspecialidades(callback: (especialidades: Especialidad[
       callback(items);
     },
     (err) => {
-      console.error('Firestore especialidades snapshot error:', err);
+      reportarErrorLectura('especialidades', err, 'Firestore especialidades snapshot error:');
     }
   );
 }
@@ -2625,7 +2626,7 @@ export function subscribeAuditLogs(callback: (logs: AuditLog[]) => void) {
       callback(items);
     },
     (err) => {
-      console.error('Firestore audit_logs snapshot error:', err);
+      reportarErrorLectura('audit_logs', err, 'Firestore audit_logs snapshot error:');
     }
   );
 }
@@ -2675,7 +2676,7 @@ export function subscribeModulosConfig(callback: (config: ModulosConfig) => void
       }
     },
     (err) => {
-      console.error('Firestore modulos_config snapshot error:', err);
+      reportarErrorLectura('modulos_config', err, 'Firestore modulos_config snapshot error:');
       callback(DEFAULT_MODULOS_CONFIG);
     }
   );
@@ -2877,7 +2878,7 @@ export function subscribePolizas(callback: (items: PolizaSeguro[]) => void): Uns
       callback(items);
     },
     (err) => {
-      console.error('Firestore polizas_seguros snapshot error:', err);
+      reportarErrorLectura('polizas', err, 'Firestore polizas_seguros snapshot error:');
     }
   );
 }
@@ -2954,7 +2955,7 @@ export function subscribeSiniestros(callback: (items: Siniestro[]) => void): Uns
       callback(items);
     },
     (err) => {
-      console.error('Firestore siniestros snapshot error:', err);
+      reportarErrorLectura('siniestros', err, 'Firestore siniestros snapshot error:');
     }
   );
 }
@@ -3019,7 +3020,7 @@ export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfe
       callback(items);
     },
     (err) => {
-      console.error('Firestore trabajos_profesionales snapshot error:', err);
+      reportarErrorLectura('trabajos_profesionales', err, 'Firestore trabajos_profesionales snapshot error:');
     }
   );
 }
@@ -3058,7 +3059,7 @@ export function subscribePresupuestosProfesionales(callback: (presupuestos: Pres
       callback(items);
     },
     (err) => {
-      console.error('Firestore presupuestos_profesionales snapshot error:', err);
+      reportarErrorLectura('presupuestos_profesionales', err, 'Firestore presupuestos_profesionales snapshot error:');
     }
   );
 }
@@ -3228,7 +3229,7 @@ export function subscribeInventarioInmueble(
       callback(items);
     },
     (err) => {
-      console.error('Firestore inventario snapshot error:', err);
+      reportarErrorLectura('inventario', err, 'Firestore inventario snapshot error:');
       callback([]);
     }
   );
@@ -3284,7 +3285,7 @@ export function subscribeHistorialInventario(
       callback(items);
     },
     (err) => {
-      console.error('Firestore historial inventario snapshot error:', err);
+      reportarErrorLectura('inventario_historial', err, 'Firestore historial inventario snapshot error:');
       callback([]);
     }
   );
@@ -3335,7 +3336,7 @@ export function subscribeHabitacionesInmueble(
       callback(items);
     },
     (err) => {
-      console.error('Firestore habitaciones snapshot error:', err);
+      reportarErrorLectura('habitaciones', err, 'Firestore habitaciones snapshot error:');
       callback([]);
     }
   );
@@ -3401,7 +3402,7 @@ export function subscribeFinanciaciones(
     callback(items);
   };
   const onError = (err: unknown) => {
-    console.error('Firestore financiaciones snapshot error:', err);
+    reportarErrorLectura('financiaciones', err, 'Firestore financiaciones snapshot error:');
   };
   // D2 (E4): el list de Rules obliga a where('propietarioId','==', pid).
   // Profesional: cero acceso (datos hipotecarios). Sin ámbito (master/admin
@@ -3480,7 +3481,7 @@ export function subscribeFacturas(callback: (facturas: Factura[]) => void) {
       callback(items);
     },
     (err) => {
-      console.error('Firestore facturas snapshot error:', err);
+      reportarErrorLectura('facturas', err, 'Firestore facturas snapshot error:');
     }
   );
 }
@@ -3521,7 +3522,7 @@ export function subscribeRegistrosFacturacion(callback: (registros: RegistroFact
       callback(items);
     },
     (err) => {
-      console.error('Firestore registros_facturacion snapshot error:', err);
+      reportarErrorLectura('registros_facturacion', err, 'Firestore registros_facturacion snapshot error:');
     }
   );
 }
@@ -3558,7 +3559,7 @@ export function subscribeEnviosVerifactu(callback: (envios: EnvioVerifactu[]) =>
       callback(items);
     },
     (err) => {
-      console.error('Firestore envios_verifactu snapshot error:', err);
+      reportarErrorLectura('envios_verifactu', err, 'Firestore envios_verifactu snapshot error:');
     }
   );
 }
@@ -3587,7 +3588,7 @@ export function subscribeSeriesFacturacion(callback: (series: SerieFacturacion[]
       callback(items);
     },
     (err) => {
-      console.error('Firestore series_facturacion snapshot error:', err);
+      reportarErrorLectura('series_facturacion', err, 'Firestore series_facturacion snapshot error:');
     }
   );
 }
@@ -3627,7 +3628,7 @@ export function subscribeFacturasElectronicasB2B(callback: (items: FacturaElectr
       callback(items);
     },
     (err) => {
-      console.error('Firestore facturas_electronicas_b2b snapshot error:', err);
+      reportarErrorLectura('facturas_b2b', err, 'Firestore facturas_electronicas_b2b snapshot error:');
     }
   );
 }

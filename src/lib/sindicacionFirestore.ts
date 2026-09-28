@@ -52,6 +52,7 @@ import {
   type RegistroEstadoSindicacion,
 } from '../sindicacion/estadoRepositorio';
 import type { RegistroTrazabilidadPublicacion } from '../types';
+import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 
 export const ESTADO_SINDICACION_COL = collection(db, COLECCION_ESTADO_SINDICACION);
 
@@ -139,7 +140,7 @@ export function subscribeEstadosSindicacionFirestore(
     },
     (err) => {
       if (cerrado) return;
-      console.error('Firestore sindicacion_inmuebles snapshot error:', err);
+      reportarErrorLectura('sindicacion', err, 'Firestore sindicacion_inmuebles snapshot error:');
     },
   );
   return () => {

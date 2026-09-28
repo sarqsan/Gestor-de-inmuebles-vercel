@@ -315,6 +315,11 @@ import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
 import { CrearProfesionalModal } from './components/modals/CrearProfesionalModal';
 import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistroModal';
+import { AvisoIncidenciasDatos } from './components/estado-datos/AvisoIncidenciasDatos';
+import { PuertaEstadoDatos } from './components/estado-datos/EstadoDatosPantalla';
+import { origenesActivosDePerfil, reportarResultadoGuardado } from './estadoDatos/canalIncidencias';
+import type { OrigenDatos } from './estadoDatos/canalIncidencias';
+import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
 
 // Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
 const SECCIONES_PROPIETARIO: SectionType[] = [
@@ -514,6 +519,32 @@ export default function App() {
 
   // Sesión y autenticación real con Firebase Authentication
   const [currentUser, setCurrentUser] = useState<UsuarioApp | null>(null);
+
+  // BLOQUE 10 · UX-2 — ESTADO DE DATOS: las lecturas del host arrancan en CARGANDO
+  // y terminan en LISTO o ERROR; `intento` es el contador de reintento real que
+  // vuelve a crear las suscripciones (sin recargar la página). Los datos siguen
+  // viviendo en los estados de siempre: aquí sólo se deriva el estado de la LECTURA.
+  const {
+    intento: intentoLecturas,
+    marcarListo,
+    iniciarLecturas,
+    reintentar: reintentarLecturas,
+    estadoDePantalla,
+    incidencias: incidenciasDatos,
+    descartarIncidencia,
+    descartarIncidencias,
+  } = useEstadoLecturas(origenesActivosDePerfil(currentUser?.tipoPerfil, currentUser?.propietarioId));
+
+  // Envuelve el callback de una suscripción: aplica los datos exactamente igual que
+  // antes y, además, marca esa lectura como LISTO (UX-2 §5: loading → data/empty).
+  const conDatos = useCallback(
+    <T,>(origen: OrigenDatos, aplicar: (data: T) => void) =>
+      (data: T) => {
+        aplicar(data);
+        marcarListo(origen);
+      },
+    [marcarListo]
+  );
   const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [gestionesCarteraGestor, setGestionesCarteraGestor] = useState<GestionCartera[]>([]);
 
@@ -1010,19 +1041,19 @@ export default function App() {
     // suscribe aquí: vive en el efecto autenticado. Las vistas anónimas
     // resuelven la ficha pública mínima por id (efecto R3 posterior).
 
-    const unsubscribeInv = subscribeInvitaciones((data) => {
+    const unsubscribeInv = subscribeInvitaciones(conDatos<InvitacionVisita[]>('invitaciones', (data) => {
       if (data && data.length > 0) {
         setInvitaciones(data);
         try { localStorage.setItem('rentselect_invitaciones', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }));
 
-    const unsubscribeSlot = subscribeVisitSlots((data) => {
+    const unsubscribeSlot = subscribeVisitSlots(conDatos<VisitSlot[]>('slots_visita', (data) => {
       if (data && data.length > 0) {
         setSlots(data);
         try { localStorage.setItem('rentselect_slots', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }));
 
     const unsubscribeDoc = subscribeSolicitudesDoc((data) => {
       if (data && data.length > 0) {
@@ -1064,13 +1095,13 @@ export default function App() {
       }
     });
 
-    const unsubscribeEnlacesHook = subscribeEnlacesRegistro((data) => {
+    const unsubscribeEnlacesHook = subscribeEnlacesRegistro(conDatos<EnlaceRegistro[]>('enlaces_registro', (data) => {
       setEnlacesRegistro(data);
-    }, currentUser ?? undefined);
+    }), currentUser ?? undefined);
 
-    const unsubscribeEspecialidadesHook = subscribeEspecialidades((data) => {
+    const unsubscribeEspecialidadesHook = subscribeEspecialidades(conDatos<Especialidad[]>('especialidades', (data) => {
       setEspecialidades(data);
-    });
+    }));
 
     const unsubscribeModulosHook = subscribeModulosConfig((data) => {
       if (data) setModulosConfig(data);
@@ -1108,8 +1139,12 @@ export default function App() {
   }, []);
 
   // Authenticated subscriptions (attached strictly when a user is authenticated)
+  // UX-2: `intentoLecturas` vuelve a ejecutar este efecto al pulsar «Reintentar»,
+  // de modo que la lectura se rehace de verdad (nuevas suscripciones, sin recargar).
   useEffect(() => {
     if (!currentUser) return;
+
+    iniciarLecturas();
 
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') {
       seedInitialDataIfEmpty();
@@ -1142,16 +1177,16 @@ export default function App() {
     // FASE 4 D2a: un snapshot vacío (consulta legítimamente acotada a cero
     // resultados) NUNCA dispara restauración caché -> Firestore; la única
     // dirección automática es Firestore -> caché de lectura.
-    const unsubscribeInm = subscribeInmuebles((data) => {
+    const unsubscribeInm = subscribeInmuebles(conDatos<Inmueble[]>('inmuebles', (data) => {
       procesarSnapshotInmuebles(data, {
         setInmuebles,
         escribirCacheLectura: (items) => {
           try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(items)); } catch (e) {}
         },
       });
-    }, dataScope);
+    }), dataScope);
 
-    const unsubscribeCand = subscribeCandidatos((data) => {
+    const unsubscribeCand = subscribeCandidatos(conDatos<Candidato[]>('candidatos', (data) => {
       if (data && data.length > 0) {
         setCandidatos(data);
         try { localStorage.setItem('rentselect_candidatos', JSON.stringify(data)); } catch (e) {}
@@ -1164,14 +1199,14 @@ export default function App() {
           return [];
         });
       }
-    });
+    }));
 
-    const unsubscribeProp = subscribePropietarios((data) => {
+    const unsubscribeProp = subscribePropietarios(conDatos<Propietario[]>('propietarios', (data) => {
       if (data && data.length > 0) {
         setPropietarios(data);
         try { localStorage.setItem('rentselect_propietarios', JSON.stringify(data)); } catch (e) {}
       }
-    }, dataScope);
+    }), dataScope);
 
     const unsubscribeSol = subscribeSolicitudes((data) => {
       if (data && data.length > 0) {
@@ -1180,42 +1215,42 @@ export default function App() {
       }
     });
 
-    const unsubscribeContratos = subscribeContratos((data) => {
+    const unsubscribeContratos = subscribeContratos(conDatos<ContratoFormalizacion[]>('contratos', (data) => {
       if (data && data.length > 0) {
         setContratos(data);
         try { localStorage.setItem('rentselect_contratos', JSON.stringify(data)); } catch (e) {}
       }
-    }, dataScope);
+    }), dataScope);
 
     // FASE 2.0: gastos acotados por propietario (profesionales no reciben nada).
-    const unsubscribeGastos = subscribeGastos((data) => {
+    const unsubscribeGastos = subscribeGastos(conDatos<Gasto[]>('gastos', (data) => {
       setGastos(Array.isArray(data) ? data : []);
-    }, dataScope);
+    }), dataScope);
 
     // FASE 2.2: plantillas recurrentes con el mismo ámbito.
-    const unsubscribeRecurrentes = subscribeGastosRecurrentes((data) => {
+    const unsubscribeRecurrentes = subscribeGastosRecurrentes(conDatos<GastoRecurrente[]>('gastos_recurrentes', (data) => {
       setGastosRecurrentes(Array.isArray(data) ? data : []);
-    }, dataScope);
+    }), dataScope);
 
     // FASE 2.3: préstamos/hipotecas con el mismo ámbito.
-    const unsubscribePrestamos = subscribePrestamos((data) => {
+    const unsubscribePrestamos = subscribePrestamos(conDatos<Prestamo[]>('prestamos', (data) => {
       setPrestamos(Array.isArray(data) ? data : []);
-    }, dataScope);
+    }), dataScope);
 
     // FASE 3.0: expedientes de recomercialización con el mismo ámbito.
-    const unsubscribeExpedientes = subscribeExpedientesRecomercializacion((data) => {
+    const unsubscribeExpedientes = subscribeExpedientesRecomercializacion(conDatos<ExpedienteRecomercializacion[]>('expedientes_recomercializacion', (data) => {
       setExpedientesRecomerc(Array.isArray(data) ? data : []);
-    }, dataScope);
+    }), dataScope);
 
     // PORTAL PROPIETARIO: incidencias acotadas por propietario (mismo `where` que exigen las reglas).
-    const unsubscribeIncidencias = subscribeIncidencias((data) => {
+    const unsubscribeIncidencias = subscribeIncidencias(conDatos<Incidencia[]>('incidencias', (data) => {
       setIncidencias(Array.isArray(data) ? data : []);
-    }, dataScope);
+    }), dataScope);
 
     // FASE 3.6: directorio de inmobiliarias (bolsa común) con RFPs y leads acotados por propietario.
-    const unsubscribeInmobiliarias = subscribeInmobiliarias((data) => {
+    const unsubscribeInmobiliarias = subscribeInmobiliarias(conDatos<InmobiliariaDirectorio[]>('inmobiliarias', (data) => {
       setInmobiliariasDirectorio(Array.isArray(data) ? data : []);
-    }, dataScope);
+    }), dataScope);
     const unsubscribePropuestas = subscribePropuestasInmobiliaria((data) => {
       setPropuestasInmobiliaria(Array.isArray(data) ? data : []);
     }, dataScope);
@@ -1223,9 +1258,9 @@ export default function App() {
       setLeadsInmobiliarios(Array.isArray(data) ? data : []);
     }, dataScope);
 
-    const unsubscribeProfesionalesHook = subscribeProfesionales((data) => {
+    const unsubscribeProfesionalesHook = subscribeProfesionales(conDatos<Profesional[]>('profesionales', (data) => {
       setProfesionales(data);
-    });
+    }));
 
     let unsubscribeMorosidadExp: (() => void) | undefined;
     let unsubscribeMorosidadCmp: (() => void) | undefined;
@@ -1252,9 +1287,9 @@ export default function App() {
         });
       });
     }
-    const unsubscribeTesoreriaLiq = subscribeLiquidaciones((data) => setTesoreriaLiquidaciones(data || []));
-    const unsubscribeTesoreriaGastos = subscribeGastosTesoreria((data) => setTesoreriaGastos(data || []));
-    const unsubscribeTesoreriaOrdenes = subscribeOrdenesPago((data) => setTesoreriaOrdenesPago(data || []));
+    const unsubscribeTesoreriaLiq = subscribeLiquidaciones(conDatos<LiquidacionPropietario[]>('liquidaciones', (data) => setTesoreriaLiquidaciones(data || [])));
+    const unsubscribeTesoreriaGastos = subscribeGastosTesoreria(conDatos<GastoInmueble[]>('tesoreria_gastos', (data) => setTesoreriaGastos(data || [])));
+    const unsubscribeTesoreriaOrdenes = subscribeOrdenesPago(conDatos<OrdenPago[]>('ordenes_pago', (data) => setTesoreriaOrdenesPago(data || [])));
     const unsubscribeTesoreriaFicheros = subscribeFicherosSepa((data) => setTesoreriaFicherosSepa(data || []));
     const unsubscribeTesoreriaMandatos = subscribeMandatosSepa((data) => setTesoreriaMandatosSepa(data || []));
     const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []));
@@ -1264,21 +1299,22 @@ export default function App() {
     // BLOQUE C — Morosidad: el admin ve todos los expedientes; el propietario solo
     // el espejo recortado (`morosidad_resumen_propietario`), nunca el expediente completo.
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') {
-      unsubscribeMorosidadExp = subscribeExpedientesMorosidad((data) => setMorosidadExpedientes(data || []));
-      unsubscribeMorosidadCmp = subscribeCompromisosMorosidad((data) => setMorosidadCompromisos(data || []));
-      unsubscribeMorosidadPol = subscribePoliticasMorosidad((data) => setMorosidadPoliticas(data || []));
+      unsubscribeMorosidadExp = subscribeExpedientesMorosidad(conDatos<ExpedienteMorosidad[]>('morosidad', (data) => setMorosidadExpedientes(data || [])));
+      unsubscribeMorosidadCmp = subscribeCompromisosMorosidad(conDatos<CompromisoPago[]>('morosidad', (data) => setMorosidadCompromisos(data || [])));
+      unsubscribeMorosidadPol = subscribePoliticasMorosidad(conDatos<PoliticaMorosidad[]>('morosidad', (data) => setMorosidadPoliticas(data || [])));
     } else if (currentUser.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId) {
-      unsubscribeMorosidadResumen = subscribeResumenMorosidadPropietario(currentUser.propietarioId, (data) =>
-        setMorosidadResumenPropietario(data || []),
+      unsubscribeMorosidadResumen = subscribeResumenMorosidadPropietario(
+        currentUser.propietarioId,
+        conDatos<ResumenMorosidadPropietario[]>('morosidad', (data) => setMorosidadResumenPropietario(data || []))
       );
     }
 
-    const unsubscribeSolicitudesSeguro = subscribeSolicitudesSeguro((data) => {
+    const unsubscribeSolicitudesSeguro = subscribeSolicitudesSeguro(conDatos<SolicitudSeguroImpago[]>('solicitudes_seguro', (data) => {
       if (data && data.length > 0) {
         setSolicitudesSeguro(data);
         try { localStorage.setItem('rentselect_solicitudes_seguro', JSON.stringify(data)); } catch (e) {}
       }
-    });
+    }));
 
     let unsubscribeAseguradoras: (() => void) | undefined;
     let unsubscribeGmail: (() => void) | undefined;
@@ -1286,15 +1322,15 @@ export default function App() {
     let unsubscribeAuditHook: (() => void) | undefined;
 
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') {
-      unsubscribeAseguradoras = subscribeAseguradoras((data) => {
+      unsubscribeAseguradoras = subscribeAseguradoras(conDatos<ConfiguracionAseguradora[]>('aseguradoras', (data) => {
         setAseguradoras(data || []);
-      });
+      }));
 
-      unsubscribeGmail = subscribeGmailConfig((data) => {
+      unsubscribeGmail = subscribeGmailConfig(conDatos<GmailIntegracionConfig>('gmail_config', (data) => {
         if (data) setGmailConfig(data);
-      });
+      }));
 
-      unsubscribeUsuariosHook = subscribeUsuarios((data) => {
+      unsubscribeUsuariosHook = subscribeUsuarios(conDatos<UsuarioApp[]>('usuarios', (data) => {
         setUsuarios(data);
         setCurrentUser((current) => {
           if (!current) return null;
@@ -1308,11 +1344,11 @@ export default function App() {
           }
           return current;
         });
-      });
+      }));
 
-      unsubscribeAuditHook = subscribeAuditLogs((data) => {
+      unsubscribeAuditHook = subscribeAuditLogs(conDatos<AuditLog[]>('audit_logs', (data) => {
         setAuditLogs(data);
-      });
+      }));
     }
 
     return () => {
@@ -1348,7 +1384,7 @@ export default function App() {
       if (unsubscribeMorosidadPol) unsubscribeMorosidadPol();
       if (unsubscribeMorosidadResumen) unsubscribeMorosidadResumen();
     };
-  }, [currentUser?.id, currentUser?.tipoPerfil, claveInmueblesParcialesGestionados]);
+  }, [currentUser?.id, currentUser?.tipoPerfil, claveInmueblesParcialesGestionados, intentoLecturas]);
 
   // Ref to track candidate questionnaires currently being auto-analyzed
   const autoAnalyzingSetRef = React.useRef<Set<string>>(new Set());
@@ -1624,7 +1660,11 @@ export default function App() {
       setInmuebles(plan.inmuebles);
       tareas.push(() => saveInmuebleFirestore(inmuebleActualizado));
     }
-    void persistirMejorEsfuerzo(tareas);
+    // UX-2 §6: `persistirMejorEsfuerzo` devuelve los errores; ya no se descartan
+    // con `void`: un fallo de guardado deja de ser invisible para la persona usuaria.
+    void persistirMejorEsfuerzo(tareas).then(({ errores }) =>
+      reportarResultadoGuardado('candidatos', errores.length === 0, errores[0])
+    );
   };
 
   // Update candidate status handler
@@ -1693,7 +1733,10 @@ export default function App() {
       setCandidatos(plan.candidatos);
       tareas.push(() => saveCandidatoFirestore(candidatoActualizado));
     }
-    void persistirMejorEsfuerzo(tareas);
+    // UX-2 §6: idem en el alta/edición de invitaciones.
+    void persistirMejorEsfuerzo(tareas).then(({ errores }) =>
+      reportarResultadoGuardado('invitaciones', errores.length === 0, errores[0])
+    );
   };
 
   // Save / Update visit slot handler
@@ -1848,6 +1891,7 @@ export default function App() {
       return next;
     });
     void deleteInmuebleFirestore(inmuebleId).then((ok) => {
+      if (!ok) reportarResultadoGuardado('inmuebles', false);
       if (!ok) return;
       void registrarAuditoriaFirestore({
         usuarioId: currentUser?.id || 'system',
@@ -1888,7 +1932,9 @@ export default function App() {
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-    saveInmuebleFirestore(newInmueble);
+    // UX-2 §6: el resultado de la persistencia no se descarta: si no se guardó,
+    // se avisa (el estado optimista se conserva; la reversión es UX-3).
+    void saveInmuebleFirestore(newInmueble).then((ok) => reportarResultadoGuardado('inmuebles', ok));
   };
 
   // Update inmueble handler
@@ -1902,6 +1948,7 @@ export default function App() {
       return next;
     });
     void saveInmuebleFirestore(updatedInmueble).then((ok) => {
+      if (!ok) reportarResultadoGuardado('inmuebles', false);
       if (!ok || !previoTitularidad) return;
       const diff = detectarCambioTitularidad(previoTitularidad, updatedInmueble);
       if (!diff.cambio) return;
@@ -2081,7 +2128,12 @@ export default function App() {
       setInmuebles((prev) => {
         const existingIds = new Set(prev.map((i) => i.id));
         const newItems = importedData.inmuebles!.filter((i) => !existingIds.has(i.id));
-        newItems.forEach((inm) => saveInmuebleFirestore(inm));
+        // UX-2 §6: importación masiva — se agrega el resultado de cada escritura para
+        // poder avisar si alguna no se guardó (antes se descartaba cada promesa).
+        const resultadosGuardado = newItems.map((inm) => saveInmuebleFirestore(inm));
+        void Promise.all(resultadosGuardado).then((resultados) =>
+          reportarResultadoGuardado('inmuebles', resultados.every(Boolean))
+        );
         return [...newItems, ...prev];
       });
     }
@@ -3098,7 +3150,8 @@ export default function App() {
     };
 
     setInmuebles((prev) => prev.map((i) => (i.id === inm.id ? updatedInm : i)));
-    await saveInmuebleFirestore(updatedInm);
+    const guardadoAsignacion = await saveInmuebleFirestore(updatedInm);
+    if (!guardadoAsignacion) reportarResultadoGuardado('inmuebles', false);
     await logAudit(
       accion === 'asignar' ? 'ASIGNAR_PROFESIONAL_INMUEBLE' : 'DESASIGNAR_PROFESIONAL_INMUEBLE',
       'INMUEBLES',
@@ -3698,8 +3751,22 @@ export default function App() {
           accessibleSections={seccionesAccesibles}
         />
 
+        {/* BLOQUE 10 · UX-2: fallos de lectura/guardado antes invisibles (sólo consola). */}
+        <AvisoIncidenciasDatos
+          incidencias={incidenciasDatos}
+          onReintentar={reintentarLecturas}
+          onDescartar={descartarIncidencia}
+          onDescartarTodas={descartarIncidencias}
+        />
+
         {/* Dynamic Section Renderer */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          {/* UX-2: ninguna pantalla afirma «no hay datos» mientras su lectura esté
+              pendiente o haya fallado (carga clara / error accionable + Reintentar). */}
+          <PuertaEstadoDatos
+            estado={estadoDePantalla(activeSection)}
+            onReintentar={reintentarLecturas}
+          >
           {activeSection === 'dashboard' && (
             <DashboardEjecutivoSection
               inmuebles={scopedInmuebles}
@@ -3711,6 +3778,7 @@ export default function App() {
               currentUser={currentUser}
               onSelectSection={setActiveSection}
               cobrosPendientesCount={cobrosPendientesCount}
+              loadingMain={estadoDePantalla('dashboard').estado === 'CARGANDO'}
             />
           )}
 
@@ -4203,6 +4271,7 @@ export default function App() {
               />
             )
           )}
+          </PuertaEstadoDatos>
         </main>
       </div>
 

@@ -31,6 +31,7 @@ import type {
 import { CAMPOS_RESUMEN_PROPIETARIO, construirResumenPropietario, recortarResumenPropietario } from '../utils/morosidad/morosidadEngine';
 import type { Notificacion } from '../types/notificaciones';
 import type { RepositorioMorosidad } from '../utils/morosidad/morosidadStore';
+import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 
 export const EXPEDIENTES_MOROSIDAD_COL = collection(db, 'expedientes_morosidad');
 export const HISTORIAL_MOROSIDAD_COL = collection(db, 'expedientes_morosidad_hist');
@@ -63,7 +64,7 @@ export function subscribeExpedientesMorosidad(
       items.sort((a, b) => (a.actualizadoEn < b.actualizadoEn ? 1 : a.actualizadoEn > b.actualizadoEn ? -1 : 0));
       callback(items);
     },
-    (err) => console.error('Firestore expedientes_morosidad snapshot error:', err),
+    (err) => reportarErrorLectura('morosidad', err, 'Firestore expedientes_morosidad snapshot error:'),
   );
 }
 
@@ -75,7 +76,7 @@ export function subscribeHistorialMorosidad(expedienteId: string, callback: (ite
       items.sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
       callback(items);
     },
-    (err) => console.error('Firestore expedientes_morosidad_hist snapshot error:', err),
+    (err) => reportarErrorLectura('morosidad', err, 'Firestore expedientes_morosidad_hist snapshot error:'),
   );
 }
 
@@ -91,7 +92,7 @@ export function subscribeCompromisosMorosidad(
       items.sort((a, b) => (a.creadoEn < b.creadoEn ? 1 : -1));
       callback(items);
     },
-    (err) => console.error('Firestore compromisos_morosidad snapshot error:', err),
+    (err) => reportarErrorLectura('morosidad', err, 'Firestore compromisos_morosidad snapshot error:'),
   );
 }
 
@@ -103,7 +104,7 @@ export function subscribeEvidenciasMorosidad(expedienteId: string, callback: (it
       items.sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
       callback(items);
     },
-    (err) => console.error('Firestore evidencias_morosidad snapshot error:', err),
+    (err) => reportarErrorLectura('morosidad', err, 'Firestore evidencias_morosidad snapshot error:'),
   );
 }
 
@@ -115,7 +116,7 @@ export function subscribePoliticasMorosidad(callback: (items: PoliticaMorosidad[
       items.sort((a, b) => (a.fechaActualizacion < b.fechaActualizacion ? 1 : -1));
       callback(items);
     },
-    (err) => console.error('Firestore politicas_morosidad snapshot error:', err),
+    (err) => reportarErrorLectura('morosidad', err, 'Firestore politicas_morosidad snapshot error:'),
   );
 }
 
@@ -129,7 +130,7 @@ export function subscribeResumenMorosidadPropietario(
     (snap) => {
       callback(mapSnap<ResumenMorosidadPropietario>(snap));
     },
-    (err) => console.error('Firestore morosidad_resumen_propietario snapshot error:', err),
+    (err) => reportarErrorLectura('morosidad', err, 'Firestore morosidad_resumen_propietario snapshot error:'),
   );
 }
 

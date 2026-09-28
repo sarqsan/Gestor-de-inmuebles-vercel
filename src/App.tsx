@@ -203,7 +203,7 @@ import { ConfiguracionSection } from './components/sections/ConfiguracionSection
 import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
 import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
 import { servicioProgresoTutoriales } from './lib/progresoTutorialesFirestore';
-import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, crearProveedorGeminiRemoto, type AccionHost } from './experiencia';
+import { contextoDesdeUsuario, ejecutarConsultaERP, iniciarTutorial, obtenerTutorial, crearProveedorGeminiRemoto, type AccionHost, type ExperienceContext, type ResultadoConsultaERP } from './experiencia';
 import type { SesionTutorial } from './experiencia';
 import { SolicitudesSection } from './components/sections/SolicitudesSection';
 import { PreseleccionadosSection } from './components/sections/PreseleccionadosSection';
@@ -347,6 +347,7 @@ const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'in
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
+  const [inmuebleContextualIA, setInmuebleContextualIA] = useState<string | null>(null);
 
   const [altaInmuebleDesdePropietarioId, setAltaInmuebleDesdePropietarioId] = useState<string | null>(null);
   // BLOQUE 1 — filtro contextual de pólizas cuando se navega desde el centro
@@ -872,6 +873,51 @@ export default function App() {
   // §6 F4: proveedor IA (Gemini vía servidor; sin clave → el motor cae al resolutor local) y
   // ejecución de acciones validadas del asistente con los medios del host (route guard intacto).
   const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  useEffect(() => {
+    if (activeSection !== 'inmuebles') setInmuebleContextualIA(null);
+  }, [activeSection]);
+  useEffect(() => setInmuebleContextualIA(null), [currentUser?.id]);
+  const inmuebleVisibleContextual = activeSection === 'inmuebles'
+    ? scopedInmuebles.find((inmueble) => inmueble.id === inmuebleContextualIA)
+    : undefined;
+  const contextoAsistente: ExperienceContext = useMemo(() => contextoDesdeUsuario(currentUser, activeSection, {
+    accessibleSections: seccionesAccesibles,
+    userId: currentUser?.id,
+    holderId: currentUser?.propietarioId,
+    portfolioIds: currentUser?.carterasL ?? [],
+    ...(inmuebleVisibleContextual ? { entityType: 'inmueble', entityId: inmuebleVisibleContextual.id, state: inmuebleVisibleContextual.estado } : {}),
+  }), [currentUser, activeSection, seccionesAccesibles, inmuebleVisibleContextual]);
+  const consultarAsistente = useCallback(async (accion: Extract<AccionHost, { tipo: 'CONSULTAR' }>): Promise<ResultadoConsultaERP> => {
+    if (!currentUser || contextoAsistente.userId !== currentUser.id) {
+      return { estado: 'NO_DISPONIBLE', capabilityId: accion.capabilityId, titulo: 'Sesión no disponible', resumen: 'No se pudo verificar la sesión actual.', motorOficial: 'RBAC', hechos: [], ambito: 'AMBITO_AUTORIZADO' };
+    }
+    const resultado = ejecutarConsultaERP(accion.capabilityId, accion.parametros, contextoAsistente, {
+      gastos: scopedGastos,
+      cobros: scopedCobros,
+      incidencias: scopedIncidencias,
+      inmuebleIdsAutorizados: scopedInmuebles.map((i) => i.id),
+    });
+    if (resultado.estado !== 'NO_DISPONIBLE') {
+      await saveAuditLogFirestore({
+        usuarioId: currentUser.id,
+        usuarioEmail: currentUser.email,
+        usuarioNombre: currentUser.nombre,
+        accion: 'CONSULTA_IA_DATOS',
+        descripcion: 'Consulta asistida ejecutada sobre datos accesibles; no se conserva el texto de la pregunta.',
+        entidadAfectada: 'modulo',
+        idAfectado: accion.capabilityId,
+        resultado: 'EXITO',
+        detalles: {
+          capabilityId: accion.capabilityId,
+          motorOficial: resultado.motorOficial,
+          estadoResultado: resultado.estado,
+          cantidadHechos: resultado.hechos.length,
+          ambito: resultado.ambito,
+        },
+      });
+    }
+    return resultado;
+  }, [currentUser, contextoAsistente, scopedGastos, scopedCobros, scopedIncidencias, scopedInmuebles]);
   const ejecutarAccionAsistente = useCallback((accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => {
     if (accion.tipo === 'NAVEGAR' || (accion.tipo === 'EXPLICAR' && accion.route)) {
       setActiveSection(accion.route as SectionType);
@@ -3623,6 +3669,8 @@ export default function App() {
           cobrosPendientesCount={cobrosPendientesCount}
           morosidadAbiertaCount={morosidadAbiertaCount}
           onAccionAsistente={ejecutarAccionAsistente}
+          onConsultarAsistente={consultarAsistente}
+          contextoIA={contextoAsistente}
           proveedorIA={proveedorIA}
           accessibleSections={seccionesAccesibles}
           onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
@@ -3644,6 +3692,8 @@ export default function App() {
           onOpenAuthModal={() => setShowAuthModal(true)}
           onLogout={handleLogout}
           onAccionAsistente={ejecutarAccionAsistente}
+          onConsultarAsistente={consultarAsistente}
+          contextoIA={contextoAsistente}
           proveedorIA={proveedorIA}
           accessibleSections={seccionesAccesibles}
         />
@@ -4014,6 +4064,7 @@ export default function App() {
               propietarioContextoAltaId={altaInmuebleDesdePropietarioId}
               onContextoAltaConsumido={() => setAltaInmuebleDesdePropietarioId(null)}
               onUpdateInmueble={handleUpdateInmueble}
+              onInmuebleSeleccionado={setInmuebleContextualIA}
               onOpenLinkModal={(inm) => setInmuebleForLinkModal(inm)}
               onOpenConfigurarAgenda={(inmId) => {
                 setSelectedInmuebleForAgenda(inmId);
@@ -4075,6 +4126,10 @@ export default function App() {
             <CentroAyudaSection
               usuario={currentUser}
               accessibleSections={seccionesAccesibles}
+              contexto={contextoAsistente}
+              proveedorIA={proveedorIA}
+              onAccionAsistente={ejecutarAccionAsistente}
+              onConsultarAsistente={consultarAsistente}
               onIniciarTutorial={(id) => {
                 const t = obtenerTutorial(id);
                 if (t) setSesionTutorial(iniciarTutorial(t));

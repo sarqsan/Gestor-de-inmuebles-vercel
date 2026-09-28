@@ -128,6 +128,8 @@ interface InmueblesSectionProps {
   propietarioContextoAltaId?: string | null;
   /** El padre lo limpia después de aplicarlo, para no repetir la preselección. */
   onContextoAltaConsumido?: () => void;
+  /** Contexto local para la ayuda/IA; el host vuelve a validar el ID contra inmuebles acotados. */
+  onInmuebleSeleccionado?: (inmuebleId: string | null) => void;
 }
 
 export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
@@ -156,6 +158,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   onRecomercializarInmueble,
   propietarioContextoAltaId,
   onContextoAltaConsumido,
+  onInmuebleSeleccionado,
 }) => {
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string | null>(null);
   const [filterState, setFilterState] = useState<'todos' | 'disponible' | 'alquilado'>('todos');
@@ -163,6 +166,10 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [inmuebleToDelete, setInmuebleToDelete] = useState<Inmueble | null>(null);
   const [gestionImagenesInmueble, setGestionImagenesInmueble] = useState<Inmueble | null>(null);
   const [verAgendaInmueble, setVerAgendaInmueble] = useState<Inmueble | null>(null);
+  const seleccionarInmueble = (id: string | null) => {
+    setSelectedInmuebleId(id);
+    onInmuebleSeleccionado?.(id);
+  };
 
   // Modal State for New Property
   const [showAddModal, setShowAddModal] = useState(false);
@@ -880,7 +887,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
         <div className="space-y-6">
           {/* Top Back Navigation */}
           <button
-            onClick={() => setSelectedInmuebleId(null)}
+            onClick={() => seleccionarInmueble(null)}
             className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 bg-white px-3.5 py-2 rounded-xl border border-slate-200 shadow-2xs hover:bg-slate-50 transition-all"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -1902,7 +1909,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
           return (
             <div
               key={inm.id}
-              onClick={() => setSelectedInmuebleId(inm.id)}
+              onClick={() => seleccionarInmueble(inm.id)}
               className="bg-white rounded-2xl border border-slate-200/80 hover:border-blue-400 overflow-hidden shadow-2xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group relative"
             >
               <div>
@@ -3486,7 +3493,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
           if (inmuebleToDelete && onDeleteInmueble) {
             onDeleteInmueble(inmuebleToDelete.id);
             if (selectedInmuebleId === inmuebleToDelete.id) {
-              setSelectedInmuebleId(null);
+              seleccionarInmueble(null);
             }
             setInmuebleToDelete(null);
           }

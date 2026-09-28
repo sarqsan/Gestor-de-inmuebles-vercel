@@ -12,6 +12,7 @@
     "test:bloque-c": "tsx scripts/test-bloque-c.ts",
     "test:bloque-e": "tsx scripts/test-bloque-e.ts",
     "test:bloque-8": "vitest run tests/bloque-8-migracion-historica.test.ts tests/migracion-dry-run-b4.test.ts tests/autorizacion-migracion-o7.test.ts tests/import-export-canonico.test.ts",
+    "test:bloque-9": "vitest run src/experiencia/experiencia.test.ts src/experiencia/asistente.test.ts src/experiencia/consultasERP.test.ts src/experiencia/proveedorGemini.test.ts src/experiencia/limites.test.ts src/experiencia/progreso.test.ts src/experiencia/targets.test.ts src/components/experiencia/experiencia.ui.test.tsx src/components/experiencia/experiencia.f2.ui.test.tsx src/components/experiencia/experiencia.f3.ui.test.tsx src/components/experiencia/experiencia.f4.ui.test.tsx src/components/sections/centro-ayuda.b9.ui.test.tsx",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

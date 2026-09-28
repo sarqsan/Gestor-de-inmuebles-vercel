@@ -7,28 +7,35 @@
 import React, { useMemo, useState } from 'react';
 import { Search, BookOpen, ChevronRight, ArrowLeft, Clock, Lock, LifeBuoy } from 'lucide-react';
 import type { SectionType, UsuarioApp } from '../../types';
-import type { ExperienceContext, HelpEntry, ModuloERP, Tutorial } from '../../experiencia';
-import { NOMBRE_MODULO, buscarAyuda, contextoDesdeUsuario, evaluarTutorial, modulosConAyuda, obtenerTutorial, tutorialesDisponibles } from '../../experiencia';
+import type { AccionHost, CategoriaAyuda, ExperienceContext, HelpEntry, ModuloERP, ProveedorIA, ResultadoConsultaERP, Tutorial } from '../../experiencia';
+import { AsistentePanel } from '../experiencia/AsistentePanel';
+import { CATEGORIAS_AYUDA, NOMBRE_MODULO, buscarAyuda, categoriaDeAyuda, categoriasConAyuda, contextoDesdeUsuario, evaluarTutorial, modulosConAyuda, obtenerTutorial, tutorialesDisponibles } from '../../experiencia';
 
 interface CentroAyudaSectionProps {
   usuario: Pick<UsuarioApp, 'tipoPerfil' | 'roles' | 'permisos'> | null;
   /** Secciones a las que el usuario puede navegar (route guard del host). */
   accessibleSections?: SectionType[];
+  contexto?: ExperienceContext;
   onIniciarTutorial: (tutorialId: string) => void;
   onSelectSection?: (section: SectionType) => void;
+  proveedorIA?: ProveedorIA;
+  onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
+  onConsultarAsistente?: (accion: Extract<AccionHost, { tipo: 'CONSULTAR' }>) => Promise<ResultadoConsultaERP>;
 }
 
-export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario, accessibleSections, onIniciarTutorial, onSelectSection }) => {
-  const ctx: ExperienceContext = useMemo(() => contextoDesdeUsuario(usuario, 'ayuda', { accessibleSections }), [usuario, accessibleSections]);
+export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario, accessibleSections, contexto, onIniciarTutorial, onSelectSection, proveedorIA, onAccionAsistente, onConsultarAsistente }) => {
+  const ctx: ExperienceContext = useMemo(() => contexto ?? contextoDesdeUsuario(usuario, 'ayuda', { accessibleSections }), [contexto, usuario, accessibleSections]);
   const [consulta, setConsulta] = useState('');
   const [modulo, setModulo] = useState<ModuloERP | 'TODOS'>('TODOS');
+  const [categoria, setCategoria] = useState<CategoriaAyuda | 'TODAS'>('TODAS');
   const [abierta, setAbierta] = useState<HelpEntry | null>(null);
 
   const modulos = useMemo(() => modulosConAyuda(ctx), [ctx]);
+  const categorias = useMemo(() => categoriasConAyuda(ctx), [ctx]);
   const resultados = useMemo(() => {
     const base = buscarAyuda(ctx, consulta);
-    return modulo === 'TODOS' ? base : base.filter((e) => e.module === modulo);
-  }, [ctx, consulta, modulo]);
+    return base.filter((e) => (modulo === 'TODOS' || e.module === modulo) && (categoria === 'TODAS' || categoriaDeAyuda(e) === categoria));
+  }, [ctx, consulta, modulo, categoria]);
   const tutoriales = useMemo(() => tutorialesDisponibles(ctx), [ctx]);
 
   const resumenTutorial = (t: Tutorial) => {
@@ -46,6 +53,9 @@ export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario,
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">Explicaciones de cada pantalla y tutoriales guiados, según tu perfil.</p>
         </div>
+        {usuario && onAccionAsistente && (
+          <AsistentePanel usuario={usuario} section="ayuda" contexto={ctx} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} onConsultar={onConsultarAsistente} variante="texto" />
+        )}
       </div>
 
       {abierta ? (
@@ -129,6 +139,13 @@ export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario,
                 ))}
               </div>
             )}
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              Categoría
+              <select aria-label="Filtrar por categoría" value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaAyuda | 'TODAS')} className="px-2 py-1.5 rounded-lg border border-slate-200 bg-white">
+                <option value="TODAS">Todas las categorías</option>
+                {CATEGORIAS_AYUDA.filter((c) => categorias.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </label>
           </div>
 
           <section aria-label="Contenidos de ayuda" className="space-y-2">

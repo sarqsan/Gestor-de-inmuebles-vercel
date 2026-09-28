@@ -22,8 +22,8 @@ import {
   normalizarTipoContenido,
 } from './src/lib/documentosServidor';
 import { idempotenciaDeEvento } from './src/types/notificaciones';
-import { construirPromptAsistente, parsearRespuestaModelo } from './src/experiencia/proveedorGemini';
-import type { CuerpoInterpretar } from './src/experiencia/proveedorGemini';
+import { construirPromptAsistente, normalizarCuerpoInterpretar, parsearRespuestaModelo } from './src/experiencia/proveedorGemini';
+import { crearLimitadorVentana } from './src/experiencia/limites';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -833,15 +833,16 @@ Responde ÚNICAMENTE en JSON válido con este formato:
 // cliente usa el resolutor local. Sin escrituras en Firestore ni auditoría.
 // ---------------------------------------------------------------------------
 const MODELO_ASISTENTE = 'gemini-3.7-flash';
+const limiteAsistente = crearLimitadorVentana(30, 60_000);
 app.post('/api/asistente/interpretar', async (req, res) => {
   try {
-    const cuerpo = req.body as Partial<CuerpoInterpretar> | undefined;
-    if (!cuerpo || typeof cuerpo.input !== 'string' || !cuerpo.input.trim() || !Array.isArray(cuerpo.capabilities)) {
-      return res.status(400).json({ disponible: true, error: 'Petición inválida: se requiere input y capabilities.' });
+    const limite = limiteAsistente.consumir(req.ip || req.socket.remoteAddress || 'desconocido');
+    if (!limite.permitido) {
+      res.setHeader('Retry-After', String(Math.ceil(limite.reintentarEnMs / 1000)));
+      return res.status(429).json({ disponible: true, error: 'Límite temporal de consultas alcanzado.' });
     }
-    if (cuerpo.input.length > 500 || cuerpo.capabilities.length > 100) {
-      return res.status(400).json({ disponible: true, error: 'Petición demasiado grande.' });
-    }
+    const cuerpo = normalizarCuerpoInterpretar(req.body);
+    if (!cuerpo) return res.status(400).json({ disponible: true, error: 'Petición inválida o demasiado grande.' });
     const ai = getGeminiClient();
     if (!ai) {
       return res.json({ disponible: false, proveedor: 'gemini', modelo: MODELO_ASISTENTE });

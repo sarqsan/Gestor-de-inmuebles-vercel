@@ -66,7 +66,7 @@ La política concreta queda cubierta por pruebas de enero 31 + 1/6 meses, agosto
 
 ## Validación de la reparación (árbol derivado de `d4fc378`)
 
-Resultados ejecutados sobre el árbol final de reparación antes del commit:
+Resultados ejecutados sobre el árbol de reparación publicado; el código funcional no cambió después de estas ejecuciones. La actualización documental de estado se limita a consignar los resultados:
 
 | Validación | Resultado |
 |---|---|
@@ -92,4 +92,4 @@ La reparación conserva las mismas rutas Firestore, serialización y reglas de a
 
 ## Estado
 
-**PR #10 sigue abierto; no se ha fusionado ni modificado `main`.** Las validaciones locales del árbol reparado están completas. El estado «listo para merge» queda sujeto a publicar el commit en la rama del PR y verificar el head y los checks remotos actuales; no se ejecutará la fusión.
+**PR #10 está abierto y listo para merge; no se ha fusionado ni modificado `main`.** Las validaciones locales y los checks remotos del head publicado están completos; no se ejecutará la fusión en esta orden.

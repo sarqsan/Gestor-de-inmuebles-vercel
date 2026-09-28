@@ -22,6 +22,10 @@ const mem = vi.hoisted(() => ({
   ficha: null as null | Record<string, unknown>,
   gastosCreados: [] as unknown[],
   auditoria: [] as unknown[],
+  /** Fuentes de catálogo que devuelve el adaptador mockeado (exportación). */
+  fuentes: null as null | { propietarios: unknown[]; inmuebles: unknown[]; contratos: unknown[]; gastos: unknown[] },
+  /** Último Blob descargado por el panel (para verificar el .xlsx real). */
+  descargado: null as null | { blob: Blob },
 }));
 
 vi.mock('../src/lib/firebase', () => ({
@@ -45,9 +49,9 @@ vi.mock('../src/lib/importExportFirebase', async (importOriginal) => {
   return {
     ...(await (importOriginal() as Promise<Record<string, unknown>>)),
     ambitoAutorizadoDesdeUsuario: ambitoReal.ambitoAutorizadoDesdeUsuario,
-    cargarFuentesCatalogo: async () => ({ propietarios: [], inmuebles: [], contratos: [], gastos: [] }),
+    cargarFuentesCatalogo: async () => mem.fuentes ?? ({ propietarios: [], inmuebles: [], contratos: [], gastos: [] }),
     catalogosDesdeFuentes: (_f: unknown, extra?: Record<string, unknown>) => ({
-      propietarios: [{ id: 'prop_A', nombre: 'A' }],
+      propietarios: [{ id: 'prop_A', nombre: 'A', nifCif: '11111111A' }],
       inmuebles: [{ id: 'inm_1', direccion: 'C X', propietarioId: 'prop_A' }],
       contratos: [{ id: 'cont_1', inmuebleId: 'inm_1', propietarioId: 'prop_A' }],
       mapeos: [{ alcance: 'INMUEBLE', origen: 'EXTERNAL:prop_ext_1', destino: 'inm_1' }],
@@ -66,8 +70,25 @@ vi.mock('../src/lib/importExportFirebase', async (importOriginal) => {
   };
 });
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { ImportExportPanel } from '../src/components/sections/ImportExportPanel';
+import { parseXlsx } from '../src/lib/importExport';
 import type { UsuarioApp } from '../src/types';
+
+// jsdom no sirve módulos como file://: los fixtures se resuelven desde la raíz
+// del repositorio (misma ruta que usa vitest como cwd).
+const fixtures = (nombre: string): Uint8Array =>
+  new Uint8Array(readFileSync(resolve(process.cwd(), 'tests/fixtures/xlsx', nombre)));
+const FIXTURE_XLSX = fixtures('movimientos-rentasync.xlsx');
+const FIXTURE_HOJAS = fixtures('inmuebles-varias-hojas.xlsx');
+
+/** jsdom no implementa createObjectURL: se intercepta para capturar la descarga. */
+function interceptarDescargas(): void {
+  const url = URL as unknown as Record<string, unknown>;
+  url['createObjectURL'] = (blob: Blob) => { mem.descargado = { blob }; return 'blob:test'; };
+  url['revokeObjectURL'] = () => {};
+}
 
 afterEach(() => {
   cleanup();
@@ -75,6 +96,8 @@ afterEach(() => {
   mem.ficha = null;
   mem.gastosCreados = [];
   mem.auditoria = [];
+  mem.fuentes = null;
+  mem.descargado = null;
 });
 
 const MASTER = {
@@ -87,12 +110,15 @@ const GASTO_JSON = JSON.stringify([{
   propertyId: 'prop_ext_1', date: '2024-03-15', description: 'Comunidad marzo',
 }]);
 
-async function subirFichero(container: HTMLElement) {
+async function subirFicheroCon(container: HTMLElement, contenido: BlobPart, nombre: string, mime: string) {
   const input = container.querySelector('input[type="file"]') as HTMLInputElement;
-  const file = new File([GASTO_JSON], 'panel.json', { type: 'application/json' });
-  fireEvent.change(input, { target: { files: [file] } });
+  fireEvent.change(input, { target: { files: [new File([contenido], nombre, { type: mime })] } });
   // La subida es async (arrayBuffer + setState): esperar a la señal sha256.
   await screen.findByText(/sha256:/);
+}
+
+async function subirFichero(container: HTMLElement) {
+  await subirFicheroCon(container, GASTO_JSON, 'panel.json', 'application/json');
 }
 
 describe('D1: flujo completo analizar → decidir → autorizar → promocionar', () => {
@@ -159,5 +185,63 @@ describe('D2: identidad propia cuando no hay props', () => {
     const btn = screen.getByText('Analizar (dry-run)');
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     expect(container.textContent).toMatch(/se bloquea/);
+  });
+});
+
+describe('BLOQUE 7: XLSX real en el panel (mismo contrato que JSON/CSV)', () => {
+  const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  it('acepta un .xlsx real, muestra el selector de hoja y hace dry-run', async () => {
+    const { container } = render(<ImportExportPanel inmuebles={[]} usuario={MASTER} gestiones={[]} />);
+    await subirFicheroCon(container, new Blob([FIXTURE_XLSX]), 'movimientos.xlsx', MIME_XLSX);
+    expect(container.textContent).toMatch(/Formato:\s*XLSX/);
+    // El selector de hoja solo existe con formato XLSX.
+    screen.getByText('Hoja:', { exact: false });
+    // Avisos reales del parser (filas sin destino, tipos interpretados…).
+    fireEvent.click(screen.getByText('Analizar (dry-run)'));
+    await screen.findByText('Decisiones de promoción (B1 G-13: sin decisión no se promociona)');
+    expect(container.textContent).toMatch(/movimientos\.xlsx/);
+  });
+
+  it('avisa de las hojas del libro cuando tiene varias (y deja elegir cuál)', async () => {
+    const { container } = render(<ImportExportPanel inmuebles={[]} usuario={MASTER} gestiones={[]} />);
+    await subirFicheroCon(container, new Blob([FIXTURE_HOJAS]), 'inmuebles.xlsx', MIME_XLSX);
+    fireEvent.click(screen.getByText('Analizar (dry-run)'));
+    // Aviso real del parser: se lee la primera hoja y se enumeran las demás.
+    await screen.findByText(/se lee 'Inmuebles'/);
+    const selectorHoja = container.querySelector('input[placeholder="(por nombre; vacío = primera)"]') as HTMLInputElement;
+    expect(selectorHoja).not.toBeNull();
+    // Elegir otra hoja cambia lo que se analiza (misma ruta, sin lógica paralela).
+    fireEvent.change(selectorHoja, { target: { value: 'Contratos' } });
+    fireEvent.click(screen.getByText('Analizar (dry-run)'));
+    await screen.findByText(/hoja 'Contratos' seleccionada entre 2 del libro/);
+    expect(container.textContent).not.toMatch(/se lee 'Inmuebles'/);
+  });
+
+  it('exportar XLSX descarga un libro real con el ámbito exacto (sin datos ajenos)', async () => {
+    interceptarDescargas();
+    mem.fuentes = {
+      propietarios: [{ id: 'prop_A', nombre: 'A', nifCif: '11111111A' }],
+      inmuebles: [{ id: 'inm_1', direccion: 'C X', propietarioId: 'prop_A' }],
+      contratos: [],
+      gastos: [
+        { id: 'g_1', inmuebleId: 'inm_1', propietarioId: 'prop_A', concepto: 'Comunidad', importe: 100.5, fechaDevengo: '2024-03-15' },
+        { id: 'g_2', inmuebleId: 'inm_2', propietarioId: 'prop_B', concepto: 'Ajena', importe: 50, fechaDevengo: '2024-03-16' },
+      ],
+    };
+    const { container } = render(<ImportExportPanel inmuebles={[]} usuario={MASTER} gestiones={[]} />);
+    fireEvent.click(screen.getByText('Exportar'));
+    fireEvent.change(screen.getByLabelText(/Propietarios \(ids, coma/, { exact: false }), { target: { value: 'prop_A' } });
+    fireEvent.change(screen.getByLabelText(/Formato:/, { exact: false }), { target: { value: 'XLSX' } });
+    fireEvent.click(screen.getByText('Generar y descargar'));
+    await screen.findByText(/registro\(s\) · run exp_/);
+    expect(mem.descargado).not.toBeNull();
+    const bytes = new Uint8Array(await mem.descargado!.blob.arrayBuffer());
+    const libro = parseXlsx(bytes);
+    expect(libro.errores).toEqual([]);
+    expect(libro.hojas).toEqual(['GASTO']);
+    expect(libro.registros.map((r) => r['id'])).toEqual(['g_1']);
+    expect(libro.registros[0]['importe']).toBe(100.5);
+    expect(libro.registros[0]['fechaDevengo']).toBe('2024-03-15');
   });
 });

@@ -10,6 +10,7 @@
  * para probar el contrato. NO son los archivos históricos reales, NO se les
  * atribuye ningún SHA real y NO sustituyen la futura reconciliación real.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from '../src/lib/importacion/hash';
 import { huellaExacta } from '../src/lib/importacion/dedup';
@@ -218,15 +219,39 @@ describe('parser CSV genérico', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. XLSX stub honesto
+// 3. Adaptador XLSX
+//
+// BLOQUE 7: el puerto se implementó de verdad (adaptador propio sin
+// dependencias). Este bloque sustituye la comprobación del antiguo stub
+// honesto ("XLSX no soportado") por la verificación REAL: un libro generado
+// por una implementación independiente (SheetJS, fixture de test) se lee con
+// sus valores, y un archivo que no es un libro sigue respondiendo honesto sin
+// lanzar. La prueba es más fuerte que la anterior: antes solo se afirmaba que
+// el importador se abstenía; ahora se afirma que lee y que sigue absteniéndose
+// cuando el archivo no es válido.
 // ---------------------------------------------------------------------------
 
-describe('adaptador XLSX', () => {
-  it('responde honesto sin romper: 0 registros + motivo documentado', () => {
-    const r = parseXlsx();
+describe('adaptador XLSX (BLOQUE 7: implementado)', () => {
+  const fixture = (nombre: string): Uint8Array =>
+    new Uint8Array(readFileSync(new URL(`./fixtures/xlsx/${nombre}`, import.meta.url)));
+
+  it('lee un libro .xlsx real con valores, fechas y booleanos', () => {
+    const r = parseXlsx(fixture('movimientos-rentasync.xlsx'));
+    expect(r.formato).toBe('XLSX');
+    expect(r.errores).toEqual([]);
+    expect(r.hojas).toEqual(['Movimientos']);
+    expect(r.registros).toHaveLength(4);
+    expect(r.registros[0]).toMatchObject({
+      id: 'exp-g1', category: 'community', amount: 100.5, date: '2024-03-15', esDeducible: true,
+    });
+    expect(r.localizaciones[0]).toBe("hoja 'Movimientos' fila 2");
+  });
+
+  it('un archivo que no es un libro responde honesto y no lanza', () => {
+    const r = parseXlsx(new TextEncoder().encode('{"no":"es un xlsx"}'));
     expect(r.formato).toBe('XLSX');
     expect(r.registros).toHaveLength(0);
-    expect(r.errores.join(' ')).toMatch(/XLSX no soportado en erp-import-export-v1/);
+    expect(r.errores.join(' ')).toMatch(/no es un ZIP válido|demasiado pequeño para ser un ZIP|no es un libro \.xlsx válido/);
   });
 });
 

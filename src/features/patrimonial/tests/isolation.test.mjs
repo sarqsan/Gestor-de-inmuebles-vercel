@@ -171,6 +171,21 @@ const PERMITIDOS_INTEGRACION = [
   // mantiene con la comprobación de adición pura de más abajo: ninguna línea
   // previa de package.json puede borrarse ni reescribirse.
   'package.json',
+  // BLOQUE 7 (Importación/Exportación + XLSX): superficie EXACTA y mínima del
+  // bloque. El módulo canónico de importación/exportación ya existía integrado;
+  // el bloque añade el adaptador XLSX (ZIP/DEFLATE/fechas Excel propios), cablea
+  // el panel y sus tests/fixtures. NO se autoriza `src/lib` completo ni
+  // `tests/` completo: cualquier otro fichero que difiera de la base sigue
+  // haciendo fallar el aislamiento. `src/lib/importExportFirebase.ts` (única
+  // capa de I/O) NO se toca.
+  'src/lib/importExport/',
+  'src/components/sections/ImportExportPanel.tsx',
+  'tests/import-export-xlsx.test.ts',
+  'tests/import-export-canonico.test.ts',
+  'tests/import-export-panel.test.tsx',
+  'tests/fixtures/xlsx/',
+  'scripts/test-bloque-7.ts',
+  'docs/BLOQUE-7-IMPORTACION-EXPORTACION-XLSX.md',
 ];
 const permitido = (path) => PERMITIDOS_INTEGRACION.some((p) => path === p || path.startsWith(p));
 

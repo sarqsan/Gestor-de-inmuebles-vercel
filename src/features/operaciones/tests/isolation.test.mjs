@@ -36,6 +36,25 @@ const SUPERFICIE_BLOQUE_5 = [
   'docs/BLOQUE-5-OPERACIONES-FISCALIDAD.md',
 ];
 const permitidaBloque5 = (path) => SUPERFICIE_BLOQUE_5.includes(path);
+/**
+ * BLOQUE 7 (Importación/Exportación + XLSX) — superficie EXACTA: el adaptador
+ * XLSX propio (ZIP/DEFLATE/fechas Excel), el cableado del panel canónico de
+ * importación/exportación y sus tests/fixtures. NO se autoriza `src/lib` ni
+ * `tests/` completos: cualquier otro fichero fuera de esta lista sigue haciendo
+ * fallar el alcance. `src/lib/importExportFirebase.ts` (única capa de I/O) NO se
+ * toca en este bloque.
+ */
+const SUPERFICIE_BLOQUE_7 = [
+  'src/lib/importExport/',
+  'src/components/sections/ImportExportPanel.tsx',
+  'tests/import-export-xlsx.test.ts',
+  'tests/import-export-canonico.test.ts',
+  'tests/import-export-panel.test.tsx',
+  'tests/fixtures/xlsx/',
+  'scripts/test-bloque-7.ts',
+  'docs/BLOQUE-7-IMPORTACION-EXPORTACION-XLSX.md',
+];
+const permitidaBloque7 = (path) => SUPERFICIE_BLOQUE_7.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p));
 function archivos(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => ['tests','persistence','ui'].includes(e.name) ? [] : e.isDirectory() ? archivos(resolve(dir, e.name)) : [resolve(dir, e.name)]);
 }
@@ -107,7 +126,9 @@ test('diff completo desde la base B permite solo el port y la conexión aditiva 
     ||path==='tests/fase14-espejo-identidad.test.ts'||path==='tests/helpers/evaluadorReglasFirestore.ts'
     ||path===excepcionRegistro
     // superficie EXACTA y mínima del BLOQUE 5 (Operaciones → Fiscalidad)
-    ||permitidaBloque5(path);
+    ||permitidaBloque5(path)
+    // superficie EXACTA y mínima del BLOQUE 7 (Importación/Exportación + XLSX)
+    ||permitidaBloque7(path);
   const referencia=referenciaCustodia(BASE);
   assert.ok(referencia,'CUSTODIA: no hay referencia verificable (base B ni commit de partida del bloque)');
   const paths=[...git('diff','--name-only',referencia.sha,'--','.').split('\n'),...git('ls-files','--others','--exclude-standard').split('\n')].filter(Boolean);

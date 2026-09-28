@@ -55,14 +55,35 @@ test('auditoría usa una sola función canónica y una sola colección; no hay f
 test('servicios/modelos heredados, configuración TS y entrypoints intactos frente a la base B',()=>{
   const referencia=referenciaCustodia();
   assert.ok(referencia,'CUSTODIA: no hay referencia verificable (base B ni commit de partida del bloque)');
-  // Ficheros que el BLOQUE 5 NO toca: byte a byte idénticos a la referencia
-  // (la comprobación histórica intacta; con la base ausente se verifica contra el
-  // commit del que parte el bloque, con la misma exigencia de no modificación).
-  const intactos=['src/App.tsx','src/main.tsx','src/lib/firebase.ts','src/lib/googleAuth.ts','server.ts','tsconfig.json'];
+  // Ficheros que el BLOQUE 5 no toca: byte a byte idénticos a la referencia.
+  // `firebase.ts` tiene una excepción estrecha y separada abajo: solo los tres
+  // puentes de escritura verificable, sin alterar los helpers históricos.
+  const intactos=['src/App.tsx','src/main.tsx','src/lib/googleAuth.ts','server.ts','tsconfig.json'];
   for(const f of intactos){
     if(referencia.historica)assert.equal(read(f),git('show',`${referencia.sha}:${f}`),f);
     else assert.ok(sinCambios(referencia.sha,f),`${f} modificado respecto a la referencia de custodia`);
   }
+  const firebaseActual=read('src/lib/firebase.ts');
+  const firebaseBase=git('show',`${referencia.sha}:src/lib/firebase.ts`);
+  const segmentos=[
+    ['export async function saveGastoFirestore', 'export async function deleteGastoFirestore('],
+    ['export async function saveTareaMantenimientoFirestore', 'export async function deleteTareaMantenimientoFirestore('],
+    ['export async function saveGarantiaReparacionFirestore', 'export async function deleteGarantiaReparacionFirestore('],
+  ];
+  const extraer=(source,inicio,fin)=>{const a=source.indexOf(inicio),b=source.indexOf(fin,a);assert.ok(a>=0&&b>a,`segmento de custodia: ${inicio}`);return source.slice(a,b);};
+  const sustituir=(source,inicio,fin,replacement)=>{const a=source.indexOf(inicio),b=source.indexOf(fin,a);return source.slice(0,a)+replacement+source.slice(b);};
+  let firebaseNormalizado=firebaseActual;
+  for(const [inicio,fin] of segmentos){
+    const actual=extraer(firebaseActual,inicio,fin);
+    const previo=extraer(firebaseBase,inicio,fin);
+    assert.match(actual,/WithResult[\s\S]*return \{ ok: true \}[\s\S]*return \{ ok: false, error \}/,`${inicio}: resultado verificable`);
+    assert.match(actual,/export async function save[\s\S]*await save\w+WithResult\(/,`${inicio}: API histórica conservada`);
+    firebaseNormalizado=sustituir(firebaseNormalizado,inicio,fin,previo);
+  }
+  firebaseNormalizado=firebaseNormalizado
+    .replace(/\/\*\* Escritura verificable para flujos que no pueden tratar un fallo como éxito\. \*\/\n/,'')
+    .replace(/export type FirestoreWriteResult =\n  \| \{ ok: true \}\n  \| \{ ok: false; error: unknown \};\n\n/,'');
+  assert.equal(firebaseNormalizado,firebaseBase,'firebase.ts solo admite los tres puentes checked-result de B5');
   // Ficheros compartidos que el BLOQUE 5 amplía de forma documentada: solo se
   // admiten ADICIONES (el contrato previo del modelo sigue siendo un subconjunto
   // literal del actual). Cualquier borrado o reescritura hace fallar la custodia.

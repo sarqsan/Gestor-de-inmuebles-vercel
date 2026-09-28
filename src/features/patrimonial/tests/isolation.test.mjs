@@ -147,6 +147,10 @@ const PERMITIDOS_INTEGRACION = [
   'src/lib/firebase.ts',
   'src/lib/importacion/hash.ts',
   'src/utils/segurosCentro.ts',
+  // Reparación fin de mes B9 (fecha civil, clamp mensual y pruebas de calendario):
+  'src/utils/mantenimientoEngine.ts',
+  'src/utils/mantenimientoEngine.test.ts',
+  'docs/REPARACION-FINAL-INTEGRACION-BLOQUES-3-9-2026-09.md',
   'tests/centro-operativo.test.ts',
   'tests/expediente-documental.test.ts',
   'tests/hash-isomorfico.test.ts',

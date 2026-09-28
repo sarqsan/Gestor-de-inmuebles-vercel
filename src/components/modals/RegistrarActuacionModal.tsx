@@ -20,7 +20,10 @@ import {
   generarGastoDesdeOperacion,
   operacionDesdeTareaMantenimiento,
 } from '../../utils/operacionGastoEngine';
-import { saveGastoFirestore, saveGarantiaReparacionFirestore } from '../../lib/firebase';
+import {
+  saveGastoFirestoreWithResult,
+  saveGarantiaReparacionFirestoreWithResult,
+} from '../../lib/firebase';
 import {
   X,
   CheckCircle2,
@@ -136,7 +139,15 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
       }
 
       const gasto = resultadoGasto?.gasto;
-      if (gasto) await saveGastoFirestore(gasto);
+      if (gasto) {
+        const persistenciaGasto = await saveGastoFirestoreWithResult(gasto);
+        if (persistenciaGasto.ok === false) {
+          const detalle = persistenciaGasto.error instanceof Error
+            ? persistenciaGasto.error.message
+            : String(persistenciaGasto.error);
+          throw new Error(`No se pudo guardar el gasto de la actuación: ${detalle}`);
+        }
+      }
       const gastoId = gasto?.id;
 
       // 2. Marcar actuación realizada deterministamente en la tarea
@@ -158,7 +169,9 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
         const fechaFinG = calcularFechaFinGarantia(fechaInicioG, mesesGarantia);
 
         const nuevaGarantia: GarantiaReparacion = {
-          id: `gar_mant_${tarea.id}_${Date.now()}`,
+          // La garantía comparte la identidad tarea+fecha de esta actuación:
+          // un reintento tras una escritura parcial actualiza el mismo documento.
+          id: `gar_mant_${tarea.id}_${fechaInicioG}`,
           inmuebleId: tarea.inmuebleId,
           propietarioId: tarea.propietarioId,
           trabajoId: tarea.ultimaOrdenTrabajoId || `ot_mant_${tarea.id}`,
@@ -178,7 +191,13 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        await saveGarantiaReparacionFirestore(nuevaGarantia);
+        const persistenciaGarantia = await saveGarantiaReparacionFirestoreWithResult(nuevaGarantia);
+        if (persistenciaGarantia.ok === false) {
+          const detalle = persistenciaGarantia.error instanceof Error
+            ? persistenciaGarantia.error.message
+            : String(persistenciaGarantia.error);
+          throw new Error(`No se pudo guardar la garantía de la actuación: ${detalle}`);
+        }
         tareaActualizada.garantiaId = nuevaGarantia.id;
       }
 

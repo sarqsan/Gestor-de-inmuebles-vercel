@@ -1220,13 +1220,25 @@ export function subscribeGastos(
   );
 }
 
-export async function saveGastoFirestore(gasto: Gasto) {
+export type FirestoreWriteResult =
+  | { ok: true }
+  | { ok: false; error: unknown };
+
+/** Escritura verificable para flujos que no pueden tratar un fallo como éxito. */
+export async function saveGastoFirestoreWithResult(gasto: Gasto): Promise<FirestoreWriteResult> {
   try {
     const cleanGasto = sanitizeObjectForFirestore(gasto);
     await setDoc(doc(db, 'gastos', gasto.id), cleanGasto, { merge: true });
-  } catch (err) {
-    console.error('Error saving gasto to Firestore:', err);
+    return { ok: true };
+  } catch (error) {
+    console.error(`Error saving gasto '${gasto.id}' to Firestore:`, error);
+    return { ok: false, error };
   }
+}
+
+/** API histórica best-effort; conserva Promise<void> para sus consumidores existentes. */
+export async function saveGastoFirestore(gasto: Gasto): Promise<void> {
+  await saveGastoFirestoreWithResult(gasto);
 }
 
 export async function deleteGastoFirestore(gastoId: string) {
@@ -1694,14 +1706,23 @@ export function subscribeTareasMantenimiento(
     'tareas_mantenimiento'
   );
 }
-export async function saveTareaMantenimientoFirestore(item: TareaMantenimiento) {
+export async function saveTareaMantenimientoFirestoreWithResult(
+  item: TareaMantenimiento
+): Promise<FirestoreWriteResult> {
   try {
     await setDoc(doc(db, 'tareas_mantenimiento', item.id), sanitizeObjectForFirestore(item), {
       merge: true,
     });
-  } catch (err) {
-    console.error('Error saving tarea mantenimiento:', err);
+    return { ok: true };
+  } catch (error) {
+    console.error(`Error saving tarea mantenimiento '${item.id}':`, error);
+    return { ok: false, error };
   }
+}
+
+/** API histórica best-effort; conserva Promise<void> para sus consumidores existentes. */
+export async function saveTareaMantenimientoFirestore(item: TareaMantenimiento): Promise<void> {
+  await saveTareaMantenimientoFirestoreWithResult(item);
 }
 export async function deleteTareaMantenimientoFirestore(id: string) {
   try {
@@ -1723,14 +1744,23 @@ export function subscribeGarantiasReparacion(
   );
 }
 
-export async function saveGarantiaReparacionFirestore(item: GarantiaReparacion) {
+export async function saveGarantiaReparacionFirestoreWithResult(
+  item: GarantiaReparacion
+): Promise<FirestoreWriteResult> {
   try {
     await setDoc(doc(db, 'garantias_reparacion', item.id), sanitizeObjectForFirestore(item), {
       merge: true,
     });
-  } catch (err) {
-    console.error('Error saving garantia reparacion:', err);
+    return { ok: true };
+  } catch (error) {
+    console.error(`Error saving garantia reparacion '${item.id}':`, error);
+    return { ok: false, error };
   }
+}
+
+/** API histórica best-effort; conserva Promise<void> para sus consumidores existentes. */
+export async function saveGarantiaReparacionFirestore(item: GarantiaReparacion): Promise<void> {
+  await saveGarantiaReparacionFirestoreWithResult(item);
 }
 
 export async function deleteGarantiaReparacionFirestore(id: string) {

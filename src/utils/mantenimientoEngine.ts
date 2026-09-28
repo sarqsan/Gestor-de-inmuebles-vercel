@@ -83,38 +83,110 @@ export const ESTADO_GARANTIA_LABELS: Record<
   },
 };
 
+interface FechaCalendario {
+  year: number;
+  month: number;
+  day: number;
+}
+
+function esBisiesto(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function diasEnMes(year: number, month: number): number {
+  if (month === 2) return esBisiesto(year) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function fechaCalendarioValida(fecha: FechaCalendario | null): fecha is FechaCalendario {
+  return !!fecha
+    && Number.isInteger(fecha.year) && fecha.year >= 1 && fecha.year <= 9999
+    && Number.isInteger(fecha.month) && fecha.month >= 1 && fecha.month <= 12
+    && Number.isInteger(fecha.day) && fecha.day >= 1 && fecha.day <= diasEnMes(fecha.year, fecha.month);
+}
+
+function parsearFechaCalendario(valor: string): FechaCalendario | null {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(valor);
+  if (!partes) return null;
+  const fecha = { year: Number(partes[1]), month: Number(partes[2]), day: Number(partes[3]) };
+  return fechaCalendarioValida(fecha) ? fecha : null;
+}
+
+function formatearFechaCalendario(fecha: FechaCalendario): string {
+  return `${String(fecha.year).padStart(4, '0')}-${String(fecha.month).padStart(2, '0')}-${String(fecha.day).padStart(2, '0')}`;
+}
+
 /**
- * Calcula la próxima fecha de mantenimiento de forma determinista y estricta.
+ * Suma meses de calendario manteniendo el día numérico cuando existe en el mes
+ * destino; si no existe, lo limita al último día de ese mes. No conserva una
+ * marca de “fin de mes”: así `2026-02-28 + 6 meses` sigue siendo `2026-08-28`,
+ * que es la semántica ya fijada por la regresión existente.
+ */
+function sumarMesesCalendario(fecha: FechaCalendario, meses: number): FechaCalendario {
+  const total = fecha.year * 12 + (fecha.month - 1) + Math.trunc(meses);
+  const year = Math.floor(total / 12);
+  const month = ((total % 12) + 12) % 12 + 1;
+  return { year, month, day: Math.min(fecha.day, diasEnMes(year, month)) };
+}
+
+/** Suma días a una fecha civil sin convertirla en un instante horario. */
+function sumarDiasCalendario(fecha: FechaCalendario, dias: number): FechaCalendario {
+  let { year, month, day } = fecha;
+  let restantes = Math.trunc(dias);
+  while (restantes > 0) {
+    const hastaFinDeMes = diasEnMes(year, month) - day;
+    if (restantes <= hastaFinDeMes) {
+      day += restantes;
+      restantes = 0;
+    } else {
+      restantes -= hastaFinDeMes + 1;
+      day = 1;
+      month += 1;
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+    }
+  }
+  return { year, month, day };
+}
+
+/** Lee una fecha ISO como fecha civil; los instantes se interpretan en zona local. */
+function leerFechaCalendario(fechaReferencia: string | Date): FechaCalendario | null {
+  if (typeof fechaReferencia === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaReferencia)) {
+    return parsearFechaCalendario(fechaReferencia);
+  }
+  const fecha = typeof fechaReferencia === 'string' ? new Date(fechaReferencia) : new Date(fechaReferencia);
+  if (!Number.isFinite(fecha.getTime())) return null;
+  const local = { year: fecha.getFullYear(), month: fecha.getMonth() + 1, day: fecha.getDate() };
+  return fechaCalendarioValida(local) ? local : null;
+}
+
+/**
+ * Calcula la próxima fecha de mantenimiento con aritmética de fecha civil.
  */
 export function calcularProximaFechaMantenimiento(
   fechaReferencia: string | Date,
   periodicidad: PeriodicidadMantenimiento,
   diasIntervaloPersonalizado?: number
 ): string {
-  const fechaCalendario = typeof fechaReferencia === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaReferencia);
-  const d = typeof fechaReferencia === 'string'
-    ? new Date(fechaCalendario ? `${fechaReferencia}T00:00:00.000Z` : fechaReferencia)
-    : new Date(fechaReferencia);
-
-  if (isNaN(d.getTime())) return formatDateInputLocal();
-  const comoFecha = () => d.toISOString().slice(0, 10);
+  const fecha = leerFechaCalendario(fechaReferencia);
+  if (!fecha) return formatDateInputLocal();
 
   if (periodicidad === 'PUNTUAL' || periodicidad === 'UNICA') {
-    return comoFecha();
+    return formatearFechaCalendario(fecha);
   }
 
   if (periodicidad === 'PERSONALIZADA') {
-    const dias = diasIntervaloPersonalizado && diasIntervaloPersonalizado > 0 ? diasIntervaloPersonalizado : 30;
-    if (fechaCalendario) d.setUTCDate(d.getUTCDate() + dias);
-    else d.setDate(d.getDate() + dias);
-    return comoFecha();
+    const dias = Number.isFinite(diasIntervaloPersonalizado) && diasIntervaloPersonalizado! > 0
+      ? Math.trunc(diasIntervaloPersonalizado!)
+      : 30;
+    return formatearFechaCalendario(sumarDiasCalendario(fecha, dias));
   }
 
   const def = PERIODICIDAD_LABELS[periodicidad];
   const meses = def ? def.mesesPaso : 12;
-  if (fechaCalendario) d.setUTCMonth(d.getUTCMonth() + meses);
-  else d.setMonth(d.getMonth() + meses);
-  return comoFecha();
+  return formatearFechaCalendario(sumarMesesCalendario(fecha, meses));
 }
 
 /**
@@ -303,22 +375,12 @@ export function generarOrdenTrabajoPreventiva(params: {
  * Calcula la fecha de finalización de una garantía en base a la fecha de inicio y duración en meses.
  */
 export function calcularFechaFinGarantia(fechaInicio: string, duracionMeses: number): string {
-  // Las garantías se expresan como fechas de calendario, no como instantes. Usar UTC
-  // exclusivamente como contenedor aritmético evita que el cambio CET/CEST desplace el día.
-  const partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(fechaInicio);
-  if (!partes) return formatDateInputLocal();
-  const year = Number(partes[1]);
-  const month = Number(partes[2]);
-  const day = Number(partes[3]);
-  const d = new Date(0);
-  d.setUTCHours(0, 0, 0, 0);
-  d.setUTCFullYear(year, month - 1, day);
-  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
-    return formatDateInputLocal();
-  }
-  const meses = duracionMeses > 0 ? duracionMeses : 6;
-  d.setUTCMonth(d.getUTCMonth() + meses);
-  return d.toISOString().slice(0, 10);
+  // Las garantías son fechas civiles. Se conserva el número de día y, si el mes
+  // destino no lo tiene, se limita a su último día (p. ej. 31-08 + 6 meses = 28-02).
+  const fecha = parsearFechaCalendario((fechaInicio || '').slice(0, 10));
+  if (!fecha) return formatDateInputLocal();
+  const meses = Number.isFinite(duracionMeses) && duracionMeses > 0 ? Math.trunc(duracionMeses) : 6;
+  return formatearFechaCalendario(sumarMesesCalendario(fecha, meses));
 }
 
 /**

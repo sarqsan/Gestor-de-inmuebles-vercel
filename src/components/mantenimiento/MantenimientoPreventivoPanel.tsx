@@ -17,6 +17,7 @@ import {
 import { CATEGORIAS_INCIDENCIA_LABELS } from '../../utils/incidenciasEngine';
 import {
   saveTareaMantenimientoFirestore,
+  saveTareaMantenimientoFirestoreWithResult,
   deleteTareaMantenimientoFirestore,
   saveTrabajoProfesionalFirestore,
 } from '../../lib/firebase';
@@ -109,6 +110,18 @@ export const MantenimientoPreventivoPanel: React.FC<MantenimientoPreventivoPanel
   const handleSaveTarea = async (tarea: TareaMantenimiento) => {
     await saveTareaMantenimientoFirestore(tarea);
     setNotificacion({ tipo: 'success', mensaje: 'Plan de mantenimiento guardado correctamente.' });
+    setTimeout(() => setNotificacion(null), 4000);
+  };
+
+  // El registro de una actuación usa un contrato explícito: la escritura del
+  // plan debe completarse antes de que el modal pueda cerrarse con éxito.
+  const handleSaveActuacion = async (tarea: TareaMantenimiento) => {
+    const resultado = await saveTareaMantenimientoFirestoreWithResult(tarea);
+    if (resultado.ok === false) {
+      const detalle = resultado.error instanceof Error ? resultado.error.message : String(resultado.error);
+      throw new Error(`No se pudo guardar la tarea de mantenimiento: ${detalle}`);
+    }
+    setNotificacion({ tipo: 'success', mensaje: 'Actuación y plan de mantenimiento guardados correctamente.' });
     setTimeout(() => setNotificacion(null), 4000);
   };
 
@@ -468,7 +481,7 @@ export const MantenimientoPreventivoPanel: React.FC<MantenimientoPreventivoPanel
         <RegistrarActuacionModal
           isOpen={isActuacionModalOpen}
           onClose={() => setIsActuacionModalOpen(false)}
-          onSave={handleSaveTarea}
+          onSave={handleSaveActuacion}
           tarea={tareaParaActuacion}
           profesionales={profesionales}
           currentUser={currentUser}

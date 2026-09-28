@@ -2,14 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-// Huellas de helpers reales B fc14156 (también contrastados con B 94e11d6).
+// Huellas de helpers reales B. `activeUser` fue actualizado en main después de
+// fc14156; su SHA vigente se contrastó en origin/main, la base y el head PR #10.
 // No acceso remoto ni copia de modelos B durante tests.
 const expected = {
   "isSignedIn": "d59dae54acfa1bc96792488d87ce301d79d0bb03403f8e1e9de4ce2991ef84e2",
   "authEmail": "445e54ac6793df9b78985339e5b1550f32892002f46c0000080293a82e3c3e83",
   "isMasterAdmin": "9dd0395e14d7df6116a909ac1bb47d2a1bf39969de5fa6cf3e96f52c101ffc44",
   "me": "6e52d23e823f14c66448a621a15909e042d93145386511640ad555efa60ba044",
-  "activeUser": "bb58a264871f3a9242386808d916505d84cb09c62cf4a86991afd09d06da2c8c",
+  "activeUser": "bea287f80b5cdf8e7c3372274adb103cf0f17a113efd2034805d5849b55be7e6",
   "isPropietarioRole": "add2a5e385f718af77ea725a73e1181ce1d3064fbba59b0de2e4b6c5e80fc260",
   "myPropId": "6d2693ad55fa289e08e500cd60cf75044c32b2897f3d1340cf399d082048b8f1",
   "ownsPropietario": "e38fdec7a232a7ff225b3f96f7e3afe5474a7104f30843cab33cad84459975ce",

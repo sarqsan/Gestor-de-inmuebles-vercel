@@ -33,6 +33,8 @@ const SUPERFICIE_BLOQUE_5 = [
   'src/components/modals/RegistrarActuacionModal.tsx',
   'src/components/modals/RegistrarActuacionModal.test.tsx',
   'src/components/mantenimiento/MantenimientoPreventivoPanel.tsx',
+  // B5 checked-result bridge: helpers nuevos; las API legacy mantienen contrato.
+  'src/lib/firebase.ts',
   'src/types.ts', 'package.json', 'scripts/test-bloque-5.ts',
   'docs/BLOQUE-5-OPERACIONES-FISCALIDAD.md',
 ];
@@ -56,6 +58,12 @@ const SUPERFICIE_BLOQUE_7 = [
   'docs/BLOQUE-7-IMPORTACION-EXPORTACION-XLSX.md',
 ];
 const permitidaBloque7 = (path) => SUPERFICIE_BLOQUE_7.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p));
+// Reparación fin de mes (B9): aritmética por fecha civil y sus casos frontera.
+const SUPERFICIE_REPARACION_FIN_MES = [
+  'src/utils/mantenimientoEngine.ts',
+  'src/utils/mantenimientoEngine.test.ts',
+  'docs/REPARACION-FINAL-INTEGRACION-BLOQUES-3-9-2026-09.md',
+];
 function archivos(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => ['tests','persistence','ui'].includes(e.name) ? [] : e.isDirectory() ? archivos(resolve(dir, e.name)) : [resolve(dir, e.name)]);
 }
@@ -120,7 +128,7 @@ test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimon
   // su contenido exacto y se verifica el baseline; los demás archivos del módulo
   // siguen exigiéndose idénticos byte a byte más arriba.
   const shaRegistro=createHash('sha256').update(actual).digest('hex');
-  assert.equal(shaRegistro,'ad20deb004c674fa21489ff8b8f69087a2ea4936735f42ad61c783f4e27bdb63','registro de custodia actualizado fuera de la superficie revisada');
+  assert.equal(shaRegistro,'a4041a9565846c2170129f43c58fc2c39e64c51ef31af971240e239bf3d19697','registro de custodia actualizado fuera de la superficie revisada');
   assert.match(actual,/const BASE_INTEGRACION = '46bb9f79b43949d833acf00e9557e575769d039a';/);
   assert.match(actual,/const REFERENCIA_LOCAL_BLOQUE_5 = '46bb9f79b43949d833acf00e9557e575769d039a';/);
   assert.match(actual,/test:bloque-5/);
@@ -135,7 +143,9 @@ test('diff completo desde la base B permite solo el port y la conexión aditiva 
     // superficie EXACTA y mínima del BLOQUE 5 (Operaciones → Fiscalidad)
     ||permitidaBloque5(path)
     // superficie EXACTA y mínima del BLOQUE 7 (Importación/Exportación + XLSX)
-    ||permitidaBloque7(path);
+    ||permitidaBloque7(path)
+    // reparación B9 de fechas y documentación de cierre de la reparación.
+    ||SUPERFICIE_REPARACION_FIN_MES.includes(path);
   const referencia=referenciaCustodia(BASE);
   assert.ok(referencia,'CUSTODIA: no hay referencia verificable (base B ni commit de partida del bloque)');
   const paths=[...git('diff','--name-only',referencia.sha,'--','.').split('\n'),...git('ls-files','--others','--exclude-standard').split('\n')].filter(Boolean);

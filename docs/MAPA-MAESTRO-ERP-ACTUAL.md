@@ -6,17 +6,12 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> **Actualización de esta Arena (2026-09-27): ROADMAP-01 — IDENTIDAD + PERSONAS + ROLES + ACCESO, PARCIAL / PENDIENTE, NO CERRADO.** Base inspeccionada `3778a5a7add700a7e3824452d0a30db0e7eef50f` (`main = origin/main` al inicio); rama `arena/01a0e460-gestor-de-inmuebles-vercel`. Modelo `personas` opt-in master-only, vínculo no autorizante `personaId`, auditoría transaccional reutilizada, proyección de delegaciones parciales fail-closed. Sin migraciones, sin UI nueva, sin despliegue de Rules; dependencias y limitaciones en [ROADMAP-01](ROADMAP-01-IDENTIDAD-PERSONAS-ROLES-ACCESO.md). Las referencias de SHA/ramas a continuación son históricos y NO representan el punto de partida de esta Arena. La numeración de bloques históricos no cambia.\n>\n> Registro histórico anterior — última actualización: **2026-09-27 — CADENA BLOQUE 6 INTEGRADA EN `main`
-> (`64fd0b2`, PR #6) + RECONCILIACIÓN DEL ASSERT E-62 CON EL ÁMBITO D3**
-> (§13, §14): `main = origin/main = 64fd0b2`, merge commit del PR #6 (sin squash
-> ni rebase) que incorpora íntegra la cadena lineal de 9 commits
-> `414642b`→`c2b1087` (deltas-C · `gestiones_cartera` · D2 · D3 · B4 · B4-fix ·
-> O7 · Import/Export v1 · auditoría Import/Export). El árbol de `64fd0b2` es
-> byte-idéntico al del tip auditado. Batería `test:bloque-e` **64/64** tras
-> reconciliar el assert E-62: D3 sustituyó el listado global `isStaff()` de las
-> colecciones E por **ámbito derivado** inmueble/contrato (+carteras, +admin) y
-> el assert pasa a verificar esa estructura acotada (sin `isStaff()` global y sin
-> vía de listado para `isTenant()`); `firestore.rules` **intacto**.
+> **Actualización de esta Arena (2026-09-27): ROADMAP-01 — IDENTIDAD + PERSONAS + ROLES + ACCESO, PARCIAL / PENDIENTE, NO CERRADO.** Base inspeccionada `3778a5a7add700a7e3824452d0a30db0e7eef50f` (`main = origin/main` al inicio); rama `arena/01a0e460-gestor-de-inmuebles-vercel`. Modelo `personas` opt-in master-only, vínculo no autorizante `personaId`, auditoría transaccional reutilizada, proyección de delegaciones parciales fail-closed. Sin migraciones, sin UI nueva, sin despliegue de Rules; dependencias y limitaciones en [ROADMAP-01](ROADMAP-01-IDENTIDAD-PERSONAS-ROLES-ACCESO.md). Las referencias de SHA/ramas a continuación son históricos y NO representan el punto de partida de esta Arena. La numeración de bloques históricos no cambia.
+>
+> Registro histórico anterior — última actualización: **2026-09-27 — CADENA BLOQUE 6 INTEGRADA EN `main` (`64fd0b2`, PR #6) + RECONCILIACIÓN DEL ASSERT E-62 CON EL ÁMBITO D3** (§13, §14): `main = origin/main = 64fd0b2`, merge commit del PR #6 (sin squash ni rebase) que incorpora íntegra la cadena lineal de 9 commits `414642b`→`c2b1087` (deltas-C · `gestiones_cartera` · D2 · D3 · B4 · B4-fix · O7 · Import/Export v1 · auditoría Import/Export). El árbol de `64fd0b2` es byte-idéntico al del tip auditado. Batería `test:bloque-e` **64/64** tras reconciliar el assert E-62: D3 sustituyó el listado global `isStaff()` de las colecciones E por **ámbito derivado** inmueble/contrato (+carteras, +admin) y el assert pasa a verificar esa estructura acotada (sin `isStaff()` global y sin vía de listado para `isTenant()`); `firestore.rules` **intacto**.
+>
+> Última actualización histórica de `main`: **2026-09-27 — BLOQUE 0 CERRADO · `main = origin/main = 3778a5a`** (PR #6 → `64fd0b2` con la cadena BLOQUE 6 de 9 commits; PR #7 → `3778a5a`, con la reconciliación del assert E-62 con el ámbito D3). Ambos integrados por **merge commit** (sin squash, sin rebase, sin reescritura de historia). Estado validado sobre `main`: `test:bloque-e` **64/64** · `test:bloque-b` **92/92** · `test:bloque-c` **82/82** · D3 Firestore **17/17** · D3 Storage **23/23** · seguridad relacionada (D2, deltas-C, carteras, ficha pública, tenant, inmuebles, storage/documentos, carteras, expediente) **196/196** · Vitest global **2253 pass + 2 skip (98 ficheros)** · `tsc --noEmit` **0** · `vite build` / `esbuild server` OK. `firestore.rules` y `storage.rules` **intactas** (sin migraciones ni escrituras de datos).
+
 > Anterior: 2026-09-26 — §16 RECUPERACIÓN FUNCIONAL HISTÓRICA Y
 > CAPACIDADES ESTRATÉGICAS** (registro documental, sin cambios de código):
 > auditoría funcional histórica declarada trabajo pendiente ·
@@ -52,7 +47,7 @@
 | Repositorio canónico | `github.com/sarqsan/Gestor-de-inmuebles-vercel` |
 | Rama canónica histórica | `arena/01a0a413-gestor-de-inmuebles-vercel` @ `91da820` (GAP 1–8 consolidados; absorbida en la línea que culmina en `5f7754b`) |
 | Rama de sesión actual | `arena/01a0e437-gestor-de-inmuebles-vercel` — reconciliación del assert E-62 con el ámbito D3 tras la integración del PR #6 |
-| `main` | **`64fd0b2` — PUBLICADA y custodiada (`main = origin/main`, 2026-09-27).** Cadena D1R/D2/D2a/D2b/D3 + Arena C (`8a2fb20`) + INC-06 (`37341c6`) + cadena BLOQUE 6 (`414642b`→`c2b1087`, merge del PR #6): ver §13. La antigua línea paralela `4d420bd` (AI Studio) fue reconciliada históricamente en `5f7754b` (ver §9) |
+| `main` | **`3778a5a` — PUBLICADA y custodiada (`main = origin/main`, 2026-09-27).** Cadena D1R/D2/D2a/D2b/D3 + Arena C (`8a2fb20`) + INC-06 (`37341c6`) + cadena BLOQUE 6 (`414642b`→`c2b1087`, merge del PR #6 = `64fd0b2`) + reconciliación E-62/D3 (PR #7 = `3778a5a`): ver §13. La antigua línea paralela `4d420bd` (AI Studio) fue reconciliada históricamente en `5f7754b` (ver §9) |
 | Deploy | Vercel (`vercel.json`: build → `dist`, función serverless `api/index.ts` → Express, rewrites SPA) |
 | Firebase | Proyecto `startup-sanctuary-sln7n` · Firestore `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` · Storage `startup-sanctuary-sln7n.firebasestorage.app` |
 | Base de datos | Firestore (~45 colecciones, ver §2.2) + Storage (rutas declaradas en `storage.rules`) |
@@ -1503,7 +1498,7 @@ Trazabilidad Git (ver `docs/ESTADO-GIT-ERP.md`): R1 `415de41` → `a18967f` · R
 
 ---
 
-## 13. ESTADO CONSOLIDADO Y CUSTODIADO (2026-09-27) — `main = origin/main = 64fd0b2`
+## 13. ESTADO CONSOLIDADO Y CUSTODIADO (2026-09-27) — `main = origin/main = 3778a5a`
 
 ### 13.1 Cadena publicada
 
@@ -1537,6 +1532,20 @@ inmueble) → `2292870` (D3 claims/ámbito) → `2162dd7` (B4 dry-run) → `819f
 `c2b1087` (auditoría + hardening Import/Export). El árbol de `64fd0b2` es
 **byte-idéntico** al del tip auditado `c2b1087` (0 cambios ocultos). El bloque
 import/export deja de estar "fuera de `main`" (ficha en §14, BLOQUE 6).
+
+**Ampliación 2026-09-27 (2) — PR #7: reconciliación E-62/D3.** `main` avanzó de
+`64fd0b2` a **`3778a5a`** con el **PR #7 MERGED**
+(`arena/01a0e437-gestor-de-inmuebles-vercel` → `main`), **merge commit** del
+commit único `613859d` (`fix(test): reconcile bloque-e E-62 with D3 scoped
+access`). Contenido: reconciliación del assert E-62 de `scripts/test-bloque-e.ts`
+con el ámbito D3 — una única `allow list` por colección E, acotada por
+`'inmuebleId'`/`'contratoId' in resource.data` y resuelta por
+`ambitoPorInmuebleLectura`/`ambitoPorContratoLectura`; sin `isStaff()` global y
+sin vía de listado para `isTenant()`; ámbito por `propietarioId` = titular +
+carteras L/E derivado del documento real; excepción de actas D acotada por
+contrato conservada — más la actualización de este mapa. `firestore.rules` y
+`storage.rules` **intactas**; `src/**` y `tests/**` intactos; sin migraciones ni
+escrituras. Batería `test:bloque-e` **64/64** (antes 63/64).
 
 **Procedencia Arena C:** `7657eea2d08f1e66c480091c5b81ecfc16aac5a8` (repo
 `sarqsan/Gestor-alquileres-vercel`, rama `arena/01a0dd70-gestor-alquileres-vercel`)
@@ -1574,12 +1583,14 @@ abiertos como `REQUIERE_VALIDACION` (ninguna se resuelve automáticamente).
 > Cada bloque se cierra completo: inspección → implementación → tests →
 > autocorrección → revisión de aislamiento → commit → custodia cuando se autorice.
 
-### BLOQUE 0 — CIERRE Y CUSTODIA — **CERRADO ✅ (2026-09-26)**
+### BLOQUE 0 — CIERRE Y CUSTODIA — **CERRADO ✅ (2026-09-26 · ampliado 2026-09-27)**
 
 - Reconciliación de historia completada (grafo demostrado con Git).
 - Integración del trabajo válido (cadena lineal, sin duplicaciones).
-- `main` publicada: **`main = origin/main = 37341c6`** (ampliada después a
-  `64fd0b2` con la cadena BLOQUE 6 vía PR #6; ver §13.1).
+- `main` publicada: **`main = origin/main = 37341c6`**, ampliada después a
+  `64fd0b2` (cadena BLOQUE 6 vía **PR #6**) y a **`3778a5a`** (reconciliación
+  E-62/D3 vía **PR #7**); ver §13.1. Ambos merges con **merge commit**, sin
+  squash, sin rebase y sin reescritura de historia.
 - Working tree limpio · cero commits pendientes.
 - Arena `01a0d832`: NO integrada; permanece en `1e73995`; sus 7 commits quedan
   pendientes de investigación independiente (ver §13.2).

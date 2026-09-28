@@ -1818,7 +1818,14 @@ export interface EnlaceRegistro {
   descripcion?: string;
   activo: boolean;
   /** Estado nominal independiente del usuario, cuenta y gestión; legacy sin campo sigue válido. */
-  estadoInvitacion?: 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'REVOCADA';
+  estadoInvitacion?: 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'REVOCADA' | 'EXPIRADA';
+  finalidad?: 'ONBOARDING_CARTERA';
+  personaIdVinculada?: string;
+  gestionId?: string;
+  alcanceInmuebleIds?: string[];
+  permisoGestion?: 'LECTURA' | 'LECTURA_ESCRITURA';
+  resueltaAt?: string;
+  resueltaPor?: string;
   profesionalIdVinculado?: string; // Si es una invitación para un profesional privado existente
   propietarioIdVinculado?: string; // Si es una invitación para un propietario existente
   usuarioIdVinculado?: string; // ACCESO-PROPIETARIOS: usuario pendiente nominal (un solo uso, NO crear usuario)

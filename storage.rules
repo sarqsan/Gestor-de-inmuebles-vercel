@@ -79,10 +79,10 @@ service firebase.storage {
     // Pertenencia a cartera como predicado (sin ternario: el subconjunto que
     // cubren los intérpretes de tests es `return`-puro; semántica idéntica).
     function enCarteraL(pid) {
-      return espejoActivo() && 'carterasL' in espejo() && espejo().carterasL is list && pid in espejo().carterasL;
+      return espejoActivo() && !('gestionesPorPropietario' in espejo() && pid in espejo().gestionesPorPropietario) && 'carterasL' in espejo() && espejo().carterasL is list && pid in espejo().carterasL;
     }
     function enCarteraE(pid) {
-      return espejoActivo() && 'carterasE' in espejo() && espejo().carterasE is list && pid in espejo().carterasE;
+      return espejoActivo() && !('gestionesPorPropietario' in espejo() && pid in espejo().gestionesPorPropietario) && 'carterasE' in espejo() && espejo().carterasE is list && pid in espejo().carterasE;
     }
     function pidMio(pid) {
       return espejoActivo() && 'propietarioId' in espejo() && espejo().propietarioId == pid;

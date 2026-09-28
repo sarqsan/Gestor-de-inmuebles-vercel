@@ -3,6 +3,7 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
+  sendEmailVerification,
   onAuthStateChanged,
   User as FirebaseUser,
   updateProfile,
@@ -525,30 +526,36 @@ async function activarUsuarioVinculado(params: {
     throw new Error('Auth y formulario no coinciden con el invitado.');
   const usuarioRef = doc(db, 'usuarios', enlace.usuarioIdVinculado as string);
   const enlaceRef = doc(db, 'enlaces_registro', enlace.id);
-  const propietarioRef = doc(db, 'propietarios', enlace.propietarioIdVinculado as string);
+  // No fiscal document read before activation: Rules checks fresh owner existence
+  // and Persona coherence during the atomic commit. A pending account has no
+  // operational/fiscal permissions yet.
+  await firebaseUser.reload();
+  await firebaseUser.getIdToken(true);
+  if (!firebaseUser.emailVerified) {
+    await sendEmailVerification(firebaseUser);
+    throw new Error('Verifica tu correo y reintenta la invitación con la misma cuenta Auth.');
+  }
   const auditRef = doc(collection(db, 'audit_logs'));
   const ahora = new Date().toISOString();
   // La lectura, consumo de un solo uso y activación se verifican sobre docs
   // FRESCOS en una sola transacción; si uno falla, no hay log de falso éxito.
   const usuarioActivado = await runTransaction(db, async tx => {
-    const [u, e, o] = await Promise.all([tx.get(usuarioRef), tx.get(enlaceRef), tx.get(propietarioRef)]);
-    if (!u.exists() || !e.exists() || !o.exists()) throw new Error('Invitación, usuario o propietario inexistente.');
+    const [u, e] = await Promise.all([tx.get(usuarioRef), tx.get(enlaceRef)]);
+    if (!u.exists() || !e.exists()) throw new Error('Invitación, usuario o propietario inexistente.');
     const pendiente = { ...u.data(), id: u.id } as UsuarioApp;
     const vigente = { ...e.data(), id: e.id } as EnlaceRegistro;
     // Doble envío tras éxito: solo el UID de la cuenta YA activada puede
     // obtener el resultado. No se vuelve a consumir ni se duplica auditoría.
     if (vigente.estadoInvitacion === 'ACEPTADA' && vigente.usosActuales === 1 &&
         vigente.usosMaximos === 1 && vigente.usuarioIdVinculado === pendiente.id &&
-        vigente.propietarioIdVinculado === o.id && vigente.emailInvitado === emailNorm &&
+        vigente.propietarioIdVinculado === pendiente.propietarioId && vigente.emailInvitado === emailNorm &&
         pendiente.email === emailNorm && pendiente.estado === 'ACTIVO' &&
         pendiente.authUid === firebaseUser.uid && pendiente.enlaceRegistroId === vigente.id &&
-        pendiente.propietarioId === o.id &&
-        (!pendiente.personaId || o.data().personaId === pendiente.personaId)) return pendiente;
+        pendiente.propietarioId === enlace.propietarioIdVinculado) return pendiente;
     const validacion = validarInvitacionPropietario(vigente, emailNorm, ahora);
     const coherencia = validarActivacionPendiente(pendiente, vigente, emailNorm);
     if (!validacion.ok || !coherencia.ok || vigente.usuarioIdVinculado !== pendiente.id ||
-        vigente.propietarioIdVinculado !== o.id ||
-        (pendiente.personaId && o.data().personaId !== pendiente.personaId)) {
+        vigente.propietarioIdVinculado !== pendiente.propietarioId) {
       throw new Error([...validacion.errores, ...coherencia.errores][0] || 'Vínculo nominal incoherente.');
     }
     const actualizacion: Partial<UsuarioApp> = {
@@ -571,7 +578,7 @@ async function activarUsuarioVinculado(params: {
       usuarioEmail: emailNorm, usuarioNombre: pendiente.nombre,
       accion: 'ACTIVACION_USUARIO_INVITACION', descripcion: 'Activación nominal de usuario existente',
       entidadAfectada: 'usuario', idAfectado: pendiente.id, resultado: 'EXITO',
-      detalles: { enlaceId: vigente.id, propietarioId: o.id, actorUid: firebaseUser.uid,
+      detalles: { enlaceId: vigente.id, propietarioId: pendiente.propietarioId, actorUid: firebaseUser.uid,
         rutas: [`usuarios/${pendiente.id}`, `enlaces_registro/${vigente.id}`] },
     });
     return confirmado;
@@ -621,6 +628,9 @@ export async function registerWithInvitationLink(params: {
   // La UI no es frontera de seguridad: recargar invitación nominal por ID
   // ANTES de crear Auth. El payload del cliente no es la autoridad.
   if (enlace.tipoPerfil === 'PROPIETARIO' && enlace.usuarioIdVinculado) {
+    // The authoritative profile/enlace/owner coherence is checked in the
+    // activation transaction's Rules. Do not expose or pre-read another
+    // collection here before the invitee has a valid own-profile session.
     const actual = await getDoc(doc(db, 'enlaces_registro', enlace.id));
     const vigente = actual.exists() ? { ...actual.data(), id: actual.id } as EnlaceRegistro : null;
     const veredicto = validarInvitacionPropietario(vigente, email);

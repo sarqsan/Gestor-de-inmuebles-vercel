@@ -284,6 +284,8 @@ import { AdministracionSection } from './components/sections/AdministracionSecti
 import { PropietarioPortalSection } from './components/sections/PropietarioPortalSection';
 import { ProfesionalPortalSection } from './components/sections/ProfesionalPortalSection';
 import { InversionSection } from './components/sections/InversionSection';
+import { InvitacionCarteraView } from './components/InvitacionCarteraView';
+import { CarterasOnboardingPanel } from './components/CarterasOnboardingPanel';
 import { PortalRegistroView } from './components/PortalRegistroView';
 import { InquilinoPortalShell } from './components/portal-inquilino/InquilinoPortalShell';
 import { RegistroInquilinoView } from './components/portal-inquilino/RegistroInquilinoView';
@@ -340,6 +342,7 @@ const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'in
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
+
   const [altaInmuebleDesdePropietarioId, setAltaInmuebleDesdePropietarioId] = useState<string | null>(null);
   // BLOQUE 1 — filtro contextual de pólizas cuando se navega desde el centro
   // operativo de un inmueble (enlace, no duplicación de la sección de seguros).
@@ -838,6 +841,7 @@ export default function App() {
   const [activePublicRegistroInqId, setActivePublicRegistroInqId] = useState<string | null>(null); // BLOQUE E
   const [activePublicRegistroPropId, setActivePublicRegistroPropId] = useState<string | null>(null); // ACCESO-PROPIETARIOS: nominal (?registroProp={enlaceId})
   // REGISTRO AUTÓNOMO: alta sin invitación (propietario/profesional).
+  const [carteraInvitada, setCarteraInvitada] = useState(() => new URLSearchParams(window.location.search).get('cartera'));
   const [showRegistroAutonomo, setShowRegistroAutonomo] = useState(false);
   // ?registro= con ID directo: lectura puntual (get anónimo si el enlace está
   // activo; sin listar la colección). Los tokens usan las listas cargadas.
@@ -965,7 +969,7 @@ export default function App() {
 
     const unsubscribeEnlacesHook = subscribeEnlacesRegistro((data) => {
       setEnlacesRegistro(data);
-    });
+    }, currentUser ?? undefined);
 
     const unsubscribeEspecialidadesHook = subscribeEspecialidades((data) => {
       setEspecialidades(data);
@@ -984,7 +988,7 @@ export default function App() {
       unsubscribeEspecialidadesHook();
       unsubscribeModulosHook();
     };
-  }, []);
+  }, [currentUser]);
 
   // DELTA-C (pestañas): coherencia local entre pestañas para candidatos,
   // invitaciones y slots (merge por id ante eventos `storage`). NUNCA toca
@@ -3269,6 +3273,10 @@ export default function App() {
     candidatos,
   ]);
 
+  if (carteraInvitada) return <InvitacionCarteraView enlaceId={carteraInvitada}
+    onComplete={usuario => { setCurrentUser(usuario); setCarteraInvitada(null); window.history.replaceState({}, '', window.location.pathname); }}
+    onCancel={() => { setCarteraInvitada(null); window.history.replaceState({}, '', window.location.pathname); }} />;
+
   // BLOQUE E: el perfil INQUILINO solo ve su portal (nunca el ERP)
   if (currentUser?.tipoPerfil === 'INQUILINO') {
     return <InquilinoPortalShell usuario={currentUser} onLogout={handleLogout} />;
@@ -3555,6 +3563,7 @@ export default function App() {
 
       {/* Main App Workspace */}
       <div className="flex-1 flex flex-col min-w-0">
+        {currentUser.roles?.includes('GESTOR_PATRIMONIAL') && <CarterasOnboardingPanel usuario={currentUser} />}
         {/* Mobile Header & Mobile Navigation */}
         <MobileNav
           activeSection={activeSection}

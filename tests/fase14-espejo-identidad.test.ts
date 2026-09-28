@@ -22,6 +22,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { crearEvaluadorReglas, type Peticion } from './harness/firestoreRulesEval';
 // SIN imports de `src/` a propósito: §38 exige una forma de documento muy concreta y aquí se
@@ -595,13 +596,33 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
       /lib[\\/]gestionesCarteraServicio\.ts$/.test(f)
       && !/from ['"]firebase/.test(readFileSync(f, 'utf8'))
       && !/\bdoc\(|\bcollection\(|setDoc|updateDoc|deleteDoc/.test(readFileSync(f, 'utf8'));
-    const esEscritorProyeccionGestiones = (f: string): boolean => {
-      if (!/lib[\\/]gestionesCarteraServicioFirebase\.ts$/.test(f)) return false;
+    // R02: both adapters may project ACCESS, never identity. Parse each mirror
+    // write (not a permissive filename exemption): literal, closed keys, merge.
+    const esProyeccionAuditada = (f: string): boolean => {
       const src = readFileSync(f, 'utf8');
-      return /carterasL/.test(src) && /carterasE/.test(src)
-        && /guardarAccesoAuditado\('usuarios_auth',uid,/.test(src)
-        && !/setDoc\(|updateDoc\(|deleteDoc\(|addDoc\(|writeBatch\(/.test(src);
+      const ast = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true);
+      const writes: ts.CallExpression[] = [];
+      const visit = (n: ts.Node) => {
+        if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+          && ['set', 'update'].includes(n.expression.name.text)
+          && n.arguments[0]?.getText(ast) === 'mirrorRef') writes.push(n);
+        ts.forEachChild(n, visit);
+      };
+      visit(ast);
+      if (!writes.length || !src.includes('runTransaction(') || !src.includes('tx.set(audit')) return false;
+      const allowed = new Set(['carterasL','carterasE','gestionesPorPropietario','ultimaInvitacionCarteraId','roadmap01AuditId']);
+      return writes.every(w => {
+        const data = w.arguments[1];
+        if (!data || !ts.isObjectLiteralExpression(data)) return false;
+        const keys = data.properties.map(p => p.name?.getText(ast));
+        return keys.includes('roadmap01AuditId') && keys.every(k => k && allowed.has(k))
+          && (w.expression.getText(ast) === 'tx.update' || /merge:\s*true/.test(w.arguments[2]?.getText(ast) || ''));
+      }) && !/setDoc\(|updateDoc\(|deleteDoc\(|addDoc\(|writeBatch\(/.test(src);
     };
+    const esEscritorProyeccionGestiones = (f: string): boolean =>
+      path.basename(f) === 'gestionesCarteraServicioFirebase.ts' && esProyeccionAuditada(f);
+    const esProyeccionOnboarding = (f: string): boolean =>
+      path.basename(f) === 'onboardingCarterasFirebase.ts' && esProyeccionAuditada(f);
     const esHelperAuditado = (f:string):boolean => {
       if (!/lib[\\/]auditoriaAccesoFirebase\.ts$/.test(f)) return false;
       const src=readFileSync(f,'utf8');
@@ -622,12 +643,13 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
       return !/from ['"][^'"]*firebase|\b(setDoc|updateDoc|deleteDoc|addDoc|writeBatch|runTransaction|doc|collection)\s*\(/.test(src);
     };
     expect(citan.filter(esAuditorPuro).map(f => path.basename(f))).toEqual(['auditoriaHistoricaRoadmap01.ts']);
-    const escritoresDelEspejo = citan.filter((f) => !esAuditorPuro(f) && !esHelperAuditado(f) && !esFirebaseCanonico(f) && !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f) && !esNucleoContratoGestiones(f) && !esEscritorProyeccionGestiones(f)).map((f) => path.basename(f));
+    const escritoresDelEspejo = citan.filter((f) => !esAuditorPuro(f) && !esHelperAuditado(f) && !esFirebaseCanonico(f) && !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f) && !esNucleoContratoGestiones(f) && !esEscritorProyeccionGestiones(f) && !esProyeccionOnboarding(f)).map((f) => path.basename(f));
     expect(citan.filter(esHelperAuditado).map(f=>path.basename(f))).toEqual(['auditoriaAccesoFirebase.ts']);
     expect(citan.filter(esFirebaseCanonico).map(f=>path.basename(f))).toEqual(['firebase.ts']);
     // el ÚNICO fichero que escribe la IDENTIDAD del espejo es authService.ts
     // (la proyección master carterasL/E tiene su excepción revisada aparte)
     expect(escritoresDelEspejo).toEqual(['authService.ts']);
+    expect(citan.filter(esProyeccionOnboarding).map(f => path.basename(f))).toEqual(['onboardingCarterasFirebase.ts']);
     expect(citan.filter(esLectorBindingOperaciones).map((f) => path.basename(f))).toEqual(['firebase.ts']);
     expect(citan.filter(esNucleoContratoGestiones).map((f) => path.basename(f))).toEqual(['gestionesCarteraServicio.ts']);
     expect(citan.filter(esEscritorProyeccionGestiones).map((f) => path.basename(f))).toEqual(['gestionesCarteraServicioFirebase.ts']);

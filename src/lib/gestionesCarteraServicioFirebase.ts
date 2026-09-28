@@ -105,15 +105,19 @@ export const puertoGestionesCarteraFirestore: PuertoGestionesCartera = {
       const mirrorRef = authUid ? doc(db,COLECCION_ESPEJOS_AUTH,authUid) : null;
       const mirrorSnap = mirrorRef ? await tx.get(mirrorRef) : null;
       const mirror = mirrorSnap?.exists() ? mirrorSnap.data() : null;
+      const oldIndex: Record<string,string> = mirror?.gestionesPorPropietario || {};
+      const newIndex = { ...oldIndex };
+      if (confirmada.estado === 'ACTIVA' && confirmada.inmuebleIds.length === 0) newIndex[confirmada.propietarioId] = confirmada.id;
+      else if (newIndex[confirmada.propietarioId] === confirmada.id) delete newIndex[confirmada.propietarioId];
       const oldL = Array.isArray(mirror?.carterasL) ? mirror.carterasL as string[] : [];
       const oldE = Array.isArray(mirror?.carterasE) ? mirror.carterasE as string[] : [];
       const newL = quitarL ? oldL.filter(x=>x!==confirmada.propietarioId) : oldL;
       const newE = quitarE ? oldE.filter(x=>x!==confirmada.propietarioId) : oldE;
-      const reduce = !!mirrorRef && !!mirror && (newL.length!==oldL.length || newE.length!==oldE.length);
+      const reduce = !!mirrorRef && !!mirror && (newL.length!==oldL.length || newE.length!==oldE.length || JSON.stringify(oldIndex)!==JSON.stringify(newIndex));
       const auditRef = doc(collection(db,'audit_logs'));
       tx.set(ref, sanitizeObjectForFirestore({ ...confirmada, id, roadmap01AuditId:auditRef.id }));
       if (reduce && mirrorRef) tx.set(mirrorRef,
-        {carterasL:newL,carterasE:newE,roadmap01AuditId:auditRef.id},{merge:true});
+        {carterasL:newL,carterasE:newE,gestionesPorPropietario:newIndex,roadmap01AuditId:auditRef.id},{merge:true});
       const log = eventoObligatorioGestion(ref,confirmada,auditRef.id);
       if (reduce && mirrorRef) log.detalles.rutas.push(`usuarios_auth/${authUid}`);
       tx.set(auditRef, log);
@@ -190,11 +194,45 @@ export const puertoEspejoCarterasFirestore: PuertoEspejoCarteras = {
     };
   },
   async escribirProyeccion(uid, proyeccion: ProyeccionEspejo) {
-    // Merge de SOLO la proyección: jamás se tocan otros campos del espejo.
-    const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
-    await guardarAccesoAuditado('usuarios_auth',uid,
-      { carterasL: [...proyeccion.carterasL], carterasE: [...proyeccion.carterasE] },
-      'PROYECCION_GESTION_CARTERA');
+    // R02: nunca publicar el snapshot recibido antes de una revocación.
+    // La query solo descubre rutas: cada relación y propietario se relee EN
+    // la transacción junto al espejo. Altas nuevas ausentes fallan cerrado.
+    const actor = auth.currentUser;
+    if (!actor || actor.email !== 'sarqsan2@gmail.com') throw new Error('Solo master proyecta carteras');
+    const mirrorRef = doc(db, COLECCION_ESPEJOS_AUTH, uid);
+    const mirror = await getDoc(mirrorRef);
+    if (!mirror.exists() || !mirror.data().usuarioId) throw new Error('Espejo de identidad pendiente');
+    const userId = mirror.data().usuarioId as string;
+    const candidatos = await getDocs(query(collection(db, COLECCION_GESTIONES_CARTERA), where('gestorUsuarioId', '==', userId)));
+    await runTransaction(db, async tx => {
+      const [user, actual, ...gestiones] = await Promise.all([
+        tx.get(doc(db, COLECCION_USUARIOS, userId)), tx.get(mirrorRef),
+        ...candidatos.docs.map(g => tx.get(doc(db, COLECCION_GESTIONES_CARTERA, g.id))),
+      ]);
+      if (!user.exists() || user.data().authUid !== uid || !actual.exists() || actual.data().usuarioId !== userId)
+        throw new Error('Identidad del espejo ha cambiado');
+      const frescas = gestiones.filter(g => g.exists()).map(g => gestionDesdeSnap(g.id, g.data()));
+      const owners = await Promise.all([...new Set(frescas.map(g => g.propietarioId))]
+        .map(id => tx.get(doc(db, COLECCION_PROPIETARIOS, id))));
+      const existentes = new Set(owners.filter(o => o.exists()).map(o => o.id));
+      const derivada = proyectarCarterasGestionadas(frescas.filter(g => existentes.has(g.propietarioId)), userId);
+      // El caller puede solicitar una reducción, jamás ampliar la derivación.
+      const indexadas: Record<string,string> = actual.data().gestionesPorPropietario || {};
+      const carterasL = derivada.carterasL.filter(id => proyeccion.carterasL.includes(id));
+      const carterasE = derivada.carterasE.filter(id => proyeccion.carterasE.includes(id));
+      const gestionesPorPropietario = { ...indexadas };
+      for (const pid of Object.keys(gestionesPorPropietario)) if (!derivada.carterasL.includes(pid) && !derivada.carterasE.includes(pid)) delete gestionesPorPropietario[pid];
+      for (const pid of new Set([...carterasL, ...carterasE])) {
+        const vigente = frescas.find(g => g.propietarioId === pid && g.estado === 'ACTIVA');
+        if (vigente) gestionesPorPropietario[pid] = vigente.id;
+      }
+      const audit = doc(collection(db, 'audit_logs'));
+      tx.set(mirrorRef, { carterasL, carterasE, gestionesPorPropietario, roadmap01AuditId: audit.id }, { merge: true });
+      tx.set(audit, { id: audit.id, usuarioId: actor.uid, usuarioEmail: actor.email, usuarioNombre: actor.email,
+        accion: 'PROYECCION_GESTION_CARTERA', descripcion: 'Proyección verificada en transacción',
+        fechaHora: new Date().toISOString(), entidadAfectada: 'usuario', idAfectado: userId, resultado: 'EXITO',
+        detalles: { actorUid: actor.uid, rutas: [`usuarios_auth/${uid}`] } });
+    });
   },
 };
 

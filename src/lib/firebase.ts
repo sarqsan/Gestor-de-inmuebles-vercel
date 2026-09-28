@@ -209,19 +209,20 @@ export function subscribePropietarios(
 
   if (scope?.tipoPerfil === 'PROPIETARIO') {
     const pid = scope.propietarioId;
-    if (!pid) {
-      callback([]);
-      return () => {};
-    }
-    return onSnapshot(
-      doc(db, 'propietarios', pid),
-      (docSnap) => {
-        callback(docSnap.exists() ? [{ id: docSnap.id, ...docSnap.data() } as Propietario] : []);
-      },
-      (err) => {
-        console.error('Firestore propietario (scoped) snapshot error:', err);
-      }
-    );
+    const delegados = Array.from(new Set(scope.propietariosGestionados ?? []));
+    const entregados: Propietario[] = [];
+    const notificar = () => callback([...entregados.filter((p) => p.id === pid), ...entregados.filter((p) => p.id !== pid)]);
+    const subs: Unsubscribe[] = [];
+    const escuchar = (id: string) => subs.push(onSnapshot(doc(db, 'propietarios', id), (snap) => {
+      const index = entregados.findIndex((p) => p.id === id);
+      if (snap.exists()) { if(index >= 0) entregados[index] = {id:snap.id,...snap.data()} as Propietario; else entregados.push({id:snap.id,...snap.data()} as Propietario); }
+      else if(index >= 0) entregados.splice(index,1);
+      notificar();
+    }, (err) => console.error(`Firestore propietario (${id}) snapshot error:`, err)));
+    if (pid) escuchar(pid);
+    for (const id of delegados) if (id && id !== pid) escuchar(id);
+    if (!pid && !delegados.length) callback([]);
+    return () => subs.forEach((unsub) => unsub());
   }
 
   return onSnapshot(
@@ -2297,7 +2298,12 @@ export async function deleteProfesionalFirestore(profesionalId: string): Promise
 // ENLACES DE REGISTRO E INVITACIONES
 // =========================================================================
 
-export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) => void) {
+export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) => void, scope?: UsuarioApp) {
+  if (scope && !['ADMINISTRADOR', 'SUPERADMIN'].includes(String(scope.tipoPerfil))) {
+    // Private R02 invites are resolved by document ID only in the authenticated invitation view.
+    callback([]);
+    return () => {};
+  }
   return onSnapshot(
     ENLACES_REGISTRO_COL,
     (snapshot) => {

@@ -52,6 +52,8 @@ import {
 
 import { esUsuarioMaster } from '../../lib/adminUsuarios';
 import { DryRunFichasPublicasPanel } from './DryRunFichasPublicasPanel';
+import { OnboardingCarterasAdmin } from './OnboardingCarterasAdmin';
+
 import type { Persona } from '../../lib/personas';
 import { crearPersonaParaPropietarioFirestore, listarPersonasMasterFirestore,
   vincularPropietarioPersonaFirestore, vincularUsuarioPersonaFirestore } from '../../lib/personasServicioFirebase';
@@ -1236,6 +1238,8 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 </div>
               </div>
             )}
+
+            {esMasterIdentidad && <OnboardingCarterasAdmin propietarios={propietarios} usuarios={usuarios} inmuebles={inmuebles} />}
 
             {/* Enlaces de Registro */}
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">

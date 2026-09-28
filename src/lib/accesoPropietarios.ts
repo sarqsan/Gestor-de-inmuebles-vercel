@@ -15,6 +15,8 @@ export type EstadoInvitacionNominal = 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | '
 /** Caducidad derivada: jamás modifica por inferencia la persona o la cuenta. */
 export function estadoInvitacionNominal(enlace: EnlaceRegistro, ahoraIso: string): EstadoInvitacionNominal {
   if (enlace.estadoInvitacion === 'ACEPTADA' || (enlace.usosMaximos !== undefined && enlace.usosActuales >= enlace.usosMaximos)) return 'ACEPTADA';
+  if (enlace.estadoInvitacion === 'EXPIRADA') return 'EXPIRADA';
+  if (enlace.fechaCaducidadMs !== undefined && enlace.fechaCaducidadMs <= Date.parse(ahoraIso) && enlace.estadoInvitacion === 'PENDIENTE') return 'EXPIRADA';
   if (enlace.estadoInvitacion === 'RECHAZADA') return 'RECHAZADA';
   if (enlace.estadoInvitacion === 'REVOCADA' || !enlace.activo) return 'REVOCADA';
   if (enlace.fechaCaducidad && Date.parse(enlace.fechaCaducidad) <= Date.parse(ahoraIso)) return 'EXPIRADA';

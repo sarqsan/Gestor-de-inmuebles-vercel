@@ -11,6 +11,7 @@
     "test:bloque-b": "tsx scripts/test-bloque-b.ts",
     "test:bloque-c": "tsx scripts/test-bloque-c.ts",
     "test:bloque-e": "tsx scripts/test-bloque-e.ts",
+    "test:bloque-5": "tsx scripts/test-bloque-5.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

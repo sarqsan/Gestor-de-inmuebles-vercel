@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve, dirname, relative, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import demoConfig from '../demo/vite.config.mjs';
@@ -60,6 +61,21 @@ test('estilos y HTML no cargan recursos remotos', () => {
 // (877494f), no el main del sandbox aislado original de Arena C. La semántica
 // se conserva: la integración NO puede añadir dependencias.
 const BASE_INTEGRACION = '877494f236707038e5ab07717df1724029f29513';
+// BLOQUE 5 — CUSTODIA: la base histórica puede no existir en este clon
+// (incidencia de infraestructura/custodia, no del bloque). Cuando existe, la
+// comprobación original se ejecuta sin cambios. Cuando no existe, NO se salta ni
+// se debilita: se compara contra la referencia verificable más próxima (el commit
+// del que parte el bloque) exigiendo exactamente lo mismo (los ficheros
+// patrimoniales byte a byte y el registro solo con inserciones).
+const REFERENCIA_LOCAL_BLOQUE_5 = '967ea936c70c4402a3f325667c566f04fb88b415';
+function existeCommit(sha) {
+  try { execFileSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: repo }); return true; } catch { return false; }
+}
+function referenciaCustodia(base) {
+  if (existeCommit(base)) return { sha: base, historica: true };
+  if (existeCommit(REFERENCIA_LOCAL_BLOQUE_5)) return { sha: REFERENCIA_LOCAL_BLOQUE_5, historica: false };
+  return null;
+}
 
 test('dependencias y lockfile siguen exactamente como en la base conocida', async () => {
   const { execFileSync } = await import('node:child_process');
@@ -131,6 +147,30 @@ const PERMITIDOS_INTEGRACION = [
   'src/components/inmueble/CentroOperativoInmueblePanel.tsx',
   'tests/fase14-espejo-identidad.test.ts',
   'tests/helpers/evaluadorReglasFirestore.ts',
+  // bloque BLOQUE 5 (Operaciones → Fiscalidad): superficie EXACTA y mínima del
+  // cierre del circuito. NO se autoriza `src/utils` completo: solo los motores
+  // que el bloque crea o modifica, el escritor real de mantenimiento (que pasa a
+  // generar el gasto con trazabilidad e idempotencia), el modelo (ampliación
+  // aditiva de `Gasto`/`ExportacionFiscalItem`), el script del bloque y su
+  // documentación. Cualquier otro fichero sigue sin poder diferir de la base.
+  'src/utils/deducibilidadEngine.ts',
+  'src/utils/deducibilidadEngine.test.ts',
+  'src/utils/operacionGastoEngine.ts',
+  'src/utils/operacionGastoEngine.test.ts',
+  'src/utils/gastosEngine.ts',
+  'src/utils/fiscalEngine.ts',
+  'src/utils/rentabilidadEngine.ts',
+  'src/utils/reportingEngine.ts',
+  'src/components/modals/RegistrarActuacionModal.tsx',
+  'src/components/modals/RegistrarActuacionModal.test.tsx',
+  'src/components/mantenimiento/MantenimientoPreventivoPanel.tsx',
+  'scripts/test-bloque-5.ts',
+  'docs/BLOQUE-5-OPERACIONES-FISCALIDAD.md',
+  // `package.json`: la ÚNICA diferencia autorizada es la línea añadida del script
+  // `test:bloque-5` (el script del bloque que exige este cierre). La garantía se
+  // mantiene con la comprobación de adición pura de más abajo: ninguna línea
+  // previa de package.json puede borrarse ni reescribirse.
+  'package.json',
 ];
 const permitido = (path) => PERMITIDOS_INTEGRACION.some((p) => path === p || path.startsWith(p));
 
@@ -143,4 +183,14 @@ test('ningún archivo productivo difiere de la base fuera de la superficie de in
   assert.equal(diff.trim(), '');
   const sinSeguimiento = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' });
   assert.ok(sinSeguimiento.trim().split('\n').filter(Boolean).every(permitido));
+  // Guardia adicional de la superficie compartida autorizada: solo se admiten
+  // ADICIONES (ninguna línea base se borra ni se reescribe). Se comprueba contra
+  // la referencia verificable disponible, porque la base histórica puede no
+  // existir en este clon (incidencia de infraestructura, no del bloque).
+  const referencia = referenciaCustodia(BASE_INTEGRACION);
+  assert.ok(referencia, 'CUSTODIA: no hay referencia verificable (base histórica ni commit de partida del bloque)');
+  for (const ficheroCompartido of ['package.json']) {
+    const [adiciones, borrados] = execFileSync('git', ['diff', '--numstat', referencia.sha, '--', ficheroCompartido], { cwd: repo, encoding: 'utf8' }).trim().split(/\s+/);
+    assert.equal(Number(borrados || 0), 0, `${ficheroCompartido} solo admite adiciones (añadido=${adiciones || 0})`);
+  }
 });

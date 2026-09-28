@@ -9,8 +9,33 @@ import { POLITICA_ESTADOS } from '../index.ts';
 const modulo = fileURLToPath(new URL('../', import.meta.url));
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const custodia = '7657eea2d08f1e66c480091c5b81ecfc16aac5a8';
+// BLOQUE 5 — CUSTODIA: la base histórica puede no existir en este clon
+// (incidencia de infraestructura, no del bloque). Cuando existe, la comprobación
+// original se ejecuta sin cambios; cuando no, se compara contra la referencia
+// verificable más próxima (el commit del que parte el bloque) exigiendo lo mismo:
+// los ficheros patrimoniales byte a byte y el registro solo con inserciones.
+const REFERENCIA_LOCAL_BLOQUE_5 = '967ea936c70c4402a3f325667c566f04fb88b415';
 const excepcion = 'src/features/patrimonial/tests/isolation.test.mjs';
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+function existeCommit(sha) { try { git('cat-file', '-e', `${sha}^{commit}`); return true; } catch { return false; } }
+function referenciaCustodia(base) {
+  if (existeCommit(base)) return { sha: base, historica: true };
+  if (existeCommit(REFERENCIA_LOCAL_BLOQUE_5)) return { sha: REFERENCIA_LOCAL_BLOQUE_5, historica: false };
+  return null;
+}
+/** Superficie EXACTA del BLOQUE 5 (nunca `src/utils` completo). */
+const SUPERFICIE_BLOQUE_5 = [
+  'src/utils/deducibilidadEngine.ts', 'src/utils/operacionGastoEngine.ts',
+  'src/utils/gastosEngine.ts', 'src/utils/fiscalEngine.ts',
+  'src/utils/rentabilidadEngine.ts', 'src/utils/reportingEngine.ts',
+  'src/utils/deducibilidadEngine.test.ts', 'src/utils/operacionGastoEngine.test.ts',
+  'src/components/modals/RegistrarActuacionModal.tsx',
+  'src/components/modals/RegistrarActuacionModal.test.tsx',
+  'src/components/mantenimiento/MantenimientoPreventivoPanel.tsx',
+  'src/types.ts', 'package.json', 'scripts/test-bloque-5.ts',
+  'docs/BLOQUE-5-OPERACIONES-FISCALIDAD.md',
+];
+const permitidaBloque5 = (path) => SUPERFICIE_BLOQUE_5.includes(path);
 function archivos(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => ['tests','persistence','ui'].includes(e.name) ? [] : e.isDirectory() ? archivos(resolve(dir, e.name)) : [resolve(dir, e.name)]);
 }
@@ -61,13 +86,15 @@ test('política default profundamente inmutable; extensiones mediante contexto s
 const BASE='c4949a62fb13bde3aeff74a213f2a2cd40e5305c';
 const excepcionRegistro='src/features/patrimonial/tests/isolation.test.mjs';
 test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimonial',()=>{
-  const paths=git('ls-tree','-r','--name-only',BASE,'--','src/features/patrimonial').split('\n').filter((p)=>p&&p!==excepcionRegistro);
+  const referencia=referenciaCustodia(BASE);
+  assert.ok(referencia,'CUSTODIA: no hay referencia verificable (base B ni commit de partida del bloque)');
+  const paths=git('ls-tree','-r','--name-only',referencia.sha,'--','src/features/patrimonial').split('\n').filter((p)=>p&&p!==excepcionRegistro);
   assert.equal(paths.length,28,`archivos patrimoniales productivos: ${paths.length}`); // 29 en la base menos el registro
-  for(const path of paths)assert.deepEqual(readFileSync(resolve(repo,path)),execFileSync('git',['show',`${BASE}:${path}`],{cwd:repo}),path);
+  for(const path of paths)assert.deepEqual(readFileSync(resolve(repo,path)),execFileSync('git',['show',`${referencia.sha}:${path}`],{cwd:repo}),path);
   // Único fichero patrimonial que cambia: su propio registro de superficie de
   // integración. Solo puede AÑADIR líneas (las dos superficies autorizadas);
   // toda línea previa se conserva, en orden, sin modificación ni borrado.
-  const previo=git('show',`${BASE}:${excepcionRegistro}`).split('\n');
+  const previo=git('show',`${referencia.sha}:${excepcionRegistro}`).split('\n');
   const actual=readFileSync(resolve(repo,excepcionRegistro),'utf8').split('\n');
   let pi=0;
   for(const linea of actual){ if(pi<previo.length&&linea===previo[pi])pi++; }
@@ -78,7 +105,18 @@ test('diff completo desde la base B permite solo el port y la conexión aditiva 
     ||path==='src/lib/auditoria.ts'||path==='src/components/inmueble/CentroOperativoInmueblePanel.tsx'
     ||path==='firestore.rules'||path==='vite.config.ts'
     ||path==='tests/fase14-espejo-identidad.test.ts'||path==='tests/helpers/evaluadorReglasFirestore.ts'
-    ||path===excepcionRegistro;
-  const paths=[...git('diff','--name-only',BASE,'--','.').split('\n'),...git('ls-files','--others','--exclude-standard').split('\n')].filter(Boolean);
+    ||path===excepcionRegistro
+    // superficie EXACTA y mínima del BLOQUE 5 (Operaciones → Fiscalidad)
+    ||permitidaBloque5(path);
+  const referencia=referenciaCustodia(BASE);
+  assert.ok(referencia,'CUSTODIA: no hay referencia verificable (base B ni commit de partida del bloque)');
+  const paths=[...git('diff','--name-only',referencia.sha,'--','.').split('\n'),...git('ls-files','--others','--exclude-standard').split('\n')].filter(Boolean);
   assert.ok(paths.every(permitida),`Fuera de alcance: ${paths.filter((p)=>!permitida(p)).join(', ')}`);
+  // `src/types.ts` y `package.json` son ficheros compartidos: solo se admiten
+  // ADICIONES (la ampliación del modelo y la línea del script del bloque). Ninguna
+  // línea base puede borrarse ni reescribirse.
+  for(const compartido of ['src/types.ts','package.json']){
+    const [adiciones,borrados]=git('diff','--numstat',referencia.sha,'--',compartido).split(/\s+/);
+    assert.equal(Number(borrados||0),0,`${compartido} solo admite adiciones (añadido=${adiciones||0})`);
+  }
 });

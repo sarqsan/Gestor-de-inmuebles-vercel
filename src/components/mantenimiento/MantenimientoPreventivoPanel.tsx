@@ -472,6 +472,7 @@ export const MantenimientoPreventivoPanel: React.FC<MantenimientoPreventivoPanel
           tarea={tareaParaActuacion}
           profesionales={profesionales}
           currentUser={currentUser}
+          inmueble={inmuebles.find((i) => i.id === tareaParaActuacion.inmuebleId)}
         />
       )}
     </div>

@@ -16,6 +16,7 @@ import {
   ItemDocumentoSolicitado,
   SolicitudDocPublicData,
   ContratoFormalizacion,
+  HabitacionInmueble,
   Gasto,
   GastoRecurrente,
   Incidencia,
@@ -78,6 +79,7 @@ import {
   subscribeVisitSlots,
   subscribeSolicitudesDoc,
   subscribeContratos,
+  subscribeGestionesCarteraGestor,
   // BLOQUE B — trabajos para importación de gastos de tesorería
   subscribeTrabajosProfesionales,
   subscribeGastos,
@@ -114,6 +116,7 @@ import {
   saveSolicitudDocFirestore,
   deleteSolicitudDocFirestore,
   saveContratoFirestore,
+  persistirTransicionAlquilerFirestore,
   deleteContratoFirestore,
   saveGastoFirestore,
   deleteGastoFirestore,
@@ -143,7 +146,8 @@ import {
   saveModulosConfigFirestore,
 } from './lib/firebase';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
-import { propietariosGestionadosDe } from './lib/carterasGestion';
+import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
+import type { GestionCartera } from './lib/gestionesCartera';
 import { detectarCambioTitularidad } from './lib/titularidadInmueble';
 import { resolverTokensPublicos } from './lib/tokensPublicos';
 import {
@@ -303,6 +307,7 @@ import {
   isProfesional,
   canAccessInmueble,
   canAccessContrato,
+  canWriteContrato,
   canAccessCandidato,
   syncAuthIndex,
 } from './lib/authService';
@@ -509,6 +514,7 @@ export default function App() {
   // Sesión y autenticación real con Firebase Authentication
   const [currentUser, setCurrentUser] = useState<UsuarioApp | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [gestionesCarteraGestor, setGestionesCarteraGestor] = useState<GestionCartera[]>([]);
 
   // 1. Suscripción a Firebase Authentication como única fuente de verdad
   useEffect(() => {
@@ -551,6 +557,37 @@ export default function App() {
     };
   }, []);
 
+  // ROADMAP-04: cargar solo las relaciones donde esta persona es gestora. La
+  // lista resultante acota consultas; las Firestore Rules siguen siendo la
+  // autoridad y vuelven a comprobar cada relación y cada inmueble.
+  useEffect(() => {
+    if (!currentUser || !['PROPIETARIO', 'PROFESIONAL'].includes(currentUser.tipoPerfil)) {
+      setGestionesCarteraGestor([]);
+      return;
+    }
+    return subscribeGestionesCarteraGestor(setGestionesCarteraGestor, currentUser.id);
+  }, [currentUser?.id, currentUser?.tipoPerfil]);
+
+  const inmuebleIdsParcialesGestionados = useMemo(
+    () => currentUser ? inmueblesParcialesActivosDe(gestionesCarteraGestor, currentUser.id) : [],
+    [currentUser?.id, gestionesCarteraGestor]
+  );
+  const ambitosParcialesGestionados = useMemo(
+    () => currentUser ? ambitosInmueblesParcialesActivosDe(gestionesCarteraGestor, currentUser.id) : [],
+    [currentUser?.id, gestionesCarteraGestor]
+  );
+  const claveInmueblesParcialesGestionados = ambitosParcialesGestionados
+    .map((par) => `${par.propietarioId}:${par.inmuebleId}`).join('|');
+  const inmueblesParcialesConEscritura = useMemo(
+    () => currentUser ? inmueblesParcialesEscrituraDe(gestionesCarteraGestor, currentUser.id) : [],
+    [currentUser?.id, gestionesCarteraGestor]
+  );
+  const usuarioConAmbitoAlquiler = useMemo(() => currentUser ? ({
+    ...currentUser,
+    inmueblesDelegadosParciales: inmuebleIdsParcialesGestionados,
+    inmueblesDelegadosParcialesEscritura: inmueblesParcialesConEscritura,
+  }) : null, [currentUser, inmuebleIdsParcialesGestionados, inmueblesParcialesConEscritura]);
+
   // 2. Route Guard Estricto de Navegación por Perfil
   useEffect(() => {
     if (!currentUser) return;
@@ -562,7 +599,9 @@ export default function App() {
         setActiveSection('propietarios');
       }
     } else if (perfil === 'PROFESIONAL') {
-      const allowedSections = SECCIONES_PROFESIONAL;
+      const allowedSections = currentUser.roles?.includes('GESTOR_PATRIMONIAL')
+        ? [...SECCIONES_PROFESIONAL, 'formalizacion', 'cobros'] as SectionType[]
+        : SECCIONES_PROFESIONAL;
       if (!allowedSections.includes(activeSection)) {
         setActiveSection('administracion');
       }
@@ -573,21 +612,28 @@ export default function App() {
   const scopedInmuebles = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') return inmuebles;
+    const gestionadosPid = new Set(propietariosGestionadosDe({
+      carterasL: currentUser.carterasL || [],
+      carterasE: currentUser.carterasE || [],
+    }));
+    const parciales = new Set(inmuebleIdsParcialesGestionados);
     if (currentUser.tipoPerfil === 'PROPIETARIO') {
       return inmuebles.filter((i) =>
         (currentUser.propietarioId && (i.propietarioId === currentUser.propietarioId || i.propietarioPrincipalId === currentUser.propietarioId)) ||
-        (currentUser.inmuebleIds && currentUser.inmuebleIds.includes(i.id))
+        (currentUser.inmuebleIds && currentUser.inmuebleIds.includes(i.id)) ||
+        gestionadosPid.has(i.propietarioId || i.propietarioPrincipalId || '') || parciales.has(i.id)
       );
     }
     if (currentUser.tipoPerfil === 'PROFESIONAL') {
       const prof = profesionales.find((p) => p.id === currentUser.profesionalId || p.usuarioId === currentUser.id);
       return inmuebles.filter((i) =>
         (prof?.inmuebleIdsAsignados && prof.inmuebleIdsAsignados.includes(i.id)) ||
-        (currentUser.inmuebleIds && currentUser.inmuebleIds.includes(i.id))
+        (currentUser.inmuebleIds && currentUser.inmuebleIds.includes(i.id)) ||
+        gestionadosPid.has(i.propietarioId || i.propietarioPrincipalId || '') || parciales.has(i.id)
       );
     }
     return [];
-  }, [currentUser, inmuebles, profesionales]);
+  }, [currentUser, inmuebles, profesionales, inmuebleIdsParcialesGestionados]);
 
   const scopedPropietarios = useMemo(() => {
     if (!currentUser) return [];
@@ -604,13 +650,16 @@ export default function App() {
   const scopedContratos = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') return contratos;
-    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+    if (currentUser.tipoPerfil === 'PROPIETARIO' || currentUser.tipoPerfil === 'PROFESIONAL') {
       const allowedInmIds = new Set(scopedInmuebles.map((i) => i.id));
-      return contratos.filter(
-        (c) =>
-          (currentUser.propietarioId && c.propietarioId === currentUser.propietarioId) ||
-          allowedInmIds.has(c.inmuebleId)
-      );
+      const allowedPids = new Set([
+        ...(currentUser.propietarioId ? [currentUser.propietarioId] : []),
+        ...propietariosGestionadosDe({
+          carterasL: currentUser.carterasL || [],
+          carterasE: currentUser.carterasE || [],
+        }),
+      ]);
+      return contratos.filter((c) => allowedPids.has(c.propietarioId || '') || allowedInmIds.has(c.inmuebleId));
     }
     return [];
   }, [currentUser, contratos, scopedInmuebles]);
@@ -814,9 +863,11 @@ export default function App() {
   const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
   const seccionesAccesibles = useMemo<SectionType[] | undefined>(() => {
     if (currentUser?.tipoPerfil === 'PROPIETARIO') return SECCIONES_PROPIETARIO;
-    if (currentUser?.tipoPerfil === 'PROFESIONAL') return SECCIONES_PROFESIONAL;
+    if (currentUser?.tipoPerfil === 'PROFESIONAL') return currentUser.roles?.includes('GESTOR_PATRIMONIAL')
+      ? [...SECCIONES_PROFESIONAL, 'formalizacion', 'cobros'] as SectionType[]
+      : SECCIONES_PROFESIONAL;
     return undefined; // ADMINISTRADOR: sin restricción de secciones
-  }, [currentUser?.tipoPerfil]);
+  }, [currentUser]);
   const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
   // §6 F4: proveedor IA (Gemini vía servidor; sin clave → el motor cae al resolutor local) y
   // ejecución de acciones validadas del asistente con los medios del host (route guard intacto).
@@ -1033,6 +1084,8 @@ export default function App() {
         carterasL: currentUser.carterasL || [],
         carterasE: currentUser.carterasE || [],
       }),
+      inmueblesGestionadosParciales: inmuebleIdsParcialesGestionados,
+      ambitosParcialesGestionados,
     };
 
     // D2a: suscripción de inmuebles CON ÁMBITO (propios ∪ autorizados
@@ -1249,7 +1302,7 @@ export default function App() {
       if (unsubscribeMorosidadPol) unsubscribeMorosidadPol();
       if (unsubscribeMorosidadResumen) unsubscribeMorosidadResumen();
     };
-  }, [currentUser?.id, currentUser?.tipoPerfil]);
+  }, [currentUser?.id, currentUser?.tipoPerfil, claveInmueblesParcialesGestionados]);
 
   // Ref to track candidate questionnaires currently being auto-analyzed
   const autoAnalyzingSetRef = React.useRef<Set<string>>(new Set());
@@ -2407,16 +2460,16 @@ export default function App() {
     savedContrato: ContratoFormalizacion,
     marcarInmuebleAlquilado?: boolean
   ) => {
-    // FASE 1.4: si quien formaliza es un propietario, el contrato debe llevar
-    // SIEMPRE su propietarioId (clave de aislamiento y de las reglas de acceso),
-    // aunque el inmueble aún no lo tuviera informado.
+    // El PID contractual se deriva primero de la ficha patrimonial vinculada;
+    // solo se usa el PID de sesión como respaldo para inmuebles legacy sin
+    // titular explícito. Así un gestor nunca reetiqueta el inmueble delegado.
     let contratoAsegurado = savedContrato;
-    if (
-      currentUser?.tipoPerfil === 'PROPIETARIO' &&
-      currentUser.propietarioId &&
-      !savedContrato.propietarioId
-    ) {
-      contratoAsegurado = { ...savedContrato, propietarioId: currentUser.propietarioId };
+    if (!savedContrato.propietarioId) {
+      const inmuebleVinculado = scopedInmuebles.find((i) => i.id === savedContrato.inmuebleId);
+      const propietarioInmueble = inmuebleVinculado?.propietarioId || inmuebleVinculado?.propietarioPrincipalId;
+      const propietarioRespaldo = currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId : undefined;
+      const propietarioId = propietarioInmueble || propietarioRespaldo;
+      if (propietarioId) contratoAsegurado = { ...savedContrato, propietarioId };
     }
 
     // Garantiza que el contrato nazca ya con su calendario de cobros materializado,
@@ -2426,32 +2479,24 @@ export default function App() {
         ? contratoAsegurado
         : { ...contratoAsegurado, registroCobros: generarPeriodosParaContrato(contratoAsegurado) };
 
-    setContratos((prev) => {
-      const exists = prev.some((c) => c.id === contratoConCobros.id);
-      if (exists) {
-        return prev.map((c) => (c.id === contratoConCobros.id ? contratoConCobros : c));
-      }
-      return [contratoConCobros, ...prev];
-    });
-    await saveContratoFirestore(contratoConCobros);
+    let inmueblePersistido: Inmueble | undefined;
+    let contratoPersistido = contratoConCobros;
+    if (marcarInmuebleAlquilado) {
+      const resultado = await persistirTransicionAlquilerFirestore(contratoConCobros, { marcarInmuebleAlquilado: true });
+      contratoPersistido = resultado.contrato;
+      inmueblePersistido = resultado.inmueble;
+    } else {
+      await saveContratoFirestore(contratoConCobros);
+    }
 
-    if (marcarInmuebleAlquilado && savedContrato.inmuebleId) {
-      setInmuebles((prev) =>
-        prev.map((i) => {
-          if (i.id === savedContrato.inmuebleId) {
-            const updated: Inmueble = {
-              ...i,
-              estado: 'alquilado',
-              inquilinoActualId: savedContrato.candidatoId,
-              inquilinoActualNombre: savedContrato.candidatoNombre,
-              contratoActivoId: savedContrato.id,
-            };
-            saveInmuebleFirestore(updated);
-            return updated;
-          }
-          return i;
-        })
-      );
+    setContratos((prev) => {
+      const exists = prev.some((c) => c.id === contratoPersistido.id);
+      return exists
+        ? prev.map((c) => (c.id === contratoPersistido.id ? contratoPersistido : c))
+        : [contratoPersistido, ...prev];
+    });
+    if (inmueblePersistido) {
+      setInmuebles((prev) => prev.map((i) => i.id === inmueblePersistido!.id ? inmueblePersistido! : i));
     }
   };
 
@@ -2460,7 +2505,9 @@ export default function App() {
     if (!targetContrato) return;
 
     const fechaFin = new Date().toISOString().split('T')[0];
-    const updatedContrato: ContratoFormalizacion = {
+    const updatedContrato: ContratoFormalizacion = targetContrato.estado === 'FINALIZADO'
+      ? targetContrato
+      : {
       ...targetContrato,
       estado: 'FINALIZADO',
       esVigente: false,
@@ -2478,26 +2525,21 @@ export default function App() {
       ],
     };
 
-    setContratos((prev) => prev.map((c) => (c.id === contratoId ? updatedContrato : c)));
-    await saveContratoFirestore(updatedContrato);
+    const resultado = await persistirTransicionAlquilerFirestore(updatedContrato, { liberarInmueble: true });
+    setContratos((prev) => prev.map((c) => (c.id === contratoId ? resultado.contrato : c)));
+    if (resultado.inmueble) {
+      setInmuebles((prev) => prev.map((i) => i.id === resultado.inmueble!.id ? resultado.inmueble! : i));
+    }
+  };
 
-    if (targetContrato.inmuebleId) {
-      setInmuebles((prev) =>
-        prev.map((i) => {
-          if (i.id === targetContrato.inmuebleId) {
-            const updated: Inmueble = {
-              ...i,
-              estado: 'disponible',
-              inquilinoActualId: undefined,
-              inquilinoActualNombre: undefined,
-              contratoActivoId: undefined,
-            };
-            saveInmuebleFirestore(updated);
-            return updated;
-          }
-          return i;
-        })
-      );
+  const handlePersistirCicloContrato = async (contrato: ContratoFormalizacion, habitacion?: HabitacionInmueble) => {
+    const resultado = await persistirTransicionAlquilerFirestore(contrato, {
+      liberarInmueble: true,
+      ...(habitacion ? { habitacion } : {}),
+    });
+    setContratos((prev) => prev.map((c) => c.id === contrato.id ? resultado.contrato : c));
+    if (resultado.inmueble) {
+      setInmuebles((prev) => prev.map((i) => i.id === resultado.inmueble!.id ? resultado.inmueble! : i));
     }
   };
 
@@ -2706,13 +2748,13 @@ export default function App() {
   const handleSaveExpedienteRecomerc = async (expediente: ExpedienteRecomercializacion) => {
     const propietarioId = resolvePropietarioId(expediente.inmuebleId, expediente.propietarioId);
     const finalExp: ExpedienteRecomercializacion = { ...expediente, propietarioId };
+    await saveExpedienteRecomercializacionFirestore(finalExp);
     setExpedientesRecomerc((prev) => {
       const exists = prev.some((e) => e.id === finalExp.id);
       return exists
         ? prev.map((e) => (e.id === finalExp.id ? finalExp : e))
         : [finalExp, ...prev];
     });
-    await saveExpedienteRecomercializacionFirestore(finalExp);
   };
   const handleDeleteExpedienteRecomerc = async (id: string) => {
     // FASE 3.2: limpia también las fotos de inspección de Storage (best-effort).
@@ -2762,16 +2804,15 @@ export default function App() {
     expediente: ExpedienteRecomercializacion,
     _resultado: 'REARRENDADO' | 'VENDIDO'
   ) => {
-    await handleSaveExpedienteRecomerc(expediente);
-
     const contratoVinculado =
       (expediente.contratoAnteriorId && contratos.find((c) => c.id === expediente.contratoAnteriorId)) ||
       contratos
         .filter((c) => c.inmuebleId === expediente.inmuebleId && c.estado !== 'FINALIZADO')
         .sort((a, b) => (b.fechaInicioContrato || '').localeCompare(a.fechaInicioContrato || ''))[0];
 
-    if (contratoVinculado && contratoVinculado.estado !== 'FINALIZADO') {
-      // Reutiliza el flujo oficial: finaliza el contrato y libera el inmueble.
+    if (contratoVinculado) {
+      // Reutiliza el flujo oficial incluso si el contrato ya aparece finalizado:
+      // el reintento idempotente puede reparar referencias patrimoniales antiguas.
       await handleFinalizarContrato(contratoVinculado.id);
     } else {
       const inm = inmuebles.find((i) => i.id === expediente.inmuebleId);
@@ -2783,10 +2824,14 @@ export default function App() {
           inquilinoActualNombre: undefined,
           contratoActivoId: undefined,
         };
+        const guardado = await saveInmuebleFirestore(libre);
+        if (!guardado) throw new Error('No se pudo liberar el inmueble; el expediente de recomercialización permanece abierto.');
         setInmuebles((prev) => prev.map((i) => (i.id === libre.id ? libre : i)));
-        await saveInmuebleFirestore(libre);
       }
     }
+    // El expediente solo se marca cerrado tras confirmar el ciclo contractual
+    // y la liberación patrimonial que correspondan.
+    await handleSaveExpedienteRecomerc(expediente);
   };
 
   // Handlers for Propietarios y Cuentas Bancarias
@@ -3719,11 +3764,13 @@ export default function App() {
               candidatos={scopedCandidatos}
               solicitudesDoc={solicitudesDoc}
               userProfile={userProfile}
-              currentUser={currentUser}
+              currentUser={usuarioConAmbitoAlquiler}
               onOpenFormalizarModal={handleOpenFormalizarModal}
               onDeleteContrato={handleDeleteContrato}
               onRecomercializarContrato={(c) => handleRecomercializarInmueble(c.inmuebleId, c.id)}
-              onSaveContrato={async (c) => { await saveContratoFirestore(c); }}
+              onSaveContrato={async (c) => { await handleSaveContrato(c); }}
+              onPersistirFinalizacion={handlePersistirCicloContrato}
+              puedeEscribirContrato={(c) => canWriteContrato(usuarioConAmbitoAlquiler, c)}
             />
           )}
 
@@ -3732,8 +3779,9 @@ export default function App() {
               contratos={scopedContratos}
               inmuebles={scopedInmuebles}
               propietarios={scopedPropietarios}
-              currentUser={currentUser}
+              currentUser={usuarioConAmbitoAlquiler}
               onSaveContrato={handleSaveContrato}
+              puedeEditarContrato={(c) => canWriteContrato(usuarioConAmbitoAlquiler, c)}
               onNavigateToInmueble={() => setActiveSection('inmuebles')}
             />
           )}

@@ -1513,6 +1513,9 @@ export function canAccessContrato(
 ): boolean {
   if (!usuario) return false;
   if (isAdmin(usuario)) return true;
+  // Contexto efímero derivado de relaciones parciales activas para render UI;
+  // la autorización efectiva siempre se vuelve a comprobar en Firestore Rules.
+  if (usuario.inmueblesDelegadosParciales?.includes(contrato.inmuebleId)) return true;
 
   if (isPropietario(usuario)) {
     if (usuario.propietarioId && contrato.propietarioId === usuario.propietarioId) {
@@ -1540,6 +1543,18 @@ export function canAccessContrato(
 
   // Los profesionales no tienen acceso a contratos de arrendamiento privados
   return false;
+}
+
+/** Visibilidad de controles de escritura; solo es UX, Firestore Rules decide el permiso efectivo. */
+export function canWriteContrato(
+  usuario: UsuarioApp | null | undefined,
+  contrato: ContratoFormalizacion
+): boolean {
+  if (!usuario) return false;
+  if (isAdmin(usuario)) return true;
+  if (usuario.tipoPerfil === 'PROPIETARIO' && usuario.propietarioId === contrato.propietarioId) return true;
+  if (contrato.propietarioId && (usuario.carterasE ?? []).includes(contrato.propietarioId)) return true;
+  return !!usuario.inmueblesDelegadosParcialesEscritura?.includes(contrato.inmuebleId);
 }
 
 /**
@@ -1582,6 +1597,7 @@ export function canAccessCobro(
 ): boolean {
   if (!usuario) return false;
   if (isAdmin(usuario)) return true;
+  if (usuario.inmueblesDelegadosParciales?.includes(cobro.inmuebleId)) return true;
 
   if (isPropietario(usuario)) {
     if (usuario.propietarioId && cobro.propietarioId === usuario.propietarioId) {

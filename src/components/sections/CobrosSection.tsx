@@ -52,6 +52,7 @@ interface CobrosSectionProps {
   propietarios?: Propietario[];
   currentUser?: UsuarioApp | null;
   onSaveContrato: (contrato: ContratoFormalizacion) => Promise<void> | void;
+  puedeEditarContrato?: (contrato: ContratoFormalizacion) => boolean;
   onNavigateToInmueble?: (inmuebleId: string) => void;
 }
 
@@ -61,6 +62,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
   propietarios = [],
   currentUser,
   onSaveContrato,
+  puedeEditarContrato,
   onNavigateToInmueble,
 }) => {
   const isOwner = currentUser?.tipoPerfil === 'PROPIETARIO';
@@ -219,7 +221,8 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
             cobroToEdit.id,
             justificanteFile,
             justificanteFile.name,
-            cobroToEdit.propietarioId || contrato.propietarioId || currentUser?.propietarioId
+            cobroToEdit.propietarioId || contrato.propietarioId || currentUser?.propietarioId,
+            contrato.id
           );
           justificanteData = {
             id: `just_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -664,6 +667,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {filteredCobros.map((cobro) => {
                   const contratoAsoc = contratos.find((c) => c.id === cobro.contratoId);
+                  const puedeEditar = !!contratoAsoc && (puedeEditarContrato?.(contratoAsoc) ?? true);
 
                   return (
                     <tr
@@ -778,7 +782,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                               <span className="truncate">{cobro.justificante.nombreArchivo}</span>
                             </span>
                           )
-                        ) : (
+                        ) : puedeEditar ? (
                           <button
                             type="button"
                             onClick={() => handleOpenEditPago(cobro)}
@@ -788,32 +792,34 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                             <Upload className="w-3 h-3" />
                             <span>Adjuntar</span>
                           </button>
-                        )}
+                        ) : <span className="text-[10px] text-slate-400">Solo lectura</span>}
                       </td>
 
                       {/* Acciones */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditPago(cobro)}
-                            className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
-                          >
-                            <Banknote className="w-3.5 h-3.5" />
-                            <span>{cobro.importeRecibido > 0 ? 'Editar' : 'Cobrar'}</span>
-                          </button>
+                          {puedeEditar && <>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditPago(cobro)}
+                              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+                            >
+                              <Banknote className="w-3.5 h-3.5" />
+                              <span>{cobro.importeRecibido > 0 ? 'Editar' : 'Cobrar'}</span>
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCobroParaIncidencia(cobro);
-                              setMotivoIncidencia(cobro.motivoIncidencia || '');
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                            title="Registrar incidencia"
-                          >
-                            <AlertCircle className="w-4 h-4" />
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCobroParaIncidencia(cobro);
+                                setMotivoIncidencia(cobro.motivoIncidencia || '');
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                              title="Registrar incidencia"
+                            >
+                              <AlertCircle className="w-4 h-4" />
+                            </button>
+                          </>}
 
                           <button
                             type="button"

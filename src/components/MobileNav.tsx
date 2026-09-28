@@ -122,6 +122,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({
       ? [
           { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
           { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
+          ...(currentUser?.roles?.includes('GESTOR_PATRIMONIAL') ? [
+            { id: 'formalizacion' as SectionType, label: 'Contratos de alquiler', icon: FileText, badge: contratosCount, description: 'Contratos en inmuebles delegados' },
+            { id: 'cobros' as SectionType, label: 'Cobros de alquiler', icon: Receipt, badge: cobrosPendientesCount, description: 'Seguimiento de alquileres delegados' },
+          ] : []),
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
           { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ]

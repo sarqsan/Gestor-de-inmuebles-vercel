@@ -11,7 +11,7 @@ export function CarterasOnboardingPanel({usuario}: {usuario: UsuarioApp}) {
   },[usuario.id,revision]);
   return <details className="m-4 rounded-xl border bg-white p-4">
     <summary className="cursor-pointer font-semibold">Mis carteras delegadas</summary>
-    <p className="mt-2 text-sm text-slate-500">Acceso verificado por relación vigente. Las delegaciones parciales no permiten listar la cartera ni acceder a contratos o documentos.</p>
+    <p className="mt-2 text-sm text-slate-500">Acceso verificado por relación vigente. Una delegación parcial solo alcanza sus inmuebles y los contratos, recibos y documentos vinculados a ellos. La escritura exige LECTURA_ESCRITURA con responsabilidad del gestor; el borrado de documentos sigue reservado al titular o la administración.</p>
     <button disabled={busy} onClick={()=>setRevision(n=>n+1)} className="mt-3 text-sm text-indigo-700">{busy?'Verificando…':'Actualizar acceso'}</button>
     {error&&<p role="alert" className="mt-3 text-amber-700">{error}. No se muestran datos sin autorización.</p>}
     {!busy&&!error&&!data.length&&<p className="mt-3 text-sm">No hay delegaciones vinculadas.</p>}

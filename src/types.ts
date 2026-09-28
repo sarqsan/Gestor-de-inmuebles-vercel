@@ -1714,7 +1714,11 @@ export interface UsuarioApp {
   activo?: boolean; // Flag de estado
   roles: string[];
   permisos: string[];
-  inmuebleIds?: string[]; // IDs de inmuebles a los que tiene acceso
+  inmuebleIds?: string[]; // IDs explícitos persistidos de inmuebles
+  /** Ámbito efímero de consulta/UI derivado de gestiones activas; nunca es autorización por sí mismo. */
+  inmueblesDelegadosParciales?: string[];
+  /** Subconjunto efímero con permiso delegado de escritura; las Rules vuelven a autorizar cada cambio. */
+  inmueblesDelegadosParcialesEscritura?: string[];
   propietarioId?: string; // ID del propietario vinculado en colección 'propietarios'
   profesionalId?: string; // ID del profesional vinculado en colección 'profesionales'
   contratoIds?: string[]; // BLOQUE E: contratos LAU vinculados (alcance del perfil INQUILINO)

@@ -157,11 +157,23 @@ service firebase.storage {
     function pidDeContrato(contratoId) {
       return firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.propietarioId;
     }
+    function contratoParcialVigente(contratoId, escritura) {
+      return firestore.exists(/databases/(default)/documents/contratos_formalizacion/$(contratoId))
+        && 'inmuebleId' in firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data
+        && 'propietarioId' in firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data
+        && firestore.exists(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId))
+        && ((('propietarioId' in firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data)
+              && firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data.propietarioId == pidDeContrato(contratoId))
+            || (!('propietarioId' in firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data)
+              && 'propietarioPrincipalId' in firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data
+              && firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data.propietarioPrincipalId == pidDeContrato(contratoId)))
+        && parcialVigente(pidDeContrato(contratoId), firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId, escritura);
+    }
     function ambitoContratoLectura(contratoId) {
-      return adminStorage() || (espejoActivo() && ambitoPidLectura(pidDeContrato(contratoId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidLectura(pidDeContrato(contratoId)) || contratoParcialVigente(contratoId, false)));
     }
     function ambitoContratoEscritura(contratoId) {
-      return adminStorage() || (espejoActivo() && ambitoPidEscritura(pidDeContrato(contratoId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidEscritura(pidDeContrato(contratoId)) || contratoParcialVigente(contratoId, true)));
     }
     function ambitoContratoBorrado(contratoId) {
       return adminStorage() || (espejoActivo() && ambitoPidBorrado(pidDeContrato(contratoId)));

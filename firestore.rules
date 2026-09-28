@@ -1034,6 +1034,14 @@ service cloud.firestore {
     // Manipular IDs solo devuelve esta ficha recortada, jamás datos privados.
     // =========================================================================
     match /fichas_publicas_inmueble/{fichaId} {
+      function fichaVinculadaAlTitular() {
+        return exists(/databases/$(database)/documents/inmuebles/$(fichaId))
+          && ((('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(fichaId)).data)
+              && get(/databases/$(database)/documents/inmuebles/$(fichaId)).data.propietarioId == existing().propietarioId)
+            || (!('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(fichaId)).data)
+              && 'propietarioPrincipalId' in get(/databases/$(database)/documents/inmuebles/$(fichaId)).data
+              && get(/databases/$(database)/documents/inmuebles/$(fichaId)).data.propietarioPrincipalId == existing().propietarioId));
+      }
       allow get: if true;
       allow list: if isSignedIn();
       allow create: if (isMasterAdmin() || (isPropietarioRole() && incoming().propietarioId == myPropId()))
@@ -1043,9 +1051,15 @@ service cloud.firestore {
         && incoming().propietarioId is string
         && incoming().propietarioId.size() > 0
         && clavesFichaPublicaOk();
-      allow update: if (isMasterAdmin() || (isPropietarioRole()
-          && existing().propietarioId == myPropId()
-          && incoming().propietarioId == myPropId()))
+      allow update: if (
+          isMasterAdmin()
+          || (isPropietarioRole()
+            && existing().propietarioId == myPropId()
+            && incoming().propietarioId == myPropId())
+          || (inmuebleParcialIndexado(existing().propietarioId, fichaId, true)
+            && fichaVinculadaAlTitular()
+            && incoming().propietarioId == existing().propietarioId)
+        )
         && incoming().id == existing().id
         && incoming().inmuebleId == existing().inmuebleId
         && incoming().inmuebleId == fichaId
@@ -1055,32 +1069,58 @@ service cloud.firestore {
 
     // =========================================================================
     // 2. CONTRATOS DE ARRENDAMIENTO = NÚCLEO ECONÓMICO (COBROS + JUSTIFICANTES)
-    // Aislamiento estricto por propietario. Un propietario sólo accede a sus
-    // contratos; los profesionales no tienen acceso en absoluto.
+    // Aislamiento por titular y por relación de cartera/inmueble autorizada.
+    // Una delegación parcial solo alcanza contratos cuyo inmueble pertenece
+    // al titular de la relación y figura expresamente en sus inmuebleIds.
     // =========================================================================
     match /contratos_formalizacion/{contratoId} {
-      // get (documento concreto): titularidad directa o inmueble asignado.
+      function inmuebleContratoCoherente(d) {
+        return 'inmuebleId' in d && d.inmuebleId is string
+          && 'propietarioId' in d && d.propietarioId is string
+          && exists(/databases/$(database)/documents/inmuebles/$(d.inmuebleId))
+          && ((('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioId == d.propietarioId)
+            || (!('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && 'propietarioPrincipalId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioPrincipalId == d.propietarioId));
+      }
+      function contratoParcialVisible(d) {
+        return inmuebleContratoCoherente(d)
+          && inmuebleParcialIndexado(d.propietarioId, d.inmuebleId, false);
+      }
+      function contratoParcialEscritura(d) {
+        return inmuebleContratoCoherente(d)
+          && inmuebleParcialIndexado(d.propietarioId, d.inmuebleId, true);
+      }
+      function inmuebleYTitularInmutables() {
+        return 'inmuebleId' in existing() && 'inmuebleId' in incoming()
+          && incoming().inmuebleId == existing().inmuebleId
+          && 'propietarioId' in existing() && 'propietarioId' in incoming()
+          && incoming().propietarioId == existing().propietarioId;
+      }
+
+      // get (documento concreto): titularidad directa, cartera o relación parcial por inmueble.
       // BLOQUE E (D-1): el inquilino lee (get) SOLO un contrato incluido en su
       // `contratoIds`; nunca `list` (sigue restringido a master/propietario).
       // D2 (§2 — dependientes dentro del mismo ámbito): las ramas de cartera
       // (mismo patrón que pólizas/siniestros) cubren al gestor multicartera:
       // lectura sobre carterasL ∪ carterasE, escritura solo sobre carterasE
       // (ACTIVA + LECTURA_ESCRITURA). Revocación = espejo vacío = deny.
-      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing())) || (isTenant() && tenantTieneContrato(contratoId)) || inmuebleEnCarteraGestionada(existing());
+      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing())) || (isTenant() && tenantTieneContrato(contratoId)) || inmuebleEnCarteraGestionada(existing()) || contratoParcialVisible(existing());
       // list (consulta): OBLIGA a where('propietarioId','==', pid) pid-a-pid
       // (propio o de cada cartera gestionada; el gestor une N consultas).
-      allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data);
+      allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data) || contratoParcialVisible(resource.data);
 
       // El propietario sólo puede crear contratos a su nombre y con propietarioId.
       allow create: if isMasterAdmin() || (
         isPropietarioRole()
         && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+        && inmuebleContratoCoherente(incoming())
       ) || (
         activeUser()
         && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId])
-        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
-      );
+        && inmuebleContratoCoherente(incoming())
+      ) || contratoParcialEscritura(incoming());
 
       // No puede mover un contrato a otro propietario ni tocar contratos ajenos.
       // BLOQUE E (reconciliado): el inquilino solo añade IDs a los índices de
@@ -1089,10 +1129,12 @@ service cloud.firestore {
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
         && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && inmuebleYTitularInmutables() && inmuebleContratoCoherente(incoming())
       ) || (
         inmuebleEnCarteraEscritura(existing())
         && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
-      ) || (
+        && inmuebleYTitularInmutables() && inmuebleContratoCoherente(incoming())
+      ) || contratoParcialEscritura(incoming()) && inmuebleYTitularInmutables() && inmuebleContratoCoherente(existing()) || (
         isTenant()
         && tenantTieneContrato(contratoId)
         && incoming().diff(existing()).affectedKeys().hasOnly(['incidenciaIds', 'mensajeIds', 'fechaActualizacion'])
@@ -1524,16 +1566,27 @@ service cloud.firestore {
     }
 
     match /habitaciones_inmueble/{habitacionId} {
+      function habitacionParcialCoherente(d, escritura) {
+        return 'inmuebleId' in d && d.inmuebleId is string
+          && 'propietarioId' in d && d.propietarioId is string
+          && exists(/databases/$(database)/documents/inmuebles/$(d.inmuebleId))
+          && ((('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioId == d.propietarioId)
+            || (!('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && 'propietarioPrincipalId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioPrincipalId == d.propietarioId))
+          && inmuebleParcialIndexado(d.propietarioId, d.inmuebleId, escritura);
+      }
       // D2 (H-fuga): mismo endurecimiento que inventario_inmuebles.
-      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+      allow get: if isMasterAdmin() || habitacionParcialCoherente(existing(), false) || (isPropietarioRole() && (
         ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
         ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
       ));
-      allow list: if isMasterAdmin() || (isPropietarioRole() && (
+      allow list: if isMasterAdmin() || habitacionParcialCoherente(resource.data, false) || (isPropietarioRole() && (
         ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) ||
         ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId]))
       ));
-      allow create: if isMasterAdmin() || (
+      allow create: if isMasterAdmin() || (habitacionParcialCoherente(incoming(), true) && incoming().id == habitacionId) || (
         isPropietarioRole()
         && incoming().keys().hasAll(['inmuebleId', 'nombre', 'estado'])
         && (
@@ -1542,6 +1595,12 @@ service cloud.firestore {
         )
       );
       allow update: if isMasterAdmin() || (
+        habitacionParcialCoherente(existing(), true)
+        && habitacionParcialCoherente(incoming(), true)
+        && existing().id == habitacionId && incoming().id == existing().id
+        && incoming().inmuebleId == existing().inmuebleId
+        && incoming().propietarioId == existing().propietarioId
+      ) || (
         isPropietarioRole()
         && (
           ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||

@@ -114,6 +114,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     navItems = [
       { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
       { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
+      ...(currentUser?.roles?.includes('GESTOR_PATRIMONIAL') ? [
+        { id: 'formalizacion' as SectionType, label: 'Contratos de alquiler', icon: FileText, badge: contratosCount },
+        { id: 'cobros' as SectionType, label: 'Cobros de alquiler', icon: Receipt, badge: cobrosPendientesCount },
+      ] : []),
       { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
       { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
     ];

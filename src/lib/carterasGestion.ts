@@ -76,6 +76,57 @@ export function propietariosGestionadosDe(carteras: CarterasProyectadas): string
 }
 
 /**
+ * Inmuebles legibles por una delegación parcial ACTIVA y aceptada.
+ * Es únicamente un ámbito de consulta del cliente: las Rules vuelven a
+ * comprobar relación, estado, inmuebleId y permiso en cada operación.
+ */
+export interface InmuebleDelegadoParcial {
+  propietarioId: string;
+  inmuebleId: string;
+}
+
+export function ambitosInmueblesParcialesActivosDe(
+  gestiones: readonly GestionCartera[],
+  gestorUsuarioId: string
+): InmuebleDelegadoParcial[] {
+  const pares = new Map<string, InmuebleDelegadoParcial>();
+  for (const gestion of gestiones) {
+    if (!gestion || gestion.gestorUsuarioId !== gestorUsuarioId
+      || gestion.estado !== 'ACTIVA' || gestion.resolucionInvitacion !== 'ACEPTADA'
+      || !Array.isArray(gestion.inmuebleIds) || gestion.inmuebleIds.length === 0) continue;
+    for (const inmuebleId of gestion.inmuebleIds) {
+      if (typeof inmuebleId !== 'string' || !inmuebleId) continue;
+      const clave = `${gestion.propietarioId}:${inmuebleId}`;
+      pares.set(clave, { propietarioId: gestion.propietarioId, inmuebleId });
+    }
+  }
+  return Array.from(pares.values());
+}
+
+export function inmueblesParcialesActivosDe(
+  gestiones: readonly GestionCartera[],
+  gestorUsuarioId: string
+): string[] {
+  return Array.from(new Set(ambitosInmueblesParcialesActivosDe(gestiones, gestorUsuarioId).map((p) => p.inmuebleId)));
+}
+
+/** Subconjunto parcial con permiso de escritura vigente según el dominio D1R. */
+export function inmueblesParcialesEscrituraDe(
+  gestiones: readonly GestionCartera[],
+  gestorUsuarioId: string
+): string[] {
+  const ids = new Set<string>();
+  for (const gestion of gestiones) {
+    if (!gestion || gestion.gestorUsuarioId !== gestorUsuarioId
+      || gestion.estado !== 'ACTIVA' || gestion.resolucionInvitacion !== 'ACEPTADA'
+      || !Array.isArray(gestion.inmuebleIds) || gestion.inmuebleIds.length === 0
+      || !puedeEscribir(gestion, gestorUsuarioId)) continue;
+    for (const inmuebleId of gestion.inmuebleIds) if (inmuebleId) ids.add(inmuebleId);
+  }
+  return Array.from(ids);
+}
+
+/**
  * Índice de resolución de gestiones vigentes por titular. A diferencia de
  * carterasL/E, incluye delegaciones parciales: el índice solo permite a Rules
  * localizar la relación canónica; inmuebleIds y el estado se revalidan en

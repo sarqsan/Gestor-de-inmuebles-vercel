@@ -35,6 +35,8 @@ import {
 } from '../../lib/firebase';
 import { compressImageForUpload } from '../../utils/fileCompressor';
 import { analizarFotosInspeccion } from '../../utils/inspeccionIa';
+import { confirmar } from '../../feedback/confirmacion';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -151,7 +153,7 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
         // Autoguardado tras cada subida para no perder el trabajo si se corta.
         await onGuardar(actual);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Error al subir la fotografía.';
+        const msg = mensajeDeErrorUsuario(err, 'Error al subir la fotografía.');
         setErrorMsg(`No se pudo subir «${file.name}»: ${msg} Puedes reintentarlo.`);
       }
     }
@@ -160,7 +162,14 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
   };
 
   const handleEliminar = async (foto: FotoInspeccion) => {
-    if (!window.confirm(`¿Eliminar esta fotografía de ${ESTANCIA_LABEL[foto.estancia]}?`)) return;
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar fotografía',
+      mensaje: `¿Eliminar esta fotografía de ${ESTANCIA_LABEL[foto.estancia]}?`,
+      detalle: 'La fotografía se retirará de la inspección de este inmueble.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+    });
+    if (!confirmado) return;
     setErrorMsg('');
     setGuardando(true);
     try {
@@ -226,7 +235,7 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
       }
       await aplicarYGuardar(mapa);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al contactar con el servicio de análisis.';
+      const msg = mensajeDeErrorUsuario(err, 'Error al contactar con el servicio de análisis.');
       setErrorMsg(`Diagnóstico IA no disponible: ${msg}`);
     } finally {
       setProgresoIa(null);

@@ -57,6 +57,10 @@ import { OnboardingCarterasAdmin } from './OnboardingCarterasAdmin';
 import type { Persona } from '../../lib/personas';
 import { crearPersonaParaPropietarioFirestore, listarPersonasMasterFirestore,
   vincularPropietarioPersonaFirestore, vincularUsuarioPersonaFirestore } from '../../lib/personasServicioFirebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface AdminControlCenterProps {
   currentUser: UsuarioApp;
@@ -238,7 +242,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     setGuardandoPersona(true);
     setErrorPersona('');
     try { await accion(); setPersonas(await listarPersonasMasterFirestore()); }
-    catch (e) { setErrorPersona(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErrorPersona(mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')); }
     finally { setGuardandoPersona(false); }
   };
 
@@ -275,7 +279,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   // Toggle user state
   const handleToggleBloqueoUsuario = async (usr: UsuarioApp) => {
     if (usr.id === currentUser.id) {
-      alert('No puedes bloquear tu propia cuenta de administrador.');
+      avisarOperacion({ tipo: 'error', mensaje: 'No puedes bloquear tu propia cuenta de administrador.' });
       return;
     }
     const nuevoEstado = usr.estado === 'BLOQUEADO' ? 'ACTIVO' : 'BLOQUEADO';
@@ -908,7 +912,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                     setBajaPendiente(null);
                     setMotivoBaja('');
                   } catch (err: any) {
-                    setBajaError(err?.message || 'No se pudo completar la baja.');
+                    setBajaError(mensajeDeErrorUsuario(err, 'No se pudo completar la baja.'));
                   } finally {
                     setBajaGuardando(false);
                   }
@@ -1320,9 +1324,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                       {esInvitacionNominalPropietario(enlace) ? (
                         enlace.estadoInvitacion === 'PENDIENTE' && enlace.activo && enlace.usosActuales === 0 && (
                           <>
-                            <button onClick={() => void onRejectEnlaceRegistro(enlace.id).catch(e => alert(e.message))}
+                            <button onClick={() => void onRejectEnlaceRegistro(enlace.id).catch(e => avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') }))}
                               className="px-2 py-1.5 text-amber-300 hover:bg-slate-800 rounded-lg cursor-pointer" title="Rechazar invitación nominal">Rechazar</button>
-                            <button onClick={() => void onDeleteEnlaceRegistro(enlace.id).catch(e => alert(e.message))}
+                            <button onClick={() => void onDeleteEnlaceRegistro(enlace.id).catch(e => avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') }))}
                               className="px-2 py-1.5 text-rose-300 hover:bg-slate-800 rounded-lg cursor-pointer" title="Revocar invitación nominal">Revocar</button>
                           </>
                         )
@@ -1560,8 +1564,22 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                         className="px-2 py-1 bg-blue-700 text-white rounded disabled:opacity-40">Vincular existente</button>
                       <button type="button" disabled={guardandoPersona}
                         onClick={() => {
-                          if (confirm('Confirma que no existe una Persona canónica para este titular. No se crearán cuentas ni inmuebles.'))
-                            void ejecutarIdentidad(() => crearPersonaParaPropietarioFirestore(selectedPropietarioDetail.id));
+                          void confirmar({
+                            titulo: 'Crear Persona sin cuenta',
+                            mensaje: '¿Confirmas que no existe una Persona canónica para este titular?',
+                            detalle: 'No se crearán cuentas ni inmuebles.',
+                            etiquetaConfirmar: 'Crear Persona',
+                            peligroso: true,
+                            alConfirmar: async () => {
+                              const { ok } = await ejecutarOperacion({
+                                accion: () => ejecutarIdentidad(() => crearPersonaParaPropietarioFirestore(selectedPropietarioDetail.id)),
+                                mensajeExito: 'Persona creada.',
+                                mensajeError: 'No se ha podido crear la Persona.',
+                                origenesDatos: ['usuarios'],
+                              });
+                              if (!ok) throw new Error('No se ha podido crear la Persona.');
+                            },
+                          });
                         }} className="px-2 py-1 bg-slate-700 text-white rounded disabled:opacity-40">Crear Persona sin cuenta</button>
                     </div>
                   )}

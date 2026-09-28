@@ -21,6 +21,7 @@ import type {
   UsuarioApp,
 } from '../../types';
 import { MiniaturaEvidencia } from './MiniaturaEvidencia';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   usuario: UsuarioApp;
@@ -333,7 +334,7 @@ function NuevaLecturaModal({
       });
       onCreada();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se ha podido registrar la lectura.');
+      setError(mensajeDeErrorUsuario(e, 'No se ha podido registrar la lectura.'));
     } finally {
       setGuardando(false);
     }
@@ -465,7 +466,7 @@ function CambioTitularModal({
       });
       onCreada();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se ha podido solicitar el cambio.');
+      setError(mensajeDeErrorUsuario(e, 'No se ha podido solicitar el cambio.'));
     } finally {
       setGuardando(false);
     }

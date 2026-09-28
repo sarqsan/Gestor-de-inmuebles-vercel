@@ -22,6 +22,7 @@ import {
   saveTrabajoProfesionalFirestore,
   saveProfesionalFirestore,
 } from '../../lib/firebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface ValoracionProfesionalModalProps {
   isOpen: boolean;
@@ -145,7 +146,7 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
       onClose();
     } catch (err: any) {
       console.error('Error saving valoracion:', err);
-      setErrorMsg(err?.message || 'Error al registrar la valoración.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al registrar la valoración.'));
     } finally {
       setGuardando(false);
     }

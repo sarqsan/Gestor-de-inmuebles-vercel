@@ -41,6 +41,7 @@ import {
   uploadTrabajoAdjuntoStorage,
   saveIncidenciaFirestore,
 } from '../../lib/firebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface TrabajoProfesionalModalProps {
   isOpen: boolean;
@@ -336,7 +337,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
       onClose();
     } catch (err: any) {
       console.error('Error saving trabajo:', err);
-      setErrorMsg(err?.message || 'Error al guardar la orden de trabajo en Firestore.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar la orden de trabajo en Firestore.'));
     } finally {
       setGuardando(false);
     }

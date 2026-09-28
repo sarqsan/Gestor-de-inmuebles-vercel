@@ -25,6 +25,7 @@ import type {
   TipoPropietario,
   UsuarioApp,
 } from '../types';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 export type PasoRegistroAutonomo = 'selector' | 'propietario' | 'profesional';
 
@@ -146,7 +147,7 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
       // Alta completa: entrar directamente en el portal (sin segundo login).
       await onComplete(usuario);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'No se pudo completar el registro.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'No se pudo completar el registro.'));
     } finally {
       setLoading(false);
     }
@@ -187,7 +188,7 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
       );
       await onComplete(usuario);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'No se pudo completar el registro.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'No se pudo completar el registro.'));
     } finally {
       setLoading(false);
     }

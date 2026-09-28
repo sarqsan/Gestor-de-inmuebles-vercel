@@ -14,7 +14,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
+import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import { db, sanitizeObjectForFirestore, type DataAccessScope } from './firebase';
 import type { AnalisisInversion } from '../types/inversion';
 
@@ -71,7 +71,7 @@ export async function saveAnalisisInversionFirestore(item: AnalisisInversion): P
     });
     await setDoc(doc(db, 'analisis_inversion', item.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving analisis inversion:', err);
+    reportarErrorGuardado('inversion', err, 'Error saving analisis inversion:');
     throw err;
   }
 }
@@ -80,7 +80,7 @@ export async function deleteAnalisisInversionFirestore(id: string): Promise<void
   try {
     await deleteDoc(doc(db, 'analisis_inversion', id));
   } catch (err) {
-    console.error('Error deleting analisis inversion:', err);
+    reportarErrorGuardado('inversion', err, 'Error deleting analisis inversion:');
     throw err;
   }
 }

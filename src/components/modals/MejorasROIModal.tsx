@@ -31,6 +31,8 @@ import {
   type EscenarioROI,
 } from '../../utils/recomercializacionEngine';
 import { evitarDuplicadosMejora, proponerMejorasROI } from '../../utils/mejorasIa';
+import { confirmar } from '../../feedback/confirmacion';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -128,7 +130,7 @@ export const MejorasROIModal: React.FC<Props> = ({
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al generar las propuestas.';
+      const msg = mensajeDeErrorUsuario(err, 'Error al generar las propuestas.');
       setAviso({ tipo: 'error', texto: msg });
     } finally {
       setCargandoIa(false);
@@ -162,8 +164,15 @@ export const MejorasROIModal: React.FC<Props> = ({
     void construirYGuardar(base.mejorasPropuestas ?? []);
   };
 
-  const handleBorrar = (m: MejoraROI) => {
-    if (!window.confirm(`¿Eliminar la mejora «${m.actuacion || 'sin nombre'}»?`)) return;
+  const handleBorrar = async (m: MejoraROI) => {
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar mejora',
+      mensaje: `¿Eliminar la mejora «${m.actuacion || 'sin nombre'}»?`,
+      detalle: 'Se retirará de la propuesta de mejora del expediente.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+    });
+    if (!confirmado) return;
     const base = quitarMejora({ ...expediente, mejorasPropuestas: mejoras }, m.id);
     aplicarLista(base.mejorasPropuestas ?? []);
   };

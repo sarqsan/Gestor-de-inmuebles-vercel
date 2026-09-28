@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { EnlaceRegistro, Inmueble, Propietario, UsuarioApp } from '../../types';
 import { invitarCarteraFirestore, prepararOnboardingPropietarioFirestore, resolverInvitacionCarteraFirestore } from '../../lib/onboardingCarterasFirebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 export function OnboardingCarterasAdmin({ propietarios, usuarios, inmuebles }: { propietarios: Propietario[]; usuarios: UsuarioApp[]; inmuebles: Inmueble[] }) {
   const [owner, setOwner] = useState(''), [nombre, setNombre] = useState(''), [email, setEmail] = useState('');
@@ -21,13 +22,13 @@ export function OnboardingCarterasAdmin({ propietarios, usuarios, inmuebles }: {
       const link = await invitarCarteraFirestore({ enlaceId: op.enlace, propietarioId: alta.propietarioId, usuarioId: alta.usuarioId!, gestorUsuarioId: gestor || undefined,
         inmuebleIds: gestor && parcial ? scope : [], permiso });
       setEnlace(link); setStatus('Invitación creada. Ningún acceso delegado hasta la aceptación.');
-    } catch(e) { setError(e instanceof Error ? e.message : 'Error de persistencia'); }
+    } catch(e) { setError(mensajeDeErrorUsuario(e, 'Error de persistencia')); }
     finally {setBusy(false);}
   }
   async function resolver(decision:'REVOCADA'|'EXPIRADA') {
     if (!enlace || busy) return;setBusy(true);setError('');
     try {await resolverInvitacionCarteraFirestore(enlace.id, decision);setEnlace({...enlace,estadoInvitacion:decision,activo:false});setStatus(`Invitación ${decision}`);}
-    catch(e){setError(e instanceof Error?e.message:'No se pudo resolver');}finally{setBusy(false);}
+    catch(e){setError(mensajeDeErrorUsuario(e, 'No se pudo resolver'));}finally{setBusy(false);}
   }
   const input = 'mt-1 block w-full rounded border border-slate-300 bg-white p-2';
   return <section className="mb-6 rounded-xl border bg-white p-6" aria-label="Alta e invitación de cartera">

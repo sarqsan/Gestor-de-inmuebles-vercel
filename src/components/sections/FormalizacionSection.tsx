@@ -34,6 +34,8 @@ import {
   Edit3,
   RefreshCw,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface FormalizacionSectionProps {
   contratos: ContratoFormalizacion[];
@@ -432,9 +434,22 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                     )}
                     {puedeEditar && <button
                       onClick={async () => {
-                        if (confirm(`¿Eliminar el expediente de ${contrato.candidatoNombre}?`)) {
-                          await onDeleteContrato(contrato.id);
-                        }
+                        await confirmar({
+                          titulo: 'Eliminar expediente',
+                          mensaje: `¿Eliminar el expediente de ${contrato.candidatoNombre}?`,
+                          detalle: 'El contrato y su histórico dejarán de estar disponibles.',
+                          etiquetaConfirmar: 'Eliminar',
+                          peligroso: true,
+                          alConfirmar: async () => {
+                            const { ok } = await ejecutarOperacion({
+                              accion: () => onDeleteContrato(contrato.id),
+                              mensajeExito: 'Expediente eliminado.',
+                              mensajeError: 'No se ha podido eliminar el expediente.',
+                              origenesDatos: ['contratos'],
+                            });
+                            if (!ok) throw new Error('No se ha podido eliminar el expediente.');
+                          },
+                        });
                       }}
                       title="Eliminar expediente"
                       className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"

@@ -138,6 +138,9 @@ describe('BLOQUE 5 · RegistrarActuacionModal (persistencia verificable e idempo
   });
 
   it('un fallo al guardar el gasto no avanza a garantía/tarea ni cierra el modal como éxito', async () => {
+    // UX-3: el motivo técnico ya no se pinta en pantalla (se queda en consola); lo
+    // que se comprueba aquí es el invariante B5: el fallo llega al modal y no hay éxito.
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.mocked(saveGastoFirestoreWithResult).mockResolvedValueOnce({
       ok: false,
       error: new Error('permission-denied gasto'),
@@ -150,13 +153,17 @@ describe('BLOQUE 5 · RegistrarActuacionModal (persistencia verificable e idempo
     activarGarantia();
     await registrar(container, '2026-03-02');
 
-    expect(await screen.findByText(/No se pudo guardar el gasto de la actuación: permission-denied gasto/)).toBeTruthy();
+    expect(await screen.findByText(/No se ha podido guardar el gasto de la actuación/)).toBeTruthy();
+    expect(screen.queryByText(/permission-denied/i)).toBeNull();
+    expect(consola).toHaveBeenCalled();
     expect(saveGarantiaReparacionFirestoreWithResult).not.toHaveBeenCalled();
     expect(onSave).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+    consola.mockRestore();
   });
 
   it('un fallo al guardar la garantía no avanza a la tarea ni cierra el modal como éxito', async () => {
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.mocked(saveGarantiaReparacionFirestoreWithResult).mockResolvedValueOnce({
       ok: false,
       error: new Error('permission-denied garantía'),
@@ -169,13 +176,17 @@ describe('BLOQUE 5 · RegistrarActuacionModal (persistencia verificable e idempo
     activarGarantia();
     await registrar(container, '2026-03-02');
 
-    expect(await screen.findByText(/No se pudo guardar la garantía de la actuación: permission-denied garantía/)).toBeTruthy();
+    expect(await screen.findByText(/No se ha podido guardar la garantía de la actuación/)).toBeTruthy();
+    expect(screen.queryByText(/permission-denied/i)).toBeNull();
+    expect(consola).toHaveBeenCalled();
     expect(saveGastoFirestoreWithResult).toHaveBeenCalledTimes(1);
     expect(onSave).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+    consola.mockRestore();
   });
 
   it('un fallo al guardar la tarea llega al modal y no produce cierre/éxito', async () => {
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const onSave = vi.fn(async (_tarea: TareaMantenimiento) => {
       throw new Error('permission-denied tarea');
     });
@@ -186,11 +197,14 @@ describe('BLOQUE 5 · RegistrarActuacionModal (persistencia verificable e idempo
     activarGarantia();
     await registrar(container, '2026-03-02');
 
-    expect(await screen.findByText(/permission-denied tarea/)).toBeTruthy();
+    expect(await screen.findByText(/No se ha podido registrar la actuación/i)).toBeTruthy();
+    expect(screen.queryByText(/permission-denied/i)).toBeNull();
+    expect(consola).toHaveBeenCalled();
     expect(saveGastoFirestoreWithResult).toHaveBeenCalledTimes(1);
     expect(saveGarantiaReparacionFirestoreWithResult).toHaveBeenCalledTimes(1);
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
+    consola.mockRestore();
   });
 
   it('repetir una actuación conserva IDs de gasto y garantía, sin crear documentos duplicados', async () => {

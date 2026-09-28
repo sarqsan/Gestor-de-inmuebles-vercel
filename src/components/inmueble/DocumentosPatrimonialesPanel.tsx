@@ -8,6 +8,9 @@ import {
   subirDocumentoPatrimonial,
 } from '../../lib/expedienteDocumental/gestorFirebase';
 import type { DocumentoPatrimonial, TipoDocumentoExpediente } from '../../lib/expedienteDocumental/tipos';
+import { confirmar } from '../../feedback/confirmacion';
+import { avisarOperacion } from '../../feedback/canalFeedback';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 const TIPOS: { value: TipoDocumentoExpediente; label: string }[] = [
   { value: 'CONTRATO', label: 'Contrato' },
@@ -98,7 +101,7 @@ export const DocumentosPatrimonialesPanel: React.FC<Props> = (props) => {
       formRef.current?.reset();
       setTipo('OTRO'); setRelacion(''); setFechaDocumental(''); setReferencia(''); setFacturaId(''); setSustituyeA('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo incorporar el documento.');
+      setError(mensajeDeErrorUsuario(e, 'No se pudo incorporar el documento.'));
     } finally { setOcupado(false); }
   };
 
@@ -109,29 +112,62 @@ export const DocumentosPatrimonialesPanel: React.FC<Props> = (props) => {
       const url = URL.createObjectURL(new Blob([result.blob], { type: result.mimeType }));
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = result.nombre; anchor.click();
       URL.revokeObjectURL(url);
-    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo recuperar el archivo.'); }
+    } catch (e) { setError(mensajeDeErrorUsuario(e, 'No se pudo recuperar el archivo.')); }
   };
 
   const editar = async (documento: DocumentoPatrimonial) => {
-    const nuevaReferencia = window.prompt('Referencia documental', documento.referencia || '');
-    if (nuevaReferencia === null) return;
-    const observaciones = window.prompt('Observaciones', documento.observaciones || '');
-    if (observaciones === null) return;
+    const { confirmado: confirmarReferencia, texto: nuevaReferencia } = await confirmar({
+      titulo: 'Editar documento',
+      mensaje: 'Actualiza la referencia documental del expediente.',
+      etiquetaConfirmar: 'Continuar',
+      peligroso: false,
+      entradaTexto: {
+        etiqueta: 'Referencia documental',
+        valorInicial: documento.referencia || '',
+      },
+    });
+    if (!confirmarReferencia) return;
+    const { confirmado: confirmarObservaciones, texto: observaciones } = await confirmar({
+      titulo: 'Editar documento',
+      mensaje: 'Añade o actualiza las observaciones del documento.',
+      etiquetaConfirmar: 'Guardar metadatos',
+      peligroso: false,
+      entradaTexto: {
+        etiqueta: 'Observaciones',
+        valorInicial: documento.observaciones || '',
+      },
+    });
+    if (!confirmarObservaciones) return;
     try {
       await actualizarMetadatosDocumentoPatrimonial(props.inmueble.id, documento.id, {
         tipo: documento.tipo, nombre: documento.nombre, fechaDocumental: documento.fechaDocumental,
         referencia: nuevaReferencia, observaciones,
       }, props.currentUser?.nombre || props.currentUser?.email || 'Usuario');
       setMensaje('Metadatos actualizados y auditados.'); setError('');
-    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudieron guardar los metadatos.'); }
+    } catch (e) { setError(mensajeDeErrorUsuario(e, 'No se pudieron guardar los metadatos.')); }
   };
 
   const eliminar = async (documento: DocumentoPatrimonial) => {
-    if (!window.confirm(`Eliminar «${documento.nombre}»? Se borrará el binario de Storage y se conservará la traza de auditoría.`)) return;
-    try {
-      await eliminarDocumentoPatrimonial(props.inmueble.id, documento.id, props.currentUser?.nombre || props.currentUser?.email || 'Usuario');
-      setMensaje('Documento eliminado; su tombstone de auditoría se conserva.'); setError('');
-    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo eliminar el documento.'); }
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar documento',
+      mensaje: `¿Eliminar «${documento.nombre}»?`,
+      detalle: 'Se borrará el archivo y se conservará la traza de auditoría.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: async () => {
+        try {
+          await eliminarDocumentoPatrimonial(props.inmueble.id, documento.id, props.currentUser?.nombre || props.currentUser?.email || 'Usuario');
+          avisarOperacion({ tipo: 'exito', mensaje: 'Documento eliminado; su traza de auditoría se conserva.' });
+          setMensaje('Documento eliminado. Se conserva el registro de auditoría.'); setError('');
+        } catch (e) {
+          const mensaje = mensajeDeErrorUsuario(e, 'No se ha podido eliminar el documento.');
+          avisarOperacion({ tipo: 'error', mensaje });
+          setError(mensaje);
+          throw new Error(mensaje);
+        }
+      },
+    });
+    return confirmado;
   };
 
   return <section className="border border-indigo-100 bg-indigo-50/30 rounded-xl p-4 space-y-3">

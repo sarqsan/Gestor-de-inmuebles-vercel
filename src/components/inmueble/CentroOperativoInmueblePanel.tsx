@@ -71,6 +71,8 @@ import {
   Paperclip,
   Ban,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 type SubTab = 'resumen' | 'seguros' | 'averias' | 'expediente' | 'historico' | 'operaciones';
 
@@ -132,7 +134,7 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
       subscribeGarantiasReparacion((items) => setGarantias(items.filter((g) => g.inmuebleId === inmueble.id))),
       subscribeGastos((items) => setGastos(items.filter((g) => g.inmuebleId === inmueble.id))),
       subscribeDocumentosPatrimoniales(inmueble.id, setDocumentosPatrimoniales, (error) => {
-        setErrorAccion(error.message || 'No se pudo cargar la documentación patrimonial.');
+        setErrorAccion(mensajeDeErrorUsuario(error, 'No se pudo cargar la documentación patrimonial.'));
       }),
     ];
     // Red de seguridad: si algún snapshot no llega (p. ej. list denegado por
@@ -173,10 +175,23 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
 
   const handleCancelarPoliza = async (poliza: PolizaSeguro) => {
     if (accionEnCurso) return;
-    const motivo = window.prompt(
-      `Cancelación lógica de la póliza ${poliza.aseguradora} (Nº ${poliza.numeroPoliza}).\nLos datos, documentos e historial se conservan. Motivo:`
-    );
-    if (motivo === null) return;
+    // UX-3: confirmación y motivo con el diálogo de la aplicación (antes `window.prompt`).
+    const { confirmado, texto } = await confirmar({
+      titulo: 'Cancelar póliza',
+      mensaje: `Cancelación lógica de la póliza ${poliza.aseguradora} (Nº ${poliza.numeroPoliza}).`,
+      detalle: 'Los datos, documentos e historial se conservan.',
+      etiquetaConfirmar: 'Cancelar póliza',
+      etiquetaCancelar: 'Volver',
+      peligroso: true,
+      entradaTexto: {
+        etiqueta: 'Motivo de la cancelación',
+        marcador: 'Ej. sustitución por nueva póliza',
+        obligatorio: true,
+        errorObligatorio: 'Indica el motivo de la cancelación.',
+      },
+    });
+    if (!confirmado || texto === undefined) return;
+    const motivo = texto;
     const resultado = cancelarPoliza(poliza, motivo || 'Sin motivo indicado', actor, new Date().toISOString());
     if (resultado.estado === 'ERROR' || !resultado.poliza) {
       setErrorAccion(resultado.error || 'No se pudo cancelar la póliza');

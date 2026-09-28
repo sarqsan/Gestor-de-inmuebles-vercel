@@ -23,6 +23,7 @@ import {
   Sparkles,
   FileCheck,
 } from 'lucide-react';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface NuevoCandidatoSectionProps {
   inmuebles: Inmueble[];
@@ -62,7 +63,7 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
     e.preventDefault();
 
     if (!formData.nombre.trim()) {
-      alert('Por favor, introduce al menos el Nombre y Apellidos completos.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Por favor, introduce al menos el Nombre y Apellidos completos.' });
       return;
     }
 
@@ -125,7 +126,7 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
       setUploadSuccessMsg('¡Datos cargados y perfil actualizado con éxito!');
     } catch (err) {
       console.error(err);
-      alert('Error al leer el archivo. Asegúrate de que sea un archivo .json o .txt válido.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Error al leer el archivo. Asegúrate de que sea un archivo .json o .txt válido.' });
     } finally {
       setIsUploading(false);
     }

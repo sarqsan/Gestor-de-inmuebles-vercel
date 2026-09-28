@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { PolizaSeguro, EstadoRenovacionPoliza, UsuarioApp } from '../../types';
 import { ESTADO_RENOVACION_LABELS, crearHistorialPolizaItem, calcularDiasRestantes } from '../../utils/segurosEngine';
 import { X, Clock, ShieldCheck, AlertTriangle, CheckCircle2, FileText, User } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface RenovacionPolizaModalProps {
   isOpen: boolean;
@@ -94,7 +95,7 @@ export const RenovacionPolizaModal: React.FC<RenovacionPolizaModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err?.message || 'Error al guardar comprobación');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar comprobación'));
     } finally {
       setIsSubmitting(false);
     }

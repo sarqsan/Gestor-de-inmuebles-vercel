@@ -26,6 +26,7 @@ import {
   validarEdicionAdmin,
   ROL_SUPERADMIN,
 } from '../../lib/adminUsuarios';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 const ETIQUETA_PERFIL: Record<TipoPerfilUsuario, string> = {
   ADMINISTRADOR: '👑 Administrador (Acceso Completo)',
@@ -196,7 +197,7 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error saving user:', err);
-      setErrorMsg(err?.message || 'Error al guardar el usuario en Firestore.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar el usuario en Firestore.'));
     } finally {
       setGuardando(false);
     }

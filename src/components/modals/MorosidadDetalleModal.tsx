@@ -45,6 +45,7 @@ import {
 import { crearEvidencia } from '../../utils/morosidad/morosidadEngine';
 import { obtenerUrlEvidenciaMorosidad, subirEvidenciaMorosidadStorage } from '../../lib/morosidadEvidenciasStorage';
 import { TRANSICIONES_MOROSIDAD } from '../../utils/morosidad/morosidadEstados';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   expediente: ExpedienteMorosidad;
@@ -150,7 +151,7 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
         await onRefresh(exp.id);
       }
     } catch (err) {
-      setAviso({ tipo: 'error', texto: err instanceof Error ? err.message : 'Error' });
+      setAviso({ tipo: 'error', texto: mensajeDeErrorUsuario(err, 'Error') });
     } finally {
       setEspera(false);
     }
@@ -164,7 +165,7 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
       const url = await obtenerUrlEvidenciaMorosidad(e.storagePath);
       window.open(url, '_blank', 'noopener');
     } catch (err) {
-      setAviso({ tipo: 'error', texto: err instanceof Error ? err.message : 'No se pudo recuperar el adjunto' });
+      setAviso({ tipo: 'error', texto: mensajeDeErrorUsuario(err, 'No se pudo recuperar el adjunto') });
     } finally {
       setResolviendoAdjuntoId(null);
     }

@@ -20,6 +20,7 @@ import {
   ZonaServicio,
   UsuarioApp,
 } from '../../types';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface CrearProfesionalModalProps {
   profesionalParaEditar?: Profesional | null;
@@ -157,7 +158,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error saving professional:', err);
-      setErrorMsg(err?.message || 'Error al guardar el profesional en Firestore.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar el profesional en Firestore.'));
     } finally {
       setGuardando(false);
     }

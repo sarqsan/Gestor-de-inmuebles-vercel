@@ -26,6 +26,8 @@ import type {
   UsuarioApp,
 } from '../../types';
 import { DESTINO_INMUEBLE_LABEL } from '../../utils/recomercializacionEngine';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -226,7 +228,14 @@ export const BolsaInmobiliariasModal: React.FC<Props> = ({
   };
 
   const guardarPropuesta = async () => {
-    if (!formPropuestaAgencia || !propuestaForm.honorarios.trim()) return;
+    if (!formPropuestaAgencia || !propuestaForm.honorarios.trim()) {
+      // UX-4 §17: antes, guardar sin estos datos no daba ninguna respuesta.
+      avisarOperacion({
+        tipo: 'error',
+        mensaje: 'Selecciona la inmobiliaria e indica los honorarios propuestos antes de guardar.',
+      });
+      return;
+    }
     const ahora = new Date().toISOString();
     const propuesta: PropuestaInmobiliaria = {
       id: `prop_${expediente.id}_${formPropuestaAgenciaIdSafe()}_${Date.now().toString(36)}`,
@@ -245,7 +254,14 @@ export const BolsaInmobiliariasModal: React.FC<Props> = ({
       estado: 'PENDIENTE',
       createdAt: ahora,
     };
-    await onGuardarPropuesta(propuesta);
+    // UX-3 §6: resultado real de la propuesta antes de seguir con el expediente.
+    const { ok: propuestaOk } = await ejecutarOperacion({
+      accion: () => onGuardarPropuesta(propuesta),
+      mensajeExito: 'Propuesta registrada.',
+      mensajeError: 'No se ha podido registrar la propuesta.',
+      origenesDatos: ['propuestas_inmobiliaria'],
+    });
+    if (!propuestaOk) return;
     await persistirExpediente({
       comercializacion: {
         inmobiliariasContactadasIds: Array.from(new Set([...(expediente.comercializacion?.inmobiliariasContactadasIds ?? []), formPropuestaAgencia])),
@@ -259,20 +275,40 @@ export const BolsaInmobiliariasModal: React.FC<Props> = ({
     formPropuestaAgencia.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 20) || 'x';
 
   const resolverPropuesta = async (p: PropuestaInmobiliaria, aceptar: boolean) => {
+    // UX-3 §6: la decisión también comunica su resultado (antes era silenciosa).
     if (aceptar) {
       // Aceptar una deja el resto en rechazadas (comparativa con una sola ganadora).
-      for (const otra of propuestasDelExpediente.filter((x) => x.id !== p.id && x.estado === 'PENDIENTE')) {
-        await onGuardarPropuesta({ ...otra, estado: 'RECHAZADA', updatedAt: new Date().toISOString() });
-      }
-      await onGuardarPropuesta({ ...p, estado: 'ACEPTADA', updatedAt: new Date().toISOString() });
-      await cambiarEstadoLead(p.inmobiliariaId, 'ACUERDO_FIRMADO');
+      await ejecutarOperacion({
+        accion: async () => {
+          for (const otra of propuestasDelExpediente.filter((x) => x.id !== p.id && x.estado === 'PENDIENTE')) {
+            await onGuardarPropuesta({ ...otra, estado: 'RECHAZADA', updatedAt: new Date().toISOString() });
+          }
+          await onGuardarPropuesta({ ...p, estado: 'ACEPTADA', updatedAt: new Date().toISOString() });
+          await cambiarEstadoLead(p.inmobiliariaId, 'ACUERDO_FIRMADO');
+        },
+        mensajeExito: 'Propuesta aceptada; el resto quedan rechazadas.',
+        mensajeError: 'No se ha podido aceptar la propuesta.',
+        origenesDatos: ['propuestas_inmobiliaria', 'leads_inmobiliarios'],
+      });
     } else {
-      await onGuardarPropuesta({ ...p, estado: 'RECHAZADA', updatedAt: new Date().toISOString() });
+      await ejecutarOperacion({
+        accion: () => onGuardarPropuesta({ ...p, estado: 'RECHAZADA', updatedAt: new Date().toISOString() }),
+        mensajeExito: 'Propuesta rechazada.',
+        mensajeError: 'No se ha podido rechazar la propuesta.',
+        origenesDatos: ['propuestas_inmobiliaria'],
+      });
     }
   };
 
   const guardarAgencia = async () => {
-    if (!nueva.nombreComercial.trim() || !nueva.telefono.trim() || !nueva.email.trim() || !nueva.localidad.trim()) return;
+    if (!nueva.nombreComercial.trim() || !nueva.telefono.trim() || !nueva.email.trim() || !nueva.localidad.trim()) {
+      // UX-4 §17: se explica qué falta en lugar de no responder.
+      avisarOperacion({
+        tipo: 'error',
+        mensaje: 'Completa nombre, teléfono, email y localidad para guardar la agencia.',
+      });
+      return;
+    }
     const ahora = new Date().toISOString();
     const agencia: InmobiliariaDirectorio = {
       id: `inmobi_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -295,7 +331,13 @@ export const BolsaInmobiliariasModal: React.FC<Props> = ({
       activo: true,
       createdAt: ahora,
     };
-    await onGuardarInmobiliaria(agencia);
+    const { ok: agenciaOk } = await ejecutarOperacion({
+      accion: () => onGuardarInmobiliaria(agencia),
+      mensajeExito: 'Inmobiliaria guardada.',
+      mensajeError: 'No se ha podido guardar la inmobiliaria.',
+      origenesDatos: ['inmobiliarias'],
+    });
+    if (!agenciaOk) return;
     setFormAgencia(false);
     setNueva({ ...nueva, nombreComercial: '', telefono: '', email: '', web: '', provincia: '', cps: '', comisionMediaAlquiler: '', comisionMediaVenta: '' });
   };

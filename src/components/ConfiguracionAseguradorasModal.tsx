@@ -3,6 +3,8 @@ import { ConfiguracionAseguradora, TipoDocumento } from '../types';
 import { X, Plus, Trash2, Check, ShieldCheck, Info, Save, Settings2, Sliders, Mail, Sparkles, Star } from 'lucide-react';
 import { getTipoDocumentoLabel } from '../utils/formatters';
 import { INITIAL_ASEGURADORAS } from '../data/mockData';
+import { confirmar } from '../feedback/confirmacion';
+import { ejecutarOperacion } from '../feedback/operaciones';
 
 interface ConfiguracionAseguradorasModalProps {
   aseguradoras: ConfiguracionAseguradora[];
@@ -399,10 +401,23 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
           <button
             onClick={() => {
-              if (confirm(`¿Eliminar la aseguradora "${editingAseg.nombre}"?`)) {
-                onDeleteAseguradora(editingAseg.id);
-                onClose();
-              }
+              void confirmar({
+                titulo: 'Eliminar aseguradora',
+                mensaje: `¿Eliminar la aseguradora "${editingAseg.nombre}"?`,
+                detalle: 'Se dejará de poder usar en nuevas pólizas y solicitudes.',
+                etiquetaConfirmar: 'Eliminar',
+                peligroso: true,
+                alConfirmar: async () => {
+                  const { ok } = await ejecutarOperacion({
+                    accion: () => onDeleteAseguradora(editingAseg.id),
+                    mensajeExito: 'Aseguradora eliminada.',
+                    mensajeError: 'No se ha podido eliminar la aseguradora.',
+                    origenesDatos: ['aseguradoras'],
+                  });
+                  if (!ok) throw new Error('No se ha podido eliminar la aseguradora.');
+                  onClose();
+                },
+              });
             }}
             className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
           >

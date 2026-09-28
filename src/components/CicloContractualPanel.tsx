@@ -16,6 +16,10 @@ import {
 } from '../utils/contratoCicloEngine';
 import { formatEuro } from '../utils/formatters';
 import { FilePlus2, FileCheck2, Flag, ReceiptText, ChevronDown, ChevronUp } from 'lucide-react';
+// Nota: este componente ya tenía una función local `confirmar(anexoId)`; el
+// diálogo de la aplicación se importa con alias para no colisionar.
+import { confirmar as confirmarAccion } from '../feedback/confirmacion';
+import { ejecutarOperacion } from '../feedback/operaciones';
 
 /**
  * GAP 2 — Panel mínimo del ciclo contractual: modalidad, anexos, finalización y finiquito.
@@ -335,9 +339,23 @@ export const CicloContractualPanel: React.FC<CicloContractualPanelProps> = ({
               />
               <button
                 onClick={async () => {
-                  if (confirm('¿Confirmar la finalización/rescisión? El contrato pasará a estado terminal y se conservará en el histórico.')) {
-                    await finalizar();
-                  }
+                  await confirmarAccion({
+                    titulo: 'Finalizar / rescindir contrato',
+                    mensaje: '¿Confirmar la finalización/rescisión del contrato?',
+                    detalle: 'El contrato pasará a estado terminal y se conservará en el histórico.',
+                    etiquetaConfirmar: 'Finalizar',
+                    etiquetaEjecutando: 'Finalizando…',
+                    peligroso: true,
+                    alConfirmar: async () => {
+                      const { ok } = await ejecutarOperacion({
+                        accion: () => finalizar(),
+                        mensajeExito: 'Contrato finalizado.',
+                        mensajeError: 'No se ha podido finalizar el contrato.',
+                        origenesDatos: ['contratos'],
+                      });
+                      if (!ok) throw new Error('No se ha podido finalizar el contrato.');
+                    },
+                  });
                 }}
                 className="px-3 py-1.5 bg-rose-600 text-white rounded-xl text-[11px] font-bold"
               >

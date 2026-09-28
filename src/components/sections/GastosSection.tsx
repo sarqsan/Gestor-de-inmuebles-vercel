@@ -46,6 +46,8 @@ import { GastoRecurrenteModal } from '../modals/GastoRecurrenteModal';
 import { PrestamoModal } from '../modals/PrestamoModal';
 import { TablaAmortizacionModal } from '../modals/TablaAmortizacionModal';
 import { RentabilidadPanel } from './RentabilidadPanel';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface GastosSectionProps {
   gastos: Gasto[];
@@ -191,10 +193,20 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
     setInmuebleIdInicial(g.inmuebleId);
     setShowModal(true);
   };
-  const handleBorrar = (g: Gasto) => {
-    if (window.confirm(`¿Eliminar el gasto «${g.concepto}» por ${euro(g.importe)}?`)) {
-      onDeleteGasto(g.id);
-    }
+  const handleBorrar = async (g: Gasto) => {
+    await confirmar({
+      titulo: 'Eliminar gasto',
+      mensaje: `¿Eliminar el gasto «${g.concepto}» por ${euro(g.importe)}?`,
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => onDeleteGasto(g.id),
+          mensajeExito: 'Gasto eliminado.',
+          mensajeError: 'No se ha podido eliminar el gasto.',
+          origenesDatos: ['gastos'],
+        }),
+    });
   };
 
   // FASE 2.2: altas de plantillas recurrentes.
@@ -208,14 +220,21 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
     setRecurrenteInmuebleInicial(r.inmuebleId);
     setShowRecurrenteModal(true);
   };
-  const handleBorrarRecurrente = (r: GastoRecurrente) => {
-    if (
-      window.confirm(
-        `¿Eliminar la plantilla «${r.concepto}»? No se generarán más apuntes; los ya creados se conservan.`
-      )
-    ) {
-      onDeleteRecurrente(r.id);
-    }
+  const handleBorrarRecurrente = async (r: GastoRecurrente) => {
+    await confirmar({
+      titulo: 'Eliminar plantilla recurrente',
+      mensaje: `¿Eliminar la plantilla «${r.concepto}»?`,
+      detalle: 'No se generarán más apuntes; los ya creados se conservan.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => onDeleteRecurrente(r.id),
+          mensajeExito: 'Plantilla recurrente eliminada.',
+          mensajeError: 'No se ha podido eliminar la plantilla recurrente.',
+          origenesDatos: ['gastos_recurrentes'],
+        }),
+    });
   };
   const handleToggleActivo = async (r: GastoRecurrente) => {
     await onSaveRecurrente({ ...r, activo: !r.activo, updatedAt: new Date().toISOString() });
@@ -232,14 +251,21 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
     setPrestamoInmuebleInicial(p.inmuebleId);
     setShowPrestamoModal(true);
   };
-  const handleBorrarPrestamo = (p: Prestamo) => {
-    if (
-      window.confirm(
-        `¿Eliminar el préstamo «${p.descripcion || p.tipo}»? Se desactivará su cuota recurrente; los recibos ya generados se conservan.`
-      )
-    ) {
-      onDeletePrestamo(p.id);
-    }
+  const handleBorrarPrestamo = async (p: Prestamo) => {
+    await confirmar({
+      titulo: 'Eliminar préstamo',
+      mensaje: `¿Eliminar el préstamo «${p.descripcion || p.tipo}»?`,
+      detalle: 'Se desactivará su cuota recurrente; los recibos ya generados se conservan.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => onDeletePrestamo(p.id),
+          mensajeExito: 'Préstamo eliminado.',
+          mensajeError: 'No se ha podido eliminar el préstamo.',
+          origenesDatos: ['prestamos'],
+        }),
+    });
   };
 
   const inputCls =

@@ -60,6 +60,7 @@ import {
   saveTrabajoProfesionalFirestore,
   saveGastoFirestore,
 } from '../../lib/firebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface DetalleProyectoReformaModalProps {
   isOpen: boolean;
@@ -240,7 +241,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
       await handleGuardarProyecto(res.proyectoActualizado);
       showFeedback('success', `Orden de Trabajo #${res.trabajo.id} generada con éxito.`);
     } catch (err: any) {
-      showFeedback('error', err?.message || 'Error al generar la orden de trabajo.');
+      showFeedback('error', mensajeDeErrorUsuario(err, 'Error al generar la orden de trabajo.'));
     } finally {
       setLoading(false);
     }
@@ -274,7 +275,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
       setMotivoAdjudicacion('');
       showFeedback('success', `Presupuesto adjudicado a ${selectedPptParaAdjudicar.profesionalNombre}.`);
     } catch (err: any) {
-      showFeedback('error', err?.message || 'Error al adjudicar el presupuesto.');
+      showFeedback('error', mensajeDeErrorUsuario(err, 'Error al adjudicar el presupuesto.'));
     } finally {
       setLoading(false);
     }
@@ -299,7 +300,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
           : `Gasto contable de explotación generado (#${res.gasto.id}) por ${res.gasto.importe} €.`
       );
     } catch (err: any) {
-      showFeedback('error', err?.message || 'Error al liquidar gasto.');
+      showFeedback('error', mensajeDeErrorUsuario(err, 'Error al liquidar gasto.'));
     } finally {
       setLoading(false);
     }
@@ -321,7 +322,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
       setShowFinalizarModal(false);
       showFeedback('success', 'Proyecto de reforma finalizado formalmente con resumen de cierre.');
     } catch (err: any) {
-      showFeedback('error', err?.message || 'Error al finalizar proyecto.');
+      showFeedback('error', mensajeDeErrorUsuario(err, 'Error al finalizar proyecto.'));
     } finally {
       setLoading(false);
     }

@@ -39,6 +39,8 @@ import {
   searchGmailMessages,
   getGmailMessageDetails,
 } from '../lib/gmailClient';
+import { avisarOperacion } from '../feedback/canalFeedback';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface DetalleSolicitudSeguroModalProps {
   solicitud: SolicitudSeguroImpago;
@@ -214,7 +216,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
       }
     } catch (err: any) {
       console.error('Error enviando con Gmail API:', err);
-      alert(`No se pudo enviar por Gmail API (${err.message}). Puedes copiar el borrador o abrir tu cliente de correo.`);
+      avisarOperacion({ tipo: 'error', mensaje: `${mensajeDeErrorUsuario(err, 'No se ha podido enviar el correo automáticamente.')} Puedes copiar el borrador o abrir tu cliente de correo.` });
     } finally {
       setIsSendingEmail(false);
     }

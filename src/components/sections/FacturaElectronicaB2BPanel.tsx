@@ -42,6 +42,7 @@ import {
   XCircle,
   Banknote,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 const ETIQUETAS_ESTADO_B2B: Record<EstadoFacturaB2B, string> = {
   BORRADOR: 'Borrador',
@@ -133,7 +134,7 @@ export const FacturaElectronicaB2BPanel: React.FC<{
         avisar('ok', `Representación electrónica ${formato} generada (v${res.feb.versionGeneracion}).`);
       }
     } catch (e) {
-      avisar('error', e instanceof Error ? e.message : 'Error al generar la representación B2B.');
+      avisar('error', mensajeDeErrorUsuario(e, 'Error al generar la representación B2B.'));
     } finally {
       setProcesando(false);
     }
@@ -155,7 +156,7 @@ export const FacturaElectronicaB2BPanel: React.FC<{
         'Factura DISPUESTA PARA ENVÍO (preparación local). NO es un envío real: el intercambio efectivo requiere plataforma habilitada.'
       );
     } catch (e) {
-      avisar('error', e instanceof Error ? e.message : 'Error al preparar el envío.');
+      avisar('error', mensajeDeErrorUsuario(e, 'Error al preparar el envío.'));
     } finally {
       setProcesando(false);
     }
@@ -174,7 +175,7 @@ export const FacturaElectronicaB2BPanel: React.FC<{
       await persistir(res.feb);
       avisar('aviso', 'Reintento registrado con la misma clave de idempotencia. Sigue siendo preparación local.');
     } catch (e) {
-      avisar('error', e instanceof Error ? e.message : 'Error en el reintento.');
+      avisar('error', mensajeDeErrorUsuario(e, 'Error en el reintento.'));
     } finally {
       setProcesando(false);
     }
@@ -197,7 +198,7 @@ export const FacturaElectronicaB2BPanel: React.FC<{
       await persistir(res.feb);
       avisar('ok', `Estado registrado: ${ETIQUETAS_ESTADO_B2B[estado]} (registro manual del avance notificado).`);
     } catch (e) {
-      avisar('error', e instanceof Error ? e.message : 'Error al registrar el estado.');
+      avisar('error', mensajeDeErrorUsuario(e, 'Error al registrar el estado.'));
     } finally {
       setProcesando(false);
     }
@@ -216,7 +217,7 @@ export const FacturaElectronicaB2BPanel: React.FC<{
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      avisar('error', e instanceof Error ? e.message : 'No se pudo generar el documento.');
+      avisar('error', mensajeDeErrorUsuario(e, 'No se pudo generar el documento.'));
     }
   };
 

@@ -75,7 +75,7 @@ import type {
 import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
 import type { GestionCartera } from './gestionesCartera';
 import type { InmuebleDelegadoParcial } from './carterasGestion';
-import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
+import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -516,7 +516,7 @@ export async function saveInmuebleFirestore(inmueble: Inmueble): Promise<boolean
     }
     return true;
   } catch (err) {
-    console.error('Error saving inmueble to Firestore:', err);
+    reportarErrorGuardado('inmuebles', err, 'Error saving inmueble to Firestore:');
     return false;
   }
 }
@@ -535,7 +535,7 @@ export async function deleteInmuebleFirestore(inmuebleId: string): Promise<boole
     }
     return true;
   } catch (err) {
-    console.error('Error deleting inmueble from Firestore:', err);
+    reportarErrorGuardado('inmuebles', err, 'Error deleting inmueble from Firestore:');
     return false;
   }
 }
@@ -640,7 +640,7 @@ export async function saveCandidatoFirestore(candidato: Candidato) {
     }
     await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
   } catch (err) {
-    console.error('Error saving candidato to Firestore:', err);
+    reportarErrorGuardado('candidatos', err, 'Error saving candidato to Firestore:');
   }
 }
 
@@ -651,7 +651,7 @@ export async function deleteCandidatoFirestore(candidateId: string) {
   try {
     await deleteDoc(doc(db, 'candidatos', candidateId));
   } catch (err) {
-    console.error('Error deleting candidato from Firestore:', err);
+    reportarErrorGuardado('candidatos', err, 'Error deleting candidato from Firestore:');
   }
 }
 
@@ -701,7 +701,7 @@ export async function saveInvitacionFirestore(invitacion: InvitacionVisita) {
     const cleanInv = sanitizeObjectForFirestore(invitacion);
     await setDoc(doc(db, 'invitaciones', invitacion.id), cleanInv, { merge: true });
   } catch (err) {
-    console.error('Error saving invitacion to Firestore:', err);
+    reportarErrorGuardado('invitaciones', err, 'Error saving invitacion to Firestore:');
   }
 }
 
@@ -712,7 +712,7 @@ export async function deleteInvitacionFirestore(invitacionId: string) {
   try {
     await deleteDoc(doc(db, 'invitaciones', invitacionId));
   } catch (err) {
-    console.error('Error deleting invitacion from Firestore:', err);
+    reportarErrorGuardado('invitaciones', err, 'Error deleting invitacion from Firestore:');
   }
 }
 
@@ -789,7 +789,7 @@ export async function saveAgendaSlotsFirestore(slots: VisitSlot[]) {
     });
     await batch.commit();
   } catch (err) {
-    console.error('Error saving agenda slots to Firestore:', err);
+    reportarErrorGuardado('slots_visita', err, 'Error saving agenda slots to Firestore:');
   }
 }
 
@@ -801,7 +801,7 @@ export async function saveVisitSlotFirestore(slot: VisitSlot) {
     const cleanSlot = sanitizeObjectForFirestore(slot);
     await setDoc(doc(db, 'slots_visita', slot.id), cleanSlot, { merge: true });
   } catch (err) {
-    console.error('Error saving visit slot to Firestore:', err);
+    reportarErrorGuardado('slots_visita', err, 'Error saving visit slot to Firestore:');
   }
 }
 
@@ -812,7 +812,7 @@ export async function deleteVisitSlotFirestore(slotId: string) {
   try {
     await deleteDoc(doc(db, 'slots_visita', slotId));
   } catch (err) {
-    console.error('Error deleting visit slot from Firestore:', err);
+    reportarErrorGuardado('slots_visita', err, 'Error deleting visit slot from Firestore:');
   }
 }
 
@@ -828,7 +828,7 @@ export async function deleteMultipleSlotsFirestore(slotIds: string[]) {
     });
     await batch.commit();
   } catch (err) {
-    console.error('Error deleting multiple visit slots from Firestore:', err);
+    reportarErrorGuardado('slots_visita', err, 'Error deleting multiple visit slots from Firestore:');
   }
 }
 
@@ -840,7 +840,7 @@ export async function saveSolicitudFirestore(solicitud: SolicitudAlquiler) {
     const cleanSol = sanitizeObjectForFirestore(solicitud);
     await setDoc(doc(db, 'solicitudes', solicitud.id), cleanSol, { merge: true });
   } catch (err) {
-    console.error('Error saving solicitud to Firestore:', err);
+    reportarErrorGuardado('solicitudes', err, 'Error saving solicitud to Firestore:');
   }
 }
 
@@ -871,7 +871,7 @@ export async function saveSolicitudDocFirestore(solicitudDoc: SolicitudDocumenta
     const cleanDoc = sanitizeDocForFirestore(solicitudDoc);
     await setDoc(doc(db, 'solicitudes_documentacion', solicitudDoc.id), cleanDoc, { merge: true });
   } catch (err) {
-    console.error('Error saving solicitud documentacion to Firestore:', err);
+    reportarErrorGuardado('solicitudes_documentacion', err, 'Error saving solicitud documentacion to Firestore:');
   }
 }
 
@@ -882,7 +882,7 @@ export async function deleteSolicitudDocFirestore(solicitudDocId: string) {
   try {
     await deleteDoc(doc(db, 'solicitudes_documentacion', solicitudDocId));
   } catch (err) {
-    console.error('Error deleting solicitud documentacion from Firestore:', err);
+    reportarErrorGuardado('solicitudes_documentacion', err, 'Error deleting solicitud documentacion from Firestore:');
   }
 }
 
@@ -939,7 +939,7 @@ export async function saveContratoFirestore(contrato: ContratoFormalizacion) {
     const cleanContrato = sanitizeObjectForFirestore(contrato);
     await setDoc(refC, cleanContrato, { merge: true });
   } catch (err) {
-    console.error('Error saving contrato formalizacion to Firestore:', err);
+    reportarErrorGuardado('contratos', err, 'Error saving contrato formalizacion to Firestore:');
     throw err;
   }
 }
@@ -1146,7 +1146,7 @@ export async function deleteContratoFirestore(contratoId: string) {
   try {
     await deleteDoc(doc(db, 'contratos_formalizacion', contratoId));
   } catch (err) {
-    console.error('Error deleting contrato formalizacion from Firestore:', err);
+    reportarErrorGuardado('contratos', err, 'Error deleting contrato formalizacion from Firestore:');
   }
 }
 
@@ -1232,7 +1232,7 @@ export async function saveGastoFirestoreWithResult(gasto: Gasto): Promise<Firest
     await setDoc(doc(db, 'gastos', gasto.id), cleanGasto, { merge: true });
     return { ok: true };
   } catch (error) {
-    console.error(`Error saving gasto '${gasto.id}' to Firestore:`, error);
+    reportarErrorGuardado('gastos', error, `Error saving gasto '${gasto.id}' to Firestore:`);
     return { ok: false, error };
   }
 }
@@ -1246,7 +1246,7 @@ export async function deleteGastoFirestore(gastoId: string) {
   try {
     await deleteDoc(doc(db, 'gastos', gastoId));
   } catch (err) {
-    console.error('Error deleting gasto from Firestore:', err);
+    reportarErrorGuardado('gastos', err, 'Error deleting gasto from Firestore:');
   }
 }
 
@@ -1316,7 +1316,7 @@ export async function saveGastoRecurrenteFirestore(plantilla: GastoRecurrente) {
     const clean = sanitizeObjectForFirestore(plantilla);
     await setDoc(doc(db, 'gastos_recurrentes', plantilla.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving gasto recurrente to Firestore:', err);
+    reportarErrorGuardado('gastos_recurrentes', err, 'Error saving gasto recurrente to Firestore:');
   }
 }
 
@@ -1325,7 +1325,7 @@ export async function deleteGastoRecurrenteFirestore(plantillaId: string) {
     // No se eliminan los apuntes ya materializados: se conserva el histórico.
     await deleteDoc(doc(db, 'gastos_recurrentes', plantillaId));
   } catch (err) {
-    console.error('Error deleting gasto recurrente from Firestore:', err);
+    reportarErrorGuardado('gastos_recurrentes', err, 'Error deleting gasto recurrente from Firestore:');
   }
 }
 
@@ -1382,7 +1382,7 @@ export async function savePrestamoFirestore(prestamo: Prestamo) {
     const clean = sanitizeObjectForFirestore(prestamo);
     await setDoc(doc(db, 'prestamos', prestamo.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving prestamo to Firestore:', err);
+    reportarErrorGuardado('prestamos', err, 'Error saving prestamo to Firestore:');
   }
 }
 
@@ -1390,7 +1390,7 @@ export async function deletePrestamoFirestore(prestamoId: string) {
   try {
     await deleteDoc(doc(db, 'prestamos', prestamoId));
   } catch (err) {
-    console.error('Error deleting prestamo from Firestore:', err);
+    reportarErrorGuardado('prestamos', err, 'Error deleting prestamo from Firestore:');
   }
 }
 
@@ -1556,14 +1556,14 @@ export async function saveExpedienteRecomercializacionFirestore(item: Expediente
       { merge: true }
     );
   } catch (err) {
-    console.error('Error saving expediente recomercializacion:', err);
+    reportarErrorGuardado('expedientes_recomercializacion', err, 'Error saving expediente recomercializacion:');
   }
 }
 export async function deleteExpedienteRecomercializacionFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'expedientes_recomercializacion', id));
   } catch (err) {
-    console.error('Error deleting expediente recomercializacion:', err);
+    reportarErrorGuardado('expedientes_recomercializacion', err, 'Error deleting expediente recomercializacion:');
   }
 }
 
@@ -1594,14 +1594,14 @@ export async function saveInmobiliariaFirestore(item: InmobiliariaDirectorio) {
       merge: true,
     });
   } catch (err) {
-    console.error('Error saving inmobiliaria:', err);
+    reportarErrorGuardado('inmobiliarias', err, 'Error saving inmobiliaria:');
   }
 }
 export async function deleteInmobiliariaFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'inmobiliarias_directorio', id));
   } catch (err) {
-    console.error('Error deleting inmobiliaria:', err);
+    reportarErrorGuardado('inmobiliarias', err, 'Error deleting inmobiliaria:');
   }
 }
 
@@ -1623,14 +1623,14 @@ export async function savePropuestaInmobiliariaFirestore(item: PropuestaInmobili
       merge: true,
     });
   } catch (err) {
-    console.error('Error saving propuesta inmobiliaria:', err);
+    reportarErrorGuardado('propuestas_inmobiliaria', err, 'Error saving propuesta inmobiliaria:');
   }
 }
 export async function deletePropuestaInmobiliariaFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'propuestas_inmobiliaria', id));
   } catch (err) {
-    console.error('Error deleting propuesta inmobiliaria:', err);
+    reportarErrorGuardado('propuestas_inmobiliaria', err, 'Error deleting propuesta inmobiliaria:');
   }
 }
 
@@ -1652,14 +1652,14 @@ export async function saveLeadInmobiliarioFirestore(item: LeadInmobiliario) {
       merge: true,
     });
   } catch (err) {
-    console.error('Error saving lead inmobiliario:', err);
+    reportarErrorGuardado('leads_inmobiliarios', err, 'Error saving lead inmobiliario:');
   }
 }
 export async function deleteLeadInmobiliarioFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'leads_inmobiliario', id));
   } catch (err) {
-    console.error('Error deleting lead inmobiliario:', err);
+    reportarErrorGuardado('leads_inmobiliarios', err, 'Error deleting lead inmobiliario:');
   }
 }
 
@@ -1685,14 +1685,14 @@ export async function saveIncidenciaFirestore(item: Incidencia) {
   try {
     await setDoc(doc(db, 'incidencias', item.id), sanitizeObjectForFirestore(item), { merge: true });
   } catch (err) {
-    console.error('Error saving incidencia:', err);
+    reportarErrorGuardado('incidencias', err, 'Error saving incidencia:');
   }
 }
 export async function deleteIncidenciaFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'incidencias', id));
   } catch (err) {
-    console.error('Error deleting incidencia:', err);
+    reportarErrorGuardado('incidencias', err, 'Error deleting incidencia:');
   }
 }
 
@@ -1716,7 +1716,7 @@ export async function saveTareaMantenimientoFirestoreWithResult(
     });
     return { ok: true };
   } catch (error) {
-    console.error(`Error saving tarea mantenimiento '${item.id}':`, error);
+    reportarErrorGuardado('tareas_mantenimiento', error, `Error saving tarea mantenimiento '${item.id}':`);
     return { ok: false, error };
   }
 }
@@ -1729,7 +1729,7 @@ export async function deleteTareaMantenimientoFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'tareas_mantenimiento', id));
   } catch (err) {
-    console.error('Error deleting tarea mantenimiento:', err);
+    reportarErrorGuardado('tareas_mantenimiento', err, 'Error deleting tarea mantenimiento:');
   }
 }
 
@@ -1754,7 +1754,7 @@ export async function saveGarantiaReparacionFirestoreWithResult(
     });
     return { ok: true };
   } catch (error) {
-    console.error(`Error saving garantia reparacion '${item.id}':`, error);
+    reportarErrorGuardado('garantias_reparacion', error, `Error saving garantia reparacion '${item.id}':`);
     return { ok: false, error };
   }
 }
@@ -1768,7 +1768,7 @@ export async function deleteGarantiaReparacionFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'garantias_reparacion', id));
   } catch (err) {
-    console.error('Error deleting garantia reparacion:', err);
+    reportarErrorGuardado('garantias_reparacion', err, 'Error deleting garantia reparacion:');
   }
 }
 
@@ -1794,7 +1794,7 @@ export async function saveNecesidadReformaFirestore(item: NecesidadReforma) {
       merge: true,
     });
   } catch (err) {
-    console.error('Error saving necesidad de reforma:', err);
+    reportarErrorGuardado('necesidades_reforma', err, 'Error saving necesidad de reforma:');
     throw err;
   }
 }
@@ -1803,7 +1803,7 @@ export async function deleteNecesidadReformaFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'necesidades_reforma', id));
   } catch (err) {
-    console.error('Error deleting necesidad de reforma:', err);
+    reportarErrorGuardado('necesidades_reforma', err, 'Error deleting necesidad de reforma:');
     throw err;
   }
 }
@@ -1826,7 +1826,7 @@ export async function saveProyectoReformaFirestore(item: ProyectoReforma) {
       merge: true,
     });
   } catch (err) {
-    console.error('Error saving proyecto de reforma:', err);
+    reportarErrorGuardado('proyectos_reforma', err, 'Error saving proyecto de reforma:');
     throw err;
   }
 }
@@ -1835,7 +1835,7 @@ export async function deleteProyectoReformaFirestore(id: string) {
   try {
     await deleteDoc(doc(db, 'proyectos_reforma', id));
   } catch (err) {
-    console.error('Error deleting proyecto de reforma:', err);
+    reportarErrorGuardado('proyectos_reforma', err, 'Error deleting proyecto de reforma:');
     throw err;
   }
 }
@@ -1994,7 +1994,7 @@ export async function saveAseguradoraFirestore(aseguradora: ConfiguracionAsegura
     const cleanAseg = sanitizeObjectForFirestore(aseguradora);
     await setDoc(doc(db, 'configuracion_aseguradoras', aseguradora.id), cleanAseg, { merge: true });
   } catch (err) {
-    console.error('Error saving aseguradora to Firestore:', err);
+    reportarErrorGuardado('aseguradoras', err, 'Error saving aseguradora to Firestore:');
   }
 }
 
@@ -2005,7 +2005,7 @@ export async function deleteAseguradoraFirestore(aseguradoraId: string) {
   try {
     await deleteDoc(doc(db, 'configuracion_aseguradoras', aseguradoraId));
   } catch (err) {
-    console.error('Error deleting aseguradora from Firestore:', err);
+    reportarErrorGuardado('aseguradoras', err, 'Error deleting aseguradora from Firestore:');
   }
 }
 
@@ -2036,7 +2036,7 @@ export async function saveSolicitudSeguroFirestore(solicitud: SolicitudSeguroImp
     const cleanSol = sanitizeObjectForFirestore(solicitud);
     await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
   } catch (err) {
-    console.error('Error saving solicitud seguro impago to Firestore:', err);
+    reportarErrorGuardado('solicitudes_seguro', err, 'Error saving solicitud seguro impago to Firestore:');
   }
 }
 
@@ -2047,7 +2047,7 @@ export async function deleteSolicitudSeguroFirestore(solicitudId: string) {
   try {
     await deleteDoc(doc(db, 'solicitudes_seguro_impago', solicitudId));
   } catch (err) {
-    console.error('Error deleting solicitud seguro impago from Firestore:', err);
+    reportarErrorGuardado('solicitudes_seguro', err, 'Error deleting solicitud seguro impago from Firestore:');
   }
 }
 
@@ -2079,7 +2079,7 @@ export async function saveGmailConfigFirestore(config: GmailIntegracionConfig) {
     const cleanConfig = sanitizeObjectForFirestore(config);
     await setDoc(doc(db, 'system', 'gmail_config'), cleanConfig, { merge: true });
   } catch (err) {
-    console.error('Error saving gmail config to Firestore:', err);
+    reportarErrorGuardado('gmail_config', err, 'Error saving gmail config to Firestore:');
   }
 }
 
@@ -2184,7 +2184,7 @@ export async function deleteSolicitudFirestore(solicitudId: string) {
   try {
     await deleteDoc(doc(db, 'solicitudes', solicitudId));
   } catch (err) {
-    console.error('Error deleting solicitud from Firestore:', err);
+    reportarErrorGuardado('solicitudes', err, 'Error deleting solicitud from Firestore:');
   }
 }
 
@@ -2891,7 +2891,7 @@ export async function savePolizaFirestore(poliza: PolizaSeguro): Promise<void> {
     const cleanPol = sanitizeObjectForFirestore({ ...poliza, updatedAt: new Date().toISOString() });
     await setDoc(doc(db, 'polizas_seguros', poliza.id), cleanPol, { merge: true });
   } catch (err) {
-    console.error('Error saving poliza to Firestore:', err);
+    reportarErrorGuardado('polizas', err, 'Error saving poliza to Firestore:');
     throw err;
   }
 }
@@ -2900,7 +2900,7 @@ export async function deletePolizaFirestore(polizaId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'polizas_seguros', polizaId));
   } catch (err) {
-    console.error('Error deleting poliza from Firestore:', err);
+    reportarErrorGuardado('polizas', err, 'Error deleting poliza from Firestore:');
     throw err;
   }
 }
@@ -2965,7 +2965,7 @@ export async function saveSiniestroFirestore(siniestro: Siniestro): Promise<void
     const cleanSin = sanitizeObjectForFirestore({ ...siniestro, updatedAt: new Date().toISOString() });
     await setDoc(doc(db, 'siniestros', siniestro.id), cleanSin, { merge: true });
   } catch (err) {
-    console.error('Error saving siniestro to Firestore:', err);
+    reportarErrorGuardado('siniestros', err, 'Error saving siniestro to Firestore:');
     throw err;
   }
 }
@@ -2974,7 +2974,7 @@ export async function deleteSiniestroFirestore(siniestroId: string): Promise<voi
   try {
     await deleteDoc(doc(db, 'siniestros', siniestroId));
   } catch (err) {
-    console.error('Error deleting siniestro from Firestore:', err);
+    reportarErrorGuardado('siniestros', err, 'Error deleting siniestro from Firestore:');
     throw err;
   }
 }
@@ -3033,7 +3033,7 @@ export async function saveTrabajoProfesionalFirestore(trabajo: TrabajoProfesiona
     });
     await setDoc(doc(db, 'trabajos_profesionales', trabajo.id), cleanTrabajo, { merge: true });
   } catch (err) {
-    console.error('Error saving trabajo profesional to Firestore:', err);
+    reportarErrorGuardado('trabajos_profesionales', err, 'Error saving trabajo profesional to Firestore:');
     throw err;
   }
 }
@@ -3042,7 +3042,7 @@ export async function deleteTrabajoProfesionalFirestore(trabajoId: string): Prom
   try {
     await deleteDoc(doc(db, 'trabajos_profesionales', trabajoId));
   } catch (err) {
-    console.error('Error deleting trabajo profesional from Firestore:', err);
+    reportarErrorGuardado('trabajos_profesionales', err, 'Error deleting trabajo profesional from Firestore:');
     throw err;
   }
 }
@@ -3072,7 +3072,7 @@ export async function savePresupuestoProfesionalFirestore(presupuesto: Presupues
     });
     await setDoc(doc(db, 'presupuestos_profesionales', presupuesto.id), cleanPresupuesto, { merge: true });
   } catch (err) {
-    console.error('Error saving presupuesto profesional to Firestore:', err);
+    reportarErrorGuardado('presupuestos_profesionales', err, 'Error saving presupuesto profesional to Firestore:');
     throw err;
   }
 }
@@ -3081,7 +3081,7 @@ export async function deletePresupuestoProfesionalFirestore(presupuestoId: strin
   try {
     await deleteDoc(doc(db, 'presupuestos_profesionales', presupuestoId));
   } catch (err) {
-    console.error('Error deleting presupuesto profesional from Firestore:', err);
+    reportarErrorGuardado('presupuestos_profesionales', err, 'Error deleting presupuesto profesional from Firestore:');
     throw err;
   }
 }
@@ -3121,7 +3121,7 @@ export async function saveValoracionProfesionalFirestore(valoracion: ValoracionP
       );
     }
   } catch (err) {
-    console.error('Error saving valoracion profesional to Firestore:', err);
+    reportarErrorGuardado('valoraciones_profesionales', err, 'Error saving valoracion profesional to Firestore:');
     throw err;
   }
 }
@@ -3438,7 +3438,7 @@ export async function saveFinanciacionFirestore(financiacion: Financiacion): Pro
     });
     await setDoc(doc(db, 'financiaciones', financiacion.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving financiacion to Firestore:', err);
+    reportarErrorGuardado('financiaciones', err, 'Error saving financiacion to Firestore:');
     throw err;
   }
 }
@@ -3451,7 +3451,7 @@ export async function deleteFinanciacionFirestore(financiacionId: string): Promi
   try {
     await deleteDoc(doc(db, 'financiaciones', financiacionId));
   } catch (err) {
-    console.error('Error deleting financiacion from Firestore:', err);
+    reportarErrorGuardado('financiaciones', err, 'Error deleting financiacion from Firestore:');
     throw err;
   }
 }
@@ -3495,7 +3495,7 @@ export async function saveFacturaFirestore(factura: Factura): Promise<void> {
     });
     await setDoc(doc(db, 'facturas', factura.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving factura to Firestore:', err);
+    reportarErrorGuardado('facturas', err, 'Error saving factura to Firestore:');
     throw err;
   }
 }
@@ -3504,7 +3504,7 @@ export async function deleteFacturaFirestore(facturaId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'facturas', facturaId));
   } catch (err) {
-    console.error('Error deleting factura from Firestore:', err);
+    reportarErrorGuardado('facturas', err, 'Error deleting factura from Firestore:');
     throw err;
   }
 }
@@ -3541,7 +3541,7 @@ export async function createRegistroFacturacionFirestore(registro: RegistroFactu
     const clean = sanitizeObjectForFirestore(registro);
     await setDoc(refReg, clean, { merge: false });
   } catch (err) {
-    console.error('Error creating registro_facturacion in Firestore:', err);
+    reportarErrorGuardado('registros_facturacion', err, 'Error creating registro_facturacion in Firestore:');
     throw err;
   }
 }
@@ -3570,7 +3570,7 @@ export async function saveEnvioVerifactuFirestore(envio: EnvioVerifactu): Promis
     const clean = sanitizeObjectForFirestore(envio);
     await setDoc(doc(db, 'envios_verifactu', envio.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving envio_verifactu to Firestore:', err);
+    reportarErrorGuardado('envios_verifactu', err, 'Error saving envio_verifactu to Firestore:');
     throw err;
   }
 }
@@ -3602,7 +3602,7 @@ export async function saveSerieFacturacionFirestore(serie: SerieFacturacion): Pr
     });
     await setDoc(doc(db, 'series_facturacion', serie.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving serie_facturacion to Firestore:', err);
+    reportarErrorGuardado('series_facturacion', err, 'Error saving serie_facturacion to Firestore:');
     throw err;
   }
 }
@@ -3646,7 +3646,7 @@ export async function saveFacturaElectronicaB2BFirestore(feb: FacturaElectronica
     });
     await setDoc(doc(db, 'facturas_electronicas_b2b', feb.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving factura_electronica_b2b to Firestore:', err);
+    reportarErrorGuardado('facturas_b2b', err, 'Error saving factura_electronica_b2b to Firestore:');
     throw err;
   }
 }

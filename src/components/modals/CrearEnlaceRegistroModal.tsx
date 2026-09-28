@@ -6,6 +6,7 @@ import {
   buildUrlInvitacionPropietario,
   generarIdEnlace,
 } from '../../lib/accesoPropietarios';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface CrearEnlaceRegistroModalProps {
   enlaceParaEditar?: EnlaceRegistro | null;
@@ -165,7 +166,7 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
       onClose();
     } catch (err: any) {
       console.error('Error saving invitation link:', err);
-      setErrorMsg(err?.message || 'Error al guardar el enlace de registro.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar el enlace de registro.'));
     } finally {
       setGuardando(false);
     }

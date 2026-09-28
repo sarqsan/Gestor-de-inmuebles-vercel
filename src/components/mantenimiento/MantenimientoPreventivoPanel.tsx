@@ -44,6 +44,9 @@ import {
   ShieldCheck,
   Zap,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface MantenimientoPreventivoPanelProps {
   tareas: TareaMantenimiento[];
@@ -126,11 +129,21 @@ export const MantenimientoPreventivoPanel: React.FC<MantenimientoPreventivoPanel
   };
 
   const handleDeleteTarea = async (id: string) => {
-    if (window.confirm('¿Está seguro de eliminar este plan de mantenimiento preventivo?')) {
-      await deleteTareaMantenimientoFirestore(id);
-      setNotificacion({ tipo: 'success', mensaje: 'Plan eliminado de la base de datos.' });
-      setTimeout(() => setNotificacion(null), 4000);
-    }
+    await confirmar({
+      titulo: 'Eliminar plan de mantenimiento',
+      mensaje: '¿Eliminar este plan de mantenimiento preventivo?',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: async () => {
+        const { ok } = await ejecutarOperacion({
+          accion: () => deleteTareaMantenimientoFirestore(id),
+          mensajeExito: 'Plan de mantenimiento eliminado.',
+          mensajeError: 'No se ha podido eliminar el plan de mantenimiento.',
+          origenesDatos: ['tareas_mantenimiento'],
+        });
+        if (!ok) throw new Error('No se ha podido eliminar el plan de mantenimiento.');
+      },
+    });
   };
 
   const handleGenerarOT = async (tarea: TareaMantenimiento) => {
@@ -175,7 +188,7 @@ export const MantenimientoPreventivoPanel: React.FC<MantenimientoPreventivoPanel
       setTimeout(() => setNotificacion(null), 5000);
     } catch (err: any) {
       console.error('Error generating preventive work order:', err);
-      setNotificacion({ tipo: 'error', mensaje: err?.message || 'Error al generar la Orden de Trabajo.' });
+      setNotificacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(err, 'Error al generar la Orden de Trabajo.') });
       setTimeout(() => setNotificacion(null), 5000);
     }
   };

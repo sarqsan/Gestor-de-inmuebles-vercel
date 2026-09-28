@@ -25,6 +25,7 @@ export const MENSAJE_RECUPERACION_NEUTRAL =
 export const MENSAJE_RECUPERACION_GENERICO =
   'No se pudo procesar la solicitud. Inténtalo de nuevo en unos minutos.';
 import { UsuarioApp } from '../types';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface LoginViewProps {
   onLoginSuccess: (usuario: UsuarioApp) => void;
@@ -77,7 +78,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
       } else if (mensajeErrorLogin(err)) {
         setErrorMsg(mensajeErrorLogin(err) as string);
       } else {
-        setErrorMsg(err?.message || 'Error al iniciar sesión.');
+        setErrorMsg(mensajeDeErrorUsuario(err, 'Error al iniciar sesión.'));
       }
     } finally {
       setLoading(false);
@@ -105,7 +106,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
       }, 1200);
     } catch (err: any) {
       console.error('Error configurando administrador:', err);
-      setErrorMsg(err?.message || 'Error al inicializar la cuenta de administrador.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al inicializar la cuenta de administrador.'));
     } finally {
       setLoading(false);
     }

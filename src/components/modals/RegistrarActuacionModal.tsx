@@ -35,6 +35,7 @@ import {
   AlertCircle,
   Wrench,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface RegistrarActuacionModalProps {
   isOpen: boolean;
@@ -142,10 +143,10 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
       if (gasto) {
         const persistenciaGasto = await saveGastoFirestoreWithResult(gasto);
         if (persistenciaGasto.ok === false) {
-          const detalle = persistenciaGasto.error instanceof Error
-            ? persistenciaGasto.error.message
-            : String(persistenciaGasto.error);
-          throw new Error(`No se pudo guardar el gasto de la actuación: ${detalle}`);
+          // UX-3 §12: el motivo técnico se queda en consola; la persona usuaria ve
+          // un mensaje claro (antes se mostraba «permission-denied…» en pantalla).
+          console.error('Error al guardar el gasto de la actuación:', persistenciaGasto.error);
+          throw new Error('No se ha podido guardar el gasto de la actuación.');
         }
       }
       const gastoId = gasto?.id;
@@ -193,10 +194,8 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
         };
         const persistenciaGarantia = await saveGarantiaReparacionFirestoreWithResult(nuevaGarantia);
         if (persistenciaGarantia.ok === false) {
-          const detalle = persistenciaGarantia.error instanceof Error
-            ? persistenciaGarantia.error.message
-            : String(persistenciaGarantia.error);
-          throw new Error(`No se pudo guardar la garantía de la actuación: ${detalle}`);
+          console.error('Error al guardar la garantía de la actuación:', persistenciaGarantia.error);
+          throw new Error('No se ha podido guardar la garantía de la actuación.');
         }
         tareaActualizada.garantiaId = nuevaGarantia.id;
       }
@@ -205,7 +204,7 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
       onClose();
     } catch (err: any) {
       console.error('Error al registrar actuación:', err);
-      setError(err?.message || 'Error al registrar la actuación realizada.');
+      setError(mensajeDeErrorUsuario(err, 'No se ha podido registrar la actuación realizada.'));
     } finally {
       setSaving(false);
     }

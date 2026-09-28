@@ -27,6 +27,11 @@ import {
   tipoDeCategoria,
 } from '../../utils/gastosEngine';
 import { uploadFacturaGasto, deleteFacturaGastoStorage } from '../../lib/firebase';
+import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFormulario';
+import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
+import type { ErroresFormulario } from '../../formularios/validacion';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useOperacionEnCurso } from '../../feedback/operaciones';
 
 interface GastoModalProps {
   gastoParaEditar?: Gasto | null;
@@ -84,7 +89,12 @@ export const GastoModal: React.FC<GastoModalProps> = ({
   );
   const [notas, setNotas] = useState<string>(gastoParaEditar?.notas || '');
   const [errorMsg, setErrorMsg] = useState<string>('');
-  const [guardando, setGuardando] = useState<boolean>(false);
+  // UX-3 §7: `idle → ejecutando → resultado`. El hook ignora una segunda pulsación
+  // mientras la operación está en curso (bloqueo de doble envío sin estados globales).
+  const { ejecutando: guardando, ejecutar } = useOperacionEnCurso();
+  // UX-4 §12/§15: los errores de validación van junto al campo; los de persistencia
+  // se muestran aparte y nunca se mezclan con la validación del formulario.
+  const [erroresCampo, setErroresCampo] = useState<ErroresFormulario>({});
 
   // FASE 2.2: factura / justificante documental en Storage.
   const [facturaFile, setFacturaFile] = useState<File | null>(null);
@@ -122,14 +132,20 @@ export const GastoModal: React.FC<GastoModalProps> = ({
 
   const handleSubmit = async () => {
     setErrorMsg('');
-    if (!inmuebleId) {
-      setErrorMsg('Selecciona el inmueble al que pertenece el gasto.');
+    // UX-4 §12: reglas reales ya existentes (inmueble obligatorio, importe > 0),
+    // ahora con el mensaje junto al campo correspondiente.
+    const validos = validarFormulario(
+      { inmuebleId, importe },
+      {
+        inmuebleId: { etiqueta: 'Inmueble', obligatorio: true },
+        importe: { etiqueta: 'Importe total (€)', obligatorio: true, importe: true },
+      }
+    );
+    if (hayErrores(validos)) {
+      setErroresCampo(validos);
       return;
     }
-    if (importeNum <= 0) {
-      setErrorMsg('Introduce un importe válido mayor que cero.');
-      return;
-    }
+    setErroresCampo({});
 
     const base = gastoParaEditar
       ? { ...gastoParaEditar }
@@ -168,42 +184,49 @@ export const GastoModal: React.FC<GastoModalProps> = ({
       justificantePath: eliminarFactura ? undefined : facturaPath || undefined,
     };
 
-    setGuardando(true);
-    try {
-      // 1) Guardar el gasto (el handler de App asegura el propietarioId y
-      //    devuelve el documento final, necesario para segmentar la factura).
-      const guardado = (await onSave(normalizarGasto(gasto))) as Gasto | undefined;
-      const referencia: Gasto = guardado || { ...normalizarGasto(gasto) };
+    // UX-3 §6: no se muestra éxito hasta que el resultado real lo confirma
+    // (excepción, `false` del contrato B5 o incidencia de guardado → nunca éxito).
+    await ejecutar({
+      accion: async () => {
+        // 1) Guardar el gasto (el handler de App asegura el propietarioId y
+        //    devuelve el documento final, necesario para segmentar la factura).
+        const guardado = (await onSave(normalizarGasto(gasto))) as Gasto | undefined;
+        const referencia: Gasto = guardado || { ...normalizarGasto(gasto) };
 
-      // 2) Sustituir/eliminar la factura anterior si se pidió.
-      if (eliminarFactura && gastoParaEditar?.justificantePath) {
-        await deleteFacturaGastoStorage(gastoParaEditar.justificantePath);
-      }
-
-      // 3) Subir la nueva factura a Storage y guardar la URL resultante.
-      if (facturaFile) {
-        if (gastoParaEditar?.justificantePath && gastoParaEditar.justificantePath !== facturaPath) {
+        // 2) Sustituir/eliminar la factura anterior si se pidió.
+        if (eliminarFactura && gastoParaEditar?.justificantePath) {
           await deleteFacturaGastoStorage(gastoParaEditar.justificantePath);
         }
-        setSubiendo(true);
-        try {
-          const { url, storagePath } = await uploadFacturaGasto(
-            referencia.id,
-            facturaFile,
-            facturaFile.name,
-            referencia.propietarioId
-          );
-          await onSave(
-            normalizarGasto({ ...referencia, justificanteUrl: url, justificantePath: storagePath })
-          );
-        } finally {
-          setSubiendo(false);
+
+        // 3) Subir la nueva factura a Storage y guardar la URL resultante.
+        if (facturaFile) {
+          if (gastoParaEditar?.justificantePath && gastoParaEditar.justificantePath !== facturaPath) {
+            await deleteFacturaGastoStorage(gastoParaEditar.justificantePath);
+          }
+          setSubiendo(true);
+          try {
+            const { url, storagePath } = await uploadFacturaGasto(
+              referencia.id,
+              facturaFile,
+              facturaFile.name,
+              referencia.propietarioId
+            );
+            await onSave(
+              normalizarGasto({ ...referencia, justificanteUrl: url, justificantePath: storagePath })
+            );
+          } finally {
+            setSubiendo(false);
+          }
         }
-      }
-      onClose();
-    } finally {
-      setGuardando(false);
-    }
+      },
+      mensajeExito: isEditing ? 'Gasto actualizado correctamente.' : 'Gasto registrado correctamente.',
+      mensajeError: 'No se ha podido guardar el gasto.',
+      origenesDatos: ['gastos'],
+      // Si falla no se cierra: no se pierde nada de lo introducido (§15).
+      onExito: () => onClose(),
+      onFallo: (fallo) =>
+        setErrorMsg(mensajeDeErrorUsuario(fallo.error, 'No se ha podido guardar el gasto.')),
+    });
   };
 
   const inputCls =
@@ -249,10 +272,13 @@ export const GastoModal: React.FC<GastoModalProps> = ({
         </div>
 
         <div className="p-6 overflow-y-auto space-y-5 flex-1">
+          {hayErrores(erroresCampo) && <ResumenErrores mensaje={resumenErrores(erroresCampo)} />}
+
           {errorMsg && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              {errorMsg}
+              {/* Error de persistencia: separado de los errores de validación por campo. */}
+              <span data-testid="error-persistencia-gasto">{errorMsg}</span>
             </div>
           )}
 
@@ -305,6 +331,7 @@ export const GastoModal: React.FC<GastoModalProps> = ({
               value={inmuebleId}
               onChange={(e) => setInmuebleId(e.target.value)}
               disabled={isEditing}
+              aria-invalid={Boolean(erroresCampo.inmuebleId)}
             >
               {inmuebles.length === 0 && <option value="">Sin inmuebles</option>}
               {inmuebles.map((i) => (
@@ -313,6 +340,7 @@ export const GastoModal: React.FC<GastoModalProps> = ({
                 </option>
               ))}
             </select>
+            <ErrorCampo mensaje={erroresCampo.inmuebleId} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -378,11 +406,13 @@ export const GastoModal: React.FC<GastoModalProps> = ({
                 type="number"
                 step="0.01"
                 min="0"
-                className={inputCls}
+                aria-invalid={Boolean(erroresCampo.importe)}
+                className={claseEntrada(erroresCampo.importe)}
                 value={importe}
                 onChange={(e) => setImporte(e.target.value)}
                 placeholder="0,00"
               />
+              <ErrorCampo mensaje={erroresCampo.importe} />
             </div>
             {/* Fecha devengo */}
             <div>

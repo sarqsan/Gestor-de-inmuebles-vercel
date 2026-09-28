@@ -8,6 +8,8 @@ import { crearPropuestasParaMovimientos, confirmarPropuesta, rechazarPropuesta, 
 import { buscarCandidatos } from '../../utils/conciliacion/matchingEngine';
 import { CsvMapping } from '../../utils/conciliacion/csvParser';
 import { Upload, FileText, AlertTriangle, CheckCircle2, XCircle, Clock, Search, Filter, Download, Eye, Banknote, TrendingDown, Shield, FileCheck2, BarChart3 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface ConciliacionBancariaSectionProps {
   inmuebles: Inmueble[];
@@ -75,7 +77,7 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
         setImportaciones((prev) => fusionarSinDuplicados(estado.importaciones, prev, (x) => x.id));
         registrarMovimientosSesion(estado.movimientos);
       } catch (e: any) {
-        if (!cancelado) setErrorPersistencia(`No se pudo cargar el estado guardado: ${e?.message || e}`);
+        if (!cancelado) setErrorPersistencia(`No se pudo cargar el estado guardado: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`);
       } finally {
         if (!cancelado) setCargandoPersistido(false);
       }
@@ -123,16 +125,16 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
         movimientos: resultado.nuevos,
         propuestas: nuevasPropuestas,
         importacion: resultado.importacion,
-      }).catch((e: any) => setErrorPersistencia(`No se pudo guardar la importación: ${e?.message || e}`));
+      }).catch((e: any) => setErrorPersistencia(`No se pudo guardar la importación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
 
       if (resultado.errores.length>0) {
-        alert(`Importación con errores: ${resultado.errores.slice(0,3).join(', ')}`);
+        avisarOperacion({ tipo: 'error', mensaje: `Importación con errores: ${resultado.errores.slice(0,3).join(', ')}` });
       }
 
       // Notificación (reutiliza motor existente) — solo log, no segundo dispatcher
       console.log(`[GAP6] Importación ${formato} ${resultado.importacion.id}: ${resultado.nuevos.length} nuevos, ${resultado.duplicados.length} duplicados`);
     } catch (err: any) {
-      alert(`Error importando: ${err.message}`);
+      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(err, 'No se ha podido importar el extracto bancario.') });
     }
   };
 
@@ -161,23 +163,23 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
       setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? confirmada : p));
       setErrorPersistencia(null);
       actualizarPropuestaConciliacion(propietarioId, confirmada)
-        .catch((e: any) => setErrorPersistencia(`No se pudo guardar la confirmación: ${e?.message || e}`));
+        .catch((e: any) => setErrorPersistencia(`No se pudo guardar la confirmación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
       setSelectedPropuesta(confirmada);
     } catch (e:any) {
-      alert(e.message);
+      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') });
     }
   };
 
   const handleAplicar = (propuesta: PropuestaConciliacion) => {
     const res = aplicarConciliacion(propuesta, allCobros, gastos, contratos, movimientos, currentUser);
     if (res.error) {
-      alert(`No se puede aplicar: ${res.error}`);
+      avisarOperacion({ tipo: 'error', mensaje: `No se puede aplicar: ${res.error}` });
       return;
     }
     setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? res.propuestaActualizada : p));
     setErrorPersistencia(null);
     actualizarPropuestaConciliacion(propietarioId, res.propuestaActualizada)
-      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la aplicación: ${e?.message || e}`));
+      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la aplicación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
     setSelectedPropuesta(res.propuestaActualizada);
     if (res.contratoActualizado) {
       console.log(`Contrato actualizado ${res.contratoActualizado.id} con trazabilidad conciliación`);
@@ -189,7 +191,7 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
     setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? rechazada : p));
     setErrorPersistencia(null);
     actualizarPropuestaConciliacion(propietarioId, rechazada)
-      .catch((e: any) => setErrorPersistencia(`No se pudo guardar el rechazo: ${e?.message || e}`));
+      .catch((e: any) => setErrorPersistencia(`No se pudo guardar el rechazo: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
     setSelectedPropuesta(rechazada);
   };
 
@@ -198,7 +200,7 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
     setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? noConc : p));
     setErrorPersistencia(null);
     actualizarPropuestaConciliacion(propietarioId, noConc)
-      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la clasificación: ${e?.message || e}`));
+      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la clasificación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
     setSelectedPropuesta(noConc);
   };
 

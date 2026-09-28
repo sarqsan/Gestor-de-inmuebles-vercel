@@ -45,6 +45,9 @@ import {
   FileCheck,
   TrendingUp,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface DetallePolizaModalProps {
   isOpen: boolean;
@@ -190,7 +193,13 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
   };
 
   const handleDeleteDocumento = async (docId: string) => {
-    if (!window.confirm('¿Eliminar este documento de renovación?')) return;
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar documento',
+      mensaje: '¿Eliminar este documento de renovación?',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+    });
+    if (!confirmado) return;
     setIsSaving(true);
     try {
       const polizaActualizada: PolizaSeguro = {
@@ -310,7 +319,7 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
       setDatosExtraidosPreview(extraidos);
     } catch (err: any) {
       console.error(err);
-      setExtraccionError(err?.message || 'Error en extracción IA');
+      setExtraccionError(mensajeDeErrorUsuario(err, 'Error en extracción IA'));
     } finally {
       setExtraccionLoading(false);
     }
@@ -566,10 +575,22 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
                 {onDelete && (
                   <button
                     onClick={async () => {
-                      if (window.confirm('¿Eliminar esta póliza? El histórico se conservará si está vinculada.')) {
-                        await onDelete(poliza.id);
-                        onClose();
-                      }
+                      const { confirmado } = await confirmar({
+                        titulo: 'Eliminar póliza',
+                        mensaje: '¿Eliminar esta póliza?',
+                        detalle: 'El histórico se conservará si está vinculada.',
+                        etiquetaConfirmar: 'Eliminar',
+                        peligroso: true,
+                        alConfirmar: () =>
+                          ejecutarOperacion({
+                            accion: () => onDelete(poliza.id),
+                            mensajeExito: 'Póliza eliminada.',
+                            mensajeError: 'No se ha podido eliminar la póliza.',
+                            origenesDatos: ['polizas'],
+                            onExito: () => onClose(),
+                          }),
+                      });
+                      if (!confirmado) return;
                     }}
                     className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl flex items-center gap-1"
                   >

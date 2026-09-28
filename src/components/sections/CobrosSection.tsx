@@ -45,6 +45,8 @@ import {
   User,
   X,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface CobrosSectionProps {
   contratos: ContratoFormalizacion[];
@@ -206,7 +208,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
     try {
       const contrato = contratos.find((c) => c.id === cobroToEdit.contratoId);
       if (!contrato) {
-        alert('No se encontró el contrato asociado.');
+        avisarOperacion({ tipo: 'error', mensaje: 'No se encontró el contrato asociado.' });
         setIsSavingPago(false);
         return;
       }
@@ -236,7 +238,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
           };
         } catch (upErr: any) {
           console.error('Error subiendo justificante:', upErr);
-          alert(upErr?.message || 'No se pudo subir el justificante. El pago no se ha guardado.');
+          avisarOperacion({ tipo: 'exito', mensaje: mensajeDeErrorUsuario(upErr, 'No se pudo subir el justificante. El pago no se ha guardado.') });
           setIsUploadingJust(false);
           setIsSavingPago(false);
           return;
@@ -264,7 +266,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
       setCobroToEdit(null);
     } catch (err) {
       console.error('Error al guardar el cobro:', err);
-      alert('Error al guardar el pago de alquiler.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Error al guardar el pago de alquiler.' });
     } finally {
       setIsSavingPago(false);
     }
@@ -291,7 +293,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
       setMotivoIncidencia('');
     } catch (err) {
       console.error('Error al reportar incidencia:', err);
-      alert('Error al registrar la incidencia.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Error al registrar la incidencia.' });
     }
   };
 

@@ -23,6 +23,7 @@ import {
   Clock,
   CheckCircle2,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface GarantiaModalProps {
   isOpen: boolean;
@@ -186,7 +187,7 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error saving warranty:', err);
-      setError(err?.message || 'Error al guardar el registro de garantía.');
+      setError(mensajeDeErrorUsuario(err, 'Error al guardar el registro de garantía.'));
     } finally {
       setSaving(false);
     }

@@ -36,6 +36,7 @@ import {
   TrendingDown,
   X,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface FinanciacionSectionProps {
   inmuebles: Inmueble[];
@@ -268,7 +269,7 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
       await saveFinanciacionFirestore(res.financiacion);
       onSaved(res.financiacion);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al crear la financiación');
+      setError(mensajeDeErrorUsuario(e, 'Error al crear la financiación'));
     }
   };
 

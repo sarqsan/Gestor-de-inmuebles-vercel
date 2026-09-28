@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import type { UsuarioApp } from '../types';
 import { cargarCarterasOnboarding } from '../lib/onboardingCarterasFirebase';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 export function CarterasOnboardingPanel({usuario}: {usuario: UsuarioApp}) {
   const [data, setData] = useState<Awaited<ReturnType<typeof cargarCarterasOnboarding>>>([]);
   const [error, setError] = useState(''), [revision,setRevision] = useState(0), [busy,setBusy] = useState(true);
   useEffect(()=>{let vigente=true;setBusy(true);setData([]);setError('');
-    cargarCarterasOnboarding(usuario).then(d=>{if(vigente)setData(d);}).catch(e=>{if(vigente)setError(e instanceof Error?e.message:'Error de acceso');}).finally(()=>{if(vigente)setBusy(false);});
+    cargarCarterasOnboarding(usuario).then(d=>{if(vigente)setData(d);}).catch(e=>{if(vigente)setError(mensajeDeErrorUsuario(e, 'Error de acceso'));}).finally(()=>{if(vigente)setBusy(false);});
     return ()=>{vigente=false;};
   },[usuario.id,revision]);
   return <details className="m-4 rounded-xl border bg-white p-4">

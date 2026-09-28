@@ -37,6 +37,7 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
+import { confirmar } from '../feedback/confirmacion';
 
 interface DetalleSolicitudDocModalProps {
   solicitud: SolicitudDocumentacion;
@@ -313,8 +314,14 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
     const targetDoc = solState.documentos.find((d) => d.id === itemId);
     if (!targetDoc) return;
 
-    const confirm = window.confirm(`¿Seguro que deseas eliminar el requisito "${targetDoc.nombre}"?`);
-    if (!confirm) return;
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar requisito',
+      mensaje: `¿Eliminar el requisito «${targetDoc.nombre}»?`,
+      detalle: 'Se retirará de la solicitud de documentación del candidato.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+    });
+    if (!confirmado) return;
 
     const updatedDocs = solState.documentos.filter((d) => d.id !== itemId);
     const updatedSol: SolicitudDocumentacion = {

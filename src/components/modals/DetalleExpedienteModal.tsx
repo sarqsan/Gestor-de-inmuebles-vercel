@@ -46,6 +46,9 @@ import { MejorasROIModal } from './MejorasROIModal';
 import { PricingModal } from './PricingModal';
 import { KitPublicacionModal } from './KitPublicacionModal';
 import { BolsaInmobiliariasModal } from './BolsaInmobiliariasModal';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -126,6 +129,8 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
   // FASE 3.6
   const [showKit, setShowKit] = useState(false);
   const [showBolsa, setShowBolsa] = useState(false);
+  // UX-3: mensaje de validación del panel de decisión (antes `window.alert`).
+  const [errorDecision, setErrorDecision] = useState('');
   const [modalidadSelec, setModalidadSelec] = useState<ModalidadComercializacion | ''>(
     expediente.modalidadElegida ?? ''
   );
@@ -177,17 +182,37 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
   };
 
   const cancelar = async () => {
-    if (!window.confirm('¿Cancelar este expediente de recomercialización?')) return;
-    await persistir({ estado: 'CANCELADO' });
+    await confirmar({
+      titulo: 'Cancelar expediente',
+      mensaje: '¿Cancelar este expediente de recomercialización?',
+      detalle: 'El expediente pasará a estado CANCELADO y podrá reabrirse como borrador.',
+      etiquetaConfirmar: 'Cancelar expediente',
+      etiquetaCancelar: 'Volver',
+      peligroso: true,
+      alConfirmar: async () => {
+        await ejecutarOperacion({
+          accion: () => persistir({ estado: 'CANCELADO' }),
+          mensajeExito: 'Expediente cancelado.',
+          mensajeError: 'No se ha podido cancelar el expediente.',
+          origenesDatos: ['expedientes_recomercializacion'],
+        });
+      },
+    });
   };
   const reabrir = async () => persistir({ estado: 'BORRADOR' });
 
   // FASE 3.6 — decisión de estrategia, publicación y cierre del ciclo.
   const tomarDecision = async () => {
     if (!modalidadSelec) {
-      window.alert('Elige primero cómo quieres comercializar el inmueble.');
+      // UX-3: antes `window.alert`; ahora el mensaje queda visible en el propio panel.
+      setErrorDecision('Elige primero cómo quieres comercializar el inmueble.');
+      avisarOperacion({
+        tipo: 'error',
+        mensaje: 'Elige primero cómo quieres comercializar el inmueble.',
+      });
       return;
     }
+    setErrorDecision('');
     await persistir({ modalidadElegida: modalidadSelec, estado: 'DECISION_ESTRATEGIA' });
   };
 
@@ -207,12 +232,18 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
 
   const cerrarCiclo = async (resultado: 'REARRENDADO' | 'VENDIDO') => {
     const esAlquiler = resultado === 'REARRENDADO';
-    const ok = window.confirm(
-      esAlquiler
-        ? '¿Marcar el expediente como CERRADO · REARRENDADO? Se dará por finalizado el contrato anterior y el inmueble quedará liberado para formalizar el nuevo contrato sobre la misma ficha.'
-        : '¿Marcar el expediente como CERRADO · VENDIDO? Se cerrará el ciclo de comercialización y el inmueble quedará liberado en el histórico.'
-    );
-    if (!ok) return;
+    const { confirmado } = await confirmar({
+      titulo: esAlquiler ? 'Cerrar como REARRENDADO' : 'Cerrar como VENDIDO',
+      mensaje: esAlquiler
+        ? '¿Marcar el expediente como CERRADO · REARRENDADO?'
+        : '¿Marcar el expediente como CERRADO · VENDIDO?',
+      detalle: esAlquiler
+        ? 'Se dará por finalizado el contrato anterior y el inmueble quedará liberado para formalizar el nuevo contrato sobre la misma ficha.'
+        : 'Se cerrará el ciclo de comercialización y el inmueble quedará liberado en el histórico.',
+      etiquetaConfirmar: 'Cerrar expediente',
+      peligroso: true,
+    });
+    if (!confirmado) return;
     const actualizado: ExpedienteRecomercializacion = {
       ...expediente,
       estado: esAlquiler ? 'CERRADO_REARRENDADO' : 'CERRADO_VENDIDO',
@@ -234,9 +265,22 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
     }
   };
   const eliminar = async () => {
-    if (!window.confirm('¿Eliminar definitivamente este expediente? Esta acción no se puede deshacer.')) return;
-    await onEliminar(expediente.id);
-    onClose();
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar expediente',
+      mensaje: '¿Eliminar definitivamente este expediente?',
+      detalle: 'Esta acción no se puede deshacer.',
+      etiquetaConfirmar: 'Eliminar definitivamente',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => onEliminar(expediente.id),
+          mensajeExito: 'Expediente eliminado.',
+          mensajeError: 'No se ha podido eliminar el expediente.',
+          origenesDatos: ['expedientes_recomercializacion'],
+          onExito: () => onClose(),
+        }),
+    });
+    if (!confirmado) return;
   };
 
   const inputCls =
@@ -615,10 +659,22 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
                           </button>
                         ))}
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex flex-col items-end gap-1.5">
+                        {/* UX-4 §11: si el control está deshabilitado, se explica por qué. */}
+                        {!modalidadSelec && (
+                          <p className="text-[11px] font-semibold text-amber-700" data-testid="aviso-modalidad">
+                            Elige primero cómo quieres comercializar el inmueble.
+                          </p>
+                        )}
+                        {errorDecision && (
+                          <p className="text-[11px] font-semibold text-rose-700" role="alert">
+                            {errorDecision}
+                          </p>
+                        )}
                         <button
                           onClick={tomarDecision}
                           disabled={guardando || !modalidadSelec}
+                          title={!modalidadSelec ? 'Elige primero cómo quieres comercializar el inmueble.' : undefined}
                           className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
                         >
                           <Check className="w-4 h-4" /> Tomar decisión de estrategia

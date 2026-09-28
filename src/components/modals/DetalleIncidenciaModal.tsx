@@ -67,6 +67,7 @@ import {
   Check,
   HelpCircle,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface DetalleIncidenciaModalProps {
   isOpen: boolean;
@@ -278,7 +279,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
       await onUpdateIncidencia(updated);
     } catch (err: any) {
       console.error('Error al solicitar análisis IA:', err);
-      setIaError(err?.message || 'Error al conectar con el motor de análisis pericial');
+      setIaError(mensajeDeErrorUsuario(err, 'Error al conectar con el motor de análisis pericial'));
     } finally {
       setAnalyzingIA(false);
     }

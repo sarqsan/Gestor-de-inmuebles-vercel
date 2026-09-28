@@ -71,6 +71,8 @@ import type {
   MandatoSEPA,
   OrdenPago,
 } from '../../tesoreria/tipos';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface TesoreriaSectionProps {
   contratos: ContratoFormalizacion[];
@@ -323,7 +325,20 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
   };
 
   const handleAnular = async (liq: LiquidacionPropietario) => {
-    const motivo = window.prompt('Motivo de anulación (obligatorio, queda en trazabilidad):');
+    const { confirmado: confirmarAnulacion, texto: motivoAnulacion } = await confirmar({
+      titulo: 'Anular factura',
+      mensaje: 'Indica el motivo de la anulación: queda registrado en la trazabilidad.',
+      etiquetaConfirmar: 'Anular factura',
+      peligroso: true,
+      entradaTexto: {
+        etiqueta: 'Motivo de anulación',
+        marcador: 'Ej. datos fiscales incorrectos',
+        obligatorio: true,
+        errorObligatorio: 'El motivo de anulación es obligatorio.',
+      },
+    });
+    if (!confirmarAnulacion) return;
+    const motivo = motivoAnulacion ?? '';
     if (!motivo?.trim()) return;
     const res = anularLiquidacion(liq, motivo.trim(), actor);
     if (!res.ok || !res.liquidacion) { avisar('error', res.errores.join(' · ')); return; }
@@ -643,7 +658,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                         <td className="py-2.5 px-3 text-right font-mono text-[11px]">{formatoImporteSepa(g.ivaImporte)} € ({g.ivaPct}%)</td>
                         <td className="py-2.5 px-3 text-right font-mono font-bold">{formatoImporteSepa(g.total)} €</td>
                         <td className="py-2.5 px-3"><span className="px-2 py-0.5 bg-slate-100 rounded-full text-[10px] font-bold">{g.estado}{g.liquidacionId ? ` · ${g.liquidacionId}` : ''}</span></td>
-                        <td className="py-2.5 px-3 text-right">{(g.estado === 'pendiente') && <button onClick={() => { if (window.confirm('¿Eliminar gasto pendiente?')) onDeleteGasto(g.id); }} className="text-rose-600 text-[11px] font-bold">Eliminar</button>}</td>
+                        <td className="py-2.5 px-3 text-right">{(g.estado === 'pendiente') && <button onClick={() => void confirmar({ titulo: 'Eliminar gasto pendiente', mensaje: '¿Eliminar este gasto pendiente?', etiquetaConfirmar: 'Eliminar', peligroso: true, alConfirmar: async () => { const { ok } = await ejecutarOperacion({ accion: () => onDeleteGasto(g.id), mensajeExito: 'Gasto pendiente eliminado.', mensajeError: 'No se ha podido eliminar el gasto pendiente.', origenesDatos: ['tesoreria_gastos', 'gastos'] }); if (!ok) throw new Error('No se ha podido eliminar el gasto pendiente.'); } })} className="text-rose-600 text-[11px] font-bold">Eliminar</button>}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -19,6 +19,7 @@ import type { EnlaceRegistro, UsuarioApp } from '../../types';
 import { getEnlaceById } from '../../lib/suministrosFirestore';
 import { registerWithInvitationLink } from '../../lib/authService';
 import { validarEnlaceRegistroInquilino } from '../../inquilino/portalEngine';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   enlaceId: string;
@@ -91,7 +92,7 @@ export const RegistroInquilinoView: React.FC<Props> = ({ enlaceId, onComplete, o
       });
       setUsuarioCreado(usuarioApp);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'No se ha podido completar el registro.');
+      setError(mensajeDeErrorUsuario(err, 'No se ha podido completar el registro.'));
     } finally {
       setGuardando(false);
     }

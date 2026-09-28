@@ -32,6 +32,8 @@ import {
   PERMISOS_SISTEMA,
   ROLES_PREDEFINIDOS,
 } from '../../types';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface AdministracionSectionProps {
   usuarios?: UsuarioApp[];
@@ -407,9 +409,22 @@ export const AdministracionSection: React.FC<AdministracionSectionProps> = ({
                               {usr.id !== currentUser?.id && (
                                 <button
                                   onClick={() => {
-                                    if (confirm(`¿Eliminar al usuario ${usr.nombre}?`)) {
-                                      onDeleteUsuario(usr.id);
-                                    }
+                                    void confirmar({
+                                      titulo: 'Eliminar usuario',
+                                      mensaje: `¿Eliminar al usuario ${usr.nombre}?`,
+                                      detalle: 'Perderá el acceso a la aplicación.',
+                                      etiquetaConfirmar: 'Eliminar',
+                                      peligroso: true,
+                                      alConfirmar: async () => {
+                                        const { ok } = await ejecutarOperacion({
+                                          accion: () => onDeleteUsuario(usr.id),
+                                          mensajeExito: 'Usuario eliminado.',
+                                          mensajeError: 'No se ha podido eliminar el usuario.',
+                                          origenesDatos: ['usuarios'],
+                                        });
+                                        if (!ok) throw new Error('No se ha podido eliminar el usuario.');
+                                      },
+                                    });
                                   }}
                                   title="Eliminar usuario"
                                   className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
@@ -611,9 +626,22 @@ export const AdministracionSection: React.FC<AdministracionSectionProps> = ({
                             </button>
                             <button
                               onClick={() => {
-                                if (confirm(`¿Eliminar profesional ${prof.nombreComercial}?`)) {
-                                  onDeleteProfesional(prof.id);
-                                }
+                                void confirmar({
+                                  titulo: 'Eliminar profesional',
+                                  mensaje: `¿Eliminar profesional ${prof.nombreComercial}?`,
+                                  detalle: 'Se retirará del directorio de profesionales.',
+                                  etiquetaConfirmar: 'Eliminar',
+                                  peligroso: true,
+                                  alConfirmar: async () => {
+                                    const { ok } = await ejecutarOperacion({
+                                      accion: () => onDeleteProfesional(prof.id),
+                                      mensajeExito: 'Profesional eliminado.',
+                                      mensajeError: 'No se ha podido eliminar el profesional.',
+                                      origenesDatos: ['profesionales'],
+                                    });
+                                    if (!ok) throw new Error('No se ha podido eliminar el profesional.');
+                                  },
+                                });
                               }}
                               className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
                               title="Eliminar"
@@ -896,9 +924,22 @@ export const AdministracionSection: React.FC<AdministracionSectionProps> = ({
 
                           <button
                             onClick={() => {
-                              if (confirm('¿Eliminar este enlace de registro?')) {
-                                onDeleteEnlaceRegistro(enlace.id);
-                              }
+                              void confirmar({
+                                titulo: 'Eliminar enlace de registro',
+                                mensaje: '¿Eliminar este enlace de registro?',
+                                detalle: 'Dejará de poder usarse para crear cuentas.',
+                                etiquetaConfirmar: 'Eliminar',
+                                peligroso: true,
+                                alConfirmar: async () => {
+                                  const { ok } = await ejecutarOperacion({
+                                    accion: () => onDeleteEnlaceRegistro(enlace.id),
+                                    mensajeExito: 'Enlace eliminado.',
+                                    mensajeError: 'No se ha podido eliminar el enlace.',
+                                    origenesDatos: ['enlaces_registro'],
+                                  });
+                                  if (!ok) throw new Error('No se ha podido eliminar el enlace.');
+                                },
+                              });
                             }}
                             className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
                             title="Eliminar"
@@ -974,9 +1015,22 @@ export const AdministracionSection: React.FC<AdministracionSectionProps> = ({
 
                       <button
                         onClick={() => {
-                          if (confirm(`¿Eliminar especialidad ${esp.nombre}?`)) {
-                            onDeleteEspecialidad(esp.id);
-                          }
+                          void confirmar({
+                            titulo: 'Eliminar especialidad',
+                            mensaje: `¿Eliminar especialidad ${esp.nombre}?`,
+                            detalle: 'Dejará de estar disponible para asignar a profesionales.',
+                            etiquetaConfirmar: 'Eliminar',
+                            peligroso: true,
+                            alConfirmar: async () => {
+                              const { ok } = await ejecutarOperacion({
+                                accion: () => onDeleteEspecialidad(esp.id),
+                                mensajeExito: 'Especialidad eliminada.',
+                                mensajeError: 'No se ha podido eliminar la especialidad.',
+                                origenesDatos: ['especialidades'],
+                              });
+                              if (!ok) throw new Error('No se ha podido eliminar la especialidad.');
+                            },
+                          });
                         }}
                         className="p-1 text-slate-400 hover:text-red-600 rounded-md cursor-pointer"
                       >

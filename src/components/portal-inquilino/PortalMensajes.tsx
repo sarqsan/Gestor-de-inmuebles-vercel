@@ -8,6 +8,7 @@ import {
 } from '../../lib/suministrosFirestore';
 import { validarMensajePortal } from '../../inquilino/portalEngine';
 import type { ContratoFormalizacion, MensajePortal, UsuarioApp } from '../../types';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   usuario: UsuarioApp;
@@ -66,7 +67,7 @@ export const PortalMensajes: React.FC<Props> = ({ usuario, contrato, mensajes, o
       setTexto('');
       await onCambio();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se ha podido enviar el mensaje.');
+      setError(mensajeDeErrorUsuario(e, 'No se ha podido enviar el mensaje.'));
     } finally {
       setEnviando(false);
     }

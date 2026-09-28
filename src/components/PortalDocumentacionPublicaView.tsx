@@ -26,6 +26,7 @@ import {
   CheckCheck,
 } from 'lucide-react';
 import { uploadDocumentoAportadoFile } from '../lib/firebase';
+import { confirmar } from '../feedback/confirmacion';
 
 interface PortalDocumentacionPublicaViewProps {
   solicitud: SolicitudDocumentacion | SolicitudDocPublicData;
@@ -161,10 +162,15 @@ export const PortalDocumentacionPublicaView: React.FC<PortalDocumentacionPublica
   // Final submit documentation
   const handleFinalSubmit = async () => {
     if (faltanObligatorios > 0) {
-      const confirmSend = window.confirm(
-        `Aún te faltan ${faltanObligatorios} documentos obligatorios por aportar. ¿Deseas enviar la documentación de forma parcial al propietario?`
-      );
-      if (!confirmSend) return;
+      const { confirmado } = await confirmar({
+        titulo: 'Envío parcial de documentación',
+        mensaje: `Aún te faltan ${faltanObligatorios} documentos obligatorios por aportar.`,
+        detalle: '¿Deseas enviar la documentación de forma parcial al propietario?',
+        etiquetaConfirmar: 'Enviar de forma parcial',
+        etiquetaCancelar: 'Seguir completando',
+        peligroso: false,
+      });
+      if (!confirmado) return;
     }
 
     setSubmitting(true);

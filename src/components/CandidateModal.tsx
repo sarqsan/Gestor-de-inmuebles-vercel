@@ -60,6 +60,7 @@ import {
   FileCheck2,
   Key,
 } from 'lucide-react';
+import { avisarOperacion } from '../feedback/canalFeedback';
 
 interface CandidateModalProps {
   candidato: Candidato | null;
@@ -206,7 +207,7 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
       setUploadSuccess('¡Datos del cuestionario aplicados correctamente al perfil!');
       setTimeout(() => setUploadSuccess(null), 4000);
     } catch {
-      alert('Error al leer el cuestionario. Asegúrate de que sea un archivo válido.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Error al leer el cuestionario. Asegúrate de que sea un archivo válido.' });
     }
   };
 

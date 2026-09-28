@@ -22,6 +22,7 @@ import {
   resumenRentasHabitaciones,
 } from '../utils/habitacionesEngine';
 import { ingresosInmuebleDesdeCircuito, obtenerCobrosInmueble } from '../utils/cobrosEngine';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface Props {
   inmueble: Inmueble;
@@ -152,7 +153,7 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
       const next = aplicarCambioEstadoHabitacion(h, nuevo, actor);
       await saveHabitacionFirestore(next);
     } catch (e) {
-      setErrorMsg((e as Error).message);
+      setErrorMsg(mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.'));
     }
   };
 
@@ -161,7 +162,7 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
     try {
       await saveHabitacionFirestore(aplicarDesactivarHabitacion(h, actor));
     } catch (e) {
-      setErrorMsg((e as Error).message);
+      setErrorMsg(mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.'));
     }
   };
 
@@ -170,7 +171,7 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
     try {
       await saveHabitacionFirestore(aplicarCambioEstadoHabitacion(h, 'DISPONIBLE', actor));
     } catch (e) {
-      setErrorMsg((e as Error).message);
+      setErrorMsg(mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.'));
     }
   };
 

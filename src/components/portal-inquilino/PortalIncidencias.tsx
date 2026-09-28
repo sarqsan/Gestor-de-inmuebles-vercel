@@ -20,6 +20,7 @@ import type {
   UsuarioApp,
 } from '../../types';
 import { MiniaturaEvidencia } from './MiniaturaEvidencia';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   usuario: UsuarioApp;
@@ -263,7 +264,7 @@ function NuevaIncidenciaModal({
       });
       onCreada();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se ha podido registrar la avería.');
+      setError(mensajeDeErrorUsuario(e, 'No se ha podido registrar la avería.'));
     } finally {
       setGuardando(false);
     }

@@ -60,6 +60,7 @@ import {
   Link2,
   Send,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface FacturacionSectionProps {
   inmuebles: Inmueble[];
@@ -433,7 +434,7 @@ function FormularioFactura({ inmuebles, propietarios, series, facturas, registro
 
       onSaved(factura);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al crear la factura');
+      setError(mensajeDeErrorUsuario(e, 'Error al crear la factura'));
     }
   };
 
@@ -624,7 +625,7 @@ function DetalleFactura({
       await onActualizar(rect);
       onClose();
     } catch (e) {
-      setErrorOp(e instanceof Error ? e.message : 'Error en la factura rectificativa');
+      setErrorOp(mensajeDeErrorUsuario(e, 'Error en la factura rectificativa'));
     }
   };
 
@@ -635,7 +636,7 @@ function DetalleFactura({
       await onActualizar(anulada);
       onClose();
     } catch (e) {
-      setErrorOp(e instanceof Error ? e.message : 'Error al anular la factura');
+      setErrorOp(mensajeDeErrorUsuario(e, 'Error al anular la factura'));
     }
   };
 
@@ -661,7 +662,7 @@ function DetalleFactura({
       await onEmitir(emitida, registro, env);
       onClose();
     } catch (e) {
-      setErrorOp(e instanceof Error ? e.message : 'Error al emitir la factura');
+      setErrorOp(mensajeDeErrorUsuario(e, 'Error al emitir la factura'));
     }
   };
 

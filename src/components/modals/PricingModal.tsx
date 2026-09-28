@@ -26,6 +26,7 @@ import {
 } from '../../utils/pricingRecomerc';
 import { DESTINO_INMUEBLE_LABEL } from '../../utils/recomercializacionEngine';
 import { estimarPricingConIA } from '../../utils/pricingIa';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -143,7 +144,7 @@ export const PricingModal: React.FC<Props> = ({
       setIaResult(refinado);
       setConfianza(c ?? null);
     } catch (err) {
-      setAviso(err instanceof Error ? err.message : 'No se pudo contactar con el servicio de IA; se mantiene el cálculo.');
+      setAviso(mensajeDeErrorUsuario(err, 'No se pudo contactar con el servicio de IA; se mantiene el cálculo.'));
     } finally {
       setCargandoIa(false);
     }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { EnlaceRegistro, UsuarioApp } from '../types';
 import type { GestionCartera } from '../lib/gestionesCartera';
 import { resumirOnboardingR02, type EstadoOnboardingR02 } from '../lib/roadmap02Onboarding';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 export interface OnboardingCarterasProps {
  usuario?: UsuarioApp | null; gestiones?: GestionCartera[]; invitaciones?: EnlaceRegistro[];
@@ -13,7 +14,7 @@ const labels = { CUENTA:'Cuenta/Auth', PERSONA:'Persona', PROPIETARIO:'Propietar
 export function OnboardingCarteras({ usuario, gestiones, invitaciones, errorFirestore, onReintentar }: OnboardingCarterasProps) {
  const [busy,setBusy]=useState(false); const [aviso,setAviso]=useState('');
  const estado: EstadoOnboardingR02 = useMemo(()=>resumirOnboardingR02({usuario,gestiones,enlace:invitaciones?.find(x=>x.id===usuario?.enlaceRegistroId),errorFirestore}),[usuario,gestiones,invitaciones,errorFirestore]);
- async function reintentar(){if(!onReintentar||busy)return;setBusy(true);setAviso('');try{await onReintentar();setAviso('Reintento completado. El estado se actualizará al sincronizar.');}catch(e){setAviso(`No se pudo completar. Conserva la sesión Auth e inténtalo de nuevo: ${e instanceof Error?e.message:'error recuperable'}`);}finally{setBusy(false);}}
+ async function reintentar(){if(!onReintentar||busy)return;setBusy(true);setAviso('');try{await onReintentar();setAviso('Reintento completado. El estado se actualizará al sincronizar.');}catch(e){setAviso(`No se pudo completar. Conserva la sesión Auth e inténtalo de nuevo: ${mensajeDeErrorUsuario(e, 'error recuperable')}`);}finally{setBusy(false);}}
  return <section aria-label="Onboarding y carteras" className="rounded-xl border border-slate-200 bg-white p-6">
   <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">Identidad y acceso</p><h2 className="mt-2 text-xl font-bold">Tu espacio y tus carteras</h2>
   <p className="mt-2 text-sm text-slate-600">El rol describe tu función; no concede acceso. Las carteras delegadas se limitan a las relaciones vigentes.</p>

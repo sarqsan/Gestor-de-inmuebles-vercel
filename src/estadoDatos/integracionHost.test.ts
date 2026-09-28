@@ -150,10 +150,16 @@ describe('UX-2 · invariante 3: el host usa una única fuente de verdad', () => 
 
 describe('UX-2 · invariante 4: guardado — el resultado de la persistencia no se descarta', () => {
   it('el host informa de los guardados que no confirma la persistencia (contrato B5)', () => {
-    const llamadas = HOST.match(/reportarResultadoGuardado\(/g) ?? [];
+    // UX-3 conserva este invariante y en algunos puntos lo delega en
+    // `ejecutarOperacion` (que trata un retorno `false` de B5 como fallo y nunca
+    // presenta éxito). Se cuentan los dos mecanismos: lo que no puede ocurrir es
+    // que el resultado de la persistencia vuelva a descartarse.
+    const reportados = HOST.match(/reportarResultadoGuardado\(/g) ?? [];
+    const ejecutados = HOST.match(/ejecutarOperacion\(/g) ?? [];
     // alta de inmueble, actualización, borrado, alta de candidato, invitaciones,
     // importación masiva y asignación de profesional.
-    expect(llamadas.length).toBeGreaterThanOrEqual(6);
+    expect(reportados.length + ejecutados.length).toBeGreaterThanOrEqual(6);
+    expect(reportados.length).toBeGreaterThanOrEqual(4);
   });
 
   it('el host ya no descarta el resultado de las escrituras en lote', () => {

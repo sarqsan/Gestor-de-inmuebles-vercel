@@ -145,6 +145,7 @@ import {
   saveAuditLogFirestore,
   saveModulosConfigFirestore,
 } from './lib/firebase';
+import { avisarOperacion } from './feedback/canalFeedback';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
 import type { GestionCartera } from './lib/gestionesCartera';
@@ -320,6 +321,7 @@ import { PuertaEstadoDatos } from './components/estado-datos/EstadoDatosPantalla
 import { origenesActivosDePerfil, reportarResultadoGuardado } from './estadoDatos/canalIncidencias';
 import type { OrigenDatos } from './estadoDatos/canalIncidencias';
 import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
+import { ejecutarOperacion } from './feedback/operaciones';
 
 // Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
 const SECCIONES_PROPIETARIO: SectionType[] = [
@@ -561,7 +563,7 @@ export default function App() {
         if (usuarioApp.estado === 'BLOQUEADO' || usuarioApp.estado === 'INACTIVO') {
           logoutUser();
           setCurrentUser(null);
-          alert('Tu cuenta se encuentra bloqueada o inactiva. Por favor, contacta con el administrador del sistema.');
+          avisarOperacion({ tipo: 'error', mensaje: 'Tu cuenta se encuentra bloqueada o inactiva. Por favor, contacta con el administrador del sistema.' });
           return;
         }
 
@@ -1663,7 +1665,19 @@ export default function App() {
     // UX-2 §6: `persistirMejorEsfuerzo` devuelve los errores; ya no se descartan
     // con `void`: un fallo de guardado deja de ser invisible para la persona usuaria.
     void persistirMejorEsfuerzo(tareas).then(({ errores }) =>
-      reportarResultadoGuardado('candidatos', errores.length === 0, errores[0])
+      ejecutarOperacion({
+        accion: () => {
+          if (errores.length > 0) {
+            // El canal de UX-2 conserva la incidencia técnica; la interfaz sólo muestra el mensaje simple.
+            reportarResultadoGuardado('candidatos', false, errores[0]);
+            throw errores[0];
+          }
+          return true;
+        },
+        mensajeExito: 'Candidato guardado correctamente.',
+        mensajeError: 'No se ha podido guardar el candidato.',
+        origenesDatos: ['candidatos'],
+      })
     );
   };
 
@@ -1735,7 +1749,18 @@ export default function App() {
     }
     // UX-2 §6: idem en el alta/edición de invitaciones.
     void persistirMejorEsfuerzo(tareas).then(({ errores }) =>
-      reportarResultadoGuardado('invitaciones', errores.length === 0, errores[0])
+      ejecutarOperacion({
+        accion: () => {
+          if (errores.length > 0) {
+            reportarResultadoGuardado('invitaciones', false, errores[0]);
+            throw errores[0];
+          }
+          return true;
+        },
+        mensajeExito: 'Invitación guardada correctamente.',
+        mensajeError: 'No se ha podido guardar la invitación.',
+        origenesDatos: ['invitaciones'],
+      })
     );
   };
 
@@ -2131,8 +2156,14 @@ export default function App() {
         // UX-2 §6: importación masiva — se agrega el resultado de cada escritura para
         // poder avisar si alguna no se guardó (antes se descartaba cada promesa).
         const resultadosGuardado = newItems.map((inm) => saveInmuebleFirestore(inm));
+        // UX-3: la importación también comunica su resultado real.
         void Promise.all(resultadosGuardado).then((resultados) =>
-          reportarResultadoGuardado('inmuebles', resultados.every(Boolean))
+          ejecutarOperacion({
+            accion: () => resultados.every(Boolean),
+            mensajeExito: `Importación completada: ${newItems.length} inmueble(s).`,
+            mensajeError: 'La importación no se ha podido completar por completo.',
+            origenesDatos: ['inmuebles'],
+          })
         );
         return [...newItems, ...prev];
       });
@@ -2142,7 +2173,14 @@ export default function App() {
       setCandidatos((prev) => {
         const existingIds = new Set(prev.map((c) => c.id));
         const newItems = importedData.candidatos!.filter((c) => !existingIds.has(c.id));
-        newItems.forEach((cand) => saveCandidatoFirestore(cand));
+        void Promise.all(newItems.map((cand) => saveCandidatoFirestore(cand))).then((resultados) =>
+          ejecutarOperacion({
+            accion: () => resultados.every(Boolean),
+            mensajeExito: `Importación completada: ${newItems.length} candidato(s).`,
+            mensajeError: 'La importación de candidatos no se ha podido completar.',
+            origenesDatos: ['candidatos'],
+          })
+        );
         return [...newItems, ...prev];
       });
     }
@@ -3150,8 +3188,16 @@ export default function App() {
     };
 
     setInmuebles((prev) => prev.map((i) => (i.id === inm.id ? updatedInm : i)));
-    const guardadoAsignacion = await saveInmuebleFirestore(updatedInm);
-    if (!guardadoAsignacion) reportarResultadoGuardado('inmuebles', false);
+    // UX-3: resultado real de la asignación (antes el booleano se descartaba).
+    // `ejecutarOperacion` ya considera fallo un retorno `false` (contrato B5).
+    const { ok: asignacionOk } = await ejecutarOperacion({
+      accion: () => saveInmuebleFirestore(updatedInm),
+      mensajeExito:
+        accion === 'asignar' ? 'Profesional asignado al inmueble.' : 'Profesional desasignado del inmueble.',
+      mensajeError: 'No se ha podido actualizar la asignación del profesional.',
+      origenesDatos: ['inmuebles'],
+    });
+    if (!asignacionOk) return;
     await logAudit(
       accion === 'asignar' ? 'ASIGNAR_PROFESIONAL_INMUEBLE' : 'DESASIGNAR_PROFESIONAL_INMUEBLE',
       'INMUEBLES',

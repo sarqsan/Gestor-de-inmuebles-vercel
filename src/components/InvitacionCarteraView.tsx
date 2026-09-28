@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { EnlaceRegistro, UsuarioApp } from '../types';
 import { aceptarOnboardingConCredenciales, autenticarInvitadoCartera, resolverInvitacionCarteraFirestore } from '../lib/onboardingCarterasFirebase';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 export function InvitacionCarteraView({ enlaceId, onComplete, onCancel }: {
   enlaceId: string; onComplete: (usuario: UsuarioApp) => void; onCancel: () => void;
@@ -20,7 +21,7 @@ export function InvitacionCarteraView({ enlaceId, onComplete, onCancel }: {
         await autenticarInvitadoCartera(enlaceId, email, password);
         await resolverInvitacionCarteraFirestore(enlaceId, 'RECHAZADA'); setEstado('RECHAZADA');
       }
-    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo completar la operación'); }
+    } catch (e) { setError(mensajeDeErrorUsuario(e, 'No se pudo completar la operación')); }
     finally { setBusy(false); }
   }
   return <main className="min-h-screen bg-slate-100 p-6 flex items-center justify-center">

@@ -90,6 +90,12 @@ import {
   AlertCircle,
   Paperclip,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFormulario';
+import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
+import type { ErroresFormulario } from '../../formularios/validacion';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface InmueblesSectionProps {
   inmuebles: Inmueble[];
@@ -176,6 +182,11 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   /** La preselección contextual no debe filtrarse al siguiente alta general. */
   const altaAplicoContexto = useRef(false);
   const [newTab, setNewTab] = useState<'general' | 'fiscal'>('general');
+  // UX-4: errores por campo (alta y edición) y errores estructurales de titularidad
+  // (antes se mostraban con `window.alert`).
+  const [erroresAlta, setErroresAlta] = useState<ErroresFormulario>({});
+  const [erroresEdicion, setErroresEdicion] = useState<ErroresFormulario>({});
+  const [erroresTitularidad, setErroresTitularidad] = useState<string[]>([]);
   const [newDireccion, setNewDireccion] = useState('');
   const [newCiudad, setNewCiudad] = useState('');
   const [newPrecio, setNewPrecio] = useState<number>(850);
@@ -380,7 +391,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       setCobroToPay(null);
     } catch (err) {
       console.error('Error al registrar cobro:', err);
-      alert('Error al registrar el cobro.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Error al registrar el cobro.' });
     } finally {
       setIsSubmittingPay(false);
     }
@@ -499,9 +510,32 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     }
   };
 
+  // Reglas reales del formulario de alta de inmueble (UX-4 §8/§11).
+  const CAMPOS_ALTA = {
+    direccion: { etiqueta: 'Dirección del Inmueble', obligatorio: true },
+    ciudad: { etiqueta: 'Ciudad', obligatorio: true },
+    precioAlquiler: { etiqueta: 'Precio Alquiler (€/mes)', obligatorio: true, importe: true },
+  } as const;
+
   const handleCreateInmuebleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDireccion || !newCiudad || !onAddInmueble) return;
+    setErroresTitularidad([]);
+    const validos = validarFormulario(
+      {
+        direccion: newDireccion,
+        ciudad: newCiudad,
+        precioAlquiler: String(newPrecio ?? ''),
+      },
+      CAMPOS_ALTA
+    );
+    if (hayErrores(validos) || !onAddInmueble) {
+      // Antes: `if (!newDireccion || !newCiudad || !onAddInmueble) return;` → el botón
+      // Guardar no respondía y el usuario no sabía qué faltaba.
+      setErroresAlta(
+        onAddInmueble ? validos : { ...validos, general: 'No se ha podido guardar el inmueble.' }
+      );
+      return;
+    }
 
     const hasCustomImage = !!(newImagenPreview || newImagenUrl.trim());
     const finalImageUrl =
@@ -579,11 +613,17 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       propietarioSecundarioId: created.propietarioSecundarioId,
     });
     if (erroresTitularidadAlta.length > 0) {
-      window.alert(erroresTitularidadAlta.join('\n'));
+      setErroresTitularidad(erroresTitularidadAlta);
+      setNewTab('fiscal');
       return;
     }
 
-    onAddInmueble(created);
+    void ejecutarOperacion({
+      accion: () => onAddInmueble(created),
+      mensajeExito: 'Inmueble guardado correctamente.',
+      mensajeError: 'No se ha podido guardar el inmueble.',
+      origenesDatos: ['inmuebles'],
+    });
     setShowAddModal(false);
     setNewIdPersonalizado('');
     setNewModalidadAlquiler('completo');
@@ -780,7 +820,22 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
   const handleSaveEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inmuebleToEdit || !onUpdateInmueble) return;
+    setErroresTitularidad([]);
+    const validos = validarFormulario(
+      { direccion: editDireccion, ciudad: editCiudad },
+      {
+        direccion: { etiqueta: 'Dirección del Inmueble', obligatorio: true },
+        ciudad: { etiqueta: 'Ciudad', obligatorio: true },
+      }
+    );
+    if (hayErrores(validos) || !inmuebleToEdit || !onUpdateInmueble) {
+      setErroresEdicion(
+        !inmuebleToEdit || !onUpdateInmueble
+          ? { ...validos, general: 'No se han podido guardar los cambios.' }
+          : validos
+      );
+      return;
+    }
 
     const propPrincipal: PropietarioFiscal = {
       nombre: editPropNombre.trim() || 'Propietario / Arrendador',
@@ -863,11 +918,17 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       propietarioSecundarioId: updated.propietarioSecundarioId,
     });
     if (erroresTitularidadEdit.length > 0) {
-      window.alert(erroresTitularidadEdit.join('\n'));
+      setErroresTitularidad(erroresTitularidadEdit);
+      setEditTab('fiscal');
       return;
     }
 
-    onUpdateInmueble(updated);
+    void ejecutarOperacion({
+      accion: () => onUpdateInmueble(updated),
+      mensajeExito: 'Cambios guardados correctamente.',
+      mensajeError: 'No se han podido guardar los cambios.',
+      origenesDatos: ['inmuebles'],
+    });
     setInmuebleToEdit(null);
   };
 
@@ -1383,16 +1444,25 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       type="button"
                       disabled={isFinalizandoContrato}
                       onClick={async () => {
-                        const confirmed = window.confirm(
-                          `¿Confirmas la finalización del contrato con ${activeContract.candidatoNombre}?\n\nEl contrato pasará a estado FINALIZADO (conservado permanentemente en el historial de este inmueble) y la vivienda quedará en estado DISPONIBLE para un nuevo alquiler.`
-                        );
-                        if (!confirmed) return;
-                        try {
-                          setIsFinalizandoContrato(true);
-                          await onFinalizarContrato(activeContract.id);
-                        } finally {
-                          setIsFinalizandoContrato(false);
-                        }
+                        const { confirmado } = await confirmar({
+                          titulo: 'Finalizar alquiler',
+                          mensaje: `¿Confirmas la finalización del contrato con ${activeContract.candidatoNombre}?`,
+                          detalle:
+                            'El contrato pasará a estado FINALIZADO (conservado permanentemente en el historial de este inmueble) y la vivienda quedará en estado DISPONIBLE para un nuevo alquiler.',
+                          etiquetaConfirmar: 'Finalizar alquiler',
+                          etiquetaEjecutando: 'Finalizando…',
+                          peligroso: true,
+                          alConfirmar: async () => {
+                            const { ok } = await ejecutarOperacion({
+                              accion: () => onFinalizarContrato(activeContract.id),
+                              mensajeExito: 'Alquiler finalizado; la vivienda queda disponible.',
+                              mensajeError: 'No se ha podido finalizar el alquiler.',
+                              origenesDatos: ['contratos', 'inmuebles'],
+                            });
+                            if (!ok) throw new Error('No se ha podido finalizar el alquiler.');
+                          },
+                        });
+                        if (!confirmado) return;
                       }}
                       className="px-3 py-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1 disabled:opacity-50"
                       title="Concluir el alquiler actual y dejar la vivienda disponible"
@@ -2211,15 +2281,24 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     <span className="text-[11px] text-slate-500 font-medium">Historial conservado bajo este ID</span>
                   </div>
 
+                  {/* UX-4: mismos mensajes por campo que en el alta. */}
+                  {(erroresEdicion.general || hayErrores(erroresEdicion)) && (
+                    <ResumenErrores mensaje={erroresEdicion.general ?? resumenErrores(erroresEdicion)} />
+                  )}
+                  {erroresTitularidad.length > 0 && <ResumenErrores mensaje={erroresTitularidad.join(' ')} />}
+
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">Dirección del Inmueble *</label>
                     <input
                       type="text"
                       required
+                      aria-required
+                      aria-invalid={Boolean(erroresEdicion.direccion)}
                       value={editDireccion}
                       onChange={(e) => setEditDireccion(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-semibold text-slate-900"
+                      className={`${claseEntrada(erroresEdicion.direccion)} font-semibold text-slate-900`}
                     />
+                    <ErrorCampo mensaje={erroresEdicion.direccion} />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -2228,10 +2307,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <input
                         type="text"
                         required
+                        aria-required
+                        aria-invalid={Boolean(erroresEdicion.ciudad)}
                         value={editCiudad}
                         onChange={(e) => setEditCiudad(e.target.value)}
-                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-semibold text-slate-900"
+                        className={`${claseEntrada(erroresEdicion.ciudad)} font-semibold text-slate-900`}
                       />
+                      <ErrorCampo mensaje={erroresEdicion.ciudad} />
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes) *</label>
@@ -2824,17 +2906,26 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     </p>
                   </div>
 
+                  {/* UX-4: errores junto a los campos + resumen del formulario. */}
+                  {(erroresAlta.general || hayErrores(erroresAlta)) && (
+                    <ResumenErrores mensaje={erroresAlta.general ?? resumenErrores(erroresAlta)} />
+                  )}
+                  {erroresTitularidad.length > 0 && <ResumenErrores mensaje={erroresTitularidad.join(' ')} />}
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-2">
                       <label className="block font-semibold text-slate-700 mb-1">Dirección del Inmueble *</label>
                       <input
                         type="text"
                         required
+                        aria-required
+                        aria-invalid={Boolean(erroresAlta.direccion)}
                         placeholder="Ej. Calle Gran Vía 42, 3ºB"
                         value={newDireccion}
                         onChange={(e) => setNewDireccion(e.target.value)}
-                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        className={claseEntrada(erroresAlta.direccion)}
                       />
+                      <ErrorCampo mensaje={erroresAlta.direccion} />
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">ID Físico (Opcional)</label>
@@ -2855,22 +2946,28 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <input
                         type="text"
                         required
+                        aria-required
+                        aria-invalid={Boolean(erroresAlta.ciudad)}
                         placeholder="Ej. Madrid"
                         value={newCiudad}
                         onChange={(e) => setNewCiudad(e.target.value)}
-                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        className={claseEntrada(erroresAlta.ciudad)}
                       />
+                      <ErrorCampo mensaje={erroresAlta.ciudad} />
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes) *</label>
                       <input
                         type="number"
                         required
+                        aria-required
+                        aria-invalid={Boolean(erroresAlta.precioAlquiler)}
                         min="100"
                         value={newPrecio}
                         onChange={(e) => setNewPrecio(Number(e.target.value))}
-                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-sm text-blue-700"
+                        className={`${claseEntrada(erroresAlta.precioAlquiler)} font-bold text-blue-700`}
                       />
+                      <ErrorCampo mensaje={erroresAlta.precioAlquiler} />
                     </div>
                   </div>
 

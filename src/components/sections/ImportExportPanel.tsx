@@ -50,6 +50,7 @@ import {
   crearPuertoFirebase,
   type FuentesCatalogo,
 } from '../../lib/importExportFirebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   inmuebles: Inmueble[];
@@ -164,7 +165,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         });
       } catch (e) {
         if (!vivo) return;
-        setCtx({ usuario: null, gestiones: [], scope: undefined, estado: 'error', error: e instanceof Error ? e.message : String(e) });
+        setCtx({ usuario: null, gestiones: [], scope: undefined, estado: 'error', error: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') });
       }
     })();
     return () => { vivo = false; };
@@ -267,7 +268,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
       });
       if (parseo.errores.length > 0) setErrorImport(`avisos de parseo: ${parseo.errores.join(' | ')}`);
     } catch (e) {
-      setErrorImport(e instanceof Error ? e.message : String(e));
+      setErrorImport(mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.'));
     } finally {
       setAnalizando(false);
     }
@@ -330,7 +331,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
       });
       setResultadoPromo(res);
     } catch (e) {
-      setErrorImport(e instanceof Error ? e.message : String(e));
+      setErrorImport(mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.'));
     } finally {
       setPromocionando(false);
     }
@@ -389,7 +390,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
       }
       setExpInfo(`${exp.recordCount} registro(s) · run ${exp.exportRunId} · sha256 ${exp.sha256.slice(0, 16)}…${exp.avisos.length > 0 ? ` · avisos: ${exp.avisos.join(' | ')}` : ''}`);
     } catch (e) {
-      setExpError(e instanceof Error ? e.message : String(e));
+      setExpError(mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.'));
     } finally {
       setExpGenerando(false);
     }

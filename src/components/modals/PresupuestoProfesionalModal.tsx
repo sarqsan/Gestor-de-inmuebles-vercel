@@ -37,6 +37,7 @@ import {
   uploadPresupuestoDocumentoStorage,
   saveTrabajoProfesionalFirestore,
 } from '../../lib/firebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface PresupuestoProfesionalModalProps {
   isOpen: boolean;
@@ -394,7 +395,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
       onClose();
     } catch (err: any) {
       console.error('Error saving presupuesto:', err);
-      setErrorMsg(err?.message || 'Error al guardar el presupuesto en Firestore.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar el presupuesto en Firestore.'));
     } finally {
       setGuardando(false);
     }

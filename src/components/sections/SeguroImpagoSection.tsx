@@ -26,6 +26,8 @@ import {
   FileCheck,
 } from 'lucide-react';
 import { getTipoDocumentoLabel } from '../../utils/formatters';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface SeguroImpagoSectionProps {
   solicitudesSeguro: SolicitudSeguroImpago[];
@@ -289,9 +291,21 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (confirm(`¿Eliminar el expediente ${sol.referenciaUnica}?`)) {
-                        onDeleteSolicitud(sol.id);
-                      }
+                      void confirmar({
+                        titulo: 'Eliminar expediente de seguro',
+                        mensaje: `¿Eliminar el expediente ${sol.referenciaUnica}?`,
+                        etiquetaConfirmar: 'Eliminar',
+                        peligroso: true,
+                        alConfirmar: async () => {
+                          const { ok } = await ejecutarOperacion({
+                            accion: () => onDeleteSolicitud(sol.id),
+                            mensajeExito: 'Expediente de seguro eliminado.',
+                            mensajeError: 'No se ha podido eliminar el expediente de seguro.',
+                            origenesDatos: ['solicitudes_seguro'],
+                          });
+                          if (!ok) throw new Error('No se ha podido eliminar el expediente de seguro.');
+                        },
+                      });
                     }}
                     className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                     title="Eliminar expediente"

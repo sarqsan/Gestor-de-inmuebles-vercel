@@ -44,6 +44,7 @@ import {
   savePresupuestoProfesionalFirestore,
   saveTrabajoProfesionalFirestore,
 } from '../../lib/firebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface DetallePresupuestoProfesionalModalProps {
   isOpen: boolean;
@@ -195,7 +196,7 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
       setDialogMode('NONE');
     } catch (err: any) {
       console.error('Error approving presupuesto:', err);
-      setErrorGeneral(err?.message || 'Error al aprobar el presupuesto.');
+      setErrorGeneral(mensajeDeErrorUsuario(err, 'Error al aprobar el presupuesto.'));
     } finally {
       setIsUpdating(false);
     }
@@ -281,7 +282,7 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
       setMotivoAjuste('');
     } catch (err: any) {
       console.error('Error requesting ajuste:', err);
-      setErrorGeneral(err?.message || 'Error al solicitar el ajuste.');
+      setErrorGeneral(mensajeDeErrorUsuario(err, 'Error al solicitar el ajuste.'));
     } finally {
       setIsUpdating(false);
     }
@@ -362,7 +363,7 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
       setMotivoRechazo('');
     } catch (err: any) {
       console.error('Error rejecting presupuesto:', err);
-      setErrorGeneral(err?.message || 'Error al rechazar el presupuesto.');
+      setErrorGeneral(mensajeDeErrorUsuario(err, 'Error al rechazar el presupuesto.'));
     } finally {
       setIsUpdating(false);
     }
@@ -446,7 +447,7 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
       setObservacionesReenvio('');
     } catch (err: any) {
       console.error('Error resubmitting presupuesto:', err);
-      setErrorGeneral(err?.message || 'Error al reenviar el presupuesto.');
+      setErrorGeneral(mensajeDeErrorUsuario(err, 'Error al reenviar el presupuesto.'));
     } finally {
       setIsUpdating(false);
     }

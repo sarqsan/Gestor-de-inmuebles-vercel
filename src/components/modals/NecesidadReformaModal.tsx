@@ -26,6 +26,7 @@ import {
   cambiarEstadoNecesidadReforma,
 } from '../../utils/reformasEngine';
 import { saveNecesidadReformaFirestore } from '../../lib/firebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface NecesidadReformaModalProps {
   isOpen: boolean;
@@ -145,7 +146,7 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error guardando necesidad de reforma:', err);
-      setErrorMsg(err?.message || 'Error al guardar la necesidad de reforma.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar la necesidad de reforma.'));
     } finally {
       setGuardando(false);
     }

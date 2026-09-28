@@ -59,6 +59,9 @@ import {
   subscribeGastos,
 } from '../../lib/firebase';
 import { registrarGarantiaDesdeTrabajo } from '../../utils/mantenimientoEngine';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface DetalleTrabajoProfesionalModalProps {
   isOpen: boolean;
@@ -238,7 +241,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
       setMotivoCambioProf('');
     } catch (err: any) {
       console.error('Error al asignar/cambiar profesional:', err);
-      setErrorCambioProf(err?.message || 'Error al guardar la asignación.');
+      setErrorCambioProf(mensajeDeErrorUsuario(err, 'Error al guardar la asignación.'));
     } finally {
       setIsUpdating(false);
     }
@@ -372,7 +375,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
       setDialogFinalizarOpen(false);
     } catch (err: any) {
       console.error('Error al finalizar trabajo:', err);
-      setErrorGasto(err?.message || 'Error al guardar la finalización del trabajo');
+      setErrorGasto(mensajeDeErrorUsuario(err, 'Error al guardar la finalización del trabajo'));
     } finally {
       setIsUpdating(false);
     }
@@ -414,7 +417,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
       }
     } catch (err: any) {
       console.error('Error al generar apunte de gasto:', err);
-      setErrorGasto(err?.message || 'Error al generar apunte de gasto');
+      setErrorGasto(mensajeDeErrorUsuario(err, 'Error al generar apunte de gasto'));
     } finally {
       setGenerandoGasto(false);
     }
@@ -470,7 +473,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
       setEditandoCosteReal(false);
     } catch (err: any) {
       console.error('Error al actualizar coste real:', err);
-      setErrorGasto(err?.message || 'Error al actualizar coste real');
+      setErrorGasto(mensajeDeErrorUsuario(err, 'Error al actualizar coste real'));
     } finally {
       setIsUpdating(false);
     }
@@ -775,9 +778,22 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                 <button
                   disabled={isUpdating}
                   onClick={() => {
-                    if (confirm('¿Deseas cancelar esta orden de trabajo?')) {
-                      handleCambiarEstado('CANCELADO', 'Cancelado por el usuario');
-                    }
+                    void confirmar({
+                      titulo: 'Cancelar orden de trabajo',
+                      mensaje: '¿Deseas cancelar esta orden de trabajo?',
+                      etiquetaConfirmar: 'Cancelar orden',
+                      etiquetaCancelar: 'Volver',
+                      peligroso: true,
+                      alConfirmar: async () => {
+                        const { ok } = await ejecutarOperacion({
+                          accion: () => handleCambiarEstado('CANCELADO', 'Cancelado por el usuario'),
+                          mensajeExito: 'Orden de trabajo cancelada.',
+                          mensajeError: 'No se ha podido cancelar la orden de trabajo.',
+                          origenesDatos: ['trabajos_profesionales'],
+                        });
+                        if (!ok) throw new Error('No se ha podido cancelar la orden de trabajo.');
+                      },
+                    });
                   }}
                   className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg border border-rose-200 transition-colors cursor-pointer"
                 >

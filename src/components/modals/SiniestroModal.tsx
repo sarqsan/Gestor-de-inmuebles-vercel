@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Shield,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface SiniestroModalProps {
   isOpen: boolean;
@@ -182,7 +183,7 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error al guardar siniestro:', err);
-      setErrorMsg(err?.message || 'Error al guardar el siniestro.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar el siniestro.'));
     } finally {
       setIsSubmitting(false);
     }

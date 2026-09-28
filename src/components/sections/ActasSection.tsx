@@ -10,6 +10,8 @@ import { generarPdfActa, descargarPdfActa } from '../../utils/actas/actaPdfEngin
 import { ESTADOS_ELEMENTO_ACTA, CATEGORIAS_ELEMENTO_ACTA, crearElementoActaInventario } from '../../utils/actas/actaInventarioEngine';
 import { saveActaFirestore, subscribeActas, uploadEvidenciaActaStorage, saveEvidenciaActaFirestore, subscribeEvidenciasPorPropietario, saveIncidenciaActaFirestore, subscribeTodasIncidenciasActa, saveOtpActaFirestore, subscribeOtpPorActa } from '../../lib/firebaseActas';
 import { registrarAuditoriaFirestore } from '../../lib/firebase';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface ActasSectionProps {
   inmuebles: Inmueble[];
@@ -100,9 +102,9 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
   };
 
   const handleCrearActa = async () => {
-    if (!formInmuebleId) { alert('Selecciona inmueble'); return; }
-    if (!formFechaActo) { alert('Fecha acto requerida'); return; }
-    if (formParticipantes.length === 0) { alert('Al menos un participante'); return; }
+    if (!formInmuebleId) { avisarOperacion({ tipo: 'error', mensaje: 'Selecciona inmueble' }); return; }
+    if (!formFechaActo) { avisarOperacion({ tipo: 'error', mensaje: 'Fecha acto requerida' }); return; }
+    if (formParticipantes.length === 0) { avisarOperacion({ tipo: 'error', mensaje: 'Al menos un participante' }); return; }
 
     const creadoPor = currentUser?.nombre || 'Propietario';
     const creadoPorId = currentUser?.id;
@@ -125,7 +127,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
       nuevaActa.observaciones = formObservaciones;
     } else {
       const actaEntrada = actas.find(a => a.id === formActaEntradaId);
-      if (!actaEntrada) { alert('Debes seleccionar acta de entrada vinculada'); return; }
+      if (!actaEntrada) { avisarOperacion({ tipo: 'error', mensaje: 'Debes seleccionar acta de entrada vinculada' }); return; }
       nuevaActa = crearActaSalidaDesdeEntrada(actaEntrada, {
         fechaActo: formFechaActo,
         horaActo: formHoraActo,
@@ -183,7 +185,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         detalles: { actaId: acta.id, estadoAnterior: acta.estado, estadoNuevo: nuevoEstado, version: acta.version },
       });
     } catch (e:any) {
-      alert(e.message);
+      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') });
     }
   };
 
@@ -220,19 +222,19 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         detalles: { actaId: acta.id, firmas: actaActualizada.firmas.map(f=>f.id) },
       });
     } catch (e:any) {
-      alert(e.message);
+      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') });
     }
   };
 
   const handleValidarOtpYFirmar = async (acta: Acta, firmaId: string, codigo: string) => {
     const firma = acta.firmas.find(f=>f.id===firmaId);
-    if (!firma) { alert('Firma no encontrada'); return; }
+    if (!firma) { avisarOperacion({ tipo: 'error', mensaje: 'Firma no encontrada' }); return; }
     const otp = otps.find(o=>o.firmaId===firmaId && o.estado==='ACTIVO');
-    if (!otp) { alert('OTP no encontrado o no activo'); return; }
+    if (!otp) { avisarOperacion({ tipo: 'error', mensaje: 'OTP no encontrado o no activo' }); return; }
     // Aislamiento: verificar acta/firma/versión/owner corresponden
     const { validarOtpContexto } = await import('../../utils/actas/actaOtpEngine');
     const ctxCheck = validarOtpContexto(otp, { actaId: acta.id, firmaId, ownerId: acta.ownerId, versionActa: acta.version, propertyId: acta.propertyId });
-    if (!ctxCheck.valido) { alert(`OTP aislamiento: ${ctxCheck.motivo}`); return; }
+    if (!ctxCheck.valido) { avisarOperacion({ tipo: 'error', mensaje: `OTP aislamiento: ${ctxCheck.motivo}` }); return; }
     const { valido, motivo, otpActualizado } = await validarOtp(otp, codigo);
     await saveOtpActaFirestore(otpActualizado);
     await registrarAuditoriaFirestore({
@@ -246,7 +248,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
       resultado: valido ? 'EXITO' : 'ERROR',
       detalles: { actaId: acta.id, firmaId, otpId: otp.id, valido, motivo },
     });
-    if (!valido) { alert(`OTP inválido: ${motivo}`); return; }
+    if (!valido) { avisarOperacion({ tipo: 'error', mensaje: `OTP inválido: ${motivo}` }); return; }
     // Validar firma con OTP y completar
     let firmaActualizada = validarFirmaConOtp(firma);
     firmaActualizada = completarFirma(firmaActualizada);
@@ -344,13 +346,13 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         resultado: 'ERROR',
         detalles: { actaId: acta.id, version: acta.version, error: e.message },
       });
-      alert(`PDF generado local pero error subiendo a Storage: ${e.message}`);
+      avisarOperacion({ tipo: 'error', mensaje: `${mensajeDeErrorUsuario(e, 'El acta se ha generado, pero no se ha podido guardar en el servidor.')} Puedes descargarla y volver a intentarlo.` });
     }
   };
 
   const handleVersionarActa = async (acta: Acta) => {
     const motivo = prompt('Motivo de versionado (obligatorio para trazabilidad):', 'Corrección tras firma / actualización requerida');
-    if (!motivo || !motivo.trim()) { alert('Motivo obligatorio'); return; }
+    if (!motivo || !motivo.trim()) { avisarOperacion({ tipo: 'error', mensaje: 'Motivo obligatorio' }); return; }
     try {
       const { actaVersionada, actaOriginalPreservada } = versionarActa(acta, currentUser?.nombre || 'Propietario', motivo.trim(), currentUser?.id);
       // Preservar original intacta ya está en Firestore, no modificarla. Guardar nueva versión como nuevo documento.
@@ -368,9 +370,9 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         detalles: { actaIdOriginal: acta.id, actaIdNueva: actaVersionada.id, versionAnterior: acta.version, versionNueva: actaVersionada.version, motivo, cadenaVersionIds: actaVersionada.cadenaVersionIds },
       });
       setSelectedActa(actaVersionada);
-      alert(`Nueva versión creada: ${actaVersionada.id} v${actaVersionada.version}. La versión firmada original ${actaOriginalPreservada.id} v${actaOriginalPreservada.version} permanece intacta e inmutable.`);
+      avisarOperacion({ tipo: 'exito', mensaje: `Nueva versión creada: ${actaVersionada.id} v${actaVersionada.version}. La versión firmada original ${actaOriginalPreservada.id} v${actaOriginalPreservada.version} permanece intacta e inmutable.` });
     } catch (e:any) {
-      alert(`Error versionando: ${e.message}`);
+      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido versionar el acta.') });
     }
   };
 
@@ -410,7 +412,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         detalles: { actaId: acta.id, evidenciaId: evidencia.id, storagePath },
       });
     } catch (e:any) {
-      alert(`Error subiendo evidencia: ${e.message}`);
+      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido subir la evidencia.') });
     }
   };
 
@@ -710,7 +712,7 @@ const AddParticipanteForm: React.FC<{ onAdd: (p: ParticipanteActa) => void }> = 
       <input placeholder="Nombre completo *" value={nombre} onChange={e=>setNombre(e.target.value)} className="px-2 py-1 bg-white border rounded" />
       <select value={rol} onChange={e=>setRol(e.target.value as any)} className="px-2 py-1 bg-white border rounded"><option>ARRENDADOR</option><option>ARRENDATARIO</option><option>COTITULAR</option><option>AVALISTA</option><option>TESTIGO</option><option>GESTOR</option><option>ADMINISTRADOR</option><option>OTRO</option></select>
       <input placeholder="DNI/NIE" value={dni} onChange={e=>setDni(e.target.value)} className="px-2 py-1 bg-white border rounded" />
-      <div className="flex items-center gap-2"><label className="flex items-center gap-1"><input type="checkbox" checked={firmaReq} onChange={e=>setFirmaReq(e.target.checked)} />Firma req</label><button onClick={()=>{ if(!nombre.trim()){alert('Nombre requerido'); return;} const p: ParticipanteActa = { id: `part_${Date.now()}`, nombre: nombre.trim(), rol, dni: dni.trim()||undefined, firmaRequerida: firmaReq, haFirmado: false }; onAdd(p); setNombre(''); setDni(''); }} className="px-3 py-1 bg-violet-600 text-white rounded-lg font-bold">Añadir</button></div>
+      <div className="flex items-center gap-2"><label className="flex items-center gap-1"><input type="checkbox" checked={firmaReq} onChange={e=>setFirmaReq(e.target.checked)} />Firma req</label><button onClick={()=>{ if(!nombre.trim()){avisarOperacion({ tipo: 'error', mensaje: 'Nombre requerido' }); return;} const p: ParticipanteActa = { id: `part_${Date.now()}`, nombre: nombre.trim(), rol, dni: dni.trim()||undefined, firmaRequerida: firmaReq, haFirmado: false }; onAdd(p); setNombre(''); setDni(''); }} className="px-3 py-1 bg-violet-600 text-white rounded-lg font-bold">Añadir</button></div>
     </div>
   );
 };
@@ -729,7 +731,7 @@ const AddInventarioForm: React.FC<{ onAdd: (e: ElementoActaInventario) => void }
       <select value={estado} onChange={e=>setEstado(e.target.value)} className="px-2 py-1 bg-white border rounded">{ESTADOS_ELEMENTO_ACTA.map(es=><option key={es.id} value={es.id}>{es.label}</option>)}</select>
       <input type="number" min={1} value={cantidad} onChange={e=>setCantidad(parseInt(e.target.value)||1)} className="px-2 py-1 bg-white border rounded" />
       <input placeholder="Ubicación" value={ubicacion} onChange={e=>setUbicacion(e.target.value)} className="px-2 py-1 bg-white border rounded" />
-      <div className="flex gap-1"><input placeholder="Observaciones" value={observaciones} onChange={e=>setObservaciones(e.target.value)} className="px-2 py-1 bg-white border rounded flex-1" /><button onClick={()=>{ if(!elemento.trim()){alert('Elemento requerido'); return;} const el = crearElementoActaInventario('tmp', { elemento: elemento.trim(), categoria: categoria as any, estado: estado as any, cantidad, ubicacion: ubicacion||undefined, observaciones: observaciones||undefined, orden: 0 }); onAdd(el); setElemento(''); setObservaciones(''); }} className="px-2 py-1 bg-violet-600 text-white rounded font-bold">+</button></div>
+      <div className="flex gap-1"><input placeholder="Observaciones" value={observaciones} onChange={e=>setObservaciones(e.target.value)} className="px-2 py-1 bg-white border rounded flex-1" /><button onClick={()=>{ if(!elemento.trim()){avisarOperacion({ tipo: 'error', mensaje: 'Elemento requerido' }); return;} const el = crearElementoActaInventario('tmp', { elemento: elemento.trim(), categoria: categoria as any, estado: estado as any, cantidad, ubicacion: ubicacion||undefined, observaciones: observaciones||undefined, orden: 0 }); onAdd(el); setElemento(''); setObservaciones(''); }} className="px-2 py-1 bg-violet-600 text-white rounded font-bold">+</button></div>
     </div>
   );
 };
@@ -745,7 +747,7 @@ const AddContadorFormSimple: React.FC<{ onAdd: (c: LecturaContador) => void }> =
       <input placeholder="Lectura *" value={lectura} onChange={e=>setLectura(e.target.value)} className="px-2 py-1 bg-white border rounded" />
       <input placeholder="Unidad" value={unidad} onChange={e=>setUnidad(e.target.value)} className="px-2 py-1 bg-white border rounded" />
       <input placeholder="Observaciones" value={obs} onChange={e=>setObs(e.target.value)} className="px-2 py-1 bg-white border rounded" />
-      <button onClick={()=>{ if(!lectura.trim()){alert('Lectura requerida'); return;} const num = parseFloat(lectura.replace(',', '.')); const lec: LecturaContador = { id: `lec_${Date.now()}`, actaId: 'tmp', tipo, lectura: lectura.trim(), lecturaNumerica: isNaN(num)?undefined:num, unidad: unidad||undefined, fechaHora: new Date().toISOString(), observaciones: obs||undefined }; onAdd(lec); setLectura(''); setObs(''); }} className="px-3 py-1 bg-violet-600 text-white rounded-lg font-bold">Añadir</button>
+      <button onClick={()=>{ if(!lectura.trim()){avisarOperacion({ tipo: 'error', mensaje: 'Lectura requerida' }); return;} const num = parseFloat(lectura.replace(',', '.')); const lec: LecturaContador = { id: `lec_${Date.now()}`, actaId: 'tmp', tipo, lectura: lectura.trim(), lecturaNumerica: isNaN(num)?undefined:num, unidad: unidad||undefined, fechaHora: new Date().toISOString(), observaciones: obs||undefined }; onAdd(lec); setLectura(''); setObs(''); }} className="px-3 py-1 bg-violet-600 text-white rounded-lg font-bold">Añadir</button>
     </div>
   );
 };
@@ -773,7 +775,7 @@ const AddIncidenciaActaForm: React.FC<{ acta: Acta; ownerId: string; onSave: (in
       <div className="font-bold">Añadir incidencia acta</div>
       <input placeholder="Título *" value={titulo} onChange={e=>setTitulo(e.target.value)} className="w-full px-2 py-1 bg-white border rounded text-xs" />
       <textarea placeholder="Descripción *" value={desc} onChange={e=>setDesc(e.target.value)} className="w-full px-2 py-1 bg-white border rounded text-xs h-16" />
-      <div className="flex gap-2"><select value={origen} onChange={e=>setOrigen(e.target.value as any)} className="px-2 py-1 bg-white border rounded text-xs"><option>ENTRADA</option><option>SALIDA</option><option>ESTANCIA</option><option>COMPARACION</option></select><button onClick={()=>{ if(!titulo.trim()||!desc.trim()){alert('Título y descripción requeridos'); return;} const inc: IncidenciaActa = { id: `inc_acta_${Date.now()}`, actaId: acta.id, ownerId, propertyId: acta.propertyId, contractId: acta.contractId, titulo: titulo.trim(), descripcion: desc.trim(), estado: 'ABIERTA', origen, fechaHora: new Date().toISOString() }; onSave(inc); setTitulo(''); setDesc(''); }} className="px-3 py-1 bg-amber-600 text-white rounded-lg font-bold text-xs">Crear incidencia</button></div>
+      <div className="flex gap-2"><select value={origen} onChange={e=>setOrigen(e.target.value as any)} className="px-2 py-1 bg-white border rounded text-xs"><option>ENTRADA</option><option>SALIDA</option><option>ESTANCIA</option><option>COMPARACION</option></select><button onClick={()=>{ if(!titulo.trim()||!desc.trim()){avisarOperacion({ tipo: 'error', mensaje: 'Título y descripción requeridos' }); return;} const inc: IncidenciaActa = { id: `inc_acta_${Date.now()}`, actaId: acta.id, ownerId, propertyId: acta.propertyId, contractId: acta.contractId, titulo: titulo.trim(), descripcion: desc.trim(), estado: 'ABIERTA', origen, fechaHora: new Date().toISOString() }; onSave(inc); setTitulo(''); setDesc(''); }} className="px-3 py-1 bg-amber-600 text-white rounded-lg font-bold text-xs">Crear incidencia</button></div>
     </div>
   );
 };

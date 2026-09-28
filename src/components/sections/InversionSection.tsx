@@ -63,6 +63,9 @@ import {
   saveAnalisisInversionFirestore,
   deleteAnalisisInversionFirestore,
 } from '../../lib/firebaseInversion';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { avisarOperacion } from '../../feedback/canalFeedback';
 
 interface InversionSectionProps {
   inmuebles: Inmueble[];
@@ -361,27 +364,66 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
         { id: genId('hist'), fecha: new Date().toISOString(), accion: 'GUARDADO', detalle: 'Análisis actualizado' },
       ],
     };
-    await saveAnalisisInversionFirestore(toSave);
-    setIsCreating(false);
-    setSelectedId(toSave.id);
-    setForm(null);
+    // UX-3 §6: el cierre se produce sólo si la persistencia confirma.
+    await ejecutarOperacion({
+      accion: () => saveAnalisisInversionFirestore(toSave),
+      mensajeExito: 'Análisis de inversión guardado correctamente.',
+      mensajeError: 'No se ha podido guardar el análisis de inversión.',
+      origenesDatos: ['inversion'],
+      onExito: () => {
+        setIsCreating(false);
+        setSelectedId(toSave.id);
+        setForm(null);
+      },
+    });
   };
 
   const handleEliminar = async (id: string) => {
-    if (!confirm('¿Eliminar este análisis de inversión? Esta acción no se puede deshacer.')) return;
-    await deleteAnalisisInversionFirestore(id);
-    setSelectedId(null);
-    setIsCreating(false);
+    await confirmar({
+      titulo: 'Eliminar análisis de inversión',
+      mensaje: '¿Eliminar este análisis de inversión?',
+      detalle: 'Esta acción no se puede deshacer.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: async () => {
+        const { ok } = await ejecutarOperacion({
+          accion: () => deleteAnalisisInversionFirestore(id),
+          mensajeExito: 'Análisis de inversión eliminado.',
+          mensajeError: 'No se ha podido eliminar el análisis de inversión.',
+          origenesDatos: ['inversion'],
+        });
+        if (!ok) throw new Error('No se ha podido eliminar el análisis de inversión.');
+        setSelectedId(null);
+        setIsCreating(false);
+      },
+    });
   };
 
   const handleConvertir = async () => {
     if (!form) return;
     if (!onAddInmueble) {
-      alert('Conversión no disponible en este contexto');
+      // UX-3: antes `alert` nativo.
+      avisarOperacion({ tipo: 'error', mensaje: 'La conversión no está disponible en este contexto.' });
       return;
     }
-    if (!confirm('¿Convertir este análisis en inmueble de cartera? Se creará un nuevo inmueble con los datos del análisis. El histórico del análisis se mantendrá.')) return;
 
+    // UX-3 §5: la confirmación se pide primero y, al aceptar, se ejecuta
+    // exactamente la misma operación que había antes (alta + marca del análisis).
+    const { confirmado } = await confirmar({
+      titulo: 'Convertir en inmueble de cartera',
+      mensaje: '¿Convertir este análisis en un inmueble de cartera?',
+      detalle:
+        'Se creará un nuevo inmueble con los datos del análisis. El histórico del análisis se mantendrá.',
+      etiquetaConfirmar: 'Convertir',
+      alConfirmar: async () => {
+        await convertirEnInmueble();
+      },
+    });
+    if (!confirmado) return;
+  };
+
+  const convertirEnInmueble = async () => {
+    if (!form || !onAddInmueble) return;
     const d = form.datosInmueble!;
     const nuevoInmueble: Inmueble = {
       id: genId('inm'),
@@ -405,9 +447,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    onAddInmueble(nuevoInmueble);
 
-    // Marcar análisis como convertido
+    // Marcar análisis como convertido (misma escritura que antes).
     const actualizado = {
       ...(form as AnalisisInversion),
       estado: 'CONVERTIDO' as const,
@@ -416,12 +457,30 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
       updatedAt: new Date().toISOString(),
       historial: [
         ...(form.historial || []),
-        { id: genId('hist'), fecha: new Date().toISOString(), accion: 'CONVERTIDO', detalle: `Convertido a inmueble ${nuevoInmueble.id}` },
+        {
+          id: genId('hist'),
+          fecha: new Date().toISOString(),
+          accion: 'CONVERTIDO',
+          detalle: `Convertido a inmueble ${nuevoInmueble.id}`,
+        },
       ],
     };
-    await saveAnalisisInversionFirestore(actualizado as AnalisisInversion);
-    setIsCreating(false);
-    setSelectedId(actualizado.id);
+
+    // UX-3 §6: resultado real de las dos escrituras (alta del inmueble + marca del análisis).
+    const { ok } = await ejecutarOperacion({
+      accion: async () => {
+        onAddInmueble(nuevoInmueble);
+        await saveAnalisisInversionFirestore(actualizado as AnalisisInversion);
+      },
+      mensajeExito: 'Análisis convertido en inmueble de cartera.',
+      mensajeError: 'No se ha podido convertir el análisis en inmueble.',
+      origenesDatos: ['inmuebles', 'inversion'],
+      onExito: () => {
+        setIsCreating(false);
+        setSelectedId(actualizado.id);
+      },
+    });
+    if (!ok) throw new Error('No se ha podido convertir el análisis en inmueble.');
   };
 
   // Filtro lista

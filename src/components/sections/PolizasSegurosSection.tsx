@@ -42,6 +42,8 @@ import {
   Trash2,
   CheckCircle2,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface PolizasSegurosSectionProps {
   inmuebles: Inmueble[];
@@ -191,13 +193,26 @@ export const PolizasSegurosSection: React.FC<PolizasSegurosSectionProps> = ({
   };
 
   const handleDeletePoliza = async (id: string) => {
-    if (window.confirm('¿Eliminar esta póliza? Si tiene histórico vinculado, el histórico de otras pólizas se conservará.')) {
-      await deletePolizaFirestore(id);
-      if (detallePoliza?.id === id) {
-        setIsDetalleOpen(false);
-        setDetallePoliza(null);
-      }
-    }
+    await confirmar({
+      titulo: 'Eliminar póliza',
+      mensaje: '¿Eliminar esta póliza?',
+      detalle: 'Si tiene histórico vinculado, el histórico de otras pólizas se conservará.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => deletePolizaFirestore(id),
+          mensajeExito: 'Póliza eliminada.',
+          mensajeError: 'No se ha podido eliminar la póliza.',
+          origenesDatos: ['polizas'],
+          onExito: () => {
+            if (detallePoliza?.id === id) {
+              setIsDetalleOpen(false);
+              setDetallePoliza(null);
+            }
+          },
+        }),
+    });
   };
 
   const handleCrearRenovacionComoNueva = (polizaAnterior: PolizaSeguro) => {

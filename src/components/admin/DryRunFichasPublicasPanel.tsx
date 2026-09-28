@@ -16,6 +16,7 @@ import {
   type InformeDryRunFichasPublicas,
 } from '../../lib/dryRunFichasPublicas';
 import type { EstadoItemBackfill } from '../../lib/backfillFichasPublicas';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   currentUser: UsuarioApp;
@@ -50,7 +51,7 @@ export const DryRunFichasPublicasPanel: React.FC<Props> = ({ currentUser, emailS
       setInforme(await fn(currentUser, { emailSesion }));
     } catch (err) {
       setInforme(null);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(mensajeDeErrorUsuario(err, 'No se ha podido completar la operación.'));
     } finally {
       setCargando(false);
     }

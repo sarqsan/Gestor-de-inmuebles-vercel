@@ -25,6 +25,7 @@ import {
   saveInmuebleFirestore,
 } from '../lib/firebase';
 import { getInmuebleCoverUrl } from '../utils/imageUtils';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface GestionImagenesModalProps {
   isOpen: boolean;
@@ -168,7 +169,7 @@ export const GestionImagenesModal: React.FC<GestionImagenesModalProps> = ({
           newUploadedImages.push(newImg);
         } catch (err: any) {
           console.error('Error uploading image:', err);
-          setErrorMessage(`Error al procesar ${file.name}: ${err.message || 'Error desconocido'}`);
+          setErrorMessage(`Error al procesar ${file.name}: ${mensajeDeErrorUsuario(err, 'Error desconocido')}`);
         }
       }
 

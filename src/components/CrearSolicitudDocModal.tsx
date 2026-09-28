@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   Send,
 } from 'lucide-react';
+import { avisarOperacion } from '../feedback/canalFeedback';
 
 interface CrearSolicitudDocModalProps {
   candidato: Candidato;
@@ -143,7 +144,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
   // Submit and create document request
   const handleCreateRequest = async () => {
     if (documentos.length === 0) {
-      alert('Debes incluir al menos un documento en la solicitud.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Debes incluir al menos un documento en la solicitud.' });
       return;
     }
 
@@ -164,7 +165,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
       setCreatedSolicitud(nuevaSol);
     } catch (err) {
       console.error('Error creating doc request:', err);
-      alert('Error al guardar la solicitud. Inténtalo de nuevo.');
+      avisarOperacion({ tipo: 'error', mensaje: 'Error al guardar la solicitud. Inténtalo de nuevo.' });
     } finally {
       setSaving(false);
     }

@@ -10,7 +10,7 @@ import {
   type Unsubscribe,
   type QuerySnapshot,
 } from 'firebase/firestore';
-import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
+import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, sanitizeObjectForFirestore, type DataAccessScope } from './firebase';
 import type {
@@ -90,7 +90,7 @@ export async function saveActaFirestore(acta: Acta): Promise<void> {
     const clean = sanitizeObjectForFirestore(acta);
     await setDoc(doc(db, 'actas', acta.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving acta:', err);
+    reportarErrorGuardado('actas', err, 'Error saving acta:');
     throw err;
   }
 }
@@ -105,7 +105,7 @@ export async function deleteActaFirestore(actaId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'actas', actaId));
   } catch (err) {
-    console.error('Error deleting acta:', err);
+    reportarErrorGuardado('actas', err, 'Error deleting acta:');
     throw err;
   }
 }
@@ -158,7 +158,7 @@ export async function saveEvidenciaActaFirestore(ev: EvidenciaActa): Promise<voi
     const clean = sanitizeObjectForFirestore(ev);
     await setDoc(doc(db, 'actas_evidencias', ev.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving evidencia acta:', err);
+    reportarErrorGuardado('actas', err, 'Error saving evidencia acta:');
     throw err;
   }
 }
@@ -167,7 +167,7 @@ export async function deleteEvidenciaActaFirestore(id: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'actas_evidencias', id));
   } catch (err) {
-    console.error('Error deleting evidencia acta:', err);
+    reportarErrorGuardado('actas', err, 'Error deleting evidencia acta:');
     throw err;
   }
 }
@@ -218,7 +218,7 @@ export async function saveIncidenciaActaFirestore(inc: IncidenciaActa): Promise<
     const clean = sanitizeObjectForFirestore(inc);
     await setDoc(doc(db, 'actas_incidencias', inc.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving incidencia acta:', err);
+    reportarErrorGuardado('incidencias', err, 'Error saving incidencia acta:');
     throw err;
   }
 }
@@ -227,7 +227,7 @@ export async function deleteIncidenciaActaFirestore(id: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'actas_incidencias', id));
   } catch (err) {
-    console.error('Error deleting incidencia acta:', err);
+    reportarErrorGuardado('incidencias', err, 'Error deleting incidencia acta:');
     throw err;
   }
 }
@@ -276,7 +276,7 @@ export async function saveOtpActaFirestore(otp: OtpActa): Promise<void> {
     const clean = sanitizeObjectForFirestore(payload);
     await setDoc(doc(db, 'actas_otp', otp.id), clean, { merge: true });
   } catch (err) {
-    console.error('Error saving OTP acta:', err);
+    reportarErrorGuardado('actas', err, 'Error saving OTP acta:');
     throw err;
   }
 }

@@ -68,6 +68,8 @@ import {
   Euro,
   Image as ImageIcon,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface IncidenciasSectionProps {
   inmuebles: Inmueble[];
@@ -183,12 +185,24 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
   };
 
   const handleDeleteIncidencia = async (id: string) => {
-    if (window.confirm('¿Confirma que desea eliminar esta incidencia y su expediente asociado?')) {
-      await deleteIncidenciaFirestore(id);
-      if (incidenciaDetalle?.id === id) {
-        setIsDetalleModalOpen(false);
-      }
-    }
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar incidencia',
+      mensaje: '¿Eliminar esta incidencia y su expediente asociado?',
+      detalle: 'La incidencia y su expediente dejarán de estar disponibles en la lista.',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => deleteIncidenciaFirestore(id),
+          mensajeExito: 'Incidencia eliminada.',
+          mensajeError: 'No se ha podido eliminar la incidencia.',
+          origenesDatos: ['incidencias'],
+          onExito: () => {
+            if (incidenciaDetalle?.id === id) setIsDetalleModalOpen(false);
+          },
+        }),
+    });
+    return confirmado;
   };
 
   const handleSavePoliza = async (pol: PolizaSeguro) => {
@@ -196,9 +210,21 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
   };
 
   const handleDeletePoliza = async (id: string) => {
-    if (window.confirm('¿Desea dar de baja esta póliza de seguro de la base de datos?')) {
-      await deletePolizaFirestore(id);
-    }
+    const { confirmado } = await confirmar({
+      titulo: 'Dar de baja la póliza',
+      mensaje: '¿Dar de baja esta póliza de seguro?',
+      detalle: 'La póliza se retirará de la cartera; su histórico vinculado no se elimina.',
+      etiquetaConfirmar: 'Dar de baja',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => deletePolizaFirestore(id),
+          mensajeExito: 'Póliza dada de baja.',
+          mensajeError: 'No se ha podido dar de baja la póliza.',
+          origenesDatos: ['polizas'],
+        }),
+    });
+    return confirmado;
   };
 
   const handleSaveSiniestro = async (sin: Siniestro) => {
@@ -206,9 +232,20 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
   };
 
   const handleDeleteSiniestro = async (id: string) => {
-    if (window.confirm('¿Confirma la eliminación del registro de este siniestro?')) {
-      await deleteSiniestroFirestore(id);
-    }
+    const { confirmado } = await confirmar({
+      titulo: 'Eliminar siniestro',
+      mensaje: '¿Eliminar el registro de este siniestro?',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: () =>
+        ejecutarOperacion({
+          accion: () => deleteSiniestroFirestore(id),
+          mensajeExito: 'Siniestro eliminado.',
+          mensajeError: 'No se ha podido eliminar el siniestro.',
+          origenesDatos: ['siniestros'],
+        }),
+    });
+    return confirmado;
   };
 
   const handleOpenSiniestroFromDetalle = (inc: Incidencia, sin?: Siniestro) => {

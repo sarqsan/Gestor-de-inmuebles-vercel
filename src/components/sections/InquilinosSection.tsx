@@ -43,6 +43,8 @@ import type {
   MensajePortal,
   UsuarioApp,
 } from '../../types';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface Props {
   currentUser: UsuarioApp;
@@ -181,15 +183,30 @@ function TabAccesos({
   };
 
   const desvincular = async (u: UsuarioApp, contratoId: string) => {
-    if (!window.confirm(`¿Desvincular el contrato ${dirContrato(contratoId)} de ${u.nombre}? Perderá el acceso.`)) return;
-    const contrato = contratos.find((c) => c.id === contratoId);
-    await saveUsuarioFirestore({
-      ...u,
-      contratoIds: (u.contratoIds || []).filter((id) => id !== contratoId),
-      updatedAt: new Date().toISOString(),
+    await confirmar({
+      titulo: 'Desvincular contrato',
+      mensaje: `¿Desvincular el contrato ${dirContrato(contratoId)} de ${u.nombre}?`,
+      detalle: 'Perderá el acceso al inmueble y al contrato.',
+      etiquetaConfirmar: 'Desvincular',
+      peligroso: true,
+      alConfirmar: async () => {
+        const { ok } = await ejecutarOperacion({
+          accion: async () => {
+            const contrato = contratos.find((c) => c.id === contratoId);
+            await saveUsuarioFirestore({
+              ...u,
+              contratoIds: (u.contratoIds || []).filter((id) => id !== contratoId),
+              updatedAt: new Date().toISOString(),
+            });
+            if (contrato) await revocarAccesoContrato(contratoId, contrato.inmuebleId);
+          },
+          mensajeExito: 'Contrato desvinculado y alcance revocado.',
+          mensajeError: 'No se ha podido desvincular el contrato.',
+          origenesDatos: ['usuarios', 'contratos'],
+        });
+        if (!ok) throw new Error('No se ha podido desvincular el contrato.');
+      },
     });
-    if (contrato) await revocarAccesoContrato(contratoId, contrato.inmuebleId);
-    informar('Contrato desvinculado y alcance revocado.');
   };
 
   if (inquilinos.length === 0) {
@@ -303,9 +320,22 @@ function TabInvitaciones({
   };
 
   const revocar = async (e: EnlaceRegistro) => {
-    if (!window.confirm('¿Revocar esta invitación? Se retirará el alcance de lectura concedido.')) return;
-    await revocarInvitacionInquilino(e);
-    informar('Invitación revocada.');
+    await confirmar({
+      titulo: 'Revocar invitación',
+      mensaje: '¿Revocar esta invitación?',
+      detalle: 'Se retirará el alcance de lectura concedido.',
+      etiquetaConfirmar: 'Revocar',
+      peligroso: true,
+      alConfirmar: async () => {
+        const { ok } = await ejecutarOperacion({
+          accion: () => revocarInvitacionInquilino(e),
+          mensajeExito: 'Invitación revocada.',
+          mensajeError: 'No se ha podido revocar la invitación.',
+          origenesDatos: ['enlaces_registro'],
+        });
+        if (!ok) throw new Error('No se ha podido revocar la invitación.');
+      },
+    });
   };
 
   return (

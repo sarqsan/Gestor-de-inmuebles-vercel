@@ -32,6 +32,8 @@ import {
   FileText,
   Tag,
 } from 'lucide-react';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface GarantiasReparacionPanelProps {
   garantias: GarantiaReparacion[];
@@ -94,11 +96,22 @@ export const GarantiasReparacionPanel: React.FC<GarantiasReparacionPanelProps> =
   };
 
   const handleDeleteGarantia = async (id: string) => {
-    if (window.confirm('¿Confirma la eliminación del registro de esta garantía?')) {
-      await deleteGarantiaReparacionFirestore(id);
-      setNotificacion({ tipo: 'success', mensaje: 'Garantía eliminada del sistema.' });
-      setTimeout(() => setNotificacion(null), 4000);
-    }
+    await confirmar({
+      titulo: 'Eliminar garantía',
+      mensaje: '¿Eliminar el registro de esta garantía?',
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      // UX-3 §6: el éxito sólo se anuncia si la persistencia lo confirma.
+      alConfirmar: async () => {
+        const { ok } = await ejecutarOperacion({
+          accion: () => deleteGarantiaReparacionFirestore(id),
+          mensajeExito: 'Garantía eliminada del sistema.',
+          mensajeError: 'No se ha podido eliminar la garantía.',
+          origenesDatos: ['garantias_reparacion'],
+        });
+        if (!ok) throw new Error('No se ha podido eliminar la garantía.');
+      },
+    });
   };
 
   const getBadgeGarantia = (fechaFin: string, estado?: EstadoGarantia) => {

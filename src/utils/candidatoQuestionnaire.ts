@@ -1,4 +1,5 @@
 import { Candidato, EmploymentType, ContractType } from '../types';
+import { avisarOperacion } from '../feedback/canalFeedback';
 
 /**
  * Generates an interactive printable/downloadable HTML PDF questionnaire
@@ -7,7 +8,7 @@ import { Candidato, EmploymentType, ContractType } from '../types';
 export function openCandidatoQuestionnairePDF(nombreCandidato: string, inmuebleNombre?: string) {
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
-    alert('Por favor, permite las ventanas emergentes en tu navegador para generar el PDF del Cuestionario.');
+    avisarOperacion({ tipo: 'error', mensaje: 'Por favor, permite las ventanas emergentes en tu navegador para generar el PDF del Cuestionario.' });
     return;
   }
 

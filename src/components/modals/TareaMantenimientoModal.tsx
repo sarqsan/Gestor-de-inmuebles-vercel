@@ -29,6 +29,7 @@ import {
   AlertCircle,
   Tag,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface TareaMantenimientoModalProps {
   isOpen: boolean;
@@ -203,7 +204,7 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
       onClose();
     } catch (err: any) {
       console.error('Error saving maintenance task:', err);
-      setError(err?.message || 'Error al guardar el plan de mantenimiento.');
+      setError(mensajeDeErrorUsuario(err, 'Error al guardar el plan de mantenimiento.'));
     } finally {
       setSaving(false);
     }

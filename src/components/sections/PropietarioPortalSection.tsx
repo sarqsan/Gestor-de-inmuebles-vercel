@@ -60,6 +60,8 @@ import {
 import type { ResumenMorosidadPropietario } from '../../types/morosidad';
 import { formatoImporteSepa } from '../../tesoreria/sepaUtils';
 import { imprimirLiquidacionPDF } from '../../tesoreria/liquidacionPdf';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface PropietarioPortalSectionProps {
   currentUser: UsuarioApp;
@@ -264,7 +266,11 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const puedeEditarFicha = !!onSavePropietario && !!currentUser.propietarioId;
 
   const handleGuardarFicha = async () => {
-    if (!onSavePropietario || !currentUser.propietarioId || !formFicha) return;
+    if (!onSavePropietario || !currentUser.propietarioId || !formFicha) {
+      // UX-4 §17: antes la pulsación no producía ninguna respuesta visible.
+      setMensajeFicha('No se ha podido guardar: falta la ficha o la sesión no está activa.');
+      return;
+    }
     setGuardandoFicha(true);
     setMensajeFicha(null);
     try {
@@ -298,11 +304,18 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
         fechaActualizacion: new Date().toISOString(),
       };
 
-      await onSavePropietario(actualizada);
-      setMensajeFicha('Ficha fiscal guardada correctamente.');
-      setTimeout(() => setMensajeFicha(null), 3000);
-    } catch (e: any) {
-      setMensajeFicha(`Error al guardar: ${e?.message || 'Revisa los campos.'}`);
+      // UX-3 §6: el mensaje de éxito sólo aparece si la persistencia lo confirma.
+      await ejecutarOperacion({
+        accion: () => onSavePropietario(actualizada),
+        mensajeExito: 'Ficha fiscal guardada correctamente.',
+        mensajeError: 'No se ha podido guardar la ficha fiscal.',
+        origenesDatos: ['propietarios'],
+        onExito: () => {
+          setMensajeFicha('Ficha fiscal guardada correctamente.');
+          setTimeout(() => setMensajeFicha(null), 3000);
+        },
+        onFallo: () => setMensajeFicha('No se ha podido guardar la ficha fiscal. Revisa los campos.'),
+      });
     } finally {
       setGuardandoFicha(false);
     }

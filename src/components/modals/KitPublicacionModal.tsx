@@ -14,6 +14,7 @@ import {
 import type { ExpedienteRecomercializacion, Inmueble, KitPublicacion } from '../../types';
 import { DESTINO_INMUEBLE_LABEL } from '../../utils/recomercializacionEngine';
 import { generarKitPublicacion } from '../../utils/kitPublicacionIa';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -131,7 +132,7 @@ export const KitPublicacionModal: React.FC<Props> = ({ expediente, inmueble, onG
       if ((kit.extras ?? []).length) setExtras(kit.extras!);
       setMotor(kit.motor);
     } catch (err) {
-      setAviso(err instanceof Error ? err.message : 'No se pudo generar el kit.');
+      setAviso(mensajeDeErrorUsuario(err, 'No se pudo generar el kit.'));
     } finally {
       setCargandoIa(false);
     }

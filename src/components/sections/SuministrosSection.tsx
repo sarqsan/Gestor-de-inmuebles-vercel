@@ -45,6 +45,9 @@ import type {
   TramoRepartoSuministro,
   UsuarioApp,
 } from '../../types';
+import { confirmar } from '../../feedback/confirmacion';
+import { ejecutarOperacion } from '../../feedback/operaciones';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
   currentUser: UsuarioApp;
@@ -103,9 +106,22 @@ export const SuministrosSection: React.FC<Props> = ({ currentUser, inmuebles }) 
 
   const borrar = async (s: Suministro) => {
     const n = lecturas.filter((l) => l.suministroId === s.id).length;
-    if (!window.confirm(`¿Eliminar el suministro ${NOMBRE_TIPO[s.tipo]} de ${nombreInmueble(s.inmuebleId)}? Tiene ${n} lecturas.`)) return;
-    await eliminarSuministro(s.id, s.inmuebleId);
-    informar('Suministro eliminado.');
+    await confirmar({
+      titulo: 'Eliminar suministro',
+      mensaje: `¿Eliminar el suministro ${NOMBRE_TIPO[s.tipo]} de ${nombreInmueble(s.inmuebleId)}?`,
+      detalle: `Tiene ${n} lecturas registradas.`,
+      etiquetaConfirmar: 'Eliminar',
+      peligroso: true,
+      alConfirmar: async () => {
+        const { ok } = await ejecutarOperacion({
+          accion: () => eliminarSuministro(s.id, s.inmuebleId),
+          mensajeExito: 'Suministro eliminado.',
+          mensajeError: 'No se ha podido eliminar el suministro.',
+          origenesDatos: ['suministros', 'inmuebles'],
+        });
+        if (!ok) throw new Error('No se ha podido eliminar el suministro.');
+      },
+    });
   };
 
   return (
@@ -226,17 +242,48 @@ function DetalleSuministro({
   const [importe, setImporte] = useState('');
 
   const confirmarCambio = async (c: CambioTitularSuministro) => {
-    if (!window.confirm(`¿Confirmar el cambio de titular a ${c.titularNuevoNombre}? Se actualizará el suministro.`)) return;
-    await resolverCambioTitular(c.id, 'CONFIRMADO', currentUser.authUid || currentUser.id);
-    await actualizarSuministro(s.id, { titularNombre: c.titularNuevoNombre, titularNif: c.titularNuevoNif });
-    informar('Cambio confirmado y titular actualizado.');
+    await confirmar({
+      titulo: 'Confirmar cambio de titular',
+      mensaje: `¿Confirmar el cambio de titular a ${c.titularNuevoNombre}?`,
+      detalle: 'Se actualizará el suministro con los datos del nuevo titular.',
+      etiquetaConfirmar: 'Confirmar cambio',
+      peligroso: false,
+      alConfirmar: async () => {
+        const { ok } = await ejecutarOperacion({
+          accion: async () => {
+            await resolverCambioTitular(c.id, 'CONFIRMADO', currentUser.authUid || currentUser.id);
+            await actualizarSuministro(s.id, { titularNombre: c.titularNuevoNombre, titularNif: c.titularNuevoNif });
+          },
+          mensajeExito: 'Cambio confirmado y titular actualizado.',
+          mensajeError: 'No se ha podido confirmar el cambio de titular.',
+          origenesDatos: ['suministros'],
+        });
+        if (!ok) throw new Error('No se ha podido confirmar el cambio de titular.');
+      },
+    });
   };
 
   const rechazarCambio = async (c: CambioTitularSuministro) => {
-    const motivo = window.prompt('Motivo del rechazo:') || '';
-    if (!motivo.trim()) return;
-    await resolverCambioTitular(c.id, 'RECHAZADO', currentUser.authUid || currentUser.id, motivo.trim());
-    informar('Cambio rechazado.');
+    const { confirmado, texto } = await confirmar({
+      titulo: 'Rechazar cambio de titular',
+      mensaje: 'Indica el motivo del rechazo para dejarlo registrado.',
+      etiquetaConfirmar: 'Rechazar cambio',
+      peligroso: true,
+      entradaTexto: {
+        etiqueta: 'Motivo del rechazo',
+        marcador: 'Ej. datos del titular incompletos',
+        obligatorio: true,
+        errorObligatorio: 'Indica el motivo del rechazo.',
+      },
+    });
+    if (!confirmado || !texto) return;
+    const motivo = texto;
+    await ejecutarOperacion({
+      accion: () => resolverCambioTitular(c.id, 'RECHAZADO', currentUser.authUid || currentUser.id, motivo),
+      mensajeExito: 'Cambio de titular rechazado.',
+      mensajeError: 'No se ha podido registrar el rechazo del cambio.',
+      origenesDatos: ['suministros'],
+    });
   };
 
   const repartoCalc = useMemo(() => {
@@ -506,7 +553,7 @@ function SuministroModal({
         onGuardado('Suministro dado de alta.');
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se ha podido guardar.');
+      setError(mensajeDeErrorUsuario(e, 'No se ha podido guardar.'));
     } finally {
       setGuardando(false);
     }
@@ -671,7 +718,7 @@ function LecturaGestorModal({
       });
       onCreada();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se ha podido registrar.');
+      setError(mensajeDeErrorUsuario(e, 'No se ha podido registrar.'));
     } finally {
       setGuardando(false);
     }
@@ -763,7 +810,7 @@ function CambioGestorModal({
       });
       onCreada();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se ha podido solicitar.');
+      setError(mensajeDeErrorUsuario(e, 'No se ha podido solicitar.'));
     } finally {
       setGuardando(false);
     }

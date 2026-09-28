@@ -85,6 +85,7 @@ import {
   ClipboardList,
   Key,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface DashboardEjecutivoProps {
   inmuebles: Inmueble[];
@@ -217,7 +218,7 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
       } catch {}
       setLoadingOps(false);
     } catch (e: any) {
-      setErrorOps(e?.message || 'Error cargando operaciones');
+      setErrorOps(mensajeDeErrorUsuario(e, 'Error cargando operaciones'));
       setLoadingOps(false);
     }
     return () => {

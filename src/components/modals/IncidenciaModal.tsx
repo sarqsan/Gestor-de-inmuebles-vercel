@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   Loader2,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface IncidenciaModalProps {
   isOpen: boolean;
@@ -277,7 +278,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error al guardar incidencia:', err);
-      setErrorMsg(err?.message || 'Error al guardar la incidencia.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar la incidencia.'));
     } finally {
       setIsSubmitting(false);
     }

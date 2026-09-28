@@ -59,6 +59,7 @@ import { describirEstado, TRANSICIONES_MOROSIDAD } from '../../utils/morosidad/m
 import { resumenMorosidad } from '../../utils/morosidad/morosidadEngine';
 import { PLANTILLAS } from '../../notificaciones/plantillas';
 import { MorosidadDetalleModal } from '../modals/MorosidadDetalleModal';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface MorosidadSectionProps {
   expedientes: ExpedienteMorosidad[];
@@ -148,7 +149,7 @@ export const MorosidadSection: React.FC<MorosidadSectionProps> = (props) => {
       setMensaje({ tipo: (r.advertencias || []).length ? 'aviso' : 'ok', texto: `${okTexto}${adv}` });
       return r;
     } catch (err) {
-      setMensaje({ tipo: 'error', texto: err instanceof Error ? err.message : 'Error inesperado' });
+      setMensaje({ tipo: 'error', texto: mensajeDeErrorUsuario(err, 'Error inesperado') });
       return null;
     }
   };
@@ -164,7 +165,7 @@ export const MorosidadSection: React.FC<MorosidadSectionProps> = (props) => {
         }. La detección es idempotente: repetirla no duplica deuda, expedientes ni comunicaciones.`,
       });
     } catch (err) {
-      setMensaje({ tipo: 'error', texto: err instanceof Error ? err.message : 'Error en la detección' });
+      setMensaje({ tipo: 'error', texto: mensajeDeErrorUsuario(err, 'Error en la detección') });
     } finally {
       setDetectando(false);
     }

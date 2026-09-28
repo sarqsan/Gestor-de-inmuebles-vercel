@@ -43,6 +43,9 @@ import {
   CheckSquare,
   Clock,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
+import { confirmar } from '../feedback/confirmacion';
+import { ejecutarOperacion } from '../feedback/operaciones';
 
 interface FormalizarContratoModalProps {
   isOpen: boolean;
@@ -149,7 +152,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
         throw new Error(data.error || 'No se pudo generar la cláusula');
       }
     } catch (err: any) {
-      setIaError(err.message || 'Error al generar la cláusula con IA');
+      setIaError(mensajeDeErrorUsuario(err, 'Error al generar la cláusula con IA'));
     } finally {
       setIsGeneratingIa(false);
     }
@@ -1323,10 +1326,23 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
             {onDeleteContrato && existingContrato && (
               <button
                 onClick={async () => {
-                  if (confirm('¿Eliminar este expediente de formalización?')) {
-                    await onDeleteContrato(contrato.id);
-                    onClose();
-                  }
+                  await confirmar({
+                    titulo: 'Eliminar expediente',
+                    mensaje: '¿Eliminar este expediente de formalización?',
+                    detalle: 'El contrato y su histórico dejarán de estar disponibles.',
+                    etiquetaConfirmar: 'Eliminar',
+                    peligroso: true,
+                    alConfirmar: async () => {
+                      const { ok } = await ejecutarOperacion({
+                        accion: () => onDeleteContrato(contrato.id),
+                        mensajeExito: 'Expediente eliminado.',
+                        mensajeError: 'No se ha podido eliminar el expediente.',
+                        origenesDatos: ['contratos'],
+                      });
+                      if (!ok) throw new Error('No se ha podido eliminar el expediente.');
+                      onClose();
+                    },
+                  });
                 }}
                 className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
               >

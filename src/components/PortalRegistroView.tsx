@@ -26,6 +26,7 @@ import {
   Especialidad,
   ROLES_PREDEFINIDOS,
 } from '../types';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface PortalRegistroViewProps {
   token: string;
@@ -224,7 +225,7 @@ export const PortalRegistroView: React.FC<PortalRegistroViewProps> = ({
       setRegistroExitoso(true);
     } catch (err: any) {
       console.error('Error during nominal activation:', err);
-      setErrorMsg(err?.message || 'Error al activar la cuenta.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al activar la cuenta.'));
     } finally {
       setLoading(false);
     }
@@ -352,7 +353,7 @@ export const PortalRegistroView: React.FC<PortalRegistroViewProps> = ({
       setRegistroExitoso(true);
     } catch (err: any) {
       console.error('Error during registration:', err);
-      setErrorMsg(err?.message || 'Error al completar el registro.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al completar el registro.'));
     } finally {
       setLoading(false);
     }

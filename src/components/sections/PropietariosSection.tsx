@@ -1,4 +1,7 @@
 import React, { useState, useMemo } from 'react';
+import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFormulario';
+import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
+import type { ErroresFormulario } from '../../formularios/validacion';
 import { Propietario, CuentaBancariaPropietario, TipoPropietario, Inmueble } from '../../types';
 import {
   UserCheck,
@@ -64,6 +67,9 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
   // Form State for Main Modal
   const [formTipo, setFormTipo] = useState<TipoPropietario>('persona_fisica');
+  // UX-4: errores por campo (antes un único `alert` al guardar).
+  const [erroresPropietario, setErroresPropietario] = useState<ErroresFormulario>({});
+  const [erroresCuentaBanco, setErroresCuentaBanco] = useState<ErroresFormulario>({});
   const [formNombre, setFormNombre] = useState('');
   const [formNifCif, setFormNifCif] = useState('');
   const [formTelefono, setFormTelefono] = useState('');
@@ -242,10 +248,24 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
   const handleSavePropietarioSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formNombre.trim() || !formNifCif.trim()) {
-      alert('Por favor introduce al menos el Nombre/Razón Social y el NIF/CIF.');
+    // UX-4 §8: reglas reales del formulario, con el mensaje junto al campo.
+    const validos = validarFormulario(
+      { nombre: formNombre, nifCif: formNifCif, email: formEmail },
+      {
+        nombre: { etiqueta: 'Nombre/Razón Social', obligatorio: true },
+        nifCif: {
+          etiqueta: formTipo === 'persona_juridica' ? 'CIF de la Sociedad' : 'NIF / NIE',
+          obligatorio: true,
+          nif: true,
+        },
+        email: { etiqueta: 'Email', email: true },
+      }
+    );
+    if (hayErrores(validos)) {
+      setErroresPropietario(validos);
       return;
     }
+    setErroresPropietario({});
 
     const now = new Date().toISOString();
     const cleanCuentas = formCuentas.map((c, idx) => ({
@@ -283,7 +303,16 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   // Quick Add Bank Account Submission
   const handleQuickAddBankSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickBankModalOwner || !quickIban.trim()) return;
+    // UX-4: el botón ya se deshabilitaba sin explicar el motivo; ahora se dice qué falta.
+    const validosCuenta = validarFormulario(
+      { iban: quickIban },
+      { iban: { etiqueta: 'Número de Cuenta IBAN', obligatorio: true, iban: true } }
+    );
+    if (hayErrores(validosCuenta) || !quickBankModalOwner) {
+      setErroresCuentaBanco(validosCuenta);
+      return;
+    }
+    setErroresCuentaBanco({});
 
     const formattedIban = formatIbanInput(quickIban);
     const newAcc: CuentaBancariaPropietario = {
@@ -799,6 +828,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                           ? 'Razón Social de la Empresa *'
                           : 'Nombre y Apellidos Completos *'}
                       </label>
+                      {erroresPropietario.general && <ResumenErrores mensaje={erroresPropietario.general} />}
                       <input
                         type="text"
                         required
@@ -809,8 +839,10 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         }
                         value={formNombre}
                         onChange={(e) => setFormNombre(e.target.value)}
-                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
+                        aria-invalid={Boolean(erroresPropietario.nombre)}
+                        className={claseEntrada(erroresPropietario.nombre)}
                       />
+                      <ErrorCampo mensaje={erroresPropietario.nombre} />
                     </div>
 
                     <div>
@@ -823,8 +855,10 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         placeholder="Ej: 12345678Z o B-12345678"
                         value={formNifCif}
                         onChange={(e) => setFormNifCif(e.target.value.toUpperCase())}
-                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none uppercase"
+                        aria-invalid={Boolean(erroresPropietario.nifCif)}
+                        className={`${claseEntrada(erroresPropietario.nifCif)} font-mono uppercase`}
                       />
+                      <ErrorCampo mensaje={erroresPropietario.nifCif} />
                     </div>
                   </div>
 
@@ -1274,8 +1308,10 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                   placeholder="ES21 0182 1234 5678 9012 3456"
                   value={quickIban}
                   onChange={(e) => setQuickIban(formatIbanInput(e.target.value))}
-                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
+                  aria-invalid={Boolean(erroresCuentaBanco.iban)}
+                  className={`${claseEntrada(erroresCuentaBanco.iban)} font-mono font-bold uppercase`}
                 />
+                <ErrorCampo mensaje={erroresCuentaBanco.iban} />
               </div>
 
               <div>
@@ -1312,6 +1348,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                 <button
                   type="submit"
                   disabled={!quickIban.trim()}
+                  title={!quickIban.trim() ? 'Introduce el número de cuenta IBAN para guardar.' : undefined}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
                 >
                   Guardar IBAN

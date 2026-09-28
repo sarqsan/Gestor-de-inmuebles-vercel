@@ -22,6 +22,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface PolizaModalProps {
   isOpen: boolean;
@@ -214,7 +215,7 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error al guardar póliza:', err);
-      setErrorMsg(err?.message || 'Error al guardar la póliza.');
+      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar la póliza.'));
     } finally {
       setIsSubmitting(false);
     }

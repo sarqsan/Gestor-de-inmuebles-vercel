@@ -11,6 +11,7 @@
     "test:bloque-b": "tsx scripts/test-bloque-b.ts",
     "test:bloque-c": "tsx scripts/test-bloque-c.ts",
     "test:bloque-e": "tsx scripts/test-bloque-e.ts",
+    "test:bloque-8": "vitest run tests/bloque-8-migracion-historica.test.ts tests/migracion-dry-run-b4.test.ts tests/autorizacion-migracion-o7.test.ts tests/import-export-canonico.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

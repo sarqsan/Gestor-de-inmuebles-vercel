@@ -47,6 +47,8 @@ interface FormalizacionSectionProps {
   // FASE 3.1: «el inquilino me ha comunicado que se va».
   onRecomercializarContrato?: (contrato: ContratoFormalizacion) => void;
   onSaveContrato?: (contrato: ContratoFormalizacion) => Promise<void> | void;
+  onPersistirFinalizacion?: (contrato: ContratoFormalizacion, habitacion?: HabitacionInmueble) => Promise<void> | void;
+  puedeEscribirContrato?: (contrato: ContratoFormalizacion) => boolean;
 }
 
 export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
@@ -60,6 +62,8 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
   onDeleteContrato,
   onRecomercializarContrato,
   onSaveContrato,
+  onPersistirFinalizacion,
+  puedeEscribirContrato,
 }) => {
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState<string>('todos');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('todos');
@@ -323,6 +327,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
             const prop = inmuebles.find((i) => i.id === contrato.inmuebleId);
             const estadoInfo = getFormalizacionEstadoInfo(contrato.estado);
             const evalAseg = contrato.evaluacionAsegurabilidad;
+            const puedeEditar = puedeEscribirContrato ? puedeEscribirContrato(contrato) : true;
 
             return (
               <div
@@ -401,6 +406,8 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                   currentUser={currentUser}
                   habitaciones={habitaciones}
                   onSaveContrato={onSaveContrato ?? (async (c) => { await saveContratoFirestore(c); })}
+                  onPersistirFinalizacion={onPersistirFinalizacion}
+                  readOnly={puedeEscribirContrato ? !puedeEscribirContrato(contrato) : false}
                   onUpdateHabitacion={async (h) => { await saveHabitacionFirestore(h); }}
                 />
 
@@ -414,7 +421,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                     >
                       <Printer className="w-4 h-4" />
                     </button>
-                    {onRecomercializarContrato && contrato.estado !== 'CANCELADO' && (
+                    {puedeEditar && onRecomercializarContrato && contrato.estado !== 'CANCELADO' && (
                       <button
                         onClick={() => onRecomercializarContrato(contrato)}
                         title="El inquilino se va: iniciar recomercialización"
@@ -423,7 +430,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                         <RefreshCw className="w-4 h-4" />
                       </button>
                     )}
-                    <button
+                    {puedeEditar && <button
                       onClick={async () => {
                         if (confirm(`¿Eliminar el expediente de ${contrato.candidatoNombre}?`)) {
                           await onDeleteContrato(contrato.id);
@@ -433,20 +440,19 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                       className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </button>}
                   </div>
 
-                  <button
+                  {puedeEditar && <button
                     onClick={() => {
-                      if (cand) {
-                        onOpenFormalizarModal(cand, prop, contrato);
-                      }
+                      if (cand) onOpenFormalizarModal(cand, prop, contrato);
                     }}
-                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-indigo-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    disabled={!cand}
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                     <span>Gestionar Expediente</span>
-                  </button>
+                  </button>}
                 </div>
               </div>
             );

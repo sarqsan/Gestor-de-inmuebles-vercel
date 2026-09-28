@@ -62,6 +62,16 @@ const ENTIDADES = ['AUTO', 'GASTO', 'COBRO', 'INMUEBLE', 'PROPIETARIO', 'CONTRAT
 
 function descargar(nombre: string, contenido: string, mime: string): void {
   const blob = new Blob([contenido], { type: mime });
+  descargarBlob(nombre, blob);
+}
+
+/** Descarga un archivo binario (libro .xlsx generado en memoria). */
+function descargarBytes(nombre: string, bytes: Uint8Array, mime: string): void {
+  const copia = bytes.slice();
+  descargarBlob(nombre, new Blob([copia.buffer], { type: mime }));
+}
+
+function descargarBlob(nombre: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -88,6 +98,10 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
     catalogos: Parameters<typeof ejecutarImportDryRun>[0]['catalogos'];
   } | null>(null);
   const [errorImport, setErrorImport] = useState<string | null>(null);
+  /** Hoja del libro XLSX a leer (vacío = primera hoja, con aviso de cuáles hay). */
+  const [hojaXlsx, setHojaXlsx] = useState('');
+  /** Avisos del parser (BLOQUE 7: hojas del libro, filas ignoradas, tipos…). */
+  const [avisosParseo, setAvisosParseo] = useState<string[]>([]);
   const [analizando, setAnalizando] = useState(false);
   const [decisiones, setDecisiones] = useState<Record<string, DecisionPromocion>>({});
   const [seleccion, setSeleccion] = useState<string[] | null>(null);
@@ -101,7 +115,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   const [expProps, setExpProps] = useState('');
   const [expInms, setExpInms] = useState('');
   const [expEjercicios, setExpEjercicios] = useState('');
-  const [expFormato, setExpFormato] = useState<'JSON' | 'CSV'>('JSON');
+  const [expFormato, setExpFormato] = useState<'JSON' | 'CSV' | 'XLSX'>('JSON');
   const [expError, setExpError] = useState<string | null>(null);
   const [expInfo, setExpInfo] = useState<string | null>(null);
   const [expGenerando, setExpGenerando] = useState(false);
@@ -170,7 +184,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   const identidad = usuarioEf ? { usuarioId: usuarioEf.id, usuarioEmail: usuarioEf.email, usuarioNombre: usuarioEf.nombre } : null;
 
   const onElegirFichero = async (f: File | undefined): Promise<void> => {
-    setErrorImport(null); setRun(null); setInsumos(null); setAutorizacion(null); setResultadoPromo(null); setDecisiones({}); setSeleccion(null);
+    setErrorImport(null); setRun(null); setInsumos(null); setAutorizacion(null); setResultadoPromo(null); setDecisiones({}); setSeleccion(null); setAvisosParseo([]);
     if (!f) return;
     const buf = new Uint8Array(await f.arrayBuffer());
     const hash = sha256Hex(buf);
@@ -196,11 +210,6 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         // del perfil (antes: 'PROPIETARIO' fijo incluso para master/gestor).
         importador: identidad ? { uid: identidad.usuarioId, modalidad } : undefined,
       });
-      if (formato === 'XLSX') {
-        const r = parseXlsx();
-        setErrorImport(r.errores.join(' '));
-        return;
-      }
       // Marca de exportación propia (solo JSON): versión + entidad + records anidados.
       let tipoFuente: 'ERP_EXPORT' | 'EXTERNAL' = 'EXTERNAL';
       let versionFuente = FUENTE_EXTERNA_SIN_VERSION;
@@ -218,7 +227,14 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
           }
         } catch { /* el parseo principal ya informa del error */ }
       }
-      const parseo = formato === 'JSON' ? parseJson(fichero.bytes, rutaAnidada ? { rutaAnidada } : {}) : parseCsv(fichero.bytes);
+      // Un solo contrato: mismo pipeline para JSON/CSV/XLSX (BLOQUE 7 añade el
+      // adaptador XLSX real, sin lógica distinta por pantalla).
+      const parseo = formato === 'JSON'
+        ? parseJson(fichero.bytes, rutaAnidada ? { rutaAnidada } : {})
+        : formato === 'XLSX'
+          ? parseXlsx(fichero.bytes, hojaXlsx.trim() !== '' ? { hoja: hojaXlsx.trim() } : {})
+          : parseCsv(fichero.bytes);
+      setAvisosParseo([...parseo.avisos]);
       if (parseo.errores.length > 0 && parseo.registros.length === 0) {
         setErrorImport(parseo.errores.join(' | '));
         return;
@@ -324,13 +340,23 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
     if (!identidadLista) return;
     setExpError(null); setExpInfo(null); setExpGenerando(true);
     try {
+      // Listas del ámbito: los huecos NO son valores. Antes, un campo vacío
+      // producía `Number('') === 0` y el filtro por ejercicio dejaba fuera TODO
+      // (`[0]`): la exportación salía vacía sin decir por qué.
+      const lista = (valor: string): string[] => valor.split(',').map((x) => x.trim()).filter(Boolean);
+      const tokensEjercicio = lista(expEjercicios);
+      const ejercicios = tokensEjercicio.map(Number);
+      const ejercicioInvalido = tokensEjercicio.find((_, i) => !Number.isInteger(ejercicios[i]) || ejercicios[i] <= 0);
+      if (ejercicioInvalido !== undefined) {
+        setExpError(`Ejercicio inválido: «${ejercicioInvalido}». Usa años de 4 cifras (p. ej. 2024) separados por comas.`);
+        return;
+      }
       const fuentes = await cargarFuentesCatalogo(scopeEf);
-      const porProp = (p: string) => p.trim();
       const solicitado: AmbitoExportacionSolicitado = {
         entidad: expEntidad,
-        propietarioIds: expProps.split(',').map(porProp).filter(Boolean),
-        inmuebleIds: expInms.split(',').map(porProp).filter(Boolean),
-        ejercicios: expEjercicios.split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n)),
+        propietarioIds: lista(expProps),
+        inmuebleIds: lista(expInms),
+        ejercicios,
         formato: expFormato,
       };
       const base: Record<string, unknown>[] = expEntidad === 'GASTO'
@@ -354,11 +380,13 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         exportedAt: new Date().toISOString(),
         exportedBy: identidad?.usuarioId ?? null,
       });
-      descargar(
-        `export_${expEntidad.toLowerCase()}_${exp.exportRunId}.${expFormato.toLowerCase()}`,
-        exp.contenido,
-        expFormato === 'JSON' ? 'application/json' : 'text/csv',
-      );
+      const nombre = `export_${expEntidad.toLowerCase()}_${exp.exportRunId}.${expFormato.toLowerCase()}`;
+      if (exp.bytes) {
+        // XLSX: libro real generado en memoria (no se sube a Storage/Firestore).
+        descargarBytes(nombre, exp.bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      } else {
+        descargar(nombre, exp.contenido, expFormato === 'JSON' ? 'application/json' : 'text/csv');
+      }
       setExpInfo(`${exp.recordCount} registro(s) · run ${exp.exportRunId} · sha256 ${exp.sha256.slice(0, 16)}…${exp.avisos.length > 0 ? ` · avisos: ${exp.avisos.join(' | ')}` : ''}`);
     } catch (e) {
       setExpError(e instanceof Error ? e.message : String(e));
@@ -401,7 +429,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
       {pestana === 'importar' && (
         <div className="space-y-3 text-xs">
           <p className="text-slate-600 leading-relaxed">
-            PASO 1–3: elige archivo (JSON/CSV) y tipo de datos. PASO 4: <strong>Analizar</strong> ejecuta un dry-run
+            PASO 1–3: elige archivo (JSON/CSV/XLSX) y tipo de datos. PASO 4: <strong>Analizar</strong> ejecuta un dry-run
             puro (0 escrituras). PASO 5–6: revisa el resumen y los problemas. PASO 7: promociona solo autorizados.
             Ámbito: {ambito.esMaster ? 'master' : identidadLista ? `${(ambito.propietarioIdsLegibles ?? []).length} propietario(s)` : 'sin identidad (bloqueado)'}.
           </p>
@@ -410,9 +438,16 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl font-bold flex items-center gap-2">
               <Upload className="w-4 h-4" /> {fichero ? fichero.nombre : 'Seleccionar archivo'}
             </button>
-            <input ref={fileRef} type="file" accept=".json,.csv" className="hidden"
+            <input ref={fileRef} type="file" accept=".json,.csv,.xlsx,.xls" className="hidden"
               onChange={(e) => void onElegirFichero(e.target.files?.[0])} />
             <span className="text-slate-500">Formato: <strong>{formato ?? '—'}</strong></span>
+            {formato === 'XLSX' && (
+              <label className="text-slate-500" title="Vacío = primera hoja del libro (se avisa de cuál se lee)">
+                Hoja:
+                <input value={hojaXlsx} onChange={(e) => setHojaXlsx(e.target.value)} placeholder="(por nombre; vacío = primera)"
+                  className="ml-1 border border-slate-200 rounded-lg px-2 py-1 font-mono" />
+              </label>
+            )}
             <label className="text-slate-500">Entidad:
               <select value={entidad} onChange={(e) => setEntidad(e.target.value)}
                 className="ml-1 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-700">
@@ -426,6 +461,11 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
           </div>
           {fichero && <p className="text-slate-500 font-mono">sha256: {fichero.hash.slice(0, 32)}… ({fichero.bytes.length} bytes)</p>}
           {errorImport && <div className="p-3 rounded-xl bg-amber-50 text-amber-800 border border-amber-200 font-semibold">{errorImport}</div>}
+          {avisosParseo.length > 0 && (
+            <ul className="p-3 rounded-xl bg-slate-50 text-slate-600 border border-slate-200 space-y-0.5">
+              {avisosParseo.map((a, i) => <li key={`${i}-${a}`} className="font-mono text-[11px]">· {a}</li>)}
+            </ul>
+          )}
           {run && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -569,10 +609,11 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
               </select>
             </label>
             <label className="text-slate-600">Formato:
-              <select value={expFormato} onChange={(e) => setExpFormato(e.target.value as 'JSON' | 'CSV')}
+              <select value={expFormato} onChange={(e) => setExpFormato(e.target.value as 'JSON' | 'CSV' | 'XLSX')}
                 className="ml-1 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-700">
                 <option value="JSON">JSON canónico</option>
                 <option value="CSV">CSV</option>
+                <option value="XLSX">Excel (.xlsx)</option>
               </select>
             </label>
             <label className="text-slate-600">Propietarios (ids, coma; vacío = todos los legibles):

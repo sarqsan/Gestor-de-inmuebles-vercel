@@ -6,12 +6,11 @@
  *   INMUEBLE → CONTRATO → COBRO/GASTO → DOCUMENTO → EXPEDIENTE FISCAL
  *
  * PRINCIPIOS:
- *  · PROYECCIÓN PURA: el índice documental NO crea una colección paralela;
- *    referencia los documentos que YA existen en sus modelos canónicos por
- *    dominio (Gasto.documento/documentos, CobroPeriodo.justificante,
- *    ContratoFormalizacion.anexos, PolizaSeguro.documentos/documentosRenovacion,
- *    Incidencia.fotografias/documentos, TareaMantenimiento.documentos,
- *    GarantiaReparacion.documentoUrl, DocumentoInventario).
+ *  · PROYECCIÓN PURA: el índice NO crea una colección global paralela. Los
+ *    adjuntos históricos se proyectan desde sus modelos de dominio y el nuevo
+ *    flujo persistente usa una subcolección acotada al inmueble
+ *    (`inmuebles/{id}/documentos_patrimoniales`), que sólo contiene metadatos
+ *    y referencias; los datos económicos permanecen en sus fuentes canónicas.
  *  · NUNCA sobrescritura silenciosa: sustituir es un acto EXPLÍCITO y
  *    versionado; el documento anterior pasa a estado SUSTITUIDO y sigue
  *    recuperable.
@@ -75,7 +74,55 @@ export type EntidadOrigenDocumento =
   | 'tareas_mantenimiento'
   | 'garantias_reparacion'
   | 'inventario'
-  | 'siniestros';
+  | 'siniestros'
+  | 'inmuebles';
+
+/**
+ * Registro canónico de un documento nuevo del inmueble. Vive en la
+ * subcolección del inmueble (no en una colección global) y sólo guarda
+ * metadatos/referencias; el binario está en Firebase Storage. Los adjuntos
+ * históricos siguen viviendo en sus entidades de dominio y se proyectan
+ * junto a estos registros en el índice.
+ */
+export type EstadoDocumentoPatrimonial =
+  | 'PENDIENTE_STORAGE'
+  | 'DISPONIBLE'
+  | 'ERROR_STORAGE'
+  | 'PENDIENTE_ELIMINACION'
+  | 'ELIMINADO';
+
+export interface DocumentoPatrimonial {
+  id: string;
+  inmuebleId: string;
+  propietarioId: string;
+  tipo: TipoDocumentoExpediente;
+  nombre: string;
+  nombreStorage: string;
+  mimeType: string;
+  tamanoBytes: number;
+  sha256: string;
+  storagePath: string;
+  fechaDocumental?: string;
+  fechaIncorporacion: string;
+  actorId: string;
+  actorNombre: string;
+  referencia?: string;
+  observaciones?: string;
+  version: number;
+  sustituyeA?: string;
+  estado: EstadoDocumentoPatrimonial;
+  contratoId?: string;
+  polizaId?: string;
+  gastoId?: string;
+  facturaId?: string;
+  incidenciaId?: string;
+  tareaMantenimientoId?: string;
+  garantiaId?: string;
+  inventarioId?: string;
+  movimientoId?: string;
+  actualizadoEl?: string;
+  eliminadoEl?: string;
+}
 
 export type EstadoDocumentoExpediente =
   | 'DISPONIBLE'   // referencia localizable (Storage/URL)
@@ -100,6 +147,7 @@ export interface EntradaIndiceDocumental {
   contratoId?: string;
   polizaId?: string;
   gastoId?: string;
+  facturaId?: string;
   cobroId?: string;
   incidenciaId?: string;
   tareaMantenimientoId?: string;
@@ -114,6 +162,8 @@ export interface EntradaIndiceDocumental {
   url?: string;
   storagePath?: string;
   hash?: string; // sha256 cuando el contenido está disponible
+  mimeType?: string;
+  tamanoBytes?: number;
 
   // Fechas y actor
   fechaDocumental?: string; // fecha del documento (no de subida)

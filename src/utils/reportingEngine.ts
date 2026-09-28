@@ -957,6 +957,11 @@ export function generarExportacionFiscal(
         moneda: 'EUR',
         ejercicioFiscal: gasto.ejercicioFiscal,
         esDeducible: esGastoDeducible(gasto),
+        // BLOQUE 5 — OPERACIONES → FISCALIDAD: la exportación conserva de dónde
+        // procede el gasto (operación + documento) sin cambiar `origen`/`tipo`.
+        ...(gasto.origen ? { origenOperacion: gasto.origen } : {}),
+        ...(gasto.origenId ? { origenOperacionId: gasto.origenId } : {}),
+        ...(documentoIdDeGasto(gasto) ? { documentoId: documentoIdDeGasto(gasto) } : {}),
       });
     }
   }
@@ -979,8 +984,13 @@ export function generarExportacionFiscal(
   };
 }
 
+/** ID del justificante del gasto (documento principal o primero de la lista). */
+function documentoIdDeGasto(gasto: Gasto): string | undefined {
+  return (gasto.documento ?? gasto.documentos?.[0])?.id;
+}
+
 export function exportarCSV(exportacion: ExportacionFiscalEstructurada): string {
-  const headers = ['propietarioId','inmuebleId','inmuebleDireccion','ejercicio','periodo','concepto','fecha','importe','categoria','tipo','referenciaId','origen','moneda','esDeducible'];
+  const headers = ['propietarioId','inmuebleId','inmuebleDireccion','ejercicio','periodo','concepto','fecha','importe','categoria','tipo','referenciaId','origen','moneda','esDeducible','origenOperacion','origenOperacionId','documentoId'];
   const rows = exportacion.items.map(item => [
     item.propietarioId,
     item.inmuebleId,
@@ -996,6 +1006,9 @@ export function exportarCSV(exportacion: ExportacionFiscalEstructurada): string 
     item.origen,
     item.moneda,
     item.esDeducible !== undefined ? String(item.esDeducible) : '',
+    item.origenOperacion ?? '',
+    item.origenOperacionId ?? '',
+    item.documentoId ?? '',
   ].join(','));
   return [headers.join(','), ...rows].join('\n');
 }
@@ -1019,6 +1032,9 @@ export function exportarJSON(exportacion: ExportacionFiscalEstructurada): string
       origen: i.origen,
       moneda: i.moneda,
       esDeducible: i.esDeducible,
+      origenOperacion: i.origenOperacion,
+      origenOperacionId: i.origenOperacionId,
+      documentoId: i.documentoId,
     })),
   };
   return JSON.stringify(safe, null, 2);

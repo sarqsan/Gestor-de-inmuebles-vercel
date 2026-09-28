@@ -20,7 +20,7 @@
 
 /** Petición simulada: auth, documentos de la mini-base, recurso existente y entrante. */
 export interface Peticion {
-  auth: { uid: string; token?: { email?: string } } | null;
+  auth: { uid: string; token?: { email?: string; email_verified?: boolean } } | null;
   db: Record<string, Record<string, unknown>>;
   /** Estado propuesto tras commit atómico, solo para getAfter; NO sustituye a db. */
   after?: Record<string, Record<string, unknown>>;
@@ -187,7 +187,13 @@ export function crearEvaluadorReglas(RULES: string) {
     const local = new Map(frame);
     for (const stmt of sentencias(cuerpo)) {
       const asign = stmt.match(/^let\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]+)$/);
-      if (asign) { local.set(asign[1], evaluar(parsear(asign[2]), req, funciones, local)); continue; }
+      if (asign) {
+        const valor = evaluar(parsear(asign[2]), req, funciones, local);
+        local.set(asign[1], valor);
+        if (process.env.RL_DEBUG_DEEP && (frame.has('enlaceId') || frame.has('gestionId')))
+          console.log('RULE_LET', asign[1], JSON.stringify(valor));
+        continue;
+      }
       const ret = stmt.match(/^return\s+([\s\S]+)$/);
       if (ret) return evaluar(parsear(ret[1]), req, funciones, local);
       throw new Error(`HARNESS NO CUBRE: sentencia de función (${stmt.slice(0, 48)}…)`);
@@ -228,6 +234,7 @@ export function crearEvaluadorReglas(RULES: string) {
   type Nodo =
     | { k: 'lit'; v: unknown }
     | { k: 'list'; items: Nodo[] }
+    | { k: 'map'; entries: [string, Nodo][] }
     | { k: 'path'; partes: (string | Nodo)[] }
     | { k: 'ident'; nombre: string }
     | { k: 'field'; obj: Nodo; nombre: string }
@@ -240,6 +247,19 @@ export function crearEvaluadorReglas(RULES: string) {
     | { k: 'size' /* marcador interno, nunca usado directamente */ };
 
   const MISSING = Symbol('missing');
+  /** Firestore equality is structural for maps/lists and ignores map key order. */
+  const firestoreEqual = (a: unknown, b: unknown): boolean => {
+    if (a === b) return true;
+    if (a === MISSING || b === MISSING || a === null || b === null || typeof a !== typeof b) return false;
+    if (Array.isArray(a) || Array.isArray(b))
+      return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => firestoreEqual(v, b[i]));
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      const ak = Object.keys(a as object).sort(), bk = Object.keys(b as object).sort();
+      return ak.length === bk.length && ak.every((k, i) => k === bk[i]
+        && firestoreEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+    }
+    return false;
+  };
   /** Envoltorio de documento (`resource`, `request.resource`, `get(...)`): permite `.data`/`.id`. */
   const DOC = (mapa: Record<string, unknown> | null) => ({ __doc: mapa });
   const esDoc = (v: unknown): v is { __doc: Record<string, unknown> | null } =>
@@ -281,7 +301,7 @@ export function crearEvaluadorReglas(RULES: string) {
         continue;
       }
       // D3: `*`/`/` para los límites de tamaño de storage.rules (`12 * 1024 * 1024`).
-      const ops = ['&&', '||', '==', '!=', '>=', '<=', '<', '>', '!', '(', ')', '[', ']', ',', '.', '+', '-', '*', '/', ':', '?'];
+      const ops = ['&&', '||', '==', '!=', '>=', '<=', '<', '>', '!', '(', ')', '[', ']', ',', '.', '+', '-', '*', '/', ':', '?', '{', '}'];
       const op = ops.find((o) => src.startsWith(o, i));
       if (op) { toks.push(op); i += op.length; continue; }
       const m = /^[A-Za-z_$][A-Za-z0-9_]*/.exec(src.slice(i)) || /^[0-9]+(\.[0-9]+)?/.exec(src.slice(i));
@@ -310,6 +330,22 @@ export function crearEvaluadorReglas(RULES: string) {
         if (peek() !== ']') { for (;;) { items.push(expr()); if (peek() === ',') { p++; continue; } break; } }
         eat(']');
         return { k: 'list', items };
+      }
+      if (t === '{') {
+        p++; const entries: [string, Nodo][] = [];
+        if (peek() !== '}') {
+          for (;;) {
+            const key = toks[p++];
+            if (!key || !/^(?:[A-Za-z_][A-Za-z0-9_]*|'[^']*'|"[^"]*")$/.test(key))
+              throw new Error(`HARNESS NO CUBRE: clave de mapa ${JSON.stringify(key)}`);
+            const normalized = key.startsWith("'") || key.startsWith('"') ? key.slice(1, -1) : key;
+            eat(':'); entries.push([normalized, expr()]);
+            if (peek() === ',') { p++; continue; }
+            break;
+          }
+        }
+        eat('}');
+        return { k: 'map', entries };
       }
       if (t && (t.startsWith('`') || t.startsWith('\u0001'))) {
         p++;
@@ -445,6 +481,7 @@ export function crearEvaluadorReglas(RULES: string) {
     switch (nodo.k) {
       case 'lit': return nodo.v;
       case 'list': return nodo.items.map((x) => evaluar(x, req, funciones, frame));
+      case 'map': return Object.fromEntries(nodo.entries.map(([k, v]) => [k, evaluar(v, req, funciones, frame)]));
       case 'path': {
         // las partes literales ya traen sus barras: se pegan tal cual
         const segs = nodo.partes.map((x) => (typeof x === 'string' ? x : String(evaluar(x, req, funciones, frame))));
@@ -538,7 +575,10 @@ export function crearEvaluadorReglas(RULES: string) {
           // llamador (las funciones del fichero no son recursivas, sí comparten ámbito)
           const nuevoFrame = new Map(frame);
           fn.params.forEach((prm, idx) => nuevoFrame.set(prm, evaluar(nodo.args[idx], req, funciones, frame)));
-          return evaluarCuerpo(fn.cuerpo, req, funciones, nuevoFrame);
+          const resultado = evaluarCuerpo(fn.cuerpo, req, funciones, nuevoFrame);
+          if (process.env.RL_DEBUG_DEEP && ['respuestaInvitacionGestion','destinatarioGestion','gestionR02Consistente','auditoriaNueva','auditoriaVinculada','usuarioR02Activado','isMasterAdmin'].includes(nombre))
+            console.log('RULE_FN', nombre, JSON.stringify(Object.fromEntries(nuevoFrame)), '=>', JSON.stringify(resultado));
+          return resultado;
         }
         const base = evaluar(nodo.obj, req, funciones, frame);
         if (nombre === 'toMillis' && base && typeof base === 'object' && '__timeMs' in base)
@@ -556,7 +596,7 @@ export function crearEvaluadorReglas(RULES: string) {
             v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
           const [antes, despues] = [plano(par[0]), plano(par[1])];
           return [...new Set([...Object.keys(antes), ...Object.keys(despues)])].filter(
-            (k) => JSON.stringify(antes[k]) !== JSON.stringify(despues[k]),
+            (k) => !firestoreEqual(k in antes ? antes[k] : MISSING, k in despues ? despues[k] : MISSING),
           );
         }
         if (nombre === 'size') {
@@ -566,10 +606,14 @@ export function crearEvaluadorReglas(RULES: string) {
           if (base && typeof base === 'object') return Object.keys(base).length;
           return MISSING;
         }
+        if (nombre === 'concat') {
+          const otros = evaluar(nodo.args[0], req, funciones, frame);
+          return Array.isArray(base) && Array.isArray(otros) ? base.concat(otros) : MISSING;
+        }
         if (nombre === 'hasAny') {
           const otros = evaluar(nodo.args[0], req, funciones, frame) as unknown[];
           if (base === MISSING || !Array.isArray(base)) return false;
-          return otros.some((x) => base.includes(x));
+          return otros.some((x) => base.some((value) => firestoreEqual(value, x)));
         }
         // INC-06 — cobertura de `hasOnly` (semántica Firestore: todo elemento
         // del conjunto está en la lista; duplicados irrelevantes). Lo usan
@@ -577,12 +621,12 @@ export function crearEvaluadorReglas(RULES: string) {
         if (nombre === 'hasOnly') {
           const permitidos = evaluar(nodo.args[0], req, funciones, frame) as unknown[];
           if (base === MISSING || !Array.isArray(base)) return false;
-          return base.every((x) => permitidos.includes(x));
+          return base.every((x) => permitidos.some(value => firestoreEqual(value, x)));
         }
         if (nombre === 'hasAll') {
           const requeridos = evaluar(nodo.args[0], req, funciones, frame) as unknown[];
           if (base === MISSING || !Array.isArray(base)) return false;
-          return requeridos.every((x) => base.includes(x));
+          return requeridos.every((x) => base.some((value) => firestoreEqual(value, x)));
         }
         if (nombre === 'keys') {
           if (base === MISSING || !base || typeof base !== 'object') return MISSING;
@@ -629,12 +673,11 @@ export function crearEvaluadorReglas(RULES: string) {
         const rv: unknown = r;
         const falta = (v: unknown): boolean => v === (MISSING as unknown);
         if (op === '==') {
-          // eslint-disable-next-line no-console
-          return !falta(lv) && !falta(rv) && JSON.stringify(lv) === JSON.stringify(rv);
+          return !falta(lv) && !falta(rv) && firestoreEqual(lv, rv);
         }
-        if (op === '!=') return !(!falta(lv) && !falta(rv) && JSON.stringify(lv) === JSON.stringify(rv));
+        if (op === '!=') return !falta(lv) && !falta(rv) && !firestoreEqual(lv, rv);
         if (op === 'in') {
-          if (Array.isArray(rv)) return rv.includes(lv);
+          if (Array.isArray(rv)) return rv.some((value) => firestoreEqual(value, lv));
           if (rv && typeof rv === 'object') return !falta(lv) && String(lv) in (rv as object);
           return false;
         }
@@ -690,7 +733,7 @@ export function crearEvaluadorReglas(RULES: string) {
         const c = entrada.condicion[i];
         if (c === '(' || c === '[') nivel++;
         if (c === ')' || c === ']') nivel--;
-        if (nivel === 0 && c === '&' && entrada.condicion[i + 1] === '&') { partes.push(actual); actual = ''; i++; continue; }
+        if (c === '&' && entrada.condicion[i + 1] === '&' && nivel === 0) { partes.push(actual); actual = ''; i++; continue; }
         actual += c;
       }
       partes.push(actual);

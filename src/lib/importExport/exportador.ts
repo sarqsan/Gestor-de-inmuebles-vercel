@@ -14,19 +14,59 @@ import type {
   ExportRun,
 } from './contrato';
 import { EXPORTADOR_CANONICO_VERSION, MARCA_EXPORT_PROPIO } from './contrato';
+import { generarXlsx, sanearNombreHoja, type ColumnaXlsx, type TipoColumnaXlsx } from './xlsx';
 
 /** Entidades exportables en v1 (modelo canónico directo). */
 export const ENTIDADES_EXPORTABLES: ReadonlyArray<string> = [
   'GASTO', 'COBRO', 'INMUEBLE', 'PROPIETARIO', 'CONTRATO',
 ];
 
-const COLUMNAS_CSV: Record<string, readonly string[]> = {
+/** Columnas del exportador canónico: única definición para CSV y XLSX. */
+export const COLUMNAS_CSV: Record<string, readonly string[]> = {
   GASTO: ['id', 'inmuebleId', 'propietarioId', 'contratoId', 'tipo', 'categoria', 'concepto', 'proveedor', 'importe', 'estado', 'fechaDevengo', 'fechaPago', 'periodoMesAnio', 'aCargoDe', 'deducible', 'ejercicioFiscal', 'metodoPago', 'origen', 'origenId', 'createdAt', 'updatedAt'],
   COBRO: ['id', 'inmuebleId', 'contratoId', 'inquilinoId', 'propietarioId', 'mes', 'anio', 'periodoMesAnio', 'nombreMes', 'importePrevisto', 'importeRecibido', 'fechaVencimiento', 'fechaPago', 'estado', 'metodoPago', 'observaciones'],
   INMUEBLE: ['id', 'direccion', 'ciudad', 'referenciaCatastral', 'propietarioId', 'propietarioPrincipalId', 'estado', 'tipoInmueble', 'precio', 'rentaMensual', 'superficie', 'habitaciones', 'codigoPostal'],
   PROPIETARIO: ['id', 'nombre', 'nifCif', 'email', 'telefono', 'direccion', 'ciudad', 'codigoPostal'],
   CONTRATO: ['id', 'inmuebleId', 'propietarioId', 'candidatoId', 'candidatoNombre', 'fechaInicio', 'fechaFin', 'rentaMensual', 'estado', 'inmuebleDireccion'],
 };
+
+/**
+ * Tipo de dato por columna y entidad para el libro XLSX (BLOQUE 7).
+ *
+ * NO hay una segunda lista de columnas: las columnas son exactamente
+ * `COLUMNAS_CSV` (mismo orden y nombres, requisito de compatibilidad); aquí
+ * solo se declara CÓMO se escribe cada una en Excel:
+ *  · `numero` → celda numérica real (los importes no viajan como texto),
+ *  · `fecha`  → serial de fecha Excel con formato de fecha (no texto),
+ *  · `texto`  → cadena literal (`inlineStr`, nunca fórmula).
+ * Los identificadores, NIF/CIF y códigos postales son TEXTO a propósito: un
+ * código postal '03001' o un NIF no deben convertirse en número.
+ */
+export const TIPOS_COLUMNAS_XLSX: Readonly<Record<string, Readonly<Record<string, TipoColumnaXlsx>>>> = {
+  GASTO: {
+    importe: 'numero', deducible: 'numero', ejercicioFiscal: 'numero',
+    fechaDevengo: 'fecha', fechaPago: 'fecha', createdAt: 'fecha', updatedAt: 'fecha',
+  },
+  COBRO: {
+    mes: 'numero', anio: 'numero', importePrevisto: 'numero', importeRecibido: 'numero',
+    fechaVencimiento: 'fecha', fechaPago: 'fecha',
+  },
+  INMUEBLE: { precio: 'numero', rentaMensual: 'numero', superficie: 'numero', habitaciones: 'numero' },
+  PROPIETARIO: {},
+  CONTRATO: { rentaMensual: 'numero', fechaInicio: 'fecha', fechaFin: 'fecha' },
+};
+
+/** Columnas XLSX de una entidad = columnas CSV con su tipo (texto por defecto). */
+export function columnasXlsxDeEntidad(entidad: string): readonly ColumnaXlsx[] {
+  const columnas = COLUMNAS_CSV[entidad] ?? [];
+  const tipos = TIPOS_COLUMNAS_XLSX[entidad] ?? {};
+  return columnas.map((nombre) => ({ nombre, tipo: tipos[nombre] ?? 'texto' }));
+}
+
+/** Nombre de la hoja del libro (la entidad; saneado si excede los límites). */
+export function nombreHojaDeEntidad(entidad: string): string {
+  return sanearNombreHoja(entidad, 0);
+}
 
 export interface VeredictoAmbito {
   ok: boolean;
@@ -181,6 +221,8 @@ function serializarCsv(entityType: string, registros: ReadonlyArray<Record<strin
 /**
  * Ejecuta una exportación (pura; `exportedAt` inyectado para reproducibilidad).
  * Lanza si el ámbito no es válido: nunca exporta fuera de ámbito.
+ * XLSX comparte columnas con CSV (`columnasXlsxDeEntidad`) y solo cambia el
+ * envoltorio (libro real, celdas tipadas, determinista byte a byte).
  */
 export function ejecutarExportacion(p: {
   solicitado: AmbitoExportacionSolicitado;
@@ -199,6 +241,26 @@ export function ejecutarExportacion(p: {
   );
   const exportRunId = p.exportRunId
     ?? `exp_${sha256Hex(`IE-EXP:${EXPORTADOR_CANONICO_VERSION}:${jsonEstable(p.solicitado)}:${p.exportedAt}`).slice(0, 12)}`;
+  if (p.solicitado.formato === 'XLSX') {
+    const bytes = generarXlsx([{
+      nombre: nombreHojaDeEntidad(p.solicitado.entidad),
+      columnas: columnasXlsxDeEntidad(p.solicitado.entidad),
+      filas: filtrados,
+    }]);
+    return {
+      exportRunId,
+      exportedAt: p.exportedAt,
+      exportedBy: p.exportedBy ?? null,
+      schemaVersion: EXPORTADOR_CANONICO_VERSION,
+      scope: p.solicitado,
+      recordCount: filtrados.length,
+      formato: 'XLSX',
+      sha256: sha256Hex(bytes),
+      contenido: '',
+      bytes,
+      avisos: [...veredicto.avisos],
+    };
+  }
   const contenido = p.solicitado.formato === 'JSON'
     ? serializarJson(p.solicitado.entidad, filtrados, { exportRunId, exportedAt: p.exportedAt, scope: p.solicitado })
     : serializarCsv(p.solicitado.entidad, filtrados);

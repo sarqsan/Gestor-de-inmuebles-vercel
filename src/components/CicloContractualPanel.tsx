@@ -27,6 +27,7 @@ interface CicloContractualPanelProps {
   currentUser?: UsuarioApp | null;
   habitaciones?: HabitacionInmueble[];
   onSaveContrato: (contrato: ContratoFormalizacion) => Promise<void> | void;
+  onPersistirFinalizacion?: (contrato: ContratoFormalizacion, habitacion?: HabitacionInmueble) => Promise<void> | void;
   onUpdateHabitacion?: (habitacion: HabitacionInmueble) => Promise<void> | void;
   readOnly?: boolean;
 }
@@ -38,6 +39,7 @@ export const CicloContractualPanel: React.FC<CicloContractualPanelProps> = ({
   currentUser,
   habitaciones,
   onSaveContrato,
+  onPersistirFinalizacion,
   onUpdateHabitacion,
   readOnly,
 }) => {
@@ -119,10 +121,15 @@ export const CicloContractualPanel: React.FC<CicloContractualPanelProps> = ({
       usuarioId: currentUser?.id,
     });
     if (!r.ok) return setError(r.error);
-    if (r.valor.habitacion && onUpdateHabitacion) {
-      await onUpdateHabitacion(r.valor.habitacion);
+    if (onPersistirFinalizacion) {
+      setError(null);
+      await onPersistirFinalizacion(r.valor.contrato, r.valor.habitacion);
+    } else {
+      // Compatibilidad para consumidores externos del panel; la pantalla
+      // principal de alquiler conecta el guardado atómico contrato-inmueble.
+      if (r.valor.habitacion && onUpdateHabitacion) await onUpdateHabitacion(r.valor.habitacion);
+      await guardar(r.valor.contrato);
     }
-    await guardar(r.valor.contrato);
   };
 
   const generarFiniquito = async () => {

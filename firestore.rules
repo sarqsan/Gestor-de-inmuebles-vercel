@@ -259,15 +259,18 @@ service cloud.firestore {
     // del espejo; mismo criterio que `contratoEsMio`).
     function inmuebleEnCarteraGestionada(d) {
       return activeUser() && 'propietarioId' in d && (
-        carterasLectura().hasAny([d.propietarioId]) ||
-        carterasEscritura().hasAny([d.propietarioId])
+        (('gestionesPorPropietario' in me() && d.propietarioId in me().gestionesPorPropietario)
+          ? gestionActivaCompletaIndexada(d.propietarioId)
+          : (carterasLectura().hasAny([d.propietarioId]) || carterasEscritura().hasAny([d.propietarioId])))
       );
     }
     // Escritura: SOLO carterasE (S7: la escritura nunca se concede por el
     // mero hecho de existir la gestión).
     function inmuebleEnCarteraEscritura(d) {
       return activeUser() && 'propietarioId' in d
-        && carterasEscritura().hasAny([d.propietarioId]);
+        && (('gestionesPorPropietario' in me() && d.propietarioId in me().gestionesPorPropietario)
+          ? gestionCompletaEscrituraIndexada(d.propietarioId)
+          : carterasEscritura().hasAny([d.propietarioId]));
     }
     // D3 (§9) — Ámbito derivado para entidades SIN `propietarioId` directo.
     // La cadena es `inmuebleId → inmuebles/{id} → propietarioId` (o
@@ -278,21 +281,25 @@ service cloud.firestore {
     // (`esAdminInmuebles()`) cortocircuita primero: conserva la operativa
     // global (p. ej. SuministrosSection solo-admin) y opera huérfanos.
     function pidEnAmbitoLectura(pid) {
-      return pid == myPropId() || carterasLectura().hasAny([pid]) || carterasEscritura().hasAny([pid]);
+      return pid == myPropId() || (('gestionesPorPropietario' in me() && pid in me().gestionesPorPropietario)
+        ? gestionActivaCompletaIndexada(pid) : (carterasLectura().hasAny([pid]) || carterasEscritura().hasAny([pid])));
     }
     function pidEnAmbitoEscritura(pid) {
-      return pid == myPropId() || carterasEscritura().hasAny([pid]);
+      return pid == myPropId() || (('gestionesPorPropietario' in me() && pid in me().gestionesPorPropietario)
+        ? gestionCompletaEscrituraIndexada(pid) : carterasEscritura().hasAny([pid]));
     }
     function pidDelInmuebleAmbito(inmuebleId) {
       return get(/databases/$(database)/documents/inmuebles/$(inmuebleId)).data.propietarioId;
     }
     function ambitoPorInmuebleLectura(inmuebleId) {
       return esAdminInmuebles() || (activeUser() && inmuebleId is string
-        && pidEnAmbitoLectura(pidDelInmuebleAmbito(inmuebleId)));
+        && (pidEnAmbitoLectura(pidDelInmuebleAmbito(inmuebleId))
+          || inmuebleParcialIndexado(pidDelInmuebleAmbito(inmuebleId), inmuebleId, false)));
     }
     function ambitoPorInmuebleEscritura(inmuebleId) {
       return esAdminInmuebles() || (activeUser() && inmuebleId is string
-        && pidEnAmbitoEscritura(pidDelInmuebleAmbito(inmuebleId)));
+        && (pidEnAmbitoEscritura(pidDelInmuebleAmbito(inmuebleId))
+          || inmuebleParcialIndexado(pidDelInmuebleAmbito(inmuebleId), inmuebleId, true)));
     }
     function pidDelContratoAmbito(contratoId) {
       return get(/databases/$(database)/documents/contratos_formalizacion/$(contratoId)).data.propietarioId;
@@ -317,10 +324,10 @@ service cloud.firestore {
     // no puede crearlos ni modificarlos en su propio espejo (anti-
     // autoasignación). El master queda fuera de estas guardas.
     function carterasNoAutoasignadasEnCreacion() {
-      return !('carterasL' in incoming()) && !('carterasE' in incoming());
+      return !('gestionesPorPropietario' in incoming()) && !('ultimaInvitacionCarteraId' in incoming()) && !('carterasL' in incoming()) && !('carterasE' in incoming());
     }
     function carterasSinCambiarPorUsuario() {
-      return ((!('carterasL' in incoming()) ||
+      return mismoCampoOpcional('gestionesPorPropietario') && mismoCampoOpcional('ultimaInvitacionCarteraId') && ((!('carterasL' in incoming()) ||
                ('carterasL' in existing() && incoming().carterasL == existing().carterasL)) &&
               (!('carterasE' in incoming()) ||
                ('carterasE' in existing() && incoming().carterasE == existing().carterasE)));
@@ -563,6 +570,124 @@ service cloud.firestore {
     function getEnlaceE(enlaceId) {
       return get(/databases/$(database)/documents/enlaces_registro/$(enlaceId)).data;
     }
+    // ROADMAP-02: la invitación vincula cuenta, Persona y cartera; el permiso
+    // nace de una relación activa, nunca del rol o del índice por sí solo.
+    function esInvitacionGestion(d) {
+      return 'finalidad' in d && d.finalidad == 'ONBOARDING_CARTERA';
+    }
+    function gestionDeInvitacion(e) {
+      return get(/databases/$(database)/documents/gestiones_cartera/$(e.gestionId)).data;
+    }
+    function destinatarioGestion(e) {
+      return isSignedIn() && request.auth.token.email_verified == true
+        && e.emailInvitado == authEmail()
+        && (!('authUid' in get(/databases/$(database)/documents/usuarios/$(e.usuarioIdVinculado)).data)
+          || get(/databases/$(database)/documents/usuarios/$(e.usuarioIdVinculado)).data.authUid == request.auth.uid)
+        && exists(/databases/$(database)/documents/usuarios/$(e.usuarioIdVinculado))
+        && get(/databases/$(database)/documents/usuarios/$(e.usuarioIdVinculado)).data.email == e.emailInvitado
+        && get(/databases/$(database)/documents/usuarios/$(e.usuarioIdVinculado)).data.personaId == e.personaIdVinculada
+        && get(/databases/$(database)/documents/usuarios/$(e.usuarioIdVinculado)).data.propietarioId == e.propietarioIdVinculado
+        && get(/databases/$(database)/documents/personas/$(e.personaIdVinculada)).data.usuarioId == e.usuarioIdVinculado
+        && get(/databases/$(database)/documents/propietarios/$(e.propietarioIdVinculado)).data.personaId == e.personaIdVinculada;
+    }
+    function gestionR02Consistente(e, g) {
+      return g.id == e.gestionId && g.enlaceRegistroId == e.id
+        && g.propietarioId == e.propietarioIdVinculado
+        && g.inmuebleIds == e.alcanceInmuebleIds && g.permiso == e.permisoGestion
+        && g.gestorUsuarioId is string;
+    }
+    function usuarioR02Activado(e) {
+      let u = getAfter(/databases/$(database)/documents/usuarios/$(e.usuarioIdVinculado)).data;
+      return u.authUid == request.auth.uid && u.estado == 'ACTIVO'
+        && u.email == e.emailInvitado && u.personaId == e.personaIdVinculada
+        && u.propietarioId == e.propietarioIdVinculado;
+    }
+    // No relación is a first-class account-only invitation, never a bypass
+    // selected by incoming data (finalidad/gestionId are immutable).
+    function respuestaRelacionR02(e, n) {
+      let g = gestionDeInvitacion(e);
+      let afterGestion = getAfter(/databases/$(database)/documents/gestiones_cartera/$(e.gestionId)).data;
+      return gestionR02Consistente(e, g) && gestionR02Consistente(e, afterGestion)
+        && g.estado == 'PENDIENTE_ACEPTACION'
+        && afterGestion.resolucionInvitacion == n.estadoInvitacion
+        && afterGestion.roadmap01AuditId == n.roadmap01AuditId
+        && (n.estadoInvitacion == 'ACEPTADA' ? afterGestion.estado == 'ACTIVA'
+          : afterGestion.estado == 'PENDIENTE_ACEPTACION');
+    }
+    function respuestaInvitacionGestion(enlaceId) {
+      let e = existing();
+      let n = incoming();
+      return esInvitacionGestion(e) && esInvitacionGestion(n)
+        && e.estadoInvitacion == 'PENDIENTE' && e.activo == true
+        && e.usosActuales == 0 && e.usosMaximos == 1
+        && n.activo == false && n.resueltaPor == request.auth.uid
+        && n.resueltaAt is string
+        && n.diff(e).affectedKeys().hasOnly(['estadoInvitacion','activo','usosActuales','resueltaAt','resueltaPor','roadmap01AuditId'])
+        && auditoriaNueva(n, e, 'enlaces_registro/' + enlaceId)
+        && ((destinatarioGestion(e) && request.time.toMillis() < e.fechaCaducidadMs
+              && ((n.estadoInvitacion == 'ACEPTADA' && n.usosActuales == 1 && usuarioR02Activado(e))
+                || (n.estadoInvitacion == 'RECHAZADA' && n.usosActuales == 0)))
+          || (isMasterAdmin() && n.usosActuales == 0
+            && (n.estadoInvitacion == 'REVOCADA' ||
+              (n.estadoInvitacion == 'EXPIRADA' && request.time.toMillis() >= e.fechaCaducidadMs))))
+        && (!('gestionId' in e) || respuestaRelacionR02(e, n));
+    }
+    function eventoAceptacionR02(e, n, enlace) {
+      let evento = n.eventos[e.eventos.size()];
+      return n.eventos == e.eventos.concat([evento])
+        && evento.keys().hasOnly(['tipo','gestionId','actorId','fecha','estadoAnterior','estadoNuevo','permiso'])
+        && evento.tipo == 'ACEPTACION' && evento.gestionId == e.id
+        && evento.actorId == enlace.usuarioIdVinculado && evento.permiso == e.permiso
+        && evento.estadoAnterior == 'PENDIENTE_ACEPTACION' && evento.estadoNuevo == 'ACTIVA'
+        && evento.fecha == n.updatedAt && n.fechaActivacion == n.updatedAt
+        && n.aceptada.por == enlace.usuarioIdVinculado && n.aceptada.fecha == n.updatedAt;
+    }
+    function actualizarGestionPorInvitacion(gestionId) {
+      let e = existing();
+      let n = incoming();
+      let enlace = getEnlaceE(e.enlaceRegistroId);
+      let afterEnlace = getAfter(/databases/$(database)/documents/enlaces_registro/$(e.enlaceRegistroId)).data;
+      return esInvitacionGestion(enlace) && enlace.gestionId == gestionId
+        && enlace.estadoInvitacion == 'PENDIENTE' && enlace.activo == true && enlace.usosActuales == 0
+        && e.estado == 'PENDIENTE_ACEPTACION'
+        && afterEnlace.estadoInvitacion in ['ACEPTADA','RECHAZADA','REVOCADA','EXPIRADA']
+        && afterEnlace.activo == false && afterEnlace.resueltaPor == request.auth.uid
+        && afterEnlace.roadmap01AuditId == n.roadmap01AuditId
+        && gestionR02Consistente(enlace, e) && gestionR02Consistente(enlace, n)
+        && n.resolucionInvitacion == afterEnlace.estadoInvitacion
+        && auditoriaNueva(n, e, 'gestiones_cartera/' + gestionId)
+        && ((afterEnlace.estadoInvitacion == 'ACEPTADA'
+            && n.estado == 'ACTIVA' && eventoAceptacionR02(e, n, enlace)
+            && n.diff(e).affectedKeys().hasOnly(['estado','aceptada','fechaActivacion','updatedAt','eventos','enlaceRegistroId','resolucionInvitacion','roadmap01AuditId']))
+          || (afterEnlace.estadoInvitacion != 'ACEPTADA'
+            && n.estado == e.estado && n.eventos == e.eventos
+            && n.diff(e).affectedKeys().hasOnly(['resolucionInvitacion','roadmap01AuditId'])));
+    }
+    function gestionActivaCompletaIndexada(pid) {
+      return activeUser() && 'gestionesPorPropietario' in me()
+        && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.propietarioId == pid
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.gestorUsuarioId == me().usuarioId
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.estado == 'ACTIVA'
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.inmuebleIds.size() == 0
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.resolucionInvitacion == 'ACEPTADA';
+    }
+    function gestionCompletaEscrituraIndexada(pid) {
+      let g = get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data;
+      return gestionActivaCompletaIndexada(pid) && g.permiso == 'LECTURA_ESCRITURA'
+        && g.responsableActual == 'GESTOR';
+    }
+    function inmuebleParcialIndexado(pid, inmId, escritura) {
+      return activeUser() && 'gestionesPorPropietario' in me()
+        && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.propietarioId == pid
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.gestorUsuarioId == me().usuarioId
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.estado == 'ACTIVA'
+        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.resolucionInvitacion == 'ACEPTADA'
+        && inmId in get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.inmuebleIds
+        && (!escritura || (get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.permiso == 'LECTURA_ESCRITURA'
+          && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.responsableActual == 'GESTOR'));
+    }
 
     // La cuenta INQUILINO solo nace de una invitación activa vinculada a su contrato.
     function enlaceInquilinoValido(enlaceId, contratoIds) {
@@ -670,7 +795,9 @@ service cloud.firestore {
       // LECTURA de la ficha; la escritura exige carterasE y queda acotada.
       function carteraGestionadaPorMi(pid) {
         return activeUser() && pid is string && (
-          carterasLectura().hasAny([pid]) || carterasEscritura().hasAny([pid])
+          (('gestionesPorPropietario' in me() && pid in me().gestionesPorPropietario)
+            ? gestionActivaCompletaIndexada(pid)
+            : (carterasLectura().hasAny([pid]) || carterasEscritura().hasAny([pid])))
         );
       }
 
@@ -689,6 +816,7 @@ service cloud.firestore {
         && auditoriaVinculada(incoming(), 'propietarios/' + propietarioId)) || (
         !isMasterAdmin() && isPropietarioRole()
         && propietarioId == myPropId()
+        && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE'])
         && !('personaId' in incoming())
         && !('roadmap01AuditId' in incoming())
         && 'id' in incoming() && incoming().id == propietarioId
@@ -744,6 +872,7 @@ service cloud.firestore {
         || inmuebleEsMio(resource.data)
         || inmuebleAutorizadoExplicito(inmuebleId)
         || inmuebleEnCarteraGestionada(resource.data)
+        || inmuebleParcialIndexado(resource.data.propietarioId, inmuebleId, false)
         || (isTenant() && (
           tenantVeContratos(campoListaActual('contratoIdsAutorizados'))
           || ('contratoActivoId' in resource.data && tenantTieneContrato(resource.data.contratoActivoId))
@@ -804,10 +933,154 @@ service cloud.firestore {
       // LECTURA_ESCRITURA + responsableActual GESTOR, proyectadas por el
       // master). carterasL (lectura histórica o permiso LECTURA) NO escribe.
       allow update: if isMasterAdmin()
-        || (inmuebleEnCarteraEscritura(existing()) && titularidadInalterada())
+        || (inmuebleEnCarteraEscritura(existing()) && titularidadInalterada()
+          && (!('gestionesPorPropietario' in me()) || mismoCampoOpcional('contratoActivoId')))
+        || (inmuebleParcialIndexado(existing().propietarioId, inmuebleId, true) && titularidadInalterada()
+          && (('contratoActivoId' in existing() ? existing().contratoActivoId : '') == ('contratoActivoId' in incoming() ? incoming().contratoActivoId : '')))
         || (isPropietarioRole() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))
         || (isPropietarioRole() && canReachInmuebleId(inmuebleId) && titularidadInalterada());
       allow delete: if isMasterAdmin();
+
+      // BLOQUE 6 — el documento patrimonial es hijo del inmueble: IDs
+      // conocidos no autorizan lectura. Se resuelven titular, cartera y
+      // delegación parcial viva en cada acceso; gestión de lectura no escribe.
+      match /documentos_patrimoniales/{documentoId} {
+        function inmuebleDoc() {
+          return get(/databases/$(database)/documents/inmuebles/$(inmuebleId)).data;
+        }
+        function docLectura() {
+          return esAdminInmuebles() || inmuebleEsMio(inmuebleDoc())
+            || inmuebleEnCarteraGestionada(inmuebleDoc())
+            || inmuebleParcialIndexado(inmuebleDoc().propietarioId, inmuebleId, false);
+        }
+        function docEscritura() {
+          return esAdminInmuebles() || inmuebleEsMio(inmuebleDoc()) || inmuebleEnCarteraEscritura(inmuebleDoc())
+            || inmuebleParcialIndexado(inmuebleDoc().propietarioId, inmuebleId, true);
+        }
+        function docBorrado() {
+          return esAdminInmuebles() || inmuebleEsMio(inmuebleDoc());
+        }
+        function fuenteEnInmueble(col, id) {
+          return exists(/databases/$(database)/documents/$(col)/$(id));
+        }
+        function tipoDocumentoPatrimonialValido(tipo) {
+          return tipo in [
+            'FACTURA_GASTO', 'JUSTIFICANTE_PAGO_GASTO', 'JUSTIFICANTE_COBRO', 'CONTRATO',
+            'ANEXO_CONTRATO', 'POLIZA_SEGURO', 'DOCUMENTO_POLIZA', 'DOCUMENTO_RENOVACION_POLIZA',
+            'RECIBO', 'LIQUIDACION_IBI', 'TASA', 'FOTO_INCIDENCIA', 'DOCUMENTO_INCIDENCIA',
+            'DOCUMENTO_MANTENIMIENTO', 'DOCUMENTO_GARANTIA', 'DOCUMENTO_INVENTARIO', 'OTRO'
+          ];
+        }
+        function facturaEnInmueble(d) {
+          return fuenteEnInmueble('facturas', d.facturaId)
+            && get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.propietarioId == d.propietarioId
+            && (get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.inmuebleId == inmuebleId
+              || ('gastoId' in get(/databases/$(database)/documents/facturas/$(d.facturaId)).data
+                && fuenteEnInmueble('gastos', get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.gastoId)
+                && get(/databases/$(database)/documents/gastos/$(get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.gastoId)).data.inmuebleId == inmuebleId))
+            && (!('gastoId' in d) || get(/databases/$(database)/documents/facturas/$(d.facturaId)).data.gastoId == d.gastoId);
+        }
+        function relacionesDocumentoValidas(d) {
+          return (!('contratoId' in d) || (fuenteEnInmueble('contratos_formalizacion', d.contratoId)
+              && get(/databases/$(database)/documents/contratos_formalizacion/$(d.contratoId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/contratos_formalizacion/$(d.contratoId)).data.propietarioId == d.propietarioId))
+            && (!('gastoId' in d) || (fuenteEnInmueble('gastos', d.gastoId)
+              && get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.propietarioId == d.propietarioId))
+            && (!('incidenciaId' in d) || (fuenteEnInmueble('incidencias', d.incidenciaId)
+              && get(/databases/$(database)/documents/incidencias/$(d.incidenciaId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/incidencias/$(d.incidenciaId)).data.propietarioId == d.propietarioId))
+            && (!('polizaId' in d) || (fuenteEnInmueble('polizas_seguros', d.polizaId)
+              && get(/databases/$(database)/documents/polizas_seguros/$(d.polizaId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/polizas_seguros/$(d.polizaId)).data.propietarioId == d.propietarioId))
+            && (!('tareaMantenimientoId' in d) || (fuenteEnInmueble('tareas_mantenimiento', d.tareaMantenimientoId)
+              && get(/databases/$(database)/documents/tareas_mantenimiento/$(d.tareaMantenimientoId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/tareas_mantenimiento/$(d.tareaMantenimientoId)).data.propietarioId == d.propietarioId))
+            && (!('garantiaId' in d) || (fuenteEnInmueble('garantias_reparacion', d.garantiaId)
+              && get(/databases/$(database)/documents/garantias_reparacion/$(d.garantiaId)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/garantias_reparacion/$(d.garantiaId)).data.propietarioId == d.propietarioId))
+            && (!('inventarioId' in d) || (fuenteEnInmueble('inventario_inmuebles', d.inventarioId)
+              && get(/databases/$(database)/documents/inventario_inmuebles/$(d.inventarioId)).data.inmuebleId == inmuebleId))
+            && (!('movimientoId' in d) || ('gastoId' in d && d.movimientoId == 'GASTO:' + d.gastoId))
+            && (!('facturaId' in d) || facturaEnInmueble(d))
+            && (!('gastoId' in d && 'contratoId' in d)
+              || get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.contratoId == d.contratoId)
+            && (!('gastoId' in d && 'incidenciaId' in d)
+              || get(/databases/$(database)/documents/gastos/$(d.gastoId)).data.incidenciaId == d.incidenciaId)
+            && (!('garantiaId' in d && 'incidenciaId' in d)
+              || get(/databases/$(database)/documents/garantias_reparacion/$(d.garantiaId)).data.incidenciaId == d.incidenciaId);
+        }
+        function documentoTieneForma(d) {
+          return d.keys().hasOnly([
+            'id', 'inmuebleId', 'propietarioId', 'tipo', 'nombre', 'nombreStorage',
+            'mimeType', 'tamanoBytes', 'sha256', 'storagePath', 'fechaDocumental',
+            'fechaIncorporacion', 'actorId', 'actorNombre', 'referencia', 'observaciones',
+            'version', 'sustituyeA', 'estado', 'contratoId', 'polizaId', 'gastoId', 'facturaId',
+            'incidenciaId', 'tareaMantenimientoId', 'garantiaId',
+            'inventarioId', 'movimientoId', 'actualizadoEl', 'eliminadoEl'
+          ])
+          && d.id == documentoId && d.inmuebleId == inmuebleId
+          && d.propietarioId == inmuebleDoc().propietarioId
+          && tipoDocumentoPatrimonialValido(d.tipo)
+          && d.nombre is string && d.nombre.size() > 0 && d.nombre.size() <= 200
+          && d.nombreStorage is string && d.nombreStorage.matches('^[A-Za-z0-9][A-Za-z0-9._-]{0,149}$')
+          && d.mimeType in ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+          && d.tamanoBytes is int && d.tamanoBytes > 0 && d.tamanoBytes <= 20971520
+          && d.sha256 is string && d.sha256.matches('^[a-f0-9]{64}$')
+          && d.storagePath == 'inmuebles/' + inmuebleId + '/documentos_patrimoniales/' + documentoId + '/' + d.nombreStorage
+          && d.fechaIncorporacion is string && d.actorId is string && d.actorNombre is string
+          && d.version is int && d.version > 0;
+        }
+        function sustitucionDocumentoValida(d) {
+          return (!('sustituyeA' in d) && d.version == 1)
+            || (d.sustituyeA is string && d.sustituyeA != documentoId
+              && exists(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA))
+              && get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.inmuebleId == inmuebleId
+              && get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.propietarioId == d.propietarioId
+              && get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.estado == 'DISPONIBLE'
+              && d.version == get(/databases/$(database)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(d.sustituyeA)).data.version + 1);
+        }
+        function estadoInicialValido(d) {
+          return documentoTieneForma(d) && d.estado == 'PENDIENTE_STORAGE'
+            && relacionesDocumentoValidas(d) && sustitucionDocumentoValida(d);
+        }
+        function edicionMetadatosValida() {
+          return resource.data.estado == 'DISPONIBLE'
+            && request.resource.data.estado == 'DISPONIBLE'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'tipo', 'nombre', 'fechaDocumental', 'referencia', 'observaciones', 'actualizadoEl'
+            ])
+            && tipoDocumentoPatrimonialValido(request.resource.data.tipo)
+            && request.resource.data.nombre is string && request.resource.data.nombre.size() > 0
+            && request.resource.data.nombre.size() <= 200;
+        }
+        function transicionCargaValida() {
+          return resource.data.estado in ['PENDIENTE_STORAGE', 'ERROR_STORAGE']
+            && request.resource.data.estado in ['DISPONIBLE', 'ERROR_STORAGE', 'PENDIENTE_STORAGE']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'actualizadoEl']);
+        }
+        function transicionBorradoValida() {
+          return docBorrado()
+            && ((resource.data.estado in ['DISPONIBLE', 'PENDIENTE_STORAGE', 'ERROR_STORAGE']
+                 && request.resource.data.estado == 'PENDIENTE_ELIMINACION'
+                 && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'actualizadoEl']))
+              || (resource.data.estado == 'PENDIENTE_ELIMINACION'
+                 && request.resource.data.estado == 'ELIMINADO'
+                 && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'eliminadoEl', 'actualizadoEl'])));
+        }
+
+        allow get, list: if docLectura();
+        allow create: if docEscritura() && estadoInicialValido(request.resource.data);
+        allow update: if docEscritura() && (edicionMetadatosValida() || transicionCargaValida() || transicionBorradoValida());
+        allow delete: if false; // tombstone/auditoría conservados; se borra sólo el binario.
+      }
+    }
+
+    function leerGestionInvitada(g) {
+      return 'enlaceRegistroId' in g && exists(/databases/$(database)/documents/enlaces_registro/$(g.enlaceRegistroId))
+        && esInvitacionGestion(getEnlaceE(g.enlaceRegistroId))
+        && destinatarioGestion(getEnlaceE(g.enlaceRegistroId))
+        && getEnlaceE(g.enlaceRegistroId).gestionId == g.id;
     }
 
     // =========================================================================
@@ -822,10 +1095,10 @@ service cloud.firestore {
     //    proyecta carterasL/carterasE al espejo). Sin autoasignación.
     // =========================================================================
     match /gestiones_cartera/{gestionId} {
-      allow get: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
+      allow get: if esAdminInmuebles() || gestionInvolucraAMi(resource.data) || leerGestionInvitada(resource.data);
       allow list: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
       allow create: if isMasterAdmin() && auditoriaVinculada(incoming(), 'gestiones_cartera/' + gestionId);
-      allow update: if isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'gestiones_cartera/' + gestionId);
+      allow update: if isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'gestiones_cartera/' + gestionId) || actualizarGestionPorInvitacion(gestionId);
       allow delete: if false; // evento REVOCACION append-only, sin purga
     }
 
@@ -895,6 +1168,14 @@ service cloud.firestore {
     // Manipular IDs solo devuelve esta ficha recortada, jamás datos privados.
     // =========================================================================
     match /fichas_publicas_inmueble/{fichaId} {
+      function fichaVinculadaAlTitular() {
+        return exists(/databases/$(database)/documents/inmuebles/$(fichaId))
+          && ((('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(fichaId)).data)
+              && get(/databases/$(database)/documents/inmuebles/$(fichaId)).data.propietarioId == existing().propietarioId)
+            || (!('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(fichaId)).data)
+              && 'propietarioPrincipalId' in get(/databases/$(database)/documents/inmuebles/$(fichaId)).data
+              && get(/databases/$(database)/documents/inmuebles/$(fichaId)).data.propietarioPrincipalId == existing().propietarioId));
+      }
       allow get: if true;
       allow list: if isSignedIn();
       allow create: if (isMasterAdmin() || (isPropietarioRole() && incoming().propietarioId == myPropId()))
@@ -904,9 +1185,15 @@ service cloud.firestore {
         && incoming().propietarioId is string
         && incoming().propietarioId.size() > 0
         && clavesFichaPublicaOk();
-      allow update: if (isMasterAdmin() || (isPropietarioRole()
-          && existing().propietarioId == myPropId()
-          && incoming().propietarioId == myPropId()))
+      allow update: if (
+          isMasterAdmin()
+          || (isPropietarioRole()
+            && existing().propietarioId == myPropId()
+            && incoming().propietarioId == myPropId())
+          || (inmuebleParcialIndexado(existing().propietarioId, fichaId, true)
+            && fichaVinculadaAlTitular()
+            && incoming().propietarioId == existing().propietarioId)
+        )
         && incoming().id == existing().id
         && incoming().inmuebleId == existing().inmuebleId
         && incoming().inmuebleId == fichaId
@@ -916,32 +1203,58 @@ service cloud.firestore {
 
     // =========================================================================
     // 2. CONTRATOS DE ARRENDAMIENTO = NÚCLEO ECONÓMICO (COBROS + JUSTIFICANTES)
-    // Aislamiento estricto por propietario. Un propietario sólo accede a sus
-    // contratos; los profesionales no tienen acceso en absoluto.
+    // Aislamiento por titular y por relación de cartera/inmueble autorizada.
+    // Una delegación parcial solo alcanza contratos cuyo inmueble pertenece
+    // al titular de la relación y figura expresamente en sus inmuebleIds.
     // =========================================================================
     match /contratos_formalizacion/{contratoId} {
-      // get (documento concreto): titularidad directa o inmueble asignado.
+      function inmuebleContratoCoherente(d) {
+        return 'inmuebleId' in d && d.inmuebleId is string
+          && 'propietarioId' in d && d.propietarioId is string
+          && exists(/databases/$(database)/documents/inmuebles/$(d.inmuebleId))
+          && ((('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioId == d.propietarioId)
+            || (!('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && 'propietarioPrincipalId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioPrincipalId == d.propietarioId));
+      }
+      function contratoParcialVisible(d) {
+        return inmuebleContratoCoherente(d)
+          && inmuebleParcialIndexado(d.propietarioId, d.inmuebleId, false);
+      }
+      function contratoParcialEscritura(d) {
+        return inmuebleContratoCoherente(d)
+          && inmuebleParcialIndexado(d.propietarioId, d.inmuebleId, true);
+      }
+      function inmuebleYTitularInmutables() {
+        return 'inmuebleId' in existing() && 'inmuebleId' in incoming()
+          && incoming().inmuebleId == existing().inmuebleId
+          && 'propietarioId' in existing() && 'propietarioId' in incoming()
+          && incoming().propietarioId == existing().propietarioId;
+      }
+
+      // get (documento concreto): titularidad directa, cartera o relación parcial por inmueble.
       // BLOQUE E (D-1): el inquilino lee (get) SOLO un contrato incluido en su
       // `contratoIds`; nunca `list` (sigue restringido a master/propietario).
       // D2 (§2 — dependientes dentro del mismo ámbito): las ramas de cartera
       // (mismo patrón que pólizas/siniestros) cubren al gestor multicartera:
       // lectura sobre carterasL ∪ carterasE, escritura solo sobre carterasE
       // (ACTIVA + LECTURA_ESCRITURA). Revocación = espejo vacío = deny.
-      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing())) || (isTenant() && tenantTieneContrato(contratoId)) || inmuebleEnCarteraGestionada(existing());
+      allow get: if isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing())) || (isTenant() && tenantTieneContrato(contratoId)) || inmuebleEnCarteraGestionada(existing()) || contratoParcialVisible(existing());
       // list (consulta): OBLIGA a where('propietarioId','==', pid) pid-a-pid
       // (propio o de cada cartera gestionada; el gestor une N consultas).
-      allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data);
+      allow list: if isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data) || contratoParcialVisible(resource.data);
 
       // El propietario sólo puede crear contratos a su nombre y con propietarioId.
       allow create: if isMasterAdmin() || (
         isPropietarioRole()
         && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
+        && inmuebleContratoCoherente(incoming())
       ) || (
         activeUser()
         && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId])
-        && 'inmuebleId' in incoming() && incoming().inmuebleId is string
-      );
+        && inmuebleContratoCoherente(incoming())
+      ) || contratoParcialEscritura(incoming());
 
       // No puede mover un contrato a otro propietario ni tocar contratos ajenos.
       // BLOQUE E (reconciliado): el inquilino solo añade IDs a los índices de
@@ -950,10 +1263,12 @@ service cloud.firestore {
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
         && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && inmuebleYTitularInmutables() && inmuebleContratoCoherente(incoming())
       ) || (
         inmuebleEnCarteraEscritura(existing())
         && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId
-      ) || (
+        && inmuebleYTitularInmutables() && inmuebleContratoCoherente(incoming())
+      ) || contratoParcialEscritura(incoming()) && inmuebleYTitularInmutables() && inmuebleContratoCoherente(existing()) || (
         isTenant()
         && tenantTieneContrato(contratoId)
         && incoming().diff(existing()).affectedKeys().hasOnly(['incidenciaIds', 'mensajeIds', 'fechaActualizacion'])
@@ -1385,16 +1700,27 @@ service cloud.firestore {
     }
 
     match /habitaciones_inmueble/{habitacionId} {
+      function habitacionParcialCoherente(d, escritura) {
+        return 'inmuebleId' in d && d.inmuebleId is string
+          && 'propietarioId' in d && d.propietarioId is string
+          && exists(/databases/$(database)/documents/inmuebles/$(d.inmuebleId))
+          && ((('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioId == d.propietarioId)
+            || (!('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+              && 'propietarioPrincipalId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data
+              && get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioPrincipalId == d.propietarioId))
+          && inmuebleParcialIndexado(d.propietarioId, d.inmuebleId, escritura);
+      }
       // D2 (H-fuga): mismo endurecimiento que inventario_inmuebles.
-      allow get: if isMasterAdmin() || (isPropietarioRole() && (
+      allow get: if isMasterAdmin() || habitacionParcialCoherente(existing(), false) || (isPropietarioRole() && (
         ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
         ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId]))
       ));
-      allow list: if isMasterAdmin() || (isPropietarioRole() && (
+      allow list: if isMasterAdmin() || habitacionParcialCoherente(resource.data, false) || (isPropietarioRole() && (
         ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) ||
         ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId]))
       ));
-      allow create: if isMasterAdmin() || (
+      allow create: if isMasterAdmin() || (habitacionParcialCoherente(incoming(), true) && incoming().id == habitacionId) || (
         isPropietarioRole()
         && incoming().keys().hasAll(['inmuebleId', 'nombre', 'estado'])
         && (
@@ -1403,6 +1729,12 @@ service cloud.firestore {
         )
       );
       allow update: if isMasterAdmin() || (
+        habitacionParcialCoherente(existing(), true)
+        && habitacionParcialCoherente(incoming(), true)
+        && existing().id == habitacionId && incoming().id == existing().id
+        && incoming().inmuebleId == existing().inmuebleId
+        && incoming().propietarioId == existing().propietarioId
+      ) || (
         isPropietarioRole()
         && (
           ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
@@ -1621,12 +1953,20 @@ service cloud.firestore {
     // 11. USUARIOS Y CONTROL DE ACCESO (PROTECCIÓN ESTRICTA CONTRA ELEVACIÓN)
     // =========================================================================
     match /usuarios/{usuarioId} {
-      // BLOQUE E (reconciliado): el personal lee cualquier ficha; el inquilino solo la
-      // suya (por uid o authUid) y las fichas que NO sean de otro inquilino.
-      allow get: if isSignedIn() && (isStaff() ||
-        request.auth.uid == usuarioId ||
+      // R02: conocer un ID, tener rol o ser staff NO autoriza a leer una cuenta.
+      // Antes del primer binding, el correo verificado identifica al titular de
+      // SU ficha precreada. No permite listar, activar ni leer datos fiscales.
+      allow get: if isMasterAdmin() || (isSignedIn() && (
         (('authUid' in resource.data) && resource.data.authUid == request.auth.uid) ||
-        resource.data.tipoPerfil != 'INQUILINO');
+        (!('authUid' in resource.data) && request.auth.token.email_verified == true
+          && resource.data.email == authEmail()
+          && ((resource.data.tipoPerfil == 'PROPIETARIO' && resource.data.estado == 'PENDIENTE')
+            || ('enlaceRegistroId' in resource.data
+              && exists(/databases/$(database)/documents/enlaces_registro/$(resource.data.enlaceRegistroId))
+              && getEnlaceE(resource.data.enlaceRegistroId).usuarioIdVinculado == usuarioId
+              && getEnlaceE(resource.data.enlaceRegistroId).emailInvitado == authEmail()
+              && getEnlaceE(resource.data.enlaceRegistroId).activo == true)))
+      ));
       allow list: if isMasterAdmin();
       // BLOQUE E (reconciliado): la cuenta INQUILINO solo nace de invitación activa
       // vinculada a su contrato (además del alta canónica PROPIETARIO/PROFESIONAL).
@@ -1641,6 +1981,7 @@ service cloud.firestore {
             'profesionales.crear','profesionales.asignar'])) ||
            (incoming().tipoPerfil == 'PROFESIONAL' && incoming().permisos.hasOnly(['profesionales.ver'])) ||
            (incoming().tipoPerfil == 'INQUILINO' && incoming().permisos.hasOnly(['inmuebles.ver','contratos.ver'])))))
+        && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE'])
         && !('personaId' in incoming())
         && !('roadmap01AuditId' in incoming())
         && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
@@ -1684,6 +2025,11 @@ service cloud.firestore {
           || existing().authUid == request.auth.uid
           || usuarioId == request.auth.uid
         )
+        // First binding is not a way to claim someone else's pending profile.
+        && (('authUid' in existing()) || (
+          request.auth.token.email_verified == true
+          && existing().email == authEmail() && incoming().authUid == request.auth.uid
+          && (existing().estado != 'PENDIENTE' || incoming().estado == 'ACTIVO')))
         && incoming().tipoPerfil == existing().tipoPerfil
         && incoming().roles == existing().roles
         // ROADMAP-01: una identidad Persona explícita no permite cambiar el
@@ -1714,9 +2060,9 @@ service cloud.firestore {
                  existing().propietarioId, existing().email)
             && getAfter(/databases/$(database)/documents/enlaces_registro/$(incoming().enlaceRegistroId)).data.usosActuales == 1
             && getAfter(/databases/$(database)/documents/enlaces_registro/$(incoming().enlaceRegistroId)).data.estadoInvitacion == 'ACEPTADA'
+            && exists(/databases/$(database)/documents/propietarios/$(existing().propietarioId))
             && (!('personaId' in existing()) ||
-              (exists(/databases/$(database)/documents/propietarios/$(existing().propietarioId)) &&
-               get(/databases/$(database)/documents/propietarios/$(existing().propietarioId)).data.personaId == existing().personaId))
+               get(/databases/$(database)/documents/propietarios/$(existing().propietarioId)).data.personaId == existing().personaId)
           )
         )
         // El usuario no puede falsificar el último evento fuera de activación.
@@ -1731,6 +2077,13 @@ service cloud.firestore {
           'email',
           'createdAt',
           'passwordHash',
+          // Campos de autorización/cartera pertenecen únicamente al espejo y
+          // nunca deben aparecer en la ficha de usuario por escritura propia.
+          'isStaff',
+          'isTenant',
+          'gestionesPorPropietario',
+          'carterasL',
+          'carterasE',
           // La marca de auditoría solo cambia en el commit de activación
           // nominal, no en actualizaciones ordinarias del titular.
           // BLOQUE E (reconciliado): el inquilino no puede auto-vincularse contratos
@@ -1772,21 +2125,27 @@ service cloud.firestore {
     // 13. ENLACES DE REGISTRO (lectura pública para validar el token)
     // =========================================================================
     match /enlaces_registro/{enlaceId} {
-      allow get: if isSignedIn() || (isValidId(enlaceId) && resource.data.activo == true);
-      allow list: if isStaff();
+      allow get: if (esInvitacionGestion(resource.data) ? (isMasterAdmin() || destinatarioGestion(resource.data)) : (isSignedIn() || (isValidId(enlaceId) && resource.data.activo == true)));
+      // Las invitaciones privadas tampoco se pueden extraer mediante list.
+      // Los genéricos conservan su contrato; su query debe excluir R02.
+      allow list: if isMasterAdmin() || (isStaff() && !('finalidad' in resource.data && resource.data.finalidad == 'ONBOARDING_CARTERA'));
       // El staff heredado puede gestionar enlaces genéricos, pero NO emitir,
       // cambiar ni borrar invitaciones nominales para una identidad ajena.
       allow create: if (isMasterAdmin() || (isStaff()
         && !('usuarioIdVinculado' in incoming())
         && !('propietarioIdVinculado' in incoming())
         && !('profesionalIdVinculado' in incoming())))
+        && (!esInvitacionGestion(incoming()) || (isMasterAdmin() && incoming().id == enlaceId
+          && incoming().estadoInvitacion == 'PENDIENTE' && incoming().activo == true
+          && incoming().usosActuales == 0 && incoming().usosMaximos == 1
+          && request.time.toMillis() < incoming().fechaCaducidadMs))
         && auditoriaVinculada(incoming(), 'enlaces_registro/' + enlaceId);
       // El master tampoco reabre, reescribe o borra el historial nominal.
       // Rechazo y revocación solo desde PENDIENTE no consumida; el servicio
       // escribe el audit_log en el mismo commit. El genérico conserva su flujo.
       allow delete: if false; // revocar sin purgar trazabilidad
       allow update: if (isMasterAdmin()
-        && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId) && (
+        && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId) && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && (
         (!('usuarioIdVinculado' in existing()) && !('usuarioIdVinculado' in incoming()))
         || ('usuarioIdVinculado' in existing()
           && existing().estadoInvitacion == 'PENDIENTE'
@@ -1795,7 +2154,7 @@ service cloud.firestore {
           && incoming().estadoInvitacion in ['RECHAZADA', 'REVOCADA']
           && incoming().activo == false)
       )) || (
-        isSignedIn() && 'usuarioIdVinculado' in existing()
+        isSignedIn() && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && 'usuarioIdVinculado' in existing()
         && invitacionNominalVigente(enlaceId, existing().usuarioIdVinculado,
              existing().propietarioIdVinculado, authEmail())
         && incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales', 'estadoInvitacion', 'roadmap01AuditId'])
@@ -1805,17 +2164,17 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/usuarios/$(existing().usuarioIdVinculado)).data.authUid == request.auth.uid
         && getAfter(/databases/$(database)/documents/usuarios/$(existing().usuarioIdVinculado)).data.estado == 'ACTIVO'
       ) || (
-        isStaff() && !('usuarioIdVinculado' in existing()) && !('usuarioIdVinculado' in incoming())
+        isStaff() && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && !('usuarioIdVinculado' in existing()) && !('usuarioIdVinculado' in incoming())
         && !('profesionalIdVinculado' in existing()) && !('propietarioIdVinculado' in existing())
         && !incoming().diff(existing()).affectedKeys().hasAny(['profesionalIdVinculado', 'propietarioIdVinculado'])
         && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId)
       ) || (
         // BLOQUE E: inquilino solo consume su invitación genérica.
-        isTenant() && !('usuarioIdVinculado' in existing())
+        isTenant() && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && !('usuarioIdVinculado' in existing())
         && incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales'])
         && incoming().usosActuales is number && existing().usosActuales is number
         && incoming().usosActuales == existing().usosActuales + 1
-      );
+      ) || respuestaInvitacionGestion(enlaceId);
     }
 
     // =========================================================================

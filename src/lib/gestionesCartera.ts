@@ -71,6 +71,9 @@ export interface EventoGestionCartera {
 }
 
 export interface GestionCartera {
+  /** Metadatos de invitación R02, sin alterar titularidad ni historial. */
+  enlaceRegistroId?: string;
+  resolucionInvitacion?: 'ACEPTADA' | 'RECHAZADA' | 'REVOCADA' | 'EXPIRADA';
   id: string;
   /** Titular legal (propietarios/{id}). La gestión NO altera su titularidad. */
   propietarioId: string;

@@ -10,8 +10,8 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Sparkles, X, Loader2, ArrowRight, AlertTriangle, ShieldAlert, CheckCircle2, BookOpen, HelpCircle } from 'lucide-react';
 import type { UsuarioApp } from '../../types';
-import type { AIIntentResolution, ExperienceContext, HostExperiencia, ProveedorIA } from '../../experiencia';
-import { capacidadesDisponibles, confirmarResolucion, contextoDesdeUsuario, ejecutarResolucion, elegirAlternativa, obtenerAyuda, resolverPeticion, type AccionHost } from '../../experiencia';
+import type { AIIntentResolution, ExperienceContext, HostExperiencia, ProveedorIA, ResultadoConsultaERP } from '../../experiencia';
+import { capacidadesDisponibles, CAPACIDADES_ERP, confirmarResolucion, contextoDesdeUsuario, ejecutarResolucion, elegirAlternativa, obtenerAyuda, resolverPeticion, type AccionHost } from '../../experiencia';
 
 export interface AsistentePanelProps {
   usuario?: Pick<UsuarioApp, 'tipoPerfil' | 'roles' | 'permisos'> | null;
@@ -22,8 +22,10 @@ export interface AsistentePanelProps {
   accessibleSections?: string[];
   /** Proveedor IA (Gemini remoto). Sin él, resolutor local. */
   proveedor?: ProveedorIA;
-  /** El host ejecuta la acción validada con sus propios medios (route guard, tutoriales, ayuda). */
+  /** El host ejecuta navegación/tutorial/ayuda con sus propios medios y route guard. */
   onAccion: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
+  /** Las consultas se resuelven localmente mediante motores oficiales sobre snapshots RBAC del host. */
+  onConsultar?: (accion: Extract<AccionHost, { tipo: 'CONSULTAR' }>) => Promise<ResultadoConsultaERP>;
   tema?: 'claro' | 'oscuro';
   variante?: 'icono' | 'texto';
   className?: string;
@@ -41,17 +43,27 @@ const ETIQUETA_ESTADO: Record<AIIntentResolution['estado'], string> = {
   ERROR: 'Error',
 };
 
-export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section, host = 'ERP' as HostExperiencia, contexto, accessibleSections, proveedor, onAccion, tema = 'claro', variante = 'icono', className = '', posicion = 'derecha' }) => {
+export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section, host = 'ERP' as HostExperiencia, contexto, accessibleSections, proveedor, onAccion, onConsultar, tema = 'claro', variante = 'icono', className = '', posicion = 'derecha' }) => {
   const ctx = useMemo(() => contexto ?? contextoDesdeUsuario(usuario, section, { host, accessibleSections }), [contexto, usuario, section, host, accessibleSections]);
   const disponible = useMemo(() => capacidadesDisponibles(ctx).length > 0, [ctx]);
   const [abierto, setAbierto] = useState(false);
   const [texto, setTexto] = useState('');
   const [cargando, setCargando] = useState(false);
   const [resolucion, setResolucion] = useState<AIIntentResolution | null>(null);
+  const [resultadoConsulta, setResultadoConsulta] = useState<ResultadoConsultaERP | null>(null);
   const [hecho, setHecho] = useState<string | null>(null);
   const panelId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const peticionId = useRef(0);
+
+  useEffect(() => {
+    peticionId.current += 1;
+    setCargando(false);
+    setResolucion(null);
+    setResultadoConsulta(null);
+    setHecho(null);
+    setTexto('');
+  }, [ctx]);
 
   useEffect(() => {
     if (!abierto) return;
@@ -86,6 +98,7 @@ export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section
     setCargando(true);
     setHecho(null);
     setResolucion(null);
+    setResultadoConsulta(null);
     const res = await resolverPeticion(t, ctx, { proveedor });
     if (id !== peticionId.current) return; // petición superada
     setCargando(false);
@@ -104,6 +117,28 @@ export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section
     else setResolucion(c);
   };
 
+  const consultarDatos = async () => {
+    if (!resolucion) return;
+    const accion = ejecutarResolucion(resolucion, ctx);
+    if (accion.tipo !== 'CONSULTAR') {
+      setResultadoConsulta({ estado: 'NO_DISPONIBLE', capabilityId: resolucion.capabilityId ?? '', titulo: 'Consulta no ejecutada', resumen: 'La resolución ya no es válida en este contexto.', motorOficial: 'RBAC', hechos: [], ambito: 'AMBITO_AUTORIZADO' });
+      return;
+    }
+    const id = ++peticionId.current;
+    setCargando(true);
+    try {
+      const resultado = onConsultar
+        ? await onConsultar(accion)
+        : { estado: 'NO_DISPONIBLE' as const, capabilityId: accion.capabilityId, titulo: 'Consulta no conectada', resumen: 'El host no ha conectado un servicio oficial para esta consulta.', motorOficial: 'ninguno', hechos: [], ambito: 'AMBITO_AUTORIZADO' as const };
+      if (id === peticionId.current) setResultadoConsulta(resultado);
+    } catch {
+      if (id === peticionId.current) setResultadoConsulta({ estado: 'NO_DISPONIBLE', capabilityId: accion.capabilityId, titulo: 'Consulta no disponible', resumen: 'No se pudo obtener un resultado verificable del ERP.', motorOficial: 'error del servicio del host', hechos: [], ambito: 'AMBITO_AUTORIZADO' });
+    } finally {
+      if (id === peticionId.current) setCargando(false);
+    }
+  };
+
+  const capConsulta = resolucion?.capabilityId ? CAPACIDADES_ERP.find((c) => c.id === resolucion.capabilityId && c.consultaId) : undefined;
   const ayudaMostrada = resolucion?.helpEntryId ? obtenerAyuda(resolucion.helpEntryId) : undefined;
   const tono = tema === 'oscuro' ? 'text-white/90 hover:bg-white/10 rounded-full p-2' : 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50';
   const clasePos = posicion === 'centro' ? 'fixed left-1/2 -translate-x-1/2 bottom-20 w-[calc(100%-2rem)] max-w-md' : 'absolute right-0 mt-2 w-[min(92vw,26rem)]';
@@ -209,6 +244,32 @@ export const AsistentePanel: React.FC<AsistentePanelProps> = ({ usuario, section
 
                 {resolucion.estado === 'RESUELTA' && (resolucion.intencion === 'EXPLICAR' || resolucion.intencion === 'CONSULTAR') && (
                   <div className="space-y-2">
+                    {capConsulta && !resultadoConsulta && (
+                      <button type="button" onClick={consultarDatos} disabled={cargando} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800 disabled:opacity-50 cursor-pointer">
+                        {cargando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                        Consultar datos autorizados
+                      </button>
+                    )}
+                    {resultadoConsulta && (
+                      <article className="p-3 rounded-xl bg-emerald-50 border border-emerald-200" aria-label="Resultado verificado del ERP">
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-800">{resultadoConsulta.estado === 'OK' ? 'Dato obtenido del ERP' : resultadoConsulta.estado === 'SIN_DATOS' ? 'Sin datos en el ámbito' : 'Consulta no disponible'}</p>
+                        <h4 className="text-xs font-extrabold text-slate-900 mt-1">{resultadoConsulta.titulo}</h4>
+                        <p className="text-xs text-slate-700 mt-1">{resultadoConsulta.resumen}</p>
+                        {resultadoConsulta.hechos.length > 0 && (
+                          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                            {resultadoConsulta.hechos.map((hecho) => {
+                              const valor = typeof hecho.valor === 'number'
+                                ? hecho.formato === 'EUR'
+                                  ? `${new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(hecho.valor)} €`
+                                  : new Intl.NumberFormat('es-ES').format(hecho.valor)
+                                : hecho.valor;
+                              return <div key={hecho.etiqueta} className="text-[11px]"><dt className="text-slate-500">{hecho.etiqueta}</dt><dd className="font-bold text-slate-800">{valor}</dd></div>;
+                            })}
+                          </dl>
+                        )}
+                        <p className="mt-2 text-[10px] text-slate-500">Fuente: {resultadoConsulta.motorOficial} · Ámbito: {resultadoConsulta.ambito === 'INMUEBLE' ? 'inmueble contextual autorizado' : 'datos accesibles por tu perfil'}</p>
+                      </article>
+                    )}
                     {ayudaMostrada && (
                       <article className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
                         <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1">

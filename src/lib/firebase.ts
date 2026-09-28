@@ -73,6 +73,8 @@ import type {
   SerieFacturacion,
 } from '../types/facturacion';
 import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
+import type { GestionCartera } from './gestionesCartera';
+import type { InmuebleDelegadoParcial } from './carterasGestion';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -177,20 +179,17 @@ export async function seedInitialDataIfEmpty() {
  * Ámbito de acceso a datos (FASE 1.4).
  * - ADMINISTRADOR / sin ámbito: colección completa.
  * - PROPIETARIO: únicamente sus propios recursos.
- * - PROFESIONAL: sin acceso a datos económicos/fiscales.
+ * - PROFESIONAL: solo recursos explícitamente asignados o derivados de cartera/inmueble; Rules revalidan el permiso efectivo.
  */
 export interface DataAccessScope {
   tipoPerfil?: string;
   propietarioId?: string;
   inmuebleIds?: string[];
-  /**
-   * D2b — RESERVADO, sin efecto en D2a. Propietarios cuyas carteras están en
-   * gestión ACTIVA (`gestiones_cartera`). Cuando D2b se implemente, los
-   * suscriptores con ámbito añadirán
-   * `where('propietarioId', 'in', scope.propietariosGestionados)` a la unión
-   * sin rehacer el suscriptor. D2a NO resuelve `gestiones_cartera` aquí.
-   */
+  /** Propietarios de carteras completas legibles; cada PID se consulta aparte. */
   propietariosGestionados?: string[];
+  /** IDs deducidos de gestiones parciales activas; solo acotan consultas. */
+  inmueblesGestionadosParciales?: string[];
+  ambitosParcialesGestionados?: InmuebleDelegadoParcial[];
 }
 
 /**
@@ -209,19 +208,20 @@ export function subscribePropietarios(
 
   if (scope?.tipoPerfil === 'PROPIETARIO') {
     const pid = scope.propietarioId;
-    if (!pid) {
-      callback([]);
-      return () => {};
-    }
-    return onSnapshot(
-      doc(db, 'propietarios', pid),
-      (docSnap) => {
-        callback(docSnap.exists() ? [{ id: docSnap.id, ...docSnap.data() } as Propietario] : []);
-      },
-      (err) => {
-        console.error('Firestore propietario (scoped) snapshot error:', err);
-      }
-    );
+    const delegados = Array.from(new Set(scope.propietariosGestionados ?? []));
+    const entregados: Propietario[] = [];
+    const notificar = () => callback([...entregados.filter((p) => p.id === pid), ...entregados.filter((p) => p.id !== pid)]);
+    const subs: Unsubscribe[] = [];
+    const escuchar = (id: string) => subs.push(onSnapshot(doc(db, 'propietarios', id), (snap) => {
+      const index = entregados.findIndex((p) => p.id === id);
+      if (snap.exists()) { if(index >= 0) entregados[index] = {id:snap.id,...snap.data()} as Propietario; else entregados.push({id:snap.id,...snap.data()} as Propietario); }
+      else if(index >= 0) entregados.splice(index,1);
+      notificar();
+    }, (err) => console.error(`Firestore propietario (${id}) snapshot error:`, err)));
+    if (pid) escuchar(pid);
+    for (const id of delegados) if (id && id !== pid) escuchar(id);
+    if (!pid && !delegados.length) callback([]);
+    return () => subs.forEach((unsub) => unsub());
   }
 
   return onSnapshot(
@@ -341,6 +341,22 @@ function subscribeUnionInmuebles(
   return () => fuentes.forEach((unsub) => unsub());
 }
 
+/** Suscribe únicamente las gestiones de cartera cuyo gestorUsuarioId coincide. */
+export function subscribeGestionesCarteraGestor(
+  callback: (gestiones: GestionCartera[]) => void,
+  gestorUsuarioId?: string
+): Unsubscribe {
+  if (!gestorUsuarioId) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(
+    query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', gestorUsuarioId)),
+    (snap) => callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera))),
+    (err) => console.error('Firestore gestiones_cartera (gestor) snapshot error:', err)
+  );
+}
+
 /**
  * Real-time listener for Inmuebles.
  *
@@ -364,7 +380,7 @@ export function subscribeInmuebles(
   scope?: DataAccessScope
 ): Unsubscribe {
   const autorizados = Array.from(
-    new Set((scope?.inmuebleIds ?? []).filter((id) => typeof id === 'string' && id.length > 0))
+    new Set([...(scope?.inmuebleIds ?? []), ...(scope?.inmueblesGestionadosParciales ?? [])].filter((id) => typeof id === 'string' && id.length > 0))
   );
   const gestionados = Array.from(
     new Set(
@@ -880,66 +896,27 @@ export function subscribeContratos(
   callback: (contratos: ContratoFormalizacion[]) => void,
   scope?: DataAccessScope
 ): Unsubscribe {
-  // Profesionales: cero acceso a contratos/cobros, salvo gestor con
-  // carteras (D2 §2: une pid propio + carteras pid-a-pid).
-  const gestionadosContratos = scope?.propietariosGestionados ?? [];
-  if (scope?.tipoPerfil === 'PROFESIONAL' && gestionadosContratos.length === 0) {
-    callback([]);
-    return () => {};
-  }
-  if (
-    gestionadosContratos.length > 0 &&
-    (scope?.tipoPerfil === 'PROPIETARIO' || scope?.tipoPerfil === 'PROFESIONAL')
-  ) {
-    const pids =
-      scope.tipoPerfil === 'PROPIETARIO' && scope.propietarioId
-        ? [scope.propietarioId, ...gestionadosContratos]
-        : gestionadosContratos;
-    return subscribeUnionPorPropietario<ContratoFormalizacion>(CONTRATOS_COL, pids, callback, 'contratos_formalizacion');
-  }
-
-  // Administrador o sin ámbito: colección completa.
-  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
-    return onSnapshot(
-      CONTRATOS_COL,
-      (snapshot) => {
-        const items: ContratoFormalizacion[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion);
-        });
-        callback(items);
-      },
-      (err) => {
-        console.error('Firestore contratos_formalizacion snapshot error:', err);
-      }
-    );
-  }
-
-  // --- PROPIETARIO ---
-  // La regla de Firestore EXIGE el filtro de igualdad por propietarioId (las
-  // reglas no filtran); por eso se consulta únicamente por ese campo. Un
-  // inmueble compartido pero titularidad de otro propietario no pertenece
-  // económicamente a este usuario y, por tanto, no se incluye aquí.
-  const pid = scope.propietarioId;
-  if (!pid) {
-    callback([]);
-    return () => {};
-  }
-
-  const scopedQuery = query(CONTRATOS_COL, where('propietarioId', '==', pid));
-  return onSnapshot(
-    scopedQuery,
-    (snap) => {
+  if (!scope || scope.tipoPerfil === 'ADMINISTRADOR') {
+    return onSnapshot(CONTRATOS_COL, (snapshot) => {
       const items: ContratoFormalizacion[] = [];
-      snap.forEach((ds) => {
-        items.push({ id: ds.id, ...ds.data() } as ContratoFormalizacion);
-      });
+      snapshot.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as ContratoFormalizacion));
       callback(items);
-    },
-    (err) => {
-      console.error('Firestore contratos (scoped) snapshot error:', err);
-    }
-  );
+    }, (err) => console.error('Firestore contratos_formalizacion snapshot error:', err));
+  }
+
+  // Los contratos del inquilino se cargan por get de cada ID vinculado; nunca
+  // se permite una consulta list a la colección desde ese perfil.
+  if (scope.tipoPerfil === 'INQUILINO') {
+    callback([]);
+    return () => {};
+  }
+
+  const pids = [
+    ...(scope.tipoPerfil === 'PROPIETARIO' && scope.propietarioId ? [scope.propietarioId] : []),
+    ...(scope.propietariosGestionados ?? []),
+  ];
+  const inmuebleIds = scope.inmuebleIds ?? [];
+  return subscribeUnionContratosPorAmbito(pids, inmuebleIds, scope.ambitosParcialesGestionados ?? [], callback);
 }
 
 /**
@@ -964,6 +941,201 @@ export async function saveContratoFirestore(contrato: ContratoFormalizacion) {
     console.error('Error saving contrato formalizacion to Firestore:', err);
     throw err;
   }
+}
+
+export interface PersistirTransicionAlquilerOpts {
+  marcarInmuebleAlquilado?: boolean;
+  liberarInmueble?: boolean;
+  habitacion?: HabitacionInmueble;
+}
+
+/**
+ * Persiste en un único commit una transición de alquiler y sus referencias
+ * patrimoniales. Contrato, ficha de inmueble, habitación (si aplica) y evento
+ * de auditoría no pueden quedar a medias.
+ */
+export async function persistirTransicionAlquilerFirestore(
+  contrato: ContratoFormalizacion,
+  opciones: PersistirTransicionAlquilerOpts
+): Promise<{ contrato: ContratoFormalizacion; inmueble?: Inmueble; habitacion?: HabitacionInmueble }> {
+  const contratoRef = doc(db, 'contratos_formalizacion', contrato.id);
+  const inmuebleRef = doc(db, 'inmuebles', contrato.inmuebleId);
+  const fichaRef = doc(db, 'fichas_publicas_inmueble', contrato.inmuebleId);
+  const habitacionId = opciones.habitacion?.id || (opciones.liberarInmueble ? contrato.habitacionId : undefined);
+  const habitacionRef = habitacionId ? doc(db, 'habitaciones_inmueble', habitacionId) : undefined;
+  const auditRef = doc(AUDIT_LOGS_COL);
+  const ahora = new Date().toISOString();
+  const actor = auth.currentUser;
+  if (!actor) throw new Error('Se requiere una sesión autenticada para cambiar el ciclo de alquiler.');
+  if (!contrato.id || !contrato.inmuebleId) throw new Error('Contrato sin ID o sin inmueble vinculado.');
+  if (!opciones.marcarInmuebleAlquilado && !opciones.liberarInmueble) {
+    throw new Error('La transición debe activar o finalizar un vínculo patrimonial.');
+  }
+  if (opciones.marcarInmuebleAlquilado && contrato.habitacionId && !opciones.habitacion) {
+    throw new Error('El contrato por habitación requiere persistir la habitación vinculada en el mismo ciclo.');
+  }
+  if (opciones.habitacion && (opciones.habitacion.inmuebleId !== contrato.inmuebleId || opciones.habitacion.id !== contrato.habitacionId)) {
+    throw new Error('La habitación no corresponde al inmueble/habitación del contrato.');
+  }
+
+  const resultado = await runTransaction(db, async (tx) => {
+    const contratoSnap = await tx.get(contratoRef);
+    const inmuebleSnap = await tx.get(inmuebleRef);
+    const fichaSnap = await tx.get(fichaRef);
+    const habitacionSnap = habitacionRef ? await tx.get(habitacionRef) : undefined;
+    if (!inmuebleSnap.exists()) throw new Error('El inmueble vinculado al contrato ya no existe.');
+    if (habitacionRef && !habitacionSnap?.exists()) throw new Error('La habitación vinculada al contrato ya no existe.');
+
+    const anterior = contratoSnap.exists() ? contratoSnap.data() as ContratoFormalizacion : undefined;
+    if (anterior?.id && anterior.id !== contratoSnap.id) {
+      throw new Error('El ID almacenado del contrato no coincide con su ruta Firestore.');
+    }
+    const inmuebleData = inmuebleSnap.data() as Inmueble;
+    if (inmuebleData.id && inmuebleData.id !== inmuebleSnap.id) {
+      throw new Error('El ID almacenado del inmueble no coincide con su ruta Firestore.');
+    }
+    const yaFinalizado = opciones.liberarInmueble && !opciones.marcarInmuebleAlquilado && anterior?.estado === 'FINALIZADO';
+    if (opciones.marcarInmuebleAlquilado && anterior && ['FINALIZADO', 'RESCINDIDO', 'CANCELADO'].includes(anterior.estado)) {
+      throw new Error('No se puede activar un contrato que ya está finalizado, rescindido o cancelado.');
+    }
+    let contratoTx = yaFinalizado ? anterior! : contrato;
+    if (anterior?.inmuebleId && anterior.inmuebleId !== contratoTx.inmuebleId) {
+      throw new Error('Conflicto de persistencia: el contrato ya está vinculado a otro inmueble.');
+    }
+    if (anterior?.habitacionId && contratoTx.habitacionId && anterior.habitacionId !== contratoTx.habitacionId) {
+      throw new Error('Conflicto de persistencia: no se puede reasignar la habitación del contratoTx.');
+    }
+
+    const inmueble = { ...inmuebleData, id: inmuebleSnap.id } as Inmueble;
+    const propietarioInmueble = inmueble.propietarioId || inmueble.propietarioPrincipalId;
+    if (contratoTx.propietarioId && propietarioInmueble && contratoTx.propietarioId !== propietarioInmueble) {
+      throw new Error('El contrato y el inmueble no pertenecen al mismo titular.');
+    }
+    if (!contratoTx.propietarioId && propietarioInmueble) contratoTx = { ...contratoTx, propietarioId: propietarioInmueble };
+
+    let inmuebleActualizado: Inmueble | undefined;
+    let habitacionActualizada: HabitacionInmueble | undefined;
+    const guardarInmuebleEnTransaccion = (valor: Inmueble) => {
+      const limpio: Record<string, any> = sanitizeInmuebleForFirestore(valor);
+      for (const campo of ['inquilinoActualId', 'inquilinoActualNombre', 'contratoActivoId'] as const) {
+        if (!valor[campo]) limpio[campo] = deleteField();
+      }
+      tx.set(inmuebleRef, limpio, { merge: true });
+    };
+    const guardarHabitacionEnTransaccion = (valor: HabitacionInmueble) => {
+      const limpio = sanitizeObjectForFirestore(valor);
+      if (opciones.liberarInmueble && !valor.contratoId) limpio.contratoId = deleteField();
+      tx.set(habitacionRef!, limpio, { merge: true });
+    };
+    if (habitacionRef) {
+      const habitacionData = habitacionSnap!.data() as HabitacionInmueble;
+      if (habitacionData.id && habitacionData.id !== habitacionSnap!.id) {
+        throw new Error('El ID almacenado de la habitación no coincide con su ruta Firestore.');
+      }
+      const habitacionActual = { ...habitacionData, id: habitacionSnap!.id } as HabitacionInmueble;
+      if (habitacionActual.inmuebleId !== contratoTx.inmuebleId || habitacionActual.id !== contratoTx.habitacionId) {
+        throw new Error('La referencia de habitación persistida no coincide con el contrato.');
+      }
+      if (habitacionActual.propietarioId && contratoTx.propietarioId && habitacionActual.propietarioId !== contratoTx.propietarioId) {
+        throw new Error('La habitación y el contrato no pertenecen al mismo titular.');
+      }
+      if (opciones.habitacion) {
+        if (opciones.habitacion.contratoId && opciones.habitacion.contratoId !== contratoTx.id) {
+          throw new Error('La habitación pertenece a otro contrato; no se puede liberar desde este ciclo.');
+        }
+        if (opciones.liberarInmueble && habitacionActual.contratoId !== contratoTx.id) {
+          throw new Error('La habitación ya no está vinculada al contrato que se intenta finalizar.');
+        }
+        habitacionActualizada = opciones.habitacion;
+        guardarHabitacionEnTransaccion(habitacionActualizada);
+      } else if (opciones.liberarInmueble && habitacionActual.contratoId === contratoTx.id) {
+        // Cierres que llegan desde recomercialización también liberan la
+        // habitación en la misma transacción, aunque no aporten el objeto UI.
+        habitacionActualizada = {
+          ...habitacionActual, estado: 'DISPONIBLE', contratoId: undefined,
+          fechaModificacion: ahora, actualizadoPor: actor.uid,
+        };
+        guardarHabitacionEnTransaccion(habitacionActualizada);
+      } else if (!yaFinalizado) {
+        throw new Error('La habitación ya no está vinculada al contrato que se intenta finalizar.');
+      }
+    }
+
+    if (opciones.marcarInmuebleAlquilado) {
+      if (inmueble.contratoActivoId && inmueble.contratoActivoId !== contratoTx.id) {
+        throw new Error('El inmueble ya tiene otro contrato activo vinculado.');
+      }
+      if (inmueble.inquilinoActualId && inmueble.inquilinoActualId !== contratoTx.candidatoId) {
+        throw new Error('El inmueble ya está ocupado por otro inquilino; no se puede sustituir su referencia.');
+      }
+      if (!contratoTx.habitacionId) {
+        inmuebleActualizado = {
+          ...inmueble,
+          estado: 'alquilado',
+          inquilinoActualId: contratoTx.candidatoId,
+          inquilinoActualNombre: contratoTx.candidatoNombre,
+          contratoActivoId: contratoTx.id,
+        };
+        guardarInmuebleEnTransaccion(inmuebleActualizado);
+      }
+    } else if (opciones.liberarInmueble && !contratoTx.habitacionId) {
+      if (inmueble.contratoActivoId && inmueble.contratoActivoId !== contratoTx.id) {
+        // Puede existir una nueva ocupación sobre la misma ficha. El contrato
+        // histórico se cierra, pero jamás libera ni borra la referencia nueva.
+      } else if (!inmueble.inquilinoActualId || inmueble.inquilinoActualId === contratoTx.candidatoId) {
+        inmuebleActualizado = {
+          ...inmueble,
+          estado: 'disponible',
+          inquilinoActualId: undefined,
+          inquilinoActualNombre: undefined,
+          contratoActivoId: undefined,
+        };
+        guardarInmuebleEnTransaccion(inmuebleActualizado);
+      }
+    }
+
+    if (yaFinalizado && !inmuebleActualizado && !habitacionActualizada) {
+      // Reintento seguro: si el cierre ya se persistió y no queda ningún
+      // vínculo patrimonial por reparar, evita historial/auditoría duplicados.
+      return { contrato: contratoTx };
+    }
+
+    if (inmuebleActualizado && fichaSnap.exists()) {
+      const fichaPublicaActualizada = buildFichaPublicaInmueble(inmuebleActualizado, ahora);
+      if (fichaPublicaActualizada) tx.set(fichaRef, sanitizeObjectForFirestore(fichaPublicaActualizada));
+    }
+    tx.set(contratoRef, sanitizeObjectForFirestore(contratoTx), { merge: true });
+    const audit: AuditLog = {
+      id: auditRef.id,
+      usuarioId: actor.uid,
+      usuarioEmail: actor.email || '',
+      usuarioNombre: actor.displayName || actor.email || actor.uid,
+      accion: opciones.marcarInmuebleAlquilado ? 'ALQUILER_CONTRATO_ACTIVADO' : 'ALQUILER_CONTRATO_FINALIZADO',
+      descripcion: opciones.marcarInmuebleAlquilado
+        ? (contratoTx.habitacionId
+          ? 'Contrato y habitación vinculados en una transición atómica de alquiler.'
+          : 'Contrato e inmueble vinculados en una transición atómica de alquiler.')
+        : 'Finalización contractual persistida con actualización condicionada de sus vínculos patrimoniales.',
+      fechaHora: ahora,
+      entidadAfectada: 'contrato',
+      idAfectado: contratoTx.id,
+      resultado: 'EXITO',
+      detalles: {
+        contratoId: contratoTx.id,
+        inmuebleId: contratoTx.inmuebleId,
+        habitacionId: contratoTx.habitacionId || null,
+        contratoAnteriorId: anterior?.id || null,
+        rutas: [`contratos_formalizacion/${contratoTx.id}`,
+          ...(inmuebleActualizado ? [`inmuebles/${contratoTx.inmuebleId}`] : []),
+          ...(habitacionActualizada && habitacionRef ? [`habitaciones_inmueble/${habitacionRef.id}`] : []),
+          ...(inmuebleActualizado && fichaSnap.exists() ? [`fichas_publicas_inmueble/${contratoTx.inmuebleId}`] : [])],
+      },
+    };
+    tx.set(auditRef, sanitizeObjectForFirestore(audit));
+    return { contrato: contratoTx, inmueble: inmuebleActualizado, habitacion: habitacionActualizada };
+  });
+
+  return resultado;
 }
 
 /**
@@ -1048,13 +1220,25 @@ export function subscribeGastos(
   );
 }
 
-export async function saveGastoFirestore(gasto: Gasto) {
+export type FirestoreWriteResult =
+  | { ok: true }
+  | { ok: false; error: unknown };
+
+/** Escritura verificable para flujos que no pueden tratar un fallo como éxito. */
+export async function saveGastoFirestoreWithResult(gasto: Gasto): Promise<FirestoreWriteResult> {
   try {
     const cleanGasto = sanitizeObjectForFirestore(gasto);
     await setDoc(doc(db, 'gastos', gasto.id), cleanGasto, { merge: true });
-  } catch (err) {
-    console.error('Error saving gasto to Firestore:', err);
+    return { ok: true };
+  } catch (error) {
+    console.error(`Error saving gasto '${gasto.id}' to Firestore:`, error);
+    return { ok: false, error };
   }
+}
+
+/** API histórica best-effort; conserva Promise<void> para sus consumidores existentes. */
+export async function saveGastoFirestore(gasto: Gasto): Promise<void> {
+  await saveGastoFirestoreWithResult(gasto);
 }
 
 export async function deleteGastoFirestore(gastoId: string) {
@@ -1256,6 +1440,48 @@ function subscribeUnionPorPropietario<T extends { id: string }>(
   return () => {
     fuentes.forEach((u) => u());
   };
+}
+
+/**
+ * Unión de consultas de contratos: cartera completa por propietario y
+ * delegación parcial por inmueble. Firestore Rules revalidan cada consulta;
+ * los IDs locales solo delimitan el conjunto solicitado.
+ */
+function subscribeUnionContratosPorAmbito(
+  pids: string[],
+  inmuebleIds: string[],
+  ambitosParciales: InmuebleDelegadoParcial[],
+  callback: (items: ContratoFormalizacion[]) => void
+): Unsubscribe {
+  const fuentesDatos = new Map<string, Map<string, ContratoFormalizacion>>();
+  const fuentes: Unsubscribe[] = [];
+  const notificar = () => {
+    const union = new Map<string, ContratoFormalizacion>();
+    fuentesDatos.forEach((fuente) => fuente.forEach((v, k) => union.set(k, v)));
+    callback(Array.from(union.values()));
+  };
+  const configuraciones = [
+    ...Array.from(new Set(pids)).filter(Boolean).map((pid) => ({ clave: `pid:${pid}`, filtros: [where('propietarioId', '==', pid)] })),
+    ...Array.from(new Set(inmuebleIds)).filter(Boolean).map((id) => ({ clave: `inmueble:${id}`, filtros: [where('inmuebleId', '==', id)] })),
+    ...ambitosParciales.map(({ propietarioId, inmuebleId }) => ({
+      clave: `parcial:${propietarioId}:${inmuebleId}`,
+      filtros: [where('propietarioId', '==', propietarioId), where('inmuebleId', '==', inmuebleId)],
+    })),
+  ];
+  for (const fuente of configuraciones) {
+    fuentes.push(onSnapshot(
+      query(CONTRATOS_COL, ...fuente.filtros),
+      (snap) => {
+        const datos = new Map<string, ContratoFormalizacion>();
+        snap.forEach((ds) => datos.set(ds.id, { id: ds.id, ...ds.data() } as ContratoFormalizacion));
+        fuentesDatos.set(fuente.clave, datos);
+        notificar();
+      },
+      (err) => console.error(`Firestore contratos (${fuente.clave}) snapshot error:`, err)
+    ));
+  }
+  if (!fuentes.length) callback([]);
+  return () => fuentes.forEach((unsubscribe) => unsubscribe());
 }
 
 // ============================================================
@@ -1480,14 +1706,23 @@ export function subscribeTareasMantenimiento(
     'tareas_mantenimiento'
   );
 }
-export async function saveTareaMantenimientoFirestore(item: TareaMantenimiento) {
+export async function saveTareaMantenimientoFirestoreWithResult(
+  item: TareaMantenimiento
+): Promise<FirestoreWriteResult> {
   try {
     await setDoc(doc(db, 'tareas_mantenimiento', item.id), sanitizeObjectForFirestore(item), {
       merge: true,
     });
-  } catch (err) {
-    console.error('Error saving tarea mantenimiento:', err);
+    return { ok: true };
+  } catch (error) {
+    console.error(`Error saving tarea mantenimiento '${item.id}':`, error);
+    return { ok: false, error };
   }
+}
+
+/** API histórica best-effort; conserva Promise<void> para sus consumidores existentes. */
+export async function saveTareaMantenimientoFirestore(item: TareaMantenimiento): Promise<void> {
+  await saveTareaMantenimientoFirestoreWithResult(item);
 }
 export async function deleteTareaMantenimientoFirestore(id: string) {
   try {
@@ -1509,14 +1744,23 @@ export function subscribeGarantiasReparacion(
   );
 }
 
-export async function saveGarantiaReparacionFirestore(item: GarantiaReparacion) {
+export async function saveGarantiaReparacionFirestoreWithResult(
+  item: GarantiaReparacion
+): Promise<FirestoreWriteResult> {
   try {
     await setDoc(doc(db, 'garantias_reparacion', item.id), sanitizeObjectForFirestore(item), {
       merge: true,
     });
-  } catch (err) {
-    console.error('Error saving garantia reparacion:', err);
+    return { ok: true };
+  } catch (error) {
+    console.error(`Error saving garantia reparacion '${item.id}':`, error);
+    return { ok: false, error };
   }
+}
+
+/** API histórica best-effort; conserva Promise<void> para sus consumidores existentes. */
+export async function saveGarantiaReparacionFirestore(item: GarantiaReparacion): Promise<void> {
+  await saveGarantiaReparacionFirestoreWithResult(item);
 }
 
 export async function deleteGarantiaReparacionFirestore(id: string) {
@@ -2117,14 +2361,18 @@ export async function uploadJustificanteCobro(
   cobroPeriodoId: string,
   file: File | Blob,
   fileName: string,
-  propietarioId?: string
+  propietarioId?: string,
+  contratoId?: string
 ): Promise<{ url: string; storagePath: string }> {
   const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   // FASE 1.4: se segmenta por propietario para que Storage Rules pueda aislar
   // los justificantes (datos económicos). Si no hay propietarioId se usa la
   // carpeta genérica "sin_asignar".
   const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `cobros_justificantes/${ownerSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
+  const contractSeg = contratoId?.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = contractSeg
+    ? `recibos/${contractSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`
+    : `cobros_justificantes/${ownerSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
   const mime =
     (file as File).type ||
     (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
@@ -2297,7 +2545,12 @@ export async function deleteProfesionalFirestore(profesionalId: string): Promise
 // ENLACES DE REGISTRO E INVITACIONES
 // =========================================================================
 
-export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) => void) {
+export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) => void, scope?: UsuarioApp) {
+  if (scope && !['ADMINISTRADOR', 'SUPERADMIN'].includes(String(scope.tipoPerfil))) {
+    // Private R02 invites are resolved by document ID only in the authenticated invitation view.
+    callback([]);
+    return () => {};
+  }
   return onSnapshot(
     ENLACES_REGISTRO_COL,
     (snapshot) => {

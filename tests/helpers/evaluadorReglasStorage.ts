@@ -36,6 +36,8 @@ export interface RecursoSubido {
   name: string;
   size: number;
   contentType: string;
+  /** Metadata personalizada opcional del objeto subido, cuando la regla la consulta. */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ContextoPeticion {

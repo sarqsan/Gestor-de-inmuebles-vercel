@@ -5,7 +5,7 @@ import { crearEvaluadorReglas, type Peticion } from './harness/firestoreRulesEva
 const rules = readFileSync(resolve(__dirname, '../firestore.rules'), 'utf8');
 const permite = crearEvaluadorReglas(rules).permite;
 const now = Date.parse('2026-09-28T10:00:00Z');
-const auth = {uid:'uid-nuevo',token:{email:'ana@test.local'}};
+const auth = {uid:'uid-nuevo',token:{email:'ana@test.local',email_verified:true}};
 const u = {id:'u', email:'ana@test.local',tipoPerfil:'PROPIETARIO',estado:'PENDIENTE',roles:['PROPIETARIO_ESTANDAR'],
   propietarioId:'o',permisos:[],inmuebleIds:[]};
 const link = {id:'e', tipoPerfil:'PROPIETARIO',emailInvitado:'ana@test.local',activo:true,

@@ -74,6 +74,17 @@ function aFecha(v: unknown, transformacion: string | undefined, warnings: string
   }
   const s = v.trim();
   if (fechaUtil(s)) return s; // ISO válido (B1)
+  // XLSX/BLOQUE 7: una celda con formato de fecha Y hora llega como ISO con
+  // hora ('2024-03-15T13:45:30'). El campo destino del ERP es de día civil, así
+  // que se conserva el DÍA y se avisa de la hora descartada (nunca se desplaza
+  // el día ni se trunca en silencio).
+  const conHora = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)$/.exec(s);
+  if (conHora) {
+    if (fechaUtil(conHora[1])) {
+      warnings.push(`${campo}: '${s}' → ${conHora[1]} (hora ${conHora[2]} descartada: el campo es de fecha civil)`);
+      return conHora[1];
+    }
+  }
   const dmy = parseFechaDMY(s); // D/M/YYYY día-primer explícito (B1)
   if (dmy.iso) {
     warnings.push(

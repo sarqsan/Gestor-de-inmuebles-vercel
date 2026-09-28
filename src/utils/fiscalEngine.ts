@@ -134,75 +134,27 @@ export interface ResumenFiscalAnual {
 }
 
 // =====================
-// HELPERS DEDUCIBILIDAD
+// HELPERS DEDUCIBILIDAD (BLOQUE 5 — fuente única)
 // =====================
+//
+// La decisión de deducibilidad vive en `deducibilidadEngine` para que TODOS los
+// consumidores (fiscal, gastos, rentabilidad, expedientes) compartan exactamente
+// la misma regla y no exista una segunda lógica en paralelo (cierre de D1).
+// Se re-exporta con los nombres históricos para no romper a ningún llamante.
 
-/**
- * Determina si un gasto es deducible.
- *
- * Coherencia D1 con el campo operativo `deducible` que escriben GastoModal,
- * crearGasto, recurrentes y el puente OT. No inventa norma fiscal: reutiliza
- * la decisión ya persistida y, solo si falta, infiere por categoría.
- *
- * Prioridad:
- * 1. `esDeducible` si es booleano (alias fiscal explícito).
- * 2. `tipoDeducible` si está informado.
- * 3. `deducible` operativo si es booleano.
- * 4. Inferencia por la lista cerrada. Incluye las categorías de explotación
- *    del catálogo de gastosEngine que esta lista omitía (IBI, SEGURO_HOGAR,
- *    ADMINISTRACION, OTRO_EXPLOTACION). OTRO y financiación no se infieren
- *    como deducibles.
- */
-export function esGastoDeducible(gasto: Gasto): boolean {
-  if (typeof gasto.esDeducible === 'boolean') return gasto.esDeducible;
-  if (gasto.tipoDeducible) {
-    return gasto.tipoDeducible === 'DEDUCIBLE';
-  }
-  if (typeof gasto.deducible === 'boolean') return gasto.deducible;
-  const categoriasDeducibles: CategoriaGasto[] = [
-    'MANTENIMIENTO',
-    'REPARACION',
-    'SUMINISTROS',
-    'SEGUROS',
-    'IMPUESTOS_TASAS',
-    'COMUNIDAD',
-    'ELECTRODOMESTICOS', // amortizable
-    'MOBILIARIO', // amortizable
-    'REFORMAS', // amortizable
-    'LIMPIEZA',
-    'GESTION',
-    'IBI',
-    'SEGURO_HOGAR',
-    'ADMINISTRACION',
-    'OTRO_EXPLOTACION',
-  ];
-  return categoriasDeducibles.includes(gasto.categoria);
-}
-
-export function clasificarGastosDeducibilidad(gastos: Gasto[]): {
-  deducibles: Gasto[];
-  noDeducibles: Gasto[];
-  totalDeducible: number;
-  totalNoDeducible: number;
-} {
-  const deducibles: Gasto[] = [];
-  const noDeducibles: Gasto[] = [];
-  let totalDeducible = 0;
-  let totalNoDeducible = 0;
-
-  for (const g of gastos) {
-    if (g.estado === 'ANULADO') continue;
-    if (esGastoDeducible(g)) {
-      deducibles.push(g);
-      totalDeducible += g.importe || 0;
-    } else {
-      noDeducibles.push(g);
-      totalNoDeducible += g.importe || 0;
-    }
-  }
-
-  return { deducibles, noDeducibles, totalDeducible, totalNoDeducible };
-}
+import {
+  analizarDeducibilidad,
+  CATEGORIAS_DEDUCIBLES,
+  clasificarGastosDeducibilidad,
+  esGastoDeducible,
+} from './deducibilidadEngine';
+export {
+  analizarDeducibilidad,
+  CATEGORIAS_DEDUCIBLES,
+  clasificarGastosDeducibilidad,
+  esGastoDeducible,
+} from './deducibilidadEngine';
+export type { OrigenDecisionDeducibilidad } from './deducibilidadEngine';
 
 // =====================
 // HELPERS FECHAS / OCUPACIÓN

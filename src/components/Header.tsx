@@ -4,7 +4,7 @@ import { Plus, Database, User, ShieldCheck, Mail, LogOut, CheckCircle2, Shield, 
 // CAPA TRANSVERSAL §6 (Fase 1): ayuda contextual de la pantalla activa
 import { ContextualHelp } from './experiencia/ContextualHelp';
 import { AsistentePanel } from './experiencia/AsistentePanel';
-import type { AccionHost, ProveedorIA } from '../experiencia';
+import type { AccionHost, ExperienceContext, ProveedorIA, ResultadoConsultaERP } from '../experiencia';
 
 interface HeaderProps {
   activeSection: SectionType;
@@ -23,6 +23,8 @@ interface HeaderProps {
   /** §6 F4: el host ejecuta la acción validada del asistente (navegar/tutorial). */
   onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
   proveedorIA?: ProveedorIA;
+  contextoIA?: ExperienceContext;
+  onConsultarAsistente?: (accion: Extract<AccionHost, { tipo: 'CONSULTAR' }>) => Promise<ResultadoConsultaERP>;
   /** Secciones accesibles (route guard del host) para el asistente. */
   accessibleSections?: SectionType[];
 }
@@ -42,6 +44,8 @@ export const Header: React.FC<HeaderProps> = ({
   onIniciarTutorial,
   onAccionAsistente,
   proveedorIA,
+  contextoIA,
+  onConsultarAsistente,
   accessibleSections,
 }) => {
   const [copiedLink, setCopiedLink] = React.useState(false);
@@ -117,10 +121,11 @@ export const Header: React.FC<HeaderProps> = ({
               section={activeSection}
               onAbrirCentro={() => onSelectSection('ayuda')}
               onIniciarTutorial={onIniciarTutorial}
+              contexto={contextoIA}
             />
           )}
           {currentUser && onAccionAsistente && (
-            <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} />
+            <AsistentePanel usuario={currentUser} section={activeSection} contexto={contextoIA} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} onConsultar={onConsultarAsistente} />
           )}
         </div>
         <p className="text-xs text-slate-500">{subtitle}</p>

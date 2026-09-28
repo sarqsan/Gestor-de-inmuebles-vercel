@@ -97,6 +97,9 @@ export function getExperienceContext(input: ExperienceContextInput = {}): Experi
 
   return {
     host: input.host ?? 'ERP',
+    userId: typeof input.userId === 'string' && input.userId.length > 0 ? input.userId : undefined,
+    holderId: typeof input.holderId === 'string' && input.holderId.length > 0 ? input.holderId : undefined,
+    portfolioIds: limpiar(input.portfolioIds),
     module,
     section,
     route: input.route ?? (section ? `#${section}` : ''),

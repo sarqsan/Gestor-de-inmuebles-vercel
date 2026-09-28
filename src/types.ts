@@ -1377,6 +1377,19 @@ export interface Gasto {
   partidaId?: string; // ID de la partida vinculada si aplica
   profesionalId?: string; // ID del Profesional que ejecutó el trabajo
   presupuestoId?: string; // ID del Presupuesto previo asociado si existió
+  // BLOQUE 5 — OPERACIONES → FISCALIDAD: procedencia operativa trazable.
+  // Reutiliza el patrón `origen`/`origenId` existente; permite reconstruir la
+  // cadena inmueble → incidencia → reparación → proveedor → presupuesto →
+  // factura → gasto → deducibilidad → documento sin tablas paralelas.
+  // La unión de `origen` ya admite `string`, por lo que los valores del circuito
+  // ('MANTENIMIENTO_PREVENTIVO' | 'FACTURA' | 'SUMINISTRO') no necesitan tocar
+  // la línea base del modelo (se documentan aquí y en `ORIGEN_POR_TIPO`).
+  facturaId?: string; // ID de la factura/comprobante de la operación
+  reparacionId?: string; // ID de la reparación/actuación de la operación
+  proveedorId?: string; // ID del proveedor catalogado (el nombre va en `proveedor`)
+  suministroId?: string; // ID del suministro (luz/agua/gas) del que procede
+  polizaId?: string; // ID de la póliza/seguro del que procede
+  lecturaId?: string; // ID de la lectura de contador que documenta el consumo
   fecha?: string; // Alias de conveniencia
   pagado?: boolean; // Alias de conveniencia
   esDeducible?: boolean; // Alias fiscal
@@ -1714,7 +1727,11 @@ export interface UsuarioApp {
   activo?: boolean; // Flag de estado
   roles: string[];
   permisos: string[];
-  inmuebleIds?: string[]; // IDs de inmuebles a los que tiene acceso
+  inmuebleIds?: string[]; // IDs explícitos persistidos de inmuebles
+  /** Ámbito efímero de consulta/UI derivado de gestiones activas; nunca es autorización por sí mismo. */
+  inmueblesDelegadosParciales?: string[];
+  /** Subconjunto efímero con permiso delegado de escritura; las Rules vuelven a autorizar cada cambio. */
+  inmueblesDelegadosParcialesEscritura?: string[];
   propietarioId?: string; // ID del propietario vinculado en colección 'propietarios'
   profesionalId?: string; // ID del profesional vinculado en colección 'profesionales'
   contratoIds?: string[]; // BLOQUE E: contratos LAU vinculados (alcance del perfil INQUILINO)
@@ -1818,7 +1835,14 @@ export interface EnlaceRegistro {
   descripcion?: string;
   activo: boolean;
   /** Estado nominal independiente del usuario, cuenta y gestión; legacy sin campo sigue válido. */
-  estadoInvitacion?: 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'REVOCADA';
+  estadoInvitacion?: 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'REVOCADA' | 'EXPIRADA';
+  finalidad?: 'ONBOARDING_CARTERA';
+  personaIdVinculada?: string;
+  gestionId?: string;
+  alcanceInmuebleIds?: string[];
+  permisoGestion?: 'LECTURA' | 'LECTURA_ESCRITURA';
+  resueltaAt?: string;
+  resueltaPor?: string;
   profesionalIdVinculado?: string; // Si es una invitación para un profesional privado existente
   propietarioIdVinculado?: string; // Si es una invitación para un propietario existente
   usuarioIdVinculado?: string; // ACCESO-PROPIETARIOS: usuario pendiente nominal (un solo uso, NO crear usuario)
@@ -3791,6 +3815,11 @@ export interface ExportacionFiscalItem {
   moneda: 'EUR';
   ejercicioFiscal?: number;
   esDeducible?: boolean;
+  // BLOQUE 5 — OPERACIONES → FISCALIDAD: origen de la operación que produjo el
+  // apunte (solo gastos de operaciones). `origen` se conserva por compatibilidad.
+  origenOperacion?: string;
+  origenOperacionId?: string;
+  documentoId?: string;
 }
 
 export interface ExportacionFiscalEstructurada {

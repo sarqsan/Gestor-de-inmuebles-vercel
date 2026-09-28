@@ -33,7 +33,7 @@ vi.mock('firebase/firestore', () => ({
     const resolvedCol = col ?? (_db as {__col:string}).__col;
     const resolvedId = id ?? `audit_${++mem.seq}`;
     mem.docCalls.push({ col: resolvedCol, id: resolvedId });
-    return { __col: resolvedCol, __id: resolvedId };
+    return { __col: resolvedCol, __id: resolvedId, id: resolvedId };
   },
   collection: (_db: unknown, col: string) => ({ __col: col }),
   getDoc: async (r: { __col: string; __id: string }) => {
@@ -71,6 +71,13 @@ vi.mock('firebase/firestore', () => ({
       },
     };
     const result = await fn(tx);
+    const db=Object.fromEntries(mem.store) as Record<string,any>, after=structuredClone(db);
+    for(const {ref,value,tipo} of writes) {const key=`${ref.__col}/${ref.__id}`;after[key]=tipo==='set'?value:{...after[key],...value};}
+    for(const {ref} of writes) {
+      const key=`${ref.__col}/${ref.__id}`;
+      if(!permiteNominal(ref.__col,db[key]?'update':'create',{auth:{uid:'uid_nuevo_1',token:{email:'prop@test.es',email_verified:true}},db,after,timeMs:Date.now(),docId:ref.__id,resource:db[key]||null,requestResource:after[key]}))
+        throw Error('Rules: vínculo incoherente o no autorizado');
+    }
     for (const {ref,value,tipo} of writes) {
       const key = `${ref.__col}/${ref.__id}`;
       mem.store.set(key, tipo === 'set' ? value : { ...(mem.store.get(key) as object), ...value });
@@ -95,12 +102,12 @@ vi.mock('firebase/auth', () => ({
     if (mem.authFalla) throw new Error('Auth inaccesible');
     if (mem.authExiste) throw { code:'auth/email-already-in-use' };
     mem.authExiste = true;
-    return { user: { uid: 'uid_nuevo_1', email } };
+    return { user: { uid: 'uid_nuevo_1', email, emailVerified:true, reload:async()=>{}, getIdToken:async()=>{} } };
   },
   signInWithEmailAndPassword: async (_a: unknown, email: string, password:string) => {
     mem.authLogins++;
     if (password !== 'secreta1' || !mem.authExiste) throw new Error('Credenciales incorrectas');
-    return { user: { uid:'uid_nuevo_1', email } };
+    return { user: { uid:'uid_nuevo_1', email, emailVerified:true, reload:async()=>{}, getIdToken:async()=>{} } };
   },
   signOut: async () => {},
   onAuthStateChanged: () => () => {},
@@ -126,6 +133,8 @@ import {
   validarActivacionPendiente,
   validarInvitacionPropietario,
 } from '../src/lib/accesoPropietarios';
+import { crearEvaluadorReglas } from './harness/firestoreRulesEval';
+const permiteNominal = crearEvaluadorReglas(readFileSync('firestore.rules','utf8')).permite;
 import { getUsuarioByAuthUid, registerWithInvitationLink } from '../src/lib/authService';
 import type { EnlaceRegistro, Propietario, UsuarioApp } from '../src/types';
 

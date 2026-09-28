@@ -118,6 +118,10 @@ function validarParametros(cap: CapacidadERP, crudos: unknown, ctx: ExperienceCo
       errores.push(`La pantalla «${v}» no está disponible para ti`);
       continue;
     }
+    if (def.semantica === 'EJERCICIO_FISCAL' && (!Number.isInteger(v) || (v as number) < 2000 || (v as number) > 2100)) {
+      errores.push(`Parámetro «${nombre}» debe ser un ejercicio entre 2000 y 2100`);
+      continue;
+    }
     if (def.semantica === 'HELP_ENTRY_VISIBLE' && !ayudaDisponible(ctx).some((e) => e.id === v)) {
       errores.push('Ese contenido de ayuda no está disponible para ti');
       continue;
@@ -200,6 +204,10 @@ export function validarResolucionIA(propuesta: unknown, ctx: ExperienceContext, 
   }
   if (hostDe(ctx) === 'PORTAL_INQUILINO' && !['inicio', 'ayuda', 'contratos', 'cobros', 'incidencias', 'suministros', 'inquilinos', 'actas', 'administracion'].includes(cap.module)) {
     return base('SIN_PERMISO', 'Esa función no está disponible en el portal.', { ...comun, confianza, errores: ['MODULO_FUERA_DE_HOST'] });
+  }
+
+  if (cap.consultaId && intencion && intencion !== 'CONSULTAR') {
+    return base('ERROR', 'La interpretación no coincide con el tipo de consulta permitido.', { ...comun, errores: ['INTENCION_INCOMPATIBLE_CON_CONSULTA'] });
   }
 
   const val = validarParametros(cap, parametrosCrudos, ctx);
@@ -317,9 +325,11 @@ export const proveedorLocal: ProveedorIA = {
       const tipo = tipoDe(cap);
       if (tipo === 'ESCRITURA') return { intencion: 'EJECUTAR', capabilityId: cap.id, confianza: 0.8 };
       if (quiereNavegar || tipo === 'NAVEGACION') return { intencion: 'NAVEGAR', capabilityId: cap.id, confianza: 0.85, explicacion: `Te llevo a «${cap.descripcion}».` };
-      // Consulta: si hay ayuda relacionada, acompañar con la explicación
+      // Consulta: extraer solo un año explícito; el host valida el rango y nunca confía en otros datos del modelo.
       const ayuda = buscarAyuda(ctx, consulta).find((e) => e.module === cap.module);
-      return { intencion: 'CONSULTAR', capabilityId: cap.id, helpEntryId: ayuda?.id, confianza: 0.8, explicacion: ayuda?.summary ?? cap.descripcion };
+      const anioExplicito = cap.parametros?.ejercicio ? q.match(/\b\d{4}\b/) : null;
+      const parametros = anioExplicito ? { ejercicio: Number(anioExplicito[0]) } : undefined;
+      return { intencion: 'CONSULTAR', capabilityId: cap.id, helpEntryId: ayuda?.id, parametros, confianza: 0.8, explicacion: ayuda?.summary ?? cap.descripcion };
     }
 
     // La petición apunta a una capacidad de este host que el usuario NO tiene: se propone igualmente
@@ -439,6 +449,7 @@ export function confirmarResolucion(res: AIIntentResolution, ctx: ExperienceCont
 
 /** Acción concreta que el HOST debe ejecutar con sus propios medios (route guard, tutoriales…). */
 export type AccionHost =
+  | { tipo: 'CONSULTAR'; capabilityId: string; parametros: Record<string, ValorParametroIA> }
   | { tipo: 'NAVEGAR'; route: string; capabilityId: string }
   | { tipo: 'EXPLICAR'; helpEntryId: string; route?: string; capabilityId: string }
   | { tipo: 'TUTORIAL'; tutorialId: string; capabilityId: string }
@@ -462,6 +473,9 @@ export function ejecutarResolucion(res: AIIntentResolution, ctx: ExperienceConte
   }
   if (res.tutorialId) {
     return tutorialesDisponibles(ctx).some((t) => t.id === res.tutorialId) ? { tipo: 'TUTORIAL', tutorialId: res.tutorialId, capabilityId: cap.id } : { tipo: 'NINGUNA', motivo: 'TUTORIAL_NO_DISPONIBLE' };
+  }
+  if (cap.consultaId) {
+    return { tipo: 'CONSULTAR', capabilityId: cap.id, parametros: { ...res.parametros } };
   }
   if (res.helpEntryId && (cap.id === 'cap.ayuda.explicar' || res.intencion === 'EXPLICAR' || res.intencion === 'CONSULTAR')) {
     if (!ayudaDisponible(ctx).some((e) => e.id === res.helpEntryId)) return { tipo: 'NINGUNA', motivo: 'AYUDA_NO_DISPONIBLE' };

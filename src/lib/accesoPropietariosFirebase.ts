@@ -46,7 +46,7 @@ export async function emitirInvitacionNominalFirestore(enlace: EnlaceRegistro): 
 }
 
 /** Rechazo/revocación administrativa, inmutables una vez aceptada. Repetir es no-op. */
-export async function resolverInvitacionNominalFirestore(id: string, decision: 'RECHAZADA'|'REVOCADA'): Promise<void> {
+export async function resolverInvitacionNominalFirestore(id: string, decision: 'RECHAZADA'|'REVOCADA'|'EXPIRADA'): Promise<void> {
   const actor = master();
   if (!idSeguro(id)) throw new Error('ID inválido');
   const link = doc(db,'enlaces_registro',id);
@@ -58,6 +58,7 @@ export async function resolverInvitacionNominalFirestore(id: string, decision: '
     if (actual.estadoInvitacion === decision && !actual.activo) return;
     if (actual.estadoInvitacion !== 'PENDIENTE' || !actual.activo || actual.usosActuales !== 0)
       throw new Error('La invitación ya fue resuelta; no se reabre');
+    if (decision === 'EXPIRADA' && (!Number.isFinite(actual.fechaCaducidadMs) || actual.fechaCaducidadMs! > Date.now())) throw new Error('La invitación todavía no ha expirado');
     tx.update(link,{ estadoInvitacion:decision,activo:false,roadmap01AuditId:audit.id });
     tx.set(audit,{
       id:audit.id,usuarioId:actor.uid,usuarioEmail:actor.email,usuarioNombre:actor.email,

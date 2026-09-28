@@ -35,6 +35,10 @@ export type HostExperiencia = 'ERP' | 'PORTAL_INQUILINO';
 export interface ExperienceContextInput {
   /** Anfitrión actual (ERP por defecto). */
   host?: HostExperiencia;
+  /** Identificadores locales de experiencia/auditoría; nunca se envían al proveedor IA. */
+  userId?: string;
+  holderId?: string;
+  portfolioIds?: string[];
   module?: ModuloERP;
   section?: SectionType | string;
   route?: string;
@@ -51,6 +55,10 @@ export interface ExperienceContextInput {
 /** Contexto resuelto. `module` y `section` siempre existen (con 'desconocido'/'' si no se pudo resolver). */
 export interface ExperienceContext {
   host: HostExperiencia;
+  /** Identidad y ámbitos canónicos, solo locales para host/auditoría. */
+  userId?: string;
+  holderId?: string;
+  portfolioIds?: string[];
   module: ModuloERP;
   section: string;
   route: string;
@@ -65,8 +73,11 @@ export interface ExperienceContext {
   missing: Array<'role' | 'permissions' | 'section' | 'entity' | 'state'>;
 }
 
+export type CategoriaAyuda = 'inicio' | 'usuarios_permisos' | 'titulares' | 'carteras' | 'inmuebles' | 'alquileres' | 'operaciones' | 'fiscalidad' | 'documentos' | 'importacion_exportacion' | 'migracion' | 'auditoria' | 'configuracion';
+
 export interface HelpEntry {
   id: string;
+  categoria?: CategoriaAyuda;
   /** Anfitrión al que pertenece la pantalla ('ERP' por defecto). */
   host?: HostExperiencia;
   module: ModuloERP;
@@ -151,6 +162,26 @@ export interface EvaluacionPaso {
  */
 export type TipoCapacidad = 'CONSULTA' | 'NAVEGACION' | 'AYUDA' | 'ESCRITURA';
 
+/** Consultas dinámicas ejecutadas por adaptadores del host sobre snapshots ya autorizados. */
+export type ConsultaERPId = 'GASTOS_EJERCICIO' | 'COBROS_EJERCICIO' | 'INCIDENCIAS_ABIERTAS';
+
+export interface HechoERPVerificado {
+  etiqueta: string;
+  valor: string | number;
+  formato?: 'EUR' | 'NUMERO';
+}
+
+/** Resultado del servicio/motor oficial. No se mezcla con texto generado por el modelo. */
+export interface ResultadoConsultaERP {
+  estado: 'OK' | 'SIN_DATOS' | 'NO_DISPONIBLE';
+  capabilityId: string;
+  titulo: string;
+  resumen: string;
+  motorOficial: string;
+  hechos: HechoERPVerificado[];
+  ambito: 'INMUEBLE' | 'AMBITO_AUTORIZADO';
+}
+
 /** Esquema mínimo de un parámetro estructurado que la IA puede proponer para una capacidad. */
 export interface EsquemaParametro {
   tipo: 'string' | 'number' | 'boolean';
@@ -158,7 +189,7 @@ export interface EsquemaParametro {
   /** Valores admitidos (enumeración cerrada) si procede. */
   valores?: readonly string[];
   /** Validación semántica adicional resuelta por el validador determinista (F4). */
-  semantica?: 'RUTA_HOST' | 'HELP_ENTRY_VISIBLE' | 'TUTORIAL_DISPONIBLE';
+  semantica?: 'RUTA_HOST' | 'HELP_ENTRY_VISIBLE' | 'TUTORIAL_DISPONIBLE' | 'EJERCICIO_FISCAL';
 }
 
 /** Capacidad segura del ERP que la capa puede ofrecer/explicar. Deriva de permisos reales. */
@@ -178,6 +209,8 @@ export interface CapacidadERP {
   sensible?: boolean;
   /** Parámetros estructurados admitidos (cerrado: cualquier otro se rechaza). */
   parametros?: Record<string, EsquemaParametro>;
+  /** Consulta de solo lectura delegada al motor oficial inyectado por el host. */
+  consultaId?: ConsultaERPId;
   /** Palabras clave para el resolutor local determinista. */
   keywords?: string[];
 }

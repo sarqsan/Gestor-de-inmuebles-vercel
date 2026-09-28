@@ -2,15 +2,28 @@ import React, { useState, useEffect } from 'react';
 import {
   TareaMantenimiento,
   Profesional,
+  Inmueble,
   UsuarioApp,
-  Gasto,
   GarantiaReparacion,
 } from '../../types';
 import {
   marcarActuacionRealizada,
+  calcularFechaFinGarantia,
   calcularProximaFechaMantenimiento,
 } from '../../utils/mantenimientoEngine';
-import { saveGastoFirestore, saveGarantiaReparacionFirestore } from '../../lib/firebase';
+import { formatDateInputLocal } from '../../utils/formatters';
+// BLOQUE 5 — OPERACIONES → FISCALIDAD: el apunte contable de la actuación se
+// construye con el puente único de operaciones (identidad determinista,
+// trazabilidad origen/origenId y sin duplicar el gasto de la misma actuación).
+import {
+  gastoIdDeActuacion,
+  generarGastoDesdeOperacion,
+  operacionDesdeTareaMantenimiento,
+} from '../../utils/operacionGastoEngine';
+import {
+  saveGastoFirestoreWithResult,
+  saveGarantiaReparacionFirestoreWithResult,
+} from '../../lib/firebase';
 import {
   X,
   CheckCircle2,
@@ -30,6 +43,8 @@ interface RegistrarActuacionModalProps {
   tarea: TareaMantenimiento;
   profesionales?: Profesional[];
   currentUser?: UsuarioApp;
+  /** Inmueble real de la tarea: permite validar el aislamiento por inmueble. */
+  inmueble?: Inmueble;
 }
 
 export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = ({
@@ -39,6 +54,7 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
   tarea,
   profesionales = [],
   currentUser,
+  inmueble,
 }) => {
   const [fechaRealizacion, setFechaRealizacion] = useState<string>('');
   const [costeReal, setCosteReal] = useState<string>('');
@@ -56,7 +72,7 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
 
   useEffect(() => {
     if (!isOpen) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatDateInputLocal();
     setFechaRealizacion(today);
     setCosteReal(tarea.costeEstimado ? String(tarea.costeEstimado) : '');
     setProfesionalNombre(tarea.profesionalPreferidoNombre || '');
@@ -90,9 +106,51 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
     setSaving(true);
     try {
       const costeNum = costeReal ? parseFloat(costeReal) : 0;
-      const gastoId = generarGasto && costeNum > 0 ? `gasto_mant_${tarea.id}_${Date.now()}` : undefined;
 
-      // 1. Marcar actuación realizada deterministamente en la tarea
+      // 1. Apunte contable de la actuación (si procede) por el puente único.
+      //    El gasto de esta actuación no se duplica al repetir el guardado: el
+      //    ID es determinista (tarea + fecha) o el que el propio modelo ya
+      //    asocia a la actuación, y conserva `origen`/`origenId` de la operación.
+      const operacion = generarGasto && costeNum > 0
+        ? operacionDesdeTareaMantenimiento(tarea, {
+            fechaRealizacion,
+            costeReal: costeNum,
+            profesionalId: tarea.profesionalPreferidoId,
+            profesionalNombre,
+            observaciones,
+            numFactura,
+            gastoIdExistente: gastoIdDeActuacion(tarea, fechaRealizacion),
+          })
+        : null;
+
+      const resultadoGasto = operacion
+        ? generarGastoDesdeOperacion({
+            operacion,
+            inmuebles: inmueble ? [inmueble] : undefined,
+            usuarioNombre: currentUser?.nombre,
+            usuarioId: currentUser?.id,
+            ahora: new Date().toISOString(),
+          })
+        : null;
+
+      if (resultadoGasto?.error) {
+        setError(resultadoGasto.error);
+        return;
+      }
+
+      const gasto = resultadoGasto?.gasto;
+      if (gasto) {
+        const persistenciaGasto = await saveGastoFirestoreWithResult(gasto);
+        if (persistenciaGasto.ok === false) {
+          const detalle = persistenciaGasto.error instanceof Error
+            ? persistenciaGasto.error.message
+            : String(persistenciaGasto.error);
+          throw new Error(`No se pudo guardar el gasto de la actuación: ${detalle}`);
+        }
+      }
+      const gastoId = gasto?.id;
+
+      // 2. Marcar actuación realizada deterministamente en la tarea
       const result = marcarActuacionRealizada({
         plan: tarea,
         fechaRealizacion,
@@ -105,41 +163,15 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
 
       const tareaActualizada = result.planActualizado;
 
-      // 2. Si se solicitó registrar apunte de gasto contable
-      if (gastoId && costeNum > 0) {
-        const nuevoGasto: Gasto = {
-          id: gastoId,
-          inmuebleId: tarea.inmuebleId,
-          propietarioId: tarea.propietarioId,
-          tipo: 'EXPLOTACION',
-          categoria: 'MANTENIMIENTO',
-          concepto: `Mantenimiento: ${tarea.titulo}${profesionalNombre ? ` (${profesionalNombre})` : ''}`,
-          importe: costeNum,
-          estado: 'PAGADO',
-          fechaDevengo: fechaRealizacion,
-          fechaPago: fechaRealizacion,
-          periodoMesAnio: fechaRealizacion.slice(0, 7),
-          aCargoDe: 'arrendador',
-          deducible: true,
-          proveedor: profesionalNombre || 'Servicio Técnico',
-          ordenTrabajoId: tarea.ultimaOrdenTrabajoId,
-          incidenciaId: tarea.ultimaIncidenciaId,
-          origen: 'MANTENIMIENTO_PREVENTIVO',
-          notas: numFactura ? `Factura nº ${numFactura}. ${observaciones || ''}` : (observaciones || undefined),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        await saveGastoFirestore(nuevoGasto);
-      }
-
       // 3. Si se solicitó registrar garantía post-actuación
       if (registrarGarantia) {
-        const fechaInicioG = new Date(fechaRealizacion);
-        const fechaFinG = new Date(fechaInicioG);
-        fechaFinG.setMonth(fechaFinG.getMonth() + mesesGarantia);
+        const fechaInicioG = fechaRealizacion;
+        const fechaFinG = calcularFechaFinGarantia(fechaInicioG, mesesGarantia);
 
         const nuevaGarantia: GarantiaReparacion = {
-          id: `gar_mant_${tarea.id}_${Date.now()}`,
+          // La garantía comparte la identidad tarea+fecha de esta actuación:
+          // un reintento tras una escritura parcial actualiza el mismo documento.
+          id: `gar_mant_${tarea.id}_${fechaInicioG}`,
           inmuebleId: tarea.inmuebleId,
           propietarioId: tarea.propietarioId,
           trabajoId: tarea.ultimaOrdenTrabajoId || `ot_mant_${tarea.id}`,
@@ -147,9 +179,9 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
           titulo: `Garantía de actuación: ${tarea.titulo}`,
           concepto: observaciones || 'Garantía derivada de trabajo de mantenimiento preventivo/correctivo.',
           categoria: (tarea.categoria as any) || 'MANTENIMIENTO',
-          fechaInicio: fechaInicioG.toISOString().slice(0, 10),
+          fechaInicio: fechaInicioG,
           duracionMeses: mesesGarantia,
-          fechaFin: fechaFinG.toISOString().slice(0, 10),
+          fechaFin: fechaFinG,
           proveedor: profesionalNombre || 'Servicio Técnico',
           profesionalId: tarea.profesionalPreferidoId,
           incidenciaId: tarea.ultimaIncidenciaId,
@@ -159,7 +191,13 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        await saveGarantiaReparacionFirestore(nuevaGarantia);
+        const persistenciaGarantia = await saveGarantiaReparacionFirestoreWithResult(nuevaGarantia);
+        if (persistenciaGarantia.ok === false) {
+          const detalle = persistenciaGarantia.error instanceof Error
+            ? persistenciaGarantia.error.message
+            : String(persistenciaGarantia.error);
+          throw new Error(`No se pudo guardar la garantía de la actuación: ${detalle}`);
+        }
         tareaActualizada.garantiaId = nuevaGarantia.id;
       }
 

@@ -168,7 +168,11 @@ export interface AmbitoExportacionSolicitado {
   /** Periodo opcional según entidad: ejercicios y/or meses 'YYYY-MM'. */
   ejercicios?: readonly number[];
   meses?: readonly string[];
-  formato: 'JSON' | 'CSV';
+  /**
+   * XLSX (BLOQUE 7): MISMO conjunto y orden de columnas que CSV (una sola
+   * definición, `COLUMNAS_CSV`), con el tipo de dato declarado por columna.
+   */
+  formato: 'JSON' | 'CSV' | 'XLSX';
 }
 
 /** Ámbito autorizado del actor (inyectado por el adaptador desde UsuarioApp/carteras). */
@@ -186,10 +190,16 @@ export interface ExportRun {
   schemaVersion: string;
   scope: AmbitoExportacionSolicitado;
   recordCount: number;
-  formato: 'JSON' | 'CSV';
-  /** sha256 del contenido generado (reproducibilidad). */
+  formato: 'JSON' | 'CSV' | 'XLSX';
+  /** sha256 del contenido generado (reproducibilidad). En XLSX, de los bytes. */
   sha256: string;
+  /** Contenido textual (JSON/CSV). En XLSX es '' (el archivo va en `bytes`). */
   contenido: string;
+  /**
+   * Bytes del libro .xlsx (solo formato XLSX). El archivo NO se guarda en
+   * Firestore en ningún caso: se entrega al usuario para descarga.
+   */
+  bytes?: Uint8Array;
   /** Avisos de ámbito de la exportación (auditoría 3ac21a5/D11: antes se descartaban). */
   avisos: readonly string[];
 }

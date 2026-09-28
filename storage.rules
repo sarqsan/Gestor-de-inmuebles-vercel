@@ -79,10 +79,10 @@ service firebase.storage {
     // Pertenencia a cartera como predicado (sin ternario: el subconjunto que
     // cubren los intérpretes de tests es `return`-puro; semántica idéntica).
     function enCarteraL(pid) {
-      return espejoActivo() && 'carterasL' in espejo() && espejo().carterasL is list && pid in espejo().carterasL;
+      return espejoActivo() && !('gestionesPorPropietario' in espejo() && pid in espejo().gestionesPorPropietario) && 'carterasL' in espejo() && espejo().carterasL is list && pid in espejo().carterasL;
     }
     function enCarteraE(pid) {
-      return espejoActivo() && 'carterasE' in espejo() && espejo().carterasE is list && pid in espejo().carterasE;
+      return espejoActivo() && !('gestionesPorPropietario' in espejo() && pid in espejo().gestionesPorPropietario) && 'carterasE' in espejo() && espejo().carterasE is list && pid in espejo().carterasE;
     }
     function pidMio(pid) {
       return espejoActivo() && 'propietarioId' in espejo() && espejo().propietarioId == pid;
@@ -105,11 +105,31 @@ service firebase.storage {
     // Derivación inmueble → propietario. `adminStorage()` cortocircuita
     // primero: el admin opera también huérfanos (inmueble borrado); para el
     // resto, un eslabón roto falla ⇒ deny.
+    // ROADMAP-03: delegación parcial = SOLO inmuebles listados en la relación
+    // viva indexada (activa, aceptada, gestor = usuario del espejo). Nunca
+    // se amplía al resto de la cartera del titular.
+    function gestionIdx(pid) {
+      return firestore.get(/databases/(default)/documents/gestiones_cartera/$(espejo().gestionesPorPropietario[pid])).data;
+    }
+    function parcialVigente(pid, inmuebleId, escritura) {
+      return espejoActivo() && 'gestionesPorPropietario' in espejo()
+        && pid in espejo().gestionesPorPropietario
+        && gestionIdx(pid).propietarioId == pid
+        && gestionIdx(pid).gestorUsuarioId == espejo().usuarioId
+        && gestionIdx(pid).estado == 'ACTIVA'
+        && gestionIdx(pid).resolucionInvitacion == 'ACEPTADA'
+        // [] conserva el contrato de delegación de cartera completa; una
+        // lista no vacía solo habilita inmuebles enumerados explícitamente.
+        && (gestionIdx(pid).inmuebleIds.size() == 0 || inmuebleId in gestionIdx(pid).inmuebleIds)
+        && (!escritura || (gestionIdx(pid).permiso == 'LECTURA_ESCRITURA' && gestionIdx(pid).responsableActual == 'GESTOR'));
+    }
     function ambitoInmuebleLectura(inmuebleId) {
-      return adminStorage() || (espejoActivo() && ambitoPidLectura(pidDeInmueble(inmuebleId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidLectura(pidDeInmueble(inmuebleId))
+        || parcialVigente(pidDeInmueble(inmuebleId), inmuebleId, false)));
     }
     function ambitoInmuebleEscritura(inmuebleId) {
-      return adminStorage() || (espejoActivo() && ambitoPidEscritura(pidDeInmueble(inmuebleId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidEscritura(pidDeInmueble(inmuebleId))
+        || parcialVigente(pidDeInmueble(inmuebleId), inmuebleId, true)));
     }
     function ambitoInmuebleBorrado(inmuebleId) {
       return adminStorage() || (espejoActivo() && ambitoPidBorrado(pidDeInmueble(inmuebleId)));
@@ -137,11 +157,23 @@ service firebase.storage {
     function pidDeContrato(contratoId) {
       return firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.propietarioId;
     }
+    function contratoParcialVigente(contratoId, escritura) {
+      return firestore.exists(/databases/(default)/documents/contratos_formalizacion/$(contratoId))
+        && 'inmuebleId' in firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data
+        && 'propietarioId' in firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data
+        && firestore.exists(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId))
+        && ((('propietarioId' in firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data)
+              && firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data.propietarioId == pidDeContrato(contratoId))
+            || (!('propietarioId' in firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data)
+              && 'propietarioPrincipalId' in firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data
+              && firestore.get(/databases/(default)/documents/inmuebles/$(firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId)).data.propietarioPrincipalId == pidDeContrato(contratoId)))
+        && parcialVigente(pidDeContrato(contratoId), firestore.get(/databases/(default)/documents/contratos_formalizacion/$(contratoId)).data.inmuebleId, escritura);
+    }
     function ambitoContratoLectura(contratoId) {
-      return adminStorage() || (espejoActivo() && ambitoPidLectura(pidDeContrato(contratoId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidLectura(pidDeContrato(contratoId)) || contratoParcialVigente(contratoId, false)));
     }
     function ambitoContratoEscritura(contratoId) {
-      return adminStorage() || (espejoActivo() && ambitoPidEscritura(pidDeContrato(contratoId)));
+      return adminStorage() || (espejoActivo() && (ambitoPidEscritura(pidDeContrato(contratoId)) || contratoParcialVigente(contratoId, true)));
     }
     function ambitoContratoBorrado(contratoId) {
       return adminStorage() || (espejoActivo() && ambitoPidBorrado(pidDeContrato(contratoId)));
@@ -242,6 +274,27 @@ service firebase.storage {
 
     function isImage() {
       return request.resource.contentType.matches('image/.*');
+    }
+
+    function isDocumentoPatrimonialValido() {
+      return request.resource.size > 0
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType.matches('application/pdf|image/(jpeg|png|webp)');
+    }
+
+    function existeMetadataDocumentoPatrimonial(inmuebleId, documentoId) {
+      return firestore.exists(/databases/(default)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(documentoId));
+    }
+    function metadataDocumentoPatrimonial(inmuebleId, documentoId) {
+      return firestore.get(/databases/(default)/documents/inmuebles/$(inmuebleId)/documentos_patrimoniales/$(documentoId)).data;
+    }
+    function metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName) {
+      return existeMetadataDocumentoPatrimonial(inmuebleId, documentoId)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).id == documentoId
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).inmuebleId == inmuebleId
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).storagePath == 'inmuebles/' + inmuebleId + '/documentos_patrimoniales/' + documentoId + '/' + fileName
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).nombreStorage == fileName
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).propietarioId == pidDeInmueble(inmuebleId);
     }
 
     // Forma segura del NOMBRE DE OBJETO subido. `request.resource.name` es la
@@ -368,6 +421,32 @@ service firebase.storage {
       // Nombre único por subida (`{imageId}_…` con id aleatorio).
       allow update: if false;
       allow delete: if ambitoInmuebleBorrado(inmuebleId);
+    }
+
+    // BLOQUE 6 — binarios documentales patrimoniales. La metadata canónica
+    // vive en inmuebles/{id}/documentos_patrimoniales/{docId}; conocer el ID
+    // o una ruta no autoriza. Se exige ámbito actual por espejo y estado de
+    // metadata coherente; no se emiten URLs públicas ni se permite list/update.
+    match /inmuebles/{inmuebleId}/documentos_patrimoniales/{documentoId}/{fileName} {
+      allow get: if ambitoInmuebleLectura(inmuebleId)
+        && metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).estado == 'DISPONIBLE';
+      allow list: if false;
+      allow create: if ambitoInmuebleEscritura(inmuebleId)
+        && metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).estado == 'PENDIENTE_STORAGE'
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).mimeType == request.resource.contentType
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).tamanoBytes == request.resource.size
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).sha256 is string
+        && request.resource.metadata.documentoId == documentoId
+        && request.resource.metadata.inmuebleId == inmuebleId
+        && request.resource.metadata.sha256 == metadataDocumentoPatrimonial(inmuebleId, documentoId).sha256
+        && isDocumentoPatrimonialValido()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if ambitoInmuebleBorrado(inmuebleId)
+        && metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName)
+        && metadataDocumentoPatrimonial(inmuebleId, documentoId).estado == 'PENDIENTE_ELIMINACION';
     }
 
     // R3 — ADJUNTOS DE INVENTARIO (documentación interna de trabajo).

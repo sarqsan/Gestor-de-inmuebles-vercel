@@ -58,7 +58,7 @@ test('versión de negocio append-only ligada al audit canónico, sin copia de ev
 test('suma exacta de los diez conceptos máximos y enteros seguros',()=>{const c=fn(rules,'opConceptos');assert.ok(c.includes('c.size() <= 10'));for(let i=0;i<10;i++){assert.ok(c.includes(`opConcepto(c,${i})`));assert.ok(c.includes(`opImporte(c,${i})`));}assert.ok(fn(rules,'opDinero').includes('9007199254740991'));});
 // ADAPTACIÓN B: la creación de propietario en B exige id propio exacto (myPropId); el
 // gestor por carterasE NO puede crear titulares.
-test('CREAR no sobrescribe y gestor E no crea titulares',()=>{assert.ok(fn(rules,'opCambio').includes("cmd.accion != 'CREAR' && e.id == b.id"));const s=rulesFull.slice(rulesFull.indexOf('match /propietarios/'),rulesFull.indexOf('// 1. INMUEBLES'));const crea=s.slice(s.indexOf('allow create'),s.indexOf('allow update'));assert.ok(crea.includes('isMasterAdmin()'));assert.ok(crea.includes('propietarioId == myPropId()'));assert.doesNotMatch(crea,/carteras/);});
+test('CREAR no sobrescribe y gestor E no crea titulares',()=>{assert.ok(fn(rules,'opCambio').includes("cmd.accion != 'CREAR' && e.id == b.id"));const s=rulesFull.slice(rulesFull.indexOf('match /propietarios/'),rulesFull.indexOf('// 1. INMUEBLES'));const crea=s.slice(s.indexOf('allow create'),s.indexOf('allow update'));assert.ok(crea.includes('isMasterAdmin()'));assert.ok(crea.includes('propietarioId == myPropId()'));assert.match(crea,/hasAny\(\[[^\]]*'carterasL'[^\]]*'carterasE'[^\]]*\]\)/,'la creación del propietario debe denegar explícitamente los campos de carteras');});
 
 // Guardas de estructura, NO certifican el presupuesto de expresiones del Emulator.
 function acoplamiento(text) {

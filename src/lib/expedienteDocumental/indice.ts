@@ -1,9 +1,9 @@
 /**
  * BLOQUE 3 — Índice documental unificado del inmueble (motor puro).
  * ---------------------------------------------------------------------------
- * PROYECTA las referencias documentales que YA existen en los modelos
- * canónicos por dominio hacia un índice único y trazable por inmueble.
- * No copia binarios, no crea colección paralela, no escribe nada.
+ * PROYECTA los adjuntos históricos de sus modelos canónicos y los registros
+ * del gestor documental (metadatos en la subcolección del inmueble) hacia un
+ * índice único y trazable. No copia binarios ni escribe nada.
  *
  * Reglas duras:
  *  · ids deterministas (sha256) → la misma proyección dos veces = mismo índice;
@@ -31,6 +31,7 @@ import type {
   IncidenciaDocumental,
   IndiceDocumentalInmueble,
   TipoDocumentoExpediente,
+  DocumentoPatrimonial,
 } from './tipos';
 
 // ============================================================================
@@ -76,6 +77,7 @@ export interface EntradaIndiceEntrada {
   incidencias?: Incidencia[];
   tareasMantenimiento?: TareaMantenimiento[];
   garantias?: GarantiaReparacion[];
+  documentosPatrimoniales?: DocumentoPatrimonial[];
   /** ISO explícito (determinismo; el motor nunca llama a Date.now()). */
   generadoEl: string;
 }
@@ -88,6 +90,9 @@ interface SemillaDocumento {
   url?: string;
   storagePath?: string;
   hash?: string; // huella de contenido si el modelo de origen la declara
+  mimeType?: string;
+  tamanoBytes?: number;
+  estadoDocumento?: DocumentoPatrimonial['estado'];
   fechaDocumental?: string;
   fechaIncorporacion: string;
   actor?: string;
@@ -98,7 +103,7 @@ interface SemillaDocumento {
   relations: Partial<
     Pick<
       EntradaIndiceDocumental,
-      | 'movimientoId' | 'contratoId' | 'polizaId' | 'gastoId' | 'cobroId'
+      | 'movimientoId' | 'contratoId' | 'polizaId' | 'gastoId' | 'facturaId' | 'cobroId'
       | 'incidenciaId' | 'tareaMantenimientoId' | 'garantiaId' | 'inventarioId' | 'siniestroId'
     >
   >;
@@ -311,6 +316,45 @@ export function construirIndiceDocumentalInmueble(entrada: EntradaIndiceEntrada)
     }
   }
 
+  // -- Gestor patrimonial nuevo (metadatos en subcolección del inmueble) -----
+  // No duplica gastos, facturas ni documentos heredados: sólo registra el
+  // binario y sus relaciones; los datos económicos siguen en sus fuentes.
+  for (const d of (entrada.documentosPatrimoniales || []).filter(
+    (doc) => doc.inmuebleId === inmueble.id && doc.estado !== 'ELIMINADO'
+  )) {
+    semillas.push({
+      tipo: d.tipo,
+      entidadOrigen: 'inmuebles',
+      origenDocumentoId: d.id,
+      nombre: d.nombre,
+      storagePath: d.estado === 'DISPONIBLE' ? d.storagePath : undefined,
+      hash: d.sha256,
+      mimeType: d.mimeType,
+      tamanoBytes: d.tamanoBytes,
+      estadoDocumento: d.estado,
+      fechaDocumental: d.fechaDocumental,
+      fechaIncorporacion: d.fechaIncorporacion,
+      actor: d.actorNombre,
+      actorId: d.actorId,
+      version: d.version,
+      referenciaSustituida: d.sustituyeA,
+      relations: {
+        movimientoId: d.movimientoId,
+        contratoId: d.contratoId,
+        polizaId: d.polizaId,
+        gastoId: d.gastoId,
+        facturaId: d.facturaId,
+        incidenciaId: d.incidenciaId,
+        tareaMantenimientoId: d.tareaMantenimientoId,
+        garantiaId: d.garantiaId,
+        inventarioId: d.inventarioId,
+      },
+      clasificacion: 'DOCUMENTAL',
+      propietarioId: d.propietarioId,
+      sistemaOrigen: 'GESTOR_DOCUMENTAL_PATRIMONIAL',
+    });
+  }
+
   // -- Materialización determinista + dedup + incidencias -----------------------
   const entradas: EntradaIndiceDocumental[] = [];
   const porIdCanónico = new Map<string, string>(); // id canónico de origen → idx id
@@ -336,7 +380,9 @@ export function construirIndiceDocumentalInmueble(entrada: EntradaIndiceEntrada)
     if (porIdCanónico.has(claveCanonica)) continue;
     porIdCanónico.set(claveCanonica, id);
 
-    const estado: EstadoDocumentoExpediente = s.url || s.storagePath ? 'DISPONIBLE' : 'PENDIENTE';
+    const estado: EstadoDocumentoExpediente = s.estadoDocumento
+      ? (s.estadoDocumento === 'DISPONIBLE' ? 'DISPONIBLE' : 'PENDIENTE')
+      : (s.url || s.storagePath ? 'DISPONIBLE' : 'PENDIENTE');
     if (estado === 'PENDIENTE') {
       incidencias.push({
         codigo: 'DOC_SIN_REFERENCIA',
@@ -381,6 +427,8 @@ export function construirIndiceDocumentalInmueble(entrada: EntradaIndiceEntrada)
       url: s.url,
       storagePath: s.storagePath,
       hash: s.hash,
+      mimeType: s.mimeType,
+      tamanoBytes: s.tamanoBytes,
       fechaDocumental: s.fechaDocumental,
       fechaIncorporacion: s.fechaIncorporacion || entrada.generadoEl,
       actor: s.actor,

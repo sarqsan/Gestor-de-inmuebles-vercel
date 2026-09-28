@@ -29,6 +29,7 @@ import type {
   PolizaSeguro,
   TareaMantenimiento,
 } from '../../types';
+import type { DocumentoPatrimonial } from './tipos';
 import { generarResumenFiscalAnual, esGastoDeducible } from '../../utils/fiscalEngine';
 import type {
   DocumentoExpediente,
@@ -57,6 +58,7 @@ export interface EntradaExpedienteInmueble {
   incidencias?: Incidencia[];
   tareasMantenimiento?: TareaMantenimiento[];
   garantias?: GarantiaReparacion[];
+  documentosPatrimoniales?: DocumentoPatrimonial[];
   /** ISO explícito del llamante (determinismo; nunca Date.now() interno). */
   generadoEl: string;
 }
@@ -85,6 +87,7 @@ export function construirExpedienteDocumentalInmueble(
     incidencias: entrada.incidencias,
     tareasMantenimiento: entrada.tareasMantenimiento,
     garantias: entrada.garantias,
+    documentosPatrimoniales: entrada.documentosPatrimoniales,
     generadoEl,
   } as EntradaIndiceEntrada);
 

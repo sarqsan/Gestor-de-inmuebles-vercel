@@ -61,7 +61,7 @@ export const InquilinosSection: React.FC<Props> = ({ currentUser, contratos, inm
   const [aviso, setAviso] = useState('');
 
   useEffect(() => {
-    const u1 = subscribeEnlacesRegistro(setEnlaces);
+    const u1 = subscribeEnlacesRegistro(setEnlaces, currentUser);
     const u2 = subscribeMensajesPortal(setMensajes);
     const u3 = subscribeIncidencias(setIncidencias);
     return () => {

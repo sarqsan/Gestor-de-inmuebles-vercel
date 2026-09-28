@@ -53,7 +53,9 @@ import {
   prepararEntradaIndiceParaExportacion,
 } from '../../lib/expedienteDocumental/expediente';
 import { construirAuditoriaExpediente } from '../../lib/expedienteDocumental/auditoria';
-import type { ExpedienteDocumentalInmueble } from '../../lib/expedienteDocumental/tipos';
+import type { DocumentoPatrimonial, ExpedienteDocumentalInmueble } from '../../lib/expedienteDocumental/tipos';
+import { subscribeDocumentosPatrimoniales } from '../../lib/expedienteDocumental/gestorFirebase';
+import { DocumentosPatrimonialesPanel } from './DocumentosPatrimonialesPanel';
 import {
   LayoutDashboard,
   ShieldCheck,
@@ -107,6 +109,7 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
   const [tareas, setTareas] = useState<TareaMantenimiento[]>([]);
   const [garantias, setGarantias] = useState<GarantiaReparacion[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
+  const [documentosPatrimoniales, setDocumentosPatrimoniales] = useState<DocumentoPatrimonial[]>([]);
   const [loading, setLoading] = useState(true);
   const [analisisIncidenciaId, setAnalisisIncidenciaId] = useState<string | null>(null);
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
@@ -128,6 +131,9 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
       subscribeTareasMantenimiento((items) => setTareas(items.filter((t) => t.inmuebleId === inmueble.id))),
       subscribeGarantiasReparacion((items) => setGarantias(items.filter((g) => g.inmuebleId === inmueble.id))),
       subscribeGastos((items) => setGastos(items.filter((g) => g.inmuebleId === inmueble.id))),
+      subscribeDocumentosPatrimoniales(inmueble.id, setDocumentosPatrimoniales, (error) => {
+        setErrorAccion(error.message || 'No se pudo cargar la documentación patrimonial.');
+      }),
     ];
     // Red de seguridad: si algún snapshot no llega (p. ej. list denegado por
     // reglas), el resumen se muestra con los datos disponibles en vez de
@@ -206,9 +212,10 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
         incidencias,
         tareasMantenimiento: tareas,
         garantias,
+        documentosPatrimoniales,
         generadoEl: new Date().toISOString(),
       }),
-    [inmueble, ejercicioExpediente, cobros, gastos, contratos, polizas, incidencias, tareas, garantias]
+    [inmueble, ejercicioExpediente, cobros, gastos, contratos, polizas, incidencias, tareas, garantias, documentosPatrimoniales]
   );
 
   const handleExportarExpediente = async () => {
@@ -675,6 +682,18 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
                   (AEAT/Libro Diario, registro 27) NO se incorporan: permanecen como pendientes documentados.
                 </span>
               </div>
+
+              <DocumentosPatrimonialesPanel
+                inmueble={inmueble}
+                currentUser={currentUser}
+                contratos={contratos}
+                gastos={gastos}
+                incidencias={incidencias}
+                polizas={polizasInmueble}
+                tareas={tareas}
+                garantias={garantias}
+                documentos={documentosPatrimoniales}
+              />
 
               {!expediente ? (
                 <p className="text-xs text-slate-400 text-center py-6">

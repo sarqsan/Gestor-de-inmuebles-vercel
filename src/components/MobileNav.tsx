@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 
 import { AsistentePanel } from './experiencia/AsistentePanel';
-import type { AccionHost, ProveedorIA } from '../experiencia';
+import type { AccionHost, ExperienceContext, ProveedorIA, ResultadoConsultaERP } from '../experiencia';
 
 interface MobileNavProps {
   activeSection: SectionType;
@@ -59,6 +59,8 @@ interface MobileNavProps {
   /** §6 F4: asistente transversal (misma acción que el Header). */
   onAccionAsistente?: (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => void;
   proveedorIA?: ProveedorIA;
+  contextoIA?: ExperienceContext;
+  onConsultarAsistente?: (accion: Extract<AccionHost, { tipo: 'CONSULTAR' }>) => Promise<ResultadoConsultaERP>;
   accessibleSections?: SectionType[];
 }
 
@@ -79,6 +81,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onOpenAuthModal,
   onAccionAsistente,
   proveedorIA,
+  contextoIA,
+  onConsultarAsistente,
   accessibleSections,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -122,6 +126,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({
       ? [
           { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
           { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
+          ...(currentUser?.roles?.includes('GESTOR_PATRIMONIAL') ? [
+            { id: 'formalizacion' as SectionType, label: 'Contratos de alquiler', icon: FileText, badge: contratosCount, description: 'Contratos en inmuebles delegados' },
+            { id: 'cobros' as SectionType, label: 'Cobros de alquiler', icon: Receipt, badge: cobrosPendientesCount, description: 'Seguimiento de alquileres delegados' },
+          ] : []),
           { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
           { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
         ]
@@ -265,7 +273,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 
         {/* §6 F4: asistente (móvil) */}
         {currentUser && onAccionAsistente && (
-          <AsistentePanel usuario={currentUser} section={activeSection} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} tema="oscuro" />
+          <AsistentePanel usuario={currentUser} section={activeSection} contexto={contextoIA} accessibleSections={accessibleSections} proveedor={proveedorIA} onAccion={onAccionAsistente} onConsultar={onConsultarAsistente} tema="oscuro" />
         )}
 
         {/* User Profile on Mobile */}

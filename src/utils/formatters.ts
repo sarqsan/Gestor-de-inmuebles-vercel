@@ -18,6 +18,14 @@ export const formatDate = (dateString: string): string => {
   }).format(date);
 };
 
+/** Fecha de calendario local para inputs type=date; no convertirla a UTC (puede cambiar el día). */
+export const formatDateInputLocal = (date: Date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const getTipoDocumentoLabel = (tipo: TipoDocumento): string => {
   switch (tipo) {
     case 'nomina':

@@ -4,7 +4,7 @@
  * El contenido describe funcionalidades REALES de la canónica (B/C/D/E y base).
  * Filtrado por rol/permiso = solo lectura del RBAC existente (nunca lo amplía).
  */
-import type { ExperienceContext, HelpEntry, ModuloERP } from './tipos';
+import type { CategoriaAyuda, ExperienceContext, HelpEntry, ModuloERP } from './tipos';
 import { contextoCumpleRoles, contextoTienePermiso } from './contexto';
 
 export const AYUDA_REGISTRO: HelpEntry[] = [
@@ -273,6 +273,66 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
       'El Centro de Ayuda reúne las explicaciones de cada pantalla y los tutoriales disponibles para tu perfil. Solo muestra contenido de funciones a las que ya tienes acceso: la ayuda nunca concede permisos.\n\nEl icono de ayuda de cada sección abre la explicación de esa pantalla concreta.',
     keywords: ['ayuda', 'tutorial', 'buscar', 'centro de ayuda'],
   },
+  {
+    id: 'ayuda.usuarios.permisos', categoria: 'usuarios_permisos', module: 'administracion', section: 'administracion',
+    title: 'Usuarios, roles y permisos', summary: 'Cómo se asigna el acceso y por qué la ayuda o el asistente no amplían permisos.',
+    content: 'El acceso depende del perfil, los roles y los permisos que mantiene la administración. El asistente solo puede proponer capacidades que ya están disponibles para tu contexto; no asigna permisos ni abre información fuera del ámbito autorizado.\n\nSi una acción no aparece o devuelve «sin permiso», solicita la revisión al administrador. Compartir un ID de inmueble o documento no sustituye la autorización.',
+    roles: ['ADMINISTRADOR'], permissions: ['administracion.usuarios'], keywords: ['usuario', 'usuarios', 'rol', 'permisos', 'acceso', 'rbac'],
+  },
+  {
+    id: 'ayuda.titulares.fichas', categoria: 'titulares', module: 'propietarios', section: 'propietarios',
+    title: 'Titulares y sus fichas', summary: 'Relación entre el titular, sus inmuebles y la información patrimonial visible.',
+    content: 'La ficha del titular es la referencia de su identidad y datos de gestión. Los inmuebles se relacionan por sus IDs y vínculos canónicos; no se deben asociar por coincidencia de nombre o dirección.\n\nLa visibilidad de una ficha y sus datos depende del perfil, los permisos y las carteras/delegaciones activas.',
+    keywords: ['titular', 'titulares', 'propietario', 'propietarios', 'ficha'],
+  },
+  {
+    id: 'ayuda.carteras.ambito', categoria: 'carteras', module: 'propietarios', section: 'propietarios',
+    title: 'Carteras y delegaciones', summary: 'El alcance delegado depende de la relación activa y de los permisos de lectura o escritura.',
+    content: 'Las carteras y delegaciones delimitan el ámbito de gestión que recibe cada usuario. Una delegación de lectura no implica permiso de escritura; una delegación revocada conserva solo lo que permita el modelo canónico.\n\nLa IA utiliza el contexto ya autorizado por la aplicación. No infiere una cartera desde el texto, el nombre del usuario ni un ID proporcionado en una consulta.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO', 'PROFESIONAL'], keywords: ['cartera', 'carteras', 'delegación', 'delegaciones', 'gestor'],
+  },
+  {
+    id: 'ayuda.inmuebles.contexto', categoria: 'inmuebles', module: 'inmuebles', section: 'inmuebles',
+    title: 'Ficha del inmueble', summary: 'El inmueble es el contexto común de contratos, operaciones, economía y documentos relacionados.',
+    content: 'La ficha del inmueble muestra la información vinculada a su ID canónico. Los módulos relacionados pueden mostrar contratos, incidencias, gastos y documentos siempre que exista una relación explícita y el usuario tenga acceso.\n\nSi el asistente no tiene un inmueble seleccionado como contexto, no debe asumir cuál quieres consultar; puedes abrir su ficha y volver a preguntar.',
+    keywords: ['inmueble', 'inmuebles', 'vivienda', 'ficha', 'relaciones'],
+  },
+  {
+    id: 'ayuda.fiscalidad.motor', categoria: 'fiscalidad', module: 'finanzas', section: 'fiscal',
+    title: 'Fiscalidad y resultados del motor', summary: 'Los resúmenes fiscales se derivan de cobros, gastos y contratos del ERP.',
+    content: 'El módulo fiscal deriva sus resultados de los datos canónicos y de los motores oficiales. La clasificación de un gasto que muestra el ERP no sustituye el criterio profesional ni determina por sí sola el resultado tributario.\n\nEl asistente puede recuperar un resumen del motor cuando esa capacidad esté disponible; no decide deducibilidad ni recalcula impuestos por su cuenta.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'], keywords: ['fiscalidad', 'fiscal', 'deducible', 'deducibilidad', 'impuestos', 'irpf'],
+  },
+  {
+    id: 'ayuda.documentos.canonicos', categoria: 'documentos', module: 'actas', section: 'actas',
+    title: 'Documentos y evidencias', summary: 'Los archivos se consultan desde el expediente documental canónico y con sus permisos.',
+    content: 'Cada documento debe permanecer vinculado a la entidad y al ámbito autorizados en el gestor documental existente. La IA no accede directamente a Storage ni crea copias o colecciones alternativas.\n\nSi el archivo no está disponible o no tienes permiso, el asistente no puede afirmar su contenido ni describirlo.',
+    roles: ['ADMINISTRADOR', 'PROPIETARIO'], keywords: ['documento', 'documentos', 'storage', 'expediente', 'factura', 'archivo'],
+  },
+  {
+    id: 'ayuda.importacion.exportacion', categoria: 'importacion_exportacion', module: 'administracion', section: 'configuracion',
+    title: 'Importación y exportación', summary: 'Usa el panel canónico para validar archivos y revisar el resultado antes de aplicarlo.',
+    content: 'La importación y exportación deben realizarse desde el panel canónico, que valida el formato, conserva procedencia y presenta los errores antes de confirmar. La IA puede orientar sobre el flujo, pero no lee archivos locales ni importa datos en segundo plano.\n\nRevisa el resumen y confirma desde la interfaz oficial; no pegues secretos ni documentos patrimoniales en el chat.',
+    roles: ['ADMINISTRADOR'], keywords: ['importar', 'importación', 'exportar', 'exportación', 'xlsx', 'csv'],
+  },
+  {
+    id: 'ayuda.migracion.historica', categoria: 'migracion', module: 'ayuda', section: 'ayuda',
+    title: 'Migración histórica', summary: 'La migración requiere fuentes completas, custodiadas y un dry-run autorizado.',
+    content: 'La migración histórica es un proceso controlado, no una acción automática del asistente. Los archivos originales se aportarán desde la aplicación cuando el flujo operativo esté habilitado; no se guardan dentro del código.\n\nUna fila incompleta o en conflicto debe permanecer pendiente. La IA puede explicar estados y orientar, pero no completa valores ausentes ni ejecuta la promoción de datos.',
+    keywords: ['migración', 'histórica', 'fuente', 'incompleta', 'conflicto', 'dry-run'],
+  },
+  {
+    id: 'ayuda.auditoria.registros', categoria: 'auditoria', module: 'administracion', section: 'administracion',
+    title: 'Auditoría', summary: 'Las acciones relevantes quedan en el registro de auditoría canónico.',
+    content: 'La auditoría del ERP conserva eventos relevantes mediante el registro existente. El asistente no crea una auditoría paralela ni guarda conversaciones completas por defecto; para consultas de datos registra solo la capacidad, el motor, el resultado resumido y el ámbito, sin incluir el texto de la pregunta.',
+    roles: ['ADMINISTRADOR'], permissions: ['administracion.auditoria'], keywords: ['auditoría', 'audit_logs', 'registro', 'trazabilidad'],
+  },
+  {
+    id: 'ayuda.configuracion.general', categoria: 'configuracion', module: 'administracion', section: 'configuracion',
+    title: 'Configuración', summary: 'La configuración habilita opciones según el perfil; no sustituye los permisos de cada módulo.',
+    content: 'Las opciones de configuración visibles dependen del perfil y de los permisos. Activar una opción visual no debe interpretarse como una autorización de datos o de escritura. Si una conexión de IA no está disponible, el asistente puede seguir ofreciendo la ayuda estática y la resolución local.',
+    roles: ['ADMINISTRADOR'], permissions: ['administracion.configuracion'], keywords: ['configuración', 'ajustes', 'módulos', 'conexión', 'gemini'],
+  },
 ];
 
 /** Palabras vacías frecuentes en español que no deben puntuar en la búsqueda. */
@@ -356,6 +416,41 @@ export function obtenerAyuda(id: string, opciones: OpcionesAyuda = {}): HelpEntr
 export function modulosConAyuda(ctx: ExperienceContext, opciones: OpcionesAyuda = {}): ModuloERP[] {
   return Array.from(new Set(ayudaDisponible(ctx, opciones).map((e) => e.module)));
 }
+
+export const CATEGORIAS_AYUDA: ReadonlyArray<{ id: CategoriaAyuda; nombre: string }> = [
+  { id: 'inicio', nombre: 'Inicio' },
+  { id: 'usuarios_permisos', nombre: 'Usuarios y permisos' },
+  { id: 'titulares', nombre: 'Titulares' },
+  { id: 'carteras', nombre: 'Carteras' },
+  { id: 'inmuebles', nombre: 'Inmuebles' },
+  { id: 'alquileres', nombre: 'Alquileres' },
+  { id: 'operaciones', nombre: 'Operaciones' },
+  { id: 'fiscalidad', nombre: 'Fiscalidad' },
+  { id: 'documentos', nombre: 'Documentos' },
+  { id: 'importacion_exportacion', nombre: 'Importación/exportación' },
+  { id: 'migracion', nombre: 'Migración' },
+  { id: 'auditoria', nombre: 'Auditoría' },
+  { id: 'configuracion', nombre: 'Configuración' },
+];
+
+export function categoriaDeAyuda(entrada: HelpEntry): CategoriaAyuda {
+  if (entrada.categoria) return entrada.categoria;
+  const porModulo: Partial<Record<ModuloERP, CategoriaAyuda>> = {
+    inicio: 'inicio', inmuebles: 'inmuebles', propietarios: 'titulares',
+    contratos: 'alquileres', cobros: 'alquileres', tesoreria: 'alquileres',
+    morosidad: 'operaciones', actas: 'documentos', inquilinos: 'usuarios_permisos',
+    suministros: 'operaciones', incidencias: 'operaciones', finanzas: 'fiscalidad',
+    seguros: 'operaciones', administracion: 'configuracion', ayuda: 'inicio', captacion: 'alquileres',
+  };
+  return porModulo[entrada.module] ?? 'inicio';
+}
+
+export function categoriasConAyuda(ctx: ExperienceContext, opciones: OpcionesAyuda = {}): CategoriaAyuda[] {
+  const disponibles = new Set(ayudaDisponible(ctx, opciones).map(categoriaDeAyuda));
+  return CATEGORIAS_AYUDA.filter((c) => disponibles.has(c.id)).map((c) => c.id);
+}
+
+export const NOMBRE_CATEGORIA_AYUDA: Record<CategoriaAyuda, string> = Object.fromEntries(CATEGORIAS_AYUDA.map((c) => [c.id, c.nombre])) as Record<CategoriaAyuda, string>;
 
 export const NOMBRE_MODULO: Record<ModuloERP, string> = {
   inicio: 'Inicio',

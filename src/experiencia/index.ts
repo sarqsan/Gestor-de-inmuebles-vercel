@@ -2,7 +2,7 @@
 export * from './tipos';
 export { getExperienceContext, contextoDesdeUsuario, contextoTienePermiso, contextoCumpleRoles, moduloDeSeccion, MODULO_POR_SECCION, MODULO_POR_VISTA_PORTAL, PANTALLAS_PORTAL } from './contexto';
 export { ATRIBUTO_TOUR, ID_OVERLAY_RESALTADO, selectorTour, localizarTarget, esVisible, targetVisible, resaltarTarget, limpiarResaltado, hayResaltadoActivo } from './targets';
-export { AYUDA_REGISTRO, NOMBRE_MODULO, ayudaDisponible, ayudaParaContexto, ayudaParaModulo, ayudaVisibleEn, buscarAyuda, obtenerAyuda, modulosConAyuda } from './ayuda';
+export { AYUDA_REGISTRO, CATEGORIAS_AYUDA, NOMBRE_CATEGORIA_AYUDA, NOMBRE_MODULO, categoriaDeAyuda, categoriasConAyuda, ayudaDisponible, ayudaParaContexto, ayudaParaModulo, ayudaVisibleEn, buscarAyuda, obtenerAyuda, modulosConAyuda } from './ayuda';
 export {
   TUTORIALES_REGISTRO,
   TUTORIAL_LIQUIDACION,
@@ -40,6 +40,8 @@ export {
 } from './progreso';
 export type { TutorialProgress, MotivoProgreso, ResultadoProgreso, ServicioProgresoTutoriales } from './progreso';
 export { CAPACIDADES_ERP, capacidadesDisponibles, construirIntentRequest, resolverIntencionLocal } from './intenciones';
+export { ejecutarConsultaERP, type FuentesConsultaERP, type OpcionesConsultaERP } from './consultasERP';
+export { crearLimitadorVentana, type ResultadoLimite } from './limites';
 export {
   INTENCIONES_IA,
   MAX_LONGITUD_PETICION,
@@ -54,5 +56,5 @@ export {
   ejecutarResolucion,
 } from './asistente';
 export type { OpcionesAsistente, AccionHost } from './asistente';
-export { RUTA_API_ASISTENTE, cuerpoDesdeRequest, construirPromptAsistente, parsearRespuestaModelo, crearProveedorGeminiRemoto } from './proveedorGemini';
+export { RUTA_API_ASISTENTE, cuerpoDesdeRequest, normalizarCuerpoInterpretar, construirPromptAsistente, parsearRespuestaModelo, crearProveedorGeminiRemoto } from './proveedorGemini';
 export type { CuerpoInterpretar, RespuestaInterpretar } from './proveedorGemini';

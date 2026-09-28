@@ -284,8 +284,10 @@ describe('D2a · E — No regresión de escritura y tenants', () => {
     // (espejo vacío) deniega. Cobertura de comportamiento en
     // seguridad-firestore-d2.test.ts (bloque C). `propietarios` intacto.
     const reglasContratos = EVAL.bloqueDe('contratos_formalizacion');
-    expect(reglasContratos).toContain('|| inmuebleEnCarteraGestionada(resource.data);');
-    expect(reglasContratos).toContain('|| inmuebleEnCarteraGestionada(existing());');
+    expect(reglasContratos).toContain('inmuebleEnCarteraGestionada(resource.data)');
+    expect(reglasContratos).toContain('inmuebleEnCarteraGestionada(existing())');
+    expect(reglasContratos).toContain('contratoParcialVisible(resource.data)');
+    expect(reglasContratos).toContain('contratoParcialEscritura(incoming())');
     expect(reglasContratos).toContain('carterasEscritura().hasAny([incoming().propietarioId])');
     const reglasGastos = EVAL.bloqueDe('gastos');
     expect(reglasGastos).toContain('|| inmuebleEnCarteraGestionada(resource.data);');

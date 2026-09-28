@@ -8,8 +8,10 @@ import {
 } from '../../types';
 import {
   marcarActuacionRealizada,
+  calcularFechaFinGarantia,
   calcularProximaFechaMantenimiento,
 } from '../../utils/mantenimientoEngine';
+import { formatDateInputLocal } from '../../utils/formatters';
 import { saveGastoFirestore, saveGarantiaReparacionFirestore } from '../../lib/firebase';
 import {
   X,
@@ -56,7 +58,7 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
 
   useEffect(() => {
     if (!isOpen) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatDateInputLocal();
     setFechaRealizacion(today);
     setCosteReal(tarea.costeEstimado ? String(tarea.costeEstimado) : '');
     setProfesionalNombre(tarea.profesionalPreferidoNombre || '');
@@ -134,9 +136,8 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
 
       // 3. Si se solicitó registrar garantía post-actuación
       if (registrarGarantia) {
-        const fechaInicioG = new Date(fechaRealizacion);
-        const fechaFinG = new Date(fechaInicioG);
-        fechaFinG.setMonth(fechaFinG.getMonth() + mesesGarantia);
+        const fechaInicioG = fechaRealizacion;
+        const fechaFinG = calcularFechaFinGarantia(fechaInicioG, mesesGarantia);
 
         const nuevaGarantia: GarantiaReparacion = {
           id: `gar_mant_${tarea.id}_${Date.now()}`,
@@ -147,9 +148,9 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
           titulo: `Garantía de actuación: ${tarea.titulo}`,
           concepto: observaciones || 'Garantía derivada de trabajo de mantenimiento preventivo/correctivo.',
           categoria: (tarea.categoria as any) || 'MANTENIMIENTO',
-          fechaInicio: fechaInicioG.toISOString().slice(0, 10),
+          fechaInicio: fechaInicioG,
           duracionMeses: mesesGarantia,
-          fechaFin: fechaFinG.toISOString().slice(0, 10),
+          fechaFin: fechaFinG,
           proveedor: profesionalNombre || 'Servicio Técnico',
           profesionalId: tarea.profesionalPreferidoId,
           incidenciaId: tarea.ultimaIncidenciaId,

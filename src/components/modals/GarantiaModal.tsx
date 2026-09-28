@@ -11,6 +11,7 @@ import {
   calcularFechaFinGarantia,
   evaluarEstadoGarantia,
 } from '../../utils/mantenimientoEngine';
+import { formatDateInputLocal } from '../../utils/formatters';
 import {
   X,
   ShieldCheck,
@@ -79,7 +80,7 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
       setNotas(garantiaToEdit.notas || '');
     } else {
       const initInmueble = defaultInmuebleId || (inmuebles.length > 0 ? inmuebles[0].id : '');
-      const today = new Date().toISOString().split('T')[0];
+      const today = formatDateInputLocal();
       setInmuebleId(initInmueble);
       setTitulo('');
       setElementoNombre('');

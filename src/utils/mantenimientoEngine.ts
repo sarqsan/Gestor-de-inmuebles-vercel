@@ -2,6 +2,7 @@
 // MOTOR DE MANTENIMIENTO PREVENTIVO, GARANTÍAS Y SEGUIMIENTO POST-REPARACIÓN
 // =========================================================================
 
+import { formatDateInputLocal } from './formatters';
 import {
   TareaMantenimiento,
   PlanMantenimiento,
@@ -90,29 +91,30 @@ export function calcularProximaFechaMantenimiento(
   periodicidad: PeriodicidadMantenimiento,
   diasIntervaloPersonalizado?: number
 ): string {
+  const fechaCalendario = typeof fechaReferencia === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fechaReferencia);
   const d = typeof fechaReferencia === 'string'
-    ? new Date(fechaReferencia.length <= 10 ? `${fechaReferencia}T00:00:00Z` : fechaReferencia)
+    ? new Date(fechaCalendario ? `${fechaReferencia}T00:00:00.000Z` : fechaReferencia)
     : new Date(fechaReferencia);
 
-  if (isNaN(d.getTime())) {
-    return new Date().toISOString().slice(0, 10);
-  }
+  if (isNaN(d.getTime())) return formatDateInputLocal();
+  const comoFecha = () => d.toISOString().slice(0, 10);
 
   if (periodicidad === 'PUNTUAL' || periodicidad === 'UNICA') {
-    return d.toISOString().slice(0, 10);
+    return comoFecha();
   }
 
   if (periodicidad === 'PERSONALIZADA') {
     const dias = diasIntervaloPersonalizado && diasIntervaloPersonalizado > 0 ? diasIntervaloPersonalizado : 30;
-    d.setDate(d.getDate() + dias);
-    return d.toISOString().slice(0, 10);
+    if (fechaCalendario) d.setUTCDate(d.getUTCDate() + dias);
+    else d.setDate(d.getDate() + dias);
+    return comoFecha();
   }
 
   const def = PERIODICIDAD_LABELS[periodicidad];
   const meses = def ? def.mesesPaso : 12;
-
-  d.setMonth(d.getMonth() + meses);
-  return d.toISOString().slice(0, 10);
+  if (fechaCalendario) d.setUTCMonth(d.getUTCMonth() + meses);
+  else d.setMonth(d.getMonth() + meses);
+  return comoFecha();
 }
 
 /**
@@ -129,15 +131,15 @@ export function evaluarEstadoSeguimiento(
   if (enCurso) return 'EN_CURSO';
   if (!proximaFecha) return 'FUTURO';
 
-  const hoyStr = fechaRef.toISOString().slice(0, 10);
+  const hoyStr = formatDateInputLocal(fechaRef);
   const fechaProximaStr = proximaFecha.slice(0, 10);
 
   if (fechaProximaStr < hoyStr) {
     return 'VENCIDO';
   }
 
-  const limiteProximo = new Date(fechaRef);
-  limiteProximo.setDate(limiteProximo.getDate() + diasVentanaProximo);
+  const limiteProximo = new Date(`${hoyStr}T00:00:00.000Z`);
+  limiteProximo.setUTCDate(limiteProximo.getUTCDate() + diasVentanaProximo);
   const limiteProximoStr = limiteProximo.toISOString().slice(0, 10);
 
   if (fechaProximaStr <= limiteProximoStr) {
@@ -301,12 +303,21 @@ export function generarOrdenTrabajoPreventiva(params: {
  * Calcula la fecha de finalización de una garantía en base a la fecha de inicio y duración en meses.
  */
 export function calcularFechaFinGarantia(fechaInicio: string, duracionMeses: number): string {
-  const d = new Date(fechaInicio.length <= 10 ? `${fechaInicio}T00:00:00Z` : fechaInicio);
-  if (isNaN(d.getTime())) {
-    return new Date().toISOString().slice(0, 10);
+  // Las garantías se expresan como fechas de calendario, no como instantes. Usar UTC
+  // exclusivamente como contenedor aritmético evita que el cambio CET/CEST desplace el día.
+  const partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(fechaInicio);
+  if (!partes) return formatDateInputLocal();
+  const year = Number(partes[1]);
+  const month = Number(partes[2]);
+  const day = Number(partes[3]);
+  const d = new Date(0);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCFullYear(year, month - 1, day);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    return formatDateInputLocal();
   }
   const meses = duracionMeses > 0 ? duracionMeses : 6;
-  d.setMonth(d.getMonth() + meses);
+  d.setUTCMonth(d.getUTCMonth() + meses);
   return d.toISOString().slice(0, 10);
 }
 
@@ -323,7 +334,7 @@ export function evaluarEstadoGarantia(
   }
   if (!fechaFin) return 'SIN_GARANTIA';
 
-  const hoyStr = fechaRef.toISOString().slice(0, 10);
+  const hoyStr = formatDateInputLocal(fechaRef);
   const finStr = fechaFin.slice(0, 10);
 
   return finStr >= hoyStr ? 'ACTIVA' : 'VENCIDA';

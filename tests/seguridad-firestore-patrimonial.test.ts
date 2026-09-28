@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * INC-06 — Seguridad Firestore de la persistencia patrimonial.
  * ---------------------------------------------------------------------------
@@ -87,6 +88,9 @@ const FIRESTORE: Peticion['db'] = {
   },
 };
 
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
+
 function peticion(p: {
   uid: string | null;
   email?: string;
@@ -94,11 +98,14 @@ function peticion(p: {
   requestResource?: Record<string, unknown> | null;
   docId: string;
 }): Peticion {
+  const audit = p.uid === 'uid_admin' && p.docId === 'prop_X' && p.requestResource;
   return {
     auth: p.uid === null ? null : { uid: p.uid, token: { email: p.email ?? 'u@test.local' } },
     db: FIRESTORE,
     resource: p.resource ?? null,
-    requestResource: p.requestResource ?? null,
+    requestResource: audit ? {...p.requestResource,roadmap01AuditId:'evt-prop'} : p.requestResource ?? null,
+    after: audit ? {'audit_logs/evt-prop':{id:'evt-prop',resultado:'EXITO',usuarioEmail:EMAIL_ADMIN,
+      detalles:{actorUid:'uid_admin',rutas:['propietarios/prop_X']}}} : undefined,
     docId: p.docId,
   };
 }
@@ -213,7 +220,7 @@ describe('INC-06 · reglas de propietarios con ficha patrimonial', () => {
   it('master: acceso completo (sin cambios)', () => {
     expect(permite('propietarios', 'get', peticion({ ...authMaster, resource: docX, docId: 'prop_X' }))).toBe(true);
     expect(permite('propietarios', 'update', peticion({ ...authMaster, resource: docX, requestResource: docX, docId: 'prop_X' }))).toBe(true);
-    expect(permite('propietarios', 'delete', peticion({ ...authMaster, resource: docX, docId: 'prop_X' }))).toBe(true);
+    expect(permite('propietarios', 'delete', peticion({ ...authMaster, resource: docX, docId: 'prop_X' }))).toBe(false); // conservar historia
   });
 
   it('sin autenticar: nada', () => {

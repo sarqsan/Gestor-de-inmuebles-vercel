@@ -423,7 +423,11 @@ export interface CuentaBancariaPropietario {
 }
 
 export interface Propietario {
+  /** Audit log creado en el mismo commit de la última escritura administrativa. */
+  roadmap01AuditId?: string;
   id: string;
+  /** Vínculo opcional con la persona; solo lo establece el master. No autoriza acceso. */
+  personaId?: string;
   nombre: string; // Nombre y apellidos o Razón Social
   nifCif: string; // NIF / CIF / NIE
   tipoPropietario: TipoPropietario;
@@ -1693,7 +1697,11 @@ export type TipoPerfilUsuario = 'ADMINISTRADOR' | 'PROPIETARIO' | 'PROFESIONAL' 
 export type EstadoUsuario = 'ACTIVO' | 'PENDIENTE' | 'BLOQUEADO' | 'INACTIVO';
 
 export interface UsuarioApp {
+  /** Audit log creado en el mismo commit de la última escritura administrativa. */
+  roadmap01AuditId?: string;
   id: string;
+  /** Persona del dominio (opcional en legacy); no sustituye authUid ni propietarioId. */
+  personaId?: string;
   uid?: string; // Alias auth
   authUid?: string;
   nombre: string;
@@ -1801,19 +1809,25 @@ export interface Profesional {
 }
 
 export interface EnlaceRegistro {
+  /** Audit log creado en el mismo commit de la última escritura administrativa. */
+  roadmap01AuditId?: string;
   id: string;
   token: string;
   tipoPerfil: 'PROPIETARIO' | 'PROFESIONAL' | 'INQUILINO';
   textoVisible: string; // Ej: "🏠 Regístrate como propietario" o "🔧 Regístrate como profesional"
   descripcion?: string;
   activo: boolean;
+  /** Estado nominal independiente del usuario, cuenta y gestión; legacy sin campo sigue válido. */
+  estadoInvitacion?: 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'REVOCADA';
   profesionalIdVinculado?: string; // Si es una invitación para un profesional privado existente
   propietarioIdVinculado?: string; // Si es una invitación para un propietario existente
   usuarioIdVinculado?: string; // ACCESO-PROPIETARIOS: usuario pendiente nominal (un solo uso, NO crear usuario)
   emailInvitado?: string; // ACCESO-PROPIETARIOS: email nominal de la invitación (verificación previa a crear Auth)
   contratoIdVinculado?: string; // BLOQUE E: contrato LAU que da acceso (invitación INQUILINO)
   inmuebleIdVinculado?: string; // BLOQUE E: inmueble del contrato (invitación INQUILINO)
-  fechaCaducidad?: string; // Opcional ISO
+  fechaCaducidad?: string; // Opcional ISO (legacy/UI)
+  /** Milisegundos UTC: campo verificable por request.time en Rules nominales. */
+  fechaCaducidadMs?: number;
   usosMaximos?: number;
   usosActuales: number;
   creadoPor: string;
@@ -1839,7 +1853,7 @@ export interface AuditLog {
   fechaHora: string;
   // ORDEN 2 (gestiones_cartera, F.7): 'gestion_cartera' cubre la auditoría de las
   // transiciones de gestión (GESTION_*). Aditivo: no altera ningún uso existente.
-  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial' | 'importacion_general' | 'poliza_seguro' | 'documento_expediente' | 'expediente_fiscal' | 'gestion_cartera';
+  entidadAfectada: 'usuario' | 'profesional' | 'inmueble' | 'enlace' | 'rol' | 'modulo' | 'especialidad' | 'contrato' | 'incidencia' | 'suministro' | 'mensaje' | 'propietario' | 'importacion_patrimonial' | 'importacion_general' | 'poliza_seguro' | 'documento_expediente' | 'expediente_fiscal' | 'gestion_cartera' | 'persona';
   idAfectado: string;
   resultado: 'EXITO' | 'ERROR';
   detalles?: Record<string, any>;

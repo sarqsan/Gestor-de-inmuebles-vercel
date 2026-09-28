@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * BLOQUE 3 — Seguridad del expediente documental/fiscal.
  * ---------------------------------------------------------------------------
@@ -56,6 +57,9 @@ const FIRESTORE: Peticion['db'] = {
   },
   'gastos/gas_X': GASTO_X,
 };
+
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
 
 const AUTH = {
   propX: { uid: 'uid_propX', token: { email: 'prop-x@test.local' } },

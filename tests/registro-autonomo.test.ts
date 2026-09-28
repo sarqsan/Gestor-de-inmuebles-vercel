@@ -179,7 +179,9 @@ describe('alta autónoma de PROPIETARIO', () => {
     expect(ficha.provincia).toBe('Almería');
     expect(ficha.tipoPropietario).toBe('persona_fisica');
     expect(ficha.cuentasBancarias).toEqual([]);
-    expect(JSON.stringify(ficha)).not.toMatch(/NO_INDICADO|Pendiente|00000/);
+    // No evaluar el ID/las fechas: sus dígitos aleatorios pueden incluir 00000.
+    expect([ficha.nifCif, ficha.direccion, ficha.ciudad, ficha.codigoPostal].join('|'))
+      .not.toMatch(/NO_INDICADO|Pendiente|00000/);
 
     // Espejo de identidad para las reglas.
     const espejo = docGuardado<Record<string, unknown>>('usuarios_auth', 'uid_auto_1');

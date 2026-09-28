@@ -109,6 +109,12 @@ describe('D3 · proyección de carteras gestionadas', () => {
     expect(proyectarCarterasGestionadas([g], OTRO)).toEqual({ carterasL: [], carterasE: [] });
   });
 
+  it('ROADMAP-01 · una delegación parcial nunca se proyecta como cartera completa', () => {
+    const parcial = ev(alta({ inmuebleIds: ['inm_A'], permiso: 'LECTURA_ESCRITURA' }), 'ACTIVACION');
+    expect(proyectarCarterasGestionadas([parcial], GESTOR)).toEqual({ carterasL: [], carterasE: [] });
+    expect(proyectarCarterasGestionadas([parcial], OTRO)).toEqual({ carterasL: [], carterasE: [] });
+  });
+
   it('P10 · varias carteras: deduplicadas y en orden; L ∪ E para el ámbito de consulta', () => {
     const g1 = ev(alta(), 'ACTIVACION'); // prop_X, L
     const g2 = ev(alta({ id: 'g_2', propietarioId: 'prop_Y', permiso: 'LECTURA_ESCRITURA' }), 'ACTIVACION'); // prop_Y, L+E

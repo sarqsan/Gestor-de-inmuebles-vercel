@@ -42,6 +42,7 @@ import {
   type TipoGestor,
 } from './gestionesCartera';
 import { proyectarCarterasGestionadas } from './carterasGestion';
+import { auditarProyeccionCarteras, type InformeProyeccion } from './auditoriaProyeccionCarteras';
 import {
   construirAuditoriaEventoGestion,
   especificarGestionesDeGestor,
@@ -341,6 +342,25 @@ export async function revocarGestionCartera(
 // ---------------------------------------------------------------------------
 // Espejo (recomputo idempotente; re-ejecutable para reparar ESPEJO_PENDIENTE)
 // ---------------------------------------------------------------------------
+/** Inspección de un gestor explícito; solo lee. NO repara ni publica datos.
+ * Quien la invoque debe estar autorizado a leer las relaciones y el espejo.
+ */
+export async function inspeccionarEspejoGestor(deps: DependenciasGestionesCartera,
+  gestorUsuarioId: string): Promise<InformeProyeccion> {
+  if (!gestorUsuarioId) throw new Error('Gestor explícito obligatorio');
+  const usuario = await deps.usuarios.obtenerUsuario(gestorUsuarioId);
+  if (!usuario?.authUid) throw new Error('Gestor sin Auth; no existe espejo que inspeccionar');
+  const [gestiones, espejo] = await Promise.all([
+    deps.gestiones.listarPorGestor(gestorUsuarioId), deps.espejo.leerProyeccion(usuario.authUid),
+  ]);
+  if (!espejo) throw new Error('Espejo inexistente; no asumir acceso');
+  const existentes = new Set<string>();
+  for (const id of new Set(gestiones.map(g => g.propietarioId).filter(Boolean))) {
+    if (await deps.propietarios.existePropietario(id)) existentes.add(id);
+  }
+  return auditarProyeccionCarteras(gestorUsuarioId, gestiones, espejo, existentes);
+}
+
 export type ResultadoSincronizarEspejo =
   | { ok: true; proyeccion: ProyeccionEspejo; omitidoSinCuenta: boolean }
   | { ok: false; error: string };

@@ -24,13 +24,16 @@ const mem = vi.hoisted(() => {
   const docCalls: Array<{ col: string; id: string }> = [];
   const setCalls: Array<{ col: string; id: string }> = [];
   const updateCalls: Array<{ col: string; id: string; data: unknown }> = [];
-  return { store, docCalls, setCalls, updateCalls, getDocsCalls: 0, denyQueries: false };
+  return { store, docCalls, setCalls, updateCalls, getDocsCalls: 0, denyQueries: false, seq: 0, failAudit: false,
+    authExiste:false, authFalla:false, authCreates:0, authLogins:0, fallaActivacionUnaVez:false };
 });
 
 vi.mock('firebase/firestore', () => ({
-  doc: (_db: unknown, col: string, id: string) => {
-    mem.docCalls.push({ col, id });
-    return { __col: col, __id: id };
+  doc: (_db: unknown, col?: string, id?: string) => {
+    const resolvedCol = col ?? (_db as {__col:string}).__col;
+    const resolvedId = id ?? `audit_${++mem.seq}`;
+    mem.docCalls.push({ col: resolvedCol, id: resolvedId });
+    return { __col: resolvedCol, __id: resolvedId };
   },
   collection: (_db: unknown, col: string) => ({ __col: col }),
   getDoc: async (r: { __col: string; __id: string }) => {
@@ -50,6 +53,32 @@ vi.mock('firebase/firestore', () => ({
     const prev = (mem.store.get(`${r.__col}/${r.__id}`) as Record<string, unknown>) || {};
     mem.store.set(`${r.__col}/${r.__id}`, { ...prev, ...data });
   },
+  runTransaction: async (_db: unknown, fn: (tx: any) => Promise<unknown>) => {
+    if (mem.fallaActivacionUnaVez) {
+      mem.fallaActivacionUnaVez = false;
+      throw new Error('Firestore temporalmente inaccesible');
+    }
+    const writes: Array<{ ref:{__col:string;__id:string}; value:Record<string,unknown>; tipo:'set'|'update' }> = [];
+    const tx = {
+      get: async (r: {__col:string;__id:string}) => {
+        const value = mem.store.get(`${r.__col}/${r.__id}`);
+        return { exists: () => value !== undefined, data: () => value, id:r.__id };
+      },
+      update: (ref: {__col:string;__id:string}, value:Record<string,unknown>) => writes.push({ref,value,tipo:'update' as const}),
+      set: (ref: {__col:string;__id:string}, value:Record<string,unknown>) => {
+        if (mem.failAudit && ref.__col === 'audit_logs') throw new Error('audit-failed');
+        writes.push({ref,value,tipo:'set' as const});
+      },
+    };
+    const result = await fn(tx);
+    for (const {ref,value,tipo} of writes) {
+      const key = `${ref.__col}/${ref.__id}`;
+      mem.store.set(key, tipo === 'set' ? value : { ...(mem.store.get(key) as object), ...value });
+      if (tipo === 'set') mem.setCalls.push({col:ref.__col,id:ref.__id});
+      else mem.updateCalls.push({col:ref.__col,id:ref.__id,data:value});
+    }
+    return result;
+  },
   deleteDoc: async () => {},
   query: (...args: unknown[]) => ({ __q: args }),
   where: (f: string, op: string, v: unknown) => ({ f, op, v }),
@@ -61,11 +90,17 @@ vi.mock('firebase/firestore', () => ({
 }));
 
 vi.mock('firebase/auth', () => ({
-  createUserWithEmailAndPassword: async (_a: unknown, email: string) => ({
-    user: { uid: 'uid_nuevo_1', email },
-  }),
-  signInWithEmailAndPassword: async () => {
-    throw new Error('login no cubierto en esta suite');
+  createUserWithEmailAndPassword: async (_a: unknown, email: string) => {
+    mem.authCreates++;
+    if (mem.authFalla) throw new Error('Auth inaccesible');
+    if (mem.authExiste) throw { code:'auth/email-already-in-use' };
+    mem.authExiste = true;
+    return { user: { uid: 'uid_nuevo_1', email } };
+  },
+  signInWithEmailAndPassword: async (_a: unknown, email: string, password:string) => {
+    mem.authLogins++;
+    if (password !== 'secreta1' || !mem.authExiste) throw new Error('Credenciales incorrectas');
+    return { user: { uid:'uid_nuevo_1', email } };
   },
   signOut: async () => {},
   onAuthStateChanged: () => () => {},
@@ -133,7 +168,9 @@ const NOMINAL: EnlaceRegistro = {
   tipoPerfil: 'PROPIETARIO',
   textoVisible: '🔑 Activa tu cuenta de propietario',
   activo: true,
+  estadoInvitacion: 'PENDIENTE',
   fechaCaducidad: '2026-12-31T00:00:00.000Z',
+  fechaCaducidadMs: Date.parse('2026-12-31T00:00:00.000Z'),
   usosMaximos: 1,
   usosActuales: 0,
   creadoPor: 'admin',
@@ -158,6 +195,13 @@ beforeEach(() => {
   mem.updateCalls.length = 0;
   mem.getDocsCalls = 0;
   mem.denyQueries = false;
+  mem.failAudit = false;
+  mem.authExiste = false;
+  mem.authFalla = false;
+  mem.authCreates = 0;
+  mem.authLogins = 0;
+  mem.fallaActivacionUnaVez = false;
+  mem.seq = 0;
   libm.audits.length = 0;
 });
 
@@ -320,7 +364,78 @@ describe('registerWithInvitationLink nominal', () => {
     expect(espejo.propietarioId).toBe('prop_1');
 
     // Trazabilidad.
-    expect(libm.audits.map((a) => a.accion)).toContain('ACTIVACION_USUARIO_INVITACION');
+    expect([...mem.store.entries()].filter(([path]) => path.startsWith('audit_logs/'))
+      .map(([,a]) => (a as Record<string,unknown>).accion)).toContain('ACTIVACION_USUARIO_INVITACION');
+  });
+});
+
+describe('ROADMAP-01 · activación nominal adversarial', () => {
+  const registro = () => registerWithInvitationLink({ enlace:{...NOMINAL}, email:'prop@test.es', password:'secreta1', nombre:'Carmen' });
+  it('copia del cliente activa no reabre invitación rechazada o revocada', async () => {
+    sembrarFlujoNominal();
+    mem.store.set('enlaces_registro/enl_1', { ...NOMINAL, estadoInvitacion:'RECHAZADA' });
+    await expect(registro()).rejects.toThrow(/rechazada/);
+    expect(mem.store.get('usuarios/user_pend_1')).toEqual(PENDIENTE);
+    expect([...mem.store.keys()].filter(k=>k.startsWith('audit_logs/'))).toHaveLength(0);
+  });
+  it('usuario inexistente o propietario de otra Persona aborta sin consumo ni auditoría', async () => {
+    sembrarFlujoNominal();
+    mem.store.delete('usuarios/user_pend_1');
+    await expect(registro()).rejects.toThrow('inexistente');
+    expect((mem.store.get('enlaces_registro/enl_1') as EnlaceRegistro).usosActuales).toBe(0);
+    sembrarFlujoNominal();
+    mem.store.set('usuarios/user_pend_1',{...PENDIENTE, personaId:'p1'});
+    mem.store.set('propietarios/prop_1',{...FICHA_REAL, personaId:'p2'});
+    await expect(registro()).rejects.toThrow('incoherente');
+    expect((mem.store.get('enlaces_registro/enl_1') as EnlaceRegistro).usosActuales).toBe(0);
+  });
+  it('segundo intento y auditoría fallida no producen doble acceso ni consumo parcial', async () => {
+    sembrarFlujoNominal();
+    mem.failAudit = true;
+    await expect(registro()).rejects.toThrow('audit-failed');
+    expect((mem.store.get('usuarios/user_pend_1') as UsuarioApp).estado).toBe('PENDIENTE');
+    expect((mem.store.get('enlaces_registro/enl_1') as EnlaceRegistro).usosActuales).toBe(0);
+    mem.failAudit = false;
+    await registro();
+    expect((await registro()).usuarioApp.estado).toBe('ACTIVO'); // doble envío legítimo idempotente
+    expect((mem.store.get('enlaces_registro/enl_1') as EnlaceRegistro).usosActuales).toBe(1);
+    expect([...mem.store.keys()].filter(k=>k.startsWith('audit_logs/'))).toHaveLength(1);
+  });
+  it('Auth OK + Firestore FAIL deja pendiente auditable; reintenta con mismo UID y sin duplicar ficha', async () => {
+    sembrarFlujoNominal();
+    mem.fallaActivacionUnaVez = true;
+    await expect(registro()).rejects.toThrow('temporalmente inaccesible');
+    expect(mem.authExiste).toBe(true);
+    expect((mem.store.get('usuarios/user_pend_1') as UsuarioApp).estado).toBe('PENDIENTE');
+    expect((mem.store.get('enlaces_registro/enl_1') as EnlaceRegistro).usosActuales).toBe(0);
+    expect(libm.audits.map(a=>a.accion)).toContain('ACTIVACION_NOMINAL_REINTENTO_PENDIENTE');
+    const resultado = await registro();
+    expect(resultado.usuarioApp.authUid).toBe('uid_nuevo_1');
+    expect(mem.authLogins).toBe(1);
+    expect(mem.setCalls.filter(c => ['usuarios','propietarios'].includes(c.col))).toHaveLength(0);
+    expect(mem.store.get('propietarios/prop_1')).toEqual(FICHA_REAL);
+    expect([...mem.store.keys()].filter(k=>k.startsWith('audit_logs/'))).toHaveLength(1);
+  });
+  it('Auth FAIL no intenta activar; contraseña ajena no recupera Auth preexistente', async () => {
+    sembrarFlujoNominal();
+    mem.authFalla = true;
+    await expect(registro()).rejects.toThrow('Auth inaccesible');
+    expect(mem.updateCalls).toHaveLength(0);
+    mem.authFalla = false;
+    mem.authExiste = true;
+    await expect(registerWithInvitationLink({enlace:{...NOMINAL},email:'prop@test.es',password:'incorrecta',nombre:'Carmen'}))
+      .rejects.toThrow('Credenciales incorrectas');
+    expect(mem.updateCalls).toHaveLength(0);
+    expect(libm.audits).toHaveLength(0);
+  });
+  it('enlace aceptado por otro UID no se usa como reintento aunque Auth del email coincida', async () => {
+    sembrarFlujoNominal();
+    mem.authExiste = true;
+    mem.store.set('enlaces_registro/enl_1',{...NOMINAL,estadoInvitacion:'ACEPTADA',usosActuales:1});
+    mem.store.set('usuarios/user_pend_1',{...PENDIENTE,estado:'ACTIVO',authUid:'uid_ajeno',enlaceRegistroId:'enl_1'});
+    await expect(registro()).rejects.toThrow();
+    expect(mem.updateCalls).toHaveLength(0);
+    expect((mem.store.get('usuarios/user_pend_1') as UsuarioApp).authUid).toBe('uid_ajeno');
   });
 });
 

@@ -16,9 +16,10 @@ import {
   updateDoc,
   query,
   where,
+  runTransaction,
 } from 'firebase/firestore';
 import { auth, db, USUARIOS_COL, ENLACES_REGISTRO_COL, saveAuditLogFirestore } from './firebase';
-import { validarActivacionPendiente } from './accesoPropietarios';
+import { validarActivacionPendiente, validarInvitacionPropietario } from './accesoPropietarios';
 import {
   contratosDelInquilino,
   puedeAccederContrato,
@@ -106,7 +107,12 @@ export async function syncAuthIndex(
       // reglas rechazan cualquier intento de autoasignación. `merge: true`
       // los preserva intactos.
     };
-    await setDoc(doc(db, 'usuarios_auth', fb.uid), payload, { merge: true });
+    if (auth.currentUser?.email?.toLowerCase() === ADMIN_MASTER_EMAIL) {
+      const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
+      await guardarAccesoAuditado('usuarios_auth',fb.uid,payload,'SINCRONIZAR_IDENTIDAD_MASTER');
+    } else {
+      await setDoc(doc(db, 'usuarios_auth', fb.uid), payload, { merge: true });
+    }
   } catch (err) {
     console.warn('No se pudo sincronizar el espejo de identidad usuarios_auth:', err);
   }
@@ -167,7 +173,8 @@ export async function getUsuarioByAuthUid(
               updatedAt: new Date().toISOString(),
               lastLoginAt: new Date().toISOString(),
             };
-            await setDoc(doc(db, 'usuarios', 'user_admin_principal'), updated, { merge: true });
+            const { saveUsuarioFirestore } = await import('./firebase');
+            await saveUsuarioFirestore({id:'user_admin_principal',...updated} as UsuarioApp); // perfil + espejo + log
             return { id: 'user_admin_principal', ...updated } as UsuarioApp;
           }
           return { id: adminSnap.id, ...adminData } as UsuarioApp;
@@ -238,7 +245,12 @@ export async function getUsuarioByAuthUid(
           lastLoginAt: new Date().toISOString(),
         };
 
-        await setDoc(doc(db, 'usuarios', docSnap.id), updatedUser, { merge: true });
+        if (auth.currentUser?.email?.toLowerCase() === ADMIN_MASTER_EMAIL) {
+          const { saveUsuarioFirestore } = await import('./firebase');
+          await saveUsuarioFirestore(updatedUser); // perfil y espejo en el mismo commit
+        } else {
+          await setDoc(doc(db, 'usuarios', docSnap.id), updatedUser, { merge: true });
+        }
 
         await saveAuditLogFirestore({
           usuarioId: docSnap.id,
@@ -345,7 +357,8 @@ export async function loginWithEmail(
         updatedAt: new Date().toISOString(),
         lastLoginAt: new Date().toISOString(),
       };
-      await setDoc(doc(db, 'usuarios', adminId), { ...usuario, passwordHash: pHash }, { merge: true });
+      const { saveUsuarioFirestore } = await import('./firebase');
+      await saveUsuarioFirestore({ ...usuario, passwordHash:pHash }); // perfil, espejo y log
     } else {
       if (firebaseUser) await signOut(auth);
       throw new Error(
@@ -463,11 +476,12 @@ export async function initFirstAdminAccount(
     lastLoginAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(db, 'usuarios', adminId), {
+  const { saveUsuarioFirestore } = await import('./firebase');
+  await saveUsuarioFirestore({
     ...adminUser,
     passwordHash: pHash,
     authMethod: providerDisabled ? 'direct_firestore' : 'firebase_auth',
-  }, { merge: true });
+  }); // perfil, espejo y log
 
   // Guardar sesión activa local para persistencia segura
   try {
@@ -507,67 +521,68 @@ async function activarUsuarioVinculado(params: {
   const { enlace, email, nombre, apellidos, telefono, firebaseUser } = params;
   const emailNorm = email.trim().toLowerCase();
 
-  // 1. Leer la ficha pendiente por get() directo (firmado).
-  const pendienteSnap = await getDoc(doc(db, 'usuarios', enlace.usuarioIdVinculado as string));
-  const pendiente = (
-    pendienteSnap.exists() ? { id: pendienteSnap.id, ...pendienteSnap.data() } : null
-  ) as UsuarioApp | null;
-
-  // 2. Validar contra la invitación (perfil, estado, email, propietario).
-  const v = validarActivacionPendiente(pendiente, enlace, emailNorm);
-  if (!v.ok || !pendiente) {
-    throw new Error(v.errores[0] || 'No se puede activar esta cuenta.');
-  }
-
-  await updateProfile(firebaseUser, {
-    displayName: `${nombre} ${apellidos || ''}`.trim() || pendiente.nombre,
+  if (firebaseUser.email?.trim().toLowerCase() !== emailNorm)
+    throw new Error('Auth y formulario no coinciden con el invitado.');
+  const usuarioRef = doc(db, 'usuarios', enlace.usuarioIdVinculado as string);
+  const enlaceRef = doc(db, 'enlaces_registro', enlace.id);
+  const propietarioRef = doc(db, 'propietarios', enlace.propietarioIdVinculado as string);
+  const auditRef = doc(collection(db, 'audit_logs'));
+  const ahora = new Date().toISOString();
+  // La lectura, consumo de un solo uso y activación se verifican sobre docs
+  // FRESCOS en una sola transacción; si uno falla, no hay log de falso éxito.
+  const usuarioActivado = await runTransaction(db, async tx => {
+    const [u, e, o] = await Promise.all([tx.get(usuarioRef), tx.get(enlaceRef), tx.get(propietarioRef)]);
+    if (!u.exists() || !e.exists() || !o.exists()) throw new Error('Invitación, usuario o propietario inexistente.');
+    const pendiente = { ...u.data(), id: u.id } as UsuarioApp;
+    const vigente = { ...e.data(), id: e.id } as EnlaceRegistro;
+    // Doble envío tras éxito: solo el UID de la cuenta YA activada puede
+    // obtener el resultado. No se vuelve a consumir ni se duplica auditoría.
+    if (vigente.estadoInvitacion === 'ACEPTADA' && vigente.usosActuales === 1 &&
+        vigente.usosMaximos === 1 && vigente.usuarioIdVinculado === pendiente.id &&
+        vigente.propietarioIdVinculado === o.id && vigente.emailInvitado === emailNorm &&
+        pendiente.email === emailNorm && pendiente.estado === 'ACTIVO' &&
+        pendiente.authUid === firebaseUser.uid && pendiente.enlaceRegistroId === vigente.id &&
+        pendiente.propietarioId === o.id &&
+        (!pendiente.personaId || o.data().personaId === pendiente.personaId)) return pendiente;
+    const validacion = validarInvitacionPropietario(vigente, emailNorm, ahora);
+    const coherencia = validarActivacionPendiente(pendiente, vigente, emailNorm);
+    if (!validacion.ok || !coherencia.ok || vigente.usuarioIdVinculado !== pendiente.id ||
+        vigente.propietarioIdVinculado !== o.id ||
+        (pendiente.personaId && o.data().personaId !== pendiente.personaId)) {
+      throw new Error([...validacion.errores, ...coherencia.errores][0] || 'Vínculo nominal incoherente.');
+    }
+    const actualizacion: Partial<UsuarioApp> = {
+      authUid: firebaseUser.uid, estado: 'ACTIVO', enlaceRegistroId: vigente.id,
+      roadmap01AuditId: auditRef.id,
+      updatedAt: ahora, lastLoginAt: ahora,
+    };
+    if (nombre.trim()) actualizacion.nombre = nombre.trim();
+    if (apellidos?.trim()) actualizacion.apellidos = apellidos.trim();
+    if (telefono?.trim()) actualizacion.telefono = telefono.trim();
+    const confirmado = { ...pendiente, ...actualizacion } as UsuarioApp;
+    tx.update(usuarioRef, actualizacion);
+    tx.update(enlaceRef, {
+      usosActuales: vigente.usosActuales + 1,
+      estadoInvitacion: 'ACEPTADA',
+      roadmap01AuditId: auditRef.id,
+    });
+    tx.set(auditRef, {
+      id: auditRef.id, fechaHora: ahora, usuarioId: pendiente.id,
+      usuarioEmail: emailNorm, usuarioNombre: pendiente.nombre,
+      accion: 'ACTIVACION_USUARIO_INVITACION', descripcion: 'Activación nominal de usuario existente',
+      entidadAfectada: 'usuario', idAfectado: pendiente.id, resultado: 'EXITO',
+      detalles: { enlaceId: vigente.id, propietarioId: o.id, actorUid: firebaseUser.uid,
+        rutas: [`usuarios/${pendiente.id}`, `enlaces_registro/${vigente.id}`] },
+    });
+    return confirmado;
   });
 
-  // 3. Vincular UID + activar. Solo claves permitidas por las reglas
-  //    (PENDIENTE→ACTIVO con email coincidente; lo demás queda intacto).
-  const ahora = new Date().toISOString();
-  const actualizacion: Record<string, unknown> = {
-    authUid: firebaseUser.uid,
-    estado: 'ACTIVO',
-    enlaceRegistroId: enlace.id,
-    updatedAt: ahora,
-    lastLoginAt: ahora,
-  };
-  if (nombre.trim()) actualizacion.nombre = nombre.trim();
-  if (apellidos?.trim()) actualizacion.apellidos = apellidos.trim();
-  if (telefono?.trim()) actualizacion.telefono = telefono.trim();
-  await updateDoc(doc(db, 'usuarios', pendiente.id), actualizacion);
-  const usuarioActivado: UsuarioApp = {
-    ...pendiente,
-    ...(actualizacion as Partial<UsuarioApp>),
-  };
-
-  // 4. Espejo de identidad (las reglas lo exigen veraz contra la ficha).
+  // La proyección sigue siendo D2/D3; sin espejo veraz el acceso falla cerrado.
   await syncAuthIndex(usuarioActivado, firebaseUser);
-
-  // 5. Consumir la invitación nominal (un solo uso).
-  await setDoc(
-    doc(db, 'enlaces_registro', enlace.id),
-    { usosActuales: (enlace.usosActuales || 0) + 1 },
-    { merge: true }
-  );
-
-  // 6. Sesión local + auditoría (mismo contrato que el alta clásica).
   try {
     localStorage.setItem('rentselect_active_session', JSON.stringify(usuarioActivado));
     localStorage.setItem('rentselect_current_user_id', usuarioActivado.id);
   } catch (e) {}
-
-  await saveAuditLogFirestore({
-    usuarioId: usuarioActivado.id,
-    usuarioEmail: usuarioActivado.email,
-    usuarioNombre: usuarioActivado.nombre,
-    accion: 'ACTIVACION_USUARIO_INVITACION',
-    descripcion: `Activación de cuenta PROPIETARIO pendiente mediante invitación nominal [${enlace.token}].`,
-    entidadAfectada: 'usuario',
-    idAfectado: usuarioActivado.id,
-    resultado: 'EXITO',
-  });
 
   return { firebaseUser, usuarioApp: usuarioActivado };
 }
@@ -590,7 +605,6 @@ export async function registerWithInvitationLink(params: {
   municipio?: string;
 }): Promise<{ firebaseUser: FirebaseUser | null; usuarioApp: UsuarioApp }> {
   const {
-    enlace,
     email,
     password,
     nombre,
@@ -602,6 +616,26 @@ export async function registerWithInvitationLink(params: {
     provincia = 'Almería',
     municipio = '',
   } = params;
+  let enlace = params.enlace;
+
+  // La UI no es frontera de seguridad: recargar invitación nominal por ID
+  // ANTES de crear Auth. El payload del cliente no es la autoridad.
+  if (enlace.tipoPerfil === 'PROPIETARIO' && enlace.usuarioIdVinculado) {
+    const actual = await getDoc(doc(db, 'enlaces_registro', enlace.id));
+    const vigente = actual.exists() ? { ...actual.data(), id: actual.id } as EnlaceRegistro : null;
+    const veredicto = validarInvitacionPropietario(vigente, email);
+    // ACEPTADA es admisible únicamente para verificar idempotencia DESPUÉS de
+    // autenticar al titular; la transacción contrastará UID, enlace y ficha.
+    const posibleReintento = vigente?.estadoInvitacion === 'ACEPTADA' &&
+      vigente.usosActuales === 1 && vigente.usosMaximos === 1 &&
+      vigente.emailInvitado === email.trim().toLowerCase();
+    if ((!veredicto.ok && !posibleReintento) || !vigente ||
+        vigente.usuarioIdVinculado !== enlace.usuarioIdVinculado ||
+        vigente.propietarioIdVinculado !== enlace.propietarioIdVinculado)
+      throw new Error(veredicto.errores[0] || 'La invitación actual no coincide con el vínculo solicitado.');
+    // No reutilizar la copia posiblemente obsoleta en las validaciones siguientes.
+    enlace = vigente;
+  }
 
   // Verificación estricta de seguridad contra elevación de privilegios
   if ((enlace.tipoPerfil as string) === 'ADMINISTRADOR') {
@@ -627,7 +661,13 @@ export async function registerWithInvitationLink(params: {
     firebaseUser = userCredential.user;
     await updateProfile(firebaseUser, { displayName: `${nombre} ${apellidos || ''}`.trim() });
   } catch (err: any) {
-    if (err?.code === 'auth/operation-not-allowed' || err?.message?.includes('operation-not-allowed')) {
+    if (err?.code === 'auth/email-already-in-use' && enlace.usuarioIdVinculado && tipoPerfil === 'PROPIETARIO') {
+      // Auth puede haber quedado creada antes de un fallo de Firestore. Solo
+      // el titular que conoce SU contraseña puede recuperar ese UID; nunca
+      // se borra la cuenta ni se crea otra ficha/Persona/propietario.
+      const cred = await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+      firebaseUser = cred.user;
+    } else if (err?.code === 'auth/operation-not-allowed' || err?.message?.includes('operation-not-allowed')) {
       console.warn('Firebase Auth: Proveedor Email/Contraseña deshabilitado en Firebase Console. Registrando usuario directamente.');
     } else {
       throw err;
@@ -641,14 +681,31 @@ export async function registerWithInvitationLink(params: {
     if (!firebaseUser) {
       throw new Error('La activación nominal requiere Firebase Authentication (proveedor Email/Contraseña).');
     }
-    return activarUsuarioVinculado({
-      enlace,
-      email,
-      nombre,
-      apellidos,
-      telefono,
-      firebaseUser,
-    });
+    try {
+      return await activarUsuarioVinculado({
+        enlace,
+        email,
+        nombre,
+        apellidos,
+        telefono,
+        firebaseUser,
+      });
+    } catch (e) {
+      // Auth y Firestore no comparten commit. Registrar intento fallido sin
+      // fingir éxito; si falla el log, no ocultar la causa original. La cuenta
+      // Auth permanece recuperable por signInWithEmailAndPassword.
+      try {
+        await saveAuditLogFirestore({
+          usuarioId: enlace.usuarioIdVinculado,
+          usuarioEmail: email.trim().toLowerCase(), usuarioNombre: nombre.trim(),
+          accion: 'ACTIVACION_NOMINAL_REINTENTO_PENDIENTE',
+          descripcion: 'Auth autenticada; activación Firestore no confirmada. Reintento seguro requerido.',
+          entidadAfectada: 'usuario', idAfectado: enlace.usuarioIdVinculado,
+          resultado: 'ERROR', detalles: { enlaceId: enlace.id, actorUid: firebaseUser.uid },
+        });
+      } catch (auditError) { console.warn('No se pudo auditar intento nominal fallido:', auditError); }
+      throw e;
+    }
   }
 
   // 2. Determinar rol predefinido según el enlace
@@ -682,8 +739,9 @@ export async function registerWithInvitationLink(params: {
     estado: 'ACTIVO',
     roles: rolDef ? [rolDef.id] : [],
     permisos: rolDef ? rolDef.permisos : [],
+    enlaceRegistroId: enlace.id,
     ...(tipoPerfil === 'INQUILINO' && enlace.contratoIdVinculado
-      ? { contratoIds: [enlace.contratoIdVinculado], enlaceRegistroId: enlace.id }
+      ? { contratoIds: [enlace.contratoIdVinculado] }
       : {}),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

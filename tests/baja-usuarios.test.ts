@@ -310,8 +310,11 @@ describe('App — handleBajaUsuario (tripwires)', () => {
     const h = handlerSrc();
     expect(h).toContain('validarBajaUsuario');
     expect(h).toContain('aplicarBajaUsuario');
-    expect(h).toContain('saveUsuarioFirestore(deBaja)');
-    expect(h).toContain('syncAuthIndex');
+    expect(h).toContain("saveUsuarioFirestore(deBaja, 'BAJA_USUARIO')");
+    const persistencia = readFileSync(root('src/lib/firebase.ts'), 'utf-8');
+    expect(persistencia).toContain('guardarAccesosAuditados([');
+    expect(persistencia).toContain("coleccion:'usuarios_auth' as const");
+    expect(h).not.toContain('syncAuthIndex('); // perfil/espejo salen del mismo commit
     expect(h).toContain("'BAJA_USUARIO'");
     expect(h).toContain('detalleBajaUsuario');
   });
@@ -334,13 +337,14 @@ describe('App — handleBajaUsuario (tripwires)', () => {
 describe('firestore.rules — baja por actualización controlada (tripwires)', () => {
   it('update usuarios: bypass master + estado inmutable para no-master', () => {
     const b = bloqueRules('match /usuarios/{usuarioId}');
-    expect(b).toContain('allow update: if isMasterAdmin() || (');
+    expect(b).toContain('allow update: if (isMasterAdmin()');
+    expect(b).toContain('&& usuarioPersonaCoherente(usuarioId, incoming())');
     expect(b).toContain('incoming().estado == existing().estado');
   });
 
   it('espejo: solo master o uid propio veraz (un normal no toca espejos ajenos)', () => {
     const b = bloqueRules('match /usuarios_auth/{uid}');
-    expect(b).toContain('allow update: if isMasterAdmin() || (');
+    expect(b).toContain("allow update: if (isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'usuarios_auth/' + uid)) || (");
     expect(b).toContain('request.auth.uid == uid');
     expect(b).toContain('indexIsTruthful()');
   });
@@ -349,8 +353,8 @@ describe('firestore.rules — baja por actualización controlada (tripwires)', (
     expect(bloqueRules('match /audit_logs/{auditId}')).toContain('allow update, delete: if false');
   });
 
-  it('usuarios delete sigue master-only preexistente (el panel no lo usa)', () => {
-    expect(bloqueRules('match /usuarios/{usuarioId}')).toContain('allow delete: if isMasterAdmin();');
+  it('usuarios delete no puede purgar identidad/histórico; baja auditada', () => {
+    expect(bloqueRules('match /usuarios/{usuarioId}')).toContain('allow delete: if false;');
   });
 });
 

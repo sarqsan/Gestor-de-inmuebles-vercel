@@ -6,17 +6,12 @@
 > Fuente de verdad: el estado real del código, Git y la documentación canónica.
 > Los documentos históricos (auditorías, informes GAP) se **enlazan**, no se duplican.
 >
-> Última actualización: **2026-09-27 — BLOQUE 0 CERRADO · `main = origin/main =
-> 3778a5a`** (PR #6 → `64fd0b2` con la cadena BLOQUE 6 de 9 commits; PR #7 →
-> `3778a5a`, con la reconciliación del assert E-62 con el ámbito D3). Ambos
-> integrados por **merge commit** (sin squash, sin rebase, sin reescritura de
-> historia). Estado validado sobre `main`: `test:bloque-e` **64/64** ·
-> `test:bloque-b` **92/92** · `test:bloque-c` **82/82** · D3 Firestore **17/17** ·
-> D3 Storage **23/23** · seguridad relacionada (D2, deltas-C, carteras, ficha
-> pública, tenant, inmuebles, storage/documentos, carteras, expediente)
-> **196/196** · Vitest global **2253 pass + 2 skip (98 ficheros)** ·
-> `tsc --noEmit` **0** · `vite build` / `esbuild server` OK. `firestore.rules` y
-> `storage.rules` **intactas** (sin migraciones ni escrituras de datos).
+> **Actualización de esta Arena (2026-09-27): ROADMAP-01 — IDENTIDAD + PERSONAS + ROLES + ACCESO, PARCIAL / PENDIENTE, NO CERRADO.** Base inspeccionada `3778a5a7add700a7e3824452d0a30db0e7eef50f` (`main = origin/main` al inicio); rama `arena/01a0e460-gestor-de-inmuebles-vercel`. Modelo `personas` opt-in master-only, vínculo no autorizante `personaId`, auditoría transaccional reutilizada, proyección de delegaciones parciales fail-closed. Sin migraciones, sin UI nueva, sin despliegue de Rules; dependencias y limitaciones en [ROADMAP-01](ROADMAP-01-IDENTIDAD-PERSONAS-ROLES-ACCESO.md). Las referencias de SHA/ramas a continuación son históricos y NO representan el punto de partida de esta Arena. La numeración de bloques históricos no cambia.
+>
+> Registro histórico anterior — última actualización: **2026-09-27 — CADENA BLOQUE 6 INTEGRADA EN `main` (`64fd0b2`, PR #6) + RECONCILIACIÓN DEL ASSERT E-62 CON EL ÁMBITO D3** (§13, §14): `main = origin/main = 64fd0b2`, merge commit del PR #6 (sin squash ni rebase) que incorpora íntegra la cadena lineal de 9 commits `414642b`→`c2b1087` (deltas-C · `gestiones_cartera` · D2 · D3 · B4 · B4-fix · O7 · Import/Export v1 · auditoría Import/Export). El árbol de `64fd0b2` es byte-idéntico al del tip auditado. Batería `test:bloque-e` **64/64** tras reconciliar el assert E-62: D3 sustituyó el listado global `isStaff()` de las colecciones E por **ámbito derivado** inmueble/contrato (+carteras, +admin) y el assert pasa a verificar esa estructura acotada (sin `isStaff()` global y sin vía de listado para `isTenant()`); `firestore.rules` **intacto**.
+>
+> Última actualización histórica de `main`: **2026-09-27 — BLOQUE 0 CERRADO · `main = origin/main = 3778a5a`** (PR #6 → `64fd0b2` con la cadena BLOQUE 6 de 9 commits; PR #7 → `3778a5a`, con la reconciliación del assert E-62 con el ámbito D3). Ambos integrados por **merge commit** (sin squash, sin rebase, sin reescritura de historia). Estado validado sobre `main`: `test:bloque-e` **64/64** · `test:bloque-b` **92/92** · `test:bloque-c` **82/82** · D3 Firestore **17/17** · D3 Storage **23/23** · seguridad relacionada (D2, deltas-C, carteras, ficha pública, tenant, inmuebles, storage/documentos, carteras, expediente) **196/196** · Vitest global **2253 pass + 2 skip (98 ficheros)** · `tsc --noEmit` **0** · `vite build` / `esbuild server` OK. `firestore.rules` y `storage.rules` **intactas** (sin migraciones ni escrituras de datos).
+
 > Anterior: 2026-09-26 — §16 RECUPERACIÓN FUNCIONAL HISTÓRICA Y
 > CAPACIDADES ESTRATÉGICAS** (registro documental, sin cambios de código):
 > auditoría funcional histórica declarada trabajo pendiente ·

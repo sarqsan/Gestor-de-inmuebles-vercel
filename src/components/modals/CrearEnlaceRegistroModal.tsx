@@ -137,6 +137,8 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
           textoVisible: textoVisible.trim() || nominal.textoVisible,
           descripcion: descripcion.trim() || nominal.descripcion,
           fechaCaducidad: new Date(fechaCaducidad).toISOString(),
+          fechaCaducidadMs: new Date(fechaCaducidad).getTime(),
+          estadoInvitacion: enlaceParaEditar?.estadoInvitacion || 'PENDIENTE',
           propietarioIdVinculado: usuarioVinculado.propietarioId,
           usuarioIdVinculado: usuarioVinculado.id,
           emailInvitado: usuarioVinculado.email.trim().toLowerCase(),

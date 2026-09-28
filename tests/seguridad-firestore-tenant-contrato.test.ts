@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * PORTAL DEL INQUILINO · D-1 — lectura del contrato propio (`contratos_formalizacion`)
  * ---------------------------------------------------------------------------
@@ -40,6 +41,9 @@ const FIRESTORE: ContextoPeticion['firestore'] = {
   'contratos_formalizacion/ct_A': CT_A,
   'contratos_formalizacion/ct_B': CT_B,
 };
+
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
 
 const AUTH = {
   inqA: { uid: 'uid_inq_A', token: { email: 'inq-a@test.local' } },

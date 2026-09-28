@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -52,6 +52,9 @@ import {
 
 import { esUsuarioMaster } from '../../lib/adminUsuarios';
 import { DryRunFichasPublicasPanel } from './DryRunFichasPublicasPanel';
+import type { Persona } from '../../lib/personas';
+import { crearPersonaParaPropietarioFirestore, listarPersonasMasterFirestore,
+  vincularPropietarioPersonaFirestore, vincularUsuarioPersonaFirestore } from '../../lib/personasServicioFirebase';
 
 interface AdminControlCenterProps {
   currentUser: UsuarioApp;
@@ -71,6 +74,7 @@ interface AdminControlCenterProps {
   onBajaUsuario?: (id: string, motivo?: string) => Promise<void>;
   onSaveEnlaceRegistro: (enlace: EnlaceRegistro) => Promise<void>;
   onDeleteEnlaceRegistro: (id: string) => Promise<void>;
+  onRejectEnlaceRegistro: (id: string) => Promise<void>;
   onSaveEspecialidad: (especialidad: Especialidad) => Promise<void>;
   onDeleteEspecialidad: (id: string) => Promise<void>;
   onSaveModulosConfig?: (config: ModulosConfig) => Promise<void>;
@@ -189,6 +193,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   onBajaUsuario,
   onSaveEnlaceRegistro,
   onDeleteEnlaceRegistro,
+  onRejectEnlaceRegistro,
   onSaveEspecialidad,
   onDeleteEspecialidad,
   onSaveModulosConfig,
@@ -209,8 +214,36 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const [inmueblePropietarioFilter, setInmueblePropietarioFilter] = useState<string>('TODOS');
   const [selectedInmuebleDossier, setSelectedInmuebleDossier] = useState<Inmueble | null>(null);
 
-  // Propietario modal
+  // Identidad en la ficha existente (solo master; no es otro panel de permisos).
   const [selectedPropietarioDetail, setSelectedPropietarioDetail] = useState<Propietario | null>(null);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [personasCargadas, setPersonasCargadas] = useState(false);
+  const [personaSeleccionadaId, setPersonaSeleccionadaId] = useState('');
+  const [errorPersona, setErrorPersona] = useState('');
+  const [guardandoPersona, setGuardandoPersona] = useState(false);
+  const esMasterIdentidad = currentUser.email?.toLowerCase() === 'sarqsan2@gmail.com';
+  useEffect(() => {
+    if (!esMasterIdentidad || activeSection !== 'propietarios') return;
+    let vigente = true;
+    setPersonasCargadas(false);
+    listarPersonasMasterFirestore().then(lista => {
+      if (vigente) { setPersonas(lista); setPersonasCargadas(true); }
+    }).catch(err => { if (vigente) setErrorPersona(String(err)); });
+    return () => { vigente = false; };
+  }, [activeSection, esMasterIdentidad]);
+  const ejecutarIdentidad = async (accion: () => Promise<unknown>) => {
+    if (!esMasterIdentidad || guardandoPersona) return;
+    setGuardandoPersona(true);
+    setErrorPersona('');
+    try { await accion(); setPersonas(await listarPersonasMasterFirestore()); }
+    catch (e) { setErrorPersona(e instanceof Error ? e.message : String(e)); }
+    finally { setGuardandoPersona(false); }
+  };
+
+  const personaFicha = personas.find(p => p.propietarioIds.includes(selectedPropietarioDetail?.id ?? ''));
+  const personaIdFicha = propietarios.find(p => p.id === selectedPropietarioDetail?.id)?.personaId ||
+    selectedPropietarioDetail?.personaId || personaFicha?.id;
+  const usuarioFicha = usuarios.find(u => u.propietarioId === selectedPropietarioDetail?.id);
 
   // Specialty state
   const [nuevaEspecialidad, setNuevaEspecialidad] = useState('');
@@ -1250,7 +1283,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                             className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                             title={`Nominal para ${enlace.emailInvitado || '—'}`}
                           >
-                            NOMINAL 1 USO
+                            NOMINAL 1 USO · {enlace.estadoInvitacion || 'PENDIENTE'}
                           </span>
                         )}
                       </div>
@@ -1280,13 +1313,21 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                         )}
                       </button>
 
-                      <button
-                        onClick={() => onDeleteEnlaceRegistro(enlace.id)}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                        title="Eliminar enlace"
-                      >
-                        <XCircle className="w-4 h-4" />
-                      </button>
+                      {esInvitacionNominalPropietario(enlace) ? (
+                        enlace.estadoInvitacion === 'PENDIENTE' && enlace.activo && enlace.usosActuales === 0 && (
+                          <>
+                            <button onClick={() => void onRejectEnlaceRegistro(enlace.id).catch(e => alert(e.message))}
+                              className="px-2 py-1.5 text-amber-300 hover:bg-slate-800 rounded-lg cursor-pointer" title="Rechazar invitación nominal">Rechazar</button>
+                            <button onClick={() => void onDeleteEnlaceRegistro(enlace.id).catch(e => alert(e.message))}
+                              className="px-2 py-1.5 text-rose-300 hover:bg-slate-800 rounded-lg cursor-pointer" title="Revocar invitación nominal">Revocar</button>
+                          </>
+                        )
+                      ) : (
+                        <button onClick={() => onDeleteEnlaceRegistro(enlace.id)}
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg cursor-pointer" title="Eliminar enlace">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1492,6 +1533,41 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   {inmuebles.filter((i) => i.propietarioPrincipalId === selectedPropietarioDetail.id).length}
                 </p>
               </div>
+
+              {esMasterIdentidad && (
+                <div className="p-3 border border-slate-700 rounded-xl space-y-2" data-testid="identidad-persona">
+                  <strong className="text-white">Persona de dominio (no concede permisos)</strong>
+                  <p>{personaIdFicha ? `Persona: ${personaIdFicha}` : 'Legacy: sin Persona; titularidad intacta.'}</p>
+                  {personaFicha && <p>Roles: {personaFicha.roles.join(', ') || 'Sin rol'} · Persona: {personaFicha.estado} · Datos: {personaFicha.estadoDatos}</p>}
+                  <p>Cuenta: {usuarioFicha ? `${usuarioFicha.estado}${usuarioFicha.authUid ? ' · Auth vinculada' : ' · sin Auth'}` : 'sin usuario'}
+                    {usuarioFicha?.personaId ? ` · Persona ${usuarioFicha.personaId}` : ''}</p>
+                  <p>La gestión se deriva de gestiones_cartera; estos roles no otorgan acceso.</p>
+                  {errorPersona && <p role="alert" className="text-red-400">{errorPersona}</p>}
+                  {!personaIdFicha && personasCargadas && (
+                    <div className="flex flex-wrap gap-2">
+                      <select aria-label="Persona existente" value={personaSeleccionadaId}
+                        onChange={e => setPersonaSeleccionadaId(e.target.value)} className="bg-slate-800 text-white rounded p-1">
+                        <option value="">Seleccione Persona existente</option>
+                        {personas.filter(p => !p.propietarioIds.includes(selectedPropietarioDetail.id)).map(p =>
+                          <option key={p.id} value={p.id}>{p.nombre} · {p.id}</option>)}
+                      </select>
+                      <button type="button" disabled={!personaSeleccionadaId || guardandoPersona}
+                        onClick={() => ejecutarIdentidad(() => vincularPropietarioPersonaFirestore(personaSeleccionadaId, selectedPropietarioDetail.id))}
+                        className="px-2 py-1 bg-blue-700 text-white rounded disabled:opacity-40">Vincular existente</button>
+                      <button type="button" disabled={guardandoPersona}
+                        onClick={() => {
+                          if (confirm('Confirma que no existe una Persona canónica para este titular. No se crearán cuentas ni inmuebles.'))
+                            void ejecutarIdentidad(() => crearPersonaParaPropietarioFirestore(selectedPropietarioDetail.id));
+                        }} className="px-2 py-1 bg-slate-700 text-white rounded disabled:opacity-40">Crear Persona sin cuenta</button>
+                    </div>
+                  )}
+                  {personaIdFicha && usuarioFicha && !usuarioFicha.personaId && (
+                    <button type="button" disabled={guardandoPersona}
+                      onClick={() => ejecutarIdentidad(() => vincularUsuarioPersonaFirestore(personaIdFicha, usuarioFicha.id))}
+                      className="px-2 py-1 bg-blue-700 text-white rounded disabled:opacity-40">Vincular usuario existente</button>
+                  )}
+                </div>
+              )}
 
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                 <button

@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * BLOQUE 1 — Seguridad de `polizas_seguros` y `siniestros`.
  * ---------------------------------------------------------------------------
@@ -72,6 +73,9 @@ const FIRESTORE: Peticion['db'] = {
   'polizas_seguros/pol_Y': POL_Y,
   'siniestros/sin_X': SIN_X,
 };
+
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
 
 const AUTH = {
   gestorL: { uid: 'uid_gestorL', token: { email: 'gestor-a@test.local' } },

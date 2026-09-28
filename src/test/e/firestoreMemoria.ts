@@ -198,7 +198,10 @@ export function crearModuloFirestore() {
     // doc(db, col, id) | doc(colRef, id) | doc(db, 'a/b')
     let coleccion: string;
     let id: string;
-    if (args.length >= 3) {
+    if (args.length === 1 && args[0] && typeof args[0] === 'object' && (args[0] as RefCol).__tipo === 'col') {
+      coleccion = (args[0] as RefCol).coleccion;
+      id = `audit_e_${Math.random().toString(36).slice(2,10)}`;
+    } else if (args.length >= 3) {
       // doc(db, col, id) | doc(db, col, id, subcol, subid, …) (§6 F3: subcolecciones)
       const segmentos = args.slice(1).map(String);
       id = segmentos[segmentos.length - 1];

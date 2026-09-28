@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * FASE 8 — Defensas de Rules adaptadas de Arena C (titularidad y escrituras públicas).
  * ---------------------------------------------------------------------------
@@ -85,6 +86,8 @@ const DOC = {
 
 const FIRESTORE: Peticion['db'] = {
   'usuarios/uid_admin': { tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO', authUid: 'uid_admin' },
+  'usuarios/uid_sin_ficha': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', authUid: 'uid_sin_ficha' },
+  'usuarios_auth/uid_sin_ficha': { usuarioId: 'uid_sin_ficha', tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO' },
   'usuarios_auth/uid_propA': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'prop_A', profesionalId: '', inmuebleIds: [] },
   'usuarios_auth/uid_propB': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'prop_B', profesionalId: '', inmuebleIds: [] },
   'usuarios_auth/uid_propS': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'prop_S', profesionalId: '', inmuebleIds: [] },
@@ -99,6 +102,9 @@ const FIRESTORE: Peticion['db'] = {
   'inmuebles/inm_C': INM_C,
   'inmuebles/inm_X': INM_X,
 };
+
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
 
 const AUTH = {
   propA: { uid: 'uid_propA', token: { email: 'prop-a@test.local' } },

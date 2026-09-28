@@ -120,7 +120,9 @@ describe('gestiones-cartera · regresión', () => {
     const rules = readFileSync(join(__dirname, '..', 'firestore.rules'), 'utf-8');
     const bloque = rules.match(/match \/gestiones_cartera\/\{gestionId\} \{[\s\S]*?\n    \}/);
     expect(bloque, 'bloque gestiones_cartera ausente en rules').not.toBeNull();
-    expect(bloque![0]).toMatch(/allow create, update, delete: if isMasterAdmin\(\);/);
+    expect(bloque![0]).toMatch(/allow create: if isMasterAdmin\(\) && auditoriaVinculada\(/);
+    expect(bloque![0]).toMatch(/allow update: if isMasterAdmin\(\) && auditoriaNueva\(/);
+    expect(bloque![0]).toMatch(/allow delete: if false/);
     expect(bloque![0]).not.toMatch(/allow create[^:]*: if [^;]*esAdminInmuebles/);
   });
 

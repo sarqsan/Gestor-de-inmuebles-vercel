@@ -96,6 +96,14 @@ const FIRESTORE: Peticion['db'] = {
   'contratos_formalizacion/ct_A': CT_A,
 };
 
+// Perfil canónico para cada espejo: ser un Auth sin ficha NO concede isStaff.
+for (const [ruta, espejoDoc] of Object.entries(FIRESTORE)) {
+  if (!ruta.startsWith('usuarios_auth/')) continue;
+  const uid = ruta.split('/')[1];
+  espejoDoc.usuarioId = uid;
+  FIRESTORE[`usuarios/${uid}`] = { authUid: uid, estado: 'ACTIVO', tipoPerfil: espejoDoc.tipoPerfil };
+}
+
 const AUTH = {
   propA: { uid: 'uid_propA', token: { email: 'prop-a@test.local' } },
   propB: { uid: 'uid_propB', token: { email: 'prop-b@test.local' } },

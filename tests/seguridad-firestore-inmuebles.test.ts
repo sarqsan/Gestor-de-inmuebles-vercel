@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * D2a — Seguridad de `inmuebles`: lectura acotada por titularidad y
  * autorización explícita (cierre de F5-1).
@@ -78,6 +79,9 @@ const FIRESTORE: Peticion['db'] = {
   'inmuebles/inm_sin_prop': INM_SIN_PROP,
   'inmuebles/inm_ct': INM_CT,
 };
+
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
 
 const AUTH = {
   propA: { uid: 'uid_propA', token: { email: 'prop-a@test.local' } },

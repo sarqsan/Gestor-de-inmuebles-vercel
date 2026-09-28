@@ -22,6 +22,10 @@
 export interface Peticion {
   auth: { uid: string; token?: { email?: string } } | null;
   db: Record<string, Record<string, unknown>>;
+  /** Estado propuesto tras commit atómico, solo para getAfter; NO sustituye a db. */
+  after?: Record<string, Record<string, unknown>>;
+  /** Reloj inyectado; ausente implica fallo de evaluación al usar request.time. */
+  timeMs?: number;
   resource: Record<string, unknown> | null;
   requestResource: Record<string, unknown> | null;
   docId: string;
@@ -472,6 +476,10 @@ export function crearEvaluadorReglas(RULES: string) {
         if (typeof base === 'object' && '__req' in (base as object)) {
           if (nodo.nombre === 'auth') return req.auth;
           if (nodo.nombre === 'resource') return DOC(req.requestResource);
+          if (nodo.nombre === 'time') {
+            if (req.timeMs === undefined) throw new Error('HARNESS NO CUBRE: falta request.time');
+            return { __timeMs: req.timeMs };
+          }
           throw new Error(`HARNESS NO CUBRE: request.${nodo.nombre}`);
         }
         if (typeof base === 'string' && base.startsWith('db:')) {
@@ -508,15 +516,18 @@ export function crearEvaluadorReglas(RULES: string) {
         // sin obj: funciones del fichero o builtins
         if (!nodo.obj) {
           if (nombre === 'isSignedIn') return Boolean(req.auth);
-          if (nombre === 'get') {
+          if (nombre === 'get' || nombre === 'getAfter') {
             const ruta = evaluar(nodo.args[0], req, funciones, frame) as string;
             const clave = ruta.replace('db:/databases/(db)/documents/', '');
-            return DOC(req.db[clave] === undefined ? null : req.db[clave]);
+            // Sin escrituras compañeras, getAfter ve el estado previo (como
+            // Firestore); nunca inventar un documento posterior permitido.
+            const mapa = nombre === 'getAfter' ? (req.after ?? req.db) : req.db;
+            return DOC(mapa[clave] === undefined ? null : mapa[clave]);
           }
-          if (nombre === 'exists') {
+          if (nombre === 'exists' || nombre === 'existsAfter') {
             const ruta = evaluar(nodo.args[0], req, funciones, frame) as string;
             const clave = ruta.replace('db:/databases/(db)/documents/', '');
-            return req.db[clave] !== undefined;
+            return (nombre === 'existsAfter' ? (req.after ?? req.db) : req.db)[clave] !== undefined;
           }
           if (nombre === 'incoming') return req.requestResource;
           if (nombre === 'existing') return req.resource;
@@ -530,6 +541,8 @@ export function crearEvaluadorReglas(RULES: string) {
           return evaluarCuerpo(fn.cuerpo, req, funciones, nuevoFrame);
         }
         const base = evaluar(nodo.obj, req, funciones, frame);
+        if (nombre === 'toMillis' && base && typeof base === 'object' && '__timeMs' in base)
+          return (base as {__timeMs:number}).__timeMs;
         if (nombre === 'diff') {
           // `incoming().diff(existing()).affectedKeys()`: claves cuyo valor cambia entre los
           // dos mapas (Firestore incluye también las que aparecen o desaparecen).
@@ -633,6 +646,7 @@ export function crearEvaluadorReglas(RULES: string) {
         }
         if (op === '+' || op === '-') {
           if (typeof lv === 'number' && typeof rv === 'number') return op === '+' ? lv + rv : lv - rv;
+          if (op === '+' && typeof lv === 'string' && typeof rv === 'string') return lv + rv;
           throw new Error(`HARNESS NO CUBRE: ${op} sobre ${typeof lv}/${typeof rv}`);
         }
         // D3: `storage.rules` expresa los límites de tamaño como

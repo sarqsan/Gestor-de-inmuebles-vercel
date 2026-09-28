@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * §10.9 — Reglas de `valoraciones_profesionales` (restauradas y endurecidas).
  *
@@ -52,6 +53,9 @@ const FIRESTORE: ContextoPeticion['firestore'] = {
   'valoraciones_profesionales/val_B': VAL_B,
   'valoraciones_profesionales/val_hist': VAL_HIST,
 };
+
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
 
 const AUTH = {
   master: { uid: 'uid_master', token: { email: 'sarqsan2@gmail.com' } },

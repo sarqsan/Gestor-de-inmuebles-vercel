@@ -34,6 +34,25 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
+    // ROADMAP-01: audit_logs sigue siendo el único libro. Cada escritura
+    // privilegiada referencia un evento NUEVO incluido en el mismo commit.
+    // El mismo evento puede abarcar varios documentos de una transacción;
+    // todos deben constar en rutas y compartir actor autenticado.
+    function auditoriaVinculada(d, ruta) {
+      return 'roadmap01AuditId' in d && isValidId(d.roadmap01AuditId)
+        && !exists(/databases/$(database)/documents/audit_logs/$(d.roadmap01AuditId))
+        && existsAfter(/databases/$(database)/documents/audit_logs/$(d.roadmap01AuditId))
+        && getAfter(/databases/$(database)/documents/audit_logs/$(d.roadmap01AuditId)).data.id == d.roadmap01AuditId
+        && getAfter(/databases/$(database)/documents/audit_logs/$(d.roadmap01AuditId)).data.resultado == 'EXITO'
+        && getAfter(/databases/$(database)/documents/audit_logs/$(d.roadmap01AuditId)).data.usuarioEmail == authEmail()
+        && getAfter(/databases/$(database)/documents/audit_logs/$(d.roadmap01AuditId)).data.detalles.actorUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/audit_logs/$(d.roadmap01AuditId)).data.detalles.rutas.hasAny([ruta]);
+    }
+    function auditoriaNueva(d, previo, ruta) {
+      return (!('roadmap01AuditId' in previo) || d.roadmap01AuditId != previo.roadmap01AuditId)
+        && auditoriaVinculada(d, ruta);
+    }
+
     // R3 — Lista blanca CERRADA de claves de `fichas_publicas_inmueble`.
     // Paridad con `CAMPOS_FICHA_PUBLICA` (src/lib/fichaPublicaInmueble.ts):
     // solo campos destinados a publicación; ni IBAN, ni NIF, ni inquilino,
@@ -143,7 +162,9 @@ service cloud.firestore {
     }
 
     function activeUser() {
-      return isSignedIn() && me().estado == 'ACTIVO';
+      // Revoca también el UID antiguo de un perfil re-enlazado: el espejo
+      // persistido por sí solo nunca concede titularidad/cartera.
+      return perfilActualVeraz();
     }
 
     function isPropietarioRole() {
@@ -191,7 +212,9 @@ service cloud.firestore {
     // que no se amplían privilegios; se retira el "isStaff() ⇒ acceso global").
     function esAdminInmuebles() {
       return isMasterAdmin() ||
-        (existeUsuarioActual() && getUsuarioActual().tipoPerfil == 'ADMINISTRADOR');
+        (existeUsuarioActual() && getUsuarioActual().tipoPerfil == 'ADMINISTRADOR'
+         && getUsuarioActual().estado == 'ACTIVO'
+         && getUsuarioActual().authUid == request.auth.uid);
     }
 
     // Titularidad jurídica del inmueble (titular o copropietario principal).
@@ -390,21 +413,23 @@ service cloud.firestore {
       // D3 — anti-autoasignación: `carterasL`/`carterasE` son campos SOLO
       // del master (proyección de `gestiones_cartera`). Un usuario no puede
       // crearlos ni alterar su propio ámbito de autorización de carteras.
-      allow create: if isMasterAdmin() || (
-        isSignedIn()
+      allow create: if (isMasterAdmin() && auditoriaVinculada(incoming(), 'usuarios_auth/' + uid)) || (
+        isSignedIn() && !isMasterAdmin()
         && request.auth.uid == uid
-        && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+        && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL', 'INQUILINO']
         && indexIsTruthful()
+        && !('roadmap01AuditId' in incoming())
         && carterasNoAutoasignadasEnCreacion()
       );
-      allow update: if isMasterAdmin() || (
-        isSignedIn()
+      allow update: if (isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'usuarios_auth/' + uid)) || (
+        isSignedIn() && !isMasterAdmin()
         && request.auth.uid == uid
-        && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+        && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL', 'INQUILINO']
         && indexIsTruthful()
+        && mismoCampoOpcional('roadmap01AuditId')
         && carterasSinCambiarPorUsuario()
       );
-      allow delete: if isMasterAdmin();
+      allow delete: if false; // no se borra el binding, se revoca estado auditado
 
       // -----------------------------------------------------------------------
       // §6 F3 — PROGRESO DE TUTORIALES (Capa Transversal de Experiencia)
@@ -460,20 +485,41 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
     }
 
+    // E: la ausencia de perfil NO convierte a un Auth recién creado en staff.
+    // El espejo apunta a la ficha autoritativa, cuyo UID/estado/tipo deben
+    // concordar. El inquilino puede tener usuarioId distinto del Auth UID.
+    function perfilActualVeraz() {
+      return isSignedIn() && exists(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid))
+        && isValidId(me().usuarioId)
+        && exists(/databases/$(database)/documents/usuarios/$(me().usuarioId))
+        && me().estado == 'ACTIVO'
+        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.authUid == request.auth.uid
+        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.estado == 'ACTIVO'
+        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.tipoPerfil == me().tipoPerfil;
+    }
     function isTenant() {
-      return isSignedIn() && !isMasterAdmin() && existeUsuarioActual() &&
-        getUsuarioActual().tipoPerfil == 'INQUILINO';
+      return isSignedIn() && !isMasterAdmin() &&
+        ((perfilActualVeraz() && me().tipoPerfil == 'INQUILINO') ||
+         (existeUsuarioActual() && getUsuarioActual().tipoPerfil == 'INQUILINO'
+          && getUsuarioActual().estado == 'ACTIVO'
+          && getUsuarioActual().authUid == request.auth.uid));
     }
 
     function isStaff() {
-      return isSignedIn() && !isTenant();
+      return isMasterAdmin() || (perfilActualVeraz() &&
+        me().tipoPerfil in ['ADMINISTRADOR', 'PROPIETARIO', 'PROFESIONAL']);
     }
 
     function tenantContratoIds() {
-      return (existeUsuarioActual() &&
-        ('contratoIds' in getUsuarioActual()) &&
-        getUsuarioActual().contratoIds is list)
-        ? getUsuarioActual().contratoIds : [];
+      return (perfilActualVeraz() && me().tipoPerfil == 'INQUILINO'
+        && 'contratoIds' in get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data
+        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.contratoIds is list)
+        ? get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.contratoIds
+        : ((existeUsuarioActual() && getUsuarioActual().tipoPerfil == 'INQUILINO'
+            && getUsuarioActual().estado == 'ACTIVO'
+            && getUsuarioActual().authUid == request.auth.uid
+            && 'contratoIds' in getUsuarioActual() && getUsuarioActual().contratoIds is list)
+          ? getUsuarioActual().contratoIds : []);
     }
 
     function tenantTieneContrato(contratoId) {
@@ -530,6 +576,57 @@ service cloud.firestore {
           getEnlaceE(enlaceId).usosActuales < getEnlaceE(enlaceId).usosMaximos);
     }
 
+    // Un perfil profesional nuevo no puede apropiarse de una ficha ya
+    // existente por conocer su ID. La invitación a esa ficha ha de ser
+    // nominal para el email Auth y seguir activa; legacy sin email se reemite.
+    function profesionalExistenteInvitado(d) {
+      return !('profesionalId' in d) || !exists(/databases/$(database)/documents/profesionales/$(d.profesionalId))
+        || ('enlaceRegistroId' in d && isValidId(d.enlaceRegistroId)
+          && exists(/databases/$(database)/documents/enlaces_registro/$(d.enlaceRegistroId))
+          && getEnlaceE(d.enlaceRegistroId).activo == true
+          && getEnlaceE(d.enlaceRegistroId).tipoPerfil == 'PROFESIONAL'
+          && getEnlaceE(d.enlaceRegistroId).profesionalIdVinculado == d.profesionalId
+          && getEnlaceE(d.enlaceRegistroId).emailInvitado == authEmail());
+    }
+
+    // La activación nominal exige invitación vigente por ruta fija y un
+    // consumo de un solo uso en la MISMA transacción (getAfter). Los enlaces
+    // legacy sin fechaCaducidadMs deben reemitirse; no se concede excepción
+    // imposible de verificar contra request.time.
+    function invitacionNominalVigente(enlaceId, usuarioId, propietarioId, email) {
+      return isValidId(enlaceId)
+        && exists(/databases/$(database)/documents/enlaces_registro/$(enlaceId))
+        && getEnlaceE(enlaceId).tipoPerfil == 'PROPIETARIO'
+        && getEnlaceE(enlaceId).usuarioIdVinculado == usuarioId
+        && getEnlaceE(enlaceId).propietarioIdVinculado == propietarioId
+        && getEnlaceE(enlaceId).emailInvitado == email
+        && getEnlaceE(enlaceId).activo == true
+        && getEnlaceE(enlaceId).estadoInvitacion == 'PENDIENTE'
+        && getEnlaceE(enlaceId).fechaCaducidadMs is number
+        && request.time.toMillis() < getEnlaceE(enlaceId).fechaCaducidadMs
+        && getEnlaceE(enlaceId).usosMaximos == 1
+        && getEnlaceE(enlaceId).usosActuales == 0;
+    }
+
+    // Valida ambos extremos del vínculo en el estado posterior del commit.
+    // El master no puede fijar personaId en una ficha sin actualizar la
+    // Persona correspondiente dentro de la misma operación.
+    function propietarioPersonaCoherente(pid, d) {
+      return !('personaId' in d) ||
+        (isValidId(d.personaId)
+          && existsAfter(/databases/$(database)/documents/personas/$(d.personaId))
+          && getAfter(/databases/$(database)/documents/personas/$(d.personaId)).data.propietarioIds.hasAny([pid]));
+    }
+    function usuarioPersonaCoherente(uid, d) {
+      return !('personaId' in d) ||
+        (isValidId(d.personaId)
+          && existsAfter(/databases/$(database)/documents/personas/$(d.personaId))
+          && getAfter(/databases/$(database)/documents/personas/$(d.personaId)).data.usuarioId == uid
+          && (!('propietarioId' in d) || d.propietarioId == '' ||
+            (existsAfter(/databases/$(database)/documents/propietarios/$(d.propietarioId))
+              && getAfter(/databases/$(database)/documents/propietarios/$(d.propietarioId)).data.personaId == d.personaId)));
+    }
+
     // ROADMAP-01: persona es identidad de dominio, NO fuente de autorización.
     // Solo el master accede; el cliente ordinario ni lista ni altera identidad.
     // No hay borrado: el vínculo histórico con titularidad nunca se purga.
@@ -537,18 +634,29 @@ service cloud.firestore {
       function personaValida() {
         return incoming().keys().hasOnly([
           'id', 'nombre', 'estado', 'estadoDatos', 'roles', 'propietarioIds',
-          'usuarioId', 'createdAt', 'updatedAt'
+          'usuarioId', 'createdAt', 'updatedAt', 'roadmap01AuditId'
         ])
         && incoming().id == personaId
         && incoming().nombre is string
         && incoming().estado in ['ACTIVA', 'BLOQUEADA']
         && incoming().estadoDatos in ['COMPLETO', 'INCOMPLETO', 'BLOQUEADO']
         && incoming().roles is list
-        && incoming().propietarioIds is list;
+        && incoming().propietarioIds is list
+        && (!('usuarioId' in incoming()) ||
+          (isValidId(incoming().usuarioId)
+            && existsAfter(/databases/$(database)/documents/usuarios/$(incoming().usuarioId))
+            && getAfter(/databases/$(database)/documents/usuarios/$(incoming().usuarioId)).data.personaId == personaId));
       }
       allow get, list: if isMasterAdmin();
-      allow create: if isMasterAdmin() && personaValida();
+      allow create: if isMasterAdmin() && personaValida()
+        && auditoriaVinculada(incoming(), 'personas/' + personaId)
+        && incoming().propietarioIds.size() <= 1
+        && (incoming().propietarioIds.size() == 0 ||
+           (isValidId(incoming().propietarioIds[0])
+            && existsAfter(/databases/$(database)/documents/propietarios/$(incoming().propietarioIds[0]))
+            && getAfter(/databases/$(database)/documents/propietarios/$(incoming().propietarioIds[0])).data.personaId == personaId));
       allow update: if isMasterAdmin() && personaValida()
+        && auditoriaNueva(incoming(), existing(), 'personas/' + personaId)
         && incoming().createdAt == existing().createdAt;
       allow delete: if false;
     }
@@ -577,16 +685,23 @@ service cloud.firestore {
       // El propietario puede crear/editar únicamente SU ficha (id coincidente).
       // (INC-06 no amplía la creación: crear propietario sigue siendo del
       // titular o del master; el gestor NO crea propietarios — S3.)
-      allow create: if isMasterAdmin() || (
-        isPropietarioRole()
+      allow create: if (isMasterAdmin() && propietarioPersonaCoherente(propietarioId, incoming())
+        && auditoriaVinculada(incoming(), 'propietarios/' + propietarioId)) || (
+        !isMasterAdmin() && isPropietarioRole()
         && propietarioId == myPropId()
         && !('personaId' in incoming())
+        && !('roadmap01AuditId' in incoming())
         && 'id' in incoming() && incoming().id == propietarioId
       );
-      allow update: if isMasterAdmin() || (
-        isPropietarioRole()
+      allow update: if (isMasterAdmin()
+        && auditoriaNueva(incoming(), existing(), 'propietarios/' + propietarioId)
+        && propietarioPersonaCoherente(propietarioId, incoming())
+        && (!('personaId' in existing()) || ('personaId' in incoming()) ||
+          (existsAfter(/databases/$(database)/documents/personas/$(existing().personaId))
+           && !getAfter(/databases/$(database)/documents/personas/$(existing().personaId)).data.propietarioIds.hasAny([propietarioId])))) || (
+        !isMasterAdmin() && isPropietarioRole()
         && propietarioId == myPropId()
-        && !incoming().diff(existing()).affectedKeys().hasAny(['personaId'])
+        && !incoming().diff(existing()).affectedKeys().hasAny(['personaId', 'roadmap01AuditId'])
         && 'id' in existing() && existing().id == propietarioId
       ) || (
         // INC-06 — el gestor con cartera de ESCRITURA (carterasE: ACTIVA +
@@ -595,11 +710,11 @@ service cloud.firestore {
         // carterasL (lectura histórica, S7) NO escribe. Ningún otro campo del
         // propietario (datos, cuentas bancarias, notas) queda al alcance del
         // gestor: la firma de la actualización es exactamente una clave.
-        activeUser()
+        !isMasterAdmin() && activeUser()
         && carterasEscritura().hasAny([propietarioId])
         && incoming().diff(existing()).affectedKeys().hasOnly(['fichaPatrimonial'])
       );
-      allow delete: if isMasterAdmin();
+      allow delete: if false; // identidad jurídica/histórico: desasociación auditada, no purga
     }
 
     // =========================================================================
@@ -709,7 +824,9 @@ service cloud.firestore {
     match /gestiones_cartera/{gestionId} {
       allow get: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
       allow list: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);
-      allow create, update, delete: if isMasterAdmin();
+      allow create: if isMasterAdmin() && auditoriaVinculada(incoming(), 'gestiones_cartera/' + gestionId);
+      allow update: if isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'gestiones_cartera/' + gestionId);
+      allow delete: if false; // evento REVOCACION append-only, sin purga
     }
 
     // =========================================================================
@@ -1513,23 +1630,31 @@ service cloud.firestore {
       allow list: if isMasterAdmin();
       // BLOQUE E (reconciliado): la cuenta INQUILINO solo nace de invitación activa
       // vinculada a su contrato (además del alta canónica PROPIETARIO/PROFESIONAL).
-      allow create: if isMasterAdmin() || (
-        isSignedIn()
+      allow create: if (isMasterAdmin() && usuarioPersonaCoherente(usuarioId, incoming())
+        && auditoriaVinculada(incoming(), 'usuarios/' + usuarioId)) || (
+        isSignedIn() && !isMasterAdmin()
         && incoming().authUid == request.auth.uid
+        && incoming().email == authEmail()
+        && (!('permisos' in incoming()) || (incoming().permisos is list &&
+          ((incoming().tipoPerfil == 'PROPIETARIO' && incoming().permisos.hasOnly([
+            'inmuebles.ver','inmuebles.editar','contratos.ver','profesionales.ver',
+            'profesionales.crear','profesionales.asignar'])) ||
+           (incoming().tipoPerfil == 'PROFESIONAL' && incoming().permisos.hasOnly(['profesionales.ver'])) ||
+           (incoming().tipoPerfil == 'INQUILINO' && incoming().permisos.hasOnly(['inmuebles.ver','contratos.ver'])))))
         && !('personaId' in incoming())
+        && !('roadmap01AuditId' in incoming())
         && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES']))
         && incoming().estado in ['ACTIVO', 'PENDIENTE']
         && (
           // INTEGRACIÓN PR4 (2026-09-25): se conserva la rama canónica de
           // autorregistro (la exige fase14 C.1 y la usan las invitaciones
           // genéricas, que escriben permisos por defecto del rol). El alta
-          // autónoma (registerAutonomo) también satisface esta rama
-          // (ACTIVO + rol exacto sin privilegios + ficha nueva). NOTA: el
-          // endurecimiento estricto de Arena B (binding de email, permisos
-          // vacíos, anti-hijack de profesionalId) queda pendiente de
-          // reintroducir cuando invitaciones y fase14 se alineen con él;
-          // ver informe de integración. No se relaja nada respecto a main.
+          // autónoma (registerAutonomo) también satisface esta rama.
+          // El email Auth, permisos por perfil y ficha profesional existente
+          // se validan arriba; los permisos por ámbito siguen gobernados
+          // exclusivamente por las reglas D2/D3 y no por roles descriptivos.
           (incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
+            && (incoming().tipoPerfil != 'PROFESIONAL' || profesionalExistenteInvitado(incoming()))
             && (
               incoming().tipoPerfil == 'PROFESIONAL'
               || !('propietarioId' in incoming())
@@ -1545,8 +1670,13 @@ service cloud.firestore {
         )
       );
 
-      allow update: if isMasterAdmin() || (
-        isSignedIn()
+      allow update: if (isMasterAdmin()
+        && auditoriaNueva(incoming(), existing(), 'usuarios/' + usuarioId)
+        && usuarioPersonaCoherente(usuarioId, incoming())
+        && (!('personaId' in existing()) || ('personaId' in incoming()) ||
+          (existsAfter(/databases/$(database)/documents/personas/$(existing().personaId))
+           && !('usuarioId' in getAfter(/databases/$(database)/documents/personas/$(existing().personaId)).data)))) || (
+        isSignedIn() && !isMasterAdmin()
         // El documento pertenece a este UID (salvo que se esté enlazando por
         // primera vez un perfil sin authUid).
         && (
@@ -1556,6 +1686,13 @@ service cloud.firestore {
         )
         && incoming().tipoPerfil == existing().tipoPerfil
         && incoming().roles == existing().roles
+        // ROADMAP-01: una identidad Persona explícita no permite cambiar el
+        // UID asociado a su perfil; los perfiles legacy sin personaId siguen
+        // usando el flujo de re-enlace de fase14. Primera activación nominal
+        // PENDIENTE exige el UID propio y el email del invitado más abajo.
+        && (!('personaId' in existing()) ||
+            (('authUid' in existing() && incoming().authUid == existing().authUid) ||
+             (!('authUid' in existing()) && incoming().authUid == request.auth.uid)))
         // ACCESO-PROPIETARIOS: el estado es inmutable salvo la activación
         // nominal — el titular del email invitado, tras crear su cuenta Auth
         // con ese email, activa su ficha PENDIENTE al vincular su UID por
@@ -1567,11 +1704,23 @@ service cloud.firestore {
             !('authUid' in existing())
             && existing().estado == 'PENDIENTE'
             && incoming().estado == 'ACTIVO'
+            && auditoriaNueva(incoming(), existing(), 'usuarios/' + usuarioId)
             && incoming().authUid == request.auth.uid
             && existing().email is string
             && request.auth.token.email == existing().email
+            && 'propietarioId' in existing()
+            && 'enlaceRegistroId' in incoming()
+            && invitacionNominalVigente(incoming().enlaceRegistroId, usuarioId,
+                 existing().propietarioId, existing().email)
+            && getAfter(/databases/$(database)/documents/enlaces_registro/$(incoming().enlaceRegistroId)).data.usosActuales == 1
+            && getAfter(/databases/$(database)/documents/enlaces_registro/$(incoming().enlaceRegistroId)).data.estadoInvitacion == 'ACEPTADA'
+            && (!('personaId' in existing()) ||
+              (exists(/databases/$(database)/documents/propietarios/$(existing().propietarioId)) &&
+               get(/databases/$(database)/documents/propietarios/$(existing().propietarioId)).data.personaId == existing().personaId))
           )
         )
+        // El usuario no puede falsificar el último evento fuera de activación.
+        && (incoming().estado != existing().estado || mismoCampoOpcional('roadmap01AuditId'))
         // El usuario no puede cambiar por sí mismo su identidad ni sus permisos.
         && !incoming().diff(existing()).affectedKeys().hasAny([
           'permisos',
@@ -1582,6 +1731,8 @@ service cloud.firestore {
           'email',
           'createdAt',
           'passwordHash',
+          // La marca de auditoría solo cambia en el commit de activación
+          // nominal, no en actualizaciones ordinarias del titular.
           // BLOQUE E (reconciliado): el inquilino no puede auto-vincularse contratos
           'contratoIds'
         ])
@@ -1599,7 +1750,7 @@ service cloud.firestore {
         // pinneada por los vetos de arriba.
       );
 
-      allow delete: if isMasterAdmin();
+      allow delete: if false; // baja auditada revoca cuenta y espejo, preserva historial
     }
 
     // =========================================================================
@@ -1623,14 +1774,47 @@ service cloud.firestore {
     match /enlaces_registro/{enlaceId} {
       allow get: if isSignedIn() || (isValidId(enlaceId) && resource.data.activo == true);
       allow list: if isStaff();
-      allow create, delete: if isStaff();
-      // BLOQUE E: el inquilino solo consume su invitación (incremento de usos en +1).
-      allow update: if isStaff() || (
-        isTenant() &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales']) &&
-        incoming().usosActuales is number &&
-        existing().usosActuales is number &&
-        incoming().usosActuales == existing().usosActuales + 1
+      // El staff heredado puede gestionar enlaces genéricos, pero NO emitir,
+      // cambiar ni borrar invitaciones nominales para una identidad ajena.
+      allow create: if (isMasterAdmin() || (isStaff()
+        && !('usuarioIdVinculado' in incoming())
+        && !('propietarioIdVinculado' in incoming())
+        && !('profesionalIdVinculado' in incoming())))
+        && auditoriaVinculada(incoming(), 'enlaces_registro/' + enlaceId);
+      // El master tampoco reabre, reescribe o borra el historial nominal.
+      // Rechazo y revocación solo desde PENDIENTE no consumida; el servicio
+      // escribe el audit_log en el mismo commit. El genérico conserva su flujo.
+      allow delete: if false; // revocar sin purgar trazabilidad
+      allow update: if (isMasterAdmin()
+        && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId) && (
+        (!('usuarioIdVinculado' in existing()) && !('usuarioIdVinculado' in incoming()))
+        || ('usuarioIdVinculado' in existing()
+          && existing().estadoInvitacion == 'PENDIENTE'
+          && existing().activo == true && existing().usosActuales == 0
+          && incoming().diff(existing()).affectedKeys().hasOnly(['estadoInvitacion', 'activo', 'roadmap01AuditId'])
+          && incoming().estadoInvitacion in ['RECHAZADA', 'REVOCADA']
+          && incoming().activo == false)
+      )) || (
+        isSignedIn() && 'usuarioIdVinculado' in existing()
+        && invitacionNominalVigente(enlaceId, existing().usuarioIdVinculado,
+             existing().propietarioIdVinculado, authEmail())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales', 'estadoInvitacion', 'roadmap01AuditId'])
+        && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId)
+        && incoming().usosActuales == 1
+        && incoming().estadoInvitacion == 'ACEPTADA'
+        && getAfter(/databases/$(database)/documents/usuarios/$(existing().usuarioIdVinculado)).data.authUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/usuarios/$(existing().usuarioIdVinculado)).data.estado == 'ACTIVO'
+      ) || (
+        isStaff() && !('usuarioIdVinculado' in existing()) && !('usuarioIdVinculado' in incoming())
+        && !('profesionalIdVinculado' in existing()) && !('propietarioIdVinculado' in existing())
+        && !incoming().diff(existing()).affectedKeys().hasAny(['profesionalIdVinculado', 'propietarioIdVinculado'])
+        && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId)
+      ) || (
+        // BLOQUE E: inquilino solo consume su invitación genérica.
+        isTenant() && !('usuarioIdVinculado' in existing())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales'])
+        && incoming().usosActuales is number && existing().usosActuales is number
+        && incoming().usosActuales == existing().usosActuales + 1
       );
     }
 

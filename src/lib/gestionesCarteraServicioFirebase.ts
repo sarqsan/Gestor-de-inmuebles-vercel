@@ -8,8 +8,8 @@
  *    de verdad si el documento ya existe: nunca sobrescritura silenciosa;
  *  · las transiciones usan transacción (get → aplicar → set) para que el
  *    histórico `eventos[]` append-only jamás pierda eventos por concurrencia;
- *  · la auditoría se integra con el mecanismo EXISTENTE `audit_logs`
- *    (`registrarAuditoriaFirestore`; append-only por reglas);
+ *  · la auditoría canónica `audit_logs` se crea en el mismo commit de cada
+ *    mutación; el puerto legado secundario no duplica el evento;
  *  · el espejo `usuarios_auth/{uid}` se escribe con merge de SOLO
  *    `carterasL/carterasE` (único escritor legítimo: sesión master, reglas D3).
  *
@@ -28,17 +28,15 @@ import {
   limit,
   query,
   runTransaction,
-  setDoc,
   where,
 } from 'firebase/firestore';
-import { db, registrarAuditoriaFirestore, sanitizeObjectForFirestore } from './firebase';
+import { auth, db, sanitizeObjectForFirestore } from './firebase';
 import {
   COLECCION_ESPEJOS_AUTH,
   COLECCION_GESTIONES_CARTERA,
   COLECCION_PROPIETARIOS,
   COLECCION_USUARIOS,
   type DependenciasGestionesCartera,
-  type EntradaAuditoriaGestiones,
   type ProyeccionEspejo,
   type PuertoAuditoriaGestiones,
   type PuertoEspejoCarteras,
@@ -48,7 +46,18 @@ import {
   type UsuarioGestionable,
 } from './gestionesCarteraServicio';
 import type { GestionCartera } from './gestionesCartera';
+import { proyectarCarterasGestionadas } from './carterasGestion';
 
+function eventoObligatorioGestion(ref: {id:string}, gestion: GestionCartera, auditId: string) {
+  const actor = auth.currentUser;
+  if (!actor || actor.email?.toLowerCase() !== 'sarqsan2@gmail.com')
+    throw new Error('Gestión administrativa sin master autenticado');
+  const ultimo = gestion.eventos?.[gestion.eventos.length - 1];
+  return {id:auditId,usuarioId:actor.uid,usuarioEmail:actor.email,usuarioNombre:actor.email,
+    accion:'GESTION_TRANSACCION',descripcion:ultimo?.tipo || 'Alta de gestión',fechaHora:new Date().toISOString(),
+    entidadAfectada:'gestion_cartera',idAfectado:ref.id,resultado:'EXITO',
+    detalles:{actorUid:actor.uid,rutas:[`gestiones_cartera/${ref.id}`],eventoTipo:ultimo?.tipo || ''}};
+}
 function gestionDesdeSnap(id: string, data: Record<string, unknown>): GestionCartera {
   return { ...(data as unknown as GestionCartera), id };
 }
@@ -68,7 +77,9 @@ export const puertoGestionesCarteraFirestore: PuertoGestionesCartera = {
           `El documento ${COLECCION_GESTIONES_CARTERA}/${gestion.id} ya existe; no se sobrescribe en silencio.`
         );
       }
-      tx.set(ref, datos);
+      const auditRef = doc(collection(db,'audit_logs'));
+      tx.set(ref, { ...datos, roadmap01AuditId:auditRef.id });
+      tx.set(auditRef, eventoObligatorioGestion(ref,gestion,auditRef.id));
     });
   },
   async aplicarTransicion(id, aplicar) {
@@ -82,7 +93,30 @@ export const puertoGestionesCarteraFirestore: PuertoGestionesCartera = {
       // la transacción: si otro escritor la cambió bajo nuestros pies y el
       // evento ya no aplica, `aplicar` lanza y NO se escribe nada.
       const confirmada = aplicar(gestionDesdeSnap(snap.id, snap.data()));
-      tx.set(ref, sanitizeObjectForFirestore({ ...confirmada, id }));
+      // Una transición que RETIRA L/E debe revocar el espejo en este mismo
+      // commit. Si la sincronización posterior falla, nunca queda acceso
+      // heredado de una gestión revocada/suspendida/reducida a parcial.
+      const proy = proyectarCarterasGestionadas([confirmada], confirmada.gestorUsuarioId);
+      const quitarL = !proy.carterasL.includes(confirmada.propietarioId);
+      const quitarE = !proy.carterasE.includes(confirmada.propietarioId);
+      const usuarioSnap = (quitarL || quitarE)
+        ? await tx.get(doc(db,COLECCION_USUARIOS,confirmada.gestorUsuarioId)) : null;
+      const authUid = usuarioSnap?.exists() ? usuarioSnap.data().authUid as string | undefined : undefined;
+      const mirrorRef = authUid ? doc(db,COLECCION_ESPEJOS_AUTH,authUid) : null;
+      const mirrorSnap = mirrorRef ? await tx.get(mirrorRef) : null;
+      const mirror = mirrorSnap?.exists() ? mirrorSnap.data() : null;
+      const oldL = Array.isArray(mirror?.carterasL) ? mirror.carterasL as string[] : [];
+      const oldE = Array.isArray(mirror?.carterasE) ? mirror.carterasE as string[] : [];
+      const newL = quitarL ? oldL.filter(x=>x!==confirmada.propietarioId) : oldL;
+      const newE = quitarE ? oldE.filter(x=>x!==confirmada.propietarioId) : oldE;
+      const reduce = !!mirrorRef && !!mirror && (newL.length!==oldL.length || newE.length!==oldE.length);
+      const auditRef = doc(collection(db,'audit_logs'));
+      tx.set(ref, sanitizeObjectForFirestore({ ...confirmada, id, roadmap01AuditId:auditRef.id }));
+      if (reduce && mirrorRef) tx.set(mirrorRef,
+        {carterasL:newL,carterasE:newE,roadmap01AuditId:auditRef.id},{merge:true});
+      const log = eventoObligatorioGestion(ref,confirmada,auditRef.id);
+      if (reduce && mirrorRef) log.detalles.rutas.push(`usuarios_auth/${authUid}`);
+      tx.set(auditRef, log);
       return confirmada;
     });
   },
@@ -157,29 +191,18 @@ export const puertoEspejoCarterasFirestore: PuertoEspejoCarteras = {
   },
   async escribirProyeccion(uid, proyeccion: ProyeccionEspejo) {
     // Merge de SOLO la proyección: jamás se tocan otros campos del espejo.
-    await setDoc(
-      doc(db, COLECCION_ESPEJOS_AUTH, uid),
+    const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
+    await guardarAccesoAuditado('usuarios_auth',uid,
       { carterasL: [...proyeccion.carterasL], carterasE: [...proyeccion.carterasE] },
-      { merge: true }
-    );
+      'PROYECCION_GESTION_CARTERA');
   },
 };
 
+// El puerto del núcleo es informativo para dobles/consumidores legacy.
+// En Firestore la evidencia obligatoria YA se escribió en la misma transacción
+// de crearGestion/aplicarTransicion; volver a registrar aquí duplicaría el log.
 export const puertoAuditoriaGestionesFirestore: PuertoAuditoriaGestiones = {
-  async registrar(entrada: EntradaAuditoriaGestiones) {
-    await registrarAuditoriaFirestore({
-      usuarioId: entrada.usuarioId,
-      usuarioEmail: entrada.usuarioEmail,
-      usuarioNombre: entrada.usuarioNombre,
-      accion: entrada.accion,
-      descripcion: entrada.descripcion,
-      fechaHora: entrada.fechaHora,
-      entidadAfectada: entrada.entidadAfectada,
-      idAfectado: entrada.idAfectado,
-      resultado: entrada.resultado,
-      detalles: entrada.detalles,
-    });
-  },
+  async registrar() { /* evento canónico persistido por el puerto de gestiones */ },
 };
 
 export const dependenciasGestionesCarteraFirestore: DependenciasGestionesCartera = {

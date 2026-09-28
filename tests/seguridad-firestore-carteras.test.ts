@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * D2b + D3 (parcial) — Seguridad de carteras gestionadas.
  * ---------------------------------------------------------------------------
@@ -100,6 +101,9 @@ const FIRESTORE: Peticion['db'] = {
   'gestiones_cartera/g_2': G_2,
 };
 
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(FIRESTORE);
+
 const AUTH = {
   gestorL: { uid: 'uid_gestorL', token: { email: 'gestor-a@test.local' } },
   gestorE: { uid: 'uid_gestorE', token: { email: 'gestor-b@test.local' } },
@@ -119,6 +123,15 @@ const INMUEBLES: Record<string, Record<string, unknown>> = {
 const GESTIONES: Record<string, Record<string, unknown>> = { g_1: G_1, g_2: G_2 };
 
 function peticion(over: Partial<Peticion>): Peticion {
+  if (over.auth?.token?.email === EMAIL_ADMIN && over.requestResource && over.docId &&
+      (over.docId.startsWith('g_') || over.docId.startsWith('uid_'))) {
+    const ruta = `${over.docId.startsWith('g_') ? 'gestiones_cartera' : 'usuarios_auth'}/${over.docId}`;
+    const auditId = 'audit-d3';
+    return {auth:null,db:FIRESTORE,resource:null,docId:'inm_X',...over,
+      requestResource:{...over.requestResource,roadmap01AuditId:auditId},
+      after:{[`audit_logs/${auditId}`]:{id:auditId,resultado:'EXITO',usuarioEmail:EMAIL_ADMIN,
+        detalles:{actorUid:over.auth.uid,rutas:[ruta]}}}};
+  }
   return { auth: null, db: FIRESTORE, resource: null, requestResource: null, docId: 'inm_X', ...over };
 }
 function getInm(id: keyof typeof INMUEBLES, auth: Peticion['auth']) {

@@ -134,13 +134,19 @@ function peticion(o: Opts): Peticion {
   if (espejoDoc) db[RUTA_ESPEJO] = espejoDoc;
   const esDeOtro = o.auth && o.auth.uid !== UID;
   if (esDeOtro) db[`usuarios_auth/${o.auth!.uid}`] = espejo({ uid: o.auth!.uid });
+  const actor = o.auth === undefined ? { uid: UID, token: { email: 'ana@erp.test' } } : o.auth;
+  const docId = o.docId || DOC_ID[o.coleccion] || String((o.requestResource ?? o.resource)?.id ?? UID);
+  const masterEscribe = actor?.token?.email === EMAIL_ADMIN && !!o.requestResource &&
+    ['usuarios','usuarios_auth'].includes(o.coleccion);
+  const auditId = 'audit-fase14';
   return {
-    auth: o.auth === undefined ? { uid: UID, token: { email: 'ana@erp.test' } } : o.auth,
-    db,
+    auth: actor, db,
     resource: o.resource === undefined ? null : o.resource,
-    requestResource: o.requestResource === undefined ? null : o.requestResource,
+    requestResource: masterEscribe ? {...o.requestResource,roadmap01AuditId:auditId} : o.requestResource === undefined ? null : o.requestResource,
+    after: masterEscribe ? {['audit_logs/'+auditId]:{id:auditId,usuarioEmail:EMAIL_ADMIN,resultado:'EXITO',
+      detalles:{actorUid:actor!.uid,rutas:[`${o.coleccion}/${docId}`]}}} : undefined,
     // en §38 la `id` del documento de estado ES el param del `match`, así que se toma del propio doc
-    docId: o.docId || DOC_ID[o.coleccion] || String((o.requestResource ?? o.resource)?.id ?? UID),
+    docId,
   };
 }
 
@@ -154,11 +160,11 @@ describe('FASE 1.4 · A. El espejo de identidad por UID', () => {
     expect([...permisos.keys()].sort()).toEqual(['create', 'delete', 'get', 'list', 'read', 'update'].filter((v) => permisos.has(v)).sort());
     expect(permisos.get('read')!.condicion).toContain('request.auth.uid == uid');
     for (const verbo of ['create', 'update']) {
-      expect(permisos.get(verbo)!.condicion, verbo).toContain("incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']");
+      expect(permisos.get(verbo)!.condicion, verbo).toContain("incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL', 'INQUILINO']");
       expect(permisos.get(verbo)!.condicion, verbo).toContain('indexIsTruthful()');
       expect(permisos.get(verbo)!.condicion, verbo).toContain('request.auth.uid == uid');
     }
-    expect(permisos.get('delete')!.condicion.trim()).toBe('isMasterAdmin()');
+    expect(permisos.get('delete')!.condicion.trim()).toBe('false');
   });
 
   it('A.1 lectura: el propio UID y la administración; nadie más', () => {
@@ -174,7 +180,7 @@ describe('FASE 1.4 · A. El espejo de identidad por UID', () => {
       requestResource: espejo({ tipoPerfil: 'PROFESIONAL', propietarioId: '', profesionalId: 'prof-9', roles: ['PROFESIONAL'], inmuebleIds: [] }) };
     expect(permite('usuarios_auth', 'create', peticion({ coleccion: 'usuarios_auth', ...prof }))).toBe(true);
     expect(permite('usuarios_auth', 'delete', peticion({ coleccion: 'usuarios_auth', resource: espejo() }))).toBe(false);
-    expect(permite('usuarios_auth', 'delete', peticion({ coleccion: 'usuarios_auth', auth: { uid: 'u-admin', token: { email: EMAIL_ADMIN } }, resource: espejo() }))).toBe(true);
+    expect(permite('usuarios_auth', 'delete', peticion({ coleccion: 'usuarios_auth', auth: { uid: 'u-admin', token: { email: EMAIL_ADMIN } }, resource: espejo() }))).toBe(false); // baja, no purga
   });
 
   it('A.3 el espejo NO es falsificable: cualquier campo sensible desviado se rechaza', () => {
@@ -239,7 +245,9 @@ describe('FASE 1.4 · B. El circuito de ownership resuelve contra el espejo (con
       expect(raiz.split(`function ${nombre}(`).length - 1, nombre).toBe(1);
     }
     const funciones = funcionesDe(raiz);
-    expect(funciones.get('activeUser')!.cuerpo).toContain("me().estado == 'ACTIVO'");
+    expect(funciones.get('activeUser')!.cuerpo).toContain('perfilActualVeraz()');
+    expect(funciones.get('perfilActualVeraz')!.cuerpo).toContain("me().estado == 'ACTIVO'");
+    expect(funciones.get('perfilActualVeraz')!.cuerpo).toContain('.data.authUid == request.auth.uid');
     expect(funciones.get('isPropietarioRole')!.cuerpo).toContain('activeUser()');
     expect(funciones.get('myPropId')!.cuerpo).toContain('me().propietarioId');
     expect(funciones.get('myInmuebleIds')!.cuerpo).toContain('me().inmuebleIds');
@@ -590,13 +598,33 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
     const esEscritorProyeccionGestiones = (f: string): boolean => {
       if (!/lib[\\/]gestionesCarteraServicioFirebase\.ts$/.test(f)) return false;
       const src = readFileSync(f, 'utf8');
-      const sets = src.match(/setDoc\(/g) || [];
       return /carterasL/.test(src) && /carterasE/.test(src)
-        && /\{\s*merge:\s*true\s*\}/.test(src)
-        && !/updateDoc|deleteDoc|addDoc|writeBatch/.test(src)
-        && sets.length === 1;
+        && /guardarAccesoAuditado\('usuarios_auth',uid,/.test(src)
+        && !/setDoc\(|updateDoc\(|deleteDoc\(|addDoc\(|writeBatch\(/.test(src);
     };
-    const escritoresDelEspejo = citan.filter((f) => !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f) && !esNucleoContratoGestiones(f) && !esEscritorProyeccionGestiones(f)).map((f) => path.basename(f));
+    const esHelperAuditado = (f:string):boolean => {
+      if (!/lib[\\/]auditoriaAccesoFirebase\.ts$/.test(f)) return false;
+      const src=readFileSync(f,'utf8');
+      return /runTransaction\(/.test(src) && /audit_logs/.test(src) && /roadmap01AuditId/.test(src)
+        && /tx\.set\(auditRef, log\)/.test(src) && /tx\.set\(destinos\[i\]/.test(src);
+    };
+    const esFirebaseCanonico = (f:string):boolean => {
+      if (!/lib[\\/]firebase\.ts$/.test(f)) return false;
+      const src=readFileSync(f,'utf8');
+      return /guardarAccesosAuditados\(/.test(src) && /'usuarios_auth' as const/.test(src)
+        && !/doc\(db, ['"]usuarios_auth['"]/.test(src);
+    };
+    // ROADMAP-01: diagnóstico histórico puro. No importa Firebase, no puede
+    // leer ni escribir Firestore; compara una instantánea aportada por el caller.
+    const esAuditorPuro = (f: string): boolean => {
+      if (!/lib[\\/]auditoriaHistoricaRoadmap01\.ts$/.test(f)) return false;
+      const src = readFileSync(f, 'utf8');
+      return !/from ['"][^'"]*firebase|\b(setDoc|updateDoc|deleteDoc|addDoc|writeBatch|runTransaction|doc|collection)\s*\(/.test(src);
+    };
+    expect(citan.filter(esAuditorPuro).map(f => path.basename(f))).toEqual(['auditoriaHistoricaRoadmap01.ts']);
+    const escritoresDelEspejo = citan.filter((f) => !esAuditorPuro(f) && !esHelperAuditado(f) && !esFirebaseCanonico(f) && !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f) && !esNucleoContratoGestiones(f) && !esEscritorProyeccionGestiones(f)).map((f) => path.basename(f));
+    expect(citan.filter(esHelperAuditado).map(f=>path.basename(f))).toEqual(['auditoriaAccesoFirebase.ts']);
+    expect(citan.filter(esFirebaseCanonico).map(f=>path.basename(f))).toEqual(['firebase.ts']);
     // el ÚNICO fichero que escribe la IDENTIDAD del espejo es authService.ts
     // (la proyección master carterasL/E tiene su excepción revisada aparte)
     expect(escritoresDelEspejo).toEqual(['authService.ts']);
@@ -620,7 +648,7 @@ describe('FASE 1.4 · E. El corte es auto-suficiente y no reescribe §38', () =>
   it('E.1 todo lo que llama el bloque del espejo está definido en el mismo fichero', () => {
     const bloque = SIN_COMENTARIOS(bloqueDe('usuarios_auth'));
     const definidas = new Map([...funcionesDe(cuerpoRaiz()), ...funcionesDe(bloque)]);
-    const BUILTINS = new Set(['get', 'exists', 'incoming', 'existing', 'size', 'keys', 'values', 'hasAny', 'diff', 'affectedKeys']);
+    const BUILTINS = new Set(['get', 'getAfter', 'exists', 'existsAfter', 'incoming', 'existing', 'size', 'keys', 'values', 'hasAny', 'diff', 'affectedKeys', 'if']); // if es palabra clave de allow
     const llamadas = new Set([...bloque.matchAll(/(?:^|[^.\w$])([a-z][A-Za-z0-9_]*)\s*\(/g)].map((m) => m[1]));
     expect(llamadas.size).toBeGreaterThan(3);
     for (const nombre of llamadas) {

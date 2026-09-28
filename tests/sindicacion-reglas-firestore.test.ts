@@ -107,7 +107,13 @@ const peticion = (p: {
   const db: Record<string, Record<string, unknown>> = { 'inmuebles/inm-A': { id: 'inm-A', propietarioId: 'prop-A' } };
   if (auth) {
     const espejoDoc = p.espejoDoc === undefined ? espejo() : p.espejoDoc;
-    if (espejoDoc) db[`usuarios_auth/${auth.uid}`] = espejoDoc;
+    if (espejoDoc) {
+      db[`usuarios_auth/${auth.uid}`] = espejoDoc;
+      // La ficha autoritativa revoca el espejo al cambiar de UID/estado.
+      const perfilId = String(espejoDoc.usuarioId || auth.uid);
+      espejoDoc.usuarioId = perfilId;
+      db[`usuarios/${perfilId}`] = { authUid:auth.uid,estado:espejoDoc.estado,tipoPerfil:espejoDoc.tipoPerfil };
+    }
   }
   return {
     auth,

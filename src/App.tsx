@@ -103,7 +103,6 @@ import {
   saveCandidatoFirestore,
   deleteCandidatoFirestore,
   savePropietarioFirestore,
-  deletePropietarioFirestore,
   saveSolicitudFirestore,
   deleteSolicitudFirestore,
   saveInvitacionFirestore,
@@ -135,11 +134,9 @@ import {
   deleteSolicitudSeguroFirestore,
   saveGmailConfigFirestore,
   saveUsuarioFirestore,
-  deleteUsuarioFirestore,
   saveProfesionalFirestore,
   deleteProfesionalFirestore,
   saveEnlaceRegistroFirestore,
-  deleteEnlaceRegistroFirestore,
   saveEspecialidadFirestore,
   deleteEspecialidadFirestore,
   saveAuditLogFirestore,
@@ -294,6 +291,8 @@ import { LoginView } from './components/LoginView';
 import { RegistroAutonomoView } from './components/RegistroAutonomoView';
 import { getEnlaceById } from './lib/suministrosFirestore';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
+import { esInvitacionNominalPropietario } from './lib/accesoPropietarios';
+import { emitirInvitacionNominalFirestore, resolverInvitacionNominalFirestore } from './lib/accesoPropietariosFirebase';
 import {
   subscribeAuthState,
   logoutUser,
@@ -2788,6 +2787,7 @@ export default function App() {
 
   // Handlers for Propietarios y Cuentas Bancarias
   const handleSavePropietario = async (propietario: Propietario) => {
+    await savePropietarioFirestore(propietario); // mutación + audit_logs en un solo commit
     setPropietarios((prev) => {
       const exists = prev.some((p) => p.id === propietario.id);
       const updated = exists
@@ -2798,18 +2798,12 @@ export default function App() {
       } catch (e) {}
       return updated;
     });
-    await savePropietarioFirestore(propietario);
   };
 
-  const handleDeletePropietario = async (propietarioId: string) => {
-    setPropietarios((prev) => {
-      const updated = prev.filter((p) => p.id !== propietarioId);
-      try {
-        localStorage.setItem('rentselect_propietarios', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    await deletePropietarioFirestore(propietarioId);
+  const handleDeletePropietario = async (_propietarioId: string) => {
+    // No se borra una identidad jurídica con titularidades/histórico: Rules
+    // impiden el borrado directo. Requiere el flujo de baja no destructiva.
+    throw new Error('No se puede eliminar una ficha jurídica con historial.');
   };
 
   // Handlers for Seguro de Impago
@@ -2864,7 +2858,7 @@ export default function App() {
   };
 
   // --- AUDIT LOG HELPER ---
-  const logAudit = async (accion: string, modulo: string, detalle: string, entidadId?: string) => {
+  const logAudit = async (accion: string, modulo: string, detalle: string, entidadId?: string, persistir = true) => {
     const log: AuditLog = {
       id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       fechaHora: new Date().toISOString(),
@@ -2889,12 +2883,15 @@ export default function App() {
       detalles: { modulo },
     };
     setAuditLogs((prev) => [log, ...prev]);
-    await saveAuditLogFirestore(log);
+    // Las escrituras de identidad ya incluyen el evento canónico en su commit.
+    // Aquí solo se conserva el mensaje de UI, sin duplicar audit_logs.
+    if (persistir) await saveAuditLogFirestore(log);
   };
 
   // --- HANDLERS FOR USERS & RBAC ---
   const handleSaveUsuario = async (user: UsuarioApp) => {
     const previo = usuarios.find((u) => u.id === user.id);
+    await saveUsuarioFirestore(user, previo ? 'MODIFICAR_USUARIO' : 'GUARDAR_USUARIO'); // cuenta/espejo y evento en commit único
     setUsuarios((prev) => {
       const idx = prev.findIndex((u) => u.id === user.id);
       if (idx >= 0) {
@@ -2904,7 +2901,6 @@ export default function App() {
       }
       return [user, ...prev];
     });
-    await saveUsuarioFirestore(user);
     // Alta: mensaje clásico. Edición: acción MODIFICAR_USUARIO con diff de
     // campos (sin secretos) para trazabilidad de la administración.
     await logAudit(
@@ -2913,20 +2909,20 @@ export default function App() {
       previo
         ? `Usuario ${user.nombre} (${user.email}) modificado: ${resumenCambiosUsuario(previo, user)}`
         : `Usuario ${user.nombre} (${user.email}) guardado con perfil ${user.tipoPerfil}`,
-      user.id
+      user.id,
+      false // evento canónico ya persistido con la ficha y su espejo
     );
   };
 
   const handleDeleteUsuario = async (userId: string) => {
     const u = usuarios.find((x) => x.id === userId);
-    setUsuarios((prev) => prev.filter((x) => x.id !== userId));
-    await deleteUsuarioFirestore(userId);
-    await logAudit(
-      'ELIMINAR_USUARIO',
-      'USUARIOS',
-      `Usuario eliminado: ${u?.nombre || userId} (${u?.email || ''})`,
-      userId
-    );
+    if (!u) throw new Error('Usuario inexistente');
+    if (u.email.toLowerCase() === 'sarqsan2@gmail.com') throw new Error('No se puede desactivar el master');
+    // Baja reversible, conserva identidad e histórico y revoca el espejo
+    // dentro de la MISMA transacción auditada. Nunca delete sin rastro.
+    const deBaja = { ...u, estado:'INACTIVO' as const, updatedAt:new Date().toISOString() };
+    await saveUsuarioFirestore(deBaja, 'BAJA_USUARIO');
+    setUsuarios(prev => prev.map(x => x.id === userId ? deBaja : x));
   };
 
   // --- BAJA SEGURA DE ACCESO (Bloque Borrado Seguro; sin borrado patrimonial) ---
@@ -2944,19 +2940,14 @@ export default function App() {
     if (rechazo) throw new Error(rechazo);
     const estadoAnterior = objetivo.estado;
     const deBaja = aplicarBajaUsuario(objetivo);
+    await saveUsuarioFirestore(deBaja, 'BAJA_USUARIO'); // baja, espejo y audit_logs atómicos
     setUsuarios((prev) => prev.map((x) => (x.id === userId ? deBaja : x)));
-    await saveUsuarioFirestore(deBaja);
-    if (objetivo.authUid) {
-      await syncAuthIndex(
-        { ...deBaja, updatedAt: new Date().toISOString() },
-        { uid: objetivo.authUid }
-      );
-    }
     await logAudit(
       'BAJA_USUARIO',
       'USUARIOS',
       detalleBajaUsuario(objetivo, motivo, estadoAnterior),
-      userId
+      userId,
+      false // evento canónico incluido en la transacción de baja
     );
   };
 
@@ -3023,6 +3014,12 @@ export default function App() {
 
   // --- HANDLERS FOR ENLACES DE REGISTRO ---
   const handleSaveEnlaceRegistro = async (enlace: EnlaceRegistro) => {
+    if (esInvitacionNominalPropietario(enlace)) {
+      await emitirInvitacionNominalFirestore(enlace); // enlace + auditoría atómicos; nunca sobreescribir
+      setEnlacesRegistro((prev) => [enlace, ...prev.filter(e => e.id !== enlace.id)]);
+      return;
+    }
+    await saveEnlaceRegistroFirestore(enlace); // enlace genérico y evento atómicos si master
     setEnlacesRegistro((prev) => {
       const idx = prev.findIndex((e) => e.id === enlace.id);
       if (idx >= 0) {
@@ -3032,19 +3029,30 @@ export default function App() {
       }
       return [enlace, ...prev];
     });
-    await saveEnlaceRegistroFirestore(enlace);
     await logAudit(
       'GUARDAR_ENLACE_REGISTRO',
       'INVITACIONES',
       `Enlace de registro creado/actualizado: ${enlace.textoVisible} (${enlace.tipoPerfil})`,
-      enlace.id
+      enlace.id,
+      false // enlace y evento ya confirmados conjuntamente
     );
   };
 
   const handleDeleteEnlaceRegistro = async (enlaceId: string) => {
-    setEnlacesRegistro((prev) => prev.filter((e) => e.id !== enlaceId));
-    await deleteEnlaceRegistroFirestore(enlaceId);
-    await logAudit('ELIMINAR_ENLACE_REGISTRO', 'INVITACIONES', `Enlace eliminado: ${enlaceId}`, enlaceId);
+    const enlace = enlacesRegistro.find(e => e.id === enlaceId);
+    if (enlace && esInvitacionNominalPropietario(enlace)) {
+      await resolverInvitacionNominalFirestore(enlaceId, 'REVOCADA');
+      setEnlacesRegistro(prev => prev.map(e => e.id === enlaceId ? { ...e, estadoInvitacion: 'REVOCADA', activo: false } : e));
+      return; // conservar evidencia; nunca borrar una invitación nominal
+    }
+    if (!enlace) throw new Error('Enlace inexistente');
+    await saveEnlaceRegistroFirestore({...enlace,activo:false});
+    setEnlacesRegistro(prev => prev.map(e => e.id === enlaceId ? {...e,activo:false} : e));
+  };
+
+  const handleRejectEnlaceRegistro = async (id: string) => {
+    await resolverInvitacionNominalFirestore(id, 'RECHAZADA');
+    setEnlacesRegistro(prev => prev.map(e => e.id === id ? { ...e, estadoInvitacion: 'RECHAZADA', activo: false } : e));
   };
 
   // --- HANDLERS FOR ESPECIALIDADES ---
@@ -3172,7 +3180,7 @@ export default function App() {
         ...enlaceUtilizado,
         usosActuales: enlaceUtilizado.usosActuales + 1,
       };
-      await saveEnlaceRegistroFirestore(updatedEnlace);
+      // El servicio de registro ya consumió el enlace; aquí solo refrescamos UI.
       setEnlacesRegistro((prev) =>
         prev.map((e) => (e.id === updatedEnlace.id ? updatedEnlace : e))
       );
@@ -4037,6 +4045,7 @@ export default function App() {
                 onBajaUsuario={handleBajaUsuario}
                 onSaveEnlaceRegistro={handleSaveEnlaceRegistro}
                 onDeleteEnlaceRegistro={handleDeleteEnlaceRegistro}
+                onRejectEnlaceRegistro={handleRejectEnlaceRegistro}
                 onSaveEspecialidad={handleSaveEspecialidad}
                 onDeleteEspecialidad={handleDeleteEspecialidad}
                 onSaveModulosConfig={async (cfg) => {

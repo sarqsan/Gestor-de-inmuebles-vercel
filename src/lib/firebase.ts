@@ -243,23 +243,20 @@ export function subscribePropietarios(
  * Save / Update Propietario in Firestore
  */
 export async function savePropietarioFirestore(propietario: Propietario) {
-  try {
-    const cleanProp = sanitizeObjectForFirestore(propietario);
+  const cleanProp = sanitizeObjectForFirestore(propietario);
+  if (auth.currentUser?.email?.toLowerCase() === 'sarqsan2@gmail.com') {
+    const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
+    await guardarAccesoAuditado('propietarios', propietario.id, cleanProp, 'GUARDAR_PROPIETARIO');
+  } else {
     await setDoc(doc(db, 'propietarios', propietario.id), cleanProp, { merge: true });
-  } catch (err) {
-    console.error('Error saving propietario to Firestore:', err);
   }
 }
 
 /**
  * Delete Propietario from Firestore
  */
-export async function deletePropietarioFirestore(propietarioId: string) {
-  try {
-    await deleteDoc(doc(db, 'propietarios', propietarioId));
-  } catch (err) {
-    console.error('Error deleting propietario from Firestore:', err);
-  }
+export async function deletePropietarioFirestore(_propietarioId: string) {
+  throw new Error('La identidad jurídica no se purga: desvincule mediante el servicio auditado.');
 }
 
 /**
@@ -2236,18 +2233,30 @@ export function subscribeUsuarios(callback: (usuarios: UsuarioApp[]) => void) {
   );
 }
 
-export async function saveUsuarioFirestore(usuario: UsuarioApp): Promise<void> {
+export async function saveUsuarioFirestore(usuario: UsuarioApp & { passwordHash?: string; authMethod?: 'direct_firestore' | 'firebase_auth' }, accion = 'GUARDAR_USUARIO'): Promise<void> {
   const userRef = doc(db, 'usuarios', usuario.id);
   const clean = sanitizeObjectForFirestore({
     ...usuario,
     updatedAt: new Date().toISOString(),
   });
-  await setDoc(userRef, clean, { merge: true });
+  if (auth.currentUser?.email?.toLowerCase() === 'sarqsan2@gmail.com') {
+    const { guardarAccesosAuditados } = await import('./auditoriaAccesoFirebase');
+    await guardarAccesosAuditados([
+      {coleccion:'usuarios',id:usuario.id,datos:clean},
+      ...(usuario.authUid ? [{coleccion:'usuarios_auth' as const,id:usuario.authUid,datos:{
+        uid:usuario.authUid,usuarioId:usuario.id,email:usuario.email,tipoPerfil:usuario.tipoPerfil,
+        estado:usuario.estado,roles:usuario.roles,propietarioId:usuario.propietarioId || '',
+        profesionalId:usuario.profesionalId || '',inmuebleIds:usuario.inmuebleIds || [],
+        updatedAt:new Date().toISOString(),
+      }}] : []),
+    ],accion);
+  } else {
+    await setDoc(userRef, clean, { merge: true });
+  }
 }
 
-export async function deleteUsuarioFirestore(usuarioId: string): Promise<void> {
-  const userRef = doc(db, 'usuarios', usuarioId);
-  await deleteDoc(userRef);
+export async function deleteUsuarioFirestore(_usuarioId: string): Promise<void> {
+  throw new Error('La cuenta no se purga: use baja auditada y revocación del espejo.');
 }
 
 // =========================================================================
@@ -2305,14 +2314,13 @@ export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) =
 }
 
 export async function saveEnlaceRegistroFirestore(enlace: EnlaceRegistro): Promise<void> {
-  const enlaceRef = doc(db, 'enlaces_registro', enlace.id);
   const clean = sanitizeObjectForFirestore(enlace);
-  await setDoc(enlaceRef, clean, { merge: true });
+  const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
+  await guardarAccesoAuditado('enlaces_registro', enlace.id, clean, 'GUARDAR_ENLACE_REGISTRO');
 }
 
-export async function deleteEnlaceRegistroFirestore(enlaceId: string): Promise<void> {
-  const enlaceRef = doc(db, 'enlaces_registro', enlaceId);
-  await deleteDoc(enlaceRef);
+export async function deleteEnlaceRegistroFirestore(_enlaceId: string): Promise<void> {
+  throw new Error('El enlace se conserva para auditoría: revóquelo de forma auditada.');
 }
 
 // =========================================================================
@@ -2452,8 +2460,6 @@ export async function seedAuthAndRolesIfEmpty() {
     // 1. Seed admin user if not exists
     const usersSnap = await getDocs(USUARIOS_COL);
     if (usersSnap.empty) {
-      const uBatch = writeBatch(db);
-
       // Admin principal
       const adminUser: UsuarioApp = {
         id: 'user_admin_principal',
@@ -2469,7 +2475,7 @@ export async function seedAuthAndRolesIfEmpty() {
         updatedAt: new Date().toISOString(),
         lastLoginAt: new Date().toISOString(),
       };
-      uBatch.set(doc(db, 'usuarios', adminUser.id), sanitizeObjectForFirestore(adminUser));
+      await saveUsuarioFirestore(adminUser);
 
       // Propietario demo
       const propUser: UsuarioApp = {
@@ -2494,7 +2500,7 @@ export async function seedAuthAndRolesIfEmpty() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      uBatch.set(doc(db, 'usuarios', propUser.id), sanitizeObjectForFirestore(propUser));
+      await saveUsuarioFirestore(propUser);
 
       // Profesional demo
       const profUser: UsuarioApp = {
@@ -2511,9 +2517,8 @@ export async function seedAuthAndRolesIfEmpty() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      uBatch.set(doc(db, 'usuarios', profUser.id), sanitizeObjectForFirestore(profUser));
+      await saveUsuarioFirestore(profUser);
 
-      await uBatch.commit();
     }
 
     // 2. Seed default especialidades if empty
@@ -2558,7 +2563,6 @@ export async function seedAuthAndRolesIfEmpty() {
     // 4. Seed default enlaces de registro if empty
     const enlacesSnap = await getDocs(ENLACES_REGISTRO_COL);
     if (enlacesSnap.empty) {
-      const lBatch = writeBatch(db);
       const enlaceProp: EnlaceRegistro = {
         id: 'enlace_prop_publico',
         token: 'registro_propietario_oficial',
@@ -2581,9 +2585,8 @@ export async function seedAuthAndRolesIfEmpty() {
         creadoPor: 'user_admin_principal',
         createdAt: new Date().toISOString(),
       };
-      lBatch.set(doc(db, 'enlaces_registro', enlaceProp.id), sanitizeObjectForFirestore(enlaceProp));
-      lBatch.set(doc(db, 'enlaces_registro', enlaceProf.id), sanitizeObjectForFirestore(enlaceProf));
-      await lBatch.commit();
+      await saveEnlaceRegistroFirestore(enlaceProp);
+      await saveEnlaceRegistroFirestore(enlaceProf);
     }
 
     // 5. Seed initial audit log if empty

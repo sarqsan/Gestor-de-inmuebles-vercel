@@ -55,10 +55,12 @@ function pet(o: {
   resource?: Record<string, unknown> | null;
   requestResource?: Record<string, unknown> | null;
   db?: Record<string, Record<string, unknown>>;
+  after?: Record<string, Record<string, unknown>>;
 }): Peticion {
   return {
     auth: o.auth,
     db: o.db || {},
+    after: o.after,
     resource: o.resource ?? null,
     requestResource: o.requestResource ?? null,
     docId: o.docId,
@@ -86,7 +88,9 @@ describe('Login admin · A. Security Rules reales', () => {
     const r = perfilAdmin();
     expect(permite('usuarios', 'get', pet({ auth, docId: ADMIN_ID, resource: r }))).toBe(true);
     expect(permite('usuarios', 'update', pet({
-      auth, docId: ADMIN_ID, resource: r, requestResource: { ...r, lastLoginAt: '2026-09-24T10:00:00.000Z' },
+      auth, docId: ADMIN_ID, resource: r, requestResource: { ...r, lastLoginAt: '2026-09-24T10:00:00.000Z',roadmap01AuditId:'evt-login' },
+      after:{'audit_logs/evt-login':{id:'evt-login',resultado:'EXITO',usuarioEmail:ADMIN_EMAIL,
+        detalles:{actorUid:ADMIN_UID,rutas:[`usuarios/${ADMIN_ID}`]}}},
     }))).toBe(true);
   });
 

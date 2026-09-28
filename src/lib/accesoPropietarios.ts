@@ -10,6 +10,17 @@
  */
 import type { EnlaceRegistro, Propietario, UsuarioApp } from '../types';
 
+export type EstadoInvitacionNominal = 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA' | 'EXPIRADA' | 'REVOCADA';
+
+/** Caducidad derivada: jamás modifica por inferencia la persona o la cuenta. */
+export function estadoInvitacionNominal(enlace: EnlaceRegistro, ahoraIso: string): EstadoInvitacionNominal {
+  if (enlace.estadoInvitacion === 'ACEPTADA' || (enlace.usosMaximos !== undefined && enlace.usosActuales >= enlace.usosMaximos)) return 'ACEPTADA';
+  if (enlace.estadoInvitacion === 'RECHAZADA') return 'RECHAZADA';
+  if (enlace.estadoInvitacion === 'REVOCADA' || !enlace.activo) return 'REVOCADA';
+  if (enlace.fechaCaducidad && Date.parse(enlace.fechaCaducidad) <= Date.parse(ahoraIso)) return 'EXPIRADA';
+  return 'PENDIENTE';
+}
+
 export interface ResultadoValidacionAcceso {
   ok: boolean;
   errores: string[];
@@ -44,7 +55,14 @@ export function validarInvitacionPropietario(
   if (!enlace.activo) {
     errores.push('Esta invitación ha sido desactivada por la administración.');
   }
-  if (enlace.fechaCaducidad && new Date(enlace.fechaCaducidad) < new Date(ahoraIso || new Date().toISOString())) {
+  if (enlace.estadoInvitacion && enlace.estadoInvitacion !== 'PENDIENTE') {
+    errores.push(`Esta invitación está ${enlace.estadoInvitacion.toLowerCase()}.`);
+  }
+  if (esInvitacionNominalPropietario(enlace) && (!enlace.emailInvitado || (emailFormulario !== undefined && !emailFormulario.trim()))) {
+    errores.push('La invitación nominal exige el email invitado y el email del formulario.');
+  }
+  if ((enlace.fechaCaducidad && new Date(enlace.fechaCaducidad) <= new Date(ahoraIso || new Date().toISOString())) ||
+      (enlace.fechaCaducidadMs !== undefined && enlace.fechaCaducidadMs <= Date.parse(ahoraIso || new Date().toISOString()))) {
     errores.push('Esta invitación ha caducado.');
   }
   if (
@@ -166,7 +184,9 @@ export function buildInvitacionNominalPropietario(params: {
       descripcion ||
       `Invitación nominal e intransferible para ${usuario.nombre}. De un solo uso.`,
     activo: true,
+    estadoInvitacion: 'PENDIENTE',
     fechaCaducidad: new Date(new Date(ahora).getTime() + diasCaducidad * 86400000).toISOString(),
+    fechaCaducidadMs: new Date(ahora).getTime() + diasCaducidad * 86400000,
     usosMaximos: 1,
     usosActuales: 0,
     creadoPor,

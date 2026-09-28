@@ -75,6 +75,7 @@ describe('E · A. Invitación de inquilino', () => {
     memoria.sembrar('inmuebles', 'inm_TEST_NUEVO', inmuebleTest('A', { id: 'inm_TEST_NUEVO', contratoIdsAutorizados: [], suministroIds: ['sum_TEST_NUEVO'] }) as never);
     memoria.sembrar('suministros', 'sum_TEST_NUEVO', suministroTest('A', { id: 'sum_TEST_NUEVO', inmuebleId: 'inm_TEST_NUEVO', contratoIdsAutorizados: [] }) as never);
 
+    authSintetico.usuarioActual = {uid:'uid_TEST_STAFF',email:'staff@test.local'};
     const enlace = await crearInvitacionInquilino({
       contratoId: 'ct_TEST_NUEVO',
       inmuebleId: 'inm_TEST_NUEVO',
@@ -104,6 +105,7 @@ describe('E · A. Invitación de inquilino', () => {
 
   it('revocar desactiva el enlace y retira el alcance del contrato', async () => {
     const enlace = enlaceTest('A');
+    authSintetico.usuarioActual = {uid:'uid_TEST_STAFF',email:'staff@test.local'};
     await revocarInvitacionInquilino(enlace);
     expect(memoria.leer<{ activo: boolean }>('enlaces_registro', IDS.A.enlace)!.activo).toBe(false);
     expect(memoria.leer<{ contratoIdsAutorizados: string[] }>('inmuebles', IDS.A.inmueble)!.contratoIdsAutorizados).not.toContain(IDS.A.contrato);

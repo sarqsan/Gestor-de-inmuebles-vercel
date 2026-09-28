@@ -448,7 +448,8 @@ export async function crearInvitacionInquilino(d: DatosInvitacionInquilino): Pro
     creadoPor: d.creadoPor,
     createdAt: ahoraIso(),
   };
-  await setDoc(doc(db, 'enlaces_registro', id), enlace);
+  const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
+  await guardarAccesoAuditado('enlaces_registro',id,{...enlace},'INVITACION_INQUILINO_CREADA');
   await concederAccesoContrato(d.contratoId, d.inmuebleId);
   return enlace;
 }
@@ -458,7 +459,8 @@ export async function crearInvitacionInquilino(d: DatosInvitacionInquilino): Pro
  * (El bloqueo de la cuenta de usuario, si existe, se gestiona en usuarios.)
  */
 export async function revocarInvitacionInquilino(enlace: EnlaceRegistro): Promise<void> {
-  await updateDoc(doc(db, 'enlaces_registro', enlace.id), { activo: false });
+  const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
+  await guardarAccesoAuditado('enlaces_registro',enlace.id,{activo:false},'INVITACION_INQUILINO_REVOCADA');
   if (enlace.contratoIdVinculado && enlace.inmuebleIdVinculado) {
     await revocarAccesoContrato(enlace.contratoIdVinculado, enlace.inmuebleIdVinculado);
   }

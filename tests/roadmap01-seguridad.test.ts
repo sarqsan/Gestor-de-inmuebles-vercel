@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -21,14 +22,29 @@ const db: Peticion['db'] = {
   'usuarios_auth/ownerManager': { usuarioId:'ownerManager', tipoPerfil:'PROPIETARIO', estado:'ACTIVO', propietarioId:'owner_B', inmuebleIds:[], carterasL:['owner_A'], carterasE:['owner_A'] },
   'inmuebles/inm_A': propio, 'inmuebles/inm_B': ajeno,
 };
-const persona = { id: 'p', nombre: 'Ana', estado: 'ACTIVA', estadoDatos: 'INCOMPLETO', roles: ['PROPIETARIO'], propietarioIds: ['owner_A'], createdAt: '2026', updatedAt: '2026' };
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(db);
+
+const persona = { id: 'p', nombre: 'Ana', estado: 'ACTIVA', estadoDatos: 'INCOMPLETO', roles: [], propietarioIds: [], createdAt: '2026', updatedAt: '2026' };
+const evento = (ruta:string) => ({'audit_logs/audit-r01':{id:'audit-r01',usuarioEmail:emailMaster,resultado:'EXITO',
+  detalles:{actorUid:master.uid,rutas:[ruta]}}});
 function permit(rules: string, col: string, verb: 'get'|'list'|'create'|'update'|'delete', auth: Peticion['auth'],
   resource: Peticion['resource'], requestResource: Peticion['requestResource'], docId: string): boolean {
-  return crearEvaluadorReglas(rules).permite(col, verb, { auth, db, resource, requestResource, docId });
+  const ruta = `${col}/${docId}`;
+  const auditId = 'audit-r01';
+  const privilegio = auth?.token?.email === emailMaster && !!requestResource && (verb === 'create' || verb === 'update');
+  const auditoria = {[`audit_logs/${auditId}`]:{id:auditId,usuarioEmail:emailMaster,resultado:'EXITO',
+    detalles:{actorUid:auth?.uid,rutas:[ruta]}}};
+  return crearEvaluadorReglas(rules).permite(col, verb, { auth, db, resource,
+    requestResource: privilegio ? {...requestResource,roadmap01AuditId:auditId} : requestResource,
+    after: privilegio ? auditoria : undefined, docId });
 }
 const run = (r: string) => ({
   personaGet: permit(r, 'personas', 'get', actor, persona, null, 'p'),
-  personaCreate: permit(r, 'personas', 'create', actor, null, persona, 'p'),
+  personaCreate: crearEvaluadorReglas(r).permite('personas','create',{auth:actor,db,resource:null,
+    requestResource:{...persona,roadmap01AuditId:'probe-event'},docId:'p',
+    after:{'audit_logs/probe-event':{id:'probe-event',usuarioEmail:actor.token.email,resultado:'EXITO',
+      detalles:{actorUid:actor.uid,rutas:['personas/p']}}}}),
   ownerGet: permit(r, 'propietarios', 'get', actor, { id: 'owner_B' }, null, 'owner_B'),
   inmuebleGet: permit(r, 'inmuebles', 'get', actor, ajeno, null, 'inm_B'),
   tenantGet: permit(r, 'inmuebles', 'get', tenant, ajeno, null, 'inm_B'),
@@ -82,14 +98,42 @@ describe('ROADMAP-01 · Rules efectivas (harness del fichero desplegable)', () =
     expect(permit(original,'propietarios','create',actor,null,{ ...o, personaId:'p' },'owner_A')).toBe(false);
     expect(permit(original,'propietarios','update',actor,o,{ ...o, personaId:'p' },'owner_A')).toBe(false);
     expect(permit(original,'usuarios','update',actor,u,{ ...u, personaId:'p' },'prop')).toBe(false);
-    expect(permit(original,'propietarios','update',master,o,{ ...o, personaId:'p' },'owner_A')).toBe(true);
+    expect(permit(original,'propietarios','update',master,o,{ ...o, personaId:'p' },'owner_A')).toBe(false);
+    expect(crearEvaluadorReglas(original).permite('propietarios','update',{
+      auth:master,db,docId:'owner_A',resource:o,requestResource:{ ...o,personaId:'p',roadmap01AuditId:'audit-r01' },
+      after:{...evento('propietarios/owner_A'),'personas/p':{...persona,propietarioIds:['owner_A']},'propietarios/owner_A':{...o,personaId:'p'}}
+    })).toBe(true);
+  });
+  it('el master tampoco puede forjar vínculos unilaterales mediante payload', () => {
+    const o = {id:'owner_A',nombre:'Ana'};
+    const u = {id:'prop',email:'prop@test.local',estado:'ACTIVO',tipoPerfil:'PROPIETARIO',roles:[],propietarioId:'owner_A'};
+    expect(permit(original,'personas','create',master,null,{...persona,propietarioIds:['owner_A'],roles:['PROPIETARIO']},'p')).toBe(false);
+    expect(permit(original,'usuarios','update',master,u,{...u,personaId:'p'},'prop')).toBe(false);
+    const snap = {'personas/p':{...persona,usuarioId:'prop',propietarioIds:['owner_A'],roles:['PROPIETARIO']},
+      'propietarios/owner_A':{...o,personaId:'p'}, 'usuarios/prop':{...u,personaId:'p'}};
+    expect(crearEvaluadorReglas(original).permite('usuarios','update',{
+      auth:master,db,docId:'prop',resource:u,requestResource:{...u,personaId:'p',roadmap01AuditId:'audit-r01'},
+      after:{...snap,...evento('usuarios/prop')}
+    })).toBe(true);
+    expect(crearEvaluadorReglas(original).permite('usuarios','update',{
+      auth:master,db,docId:'prop',resource:u,requestResource:{...u,personaId:'p',roadmap01AuditId:'audit-r01'},
+      after:{...snap,...evento('usuarios/prop'),'propietarios/owner_A':{...o,personaId:'otra'}}
+    })).toBe(false);
+  });
+  it('un perfil Persona no puede reescribir UID; legacy conserva el re-enlace de fase14', () => {
+    const base = { id:'prop', authUid:'prop', email:'prop@test.local', tipoPerfil:'PROPIETARIO',
+      estado:'ACTIVO', roles:[], propietarioId:'owner_A', personaId:'p' };
+    expect(permit(original,'usuarios','update',actor,base,{ ...base, authUid:'otro' },'prop')).toBe(false);
+    expect(permit(original,'usuarios','update',actor,base,{ ...base, nombre:'Nuevo' },'prop')).toBe(true);
+    const legacy = { ...base }; delete (legacy as {personaId?:string}).personaId;
+    expect(permit(original,'usuarios','update',actor,legacy,{ ...legacy, authUid:'otro' },'prop')).toBe(true);
   });
   it('mutar el veto de personaId abre vínculos forjados: el test los detecta', () => {
     const o = { id:'owner_A', nombre:'Ana' };
     const u = { id:'prop', authUid:'prop', email:'prop@test.local', tipoPerfil:'PROPIETARIO', estado:'ACTIVO', roles:[], propietarioId:'owner_A' };
     const probes = [
       { guard:"&& !('personaId' in incoming())", col:'propietarios', verb:'create' as const, old:null, next:{ ...o, personaId:'p' }, id:'owner_A' },
-      { guard:"&& !incoming().diff(existing()).affectedKeys().hasAny(['personaId'])", col:'propietarios', verb:'update' as const, old:o, next:{ ...o, personaId:'p' }, id:'owner_A' },
+      { guard:"&& !incoming().diff(existing()).affectedKeys().hasAny(['personaId', 'roadmap01AuditId'])", col:'propietarios', verb:'update' as const, old:o, next:{ ...o, personaId:'p' }, id:'owner_A' },
       { guard:"'personaId',", col:'usuarios', verb:'update' as const, old:u, next:{ ...u, personaId:'p' }, id:'prop' },
     ];
     for (const p of probes) {
@@ -105,7 +149,7 @@ describe('ROADMAP-01 · Rules efectivas (harness del fichero desplegable)', () =
   it('mutaciones adversariales: cada bypass cambia una decisión, nunca solo un string', () => {
     const cases: { label:string; col:string; from:string; to:string; key:keyof ReturnType<typeof run> }[] = [
       { label:'global persona', col:'personas', from:'allow get, list: if isMasterAdmin();', to:'allow get, list: if isStaff();', key:'personaGet' },
-      { label:'rol sin ámbito persona', col:'personas', from:'allow create: if isMasterAdmin() && personaValida();', to:'allow create: if isSignedIn() && personaValida();', key:'personaCreate' },
+      { label:'rol sin ámbito persona', col:'personas', from:'allow create: if isMasterAdmin() && personaValida()', to:'allow create: if isSignedIn() && personaValida()', key:'personaCreate' },
       { label:'propietario incorrecto', col:'propietarios', from:'allow get: if isMasterAdmin() || ownsPropietario(propietarioId)', to:'allow get: if isMasterAdmin() || isPropietarioRole()', key:'ownerGet' },
       { label:'inmueble incorrecto', col:'inmuebles', from:'allow get: if esAdminInmuebles()\n        || inmuebleEsMio(resource.data)', to:'allow get: if esAdminInmuebles()\n        || isPropietarioRole()', key:'inmuebleGet' },
       { label:'bypass staff', col:'inmuebles', from:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || inmuebleEnCarteraGestionada(resource.data)', to:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || isStaff()', key:'inmuebleGet' },

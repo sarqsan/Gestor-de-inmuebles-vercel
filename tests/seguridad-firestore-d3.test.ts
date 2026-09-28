@@ -1,3 +1,4 @@
+import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 /**
  * D3 (ORDEN 4 §9) — Firestore: fin del `isStaff()` transversal en el BLOQUE E.
  * ---------------------------------------------------------------------------
@@ -52,6 +53,9 @@ const DB: Peticion['db'] = {
   'solicitudes_seguro_impago/seg_A': { inmuebleId: 'inm_A' },
   'solicitudes_seguro_impago/seg_B': { inmuebleId: 'inm_B' },
 };
+
+// Los fixtures históricos deben contener la ficha autoritativa del espejo.
+completarPerfilesSinteticos(DB);
 
 const AUTH = {
   propA: { uid: 'uid_propA', token: { email: 'prop-a@test.local' } },

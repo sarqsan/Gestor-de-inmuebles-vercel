@@ -654,7 +654,8 @@ describe('AdminControlCenter — tabla de usuarios', () => {
 describe('firestore.rules — update de usuarios reutiliza la vía segura', () => {
   it('bypass master + tipoPerfil/roles inmutables para el resto', () => {
     const bloque = reglasUsuarios();
-    expect(bloque).toContain('allow update: if isMasterAdmin() || (');
+    expect(bloque).toContain('allow update: if (isMasterAdmin()');
+    expect(bloque).toContain('&& usuarioPersonaCoherente(usuarioId, incoming())');
     expect(bloque).toContain('incoming().tipoPerfil == existing().tipoPerfil');
     expect(bloque).toContain('incoming().roles == existing().roles');
   });
@@ -681,8 +682,8 @@ describe('firestore.rules — update de usuarios reutiliza la vía segura', () =
     }
   });
 
-  it('borrado solo-master (sin cambios)', () => {
-    expect(reglasUsuarios()).toContain('allow delete: if isMasterAdmin();');
+  it('borrado físico prohibido: baja por actualización auditada', () => {
+    expect(reglasUsuarios()).toContain('allow delete: if false;');
   });
 });
 

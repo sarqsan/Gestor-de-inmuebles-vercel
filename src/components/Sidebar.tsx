@@ -1,40 +1,15 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { SectionType, Candidato, UsuarioApp } from '../types';
+import { Building2, Database, LogOut } from 'lucide-react';
+// BLOQUE 10 · UX-1: fuente única de navegación (sin listas locales de secciones).
 import {
-  Home,
-  Building2,
-  Users,
-  UserPlus,
-  Sparkles,
-  HelpCircle,
-  Settings,
-  ShieldCheck,
-  ChevronRight,
-  Database,
-  FileText,
-  UserCheck,
-  Key,
-  Shield,
-  Wrench,
-  User,
-  LogOut,
-  Receipt,
-  AlertTriangle,
-  Smartphone,
-  Zap,
-  TrendingDown,
-  TrendingUp,
-  RefreshCw,
-  LifeBuoy,
-  Calculator,
-  BarChart3,
-  Landmark,
-  Banknote,
-  LayoutDashboard,
-  Wallet,
-  ShieldAlert,
-  Activity,
-} from 'lucide-react';
+  ATRIBUTO_TOUR_NAV,
+  ContadoresNav,
+  gruposDePerfil,
+  idTourDeSeccion,
+  perfilNavegacionDe,
+  valorBadge,
+} from '../navegacion/navegacion';
 
 interface SidebarProps {
   activeSection: SectionType;
@@ -75,86 +50,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pendingReviewCount = candidatos.filter((c) => c.estado === 'nuevo').length;
   const pendingDocCount = candidatos.filter((c) => c.estado === 'pendiente_doc').length;
 
-  const perfil = currentUser?.tipoPerfil || 'ADMINISTRADOR';
-
-  // Role-scoped navigation items
-  let navItems: {
-    id: SectionType;
-    label: string;
-    icon: React.FC<{ className?: string }>;
-    badge?: number;
-  }[] = [];
-
-  if (perfil === 'PROPIETARIO') {
-    navItems = [
-      { id: 'dashboard', label: 'Centro de Control', icon: LayoutDashboard },
-      { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck },
-      { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount },
-      { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
-      { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount },
-      { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount },
-
-      { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet },
-      { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown },
-      { id: 'financiacion', label: 'Financiación', icon: Landmark },
-      { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
-      { id: 'facturacion', label: 'Facturación', icon: FileText },
-      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
-      { id: 'informes', label: 'Informes & Export', icon: BarChart3 },
-      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
-      { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText },
-      { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw },
-      { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
-      { id: 'operaciones', label: 'Operaciones', icon: Activity },
-      { id: 'suministros', label: 'Suministros', icon: Zap },
-      { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
-      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
-    ];
-  } else if (perfil === 'PROFESIONAL') {
-    navItems = [
-      { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench },
-      { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount },
-      ...(currentUser?.roles?.includes('GESTOR_PATRIMONIAL') ? [
-        { id: 'formalizacion' as SectionType, label: 'Contratos de alquiler', icon: FileText, badge: contratosCount },
-        { id: 'cobros' as SectionType, label: 'Cobros de alquiler', icon: Receipt, badge: cobrosPendientesCount },
-      ] : []),
-      { id: 'configuracion', label: 'Mi Cuenta', icon: Settings },
-      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
-    ];
-  } else {
-    // ADMINISTRADOR
-    navItems = [
-      { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard },
-      { id: 'administracion', label: 'Centro de Control', icon: Shield },
-      { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount },
-      { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount },
-      { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp },
-      { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount },
-
-      { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet },
-      { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown },
-      { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark },
-      { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote },
-      { id: 'morosidad', label: 'Morosidad y Recobro', icon: ShieldAlert, badge: morosidadAbiertaCount },
-      { id: 'facturacion', label: 'Facturación & VERI*FACTU', icon: FileText },
-      { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator },
-      { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3 },
-      { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck },
-      { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText },
-      { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone },
-      { id: 'suministros', label: 'Suministros', icon: Zap },
-      { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount },
-      { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount },
-      { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount },
-      { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw },
-      { id: 'incidencias', label: 'Incidencias', icon: LifeBuoy, badge: incidenciasAbiertasCount },
-      { id: 'operaciones', label: 'Operaciones', icon: Activity },
-      { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length },
-      { id: 'analisis', label: 'Análisis IA', icon: Sparkles },
-      { id: 'configuracion', label: 'Configuración', icon: Settings },
-      { id: 'ayuda', label: 'Ayuda', icon: HelpCircle },
-    ];
-  }
+  const perfil = perfilNavegacionDe(currentUser?.tipoPerfil);
+  const contadores: ContadoresNav = {
+    inmuebles: inmueblesCount,
+    propietarios: propietariosCount,
+    solicitudes: solicitudesCount,
+    preseleccionados: preseleccionadosCount,
+    contratos: contratosCount,
+    solicitudesSeguro: solicitudesSeguroCount,
+    cobrosPendientes: cobrosPendientesCount,
+    incidenciasAbiertas: incidenciasAbiertasCount,
+    morosidadAbierta: morosidadAbiertaCount,
+    candidatos: candidatos.length,
+  };
+  const gestorPatrimonial = Boolean(currentUser?.roles?.includes('GESTOR_PATRIMONIAL'));
+  const grupos = useMemo(
+    () => gruposDePerfil(perfil, { gestorPatrimonial }),
+    [perfil, gestorPatrimonial]
+  );
 
   return (
     <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-slate-300 border-r border-slate-800 min-h-screen sticky top-0 shrink-0 select-none">
@@ -171,44 +84,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Navigation List */}
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-        <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-          Menú Principal
-        </div>
+      {/* Navigation List (agrupada; fuente única: src/navegacion/navegacion.ts) */}
+      <nav className="flex-1 p-3 space-y-4 overflow-y-auto" aria-label="Navegación principal">
+        {grupos.map((grupo) => (
+          <div key={grupo.id} className="space-y-1">
+            <h3 className="px-3 py-1 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              {grupo.nombre}
+            </h3>
 
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeSection === item.id;
+            {grupo.items.map((item) => {
+              const Icon = item.icono;
+              const isActive = activeSection === item.id;
+              const badge = valorBadge(item.contador, contadores);
 
-          return (
-            <button
-              key={item.id}
-              data-tour={`nav-${item.id}`}
-              onClick={() => onSelectSection(item.id)}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/30'
-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
-              </div>
-
-              {item.badge !== undefined && item.badge > 0 && (
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                    isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300 border border-slate-700'
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  {...{ [ATRIBUTO_TOUR_NAV]: idTourDeSeccion(item.id) }}
+                  aria-current={isActive ? 'page' : undefined}
+                  onClick={() => onSelectSection(item.id)}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/30'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
                   }`}
                 >
-                  {item.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+                  <div className="flex items-center gap-3">
+                    <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                    <span>{item.etiqueta}</span>
+                  </div>
+
+                  {badge !== undefined && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Quick Summary Cards in Sidebar (Only for Admins) */}

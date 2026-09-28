@@ -1,44 +1,18 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useId } from 'react';
 import { SectionType, Candidato, UsuarioApp } from '../types';
-import {
-  Home,
-  Building2,
-  Users,
-  UserPlus,
-  Sparkles,
-  Settings,
-  Plus,
-  HelpCircle,
-  FileText,
-  UserCheck,
-  Key,
-  ChevronDown,
-  Menu,
-  X,
-  Check,
-  ShieldCheck,
-  Shield,
-  Wrench,
-  ArrowLeftRight,
-  Receipt,
-  AlertTriangle,
-  Smartphone,
-  Zap,
-  TrendingDown,
-  TrendingUp,
-  RefreshCw,
-  Calculator,
-  BarChart3,
-  Landmark,
-  Banknote,
-  LayoutDashboard,
-  Wallet,
-  ShieldAlert,
-  Activity,
-} from 'lucide-react';
+import { Plus, ChevronDown, Check } from 'lucide-react';
 
 import { AsistentePanel } from './experiencia/AsistentePanel';
 import type { AccionHost, ExperienceContext, ProveedorIA, ResultadoConsultaERP } from '../experiencia';
+// BLOQUE 10 · UX-1: fuente única de navegación (sin listas locales de secciones).
+import {
+  ATRIBUTO_TOUR_NAV,
+  ContadoresNav,
+  gruposDePerfil,
+  idTourDeSeccion,
+  perfilNavegacionDe,
+  valorBadge,
+} from '../navegacion/navegacion';
 
 interface MobileNavProps {
   activeSection: SectionType;
@@ -87,85 +61,30 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
 
-  const pendingCount = candidatos.filter((c) => c.estado === 'nuevo').length;
-  const perfil = currentUser?.tipoPerfil || 'ADMINISTRADOR';
+  const perfil = perfilNavegacionDe(currentUser?.tipoPerfil);
+  const contadores: ContadoresNav = {
+    inmuebles: inmueblesCount,
+    propietarios: propietariosCount,
+    solicitudes: solicitudesCount,
+    preseleccionados: preseleccionadosCount,
+    contratos: contratosCount,
+    solicitudesSeguro: solicitudesSeguroCount,
+    cobrosPendientes: cobrosPendientesCount,
+    morosidadAbierta: morosidadAbiertaCount,
+    candidatos: candidatos.length,
+  };
+  const gestorPatrimonial = Boolean(currentUser?.roles?.includes('GESTOR_PATRIMONIAL'));
+  const grupos = useMemo(
+    () => gruposDePerfil(perfil, { gestorPatrimonial }),
+    [perfil, gestorPatrimonial]
+  );
+  const items = useMemo(() => grupos.flatMap((grupo) => grupo.items), [grupos]);
 
-  const allSections: {
-    id: SectionType;
-    label: string;
-    icon: React.FC<{ className?: string }>;
-    badge?: number;
-    description?: string;
-  }[] =
-    perfil === 'PROPIETARIO'
-      ? [
-          { id: 'dashboard', label: 'Centro de Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs, atención, financiero, operaciones' },
-          { id: 'propietarios', label: 'Mi Portal Propietario', icon: UserCheck, description: 'Servicios y profesionales' },
-          { id: 'inmuebles', label: 'Mis Viviendas', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
-          { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Compra, reforma, alquiler, rentabilidad' },
-          { id: 'formalizacion', label: 'Mis Contratos', icon: FileText, badge: contratosCount, description: 'Contratos de alquiler' },
-          { id: 'cobros', label: 'Mis Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual y pagos' },
-
-          { id: 'tesoreria', label: 'Mis Liquidaciones', icon: Wallet, description: 'Estado de cuenta mensual y neto transferido' },
-          { id: 'gastos', label: 'Mis Gastos', icon: TrendingDown, description: 'Explotación e hipoteca' },
-          { id: 'financiacion', label: 'Financiación', icon: Landmark, description: 'Hipotecas y amortización' },
-          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos y conciliar cobros/gastos' },
-          { id: 'facturacion', label: 'Facturación', icon: FileText, description: 'Facturas y registro VERI*FACTU' },
-          { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
-          { id: 'informes', label: 'Informes & Export', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
-          { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
-          { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
-          { id: 'recomercializacion', label: 'Recomercializar', icon: RefreshCw, description: 'Salida, inspección y nueva puesta en mercado' },
-          { id: 'operaciones', label: 'Operaciones', icon: Activity, description: 'Centro de operaciones y mantenimiento' },
-          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'Lecturas y consumos' },
-          { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
-          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
-        ]
-      : perfil === 'PROFESIONAL'
-      ? [
-          { id: 'administracion', label: 'Mi Portal Profesional', icon: Wrench, description: 'Datos y especialidades' },
-          { id: 'inmuebles', label: 'Viviendas Asignadas', icon: Building2, badge: inmueblesCount, description: 'Inmuebles a atender' },
-          ...(currentUser?.roles?.includes('GESTOR_PATRIMONIAL') ? [
-            { id: 'formalizacion' as SectionType, label: 'Contratos de alquiler', icon: FileText, badge: contratosCount, description: 'Contratos en inmuebles delegados' },
-            { id: 'cobros' as SectionType, label: 'Cobros de alquiler', icon: Receipt, badge: cobrosPendientesCount, description: 'Seguimiento de alquileres delegados' },
-          ] : []),
-          { id: 'configuracion', label: 'Mi Cuenta', icon: Settings, description: 'Ajustes' },
-          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
-        ]
-      : [
-          { id: 'dashboard', label: 'Centro Control Ejecutivo', icon: LayoutDashboard, description: 'KPIs reales, atención prioritaria, financiero y operaciones' },
-          { id: 'administracion', label: 'Centro de Control', icon: Shield, description: 'Gestión de usuarios, roles y seguridad' },
-          { id: 'inmuebles', label: 'Inmuebles', icon: Building2, badge: inmueblesCount, description: 'Catálogo de propiedades' },
-          { id: 'propietarios', label: 'Propietarios & IBAN', icon: UserCheck, badge: propietariosCount, description: 'Base fiscal y cuentas bancarias' },
-          { id: 'inversion', label: 'Inversión y Valoración', icon: TrendingUp, description: 'Analizador compra-reforma-alquiler' },
-          { id: 'cobros', label: 'Gestión de Cobros', icon: Receipt, badge: cobrosPendientesCount, description: 'Control mensual de alquileres' },
-
-          { id: 'tesoreria', label: 'Tesorería & SEPA', icon: Wallet, description: 'Liquidaciones, gastos, SEPA PAIN.008/001 y movimientos' },
-          { id: 'gastos', label: 'Gestión de Gastos', icon: TrendingDown, description: 'Explotación vs financiación' },
-          { id: 'financiacion', label: 'Financiación & Hipotecas', icon: Landmark, description: 'Préstamos, LTV y amortización' },
-          { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Banknote, description: 'Importar extractos CSV/OFX/MT940/Norma43 y conciliar' },
-          { id: 'morosidad', label: 'Morosidad y Recobro', icon: ShieldAlert, badge: morosidadAbiertaCount, description: 'Detección de deuda, recobro, compromisos y expediente legal' },
-          { id: 'facturacion', label: 'Facturación & VERI*FACTU', icon: FileText, description: 'Facturas y registro de facturación AEAT' },
-          { id: 'fiscal', label: 'Fiscalidad IRPF', icon: Calculator, description: 'Cálculo y rendimiento IRPF' },
-          { id: 'informes', label: 'Informes Ejecutivos', icon: BarChart3, description: 'Patrimonio, rentabilidad, exportación estructurada' },
-          { id: 'polizas', label: 'Pólizas y Seguros', icon: ShieldCheck, description: 'Pólizas, siniestros y renovaciones' },
-          { id: 'actas', label: 'Actas Entrada/Salida', icon: FileText, description: 'Inventario, evidencias, firma y trazabilidad' },
-          { id: 'inquilinos', label: 'Portal Inquilinos', icon: Smartphone, description: 'Accesos, invitaciones y mensajes' },
-          { id: 'suministros', label: 'Suministros', icon: Zap, description: 'CUPS, lecturas y reparto' },
-          { id: 'preseleccionados', label: 'Preseleccionados', icon: Key, badge: preseleccionadosCount, description: 'Gestión de visitas y citas' },
-          { id: 'seguro_impago', label: 'Seguro Impago', icon: ShieldCheck, badge: solicitudesSeguroCount, description: 'Estudio de solvencia con aseguradoras' },
-          { id: 'formalizacion', label: 'Formalización & LAU', icon: FileText, badge: contratosCount, description: 'Contratos y asegurabilidad' },
-          { id: 'recomercializacion', label: 'Recomercialización', icon: RefreshCw, description: 'Salida, inspección y nueva comercialización' },
-          { id: 'operaciones', label: 'Operaciones', icon: Activity, description: 'Centro de operaciones y mantenimiento' },
-          { id: 'candidatos', label: 'Candidatos', icon: Users, badge: candidatos.length, description: 'Listado completo' },
-          { id: 'analisis', label: 'Análisis IA', icon: Sparkles, description: 'Puntuación e informes' },
-          { id: 'configuracion', label: 'Configuración', icon: Settings, description: 'Ajustes del sistema' },
-          { id: 'ayuda', label: 'Ayuda', icon: HelpCircle, description: 'Centro de ayuda y tutoriales' },
-        ];
-
-  const currentSectionItem = allSections.find((s) => s.id === activeSection) || allSections[0];
-  const CurrentIcon = currentSectionItem.icon;
+  const currentSectionItem = items.find((s) => s.id === activeSection) || items[0];
+  const CurrentIcon = currentSectionItem.icono;
+  const currentBadge = valorBadge(currentSectionItem.contador, contadores);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -189,6 +108,9 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         {/* Brand & Section Dropdown Selector */}
         <div className="relative flex-1">
           <button
+            type="button"
+            aria-expanded={isOpen}
+            aria-controls={panelId}
             onClick={() => setIsOpen(!isOpen)}
             className="flex items-center gap-2.5 px-3 py-1.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 rounded-xl transition-all text-left w-full max-w-xs"
           >
@@ -198,10 +120,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="font-bold text-xs text-white truncate">{currentSectionItem.label}</span>
-                {currentSectionItem.badge !== undefined && currentSectionItem.badge > 0 && (
+                <span className="font-bold text-xs text-white truncate">{currentSectionItem.etiqueta}</span>
+                {currentBadge !== undefined && (
                   <span className="px-1.5 py-0.2 text-[10px] font-bold bg-blue-500 text-white rounded-full">
-                    {currentSectionItem.badge}
+                    {currentBadge}
                   </span>
                 )}
               </div>
@@ -216,57 +138,66 @@ export const MobileNav: React.FC<MobileNavProps> = ({
             <div className="absolute top-full left-0 mt-2 w-72 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-50 animate-fadeIn">
               <div className="p-2.5 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between text-xs text-slate-400 font-semibold uppercase tracking-wider">
                 <span>Navegación</span>
-                <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded-sm">{allSections.length} módulos</span>
+                <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded-sm">{items.length} módulos</span>
               </div>
 
-              <div className="p-1.5 max-h-[60vh] overflow-y-auto space-y-1">
-                {allSections.map((item) => {
-                  const Icon = item.icon;
-                  const isSelected = activeSection === item.id;
+              <nav id={panelId} aria-label="Navegación del ERP" className="p-1.5 max-h-[60vh] overflow-y-auto space-y-3">
+                {grupos.map((grupo) => (
+                  <div key={grupo.id} className="space-y-1">
+                    <h3 className="px-2.5 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      {grupo.nombre}
+                    </h3>
 
-                  return (
-                    <button
-                      key={item.id}
-                      data-tour={`nav-${item.id}`}
-                      onClick={() => handleSelect(item.id)}
-                      className={`w-full flex items-center justify-between p-2 rounded-xl text-xs transition-colors cursor-pointer ${
-                        isSelected ? 'bg-blue-600 text-white font-bold shadow-xs' : 'hover:bg-slate-800/80 text-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div
-                          className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
-                            isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                    {grupo.items.map((item) => {
+                      const Icon = item.icono;
+                      const isSelected = activeSection === item.id;
+                      const badge = valorBadge(item.contador, contadores);
+
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          {...{ [ATRIBUTO_TOUR_NAV]: idTourDeSeccion(item.id) }}
+                          aria-current={isSelected ? 'page' : undefined}
+                          onClick={() => handleSelect(item.id)}
+                          className={`w-full flex items-center justify-between p-2 rounded-xl text-xs transition-colors cursor-pointer ${
+                            isSelected ? 'bg-blue-600 text-white font-bold shadow-xs' : 'hover:bg-slate-800/80 text-slate-300'
                           }`}
                         >
-                          <Icon className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="text-left truncate">
-                          <p className="truncate font-medium">{item.label}</p>
-                          {item.description && (
-                            <p className={`text-[10px] truncate ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
-                              {item.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                                isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                              }`}
+                            >
+                              <Icon className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="text-left truncate">
+                              <p className="truncate font-medium">{item.etiqueta}</p>
+                              <p className={`text-[10px] truncate ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                                {item.descripcion}
+                              </p>
+                            </div>
+                          </div>
 
-                      <div className="flex items-center gap-1 shrink-0 ml-2">
-                        {item.badge !== undefined && item.badge > 0 && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300 border border-slate-700'
-                            }`}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-                        {isSelected && <Check className="w-3.5 h-3.5 text-white ml-1" />}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            {badge !== undefined && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300 border border-slate-700'
+                                }`}
+                              >
+                                {badge}
+                              </span>
+                            )}
+                            {isSelected && <Check className="w-3.5 h-3.5 text-white ml-1" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </nav>
             </div>
           )}
         </div>

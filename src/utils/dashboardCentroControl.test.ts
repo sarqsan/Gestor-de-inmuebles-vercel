@@ -1,10 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { LayoutDashboard } from 'lucide-react';
 
 import { calcularResumenCobros, calcularAvisosCobros, generarPeriodosParaContrato } from './cobrosEngine';
 import { resumenGastos } from './gastosEngine';
-import type { CobroPeriodo, Gasto, Inmueble, ContratoFormalizacion } from '../types';
+// BLOQUE 10 · UX-1: la navegación es una fuente única consumida por ambos componentes.
+import { NAVEGACION, etiquetaDeItem, iconoDeItem, seccionesDePerfil } from '../navegacion/navegacion';
+import { Sidebar } from '../components/Sidebar';
+import { MobileNav } from '../components/MobileNav';
+import type { CobroPeriodo, Gasto, Inmueble, ContratoFormalizacion, UsuarioApp } from '../types';
 
 // Helpers replicando lógica dashboard para tests deterministas
 function calcInmueblesStats(inmuebles: Inmueble[]) {
@@ -121,12 +128,58 @@ describe('Dashboard — Permisos y seguridad', () => {
     expect(content).toContain('dashboard');
   });
 
-  it('Sidebar y MobileNav incluyen dashboard para PROPIETARIO y ADMIN', () => {
+  /**
+   * BLOQUE 10 · UX-1: la navegación dejó de estar escrita dentro de los componentes.
+   * Esta prueba verifica ahora el COMPORTAMIENTO REAL (catálogo + render), no la
+   * presencia de listas literales en Sidebar/MobileNav.
+   */
+  it('el catálogo ofrece dashboard a PROPIETARIO y ADMINISTRADOR, con su icono', () => {
+    for (const perfil of ['ADMINISTRADOR', 'PROPIETARIO'] as const) {
+      expect(seccionesDePerfil(perfil)).toContain('dashboard');
+    }
+    const def = NAVEGACION.find((d) => d.section === 'dashboard')!;
+    expect(def).toBeTruthy();
+    expect(iconoDeItem(def, 'ADMINISTRADOR')).toBe(LayoutDashboard);
+    expect(etiquetaDeItem(def, 'ADMINISTRADOR')).toBe('Centro de Control');
+    expect(etiquetaDeItem(def, 'PROPIETARIO')).toBe('Centro de Control');
+    // El profesional no recibe el panel ejecutivo
+    expect(seccionesDePerfil('PROFESIONAL', { gestorPatrimonial: true })).not.toContain('dashboard');
+  });
+
+  it('Sidebar y MobileNav pintan dashboard (render real) desde la fuente única', () => {
+    const usuario = (tipoPerfil: 'ADMINISTRADOR' | 'PROPIETARIO'): UsuarioApp =>
+      ({ id: 'u1', authUid: 'u1', nombre: 'Test', email: 't@test.invalid', tipoPerfil, estado: 'ACTIVO', activo: true, roles: [], permisos: [] } as unknown as UsuarioApp);
+
+    for (const perfil of ['ADMINISTRADOR', 'PROPIETARIO'] as const) {
+      const sidebar = renderToStaticMarkup(
+        React.createElement(Sidebar, { activeSection: 'dashboard' as any, onSelectSection: () => undefined, candidatos: [], inmueblesCount: 0, currentUser: usuario(perfil) })
+      );
+      const mobile = renderToStaticMarkup(
+        React.createElement(MobileNav, { activeSection: 'dashboard' as any, onSelectSection: () => undefined, candidatos: [], currentUser: usuario(perfil) })
+      );
+      // Escritorio: el destino existe con su identificador de tutorial y el nombre aprobado (D-4)
+      expect(sidebar).toContain('data-tour="nav-dashboard"');
+      expect(sidebar).toContain('Centro de Control');
+      // Móvil: el desplegable está cerrado por defecto, así que el nombre de la sección
+      // activa se refleja en el selector; los destinos con `data-tour` del panel se
+      // verifican abriéndolo en `src/navegacion/navegacion.ui.test.tsx`.
+      expect(mobile).not.toContain('data-tour="nav-dashboard"'); // cerrado: sin panel pintado
+      expect(mobile).toContain('Centro de Control');
+      expect(mobile).toContain('RentSelect Menu');
+    }
+  });
+
+  it('la navegación vive en una única fuente: los componentes la consumen y no la redefinen', () => {
     const sidebar = fs.readFileSync(path.resolve(__dirname, '../components/Sidebar.tsx'), 'utf-8');
     const mobile = fs.readFileSync(path.resolve(__dirname, '../components/MobileNav.tsx'), 'utf-8');
-    expect(sidebar).toContain("'dashboard'");
-    expect(mobile).toContain("'dashboard'");
-    expect(sidebar).toContain('LayoutDashboard');
+    for (const fuente of [sidebar, mobile]) {
+      expect(fuente).toContain("from '../navegacion/navegacion'");
+      expect(fuente).toContain('gruposDePerfil(');
+      // Sin listas locales de secciones con etiqueta propia (patrón anterior de duplicación)
+      expect(fuente).not.toMatch(/id:\s*'[a-z_]+',\s*label:/);
+      expect(fuente).not.toContain('const allSections');
+      expect(fuente).not.toContain('let navItems');
+    }
   });
 
   it('Dashboard no duplica sensibles en localStorage ni modifica firestore.rules', () => {

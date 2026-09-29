@@ -268,7 +268,8 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
               <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
               <span className="font-medium">{successMessage}</span>
             </div>
-            <button onClick={() => setSuccessMessage(null)} className="text-emerald-700 hover:text-emerald-900">
+            <button
+              aria-label="Cerrar" onClick={() => setSuccessMessage(null)} className="text-emerald-700 hover:text-emerald-900">
               <XCircle className="w-4 h-4" />
             </button>
           </div>
@@ -279,7 +280,8 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
               <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
               <span className="font-medium">{errorMessage}</span>
             </div>
-            <button onClick={() => setErrorMessage(null)} className="text-rose-700 hover:text-rose-900">
+            <button
+              aria-label="Cerrar" onClick={() => setErrorMessage(null)} className="text-rose-700 hover:text-rose-900">
               <XCircle className="w-4 h-4" />
             </button>
           </div>
@@ -444,7 +446,7 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
                 {/* Confirm Button */}
                 <div className="pt-4 border-t border-slate-100 space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label htmlFor="campo-observaciones-comentarios-para-el-propie" className="block text-xs font-semibold text-slate-700 mb-1">
                       Observaciones / Comentarios para el propietario (Opcional):
                     </label>
                     <textarea
@@ -453,7 +455,8 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
                       onChange={(e) => setNotas(e.target.value)}
                       placeholder="Indica si vendrás acompañado/a o si tienes alguna preferencia puntual..."
                       className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
-                    />
+
+                       id="campo-observaciones-comentarios-para-el-propie"/>
                   </div>
 
                   <button

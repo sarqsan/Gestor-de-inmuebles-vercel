@@ -33,6 +33,7 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
             <h3 className="font-bold text-slate-900 text-base">{title}</h3>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onCancel}
             className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >

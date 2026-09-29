@@ -27,6 +27,8 @@ import {
   generateSlotsFromDayConfig,
   formatDateNice,
 } from '../utils/agendaUtils';
+import { propsInteraccion } from '../accesibilidad/interaccion';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface CrearAgendaVisitasModalProps {
   isOpen: boolean;
@@ -51,8 +53,12 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
   onSaveSlots,
   onSaveInvitacion,
 }) => {
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Configurar Agenda de Visitas'
+  );
 
+  if (!isOpen) return null;
   // Selected property
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string>(
     selectedInmuebleIdDefault || (inmuebles[0]?.id || '')
@@ -370,9 +376,9 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
+
         {/* Header */}
-        <div className="p-5 border-b border-slate-100 bg-slate-900 text-white flex items-center justify-between shrink-0">
+        <div ref={refDialogo} {...propsDialogo} className="p-5 border-b border-slate-100 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center font-bold shadow-md">
               <Calendar className="w-5 h-5 text-white" />
@@ -385,6 +391,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
           >
@@ -394,20 +401,21 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
 
         {/* Modal Scrollable Body */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1 text-xs">
-          
+
           {/* STEP 1: CONFIGURAR AGENDA */}
           {step === 'config_agenda' && (
             <div className="space-y-6">
               {/* Select Property */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
-                <label className="block font-bold text-slate-800 text-xs">
+                <label htmlFor="campo-1-seleccionar-inmueble" className="block font-bold text-slate-800 text-xs">
                   1. Seleccionar Inmueble
                 </label>
                 <select
                   value={selectedInmuebleId}
                   onChange={(e) => setSelectedInmuebleId(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 text-xs"
-                >
+
+                   id="campo-1-seleccionar-inmueble">
                   {inmuebles.map((inm) => (
                     <option key={inm.id} value={inm.id}>
                       {inm.direccion} ({inm.ciudad}) — {inm.precio} €/mes
@@ -506,7 +514,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                             className="p-3 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-5 gap-2.5 items-end relative"
                           >
                             <div>
-                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                              <label htmlFor="campo-hora-inicio" className="block text-[10px] font-semibold text-slate-500 mb-1">
                                 Hora Inicio
                               </label>
                               <input
@@ -516,11 +524,12 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                                   handleUpdateBlock(day.id, block.id, 'horaInicio', e.target.value)
                                 }
                                 className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold text-slate-800"
-                              />
+
+                                 id="campo-hora-inicio"/>
                             </div>
 
                             <div>
-                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                              <label htmlFor="campo-hora-fin" className="block text-[10px] font-semibold text-slate-500 mb-1">
                                 Hora Fin
                               </label>
                               <input
@@ -530,11 +539,12 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                                   handleUpdateBlock(day.id, block.id, 'horaFin', e.target.value)
                                 }
                                 className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold text-slate-800"
-                              />
+
+                                 id="campo-hora-fin"/>
                             </div>
 
                             <div>
-                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                              <label htmlFor="campo-duracion-visita" className="block text-[10px] font-semibold text-slate-500 mb-1">
                                 Duración visita
                               </label>
                               <select
@@ -543,7 +553,8 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                                   handleUpdateBlock(day.id, block.id, 'duracionMinutos', Number(e.target.value))
                                 }
                                 className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium text-slate-800"
-                              >
+
+                                 id="campo-duracion-visita">
                                 {DURACION_OPCIONES.map((opt) => (
                                   <option key={opt} value={opt}>
                                     {opt} min
@@ -553,7 +564,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                             </div>
 
                             <div>
-                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                              <label htmlFor="campo-descanso-intervalo" className="block text-[10px] font-semibold text-slate-500 mb-1">
                                 Descanso / Intervalo
                               </label>
                               <select
@@ -562,7 +573,8 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                                   handleUpdateBlock(day.id, block.id, 'intervaloMinutos', Number(e.target.value))
                                 }
                                 className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium text-slate-800"
-                              >
+
+                                 id="campo-descanso-intervalo">
                                 {INTERVALO_OPCIONES.map((opt) => (
                                   <option key={opt} value={opt}>
                                     {opt === 0 ? '0 min (Seguidos)' : `${opt} min`}
@@ -650,6 +662,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                                     className="bg-slate-900 text-white px-1 py-0.5 rounded text-[10px] w-16"
                                   />
                                   <button
+                                    aria-label="Guardar cambios"
                                     type="button"
                                     onClick={() => handleSaveSlotEdit(slot.id)}
                                     className="p-1 bg-emerald-600 text-white rounded hover:bg-emerald-500"
@@ -788,6 +801,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
 
                     return (
                       <div
+                        {...propsInteraccion(() => toggleCandidateSelection(cand.id))}
                         key={cand.id}
                         onClick={() => toggleCandidateSelection(cand.id)}
                         className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
@@ -797,13 +811,13 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
                         }`}
                       >
                         <div className="flex items-center gap-3">
-                          <button type="button" className="text-blue-600">
+                          <span aria-hidden="true" className="text-blue-600">
                             {isSelected ? (
                               <CheckSquare className="w-5 h-5 text-blue-600" />
                             ) : (
                               <Square className="w-5 h-5 text-slate-300" />
                             )}
-                          </button>
+                          </span>
                           <div>
                             <span className="font-bold text-slate-900 text-xs block">{cand.nombre}</span>
                             <span className="text-[11px] text-slate-500">{cand.telefono} • Solvencia {cand.scoreEstimado || 85}%</span>

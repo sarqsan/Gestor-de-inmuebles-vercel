@@ -24,6 +24,7 @@ import {
   MessageSquare,
   AlertCircle,
 } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface DocumentAnalysisModalProps {
   documento: DocumentoAnalizado;
@@ -45,6 +46,10 @@ export const DocumentAnalysisModal: React.FC<DocumentAnalysisModalProps> = ({
   onConfirmDocumentData,
   onReanalyzeDoc,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'ANÁLISIS DOCUMENTAL CON IA'
+  );
   const [tipoDocumento, setTipoDocumento] = useState<TipoDocumento>(documento.tipoDocumento || 'nomina');
   const [fields, setFields] = useState<Record<string, ExtractedField>>(
     documento.datosExtraidos ? JSON.parse(JSON.stringify(documento.datosExtraidos)) : {}
@@ -123,7 +128,7 @@ export const DocumentAnalysisModal: React.FC<DocumentAnalysisModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={refDialogo} {...propsDialogo}
         className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto max-h-[94vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -149,6 +154,7 @@ export const DocumentAnalysisModal: React.FC<DocumentAnalysisModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
           >
@@ -158,7 +164,7 @@ export const DocumentAnalysisModal: React.FC<DocumentAnalysisModalProps> = ({
 
         {/* Modal Body with 5 Explicit Sections */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-6 text-sm">
-          
+
           {/* Tipo de Documento Bar */}
           <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -170,12 +176,13 @@ export const DocumentAnalysisModal: React.FC<DocumentAnalysisModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-600 shrink-0">Corregir tipo:</label>
+              <label htmlFor="campo-corregir-tipo" className="text-xs font-semibold text-slate-600 shrink-0">Corregir tipo:</label>
               <select
                 value={tipoDocumento}
                 onChange={(e) => handleTipoChange(e.target.value as TipoDocumento)}
                 className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none shadow-2xs"
-              >
+
+                 id="campo-corregir-tipo">
                 <option value="nomina">Nómina</option>
                 <option value="contrato">Contrato laboral</option>
                 <option value="vida_laboral">Vida laboral</option>

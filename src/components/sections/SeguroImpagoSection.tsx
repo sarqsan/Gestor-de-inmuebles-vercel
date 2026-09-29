@@ -28,6 +28,7 @@ import {
 import { getTipoDocumentoLabel } from '../../utils/formatters';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface SeguroImpagoSectionProps {
   solicitudesSeguro: SolicitudSeguroImpago[];
@@ -217,6 +218,7 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
         <div className="grid grid-cols-1 gap-3 sm:gap-4">
           {filtered.map((sol) => (
             <div
+              {...propsInteraccion(() => onOpenDetalleModal(sol))}
               key={sol.id}
               onClick={() => onOpenDetalleModal(sol)}
               className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 group"

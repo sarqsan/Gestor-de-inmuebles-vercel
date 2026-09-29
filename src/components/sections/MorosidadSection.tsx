@@ -222,7 +222,8 @@ export const MorosidadSection: React.FC<MorosidadSectionProps> = (props) => {
           }`}
         >
           <span className="flex-1">{mensaje.texto}</span>
-          <button onClick={() => setMensaje(null)} className="shrink-0"><X className="w-4 h-4" /></button>
+          <button
+            aria-label="Cerrar" onClick={() => setMensaje(null)} className="shrink-0"><X className="w-4 h-4" /></button>
         </div>
       )}
 
@@ -332,152 +333,156 @@ export const MorosidadSection: React.FC<MorosidadSectionProps> = (props) => {
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-600 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left px-4 py-3">Expediente / Inmueble</th>
-                  <th className="text-left px-4 py-3">Estado</th>
-                  <th className="text-right px-4 py-3">Deuda</th>
-                  <th className="text-right px-4 py-3">Antigüedad</th>
-                  <th className="text-left px-4 py-3">Próxima acción</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtrados.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">
-                      Sin expedientes. Ejecuta «Detectar / sincronizar deuda» para derivarlos de los calendarios de cobro.
-                    </td>
-                  </tr>
-                )}
-                {filtrados.map((e) => {
-                  const info = describirEstado(e);
-                  return (
-                    <tr key={e.id} className="hover:bg-slate-50/60">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900 flex items-center gap-1.5">
-                          <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                          {e.inmuebleDireccion || e.inmuebleId}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {e.propietarioNombre || e.propietarioId} · {e.piezasDeuda.length} periodo(s):{' '}
-                          {e.piezasDeuda.slice(0, 3).map((p) => p.periodoMesAnio).join(', ')}
-                          {e.piezasDeuda.length > 3 ? '…' : ''}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badgeEstado(e.estado)}`}>
-                          {ESTADO_EXPEDIENTE_LABELS[e.estado]}
-                        </span>
-                        {e.enDisputa && (
-                          <div className="text-[10px] text-rose-600 font-semibold mt-1">Deuda en disputa</div>
-                        )}
-                        {info.requiereAtencion && (
-                          <div className="text-[10px] text-amber-600 font-semibold mt-1">Atención requerida</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="font-semibold text-slate-900">{fmtEur(e.saldoPendiente)}</div>
-                        <div className="text-[10px] text-slate-500">reclamado {fmtEur(e.importeTotalReclamado)}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-600">
-                        <div>{e.diasRetrasoActual} d</div>
-                        <div className="text-[10px] text-slate-400">desde {e.fechaUltimaVencimiento}</div>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-600">
-                        {e.proximaAccionCodigo ? (
-                          <>
-                            <span className="font-medium">{e.proximaAccionCodigo}</span>
-                            <div className="text-[10px] text-slate-400">{e.proximaAccionFecha}</div>
-                          </>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                        <div className="text-[10px] text-slate-400">
-                          {e.comunicaciones.length} comun. · {e.numEvidencias} evid.
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => abrirDetalle(e)}
-                          className="text-xs font-semibold text-blue-700 hover:text-blue-900 inline-flex items-center gap-1"
-                        >
-                          Abrir <ArrowUpRight className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          <div className="scroll-x-controlado">
+                <table className="min-w-[640px] w-full text-sm">
+                              <thead className="bg-slate-50 text-slate-600 text-xs uppercase tracking-wide">
+                                <tr>
+                                  <th className="text-left px-4 py-3">Expediente / Inmueble</th>
+                                  <th className="text-left px-4 py-3">Estado</th>
+                                  <th className="text-right px-4 py-3">Deuda</th>
+                                  <th className="text-right px-4 py-3">Antigüedad</th>
+                                  <th className="text-left px-4 py-3">Próxima acción</th>
+                                  <th className="px-4 py-3" />
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {filtrados.length === 0 && (
+                                  <tr>
+                                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">
+                                      Sin expedientes. Ejecuta «Detectar / sincronizar deuda» para derivarlos de los calendarios de cobro.
+                                    </td>
+                                  </tr>
+                                )}
+                                {filtrados.map((e) => {
+                                  const info = describirEstado(e);
+                                  return (
+                                    <tr key={e.id} className="hover:bg-slate-50/60">
+                                      <td className="px-4 py-3">
+                                        <div className="font-medium text-slate-900 flex items-center gap-1.5">
+                                          <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                                          {e.inmuebleDireccion || e.inmuebleId}
+                                        </div>
+                                        <div className="text-[11px] text-slate-500">
+                                          {e.propietarioNombre || e.propietarioId} · {e.piezasDeuda.length} periodo(s):{' '}
+                                          {e.piezasDeuda.slice(0, 3).map((p) => p.periodoMesAnio).join(', ')}
+                                          {e.piezasDeuda.length > 3 ? '…' : ''}
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <span className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badgeEstado(e.estado)}`}>
+                                          {ESTADO_EXPEDIENTE_LABELS[e.estado]}
+                                        </span>
+                                        {e.enDisputa && (
+                                          <div className="text-[10px] text-rose-600 font-semibold mt-1">Deuda en disputa</div>
+                                        )}
+                                        {info.requiereAtencion && (
+                                          <div className="text-[10px] text-amber-600 font-semibold mt-1">Atención requerida</div>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        <div className="font-semibold text-slate-900">{fmtEur(e.saldoPendiente)}</div>
+                                        <div className="text-[10px] text-slate-500">reclamado {fmtEur(e.importeTotalReclamado)}</div>
+                                      </td>
+                                      <td className="px-4 py-3 text-right text-slate-600">
+                                        <div>{e.diasRetrasoActual} d</div>
+                                        <div className="text-[10px] text-slate-400">desde {e.fechaUltimaVencimiento}</div>
+                                      </td>
+                                      <td className="px-4 py-3 text-xs text-slate-600">
+                                        {e.proximaAccionCodigo ? (
+                                          <>
+                                            <span className="font-medium">{e.proximaAccionCodigo}</span>
+                                            <div className="text-[10px] text-slate-400">{e.proximaAccionFecha}</div>
+                                          </>
+                                        ) : (
+                                          <span className="text-slate-400">—</span>
+                                        )}
+                                        <div className="text-[10px] text-slate-400">
+                                          {e.comunicaciones.length} comun. · {e.numEvidencias} evid.
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        <button
+                                          onClick={() => abrirDetalle(e)}
+                                          className="text-xs font-semibold text-blue-700 hover:text-blue-900 inline-flex items-center gap-1"
+                                        >
+                                          Abrir <ArrowUpRight className="w-3.5 h-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+              </div>
           </div>
         </section>
       )}
 
       {tab === 'compromisos' && (
         <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600 text-xs uppercase tracking-wide">
-              <tr>
-                <th className="text-left px-4 py-3">Compromiso</th>
-                <th className="text-left px-4 py-3">Estado</th>
-                <th className="text-right px-4 py-3">Importe</th>
-                <th className="text-left px-4 py-3">Cuotas</th>
-                <th className="text-left px-4 py-3">Próxima cuota</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {compromisos.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                    Sin compromisos registrados. Se abren desde el detalle de cada expediente.
-                  </td>
-                </tr>
-              )}
-              {compromisos.map((c) => {
-                const prog = progresoCompromiso(c);
-                const exp = visibles.find((e) => e.id === c.expedienteId);
-                return (
-                  <tr key={c.id}>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900">{c.id}</div>
-                      <div className="text-[11px] text-slate-500">
-                        {exp?.inmuebleDireccion || c.inmuebleId} · propuesto {c.fechaPropuesta}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${
-                          c.estado === 'CUMPLIDO'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : c.estado === 'INCUMPLIDO'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : 'bg-blue-50 text-blue-700 border-blue-200'
-                        }`}
-                      >
-                        {c.estado}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="font-semibold">{fmtEur(c.importeCubierto)} / {fmtEur(c.importeTotal)}</div>
-                      <div className="text-[10px] text-slate-500">{prog.pct}% cubierto</div>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {prog.cuotasCubiertas}/{c.numPagos} cubiertas
-                      {prog.cuotasVencidas > 0 ? ` · ${prog.cuotasVencidas} vencida(s)` : ''}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {prog.proximaFecha || '—'}
-                      <div className="text-[10px] text-slate-400">
-                        Los cobros proceden de la fuente oficial (cobrosEngine/GAP 6); el compromiso no altera ningún recibo.
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <div className="scroll-x-controlado">
+              <table className="min-w-[640px] w-full text-sm">
+                          <thead className="bg-slate-50 text-slate-600 text-xs uppercase tracking-wide">
+                            <tr>
+                              <th className="text-left px-4 py-3">Compromiso</th>
+                              <th className="text-left px-4 py-3">Estado</th>
+                              <th className="text-right px-4 py-3">Importe</th>
+                              <th className="text-left px-4 py-3">Cuotas</th>
+                              <th className="text-left px-4 py-3">Próxima cuota</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {compromisos.length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                                  Sin compromisos registrados. Se abren desde el detalle de cada expediente.
+                                </td>
+                              </tr>
+                            )}
+                            {compromisos.map((c) => {
+                              const prog = progresoCompromiso(c);
+                              const exp = visibles.find((e) => e.id === c.expedienteId);
+                              return (
+                                <tr key={c.id}>
+                                  <td className="px-4 py-3">
+                                    <div className="font-medium text-slate-900">{c.id}</div>
+                                    <div className="text-[11px] text-slate-500">
+                                      {exp?.inmuebleDireccion || c.inmuebleId} · propuesto {c.fechaPropuesta}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span
+                                      className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${
+                                        c.estado === 'CUMPLIDO'
+                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                          : c.estado === 'INCUMPLIDO'
+                                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                            : 'bg-blue-50 text-blue-700 border-blue-200'
+                                      }`}
+                                    >
+                                      {c.estado}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <div className="font-semibold">{fmtEur(c.importeCubierto)} / {fmtEur(c.importeTotal)}</div>
+                                    <div className="text-[10px] text-slate-500">{prog.pct}% cubierto</div>
+                                  </td>
+                                  <td className="px-4 py-3 text-xs text-slate-600">
+                                    {prog.cuotasCubiertas}/{c.numPagos} cubiertas
+                                    {prog.cuotasVencidas > 0 ? ` · ${prog.cuotasVencidas} vencida(s)` : ''}
+                                  </td>
+                                  <td className="px-4 py-3 text-xs text-slate-600">
+                                    {prog.proximaFecha || '—'}
+                                    <div className="text-[10px] text-slate-400">
+                                      Los cobros proceden de la fuente oficial (cobrosEngine/GAP 6); el compromiso no altera ningún recibo.
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+            </div>
         </section>
       )}
 
@@ -599,7 +604,8 @@ const TabPolitica: React.FC<{
             disabled={!esAdmin}
             onChange={(e) => setBorrador({ ...borrador, diasGracia: Number(e.target.value) })}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm w-32"
-          />
+
+            inputMode="decimal"/>
         </label>
         <label className="text-xs font-semibold text-slate-600 flex flex-col gap-1">
           Escalado: días de retraso mínimos
@@ -610,7 +616,8 @@ const TabPolitica: React.FC<{
             disabled={!esAdmin}
             onChange={(e) => setBorrador({ ...borrador, escalado: { ...borrador.escalado, diasRetrasoMinimo: Number(e.target.value) } })}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm w-32"
-          />
+
+            inputMode="decimal"/>
         </label>
         <label className="text-xs font-semibold text-slate-600 flex flex-col gap-1">
           Escalado: mensualidades impagadas mínimas
@@ -621,7 +628,8 @@ const TabPolitica: React.FC<{
             disabled={!esAdmin}
             onChange={(e) => setBorrador({ ...borrador, escalado: { ...borrador.escalado, mesesImpagadosMinimos: Number(e.target.value) } })}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm w-32"
-          />
+
+            inputMode="decimal"/>
         </label>
         <label className="text-xs font-semibold text-slate-600 flex items-center gap-2 pb-2">
           <input
@@ -640,59 +648,62 @@ const TabPolitica: React.FC<{
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-600 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="text-left px-4 py-3">Paso</th>
-              <th className="text-left px-4 py-3">Acción</th>
-              <th className="text-left px-4 py-3">Plantilla GAP 1</th>
-              <th className="text-right px-4 py-3">Días (offset)</th>
-              <th className="text-left px-4 py-3">Destinatarios</th>
-              <th className="text-center px-4 py-3">Activo</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {borrador.pasos.map((paso) => (
-              <tr key={paso.codigo}>
-                <td className="px-4 py-3">
-                  <div className="font-medium text-slate-900">{paso.codigo}</div>
-                  <div className="text-[11px] text-slate-500">{paso.nombre}</div>
-                </td>
-                <td className="px-4 py-3">
-                  <select
-                    value={paso.accion}
-                    disabled={!esAdmin}
-                    onChange={(e) => setPaso(paso.codigo, { accion: e.target.value as typeof paso.accion })}
-                    className="border border-slate-300 rounded px-2 py-1 text-xs"
-                  >
-                    <option value="NOTIFICAR">Notificar (GAP 1)</option>
-                    <option value="TAREA INTERNA">Tarea interna</option>
-                    <option value="NO_ACTION">Sin acción</option>
-                  </select>
-                </td>
-                <td className="px-4 py-3 text-xs text-slate-600 font-mono">{paso.tipoEvento || '—'}</td>
-                <td className="px-4 py-3 text-right">
-                  <input
-                    type="number"
-                    value={paso.diasOffset}
-                    disabled={!esAdmin}
-                    onChange={(e) => setPaso(paso.codigo, { diasOffset: Number(e.target.value) })}
-                    className="border border-slate-300 rounded px-2 py-1 text-xs w-20 text-right"
-                  />
-                </td>
-                <td className="px-4 py-3 text-[11px] text-slate-600">{(paso.destinatarios || []).join(', ') || '—'}</td>
-                <td className="px-4 py-3 text-center">
-                  <input
-                    type="checkbox"
-                    checked={paso.activo}
-                    disabled={!esAdmin}
-                    onChange={(e) => setPaso(paso.codigo, { activo: e.target.checked })}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <div className="scroll-x-controlado">
+            <table className="min-w-[640px] w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-600 text-xs uppercase tracking-wide">
+                        <tr>
+                          <th className="text-left px-4 py-3">Paso</th>
+                          <th className="text-left px-4 py-3">Acción</th>
+                          <th className="text-left px-4 py-3">Plantilla GAP 1</th>
+                          <th className="text-right px-4 py-3">Días (offset)</th>
+                          <th className="text-left px-4 py-3">Destinatarios</th>
+                          <th className="text-center px-4 py-3">Activo</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {borrador.pasos.map((paso) => (
+                          <tr key={paso.codigo}>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-slate-900">{paso.codigo}</div>
+                              <div className="text-[11px] text-slate-500">{paso.nombre}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <select
+                                value={paso.accion}
+                                disabled={!esAdmin}
+                                onChange={(e) => setPaso(paso.codigo, { accion: e.target.value as typeof paso.accion })}
+                                className="border border-slate-300 rounded px-2 py-1 text-xs"
+                              >
+                                <option value="NOTIFICAR">Notificar (GAP 1)</option>
+                                <option value="TAREA INTERNA">Tarea interna</option>
+                                <option value="NO_ACTION">Sin acción</option>
+                              </select>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-slate-600 font-mono">{paso.tipoEvento || '—'}</td>
+                            <td className="px-4 py-3 text-right">
+                              <input
+                                type="number"
+                                value={paso.diasOffset}
+                                disabled={!esAdmin}
+                                onChange={(e) => setPaso(paso.codigo, { diasOffset: Number(e.target.value) })}
+                                className="border border-slate-300 rounded px-2 py-1 text-xs w-20 text-right"
+
+                                inputMode="decimal"/>
+                            </td>
+                            <td className="px-4 py-3 text-[11px] text-slate-600">{(paso.destinatarios || []).join(', ') || '—'}</td>
+                            <td className="px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={paso.activo}
+                                disabled={!esAdmin}
+                                onChange={(e) => setPaso(paso.codigo, { activo: e.target.checked })}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+          </div>
         <p className="px-4 py-3 text-[11px] text-slate-500 border-t border-slate-100">
           Los desfases son <strong>política operativa</strong>, no plazos legales. Desactivar un paso no borra las
           comunicaciones ni el histórico ya generados. Las plantillas pertenecen al registro canónico de GAP&nbsp;1.

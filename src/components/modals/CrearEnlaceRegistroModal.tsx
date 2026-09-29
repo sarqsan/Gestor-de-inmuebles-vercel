@@ -194,6 +194,7 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -374,7 +375,8 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
                   onChange={(e) => setUsosMaximos(e.target.value)}
                   placeholder="Ilimitado"
                   className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
-                />
+
+                  inputMode="decimal"/>
               </div>
             </div>
 

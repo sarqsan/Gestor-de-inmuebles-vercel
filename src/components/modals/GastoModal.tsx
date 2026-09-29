@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   X,
   TrendingDown,
@@ -32,6 +32,7 @@ import { hayErrores, resumenErrores, validarFormulario } from '../../formularios
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { useOperacionEnCurso } from '../../feedback/operaciones';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface GastoModalProps {
   gastoParaEditar?: Gasto | null;
@@ -95,6 +96,22 @@ export const GastoModal: React.FC<GastoModalProps> = ({
   // UX-4 §12/§15: los errores de validación van junto al campo; los de persistencia
   // se muestran aparte y nunca se mezclan con la validación del formulario.
   const [erroresCampo, setErroresCampo] = useState<ErroresFormulario>({});
+  // UX-6 §11/§12: semántica de diálogo, foco dentro y Escape (el modal no se cierra
+  // mientras la operación está en curso, para no perder lo introducido).
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose, cerrableConEscape: !guardando },
+    isEditing ? 'Editar gasto' : 'Nuevo gasto'
+  );
+
+  // UX-6 §12: cuando la validación falla, el foco va al primer campo con error para que
+  // el motivo se oiga y se vea sin buscarlo a mano.
+  useEffect(() => {
+    if (!hayErrores(erroresCampo)) return;
+    const contenedor = refDialogo.current;
+    if (!contenedor) return;
+    const primero = contenedor.querySelector<HTMLElement>('[aria-invalid="true"]');
+    primero?.focus();
+  }, [erroresCampo, refDialogo]);
 
   // FASE 2.2: factura / justificante documental en Storage.
   const [facturaFile, setFacturaFile] = useState<File | null>(null);
@@ -239,6 +256,8 @@ export const GastoModal: React.FC<GastoModalProps> = ({
       onClick={onClose}
     >
       <div
+        ref={refDialogo}
+        {...propsDialogo}
         className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
@@ -264,6 +283,7 @@ export const GastoModal: React.FC<GastoModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -325,14 +345,15 @@ export const GastoModal: React.FC<GastoModalProps> = ({
 
           {/* Inmueble */}
           <div>
-            <label className={labelCls}>Inmueble *</label>
+            <label htmlFor="campo-inmueble" className={labelCls}>Inmueble *</label>
             <select
               className={inputCls}
               value={inmuebleId}
               onChange={(e) => setInmuebleId(e.target.value)}
               disabled={isEditing}
               aria-invalid={Boolean(erroresCampo.inmuebleId)}
-            >
+              aria-describedby="error-inmuebleid"
+               id="campo-inmueble">
               {inmuebles.length === 0 && <option value="">Sin inmuebles</option>}
               {inmuebles.map((i) => (
                 <option key={i.id} value={i.id}>
@@ -340,18 +361,19 @@ export const GastoModal: React.FC<GastoModalProps> = ({
                 </option>
               ))}
             </select>
-            <ErrorCampo mensaje={erroresCampo.inmuebleId} />
+            <ErrorCampo id="error-inmuebleid" mensaje={erroresCampo.inmuebleId} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             {/* Categoría */}
             <div>
-              <label className={labelCls}>Categoría *</label>
+              <label htmlFor="campo-categoria" className={labelCls}>Categoría *</label>
               <select
                 className={inputCls}
                 value={categoria}
                 onChange={(e) => handleSeleccionCategoria(e.target.value as CategoriaGasto)}
-              >
+
+                 id="campo-categoria">
                 {categoriasDelTipo.map((c) => (
                   <option key={c.value} value={c.value}>
                     {c.label}
@@ -361,12 +383,13 @@ export const GastoModal: React.FC<GastoModalProps> = ({
             </div>
             {/* Estado */}
             <div>
-              <label className={labelCls}>Estado</label>
+              <label htmlFor="campo-estado" className={labelCls}>Estado</label>
               <select
                 className={inputCls}
                 value={estado}
                 onChange={(e) => setEstado(e.target.value as EstadoGasto)}
-              >
+
+                 id="campo-estado">
                 <option value="PENDIENTE">Pendiente</option>
                 <option value="PAGADO">Pagado</option>
                 <option value="ANULADO">Anulado</option>
@@ -377,31 +400,33 @@ export const GastoModal: React.FC<GastoModalProps> = ({
           {/* Concepto y proveedor */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>Concepto</label>
+              <label htmlFor="campo-concepto" className={labelCls}>Concepto</label>
               <input
                 type="text"
                 className={inputCls}
                 value={concepto}
                 onChange={(e) => setConcepto(e.target.value)}
                 placeholder={categoriaDef(categoria).label}
-              />
+
+                 id="campo-concepto"/>
             </div>
             <div>
-              <label className={labelCls}>Proveedor / Acreedor</label>
+              <label htmlFor="campo-proveedor-acreedor" className={labelCls}>Proveedor / Acreedor</label>
               <input
                 type="text"
                 className={inputCls}
                 value={proveedor}
                 onChange={(e) => setProveedor(e.target.value)}
                 placeholder="Comunidad, banco, empresa…"
-              />
+
+                 id="campo-proveedor-acreedor"/>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {/* Importe */}
             <div>
-              <label className={labelCls}>Importe total (€) *</label>
+              <label htmlFor="campo-importe-total" className={labelCls}>Importe total (€) *</label>
               <input
                 type="number"
                 step="0.01"
@@ -411,29 +436,34 @@ export const GastoModal: React.FC<GastoModalProps> = ({
                 value={importe}
                 onChange={(e) => setImporte(e.target.value)}
                 placeholder="0,00"
-              />
-              <ErrorCampo mensaje={erroresCampo.importe} />
+
+                aria-describedby="error-importe"
+                inputMode="decimal"
+                 id="campo-importe-total"/>
+              <ErrorCampo id="error-importe" mensaje={erroresCampo.importe} />
             </div>
             {/* Fecha devengo */}
             <div>
-              <label className={labelCls}>Fecha factura / devengo</label>
+              <label htmlFor="campo-fecha-factura-devengo" className={labelCls}>Fecha factura / devengo</label>
               <input
                 type="date"
                 className={inputCls}
                 value={fechaDevengo}
                 onChange={(e) => setFechaDevengo(e.target.value)}
-              />
+
+                 id="campo-fecha-factura-devengo"/>
             </div>
             {/* Fecha pago */}
             <div>
-              <label className={labelCls}>Fecha de pago</label>
+              <label htmlFor="campo-fecha-de-pago" className={labelCls}>Fecha de pago</label>
               <input
                 type="date"
                 className={inputCls}
                 value={fechaPago}
                 onChange={(e) => setFechaPago(e.target.value)}
                 disabled={estado !== 'PAGADO'}
-              />
+
+                 id="campo-fecha-de-pago"/>
             </div>
           </div>
 
@@ -443,9 +473,9 @@ export const GastoModal: React.FC<GastoModalProps> = ({
               <p className="text-xs font-semibold text-violet-800">
                 Desglose de la cuota (opcional, para separar capital e intereses)
               </p>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className={labelCls}>Capital amortizado (€)</label>
+                  <label htmlFor="campo-capital-amortizado" className={labelCls}>Capital amortizado (€)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -454,10 +484,12 @@ export const GastoModal: React.FC<GastoModalProps> = ({
                     value={capitalAmortizado}
                     onChange={(e) => setCapitalAmortizado(e.target.value)}
                     placeholder="No es gasto"
-                  />
+
+                    inputMode="decimal"
+                     id="campo-capital-amortizado"/>
                 </div>
                 <div>
-                  <label className={labelCls}>Intereses (€)</label>
+                  <label htmlFor="campo-intereses" className={labelCls}>Intereses (€)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -466,7 +498,9 @@ export const GastoModal: React.FC<GastoModalProps> = ({
                     value={intereses}
                     onChange={(e) => setIntereses(e.target.value)}
                     placeholder="Gasto financiero"
-                  />
+
+                    inputMode="decimal"
+                     id="campo-intereses"/>
                 </div>
                 <div className="flex items-end">
                   <div className="text-[11px] text-violet-700 leading-snug pb-2">
@@ -487,24 +521,26 @@ export const GastoModal: React.FC<GastoModalProps> = ({
           <div className="grid grid-cols-2 gap-4">
             {/* A cargo de */}
             <div>
-              <label className={labelCls}>Coste a cargo de</label>
+              <label htmlFor="campo-coste-a-cargo-de" className={labelCls}>Coste a cargo de</label>
               <select
                 className={inputCls}
                 value={aCargoDe}
                 onChange={(e) => setACargoDe(e.target.value as 'arrendador' | 'arrendatario')}
-              >
+
+                 id="campo-coste-a-cargo-de">
                 <option value="arrendador">Arrendador (propietario)</option>
                 <option value="arrendatario">Arrendatario (inquilino)</option>
               </select>
             </div>
             {/* Método de pago */}
             <div>
-              <label className={labelCls}>Método de pago</label>
+              <label htmlFor="campo-metodo-de-pago" className={labelCls}>Método de pago</label>
               <select
                 className={inputCls}
                 value={metodoPago}
                 onChange={(e) => setMetodoPago(e.target.value as Gasto['metodoPago'])}
-              >
+
+                 id="campo-metodo-de-pago">
                 <option value="transferencia">Transferencia</option>
                 <option value="domiciliacion">Domiciliación</option>
                 <option value="bizum">Bizum</option>

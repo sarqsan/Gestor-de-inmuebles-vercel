@@ -1,6 +1,7 @@
 import React from 'react';
 import { MessageSquare, CheckCircle, X, ExternalLink, Calendar, Info } from 'lucide-react';
 import { InvitacionVisita } from '../types';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface ConfirmWhatsappSentModalProps {
   invitacion: InvitacionVisita | null;
@@ -15,13 +16,18 @@ export const ConfirmWhatsappSentModal: React.FC<ConfirmWhatsappSentModalProps> =
   onConfirmSent,
   onClose,
 }) => {
-  if (!invitacion) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: Boolean(invitacion), onCerrar: onClose },
+    '¿Has enviado la invitación por WhatsApp?'
+  );
 
+  if (!invitacion) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
       <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 relative overflow-hidden">
         {/* Close button */}
         <button
+            aria-label="Cerrar"
           onClick={onClose}
           className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
         >
@@ -29,7 +35,7 @@ export const ConfirmWhatsappSentModal: React.FC<ConfirmWhatsappSentModalProps> =
         </button>
 
         {/* Header Badge */}
-        <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4 shadow-xs">
+        <div ref={refDialogo} {...propsDialogo} className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4 shadow-xs">
           <MessageSquare className="w-6 h-6" />
         </div>
 

@@ -329,7 +329,7 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
         )}
 
         {/* Navegación inferior */}
-        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] z-20">
+        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] z-20 pb-safe">
           <div className="grid grid-cols-5 px-2 py-2">
             {(
               [

@@ -226,7 +226,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
 
   const handleSaveItem = async () => {
     if (!canEdit || !nombre.trim()) return;
-    
+
     if (editItem) {
       const updated = modificarElementoInventario(
         editItem,
@@ -359,6 +359,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
         </div>
         <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
           <button
+            aria-current={tab === 'ficha' ? 'true' : undefined}
             type="button"
             onClick={() => setTab('ficha')}
             className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
@@ -369,6 +370,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
             Ficha Técnica ({completitudFicha.porcentaje}%)
           </button>
           <button
+            aria-current={tab === 'inventario' ? 'true' : undefined}
             type="button"
             onClick={() => setTab('inventario')}
             className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
@@ -379,6 +381,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
             Inventario ({items.length})
           </button>
           <button
+            aria-current={tab === 'historial' ? 'true' : undefined}
             type="button"
             onClick={() => setTab('historial')}
             className={`px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${
@@ -405,40 +408,50 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             <div>
-              <label className="block font-semibold mb-1">Provincia</label>
-              <input disabled={!canEdit} value={provincia} onChange={(e) => setProvincia(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-provincia" className="block font-semibold mb-1">Provincia</label>
+              <input disabled={!canEdit} value={provincia} onChange={(e) => setProvincia(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-provincia"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Planta / Puerta</label>
-              <input disabled={!canEdit} value={planta} onChange={(e) => setPlanta(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-planta-puerta" className="block font-semibold mb-1">Planta / Puerta</label>
+              <input disabled={!canEdit} value={planta} onChange={(e) => setPlanta(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-planta-puerta"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Orientación</label>
-              <input disabled={!canEdit} value={orientacion} onChange={(e) => setOrientacion(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-orientacion" className="block font-semibold mb-1">Orientación</label>
+              <input disabled={!canEdit} value={orientacion} onChange={(e) => setOrientacion(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-orientacion"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Año construcción</label>
-              <input type="number" disabled={!canEdit} value={anioConstruccion || ''} onChange={(e) => setAnioConstruccion(Number(e.target.value))} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-ano-construccion" className="block font-semibold mb-1">Año construcción</label>
+              <input type="number" disabled={!canEdit} value={anioConstruccion || ''} onChange={(e) => setAnioConstruccion(Number(e.target.value))} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                inputMode="decimal"
+                 id="campo-ano-construccion"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Tipo de inmueble</label>
-              <input disabled={!canEdit} value={tipoInmueble} onChange={(e) => setTipoInmueble(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-tipo-de-inmueble" className="block font-semibold mb-1">Tipo de inmueble</label>
+              <input disabled={!canEdit} value={tipoInmueble} onChange={(e) => setTipoInmueble(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-tipo-de-inmueble"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Estado conservación</label>
-              <input disabled={!canEdit} value={estadoConservacion} onChange={(e) => setEstadoConservacion(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-estado-conservacion" className="block font-semibold mb-1">Estado conservación</label>
+              <input disabled={!canEdit} value={estadoConservacion} onChange={(e) => setEstadoConservacion(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-estado-conservacion"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Tipo de ventanas</label>
-              <input disabled={!canEdit} value={tipoVentanas} onChange={(e) => setTipoVentanas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-tipo-de-ventanas" className="block font-semibold mb-1">Tipo de ventanas</label>
+              <input disabled={!canEdit} value={tipoVentanas} onChange={(e) => setTipoVentanas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-tipo-de-ventanas"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Tipo de persianas</label>
-              <input disabled={!canEdit} value={tipoPersianas} onChange={(e) => setTipoPersianas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg" />
+              <label htmlFor="campo-tipo-de-persianas" className="block font-semibold mb-1">Tipo de persianas</label>
+              <input disabled={!canEdit} value={tipoPersianas} onChange={(e) => setTipoPersianas(e.target.value)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-tipo-de-persianas"/>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Distribución</label>
-              <select disabled={!canEdit} value={interiorExterior} onChange={(e) => setInteriorExterior(e.target.value as any)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg">
+              <label htmlFor="campo-distribucion" className="block font-semibold mb-1">Distribución</label>
+              <select disabled={!canEdit} value={interiorExterior} onChange={(e) => setInteriorExterior(e.target.value as any)} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg"
+                 id="campo-distribucion">
                 <option value="exterior">Exterior</option>
                 <option value="interior">Interior</option>
               </select>
@@ -664,8 +677,9 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
               <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Frigorífico combi, Sofá 3 plazas..." className="w-full px-3 py-2 border rounded-xl" />
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Categoría</label>
-              <select value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaInventario)} className="w-full px-3 py-2 border rounded-xl">
+              <label htmlFor="campo-categoria" className="block font-semibold text-slate-700 mb-1">Categoría</label>
+              <select value={categoria} onChange={(e) => setCategoria(e.target.value as CategoriaInventario)} className="w-full px-3 py-2 border rounded-xl"
+                 id="campo-categoria">
                 {CATEGORIAS_INVENTARIO.map((c) => (
                   <option key={c} value={c}>
                     {CATEGORIA_LABELS[c]}
@@ -674,17 +688,21 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
               </select>
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Descripción</label>
-              <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Marca, modelo, número de serie..." className="w-full px-3 py-2 border rounded-xl" rows={2} />
+              <label htmlFor="campo-descripcion" className="block font-semibold text-slate-700 mb-1">Descripción</label>
+              <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Marca, modelo, número de serie..." className="w-full px-3 py-2 border rounded-xl" rows={2}
+                 id="campo-descripcion"/>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Cantidad</label>
-                <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(Number(e.target.value))} className="w-full px-3 py-2 border rounded-xl" />
+                <label htmlFor="campo-cantidad" className="block font-semibold text-slate-700 mb-1">Cantidad</label>
+                <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(Number(e.target.value))} className="w-full px-3 py-2 border rounded-xl"
+                  inputMode="decimal"
+                   id="campo-cantidad"/>
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Estado</label>
-                <select value={estado} onChange={(e) => setEstado(e.target.value as EstadoInventario)} className="w-full px-3 py-2 border rounded-xl">
+                <label htmlFor="campo-estado" className="block font-semibold text-slate-700 mb-1">Estado</label>
+                <select value={estado} onChange={(e) => setEstado(e.target.value as EstadoInventario)} className="w-full px-3 py-2 border rounded-xl"
+                   id="campo-estado">
                   {ESTADOS_INVENTARIO.map((s) => (
                     <option key={s} value={s}>
                       {ESTADO_INVENTARIO_LABELS[s]}
@@ -694,12 +712,14 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
               </div>
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Ubicación / Estancia</label>
-              <input value={ubicacion} onChange={(e) => setUbicacion(e.target.value)} placeholder="Ej: Habitación 1, Cocina, Salón principal..." className="w-full px-3 py-2 border rounded-xl" />
+              <label htmlFor="campo-ubicacion-estancia" className="block font-semibold text-slate-700 mb-1">Ubicación / Estancia</label>
+              <input value={ubicacion} onChange={(e) => setUbicacion(e.target.value)} placeholder="Ej: Habitación 1, Cocina, Salón principal..." className="w-full px-3 py-2 border rounded-xl"
+                 id="campo-ubicacion-estancia"/>
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Observaciones</label>
-              <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Notas de uso, mantenimiento o garantías..." className="w-full px-3 py-2 border rounded-xl" rows={2} />
+              <label htmlFor="campo-observaciones" className="block font-semibold text-slate-700 mb-1">Observaciones</label>
+              <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Notas de uso, mantenimiento o garantías..." className="w-full px-3 py-2 border rounded-xl" rows={2}
+                 id="campo-observaciones"/>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t">
               <button type="button" onClick={() => setFormOpen(false)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors">

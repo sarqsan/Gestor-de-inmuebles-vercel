@@ -68,6 +68,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface DetalleIncidenciaModalProps {
   isOpen: boolean;
@@ -494,6 +495,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
             </div>
 
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors shrink-0"
             >
@@ -858,6 +860,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     {incidencia.fotografias.map((foto) => (
                       <div
+                        {...propsInteraccion(() => setSelectedPhotoUrl(foto.url), `Ampliar foto ${foto.nombre}`)}
                         key={foto.id}
                         onClick={() => setSelectedPhotoUrl(foto.url)}
                         className="group relative rounded-xl overflow-hidden border border-slate-200 aspect-video bg-slate-100 cursor-pointer shadow-xs hover:shadow-md transition-shadow"
@@ -1276,6 +1279,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   {/* PROPIETARIO */}
                   <button
+                    aria-current={responsabilidad === 'PROPIETARIO' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('PROPIETARIO')}
@@ -1299,6 +1303,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                   {/* INQUILINO */}
                   <button
+                    aria-current={responsabilidad === 'INQUILINO' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('INQUILINO')}
@@ -1322,6 +1327,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                   {/* GARANTIA */}
                   <button
+                    aria-current={responsabilidad === 'GARANTIA' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('GARANTIA')}
@@ -1345,6 +1351,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                   {/* SEGURO */}
                   <button
+                    aria-current={responsabilidad === 'SEGURO' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('SEGURO')}
@@ -1368,6 +1375,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                   {/* PROFESIONAL */}
                   <button
+                    aria-current={responsabilidad === 'PROFESIONAL' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('PROFESIONAL')}
@@ -1391,6 +1399,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                   {/* PENDIENTE DE DETERMINAR */}
                   <button
+                    aria-current={responsabilidad === 'PENDIENTE_DE_DETERMINAR' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('PENDIENTE_DE_DETERMINAR')}
@@ -1417,6 +1426,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                 <div className="pt-2 flex items-center gap-2 text-xs">
                   <span className="text-slate-500 font-medium">Otras partes:</span>
                   <button
+                    aria-current={responsabilidad === 'COMUNIDAD' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('COMUNIDAD')}
@@ -1429,6 +1439,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                     Comunidad de Propietarios
                   </button>
                   <button
+                    aria-current={responsabilidad === 'TERCERO' ? 'true' : undefined}
                     type="button"
                     disabled={!canEditResponsabilidad}
                     onClick={() => setResponsabilidad('TERCERO')}
@@ -1445,7 +1456,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                 {/* Campos contextuales específicos según la categoría elegida */}
                 {responsabilidad === 'GARANTIA' && (
                   <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-3">
-                    <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider">
+                    <label htmlFor="campo-referencia-de-la-garantia" className="block text-xs font-bold text-emerald-900 uppercase tracking-wider">
                       Referencia de la Garantía
                     </label>
                     <input
@@ -1455,7 +1466,8 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       onChange={(e) => setResponsabilidadGarantiaRef(e.target.value)}
                       placeholder="ej. Garantía Caldera Saunier Duval modelo Thelia Condens hasta 12/2026, Factura #2024/089"
                       className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-medium"
-                    />
+
+                       id="campo-referencia-de-la-garantia"/>
 
                     {/* Ayuda contextual: Trabajos previos en el inmueble */}
                     {trabajosDelInmueble.length > 0 && (
@@ -1497,7 +1509,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                 {responsabilidad === 'SEGURO' && (
                   <div className="p-4 bg-sky-50/60 border border-sky-200 rounded-xl space-y-3">
-                    <label className="block text-xs font-bold text-sky-950 uppercase tracking-wider">
+                    <label htmlFor="campo-poliza-de-seguro-aplicable" className="block text-xs font-bold text-sky-950 uppercase tracking-wider">
                       Póliza de Seguro Aplicable
                     </label>
                     <select
@@ -1505,7 +1517,8 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       value={polizaId}
                       onChange={(e) => setPolizaId(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-sky-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-400 font-semibold"
-                    >
+
+                       id="campo-poliza-de-seguro-aplicable">
                       <option value="">-- Seleccione una póliza vinculada a este inmueble --</option>
                       {(polizasDelInmueble.length > 0 ? polizasDelInmueble : polizas).map((pol) => (
                         <option key={pol.id} value={pol.id}>
@@ -1545,7 +1558,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                 {responsabilidad === 'PROFESIONAL' && (
                   <div className="p-4 bg-teal-50/60 border border-teal-200 rounded-xl space-y-3">
-                    <label className="block text-xs font-bold text-teal-950 uppercase tracking-wider">
+                    <label htmlFor="campo-profesional-responsable-garantia-de-obra" className="block text-xs font-bold text-teal-950 uppercase tracking-wider">
                       Profesional Responsable (Garantía de Obra / Subsanación)
                     </label>
                     <select
@@ -1553,7 +1566,8 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       value={responsabilidadProfesionalId}
                       onChange={(e) => setResponsabilidadProfesionalId(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-teal-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-400 font-semibold"
-                    >
+
+                       id="campo-profesional-responsable-garantia-de-obra">
                       <option value="">-- Seleccione el profesional responsable --</option>
                       {profesionales.map((prof) => (
                         <option key={prof.id} value={prof.id}>
@@ -1592,7 +1606,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                 {/* Motivo sintético de la decisión */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-motivo-sintetico-de-la-decision" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     Motivo Sintético de la Decisión
                   </label>
                   <input
@@ -1602,12 +1616,13 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                     onChange={(e) => setResponsabilidadMotivo(e.target.value)}
                     placeholder="ej. Rotura fortuita de instalación fija por fatiga de material según Art. 21.1 LAU"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 outline-none font-medium"
-                  />
+
+                     id="campo-motivo-sintetico-de-la-decision"/>
                 </div>
 
                 {/* Justificación jurídica / técnica y observaciones */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-observaciones-y-justificacion-detallada" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     Observaciones y Justificación Detallada
                   </label>
                   <textarea
@@ -1617,7 +1632,8 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                     onChange={(e) => setResponsabilidadNotas(e.target.value)}
                     placeholder="Indique los antecedentes, acuerdo con las partes, informe del técnico o fundamentos aplicables..."
                     className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-                  />
+
+                     id="campo-observaciones-y-justificacion-detallada"/>
                 </div>
 
                 {/* Botón de guardado y confirmación */}
@@ -1843,14 +1859,15 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label htmlFor="campo-profesional-empresa-asignada" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                       Profesional / Empresa Asignada
                     </label>
                     <select
                       value={profesionalId}
                       onChange={(e) => setProfesionalId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-                    >
+
+                       id="campo-profesional-empresa-asignada">
                       <option value="">Sin profesional asignado</option>
                       {candidatosCompatibles.map((res) => {
                         const prof = res.profesional;
@@ -1871,14 +1888,15 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label htmlFor="campo-estado-de-la-reparacion" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                       Estado de la Reparación
                     </label>
                     <select
                       value={estadoTrabajo}
                       onChange={(e) => setEstadoTrabajo(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 outline-none font-semibold"
-                    >
+
+                       id="campo-estado-de-la-reparacion">
                       <option value="ASIGNADO">Asignado</option>
                       <option value="PRESUPUESTADO">Presupuestado</option>
                       <option value="ACEPTADO">Aceptado</option>
@@ -1892,7 +1910,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                 {/* Importes y Facturación */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label htmlFor="campo-presupuesto" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                       Presupuesto (€)
                     </label>
                     <input
@@ -1903,11 +1921,13 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       onChange={(e) => setPresupuestoEstimado(e.target.value)}
                       placeholder="Ej: 150"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 outline-none"
-                    />
+
+                      inputMode="decimal"
+                       id="campo-presupuesto"/>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label htmlFor="campo-coste-real-factura" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                       Coste Real Factura (€)
                     </label>
                     <input
@@ -1918,11 +1938,13 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       onChange={(e) => setCosteReal(e.target.value)}
                       placeholder="Ej: 145.20"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 outline-none"
-                    />
+
+                      inputMode="decimal"
+                       id="campo-coste-real-factura"/>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label htmlFor="campo-no-de-factura" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                       Nº de Factura
                     </label>
                     <input
@@ -1931,7 +1953,8 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                       onChange={(e) => setFacturaNumero(e.target.value)}
                       placeholder="Ej: FAC-2025/104"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-900 outline-none"
-                    />
+
+                       id="campo-no-de-factura"/>
                   </div>
                 </div>
               </div>
@@ -2073,6 +2096,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
                 className="max-w-full max-h-[90vh] object-contain rounded-lg"
               />
               <button
+                aria-label="Cerrar"
                 onClick={() => setSelectedPhotoUrl(null)}
                 className="absolute top-2 right-2 p-2 bg-black/60 text-white rounded-full hover:bg-black"
               >

@@ -298,6 +298,7 @@ export const GestionImagenesModal: React.FC<GestionImagenesModalProps> = ({
               {currentCount} de {maxLimit} imágenes
             </span>
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
             >
@@ -315,7 +316,8 @@ export const GestionImagenesModal: React.FC<GestionImagenesModalProps> = ({
                 <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
                 <span>{errorMessage}</span>
               </div>
-              <button onClick={() => setErrorMessage(null)} className="text-rose-600 hover:text-rose-800">
+              <button
+                aria-label="Cerrar" onClick={() => setErrorMessage(null)} className="text-rose-600 hover:text-rose-800">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -327,7 +329,8 @@ export const GestionImagenesModal: React.FC<GestionImagenesModalProps> = ({
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <span>{successMessage}</span>
               </div>
-              <button onClick={() => setSuccessMessage(null)} className="text-emerald-600 hover:text-emerald-800">
+              <button
+                aria-label="Cerrar" onClick={() => setSuccessMessage(null)} className="text-emerald-600 hover:text-emerald-800">
                 <X className="w-4 h-4" />
               </button>
             </div>

@@ -61,6 +61,8 @@ export const PortalIncidencias: React.FC<Props> = ({ usuario, contrato, inmueble
       {vms.map((vm) => (
         <article key={vm.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <button
+            type="button"
+            aria-expanded={expandida === vm.id}
             onClick={() => setExpandida(expandida === vm.id ? null : vm.id)}
             className="w-full p-4 text-left cursor-pointer"
           >
@@ -285,43 +287,47 @@ function NuevaIncidenciaModal({
 
         {error && <p className="mb-3 p-2.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium">{error}</p>}
 
-        <label className="block text-xs font-bold text-slate-600 mb-1">Título *</label>
+        <label htmlFor="campo-titulo" className="block text-xs font-bold text-slate-600 mb-1">Título *</label>
         <input
           value={titulo}
           onChange={(e) => setTitulo(e.target.value)}
           placeholder="Ej. Fuga bajo el fregadero"
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3"
-        />
 
-        <label className="block text-xs font-bold text-slate-600 mb-1">Descripción * (mínimo 10 caracteres)</label>
+           id="campo-titulo"/>
+
+        <label htmlFor="campo-descripcion-minimo-10-caracteres" className="block text-xs font-bold text-slate-600 mb-1">Descripción * (mínimo 10 caracteres)</label>
         <textarea
           value={descripcion}
           onChange={(e) => setDescripcion(e.target.value)}
           rows={4}
           placeholder="Describe qué ocurre, dónde y desde cuándo…"
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3"
-        />
+
+           id="campo-descripcion-minimo-10-caracteres"/>
 
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Categoría</label>
+            <label htmlFor="campo-categoria" className="block text-xs font-bold text-slate-600 mb-1">Categoría</label>
             <select
               value={categoria}
               onChange={(e) => setCategoria(e.target.value as CategoriaIncidencia)}
               className="w-full px-2 py-2.5 text-sm border border-slate-200 rounded-xl bg-white"
-            >
+
+               id="campo-categoria">
               {CATEGORIAS.map((c) => (
                 <option key={c} value={c}>{c.charAt(0) + c.slice(1).toLowerCase()}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Prioridad</label>
+            <label htmlFor="campo-prioridad" className="block text-xs font-bold text-slate-600 mb-1">Prioridad</label>
             <select
               value={prioridad}
               onChange={(e) => setPrioridad(e.target.value as PrioridadIncidencia)}
               className="w-full px-2 py-2.5 text-sm border border-slate-200 rounded-xl bg-white"
-            >
+
+               id="campo-prioridad">
               <option value="NORMAL">Normal</option>
               <option value="ALTA">Alta</option>
               <option value="URGENTE">Urgente</option>

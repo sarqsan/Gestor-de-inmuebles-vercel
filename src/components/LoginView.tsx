@@ -289,7 +289,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label htmlFor="campo-confirmar-contrasena" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                   Confirmar Contraseña
                 </label>
                 <input
@@ -299,7 +299,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
                   onChange={(e) => setAdminSetupConfirm(e.target.value)}
                   placeholder="Repite la contraseña"
                   className="block w-full px-3.5 py-2.5 bg-slate-950/70 border border-slate-700 rounded-xl text-white text-sm focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-                />
+
+                   id="campo-confirmar-contrasena"/>
               </div>
 
               <div className="pt-2 flex flex-col gap-2">
@@ -334,7 +335,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label htmlFor="campo-token-o-enlace-de-invitacion" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                   Token o Enlace de Invitación
                 </label>
                 <input
@@ -344,7 +345,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
                   onChange={(e) => setInvitationTokenInput(e.target.value)}
                   placeholder="Ej. reg_prop_valle_2026 o URL completa"
                   className="block w-full px-3.5 py-2.5 bg-slate-950/70 border border-slate-700 rounded-xl text-white text-sm focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
-                />
+
+                   id="campo-token-o-enlace-de-invitacion"/>
               </div>
 
               <div className="pt-2 flex flex-col gap-2">
@@ -384,7 +386,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               ) : (
                 <form onSubmit={handleRecuperacionSubmit} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    <label htmlFor="campo-correo-electronico" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                       Correo Electrónico
                     </label>
                     <input
@@ -394,7 +396,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
                       onChange={(e) => setRecuperacionEmail(e.target.value)}
                       placeholder="ejemplo@rentselect.com"
                       className="block w-full px-3.5 py-2.5 bg-slate-950/70 border border-slate-700 rounded-xl text-white text-sm focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                    />
+
+                       id="campo-correo-electronico"/>
                   </div>
                   <button
                     type="submit"

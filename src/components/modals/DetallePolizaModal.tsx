@@ -439,7 +439,8 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
               )}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg shrink-0">
+          <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -771,6 +772,7 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
                             <Sparkles className="w-4 h-4" />
                           </button>
                           <button
+                            aria-label="Eliminar"
                             onClick={() => handleDeleteDocumento(doc.id)}
                             className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg"
                           >

@@ -91,7 +91,12 @@ export const PortalSuministros: React.FC<Props> = ({ usuario, contrato, suminist
         const abierto = expandido === s.id;
         return (
           <article key={s.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <button onClick={() => setExpandido(abierto ? null : s.id)} className="w-full p-4 text-left cursor-pointer">
+            <button
+              type="button"
+              aria-expanded={abierto}
+              onClick={() => setExpandido(abierto ? null : s.id)}
+              className="w-full p-4 text-left cursor-pointer"
+            >
               <div className="flex items-center gap-3">
                 <span className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
                   {ICONO_TIPO[s.tipo] || ICONO_TIPO.OTRO}
@@ -356,7 +361,7 @@ function NuevaLecturaModal({
           </p>
         )}
 
-        <label className="block text-xs font-bold text-slate-600 mb-1">Valor del contador ({unidad}) *</label>
+        <label htmlFor="campo-valor-del-contador" className="block text-xs font-bold text-slate-600 mb-1">Valor del contador ({unidad}) *</label>
         <input
           type="number"
           inputMode="decimal"
@@ -366,16 +371,18 @@ function NuevaLecturaModal({
           onChange={(e) => setValor(e.target.value)}
           placeholder="Ej. 1234.5"
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3"
-        />
 
-        <label className="block text-xs font-bold text-slate-600 mb-1">Fecha de la lectura *</label>
+           id="campo-valor-del-contador"/>
+
+        <label htmlFor="campo-fecha-de-la-lectura" className="block text-xs font-bold text-slate-600 mb-1">Fecha de la lectura *</label>
         <input
           type="date"
           value={fecha}
           max={hoy}
           onChange={(e) => setFecha(e.target.value)}
           className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3"
-        />
+
+           id="campo-fecha-de-la-lectura"/>
 
         <label className="block text-xs font-bold text-slate-600 mb-1">Foto del contador (recomendada)</label>
         <label className="flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-bold text-slate-600 cursor-pointer mb-1">
@@ -491,20 +498,24 @@ function CambioTitularModal({
 
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">NIF/NIE</label>
-            <input value={nif} onChange={(e) => setNif(e.target.value)} placeholder="12345678Z" className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-nif-nie" className="block text-xs font-bold text-slate-600 mb-1">NIF/NIE</label>
+            <input value={nif} onChange={(e) => setNif(e.target.value)} placeholder="12345678Z" className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl"
+               id="campo-nif-nie"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Teléfono</label>
-            <input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="+34…" className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-telefono" className="block text-xs font-bold text-slate-600 mb-1">Teléfono</label>
+            <input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="+34…" className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl"
+               id="campo-telefono"/>
           </div>
         </div>
 
-        <label className="block text-xs font-bold text-slate-600 mb-1">Email</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="correo@ejemplo.com" className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3" />
+        <label htmlFor="campo-email" className="block text-xs font-bold text-slate-600 mb-1">Email</label>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="correo@ejemplo.com" className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3"
+           id="campo-email"/>
 
-        <label className="block text-xs font-bold text-slate-600 mb-1">Fecha de efecto *</label>
-        <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3" />
+        <label htmlFor="campo-fecha-de-efecto" className="block text-xs font-bold text-slate-600 mb-1">Fecha de efecto *</label>
+        <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl mb-3"
+           id="campo-fecha-de-efecto"/>
 
         <button
           onClick={guardar}

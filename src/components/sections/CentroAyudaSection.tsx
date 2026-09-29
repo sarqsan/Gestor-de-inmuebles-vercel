@@ -119,6 +119,7 @@ export const CentroAyudaSection: React.FC<CentroAyudaSectionProps> = ({ usuario,
             {modulos.length > 1 && (
               <div className="flex gap-1.5 flex-wrap" role="group" aria-label="Filtrar por módulo">
                 <button
+                  aria-current={modulo === 'TODOS' ? 'true' : undefined}
                   type="button"
                   onClick={() => setModulo('TODOS')}
                   aria-pressed={modulo === 'TODOS'}

@@ -139,7 +139,7 @@ export const BajaUsuarioConfirmacion: React.FC<BajaUsuarioConfirmacionProps> = (
         No se elimina ningún dato patrimonial.
       </p>
       <div>
-        <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+        <label htmlFor="campo-motivo-opcional" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
           Motivo (opcional)
         </label>
         <input
@@ -149,7 +149,8 @@ export const BajaUsuarioConfirmacion: React.FC<BajaUsuarioConfirmacionProps> = (
           placeholder="Ej. Fin de la relación contractual"
           data-testid="baja-motivo"
           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
-        />
+
+           id="campo-motivo-opcional"/>
       </div>
       {error && (
         <div

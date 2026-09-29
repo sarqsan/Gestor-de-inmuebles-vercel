@@ -25,6 +25,8 @@ import {
   Check,
 } from 'lucide-react';
 import { getTipoDocumentoLabel } from '../utils/formatters';
+import { propsInteraccion } from '../accesibilidad/interaccion';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface CrearSolicitudSeguroModalProps {
   candidato?: Candidato | null;
@@ -45,6 +47,10 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
   onClose,
   onCrearSolicitud,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Nuevo Expediente de Seguro de Impago'
+  );
   // Inmueble state
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string>(
     inmueble?.id || candidato?.inmuebleInteresId || inmueblesList[0]?.id || ''
@@ -242,7 +248,7 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={refDialogo} {...propsDialogo}
         className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto max-h-[94vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -262,6 +268,7 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
           >
@@ -280,12 +287,13 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-600 block mb-1">Seleccionar Inmueble:</label>
+                <label htmlFor="campo-seleccionar-inmueble" className="text-xs font-semibold text-slate-600 block mb-1">Seleccionar Inmueble:</label>
                 <select
                   value={selectedInmuebleId}
                   onChange={(e) => setSelectedInmuebleId(e.target.value)}
                   className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                >
+
+                   id="campo-seleccionar-inmueble">
                   {inmueblesList.map((inm) => (
                     <option key={inm.id} value={inm.id}>
                       {inm.titulo} ({inm.precio} €/mes) - {inm.ciudad}
@@ -295,13 +303,15 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-600 block mb-1">Renta Mensual Asegurable (€):</label>
+                <label htmlFor="campo-renta-mensual-asegurable" className="text-xs font-semibold text-slate-600 block mb-1">Renta Mensual Asegurable (€):</label>
                 <input
                   type="number"
                   value={rentaMensual}
                   onChange={(e) => setRentaMensual(Number(e.target.value))}
                   className="w-full px-3 py-2 text-xs font-black text-slate-900 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+
+                  inputMode="decimal"
+                   id="campo-renta-mensual-asegurable"/>
               </div>
             </div>
 
@@ -312,12 +322,13 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-600 block mb-1">Seleccionar Compañía / Garantía:</label>
+                <label htmlFor="campo-seleccionar-compania-garantia" className="text-xs font-semibold text-slate-600 block mb-1">Seleccionar Compañía / Garantía:</label>
                 <select
                   value={selectedAseguradoraId}
                   onChange={(e) => setSelectedAseguradoraId(e.target.value)}
                   className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                >
+
+                   id="campo-seleccionar-compania-garantia">
                   {aseguradoras.map((aseg) => {
                     const isSeag = aseg.id === 'seag' || aseg.nombre.toLowerCase().includes('seag');
                     return (
@@ -359,12 +370,13 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-1.5 bg-indigo-50/80 px-2 py-1 rounded-lg border border-indigo-200/70">
-                  <label className="text-[11px] font-bold text-indigo-900">Orden:</label>
+                  <label htmlFor="campo-orden" className="text-[11px] font-bold text-indigo-900">Orden:</label>
                   <select
                     value={numeroCandidatoInmueble}
                     onChange={(e) => setNumeroCandidatoInmueble(Number(e.target.value))}
                     className="px-1.5 py-0.5 text-xs font-black text-indigo-700 bg-white border border-indigo-200 rounded"
-                  >
+
+                     id="campo-orden">
                     <option value={1}>Candidato 1</option>
                     <option value={2}>Candidato 2</option>
                     <option value={3}>Candidato 3</option>
@@ -374,12 +386,13 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  <label className="text-xs font-semibold text-slate-600">Candidato base:</label>
+                  <label htmlFor="campo-candidato-base" className="text-xs font-semibold text-slate-600">Candidato base:</label>
                   <select
                     value={selectedCandidatoId}
                     onChange={(e) => setSelectedCandidatoId(e.target.value)}
                     className="px-2.5 py-1 text-xs font-bold border border-slate-300 rounded-lg bg-white"
-                  >
+
+                     id="campo-candidato-base">
                     {candidatosList.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.nombre} ({c.ingresosNetos} €)
@@ -400,58 +413,65 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Nombre y Apellidos:</label>
+                  <label htmlFor="campo-nombre-y-apellidos" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Nombre y Apellidos:</label>
                   <input
                     type="text"
                     value={titular1.nombre}
                     onChange={(e) => setTitular1({ ...titular1, nombre: e.target.value })}
                     className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg"
-                  />
+
+                     id="campo-nombre-y-apellidos"/>
                 </div>
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">DNI / NIE:</label>
+                  <label htmlFor="campo-dni-nie" className="text-[11px] font-semibold text-slate-500 block mb-0.5">DNI / NIE:</label>
                   <input
                     type="text"
                     value={titular1.dniNie || ''}
                     onChange={(e) => setTitular1({ ...titular1, dniNie: e.target.value })}
                     className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg"
-                  />
+
+                     id="campo-dni-nie"/>
                 </div>
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Ingresos Netos Mensuales (€):</label>
+                  <label htmlFor="campo-ingresos-netos-mensuales" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Ingresos Netos Mensuales (€):</label>
                   <input
                     type="number"
                     value={titular1.ingresosNetosMensuales}
                     onChange={(e) => setTitular1({ ...titular1, ingresosNetosMensuales: Number(e.target.value) })}
                     className="w-full px-2.5 py-1.5 text-xs font-black text-slate-900 border border-slate-300 rounded-lg"
-                  />
+
+                    inputMode="decimal"
+                     id="campo-ingresos-netos-mensuales"/>
                 </div>
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Empresa:</label>
+                  <label htmlFor="campo-empresa" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Empresa:</label>
                   <input
                     type="text"
                     value={titular1.empresa || ''}
                     onChange={(e) => setTitular1({ ...titular1, empresa: e.target.value })}
                     className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg"
-                  />
+
+                     id="campo-empresa"/>
                 </div>
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Tipo de Contrato:</label>
+                  <label htmlFor="campo-tipo-de-contrato" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Tipo de Contrato:</label>
                   <input
                     type="text"
                     value={titular1.tipoContrato || ''}
                     onChange={(e) => setTitular1({ ...titular1, tipoContrato: e.target.value })}
                     className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg"
-                  />
+
+                     id="campo-tipo-de-contrato"/>
                 </div>
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Antigüedad:</label>
+                  <label htmlFor="campo-antiguedad" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Antigüedad:</label>
                   <input
                     type="text"
                     value={titular1.antiguedadLaboral || ''}
                     onChange={(e) => setTitular1({ ...titular1, antiguedadLaboral: e.target.value })}
                     className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg"
-                  />
+
+                     id="campo-antiguedad"/>
                 </div>
               </div>
             </div>
@@ -481,33 +501,37 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Nombre y Apellidos:</label>
+                    <label htmlFor="campo-nombre-y-apellidos-2" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Nombre y Apellidos:</label>
                     <input
                       type="text"
                       value={titular2.nombre}
                       onChange={(e) => setTitular2({ ...titular2, nombre: e.target.value })}
                       placeholder="Nombre del cotitular"
                       className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white"
-                    />
+
+                       id="campo-nombre-y-apellidos-2"/>
                   </div>
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">DNI / NIE:</label>
+                    <label htmlFor="campo-dni-nie-2" className="text-[11px] font-semibold text-slate-500 block mb-0.5">DNI / NIE:</label>
                     <input
                       type="text"
                       value={titular2.dniNie || ''}
                       onChange={(e) => setTitular2({ ...titular2, dniNie: e.target.value })}
                       placeholder="12345678Z"
                       className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white"
-                    />
+
+                       id="campo-dni-nie-2"/>
                   </div>
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Ingresos Netos Mensuales (€):</label>
+                    <label htmlFor="campo-ingresos-netos-mensuales-2" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Ingresos Netos Mensuales (€):</label>
                     <input
                       type="number"
                       value={titular2.ingresosNetosMensuales}
                       onChange={(e) => setTitular2({ ...titular2, ingresosNetosMensuales: Number(e.target.value) })}
                       className="w-full px-2.5 py-1.5 text-xs font-black text-slate-900 border border-slate-300 rounded-lg bg-white"
-                    />
+
+                      inputMode="decimal"
+                       id="campo-ingresos-netos-mensuales-2"/>
                   </div>
                 </div>
               </div>
@@ -537,33 +561,37 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Nombre Avalista:</label>
+                    <label htmlFor="campo-nombre-avalista" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Nombre Avalista:</label>
                     <input
                       type="text"
                       value={avalista.nombre}
                       onChange={(e) => setAvalista({ ...avalista, nombre: e.target.value })}
                       placeholder="Nombre del avalista"
                       className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white"
-                    />
+
+                       id="campo-nombre-avalista"/>
                   </div>
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Parentesco / Relación:</label>
+                    <label htmlFor="campo-parentesco-relacion" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Parentesco / Relación:</label>
                     <input
                       type="text"
                       value={avalista.relacion || ''}
                       onChange={(e) => setAvalista({ ...avalista, relacion: e.target.value })}
                       placeholder="Padre / Madre / Familiar"
                       className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
-                    />
+
+                       id="campo-parentesco-relacion"/>
                   </div>
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-500 block mb-0.5">Ingresos Avalista (€):</label>
+                    <label htmlFor="campo-ingresos-avalista" className="text-[11px] font-semibold text-slate-500 block mb-0.5">Ingresos Avalista (€):</label>
                     <input
                       type="number"
                       value={avalista.ingresosNetosMensuales || 0}
                       onChange={(e) => setAvalista({ ...avalista, ingresosNetosMensuales: Number(e.target.value) })}
                       className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white"
-                    />
+
+                      inputMode="decimal"
+                       id="campo-ingresos-avalista"/>
                   </div>
                 </div>
               </div>
@@ -623,6 +651,7 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {documentosAdjuntos.map((doc) => (
                 <div
+                  {...propsInteraccion(() => handleToggleDocVerificado(doc.id))}
                   key={doc.id}
                   onClick={() => handleToggleDocVerificado(doc.id)}
                   className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${

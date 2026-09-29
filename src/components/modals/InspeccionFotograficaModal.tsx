@@ -306,7 +306,8 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
             <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${ESTADOS_RECOMERCIALIZACION[estado].color}`}>
               {ESTADOS_RECOMERCIALIZACION[estado].label}
             </span>
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
+            <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -592,6 +593,7 @@ export const InspeccionFotograficaModal: React.FC<Props> = ({
           onClick={() => setFotoZoom(null)}
         >
           <button
+            aria-label="Cerrar"
             onClick={() => setFotoZoom(null)}
             className="absolute top-5 right-5 p-2 text-white/80 hover:text-white z-10"
           >

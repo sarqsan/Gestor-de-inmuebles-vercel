@@ -61,6 +61,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const panelId = useId();
 
   const perfil = perfilNavegacionDe(currentUser?.tipoPerfil);
@@ -97,6 +99,30 @@ export const MobileNav: React.FC<MobileNavProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // BLOQUE 10 · UX-6 §12: el menú móvil se cierra con Escape y el foco vuelve al botón
+  // que lo abrió; al abrirse, el foco entra en el menú (antes sólo funcionaba con ratón).
+  useEffect(() => {
+    if (!isOpen) return;
+    const alPulsar = (evento: KeyboardEvent) => {
+      if (evento.key !== 'Escape') return;
+      evento.stopPropagation();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('keydown', alPulsar);
+    return () => document.removeEventListener('keydown', alPulsar);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const destino =
+      panel.querySelector<HTMLButtonElement>('button[aria-current="page"]') ||
+      panel.querySelector<HTMLButtonElement>('button');
+    destino?.focus();
+  }, [isOpen]);
+
   const handleSelect = (sectionId: SectionType) => {
     onSelectSection(sectionId);
     setIsOpen(false);
@@ -108,6 +134,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         {/* Brand & Section Dropdown Selector */}
         <div className="relative flex-1">
           <button
+            ref={triggerRef}
             type="button"
             aria-expanded={isOpen}
             aria-controls={panelId}
@@ -135,13 +162,13 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 
           {/* Top Dropdown Menu Overlay */}
           {isOpen && (
-            <div className="absolute top-full left-0 mt-2 w-72 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-50 animate-fadeIn">
+            <div className="absolute top-full left-0 mt-2 w-[min(88vw,20rem)] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-50 animate-fadeIn">
               <div className="p-2.5 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between text-xs text-slate-400 font-semibold uppercase tracking-wider">
                 <span>Navegación</span>
                 <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded-sm">{items.length} módulos</span>
               </div>
 
-              <nav id={panelId} aria-label="Navegación del ERP" className="p-1.5 max-h-[60vh] overflow-y-auto space-y-3">
+              <nav ref={panelRef} id={panelId} aria-label="Navegación del ERP" className="p-1.5 max-h-[60vh] overflow-y-auto space-y-3">
                 {grupos.map((grupo) => (
                   <div key={grupo.id} className="space-y-1">
                     <h3 className="px-2.5 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">

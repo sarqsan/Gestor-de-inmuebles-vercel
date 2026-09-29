@@ -545,12 +545,13 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
           {/* Año */}
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Año</label>
+            <label htmlFor="campo-ano" className="block font-semibold text-slate-600 mb-1">Año</label>
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
-            >
+
+               id="campo-ano">
               <option value={0}>Todos los años</option>
               {availableYears.map((y) => (
                 <option key={y} value={y}>
@@ -562,12 +563,13 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
 
           {/* Mes */}
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Mes</label>
+            <label htmlFor="campo-mes" className="block font-semibold text-slate-600 mb-1">Mes</label>
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value === 'TODOS' ? 'TODOS' : Number(e.target.value))}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
-            >
+
+               id="campo-mes">
               <option value="TODOS">Todos los meses</option>
               {MESES_NOMBRES.map((nombre, idx) => (
                 <option key={idx} value={idx + 1}>
@@ -579,12 +581,13 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
 
           {/* Inmueble */}
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Inmueble</label>
+            <label htmlFor="campo-inmueble" className="block font-semibold text-slate-600 mb-1">Inmueble</label>
             <select
               value={selectedInmuebleId}
               onChange={(e) => setSelectedInmuebleId(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 truncate"
-            >
+
+               id="campo-inmueble">
               <option value="TODOS">Todos los inmuebles</option>
               {inmuebles.map((i) => (
                 <option key={i.id} value={i.id}>
@@ -596,12 +599,13 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
 
           {/* Estado */}
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Estado del Pago</label>
+            <label htmlFor="campo-estado-del-pago" className="block font-semibold text-slate-600 mb-1">Estado del Pago</label>
             <select
               value={selectedEstado}
               onChange={(e) => setSelectedEstado(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
-            >
+
+               id="campo-estado-del-pago">
               <option value="TODOS">Todos los estados</option>
               <option value="PENDIENTE">Pendientes</option>
               <option value="RECIBIDO">Recibidos</option>
@@ -852,6 +856,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                 <h3 className="font-bold text-base">Registrar Cobro de Alquiler</h3>
               </div>
               <button
+                aria-label="Cerrar"
                 type="button"
                 onClick={() => setCobroToEdit(null)}
                 className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
@@ -892,10 +897,11 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                     value={inputImporte}
                     onChange={(e) => setInputImporte(Number(e.target.value))}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
-                  />
+
+                    inputMode="decimal"/>
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label htmlFor="campo-fecha-de-recepcion" className="block font-semibold text-slate-700 mb-1">
                     Fecha de Recepción *
                   </label>
                   <input
@@ -904,19 +910,21 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                     value={inputFechaPago}
                     onChange={(e) => setInputFechaPago(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500"
-                  />
+
+                     id="campo-fecha-de-recepcion"/>
                 </div>
               </div>
 
               {/* Método de Pago y Estado */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Método de Pago</label>
+                  <label htmlFor="campo-metodo-de-pago" className="block font-semibold text-slate-700 mb-1">Método de Pago</label>
                   <select
                     value={inputMetodoPago}
                     onChange={(e) => setInputMetodoPago(e.target.value as any)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900"
-                  >
+
+                     id="campo-metodo-de-pago">
                     <option value="transferencia">Transferencia Bancaria</option>
                     <option value="domiciliacion">Domiciliación SEPA</option>
                     <option value="bizum">Bizum</option>
@@ -925,12 +933,13 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Estado</label>
+                  <label htmlFor="campo-estado" className="block font-semibold text-slate-700 mb-1">Estado</label>
                   <select
                     value={inputEstado}
                     onChange={(e) => setInputEstado(e.target.value as EstadoCobroAlquiler)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900"
-                  >
+
+                     id="campo-estado">
                     <option value="RECIBIDO">RECIBIDO</option>
                     <option value="VERIFICADO">VERIFICADO</option>
                     <option value="PENDIENTE">PENDIENTE</option>
@@ -942,7 +951,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
 
               {/* Referencia bancaria opcional */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
+                <label htmlFor="campo-referencia-bancaria-justificante-ref-opc" className="block font-semibold text-slate-700 mb-1">
                   Referencia Bancaria / Justificante Ref (Opcional)
                 </label>
                 <input
@@ -951,7 +960,8 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                   value={inputReferencia}
                   onChange={(e) => setInputReferencia(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
-                />
+
+                   id="campo-referencia-bancaria-justificante-ref-opc"/>
               </div>
 
               {/* Justificante Documental Independiente */}
@@ -1071,6 +1081,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                 <h3 className="font-bold text-base">Registrar Incidencia de Cobro</h3>
               </div>
               <button
+                aria-label="Cerrar"
                 type="button"
                 onClick={() => setCobroParaIncidencia(null)}
                 className="p-1 text-amber-200 hover:text-white rounded-lg transition-colors"
@@ -1091,7 +1102,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
+                <label htmlFor="campo-motivo-de-la-incidencia-retraso" className="block font-semibold text-slate-700 mb-1">
                   Motivo de la Incidencia / Retraso *
                 </label>
                 <textarea
@@ -1101,7 +1112,8 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                   value={motivoIncidencia}
                   onChange={(e) => setMotivoIncidencia(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
-                />
+
+                   id="campo-motivo-de-la-incidencia-retraso"/>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
@@ -1135,6 +1147,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                 <h3 className="font-bold text-base">Trazabilidad del Periodo</h3>
               </div>
               <button
+                aria-label="Cerrar"
                 type="button"
                 onClick={() => setCobroParaTrazabilidad(null)}
                 className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
@@ -1228,6 +1241,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                 </div>
               </div>
               <button
+                aria-label="Cerrar"
                 type="button"
                 onClick={() => setShowFiscalModal(false)}
                 className="p-1 text-indigo-300 hover:text-white rounded-lg hover:bg-indigo-800 transition-colors"
@@ -1240,14 +1254,15 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
               {/* Selectores de Inmueble y Año */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl">
                 <div>
-                  <label className="block font-bold text-indigo-950 mb-1">
+                  <label htmlFor="campo-seleccionar-inmueble" className="block font-bold text-indigo-950 mb-1">
                     Seleccionar Inmueble
                   </label>
                   <select
                     value={fiscalInmuebleId}
                     onChange={(e) => setFiscalInmuebleId(e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-900"
-                  >
+
+                     id="campo-seleccionar-inmueble">
                     {inmuebles.map((i) => (
                       <option key={i.id} value={i.id}>
                         {i.direccion} ({i.ciudad})
@@ -1256,12 +1271,13 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block font-bold text-indigo-950 mb-1">Año Fiscal</label>
+                  <label htmlFor="campo-ano-fiscal" className="block font-bold text-indigo-950 mb-1">Año Fiscal</label>
                   <select
                     value={fiscalYear}
                     onChange={(e) => setFiscalYear(Number(e.target.value))}
                     className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-900"
-                  >
+
+                     id="campo-ano-fiscal">
                     {availableYears.map((y) => (
                       <option key={y} value={y}>
                         Ejercicio Fiscal {y}

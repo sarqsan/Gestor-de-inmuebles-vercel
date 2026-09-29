@@ -195,16 +195,16 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
       await saveActaFirestore(actaActualizada);
       // Generar OTPs para cada firma — transporte PENDIENTE, código solo en campo temporal seguro, no en logs producción
       for (const firma of actaActualizada.firmas) {
-        const { otp } = await crearOtpActa({ 
-          actaId: acta.id, 
-          firmaId: firma.id, 
-          ownerId: acta.ownerId, 
+        const { otp } = await crearOtpActa({
+          actaId: acta.id,
+          firmaId: firma.id,
+          ownerId: acta.ownerId,
           propertyId: acta.propertyId,
           contractId: acta.contractId,
           versionActa: acta.version,
-          solicitante: currentUser?.nombre, 
+          solicitante: currentUser?.nombre,
           solicitanteId: currentUser?.id,
-          canal: 'PENDIENTE_PROVEEDOR' 
+          canal: 'PENDIENTE_PROVEEDOR'
         });
         await saveOtpActaFirestore(otp);
         // NO console.log del código en producción. El código se entrega solo vía campo temporal controlado en UI dev/manual si canal MANUAL, y se limpia tras uso.
@@ -493,8 +493,10 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
                     <td className="py-2 px-3">{acta.evidenciaIds.length}</td>
                     <td className="py-2 px-3"><span className={`px-2 py-0.5 rounded-full text-[10px] border ${acta.estadoFirma==='FIRMADA'?'bg-emerald-50 text-emerald-700 border-emerald-200':'bg-amber-50 text-amber-700 border-amber-200'}`}>{acta.estadoFirma}</span></td>
                     <td className="py-2 px-3 text-right flex gap-1 justify-end">
-                      <button onClick={()=>setSelectedActa(acta)} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg"><Eye className="w-3.5 h-3.5" /></button>
-                      <button onClick={()=>handleGenerarPdf(acta)} className="p-1.5 bg-violet-50 hover:bg-violet-100 rounded-lg"><Download className="w-3.5 h-3.5 text-violet-600" /></button>
+                      <button
+                        aria-label="Ver detalle" onClick={()=>setSelectedActa(acta)} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg"><Eye className="w-3.5 h-3.5" /></button>
+                      <button
+                        aria-label="Descargar" onClick={()=>handleGenerarPdf(acta)} className="p-1.5 bg-violet-50 hover:bg-violet-100 rounded-lg"><Download className="w-3.5 h-3.5 text-violet-600" /></button>
                     </td>
                   </tr>
                 );
@@ -512,7 +514,8 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
               <h3 className="font-bold flex items-center gap-2"><FileText className="w-5 h-5 text-violet-600" />Acta {selectedActa.tipo} — {selectedActa.id} v{selectedActa.version}</h3>
               <p className="text-xs text-slate-500">Inmueble {selectedActa.propertyId} | Contrato {selectedActa.contractId || '—'} | Fecha acto {selectedActa.fechaActo} {selectedActa.horaActo||''} | Creada {selectedActa.fechaCreacion.slice(0,19)}</p>
             </div>
-            <button onClick={()=>setSelectedActa(null)} className="p-1.5 bg-slate-100 rounded-lg"><Filter className="w-4 h-4" /></button>
+            <button
+              aria-label="Filtrar" onClick={()=>setSelectedActa(null)} className="p-1.5 bg-slate-100 rounded-lg"><Filter className="w-4 h-4" /></button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
@@ -575,8 +578,9 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
                 {evidencias.filter(e=>e.actaId===selectedActa.id).map(ev=><div key={ev.id} className="p-2 bg-slate-50 border rounded-lg flex justify-between"><span>{ev.tipo} {ev.nombreArchivo} {ev.descripcion||''}</span><a href={ev.downloadURL} target="_blank" className="text-blue-600 underline">Ver</a></div>)}
               </div>
               <div className="mt-2">
-                <label className="block font-bold mb-1">Subir evidencia (imagen)</label>
-                <input type="file" accept="image/*,application/pdf" onChange={e=>{ const f=e.target.files?.[0]; if(f) handleUploadEvidencia(selectedActa, f); }} className="w-full px-2 py-1 bg-slate-50 border rounded" />
+                <label htmlFor="campo-subir-evidencia-imagen" className="block font-bold mb-1">Subir evidencia (imagen)</label>
+                <input type="file" accept="image/*,application/pdf" onChange={e=>{ const f=e.target.files?.[0]; if(f) handleUploadEvidencia(selectedActa, f); }} className="w-full px-2 py-1 bg-slate-50 border rounded"
+                   id="campo-subir-evidencia-imagen"/>
               </div>
             </div>
             <div className="p-3 bg-white border rounded-xl">
@@ -632,7 +636,8 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
           <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col border border-slate-200">
             <div className="p-4 bg-violet-900 text-white flex items-center justify-between">
               <h3 className="font-bold text-sm">Crear Acta {tipoCrear} — 14 pasos flujo completo</h3>
-              <button onClick={()=>{setShowCrearModal(false); resetForm();}} className="p-1 rounded-lg bg-white/10 hover:bg-white/20"><Filter className="w-4 h-4" /></button>
+              <button
+                aria-label="Filtrar" onClick={()=>{setShowCrearModal(false); resetForm();}} className="p-1 rounded-lg bg-white/10 hover:bg-white/20"><Filter className="w-4 h-4" /></button>
             </div>
             <div className="p-4 overflow-y-auto flex-1 space-y-4 text-xs">
               <div className="flex gap-2 text-[11px]">
@@ -643,11 +648,16 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
                 <div className="space-y-3">
                   <h4 className="font-bold">Paso 1 — Seleccionar inmueble/contrato + crear acta base</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div><label className="block font-semibold">Inmueble *</label><select value={formInmuebleId} onChange={e=>setFormInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl">{['', ...inmuebles.map(i=>i.id)].map(id=>{ const inm=inmuebles.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${inm?.direccion || id} — ${inm?.ciudad||''}` : 'Selecciona inmueble'}</option>; })}</select></div>
-                    <div><label className="block font-semibold">Contrato (opcional)</label><select value={formContratoId} onChange={e=>setFormContratoId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl">{['', ...contratos.filter(c=>!formInmuebleId || c.inmuebleId===formInmuebleId).map(c=>c.id)].map(id=>{ const c=contratos.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${c?.candidatoNombre || id} — ${c?.inmuebleNombre || ''}` : 'Sin contrato'}</option>; })}</select></div>
-                    {tipoCrear==='SALIDA' && <div className="md:col-span-2"><label className="block font-semibold">Acta ENTRADA vinculada * (para SALIDA)</label><select value={formActaEntradaId} onChange={e=>setFormActaEntradaId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl">{['', ...actas.filter(a=>a.tipo==='ENTRADA' && (!formInmuebleId || a.propertyId===formInmuebleId)).map(a=>a.id)].map(id=>{ const a=actas.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${a?.id.slice(0,8)} — ${a?.fechaActo} — ${a?.propertyId.slice(0,8)}` : 'Selecciona acta entrada'}</option>; })}</select></div>}
-                    <div><label className="block font-semibold">Fecha acto *</label><input type="date" value={formFechaActo} onChange={e=>setFormFechaActo(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl" /></div>
-                    <div><label className="block font-semibold">Hora acto</label><input type="time" value={formHoraActo} onChange={e=>setFormHoraActo(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl" /></div>
+                    <div><label htmlFor="campo-inmueble" className="block font-semibold">Inmueble *</label><select value={formInmuebleId} onChange={e=>setFormInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+                                                                                     id="campo-inmueble">{['', ...inmuebles.map(i=>i.id)].map(id=>{ const inm=inmuebles.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${inm?.direccion || id} — ${inm?.ciudad||''}` : 'Selecciona inmueble'}</option>; })}</select></div>
+                    <div><label htmlFor="campo-contrato-opcional" className="block font-semibold">Contrato (opcional)</label><select value={formContratoId} onChange={e=>setFormContratoId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+                                                                                              id="campo-contrato-opcional">{['', ...contratos.filter(c=>!formInmuebleId || c.inmuebleId===formInmuebleId).map(c=>c.id)].map(id=>{ const c=contratos.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${c?.candidatoNombre || id} — ${c?.inmuebleNombre || ''}` : 'Sin contrato'}</option>; })}</select></div>
+                    {tipoCrear==='SALIDA' && <div className="md:col-span-2"><label htmlFor="campo-acta-entrada-vinculada-para-salida" className="block font-semibold">Acta ENTRADA vinculada * (para SALIDA)</label><select value={formActaEntradaId} onChange={e=>setFormActaEntradaId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+                                                                                                                                                                    id="campo-acta-entrada-vinculada-para-salida">{['', ...actas.filter(a=>a.tipo==='ENTRADA' && (!formInmuebleId || a.propertyId===formInmuebleId)).map(a=>a.id)].map(id=>{ const a=actas.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${a?.id.slice(0,8)} — ${a?.fechaActo} — ${a?.propertyId.slice(0,8)}` : 'Selecciona acta entrada'}</option>; })}</select></div>}
+                    <div><label htmlFor="campo-fecha-acto" className="block font-semibold">Fecha acto *</label><input type="date" value={formFechaActo} onChange={e=>setFormFechaActo(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+                                                                                       id="campo-fecha-acto"/></div>
+                    <div><label htmlFor="campo-hora-acto" className="block font-semibold">Hora acto</label><input type="time" value={formHoraActo} onChange={e=>setFormHoraActo(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+                                                                                    id="campo-hora-acto"/></div>
                   </div>
                   <button onClick={()=>setPaso(2)} className="px-4 py-2 bg-violet-600 text-white rounded-xl font-bold">Siguiente — Participantes</button>
                 </div>
@@ -683,7 +693,8 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
               {paso===5 && (
                 <div className="space-y-3">
                   <h4 className="font-bold">Paso 5 — Observaciones, revisión, PENDIENTE_FIRMA, firma, trazabilidad, PDF</h4>
-                  <div><label className="block font-semibold">Observaciones generales</label><textarea value={formObservaciones} onChange={e=>setFormObservaciones(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl h-20" /></div>
+                  <div><label htmlFor="campo-observaciones-generales" className="block font-semibold">Observaciones generales</label><textarea value={formObservaciones} onChange={e=>setFormObservaciones(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl h-20"
+                                                                                                id="campo-observaciones-generales"/></div>
                   <div className="p-3 bg-slate-900 text-white rounded-xl text-[11px] space-y-1">
                     <div>Resumen: Inmueble {formInmuebleId} | Contrato {formContratoId || '—'} | Fecha {formFechaActo} {formHoraActo} | Participantes {formParticipantes.length} | Inventario {formInventario.length} | Contadores {formContadores.length}</div>
                     <div>Flujo acta ENTRADA: seleccionar inmueble/contrato → crear → fecha/hora → participantes → inventario → estados → observaciones → contadores → evidencias (tras crear) → incidencias (tras crear) → revisión → PENDIENTE_FIRMA → firma → trazabilidad → PDF</div>
@@ -729,7 +740,8 @@ const AddInventarioForm: React.FC<{ onAdd: (e: ElementoActaInventario) => void }
       <select value={categoria} onChange={e=>setCategoria(e.target.value)} className="px-2 py-1 bg-white border rounded">{CATEGORIAS_ELEMENTO_ACTA.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select>
       <input placeholder="Elemento *" value={elemento} onChange={e=>setElemento(e.target.value)} className="px-2 py-1 bg-white border rounded" />
       <select value={estado} onChange={e=>setEstado(e.target.value)} className="px-2 py-1 bg-white border rounded">{ESTADOS_ELEMENTO_ACTA.map(es=><option key={es.id} value={es.id}>{es.label}</option>)}</select>
-      <input type="number" min={1} value={cantidad} onChange={e=>setCantidad(parseInt(e.target.value)||1)} className="px-2 py-1 bg-white border rounded" />
+      <input type="number" min={1} value={cantidad} onChange={e=>setCantidad(parseInt(e.target.value)||1)} className="px-2 py-1 bg-white border rounded"
+        inputMode="decimal"/>
       <input placeholder="Ubicación" value={ubicacion} onChange={e=>setUbicacion(e.target.value)} className="px-2 py-1 bg-white border rounded" />
       <div className="flex gap-1"><input placeholder="Observaciones" value={observaciones} onChange={e=>setObservaciones(e.target.value)} className="px-2 py-1 bg-white border rounded flex-1" /><button onClick={()=>{ if(!elemento.trim()){avisarOperacion({ tipo: 'error', mensaje: 'Elemento requerido' }); return;} const el = crearElementoActaInventario('tmp', { elemento: elemento.trim(), categoria: categoria as any, estado: estado as any, cantidad, ubicacion: ubicacion||undefined, observaciones: observaciones||undefined, orden: 0 }); onAdd(el); setElemento(''); setObservaciones(''); }} className="px-2 py-1 bg-violet-600 text-white rounded font-bold">+</button></div>
     </div>

@@ -401,6 +401,7 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
           >
@@ -521,6 +522,7 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-indigo-950">Añadir documento a esta solicitud</span>
                   <button
+                    aria-label="Cerrar"
                     type="button"
                     onClick={() => setShowAddNewDoc(false)}
                     className="text-slate-400 hover:text-slate-600"
@@ -822,6 +824,7 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
                             Indicar motivo de corrección para el candidato:
                           </span>
                           <button
+                            aria-label="Cerrar"
                             type="button"
                             onClick={() => setCorrectionTargetId(null)}
                             className="text-slate-400 hover:text-slate-600"
@@ -910,6 +913,7 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <h5 className="font-bold text-slate-900 text-sm truncate">{previewFile.nombreArchivo}</h5>
                 <button
+                  aria-label="Cerrar"
                   onClick={() => setPreviewFile(null)}
                   className="p-1 text-slate-400 hover:text-slate-700"
                 >

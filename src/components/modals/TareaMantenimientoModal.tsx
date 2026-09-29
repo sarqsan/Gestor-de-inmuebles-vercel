@@ -30,6 +30,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface TareaMantenimientoModalProps {
   isOpen: boolean;
@@ -97,11 +98,11 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
       setCategoria('CLIMATIZACION');
       setPeriodicidad('ANUAL');
       setDiasIntervaloPersonalizado(30);
-      
+
       // Default next date: calculated from today based on periodicity
       const calculatedDate = calcularProximaFechaMantenimiento(new Date(), 'ANUAL');
       setProximaFecha(calculatedDate.split('T')[0]);
-      
+
       setCosteEstimado('');
       setResponsableTipo('PROPIETARIO');
       setProfesionalPreferidoId('');
@@ -110,8 +111,12 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
     setError(null);
   }, [isOpen, tareaToEdit, defaultInmuebleId, inmuebles]);
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Plan de mantenimiento'
+  );
 
+  if (!isOpen) return null;
   const handlePeriodicidadChange = (newPeriodicidad: PeriodicidadMantenimiento) => {
     setPeriodicidad(newPeriodicidad);
     if (!tareaToEdit) {
@@ -212,7 +217,7 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
         {/* Cabecera */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/80">
           <div className="flex items-center gap-3">
@@ -229,6 +234,7 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
           >
@@ -291,7 +297,7 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
           {/* Título y Elemento Inventario */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="sm:col-span-2">
-              <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              <label htmlFor="campo-titulo-del-plan-actuacion" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
                 Título del Plan / Actuación <span className="text-rose-500">*</span>
               </label>
               <input
@@ -301,11 +307,12 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
                 placeholder="Ej. Revisión anual de caldera y circuito calefacción"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none font-medium"
                 required
-              />
+
+                 id="campo-titulo-del-plan-actuacion"/>
             </div>
 
             <div>
-              <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              <label htmlFor="campo-elemento-equipo" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
                 Elemento / Equipo
               </label>
               <input
@@ -314,21 +321,23 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
                 onChange={(e) => setElementoNombre(e.target.value)}
                 placeholder="Ej. Caldera Junkers 24kW"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-              />
+
+                 id="campo-elemento-equipo"/>
             </div>
           </div>
 
           {/* Categoría y Periodicidad */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              <label htmlFor="campo-gremio-categoria-tecnica" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
                 Gremio / Categoría Técnica
               </label>
               <select
                 value={categoria}
                 onChange={(e) => setCategoria(e.target.value as CategoriaIncidencia)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-              >
+
+                 id="campo-gremio-categoria-tecnica">
                 {Object.entries(CATEGORIAS_INCIDENCIA_LABELS).map(([k, label]) => (
                   <option key={k} value={k}>
                     {label}
@@ -338,14 +347,15 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
             </div>
 
             <div>
-              <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              <label htmlFor="campo-frecuencia-periodicidad" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
                 Frecuencia / Periodicidad
               </label>
               <select
                 value={periodicidad}
                 onChange={(e) => handlePeriodicidadChange(e.target.value as PeriodicidadMantenimiento)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-              >
+
+                 id="campo-frecuencia-periodicidad">
                 {Object.entries(PERIODICIDAD_LABELS).map(([k, label]) => (
                   <option key={k} value={k}>
                     {label}
@@ -366,7 +376,8 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
                 value={diasIntervaloPersonalizado}
                 onChange={(e) => handleDiasPersonalizadosChange(parseInt(e.target.value, 10) || 30)}
                 className="w-24 px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-right font-bold text-blue-900 outline-none"
-              />
+
+                inputMode="decimal"/>
             </div>
           )}
 
@@ -402,7 +413,8 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
                   onChange={(e) => setCosteEstimado(e.target.value)}
                   placeholder="0.00"
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none text-right font-mono font-semibold"
-                />
+
+                  inputMode="decimal"/>
               </div>
             </div>
           </div>
@@ -426,14 +438,15 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
             </div>
 
             <div>
-              <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              <label htmlFor="campo-profesional-empresa-preferida" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
                 Profesional / Empresa Preferida
               </label>
               <select
                 value={profesionalPreferidoId}
                 onChange={(e) => setProfesionalPreferidoId(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-              >
+
+                 id="campo-profesional-empresa-preferida">
                 <option value="">Sin asignar (seleccionar al emitir OT)</option>
                 {profesionales.map((prof) => (
                   <option key={prof.id} value={prof.id}>
@@ -446,7 +459,7 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
 
           {/* Descripción / Instrucciones Técnicas */}
           <div>
-            <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+            <label htmlFor="campo-descripcion-del-alcance-puntos-de-inspec" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
               Descripción del Alcance / Puntos de Inspección
             </label>
             <textarea
@@ -455,12 +468,13 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
               onChange={(e) => setDescripcion(e.target.value)}
               placeholder="Detalle los puntos a comprobar (presión de caldera, limpieza de quemadores, sustitución de filtros, purgado de radiadores...)"
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-            />
+
+               id="campo-descripcion-del-alcance-puntos-de-inspec"/>
           </div>
 
           {/* Notas Internas */}
           <div>
-            <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+            <label htmlFor="campo-notas-adicionales-garantia-referencias" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
               Notas Adicionales / Garantía / Referencias
             </label>
             <input
@@ -469,7 +483,8 @@ export const TareaMantenimientoModal: React.FC<TareaMantenimientoModalProps> = (
               onChange={(e) => setNotas(e.target.value)}
               placeholder="Ej. Contrato SAT oficial nº 98412 / Garantía hasta 2027"
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-            />
+
+               id="campo-notas-adicionales-garantia-referencias"/>
           </div>
 
           {/* Pie y Acciones */}

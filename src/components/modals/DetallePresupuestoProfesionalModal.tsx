@@ -501,6 +501,7 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
               </button>
             )}
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/60 transition-colors cursor-pointer"
             >
@@ -756,7 +757,7 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
             </p>
 
             <div className="space-y-1.5">
-              <label className="font-bold text-slate-800 block">
+              <label htmlFor="campo-motivo-del-rechazo" className="font-bold text-slate-800 block">
                 Motivo del Rechazo <span className="text-rose-600">*</span>
               </label>
               <textarea
@@ -769,7 +770,8 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
                 }}
                 placeholder="Indica el motivo justificado del rechazo (ej: importe desproporcionado, oferta alternativa adjudicada, inviabilidad técnica)..."
                 className="w-full p-2.5 border border-rose-300 rounded-xl bg-white text-xs focus:ring-2 focus:ring-rose-500 font-medium"
-              />
+
+                 id="campo-motivo-del-rechazo"/>
               {errorRechazo && (
                 <p className="text-rose-600 font-bold text-[11px] flex items-center space-x-1">
                   <AlertCircle className="w-3.5 h-3.5" />
@@ -830,7 +832,7 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
             </div>
 
             <div className="space-y-1.5">
-              <label className="font-bold text-slate-800 block">
+              <label htmlFor="campo-notas-y-cambios-aplicados-para-el-gestor" className="font-bold text-slate-800 block">
                 Notas y Cambios Aplicados para el Gestor / Propietario (Opcional)
               </label>
               <textarea
@@ -839,7 +841,8 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
                 onChange={(e) => setObservacionesReenvio(e.target.value)}
                 placeholder="Describe brevemente las mejoras o correcciones aplicadas en respuesta al ajuste solicitado..."
                 className="w-full p-2.5 border border-emerald-300 rounded-xl bg-white text-xs focus:ring-2 focus:ring-emerald-500 font-medium"
-              />
+
+                 id="campo-notas-y-cambios-aplicados-para-el-gestor"/>
             </div>
 
             <div className="flex items-center justify-end space-x-2 pt-1">
@@ -1023,44 +1026,46 @@ export const DetallePresupuestoProfesionalModal: React.FC<DetallePresupuestoProf
             </div>
 
             <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                  <tr>
-                    <th className="p-3 pl-4">Concepto / Unidad de Obra</th>
-                    <th className="p-3 text-center w-20">Cantidad</th>
-                    <th className="p-3 text-right w-28">Precio Ud</th>
-                    <th className="p-3 text-right w-28 pr-4">Importe</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {presupuesto.partidas && presupuesto.partidas.length > 0 ? (
-                    presupuesto.partidas.map((item, idx) => (
-                      <tr key={item.id || idx}>
-                        <td className="p-3 pl-4 font-medium text-slate-800">{item.concepto}</td>
-                        <td className="p-3 text-center text-slate-600">{item.cantidad}</td>
-                        <td className="p-3 text-right text-slate-600">
-                          {item.precioUnitario.toLocaleString('es-ES', {
-                            style: 'currency',
-                            currency: 'EUR',
-                          })}
-                        </td>
-                        <td className="p-3 text-right font-bold text-slate-900 pr-4">
-                          {item.importe.toLocaleString('es-ES', {
-                            style: 'currency',
-                            currency: 'EUR',
-                          })}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={4} className="p-4 text-center text-slate-400">
-                        Sin partidas desglosadas
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                              <div className="scroll-x-controlado">
+                  <table className="min-w-[640px] w-full text-xs text-left">
+                                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                                    <tr>
+                                      <th className="p-3 pl-4">Concepto / Unidad de Obra</th>
+                                      <th className="p-3 text-center w-20">Cantidad</th>
+                                      <th className="p-3 text-right w-28">Precio Ud</th>
+                                      <th className="p-3 text-right w-28 pr-4">Importe</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {presupuesto.partidas && presupuesto.partidas.length > 0 ? (
+                                      presupuesto.partidas.map((item, idx) => (
+                                        <tr key={item.id || idx}>
+                                          <td className="p-3 pl-4 font-medium text-slate-800">{item.concepto}</td>
+                                          <td className="p-3 text-center text-slate-600">{item.cantidad}</td>
+                                          <td className="p-3 text-right text-slate-600">
+                                            {item.precioUnitario.toLocaleString('es-ES', {
+                                              style: 'currency',
+                                              currency: 'EUR',
+                                            })}
+                                          </td>
+                                          <td className="p-3 text-right font-bold text-slate-900 pr-4">
+                                            {item.importe.toLocaleString('es-ES', {
+                                              style: 'currency',
+                                              currency: 'EUR',
+                                            })}
+                                          </td>
+                                        </tr>
+                                      ))
+                                    ) : (
+                                      <tr>
+                                        <td colSpan={4} className="p-4 text-center text-slate-400">
+                                          Sin partidas desglosadas
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                </div>
             </div>
           </div>
 

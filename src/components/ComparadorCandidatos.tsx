@@ -104,7 +104,7 @@ export const ComparadorCandidatos: React.FC<ComparadorCandidatosProps> = ({
 
         {/* Selector de Inmueble */}
         <div className="w-full sm:w-auto">
-          <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+          <label htmlFor="campo-inmueble-a-comparar" className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
             Inmueble a comparar:
           </label>
 
@@ -112,7 +112,8 @@ export const ComparadorCandidatos: React.FC<ComparadorCandidatosProps> = ({
             value={selectedInmuebleId}
             onChange={(e) => setSelectedInmuebleId(e.target.value)}
             className="w-full sm:w-80 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
-          >
+
+             id="campo-inmueble-a-comparar">
             {inmuebles.map((inm) => (
               <option key={inm.id} value={inm.id}>
                 Piso: {inm.direccion} — {inm.precio} €/mes

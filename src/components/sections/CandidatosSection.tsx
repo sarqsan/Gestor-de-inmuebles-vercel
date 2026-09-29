@@ -26,6 +26,7 @@ import {
   UserCheck,
   UserPlus,
 } from 'lucide-react';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface CandidatosSectionProps {
   candidatos: Candidato[];
@@ -122,12 +123,13 @@ export const CandidatosSection: React.FC<CandidatosSectionProps> = ({
         {/* Dropdown Filters */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Filtrar por Estado:</label>
+            <label htmlFor="campo-filtrar-por-estado" className="block text-xs font-semibold text-slate-500 mb-1">Filtrar por Estado:</label>
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+
+               id="campo-filtrar-por-estado">
               <option value="todos">Todos los estados ({candidatos.length})</option>
               <option value="nuevo">Nuevo</option>
               <option value="pendiente_doc">Pendiente de documentación</option>
@@ -141,12 +143,13 @@ export const CandidatosSection: React.FC<CandidatosSectionProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Filtrar por Inmueble:</label>
+            <label htmlFor="campo-filtrar-por-inmueble" className="block text-xs font-semibold text-slate-500 mb-1">Filtrar por Inmueble:</label>
             <select
               value={selectedInmuebleId}
               onChange={(e) => setSelectedInmuebleId(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+
+               id="campo-filtrar-por-inmueble">
               <option value="todos">Todos los inmuebles</option>
               {inmuebles.map((inm) => (
                 <option key={inm.id} value={inm.id}>
@@ -178,6 +181,7 @@ export const CandidatosSection: React.FC<CandidatosSectionProps> = ({
 
                 return (
                   <div
+                    {...propsInteraccion(() => onSelectCandidate(cand))}
                     key={cand.id}
                     onClick={() => onSelectCandidate(cand)}
                     className="bg-white rounded-2xl border border-slate-200/80 hover:border-blue-400 p-5 shadow-2xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group space-y-4"

@@ -245,8 +245,18 @@ export const FacturacionSection: React.FC<FacturacionSectionProps> = ({
                   className="border-t border-slate-100 hover:bg-blue-50/40 cursor-pointer"
                 >
                   <td className="px-4 py-3 font-semibold text-slate-800">
-                    {f.tipo !== 'F1' && <span className="text-amber-600 mr-1">[{f.tipo}]</span>}
-                    {numeroFacturaFormateado(f.serie, f.numero, f.ejercicio)}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedId(f.id);
+                      }}
+                      className="font-semibold text-slate-800 hover:text-blue-700 hover:underline cursor-pointer"
+                      aria-label={`Ver factura ${numeroFacturaFormateado(f.serie, f.numero, f.ejercicio)}`}
+                    >
+                      {f.tipo !== 'F1' && <span className="text-amber-600 mr-1">[{f.tipo}]</span>}
+                      {numeroFacturaFormateado(f.serie, f.numero, f.ejercicio)}
+                    </button>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{f.fechaExpedicion}</td>
                   <td className="px-4 py-3 text-slate-600">
@@ -445,6 +455,7 @@ function FormularioFactura({ inmuebles, propietarios, series, facturas, registro
           <FileText className="w-5 h-5 text-blue-600" /> Nueva factura
         </h3>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer">
+          aria-label="Cerrar"
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -478,11 +489,13 @@ function FormularioFactura({ inmuebles, propietarios, series, facturas, registro
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-sm">
             <span className="text-slate-600 font-medium">Cantidad</span>
-            <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(Number(e.target.value))} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(Number(e.target.value))} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              inputMode="decimal"/>
           </label>
           <label className="block text-sm">
             <span className="text-slate-600 font-medium">Precio unitario (€)</span>
-            <input type="number" min={0} step="0.01" value={precio} onChange={(e) => setPrecio(Number(e.target.value))} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <input type="number" min={0} step="0.01" value={precio} onChange={(e) => setPrecio(Number(e.target.value))} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              inputMode="decimal"/>
           </label>
         </div>
         <label className="block text-sm">
@@ -493,7 +506,8 @@ function FormularioFactura({ inmuebles, propietarios, series, facturas, registro
         </label>
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Retención IRPF (%)</span>
-          <input type="number" min={0} step="0.5" value={retencion} onChange={(e) => setRetencion(Number(e.target.value))} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          <input type="number" min={0} step="0.5" value={retencion} onChange={(e) => setRetencion(Number(e.target.value))} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+            inputMode="decimal"/>
         </label>
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Receptor (nombre)</span>
@@ -697,6 +711,7 @@ function DetalleFactura({
           <div className="flex items-center gap-2">
             <EstadoBadge estado={factura.estado} />
             <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer">
+              aria-label="Cerrar"
               <X className="w-4 h-4" />
             </button>
           </div>

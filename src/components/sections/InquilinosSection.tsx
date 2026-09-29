@@ -217,7 +217,12 @@ function TabAccesos({
     <div className="space-y-2">
       {inquilinos.map((u) => (
         <article key={u.id} className="bg-white rounded-2xl border border-slate-200 p-4">
-          <button onClick={() => setExpandido(expandido === u.id ? null : u.id)} className="w-full text-left cursor-pointer">
+          <button
+            type="button"
+            aria-expanded={expandido === u.id}
+            onClick={() => setExpandido(expandido === u.id ? null : u.id)}
+            className="w-full text-left cursor-pointer"
+          >
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-extrabold">
@@ -344,12 +349,13 @@ function TabInvitaciones({
         <h3 className="text-sm font-extrabold flex items-center gap-1.5 mb-2">
           <Plus className="w-4 h-4 text-indigo-700" /> Nueva invitación
         </h3>
-        <label className="block text-xs font-bold text-slate-600 mb-1">Contrato *</label>
+        <label htmlFor="campo-contrato" className="block text-xs font-bold text-slate-600 mb-1">Contrato *</label>
         <select
           value={contratoId}
           onChange={(e) => setContratoId(e.target.value)}
           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white mb-2"
-        >
+
+           id="campo-contrato">
           <option value="">Selecciona…</option>
           {contratos.map((c) => (
             <option key={c.id} value={c.id}>
@@ -359,16 +365,17 @@ function TabInvitaciones({
         </select>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Caducidad</label>
+            <label htmlFor="campo-caducidad" className="block text-xs font-bold text-slate-600 mb-1">Caducidad</label>
             <input
               type="date"
               value={caducidad}
               onChange={(e) => setCaducidad(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
-            />
+
+               id="campo-caducidad"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Usos máx.</label>
+            <label htmlFor="campo-usos-max" className="block text-xs font-bold text-slate-600 mb-1">Usos máx.</label>
             <input
               type="number"
               min={1}
@@ -376,7 +383,9 @@ function TabInvitaciones({
               value={usos}
               onChange={(e) => setUsos(Number(e.target.value) || 1)}
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
-            />
+
+              inputMode="decimal"
+               id="campo-usos-max"/>
           </div>
         </div>
         <button
@@ -485,12 +494,13 @@ function TabMensajes({
 
   return (
     <div className="space-y-3">
-      <label className="block text-xs font-bold text-slate-600">Hilo por contrato</label>
+      <label htmlFor="campo-hilo-por-contrato" className="block text-xs font-bold text-slate-600">Hilo por contrato</label>
       <select
         value={hiloId || hilos[0]?.id || ''}
         onChange={(e) => setHiloId(e.target.value)}
         className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white"
-      >
+
+         id="campo-hilo-por-contrato">
         {hilos.map((c) => {
           const n = mensajes.filter((m) => m.contratoId === c.id && m.remitenteRol === 'INQUILINO' && m.leidoPorGestion !== true).length;
           return (
@@ -618,12 +628,13 @@ function TabVinculacion({
 
   return (
     <div className="space-y-3">
-      <label className="block text-xs font-bold text-slate-600">Contrato</label>
+      <label htmlFor="campo-contrato-2" className="block text-xs font-bold text-slate-600">Contrato</label>
       <select
         value={contrato.id}
         onChange={(e) => setContratoId(e.target.value)}
         className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white"
-      >
+
+         id="campo-contrato-2">
         {contratos.map((c) => (
           <option key={c.id} value={c.id}>
             {dirContrato(c.id)} · {c.candidatoNombre}

@@ -20,6 +20,7 @@ import {
   Sparkles,
   ChevronRight,
 } from 'lucide-react';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface InicioSectionProps {
   candidatos: Candidato[];
@@ -69,6 +70,7 @@ export const InicioSection: React.FC<InicioSectionProps> = ({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Metric 1: Total Candidatos */}
         <div
+          {...propsInteraccion(() => onSelectSection('candidatos'))}
           onClick={() => onSelectSection('candidatos')}
           className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:shadow-md transition-all cursor-pointer group"
         >
@@ -86,6 +88,7 @@ export const InicioSection: React.FC<InicioSectionProps> = ({
 
         {/* Metric 2: Pendientes de revisar */}
         <div
+          {...propsInteraccion(() => onSelectSection('candidatos'))}
           onClick={() => onSelectSection('candidatos')}
           className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:shadow-md transition-all cursor-pointer group"
         >
@@ -103,6 +106,7 @@ export const InicioSection: React.FC<InicioSectionProps> = ({
 
         {/* Metric 3: Documentación pendiente */}
         <div
+          {...propsInteraccion(() => onSelectSection('candidatos'))}
           onClick={() => onSelectSection('candidatos')}
           className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:shadow-md transition-all cursor-pointer group"
         >
@@ -120,6 +124,7 @@ export const InicioSection: React.FC<InicioSectionProps> = ({
 
         {/* Metric 4: Inmuebles disponibles */}
         <div
+          {...propsInteraccion(() => onSelectSection('inmuebles'))}
           onClick={() => onSelectSection('inmuebles')}
           className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:shadow-md transition-all cursor-pointer group"
         >
@@ -157,6 +162,7 @@ export const InicioSection: React.FC<InicioSectionProps> = ({
           <div className="space-y-3">
             {ultimosCandidatos.map((cand) => (
               <div
+                {...propsInteraccion(() => onSelectCandidate(cand))}
                 key={cand.id}
                 onClick={() => onSelectCandidate(cand)}
                 className="p-3.5 rounded-xl border border-slate-100 hover:border-slate-300 bg-slate-50/50 hover:bg-slate-50 transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
@@ -214,6 +220,7 @@ export const InicioSection: React.FC<InicioSectionProps> = ({
             <div className="space-y-3">
               {inmuebles.map((inm) => (
                 <div
+                  {...propsInteraccion(() => onSelectSection('inmuebles'))}
                   key={inm.id}
                   onClick={() => onSelectSection('inmuebles')}
                   className="p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-slate-50/70 hover:bg-slate-100/80 transition-all cursor-pointer flex items-center justify-between"

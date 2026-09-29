@@ -632,6 +632,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
               </button>
             )}
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/60 transition-colors"
             >
@@ -1384,6 +1385,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   <h3 className="font-bold text-slate-900 text-sm">Finalizar Orden de Trabajo</h3>
                 </div>
                 <button
+                  aria-label="Cerrar"
                   onClick={() => setDialogFinalizarOpen(false)}
                   className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
                 >
@@ -1420,7 +1422,8 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                       value={costeRealInput}
                       onChange={(e) => setCosteRealInput(e.target.value)}
                       className="w-full pl-8 p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold text-slate-900"
-                    />
+
+                      inputMode="decimal"/>
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">
                     Si no indicas un importe, no se generará automáticamente el apunte de gasto contable.
@@ -1497,6 +1500,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
               <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
                 <h3 className="font-bold text-slate-900 text-sm">Modificar Coste Real</h3>
                 <button
+                  aria-label="Cerrar"
                   onClick={() => setEditandoCosteReal(false)}
                   className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
                 >
@@ -1516,7 +1520,8 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                     value={costeRealModificado}
                     onChange={(e) => setCosteRealModificado(e.target.value)}
                     className="w-full pl-8 p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 font-bold text-slate-900"
-                  />
+
+                    inputMode="decimal"/>
                 </div>
                 {gastoAsociado && (
                   <p className="text-[11px] text-emerald-700 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
@@ -1562,6 +1567,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                   </h3>
                 </div>
                 <button
+                  aria-label="Cerrar"
                   onClick={() => setDialogCambiarProfOpen(false)}
                   className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
                 >
@@ -1631,7 +1637,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                 {/* Motivo de cambio obligatorio si ya había un profesional asignado */}
                 {Boolean(localTrabajo.profesionalId && localTrabajo.profesionalId !== profesionalSeleccionadoId) && (
                   <div>
-                    <label className="font-bold text-slate-800 block mb-1">
+                    <label htmlFor="campo-motivo-de-reasignacion" className="font-bold text-slate-800 block mb-1">
                       Motivo de Reasignación <span className="text-rose-500">*</span>
                     </label>
                     <textarea
@@ -1641,7 +1647,8 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
                       placeholder="Indique el motivo por el cual se cambia de profesional (indisponibilidad, ajuste de plazos, especialidad requerida...)"
                       className="w-full p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-slate-900 text-xs"
                       required
-                    />
+
+                       id="campo-motivo-de-reasignacion"/>
                   </div>
                 )}
 

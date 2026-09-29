@@ -1,1 +1,38 @@
 @import "tailwindcss";
+
+/*
+ * BLOQUE 10 · UX-5 — AJUSTES MÓVILES REALES (no estéticos).
+ *
+ * Se escriben como CSS sin capa a propósito: las reglas sueltas ganan a las capas de
+ * Tailwind, así que estas dos correcciones no obligan a tocar cientos de componentes.
+ */
+
+/* 1) Auto-zoom de iOS/Android: con fuentes < 16 px el navegador amplía la pantalla al
+ *    enfocar un campo y el formulario se descoloca. Se sube sólo en móvil estrecho. */
+@media (max-width: 640px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Los campos con `inputMode="decimal"` y `type="number"` mantienen su tamaño; el
+   * navegador móvil ya muestra el teclado numérico. */
+  input[type='number'] {
+    font-size: 16px;
+  }
+}
+
+/* 2) Barra fija del portal del inquilino / hojas inferiores: el indicador de inicio de
+ *    los móviles modernos no debe tapar los botones inferiores. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 3) Contenedores con scroll horizontal controlado (tablas anchas en móvil): el gesto
+ *    horizontal no encadena con el scroll de la página ni arrastra la vista completa. */
+.scroll-x-controlado {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}

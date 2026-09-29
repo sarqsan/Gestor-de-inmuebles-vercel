@@ -47,6 +47,7 @@ import type {
 } from '../../types';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 
 interface Props {
@@ -331,7 +332,8 @@ function DetalleSuministro({
               <button onClick={onEditar} className="flex-1 py-2 bg-slate-100 text-xs font-bold rounded-xl cursor-pointer">
                 Editar
               </button>
-              <button onClick={onBorrar} className="flex items-center justify-center gap-1 px-3 py-2 bg-red-50 text-red-700 text-xs font-bold rounded-xl cursor-pointer">
+              <button
+            aria-label="Eliminar" onClick={onBorrar} className="flex items-center justify-center gap-1 px-3 py-2 bg-red-50 text-red-700 text-xs font-bold rounded-xl cursor-pointer">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -405,7 +407,7 @@ function DetalleSuministro({
           {(!s.reparto || s.reparto.length === 0) && <p className="text-xs text-slate-500">Sin reparto configurado ({s.modoReparto}).</p>}
           {s.reparto && s.reparto.length > 0 && (
             <>
-              <label className="block text-xs font-bold text-slate-600 mb-1">Importe de factura (€)</label>
+              <label htmlFor="campo-importe-de-factura" className="block text-xs font-bold text-slate-600 mb-1">Importe de factura (€)</label>
               <input
                 type="number"
                 min="0"
@@ -414,7 +416,9 @@ function DetalleSuministro({
                 onChange={(e) => setImporte(e.target.value)}
                 placeholder="Ej. 85.40"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl mb-2"
-              />
+
+                inputMode="decimal"
+                 id="campo-importe-de-factura"/>
               {(repartoCalc.length > 0 ? repartoCalc : s.reparto.map((t) => ({ ...t, importe: 0 }))).map((t, i) => (
                 <div key={i} className="flex justify-between text-xs bg-slate-50 rounded-lg px-2.5 py-1.5 mb-1 font-medium">
                   <span>{t.etiqueta}</span>
@@ -480,6 +484,11 @@ function SuministroModal({
   onCerrar: () => void;
   onGuardado: (m: string) => void;
 }) {
+  // UX-6 §11: el panel inferior es un diálogo (semántica, foco dentro y Escape).
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar },
+    inicial ? 'Editar suministro' : 'Alta de suministro'
+  );
   const [inmuebleId, setInmuebleId] = useState(inicial?.inmuebleId || inmuebles[0]?.id || '');
   const [tipo, setTipo] = useState<TipoSuministro>(inicial?.tipo || 'LUZ');
   const [cups, setCups] = useState(inicial?.cups || '');
@@ -560,9 +569,9 @@ function SuministroModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onCerrar}>
-      <div className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
+    <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto" onClick={onCerrar}>
+      <div ref={refDialogo} {...propsDialogo} className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3 sticky top-0 z-10 bg-white">
           <h2 className="text-base font-extrabold">{inicial ? 'Editar suministro' : 'Alta de suministro'}</h2>
           <button onClick={onCerrar} className="p-1.5 rounded-full hover:bg-slate-100 cursor-pointer" aria-label="Cerrar">
             <X className="w-5 h-5" />
@@ -572,53 +581,64 @@ function SuministroModal({
 
         <div className="grid grid-cols-2 gap-2 mb-2">
           <div className="col-span-2">
-            <label className="block text-xs font-bold text-slate-600 mb-1">Inmueble *</label>
-            <select value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)} disabled={!!inicial} className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl bg-white disabled:opacity-60">
+            <label htmlFor="campo-inmueble" className="block text-xs font-bold text-slate-600 mb-1">Inmueble *</label>
+            <select value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)} disabled={!!inicial} className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl bg-white disabled:opacity-60"
+               id="campo-inmueble">
               {inmuebles.map((v) => (
                 <option key={v.id} value={v.id}>{v.direccion} · {v.ciudad}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Tipo *</label>
-            <select value={tipo} onChange={(e) => setTipo(e.target.value as TipoSuministro)} className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl bg-white">
+            <label htmlFor="campo-tipo" className="block text-xs font-bold text-slate-600 mb-1">Tipo *</label>
+            <select value={tipo} onChange={(e) => setTipo(e.target.value as TipoSuministro)} className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl bg-white"
+               id="campo-tipo">
               {TIPOS.map((t) => (
                 <option key={t} value={t}>{NOMBRE_TIPO[t]}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Potencia (kW)</label>
-            <input value={potencia} onChange={(e) => setPotencia(e.target.value)} type="number" min="0" step="any" placeholder="4.6" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-potencia-kw" className="block text-xs font-bold text-slate-600 mb-1">Potencia (kW)</label>
+            <input value={potencia} onChange={(e) => setPotencia(e.target.value)} type="number" min="0" step="any" placeholder="4.6" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl"
+              inputMode="decimal"
+               id="campo-potencia-kw"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">CUPS {(tipo === 'LUZ' || tipo === 'GAS') ? '*' : ''}</label>
-            <input value={cups} onChange={(e) => setCups(e.target.value.toUpperCase())} placeholder="ES…" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl font-mono" />
+            <label htmlFor="campo-cups" className="block text-xs font-bold text-slate-600 mb-1">CUPS {(tipo === 'LUZ' || tipo === 'GAS') ? '*' : ''}</label>
+            <input value={cups} onChange={(e) => setCups(e.target.value.toUpperCase())} placeholder="ES…" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl font-mono"
+               id="campo-cups"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Contador</label>
-            <input value={contador} onChange={(e) => setContador(e.target.value)} placeholder="Nº contador" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-contador" className="block text-xs font-bold text-slate-600 mb-1">Contador</label>
+            <input value={contador} onChange={(e) => setContador(e.target.value)} placeholder="Nº contador" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-contador"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Titular</label>
-            <input value={titular} onChange={(e) => setTitular(e.target.value)} placeholder="Nombre" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-titular" className="block text-xs font-bold text-slate-600 mb-1">Titular</label>
+            <input value={titular} onChange={(e) => setTitular(e.target.value)} placeholder="Nombre" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-titular"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">NIF titular</label>
-            <input value={nif} onChange={(e) => setNif(e.target.value)} placeholder="12345678Z" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-nif-titular" className="block text-xs font-bold text-slate-600 mb-1">NIF titular</label>
+            <input value={nif} onChange={(e) => setNif(e.target.value)} placeholder="12345678Z" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-nif-titular"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Comercializadora</label>
-            <input value={comer} onChange={(e) => setComer(e.target.value)} placeholder="Ej. Iberdrola" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-comercializadora" className="block text-xs font-bold text-slate-600 mb-1">Comercializadora</label>
+            <input value={comer} onChange={(e) => setComer(e.target.value)} placeholder="Ej. Iberdrola" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-comercializadora"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Tarifa</label>
-            <input value={tarifa} onChange={(e) => setTarifa(e.target.value)} placeholder="Ej. 2.0TD" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-tarifa" className="block text-xs font-bold text-slate-600 mb-1">Tarifa</label>
+            <input value={tarifa} onChange={(e) => setTarifa(e.target.value)} placeholder="Ej. 2.0TD" className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-tarifa"/>
           </div>
         </div>
 
-        <label className="block text-xs font-bold text-slate-600 mb-1">Modo de reparto</label>
-        <select value={modo} onChange={(e) => setModo(e.target.value as ModoRepartoSuministro)} className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl bg-white mb-2">
+        <label htmlFor="campo-modo-de-reparto" className="block text-xs font-bold text-slate-600 mb-1">Modo de reparto</label>
+        <select value={modo} onChange={(e) => setModo(e.target.value as ModoRepartoSuministro)} className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl bg-white mb-2"
+           id="campo-modo-de-reparto">
           <option value="SIN_REPARTO">Sin reparto</option>
           <option value="IGUALITARIO">Igualitario</option>
           <option value="POR_HABITACION">Por habitación</option>
@@ -638,7 +658,8 @@ function SuministroModal({
             ))}
             <div className="flex gap-1.5">
               <input value={nuevaEtiqueta} onChange={(e) => setNuevaEtiqueta(e.target.value)} placeholder="Etiqueta (HAB-1…)" className="flex-1 px-2 py-2 text-xs border border-slate-200 rounded-xl" />
-              <input value={nuevoPct} onChange={(e) => setNuevoPct(e.target.value)} type="number" min="0" max="100" step="any" placeholder="%" className="w-20 px-2 py-2 text-xs border border-slate-200 rounded-xl" />
+              <input value={nuevoPct} onChange={(e) => setNuevoPct(e.target.value)} type="number" min="0" max="100" step="any" placeholder="%" className="w-20 px-2 py-2 text-xs border border-slate-200 rounded-xl"
+                inputMode="decimal"/>
               <button onClick={anadirTramo} className="px-3 bg-slate-800 text-white text-xs font-bold rounded-xl cursor-pointer">+</button>
             </div>
             <p className="mt-1 text-[11px] text-slate-400">La suma debe ser 100%.</p>
@@ -669,6 +690,10 @@ function LecturaGestorModal({
   onCerrar: () => void;
   onCreada: () => void;
 }) {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar },
+    'Registrar lectura'
+  );
   const hoy = new Date().toISOString().slice(0, 10);
   const [valor, setValor] = useState('');
   const [fecha, setFecha] = useState(hoy);
@@ -725,9 +750,9 @@ function LecturaGestorModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center" onClick={onCerrar}>
-      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
+    <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center overflow-y-auto" onClick={onCerrar}>
+      <div ref={refDialogo} {...propsDialogo} className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3 sticky top-0 z-10 bg-white">
           <h2 className="text-base font-extrabold">Registrar lectura</h2>
           <button onClick={onCerrar} className="p-1.5 rounded-full hover:bg-slate-100 cursor-pointer" aria-label="Cerrar">
             <X className="w-5 h-5" />
@@ -742,17 +767,20 @@ function LecturaGestorModal({
         <div className="grid grid-cols-2 gap-2 mb-2">
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">Valor ({unidad}) *</label>
-            <input type="number" min="0" step="any" value={valor} onChange={(e) => setValor(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl" />
+            <input type="number" min="0" step="any" value={valor} onChange={(e) => setValor(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+              inputMode="decimal"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Fecha *</label>
-            <input type="date" value={fecha} max={hoy} onChange={(e) => setFecha(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-fecha" className="block text-xs font-bold text-slate-600 mb-1">Fecha *</label>
+            <input type="date" value={fecha} max={hoy} onChange={(e) => setFecha(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-fecha"/>
           </div>
         </div>
         {(suministro.contratoIdsAutorizados || []).length > 0 && (
           <>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Contrato asociado (visible para su inquilino)</label>
-            <select value={contratoId} onChange={(e) => setContratoId(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white mb-2">
+            <label htmlFor="campo-contrato-asociado-visible-para-su-inquil" className="block text-xs font-bold text-slate-600 mb-1">Contrato asociado (visible para su inquilino)</label>
+            <select value={contratoId} onChange={(e) => setContratoId(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white mb-2"
+               id="campo-contrato-asociado-visible-para-su-inquil">
               <option value="">Sin asociar</option>
               {(suministro.contratoIdsAutorizados || []).map((cid) => (
                 <option key={cid} value={cid}>{cid}</option>
@@ -782,6 +810,10 @@ function CambioGestorModal({
   onCerrar: () => void;
   onCreada: () => void;
 }) {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar },
+    'Solicitar cambio de titular'
+  );
   const hoy = new Date().toISOString().slice(0, 10);
   const [nombre, setNombre] = useState('');
   const [nif, setNif] = useState('');
@@ -817,25 +849,28 @@ function CambioGestorModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center" onClick={onCerrar}>
-      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
+    <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center overflow-y-auto" onClick={onCerrar}>
+      <div ref={refDialogo} {...propsDialogo} className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3 sticky top-0 z-10 bg-white">
           <h2 className="text-base font-extrabold">Solicitar cambio de titular</h2>
           <button onClick={onCerrar} className="p-1.5 rounded-full hover:bg-slate-100 cursor-pointer" aria-label="Cerrar">
             <X className="w-5 h-5" />
           </button>
         </div>
         {error && <p className="mb-3 p-2.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium">{error}</p>}
-        <label className="block text-xs font-bold text-slate-600 mb-1">Nuevo titular *</label>
-        <input value={nombre} onChange={(e) => setNombre(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl mb-2" />
+        <label htmlFor="campo-nuevo-titular" className="block text-xs font-bold text-slate-600 mb-1">Nuevo titular *</label>
+        <input value={nombre} onChange={(e) => setNombre(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl mb-2"
+           id="campo-nuevo-titular"/>
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">NIF/NIE</label>
-            <input value={nif} onChange={(e) => setNif(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-nif-nie" className="block text-xs font-bold text-slate-600 mb-1">NIF/NIE</label>
+            <input value={nif} onChange={(e) => setNif(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-nif-nie"/>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">Efecto *</label>
-            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl" />
+            <label htmlFor="campo-efecto" className="block text-xs font-bold text-slate-600 mb-1">Efecto *</label>
+            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+               id="campo-efecto"/>
           </div>
         </div>
         <button onClick={guardar} disabled={guardando} className="w-full py-2.5 bg-indigo-700 text-white text-sm font-bold rounded-xl cursor-pointer disabled:opacity-50">

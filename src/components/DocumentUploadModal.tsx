@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { TipoDocumento } from '../types';
 import { getTipoDocumentoLabel } from '../utils/formatters';
 import { Upload, X, FileText, Image, CheckCircle, AlertCircle } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface DocumentUploadModalProps {
   candidatoNombre: string;
@@ -19,6 +20,10 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   onClose,
   onUploadDocument,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Añadir Documento'
+  );
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [base64String, setBase64String] = useState<string>('');
   const [tipoDocumento, setTipoDocumento] = useState<TipoDocumento>('nomina');
@@ -81,7 +86,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={refDialogo} {...propsDialogo}
         className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -97,6 +102,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
           >

@@ -157,6 +157,7 @@ export const RecomercializarModal: React.FC<Props> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60"
           >
@@ -174,7 +175,7 @@ export const RecomercializarModal: React.FC<Props> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>Inmueble *</label>
+              <label htmlFor="campo-inmueble" className={labelCls}>Inmueble *</label>
               <select
                 className={inputCls}
                 value={inmuebleId}
@@ -183,7 +184,8 @@ export const RecomercializarModal: React.FC<Props> = ({
                   setContratoAnteriorId('');
                 }}
                 disabled={!!contexto?.inmuebleId}
-              >
+
+                 id="campo-inmueble">
                 {inmuebles.length === 0 && <option value="">Sin inmuebles</option>}
                 {inmuebles.map((i) => (
                   <option key={i.id} value={i.id}>
@@ -193,8 +195,9 @@ export const RecomercializarModal: React.FC<Props> = ({
               </select>
             </div>
             <div>
-              <label className={labelCls}>Contrato anterior (opcional)</label>
-              <select className={inputCls} value={contratoAnteriorId} onChange={(e) => setContratoAnteriorId(e.target.value)}>
+              <label htmlFor="campo-contrato-anterior-opcional" className={labelCls}>Contrato anterior (opcional)</label>
+              <select className={inputCls} value={contratoAnteriorId} onChange={(e) => setContratoAnteriorId(e.target.value)}
+                 id="campo-contrato-anterior-opcional">
                 <option value="">Sin vincular</option>
                 {contratosDelInmueble.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -206,8 +209,9 @@ export const RecomercializarModal: React.FC<Props> = ({
           </div>
 
           <div>
-            <label className={labelCls}>Destino previsto</label>
-            <select className={inputCls} value={destino} onChange={(e) => setDestino(e.target.value as DestinoInmueble)}>
+            <label htmlFor="campo-destino-previsto" className={labelCls}>Destino previsto</label>
+            <select className={inputCls} value={destino} onChange={(e) => setDestino(e.target.value as DestinoInmueble)}
+               id="campo-destino-previsto">
               {(Object.keys(DESTINO_INMUEBLE_LABEL) as DestinoInmueble[]).map((d) => (
                 <option key={d} value={d}>
                   {DESTINO_INMUEBLE_LABEL[d]}
@@ -218,34 +222,40 @@ export const RecomercializarModal: React.FC<Props> = ({
 
           <div className="rounded-xl border border-slate-200 p-4 space-y-3 bg-slate-50/50">
             <p className="text-xs font-bold text-slate-700">Salida del inquilino actual</p>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
-                <label className={labelCls}>Comunicación</label>
-                <input type="date" className={inputCls} value={fechaComunicacion} onChange={(e) => setFechaComunicacion(e.target.value)} />
+                <label htmlFor="campo-comunicacion" className={labelCls}>Comunicación</label>
+                <input type="date" className={inputCls} value={fechaComunicacion} onChange={(e) => setFechaComunicacion(e.target.value)}
+                   id="campo-comunicacion"/>
               </div>
               <div>
-                <label className={labelCls}>Salida prevista</label>
-                <input type="date" className={inputCls} value={fechaPrevistaSalida} onChange={(e) => setFechaPrevistaSalida(e.target.value)} />
+                <label htmlFor="campo-salida-prevista" className={labelCls}>Salida prevista</label>
+                <input type="date" className={inputCls} value={fechaPrevistaSalida} onChange={(e) => setFechaPrevistaSalida(e.target.value)}
+                   id="campo-salida-prevista"/>
               </div>
               <div>
-                <label className={labelCls}>Entrega de llaves</label>
-                <input type="date" className={inputCls} value={fechaEntregaLlaves} onChange={(e) => setFechaEntregaLlaves(e.target.value)} />
+                <label htmlFor="campo-entrega-de-llaves" className={labelCls}>Entrega de llaves</label>
+                <input type="date" className={inputCls} value={fechaEntregaLlaves} onChange={(e) => setFechaEntregaLlaves(e.target.value)}
+                   id="campo-entrega-de-llaves"/>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="col-span-1">
-                <label className={labelCls}>Fianza a devolver (€)</label>
-                <input type="number" step="0.01" min="0" className={inputCls} value={fianza} onChange={(e) => setFianza(e.target.value)} placeholder="0,00" />
+                <label htmlFor="campo-fianza-a-devolver" className={labelCls}>Fianza a devolver (€)</label>
+                <input type="number" step="0.01" min="0" className={inputCls} value={fianza} onChange={(e) => setFianza(e.target.value)} placeholder="0,00"
+                  inputMode="decimal"
+                   id="campo-fianza-a-devolver"/>
               </div>
               <div className="col-span-2">
-                <label className={labelCls}>Observaciones de la salida</label>
+                <label htmlFor="campo-observaciones-de-la-salida" className={labelCls}>Observaciones de la salida</label>
                 <input
                   type="text"
                   className={inputCls}
                   value={observaciones}
                   onChange={(e) => setObservaciones(e.target.value)}
                   placeholder="Estado aparente, suministros, acuerdos…"
-                />
+
+                   id="campo-observaciones-de-la-salida"/>
               </div>
             </div>
             <p className="text-[11px] text-slate-400">

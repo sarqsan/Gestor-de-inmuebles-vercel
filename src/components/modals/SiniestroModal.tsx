@@ -22,6 +22,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface SiniestroModalProps {
   isOpen: boolean;
@@ -111,8 +112,12 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
     }
   }, [isOpen, siniestroToEdit, polizasDisponibles]);
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Siniestro'
+  );
 
+  if (!isOpen) return null;
   const handlePolizaChange = (newPolId: string) => {
     setPolizaId(newPolId);
     const pol = polizas.find((p) => p.id === newPolId);
@@ -191,7 +196,7 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -208,6 +213,7 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
@@ -282,7 +288,7 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
           {/* Expediente y Fecha */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-no-expediente-siniestro" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Nº Expediente / Siniestro
               </label>
               <input
@@ -291,11 +297,12 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
                 onChange={(e) => setNumeroExpediente(e.target.value)}
                 placeholder="Ej: SIN-2025/94821"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-900 focus:bg-white focus:border-indigo-500 outline-none"
-              />
+
+                 id="campo-no-expediente-siniestro"/>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-fecha-del-parte" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Fecha del Parte *
               </label>
               <input
@@ -304,18 +311,20 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
                 onChange={(e) => setFechaComunicacion(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-indigo-500 outline-none"
                 required
-              />
+
+                 id="campo-fecha-del-parte"/>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-estado-del-siniestro" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Estado del Siniestro *
               </label>
               <select
                 value={estado}
                 onChange={(e) => setEstado(e.target.value as EstadoSiniestro)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-indigo-500 outline-none"
-              >
+
+                 id="campo-estado-del-siniestro">
                 {Object.entries(ESTADOS_SINIESTRO_LABELS).map(([estKey, val]) => (
                   <option key={estKey} value={estKey}>
                     {val.label}
@@ -340,7 +349,8 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
                   onChange={(e) => setFranquicia(e.target.value)}
                   placeholder="0"
                   className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-indigo-500 outline-none"
-                />
+
+                  inputMode="decimal"/>
                 <Euro className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
             </div>
@@ -358,7 +368,8 @@ export const SiniestroModal: React.FC<SiniestroModalProps> = ({
                   onChange={(e) => setIndemnizacion(e.target.value)}
                   placeholder="Importe liquidado por la aseguradora"
                   className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-indigo-500 outline-none"
-                />
+
+                  inputMode="decimal"/>
                 <Euro className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
             </div>

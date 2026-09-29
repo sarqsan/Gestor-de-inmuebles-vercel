@@ -212,7 +212,8 @@ export const PricingModal: React.FC<Props> = ({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
+          <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -273,25 +274,29 @@ export const PricingModal: React.FC<Props> = ({
             <h4 className="text-xs font-bold text-slate-700 mb-3">Hipótesis de partida</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
-                <label className="block text-[10px] font-semibold text-slate-400 mb-1">Renta anterior (€/mes)</label>
+                <label htmlFor="campo-renta-anterior-mes" className="block text-[10px] font-semibold text-slate-400 mb-1">Renta anterior (€/mes)</label>
                 <input
                   type="number" min="0"
                   className={inputCls}
                   value={rentaAnteriorVal}
                   onChange={(e) => { setRentaAnteriorVal(e.target.value); invalidarIa(); }}
-                />
+
+                  inputMode="decimal"
+                   id="campo-renta-anterior-mes"/>
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-slate-400 mb-1">IPC / actualización (%)</label>
+                <label htmlFor="campo-ipc-actualizacion" className="block text-[10px] font-semibold text-slate-400 mb-1">IPC / actualización (%)</label>
                 <input
                   type="number" step="0.1"
                   className={inputCls}
                   value={ipc}
                   onChange={(e) => { setIpc(e.target.value); invalidarIa(); }}
-                />
+
+                  inputMode="decimal"
+                   id="campo-ipc-actualizacion"/>
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-slate-400 mb-1">Ajuste de mercado (%)</label>
+                <label htmlFor="campo-ajuste-de-mercado" className="block text-[10px] font-semibold text-slate-400 mb-1">Ajuste de mercado (%)</label>
                 <input
                   type="number" step="0.5"
                   className={inputCls}
@@ -299,7 +304,9 @@ export const PricingModal: React.FC<Props> = ({
                   onChange={(e) => { setAjuste(e.target.value); invalidarIa(); }}
                   disabled={comparables.length > 0}
                   title={comparables.length > 0 ? 'Con comparables, el precio se ancla a los testigos de zona' : undefined}
-                />
+
+                  inputMode="decimal"
+                   id="campo-ajuste-de-mercado"/>
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-400 mb-1">Mejoras confirmadas (+€/mes)</label>
@@ -356,14 +363,19 @@ export const PricingModal: React.FC<Props> = ({
                     <input className={`${inputCls} col-span-3`} value={c.fuente || ''} placeholder="Portal / inmobiliaria"
                       onChange={(e) => { editarComparable(c.id, { fuente: e.target.value }); }} />
                     <input type="number" className={`${inputCls} col-span-2`} value={c.metros ?? ''}
-                      onChange={(e) => { editarComparable(c.id, { metros: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
+                      onChange={(e) => { editarComparable(c.id, { metros: e.target.value === '' ? undefined : Number(e.target.value) }); }}
+                      inputMode="decimal"/>
                     <input type="number" className={`${inputCls} col-span-1`} value={c.habitaciones ?? ''} placeholder="—"
-                      onChange={(e) => { editarComparable(c.id, { habitaciones: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
+                      onChange={(e) => { editarComparable(c.id, { habitaciones: e.target.value === '' ? undefined : Number(e.target.value) }); }}
+                      inputMode="decimal"/>
                     <input type="number" className={`${inputCls} col-span-3`} value={c.precioAlquilerMensual ?? ''}
-                      onChange={(e) => { editarComparable(c.id, { precioAlquilerMensual: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
+                      onChange={(e) => { editarComparable(c.id, { precioAlquilerMensual: e.target.value === '' ? undefined : Number(e.target.value) }); }}
+                      inputMode="decimal"/>
                     <input type="number" className={`${inputCls} col-span-2`} value={c.precioVenta ?? ''}
-                      onChange={(e) => { editarComparable(c.id, { precioVenta: e.target.value === '' ? undefined : Number(e.target.value) }); }} />
-                    <button type="button" onClick={() => borrarComparable(c.id)} className="col-span-1 p-1 text-slate-400 hover:text-rose-600">
+                      onChange={(e) => { editarComparable(c.id, { precioVenta: e.target.value === '' ? undefined : Number(e.target.value) }); }}
+                      inputMode="decimal"/>
+                    <button
+                      aria-label="Eliminar" type="button" onClick={() => borrarComparable(c.id)} className="col-span-1 p-1 text-slate-400 hover:text-rose-600">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -382,7 +394,8 @@ export const PricingModal: React.FC<Props> = ({
                 <label className="block text-[10px] font-semibold text-slate-400 mb-1">€/m² de venta</label>
                 <input type="number" min="0" className={inputCls} value={precioM2Venta}
                   onChange={(e) => { setPrecioM2Venta(e.target.value); invalidarIa(); }}
-                  placeholder={calculo.metricas.m2VentaComparables ? String(calculo.metricas.m2VentaComparables) : 'manual'} />
+                  placeholder={calculo.metricas.m2VentaComparables ? String(calculo.metricas.m2VentaComparables) : 'manual'}
+                  inputMode="decimal"/>
               </div>
               <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5">
                 <p className="text-[9px] font-semibold text-slate-400">Valoración</p>

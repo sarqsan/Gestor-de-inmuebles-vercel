@@ -237,6 +237,8 @@ const FactorAccordionItem: React.FC<FactorAccordionItemProps> = ({
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50 transition-all">
       <button
+        type="button"
+        aria-expanded={isOpen}
         onClick={onToggle}
         className="w-full px-4 py-3.5 flex items-center justify-between text-left hover:bg-slate-100/70 transition-colors focus:outline-none"
       >

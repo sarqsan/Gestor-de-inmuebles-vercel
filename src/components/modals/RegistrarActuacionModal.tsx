@@ -36,6 +36,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface RegistrarActuacionModalProps {
   isOpen: boolean;
@@ -62,7 +63,7 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
   const [profesionalNombre, setProfesionalNombre] = useState<string>('');
   const [observaciones, setObservaciones] = useState<string>('');
   const [numFactura, setNumFactura] = useState<string>('');
-  
+
   // Opciones de integración automática
   const [generarGasto, setGenerarGasto] = useState<boolean>(true);
   const [registrarGarantia, setRegistrarGarantia] = useState<boolean>(false);
@@ -85,8 +86,12 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
     setError(null);
   }, [isOpen, tarea]);
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Registrar actuación realizada'
+  );
 
+  if (!isOpen) return null;
   const proximaFechaCalculada = calcularProximaFechaMantenimiento(
     fechaRealizacion || new Date(),
     tarea.periodicidad,
@@ -212,7 +217,7 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
         {/* Cabecera */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-emerald-50/70">
           <div className="flex items-center gap-3">
@@ -229,6 +234,7 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
           >
@@ -277,7 +283,8 @@ export const RegistrarActuacionModal: React.FC<RegistrarActuacionModalProps> = (
                   onChange={(e) => setCosteReal(e.target.value)}
                   placeholder="0.00"
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-emerald-500 outline-none font-mono font-semibold text-right"
-                />
+
+                  inputMode="decimal"/>
               </div>
             </div>
           </div>

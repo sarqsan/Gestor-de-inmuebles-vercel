@@ -46,6 +46,7 @@ import {
 import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 import { confirmar } from '../feedback/confirmacion';
 import { ejecutarOperacion } from '../feedback/operaciones';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface FormalizarContratoModalProps {
   isOpen: boolean;
@@ -122,8 +123,12 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
     }
   }, [existingContrato, candidato.id, defaultInmueble.id, propietarios]);
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Formalización del Alquiler y Contrato LAU'
+  );
 
+  if (!isOpen) return null;
   const handleGenerarClausulaIA = async () => {
     if (!iaPrompt.trim()) return;
     setIsGeneratingIa(true);
@@ -274,7 +279,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
         {/* Header Modal */}
-        <div className="p-5 sm:p-6 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+        <div ref={refDialogo} {...propsDialogo} className="p-5 sm:p-6 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/30">
               <Key className="w-6 h-6" />
@@ -299,6 +304,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
           </div>
 
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
           >
@@ -537,51 +543,56 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                       )}
                     </div>
                     <div>
-                      <label className="text-[11px] font-semibold text-slate-500">Nombre / Razón Social</label>
+                      <label htmlFor="campo-nombre-razon-social" className="text-[11px] font-semibold text-slate-500">Nombre / Razón Social</label>
                       <input
                         type="text"
                         value={contrato.propietarioNombre}
                         onChange={(e) => handleUpdateField('propietarioNombre', e.target.value)}
                         className="w-full text-xs font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                      />
+
+                         id="campo-nombre-razon-social"/>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[11px] font-semibold text-slate-500">DNI / CIF</label>
+                        <label htmlFor="campo-dni-cif" className="text-[11px] font-semibold text-slate-500">DNI / CIF</label>
                         <input
                           type="text"
                           value={contrato.propietarioDni}
                           onChange={(e) => handleUpdateField('propietarioDni', e.target.value)}
                           className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                        />
+
+                           id="campo-dni-cif"/>
                       </div>
                       <div>
-                        <label className="text-[11px] font-semibold text-slate-500">Teléfono</label>
+                        <label htmlFor="campo-telefono" className="text-[11px] font-semibold text-slate-500">Teléfono</label>
                         <input
                           type="text"
                           value={contrato.propietarioTelefono}
                           onChange={(e) => handleUpdateField('propietarioTelefono', e.target.value)}
                           className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                        />
+
+                           id="campo-telefono"/>
                       </div>
                     </div>
                     <div>
-                      <label className="text-[11px] font-semibold text-slate-500">Domicilio Notificaciones</label>
+                      <label htmlFor="campo-domicilio-notificaciones" className="text-[11px] font-semibold text-slate-500">Domicilio Notificaciones</label>
                       <input
                         type="text"
                         value={contrato.propietarioDireccion}
                         onChange={(e) => handleUpdateField('propietarioDireccion', e.target.value)}
                         className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                      />
+
+                         id="campo-domicilio-notificaciones"/>
                     </div>
                     <div>
-                      <label className="text-[11px] font-semibold text-slate-500">IBAN para Pago de Renta</label>
+                      <label htmlFor="campo-iban-para-pago-de-renta" className="text-[11px] font-semibold text-slate-500">IBAN para Pago de Renta</label>
                       <input
                         type="text"
                         value={contrato.propietarioIban}
                         onChange={(e) => handleUpdateField('propietarioIban', e.target.value)}
                         className="w-full text-xs font-mono px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                      />
+
+                         id="campo-iban-para-pago-de-renta"/>
                     </div>
 
                     {/* Botón para añadir/quitar segundo propietario */}
@@ -613,24 +624,26 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-[10px] font-semibold text-slate-500">DNI / NIF</label>
+                            <label htmlFor="campo-dni-nif" className="text-[10px] font-semibold text-slate-500">DNI / NIF</label>
                             <input
                               type="text"
                               placeholder="DNI/NIE"
                               value={contrato.segundoPropietarioDni || ''}
                               onChange={(e) => handleUpdateField('segundoPropietarioDni', e.target.value)}
                               className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg"
-                            />
+
+                               id="campo-dni-nif"/>
                           </div>
                           <div>
-                            <label className="text-[10px] font-semibold text-slate-500">Teléfono</label>
+                            <label htmlFor="campo-telefono-2" className="text-[10px] font-semibold text-slate-500">Teléfono</label>
                             <input
                               type="text"
                               placeholder="Teléfono"
                               value={contrato.segundoPropietarioTelefono || ''}
                               onChange={(e) => handleUpdateField('segundoPropietarioTelefono', e.target.value)}
                               className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg"
-                            />
+
+                               id="campo-telefono-2"/>
                           </div>
                         </div>
                       </div>
@@ -641,42 +654,46 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2.5">
                     <span className="text-xs font-bold text-slate-800">Parte Arrendataria (Inquilino)</span>
                     <div>
-                      <label className="text-[11px] font-semibold text-slate-500">Nombre Completo</label>
+                      <label htmlFor="campo-nombre-completo" className="text-[11px] font-semibold text-slate-500">Nombre Completo</label>
                       <input
                         type="text"
                         value={contrato.candidatoNombre}
                         onChange={(e) => handleUpdateField('candidatoNombre', e.target.value)}
                         className="w-full text-xs font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                      />
+
+                         id="campo-nombre-completo"/>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[11px] font-semibold text-slate-500">DNI / NIE</label>
+                        <label htmlFor="campo-dni-nie" className="text-[11px] font-semibold text-slate-500">DNI / NIE</label>
                         <input
                           type="text"
                           value={contrato.candidatoDni}
                           onChange={(e) => handleUpdateField('candidatoDni', e.target.value)}
                           className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                        />
+
+                           id="campo-dni-nie"/>
                       </div>
                       <div>
-                        <label className="text-[11px] font-semibold text-slate-500">Teléfono</label>
+                        <label htmlFor="campo-telefono-3" className="text-[11px] font-semibold text-slate-500">Teléfono</label>
                         <input
                           type="text"
                           value={contrato.candidatoTelefono}
                           onChange={(e) => handleUpdateField('candidatoTelefono', e.target.value)}
                           className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                        />
+
+                           id="campo-telefono-3"/>
                       </div>
                     </div>
                     <div>
-                      <label className="text-[11px] font-semibold text-slate-500">Email de Contacto</label>
+                      <label htmlFor="campo-email-de-contacto" className="text-[11px] font-semibold text-slate-500">Email de Contacto</label>
                       <input
                         type="email"
                         value={contrato.candidatoEmail}
                         onChange={(e) => handleUpdateField('candidatoEmail', e.target.value)}
                         className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl mt-0.5"
-                      />
+
+                         id="campo-email-de-contacto"/>
                     </div>
 
                     {contrato.tieneCotitular && (
@@ -713,7 +730,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-xs font-semibold text-slate-700">Renta Mensual (€)</label>
+                    <label htmlFor="campo-renta-mensual" className="text-xs font-semibold text-slate-700">Renta Mensual (€)</label>
                     <input
                       type="number"
                       value={contrato.rentaMensual}
@@ -723,7 +740,9 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                         handleUpdateField('fianzaLegalImporte', val * contrato.fianzaLegalMeses);
                       }}
                       className="w-full text-sm font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                    />
+
+                      inputMode="decimal"
+                       id="campo-renta-mensual"/>
                   </div>
 
                   <div>
@@ -764,23 +783,25 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                   <div>
-                    <label className="text-xs font-semibold text-slate-700">Fecha de Inicio de Contrato</label>
+                    <label htmlFor="campo-fecha-de-inicio-de-contrato" className="text-xs font-semibold text-slate-700">Fecha de Inicio de Contrato</label>
                     <input
                       type="date"
                       value={contrato.fechaInicioContrato}
                       onChange={(e) => handleUpdateField('fechaInicioContrato', e.target.value)}
                       className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                    />
+
+                       id="campo-fecha-de-inicio-de-contrato"/>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-slate-700">Referencia Catastral</label>
+                    <label htmlFor="campo-referencia-catastral" className="text-xs font-semibold text-slate-700">Referencia Catastral</label>
                     <input
                       type="text"
                       value={contrato.inmuebleReferenciaCatastral || ''}
                       onChange={(e) => handleUpdateField('inmuebleReferenciaCatastral', e.target.value)}
                       placeholder="Ej. 9876543VK4797S0001TR"
                       className="w-full text-xs font-mono px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                    />
+
+                       id="campo-referencia-catastral"/>
                   </div>
                 </div>
               </div>
@@ -849,6 +870,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                         </button>
                       </div>
                       <button
+                        aria-label="Cerrar"
                         onClick={() => setShowAddClausula(false)}
                         className="text-slate-400 hover:text-slate-600 p-1"
                       >
@@ -859,7 +881,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                     {clausulaModalMode === 'ia' ? (
                       <div className="space-y-3">
                         <div>
-                          <label className="text-xs font-bold text-indigo-950 block mb-1">
+                          <label htmlFor="campo-que-deseas-pactar-o-exigir-en-la-clausul" className="text-xs font-bold text-indigo-950 block mb-1">
                             ¿Qué deseas pactar o exigir en la cláusula?
                           </label>
                           <textarea
@@ -868,7 +890,8 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                             onChange={(e) => setIaPrompt(e.target.value)}
                             rows={3}
                             className="w-full text-xs p-3 bg-white border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-hidden"
-                          />
+
+                             id="campo-que-deseas-pactar-o-exigir-en-la-clausul"/>
                           <p className="text-[10px] text-indigo-700/80 mt-1">
                             La IA redactará la cláusula adaptándola rigurosamente a la Ley 29/1994 (LAU) y descartará términos nulos de pleno derecho.
                           </p>
@@ -1025,6 +1048,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
 
                         {(clausula.id.startsWith('cl-custom-') || clausula.id.startsWith('cl-ia-')) && (
                           <button
+                            aria-label="Eliminar"
                             onClick={() => handleDeleteClausula(clausula.id)}
                             className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
                           >
@@ -1081,34 +1105,37 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="text-xs font-semibold text-slate-600">Contador Electricidad (kWh)</label>
+                      <label htmlFor="campo-contador-electricidad-kwh" className="text-xs font-semibold text-slate-600">Contador Electricidad (kWh)</label>
                       <input
                         type="text"
                         value={contrato.actaEntregaLlaves.contadorElectricidadKwh || ''}
                         onChange={(e) => handleUpdateActaField('contadorElectricidadKwh', e.target.value)}
                         placeholder="Ej. 14250.5"
                         className="w-full text-xs font-mono font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                      />
+
+                         id="campo-contador-electricidad-kwh"/>
                     </div>
                     <div>
-                      <label className="text-xs font-semibold text-slate-600">Contador Agua (m³)</label>
+                      <label htmlFor="campo-contador-agua-m3" className="text-xs font-semibold text-slate-600">Contador Agua (m³)</label>
                       <input
                         type="text"
                         value={contrato.actaEntregaLlaves.contadorAguaM3 || ''}
                         onChange={(e) => handleUpdateActaField('contadorAguaM3', e.target.value)}
                         placeholder="Ej. 312.4"
                         className="w-full text-xs font-mono font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                      />
+
+                         id="campo-contador-agua-m3"/>
                     </div>
                     <div>
-                      <label className="text-xs font-semibold text-slate-600">Contador Gas (m³ / kWh)</label>
+                      <label htmlFor="campo-contador-gas-m3-kwh" className="text-xs font-semibold text-slate-600">Contador Gas (m³ / kWh)</label>
                       <input
                         type="text"
                         value={contrato.actaEntregaLlaves.contadorGasM3 || ''}
                         onChange={(e) => handleUpdateActaField('contadorGasM3', e.target.value)}
                         placeholder="Ej. 104.2"
                         className="w-full text-xs font-mono font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                      />
+
+                         id="campo-contador-gas-m3-kwh"/>
                     </div>
                   </div>
                 </div>
@@ -1120,37 +1147,43 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                   </span>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div>
-                      <label className="text-xs text-slate-600">Vivienda (Puerta)</label>
+                      <label htmlFor="campo-vivienda-puerta" className="text-xs text-slate-600">Vivienda (Puerta)</label>
                       <input
                         type="number"
                         min={0}
                         value={contrato.actaEntregaLlaves.juegosLlavesVivienda}
                         onChange={(e) => handleUpdateActaField('juegosLlavesVivienda', parseInt(e.target.value) || 0)}
                         className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-vivienda-puerta"/>
                     </div>
                     <div>
-                      <label className="text-xs text-slate-600">Portal / Acceso</label>
+                      <label htmlFor="campo-portal-acceso" className="text-xs text-slate-600">Portal / Acceso</label>
                       <input
                         type="number"
                         min={0}
                         value={contrato.actaEntregaLlaves.juegosLlavesPortal}
                         onChange={(e) => handleUpdateActaField('juegosLlavesPortal', parseInt(e.target.value) || 0)}
                         className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-portal-acceso"/>
                     </div>
                     <div>
-                      <label className="text-xs text-slate-600">Buzón</label>
+                      <label htmlFor="campo-buzon" className="text-xs text-slate-600">Buzón</label>
                       <input
                         type="number"
                         min={0}
                         value={contrato.actaEntregaLlaves.juegosLlavesBuzon}
                         onChange={(e) => handleUpdateActaField('juegosLlavesBuzon', parseInt(e.target.value) || 0)}
                         className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-buzon"/>
                     </div>
                     <div>
-                      <label className="text-xs text-slate-600">Garaje / Trastero</label>
+                      <label htmlFor="campo-garaje-trastero" className="text-xs text-slate-600">Garaje / Trastero</label>
                       <input
                         type="number"
                         min={0}
@@ -1159,7 +1192,9 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
                           handleUpdateActaField('juegosLlavesGarajeTrastero', parseInt(e.target.value) || 0)
                         }
                         className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl mt-1"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-garaje-trastero"/>
                     </div>
                   </div>
                 </div>

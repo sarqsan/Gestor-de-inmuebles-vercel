@@ -189,12 +189,13 @@ export const FiscalidadSection: React.FC<FiscalidadSectionProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Inmueble (solo autorizados)</label>
+            <label htmlFor="campo-inmueble-solo-autorizados" className="block font-semibold text-slate-600 mb-1">Inmueble (solo autorizados)</label>
             <select
               value={selectedInmuebleId}
               onChange={(e) => setSelectedInmuebleId(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
-            >
+
+               id="campo-inmueble-solo-autorizados">
               {inmueblesFiltrados.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.direccion} - {i.ciudad} ({i.id})
@@ -204,12 +205,13 @@ export const FiscalidadSection: React.FC<FiscalidadSectionProps> = ({
           </div>
 
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Ejercicio Fiscal</label>
+            <label htmlFor="campo-ejercicio-fiscal" className="block font-semibold text-slate-600 mb-1">Ejercicio Fiscal</label>
             <select
               value={selectedEjercicio}
               onChange={(e) => setSelectedEjercicio(Number(e.target.value))}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
-            >
+
+               id="campo-ejercicio-fiscal">
               {ejerciciosDisponibles.map((y) => (
                 <option key={y} value={y}>
                   Ejercicio {y} {y === currentYear ? '(Actual)' : ''}

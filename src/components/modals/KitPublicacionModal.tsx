@@ -49,7 +49,8 @@ const SeccionChips: React.FC<{
         {valores.map((v, i) => (
           <span key={`${v}-${i}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${color}`}>
             {v}
-            <button type="button" onClick={() => onRemove(i)} className="opacity-60 hover:opacity-100">
+            <button
+              aria-label="Cerrar" type="button" onClick={() => onRemove(i)} className="opacity-60 hover:opacity-100">
               <X className="w-3 h-3" />
             </button>
           </span>
@@ -65,6 +66,7 @@ const SeccionChips: React.FC<{
           placeholder="Añadir y pulsar +"
         />
         <button type="button" onClick={agregar} className="px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">
+          aria-label="Añadir"
           <Plus className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -205,6 +207,7 @@ export const KitPublicacionModal: React.FC<Props> = ({ expediente, inmueble, onG
             </div>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
+            aria-label="Cerrar"
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -229,17 +232,19 @@ export const KitPublicacionModal: React.FC<Props> = ({ expediente, inmueble, onG
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Titular del anuncio</label>
+            <label htmlFor="campo-titular-del-anuncio" className="block text-[10px] font-bold text-slate-500 mb-1">Titular del anuncio</label>
             <input className={inputCls} value={titulo} maxLength={80} onChange={(e) => setTitulo(e.target.value)}
-              placeholder="Ej. Piso reformado en el centro de Alicante · 3 hab. · 85 m²" />
+              placeholder="Ej. Piso reformado en el centro de Alicante · 3 hab. · 85 m²"
+               id="campo-titular-del-anuncio"/>
             <p className="text-[9px] text-slate-400 mt-0.5 text-right">{titulo.length}/80</p>
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Descripción</label>
+            <label htmlFor="campo-descripcion" className="block text-[10px] font-bold text-slate-500 mb-1">Descripción</label>
             <textarea className={`${inputCls} min-h-[150px] leading-relaxed`} value={descripcion}
               onChange={(e) => setDescripcion(e.target.value)}
-              placeholder="La IA redacta un borrador veraz y prudente; revísalo y ajústalo antes de publicar." />
+              placeholder="La IA redacta un borrador veraz y prudente; revísalo y ajústalo antes de publicar."
+               id="campo-descripcion"/>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

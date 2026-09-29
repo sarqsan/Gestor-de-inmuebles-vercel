@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Inmueble } from '../types';
 import { getInmueblePublicImages } from '../utils/imageUtils';
+import { propsInteraccion } from '../accesibilidad/interaccion';
 
 interface PublicPropertyGalleryProps {
   inmueble?: Inmueble | null;
@@ -42,6 +43,7 @@ export const PublicPropertyGallery: React.FC<PublicPropertyGalleryProps> = ({
     <div className={`space-y-3 ${className}`}>
       {/* Main Image Stage */}
       <div
+        {...propsInteraccion(() => setIsFullscreen(true), 'Ver imagen a pantalla completa')}
         onClick={() => setIsFullscreen(true)}
         className="relative h-64 sm:h-80 md:h-96 w-full bg-slate-900 rounded-3xl overflow-hidden cursor-pointer group shadow-sm border border-slate-200/80"
       >
@@ -155,6 +157,7 @@ export const PublicPropertyGallery: React.FC<PublicPropertyGalleryProps> = ({
               <span className="text-xs text-slate-500">• {inmueble.direccion}</span>
             </div>
             <button
+              aria-label="Cerrar"
               onClick={() => setIsFullscreen(false)}
               className="p-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl border border-slate-700 shadow-md transition-all"
             >
@@ -176,12 +179,14 @@ export const PublicPropertyGallery: React.FC<PublicPropertyGalleryProps> = ({
                   onClick={handlePrev}
                   className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-3 bg-slate-900/80 hover:bg-slate-900 text-white rounded-full border border-slate-700 shadow-2xl transition-all"
                 >
+                  aria-label="Anterior"
                   <ChevronLeft className="w-6 h-6" />
                 </button>
                 <button
                   onClick={handleNext}
                   className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-3 bg-slate-900/80 hover:bg-slate-900 text-white rounded-full border border-slate-700 shadow-2xl transition-all"
                 >
+                  aria-label="Siguiente"
                   <ChevronRight className="w-6 h-6" />
                 </button>
               </>

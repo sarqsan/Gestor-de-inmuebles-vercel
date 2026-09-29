@@ -368,7 +368,7 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
                 />
               </div>
               <div>
-                <label className={labelCls}>Dirección Fiscal *</label>
+                <label htmlFor="campo-direccion-fiscal" className={labelCls}>Dirección Fiscal *</label>
                 <input
                   type="text"
                   required
@@ -376,10 +376,11 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
                   onChange={(e) => setDireccion(e.target.value)}
                   placeholder="Calle, número, piso"
                   className={inputCls}
-                />
+
+                   id="campo-direccion-fiscal"/>
               </div>
               <div>
-                <label className={labelCls}>Ciudad *</label>
+                <label htmlFor="campo-ciudad" className={labelCls}>Ciudad *</label>
                 <input
                   type="text"
                   required
@@ -387,10 +388,11 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
                   onChange={(e) => setCiudad(e.target.value)}
                   placeholder="Ej. Almería"
                   className={inputCls}
-                />
+
+                   id="campo-ciudad"/>
               </div>
               <div>
-                <label className={labelCls}>Código Postal *</label>
+                <label htmlFor="campo-codigo-postal" className={labelCls}>Código Postal *</label>
                 <input
                   type="text"
                   required
@@ -398,23 +400,25 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
                   onChange={(e) => setCodigoPostal(e.target.value)}
                   placeholder="Ej. 04001"
                   className={inputCls}
-                />
+
+                   id="campo-codigo-postal"/>
               </div>
               <div className="sm:col-span-2">
-                <label className={labelCls}>Provincia</label>
+                <label htmlFor="campo-provincia" className={labelCls}>Provincia</label>
                 <input
                   type="text"
                   value={provinciaProp}
                   onChange={(e) => setProvinciaProp(e.target.value)}
                   placeholder="Ej. Almería"
                   className={inputCls}
-                />
+
+                   id="campo-provincia"/>
               </div>
             </div>
 
             <div>
               <label className={labelCls}>Tipo de Propietario *</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {TIPOS_PROPIETARIO.map((t) => {
                   const Icon = t.Icon;
                   const selected = tipoPropietario === t.id;
@@ -603,7 +607,7 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
 
           <div>
             <label className={labelCls}>Tipo de Entidad *</label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {(['AUTONOMO', 'EMPRESA', 'PARTICULAR'] as TipoProfesional[]).map((t) => (
                 <button
                   type="button"
@@ -669,14 +673,15 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
                 />
               </div>
               <div>
-                <label className={labelCls}>Municipio Principal</label>
+                <label htmlFor="campo-municipio-principal" className={labelCls}>Municipio Principal</label>
                 <input
                   type="text"
                   value={municipio}
                   onChange={(e) => setMunicipio(e.target.value)}
                   placeholder="Ej. Vera"
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                />
+
+                   id="campo-municipio-principal"/>
               </div>
             </div>
           </div>
@@ -696,6 +701,7 @@ export const RegistroAutonomoView: React.FC<RegistroAutonomoViewProps> = ({
                   {z.municipio && <span className="text-slate-600">· {z.municipio}</span>}
                 </div>
                 <button
+                  aria-label="Eliminar"
                   type="button"
                   onClick={() => handleRemoveZona(idx)}
                   className="p-1 text-slate-400 hover:text-red-600 rounded-md cursor-pointer"

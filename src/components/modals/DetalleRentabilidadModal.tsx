@@ -80,6 +80,7 @@ export const DetalleRentabilidadModal: React.FC<Props> = ({ detalle, anio, onClo
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >

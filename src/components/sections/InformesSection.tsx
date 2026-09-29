@@ -224,8 +224,9 @@ export const InformesSection: React.FC<InformesSectionProps> = ({
         <div className="flex items-center gap-2 text-xs font-bold"><Filter className="w-4 h-4 text-indigo-600" />Filtros: propietario, inmueble, ejercicio, fecha inicial/final, habitación</div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Vista</label>
-            <select value={vista} onChange={e=>setVista(e.target.value as any)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl font-semibold">
+            <label htmlFor="campo-vista" className="block font-semibold text-slate-600 mb-1">Vista</label>
+            <select value={vista} onChange={e=>setVista(e.target.value as any)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl font-semibold"
+               id="campo-vista">
               <option value="CARTERA">Cartera</option>
               <option value="INMUEBLE">Por Inmueble</option>
               <option value="RENTABILIDAD">Rentabilidad</option>
@@ -234,15 +235,17 @@ export const InformesSection: React.FC<InformesSectionProps> = ({
             </select>
           </div>
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Inmueble</label>
-            <select value={selectedInmuebleId} onChange={e=>setSelectedInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl">
+            <label htmlFor="campo-inmueble" className="block font-semibold text-slate-600 mb-1">Inmueble</label>
+            <select value={selectedInmuebleId} onChange={e=>setSelectedInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+               id="campo-inmueble">
               <option value="">Todos (cartera)</option>
               {inmueblesFiltrados.map(i=><option key={i.id} value={i.id}>{i.direccion} - {i.ciudad}</option>)}
             </select>
           </div>
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Periodo</label>
-            <select value={periodoTipo} onChange={e=>setPeriodoTipo(e.target.value as any)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl">
+            <label htmlFor="campo-periodo" className="block font-semibold text-slate-600 mb-1">Periodo</label>
+            <select value={periodoTipo} onChange={e=>setPeriodoTipo(e.target.value as any)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+               id="campo-periodo">
               <option value="MENSUAL">Mensual</option>
               <option value="TRIMESTRAL">Trimestral</option>
               <option value="ANUAL">Anual</option>
@@ -250,24 +253,27 @@ export const InformesSection: React.FC<InformesSectionProps> = ({
             </select>
           </div>
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">Ejercicio</label>
-            <select value={ejercicio} onChange={e=>setEjercicio(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border rounded-xl">
+            <label htmlFor="campo-ejercicio" className="block font-semibold text-slate-600 mb-1">Ejercicio</label>
+            <select value={ejercicio} onChange={e=>setEjercicio(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
+               id="campo-ejercicio">
               {[currentYear, currentYear-1, currentYear-2, currentYear-3].map(y=><option key={y} value={y}>{y}</option>)}
             </select>
           </div>
           <div className="flex gap-2">
             {periodoTipo==='MENSUAL' && (
               <div className="flex-1">
-                <label className="block font-semibold text-slate-600 mb-1">Mes</label>
-                <select value={mes} onChange={e=>setMes(Number(e.target.value))} className="w-full px-2 py-2 bg-slate-50 border rounded-xl">
+                <label htmlFor="campo-mes" className="block font-semibold text-slate-600 mb-1">Mes</label>
+                <select value={mes} onChange={e=>setMes(Number(e.target.value))} className="w-full px-2 py-2 bg-slate-50 border rounded-xl"
+                   id="campo-mes">
                   {Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
             )}
             {periodoTipo==='TRIMESTRAL' && (
               <div className="flex-1">
-                <label className="block font-semibold text-slate-600 mb-1">Trimestre</label>
-                <select value={trimestre} onChange={e=>setTrimestre(Number(e.target.value))} className="w-full px-2 py-2 bg-slate-50 border rounded-xl">
+                <label htmlFor="campo-trimestre" className="block font-semibold text-slate-600 mb-1">Trimestre</label>
+                <select value={trimestre} onChange={e=>setTrimestre(Number(e.target.value))} className="w-full px-2 py-2 bg-slate-50 border rounded-xl"
+                   id="campo-trimestre">
                   {[1,2,3,4].map(t=><option key={t} value={t}>T{t}</option>)}
                 </select>
               </div>
@@ -275,12 +281,14 @@ export const InformesSection: React.FC<InformesSectionProps> = ({
             {periodoTipo==='PERSONALIZADO' && (
               <>
                 <div className="flex-1">
-                  <label className="block font-semibold text-slate-600 mb-1">Inicio</label>
-                  <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border rounded-xl" />
+                  <label htmlFor="campo-inicio" className="block font-semibold text-slate-600 mb-1">Inicio</label>
+                  <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border rounded-xl"
+                     id="campo-inicio"/>
                 </div>
                 <div className="flex-1">
-                  <label className="block font-semibold text-slate-600 mb-1">Fin</label>
-                  <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border rounded-xl" />
+                  <label htmlFor="campo-fin" className="block font-semibold text-slate-600 mb-1">Fin</label>
+                  <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full px-2 py-2 bg-slate-50 border rounded-xl"
+                     id="campo-fin"/>
                 </div>
               </>
             )}

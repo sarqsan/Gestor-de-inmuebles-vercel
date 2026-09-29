@@ -73,6 +73,7 @@ import type {
 } from '../../tesoreria/tipos';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface TesoreriaSectionProps {
   contratos: ContratoFormalizacion[];
@@ -507,6 +508,24 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
     { id: 'movimientos', label: 'Movimientos', icon: <Landmark className="w-4 h-4" /> },
   ];
 
+  // UX-6 §11: semántica de diálogo, foco dentro y Escape en los cuatro diálogos de la sección.
+  const dialogoLiquidacion = useDialogoAccesible(
+    { abierto: showGenerar, onCerrar: () => setShowGenerar(false) },
+    'Generar liquidación mensual'
+  );
+  const dialogoGasto = useDialogoAccesible(
+    { abierto: showGasto, onCerrar: () => setShowGasto(false) },
+    'Nuevo gasto imputable'
+  );
+  const dialogoGastoImport = useDialogoAccesible(
+    { abierto: showGastoImport, onCerrar: () => setShowGastoImport(false) },
+    'Importar gasto canónico'
+  );
+  const dialogoPago = useDialogoAccesible(
+    { abierto: Boolean(pagoLiq), onCerrar: () => setPagoLiq(null) },
+    'Registrar pago de liquidación'
+  );
+
   return (
     <div className="space-y-6 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
@@ -674,10 +693,14 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                 <p className="mt-1">Generar → Validar → Preparar. El fichero se descarga para banca electrónica; <strong>nunca se ejecuta ningún cargo automáticamente</strong>. Cada adeudo requiere mandato (MndtId + firma) y produce EndToEndId trazable al cobro.</p>
               </div>
               <form onSubmit={handleGenerar008} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                <div><label className="font-semibold block mb-1">Acreedor</label><input value={s008Acreedor} onChange={(e) => setS008Acreedor(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl" /></div>
-                <div><label className="font-semibold block mb-1">Creditor ID (AT-02)</label><input value={s008CI} onChange={(e) => setS008CI(e.target.value)} placeholder="ES... (validación mod-97)" className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono" /></div>
-                <div><label className="font-semibold block mb-1">IBAN abono acreedor</label><input value={s008Iban} onChange={(e) => setS008Iban(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono" /></div>
-                <div><label className="font-semibold block mb-1">Fecha de cobro</label><input type="date" value={s008Fecha} onChange={(e) => setS008Fecha(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl" /></div>
+                <div><label htmlFor="campo-acreedor" className="font-semibold block mb-1">Acreedor</label><input value={s008Acreedor} onChange={(e) => setS008Acreedor(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl"
+                                                                                    id="campo-acreedor"/></div>
+                <div><label htmlFor="campo-creditor-id-at-02" className="font-semibold block mb-1">Creditor ID (AT-02)</label><input value={s008CI} onChange={(e) => setS008CI(e.target.value)} placeholder="ES... (validación mod-97)" className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono"
+                                                                                               id="campo-creditor-id-at-02"/></div>
+                <div><label htmlFor="campo-iban-abono-acreedor" className="font-semibold block mb-1">IBAN abono acreedor</label><input value={s008Iban} onChange={(e) => setS008Iban(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono"
+                                                                                               id="campo-iban-abono-acreedor"/></div>
+                <div><label htmlFor="campo-fecha-de-cobro" className="font-semibold block mb-1">Fecha de cobro</label><input type="date" value={s008Fecha} onChange={(e) => setS008Fecha(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl"
+                                                                                          id="campo-fecha-de-cobro"/></div>
                 <div className="sm:col-span-2 lg:col-span-4">
                   <label className="font-semibold block mb-1">Cobros pendientes a domiciliar ({cobrosPendientesDomiciliar.length}) — marque con mandato activo</label>
                   <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-xl bg-white divide-y divide-slate-100">
@@ -704,10 +727,14 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                 <p className="font-bold text-slate-800">Alta rápida de mandato SEPA (vinculado a cobro)</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                   <div><label className="font-semibold block mb-1">Cobro origen</label><select value={mCobroId} onChange={(e) => setMCobroId(e.target.value)} className="w-full px-2 py-2 border border-slate-200 rounded-xl"><option value="">—</option>{cobrosPendientesDomiciliar.map((c) => <option key={c.id} value={c.id}>{c.nombreMes} · {c.inquilinoNombre} · {formatoImporteSepa(c.importePrevisto)} €</option>)}</select></div>
-                  <div><label className="font-semibold block mb-1">Deudor</label><input value={mNombre} onChange={(e) => setMNombre(e.target.value)} className="w-full px-2 py-2 border border-slate-200 rounded-xl" /></div>
-                  <div><label className="font-semibold block mb-1">IBAN deudor</label><input value={mIban} onChange={(e) => setMIban(e.target.value)} className="w-full px-2 py-2 border border-slate-200 rounded-xl font-mono" /></div>
-                  <div><label className="font-semibold block mb-1">Firma</label><input type="date" value={mFecha} onChange={(e) => setMFecha(e.target.value)} className="w-full px-2 py-2 border border-slate-200 rounded-xl" /></div>
-                  <div><label className="font-semibold block mb-1">Secuencia</label><select value={mSec} onChange={(e) => setMSec(e.target.value as 'FRST' | 'RCUR' | 'FNAL' | 'OOFF')} className="w-full px-2 py-2 border border-slate-200 rounded-xl"><option>FRST</option><option>RCUR</option><option>FNAL</option><option>OOFF</option></select></div>
+                  <div><label htmlFor="campo-deudor" className="font-semibold block mb-1">Deudor</label><input value={mNombre} onChange={(e) => setMNombre(e.target.value)} className="w-full px-2 py-2 border border-slate-200 rounded-xl"
+                                                                                    id="campo-deudor"/></div>
+                  <div><label htmlFor="campo-iban-deudor" className="font-semibold block mb-1">IBAN deudor</label><input value={mIban} onChange={(e) => setMIban(e.target.value)} className="w-full px-2 py-2 border border-slate-200 rounded-xl font-mono"
+                                                                                         id="campo-iban-deudor"/></div>
+                  <div><label htmlFor="campo-firma" className="font-semibold block mb-1">Firma</label><input type="date" value={mFecha} onChange={(e) => setMFecha(e.target.value)} className="w-full px-2 py-2 border border-slate-200 rounded-xl"
+                                                                                   id="campo-firma"/></div>
+                  <div><label htmlFor="campo-secuencia" className="font-semibold block mb-1">Secuencia</label><select value={mSec} onChange={(e) => setMSec(e.target.value as 'FRST' | 'RCUR' | 'FNAL' | 'OOFF')} className="w-full px-2 py-2 border border-slate-200 rounded-xl"
+                                                                                       id="campo-secuencia"><option>FRST</option><option>RCUR</option><option>FNAL</option><option>OOFF</option></select></div>
                 </div>
                 <div className="flex justify-end"><button type="submit" className="px-4 py-2 bg-slate-800 text-white rounded-xl font-bold">Guardar mandato</button></div>
               </form>
@@ -723,9 +750,12 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                 <p className="mt-1">Liquidación aprobada → orden de pago → fichero pain.001 → preparado para banca electrónica → conciliación posterior. <strong>Se rechaza cualquier importe sin origen trazable.</strong></p>
               </div>
               <form onSubmit={handleGenerar001} className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                <div><label className="font-semibold block mb-1">Ordenante</label><input value={s001Ord} onChange={(e) => setS001Ord(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl" /></div>
-                <div><label className="font-semibold block mb-1">IBAN cargo</label><input value={s001Iban} onChange={(e) => setS001Iban(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono" /></div>
-                <div><label className="font-semibold block mb-1">Fecha ejecución</label><input type="date" value={s001Fecha} onChange={(e) => setS001Fecha(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl" /></div>
+                <div><label htmlFor="campo-ordenante" className="font-semibold block mb-1">Ordenante</label><input value={s001Ord} onChange={(e) => setS001Ord(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl"
+                                                                                     id="campo-ordenante"/></div>
+                <div><label htmlFor="campo-iban-cargo" className="font-semibold block mb-1">IBAN cargo</label><input value={s001Iban} onChange={(e) => setS001Iban(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono"
+                                                                                      id="campo-iban-cargo"/></div>
+                <div><label htmlFor="campo-fecha-ejecucion" className="font-semibold block mb-1">Fecha ejecución</label><input type="date" value={s001Fecha} onChange={(e) => setS001Fecha(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl"
+                                                                                           id="campo-fecha-ejecucion"/></div>
                 <div className="sm:col-span-3">
                   <label className="font-semibold block mb-1">Órdenes APROBADAS a incluir</label>
                   <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-xl bg-white divide-y divide-slate-100">
@@ -773,27 +803,35 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
 
       {showGenerar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden my-auto">
-            <div className="p-4 bg-emerald-700 text-white flex items-center justify-between">
+          <div ref={dialogoLiquidacion.refDialogo} {...dialogoLiquidacion.propsDialogo} className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto my-auto">
+            <div className="p-4 bg-emerald-700 text-white flex items-center justify-between sticky top-0 z-10">
               <h3 className="font-bold flex items-center gap-2"><Wallet className="w-5 h-5" />Generar liquidación mensual</h3>
-              <button onClick={() => setShowGenerar(false)} className="p-1 hover:bg-emerald-600 rounded-lg"><X className="w-5 h-5" /></button>
+              <button
+                aria-label="Cerrar" onClick={() => setShowGenerar(false)} className="p-1 hover:bg-emerald-600 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleGenerar} className="p-5 space-y-4 text-xs">
               <PreviewCobros propietarioId={genPropId} periodo={genPeriodo} contratos={contratos} />
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="font-semibold block mb-1">Propietario *</label><select value={genPropId} onChange={(e) => setGenPropId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold">{propietarios.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></div>
-                <div><label className="font-semibold block mb-1">Periodo (YYYY-MM) *</label><input value={genPeriodo} onChange={(e) => setGenPeriodo(e.target.value)} pattern="20\d{2}-(0[1-9]|1[0-2])" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono" /></div>
-                <div><label className="font-semibold block mb-1">Honorarios % *</label><input type="number" step="0.01" min="0" max="100" value={genHonorarios} onChange={(e) => setGenHonorarios(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                <div><label className="font-semibold block mb-1">IVA honorarios %</label><div className="flex gap-2"><input type="number" step="0.01" value={genIva} onChange={(e) => setGenIva(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /><label className="flex items-center gap-1 whitespace-nowrap"><input type="checkbox" checked={genAplicaIva} onChange={(e) => setGenAplicaIva(e.target.checked)} />Aplica</label></div></div>
+                <div><label htmlFor="campo-periodo-yyyy-mm" className="font-semibold block mb-1">Periodo (YYYY-MM) *</label><input value={genPeriodo} onChange={(e) => setGenPeriodo(e.target.value)} pattern="20\d{2}-(0[1-9]|1[0-2])" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                                                                                               id="campo-periodo-yyyy-mm"/></div>
+                <div><label htmlFor="campo-honorarios" className="font-semibold block mb-1">Honorarios % *</label><input type="number" step="0.01" min="0" max="100" value={genHonorarios} onChange={(e) => setGenHonorarios(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                         inputMode="decimal"
+                                                                                          id="campo-honorarios"/></div>
+                <div><label className="font-semibold block mb-1">IVA honorarios %</label><div className="flex gap-2"><input type="number" step="0.01" value={genIva} onChange={(e) => setGenIva(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                                                       inputMode="decimal"/><label className="flex items-center gap-1 whitespace-nowrap"><input type="checkbox" checked={genAplicaIva} onChange={(e) => setGenAplicaIva(e.target.checked)} />Aplica</label></div></div>
               </div>
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
                 <label className="flex items-center gap-2 font-bold text-amber-900"><input type="checkbox" checked={genRetencion} onChange={(e) => setGenRetencion(e.target.checked)} />Aplicar retención (SOLO si existe obligación legal — nunca en vivienda)</label>
-                {genRetencion && (<div className="grid grid-cols-3 gap-2">
-                  <div><label className="font-semibold block mb-1">% retención</label><input type="number" step="0.01" value={genRetPct} onChange={(e) => setGenRetPct(Number(e.target.value))} className="w-full px-2 py-1.5 border border-amber-300 rounded-lg" /></div>
-                  <div className="col-span-2"><label className="font-semibold block mb-1">Motivo *</label><input value={genMotivoRet} onChange={(e) => setGenMotivoRet(e.target.value)} placeholder="Ej. Arrendatario empresa, local urbano" className="w-full px-2 py-1.5 border border-amber-300 rounded-lg" /></div>
+                {genRetencion && (<div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div><label className="font-semibold block mb-1">% retención</label><input type="number" step="0.01" value={genRetPct} onChange={(e) => setGenRetPct(Number(e.target.value))} className="w-full px-2 py-1.5 border border-amber-300 rounded-lg"
+                                                                                        inputMode="decimal"/></div>
+                  <div className="col-span-2"><label htmlFor="campo-motivo" className="font-semibold block mb-1">Motivo *</label><input value={genMotivoRet} onChange={(e) => setGenMotivoRet(e.target.value)} placeholder="Ej. Arrendatario empresa, local urbano" className="w-full px-2 py-1.5 border border-amber-300 rounded-lg"
+                                                                                                             id="campo-motivo"/></div>
                 </div>)}
               </div>
-              <div><label className="font-semibold block mb-1">Fuente/regla aplicada</label><textarea rows={2} value={genFuente} onChange={(e) => setGenFuente(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
+              <div><label htmlFor="campo-fuente-regla-aplicada" className="font-semibold block mb-1">Fuente/regla aplicada</label><textarea rows={2} value={genFuente} onChange={(e) => setGenFuente(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                               id="campo-fuente-regla-aplicada"/></div>
               <div className="flex justify-end gap-2 pt-2 border-t"><button type="button" onClick={() => setShowGenerar(false)} className="px-4 py-2 border border-slate-200 rounded-xl font-semibold">Cancelar</button><button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold">Generar borrador</button></div>
             </form>
           </div>
@@ -802,24 +840,34 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
 
       {showGasto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden my-auto">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+          <div ref={dialogoGasto.refDialogo} {...dialogoGasto.propsDialogo} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto my-auto">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between sticky top-0 z-10">
               <h3 className="font-bold flex items-center gap-2"><Receipt className="w-5 h-5" />Nuevo gasto imputable</h3>
-              <button onClick={() => setShowGasto(false)} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
+              <button
+                aria-label="Cerrar" onClick={() => setShowGasto(false)} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleCrearGasto} className="p-5 space-y-3 text-xs">
-              <div><label className="font-semibold block mb-1">Inmueble *</label><select value={gInmuebleId} onChange={(e) => setGInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">{inmuebles.map((i) => <option key={i.id} value={i.id}>{i.direccion} ({i.ciudad})</option>)}</select></div>
-              <div><label className="font-semibold block mb-1">Concepto *</label><input value={gConcepto} onChange={(e) => setGConcepto(e.target.value)} placeholder="Ej. Reparación caldera, cuota comunidad septiembre..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-              <div className="grid grid-cols-3 gap-3">
-                <div><label className="font-semibold block mb-1">Importe *</label><input type="number" step="0.01" min="0" value={gImporte} onChange={(e) => setGImporte(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono" /></div>
-                <div><label className="font-semibold block mb-1">IVA %</label><input type="number" step="0.01" value={gIva} onChange={(e) => setGIva(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                <div><label className="font-semibold block mb-1">Categoría</label><select value={gCategoria} onChange={(e) => setGCategoria(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"><option value="reparacion">Reparación</option><option value="comunidad">Comunidad</option><option value="ibi">IBI</option><option value="seguro">Seguro</option><option value="suministro">Suministro</option><option value="administracion">Administración</option><option value="otro">Otro</option></select></div>
+              <div><label htmlFor="campo-inmueble" className="font-semibold block mb-1">Inmueble *</label><select value={gInmuebleId} onChange={(e) => setGInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                    id="campo-inmueble">{inmuebles.map((i) => <option key={i.id} value={i.id}>{i.direccion} ({i.ciudad})</option>)}</select></div>
+              <div><label htmlFor="campo-concepto" className="font-semibold block mb-1">Concepto *</label><input value={gConcepto} onChange={(e) => setGConcepto(e.target.value)} placeholder="Ej. Reparación caldera, cuota comunidad septiembre..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                    id="campo-concepto"/></div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div><label htmlFor="campo-importe" className="font-semibold block mb-1">Importe *</label><input type="number" step="0.01" min="0" value={gImporte} onChange={(e) => setGImporte(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                                                                                    inputMode="decimal"
+                                                                                     id="campo-importe"/></div>
+                <div><label htmlFor="campo-iva" className="font-semibold block mb-1">IVA %</label><input type="number" step="0.01" value={gIva} onChange={(e) => setGIva(Number(e.target.value))} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                inputMode="decimal"
+                                                                                 id="campo-iva"/></div>
+                <div><label htmlFor="campo-categoria" className="font-semibold block mb-1">Categoría</label><select value={gCategoria} onChange={(e) => setGCategoria(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                     id="campo-categoria"><option value="reparacion">Reparación</option><option value="comunidad">Comunidad</option><option value="ibi">IBI</option><option value="seguro">Seguro</option><option value="suministro">Suministro</option><option value="administracion">Administración</option><option value="otro">Otro</option></select></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="font-semibold block mb-1">Fecha *</label><input type="date" value={gFecha} onChange={(e) => setGFecha(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
+                <div><label htmlFor="campo-fecha" className="font-semibold block mb-1">Fecha *</label><input type="date" value={gFecha} onChange={(e) => setGFecha(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                   id="campo-fecha"/></div>
                 <label className="flex items-end gap-2 pb-2"><input type="checkbox" checked={gEsBase} onChange={(e) => setGEsBase(e.target.checked)} />El importe es base sin IVA</label>
                 <div><label className="font-semibold block mb-1">Factura nº</label><input value={gFactura} onChange={(e) => setGFactura(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                <div><label className="font-semibold block mb-1">Proveedor</label><input value={gProveedor} onChange={(e) => setGProveedor(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
+                <div><label htmlFor="campo-proveedor" className="font-semibold block mb-1">Proveedor</label><input value={gProveedor} onChange={(e) => setGProveedor(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                     id="campo-proveedor"/></div>
               </div>
               <p className="text-[11px] text-slate-500">Se registra como pagado por administración e imputable al propietario (descontable en liquidación).</p>
               <div className="flex justify-end gap-2 pt-2 border-t"><button type="button" onClick={() => setShowGasto(false)} className="px-4 py-2 border border-slate-200 rounded-xl font-semibold">Cancelar</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold">Guardar gasto</button></div>
@@ -830,15 +878,17 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
 
       {showGastoImport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden my-auto">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+          <div ref={dialogoGastoImport.refDialogo} {...dialogoGastoImport.propsDialogo} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto my-auto">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between sticky top-0 z-10">
               <h3 className="font-bold flex items-center gap-2"><Upload className="w-5 h-5" />Importar gasto canónico</h3>
-              <button onClick={() => setShowGastoImport(false)} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
+              <button
+                aria-label="Cerrar" onClick={() => setShowGastoImport(false)} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-3 text-xs">
               <p className="text-slate-500">Importación <strong>unidireccional</strong> del modelo oficial de gastos (colección <span className="font-mono">gastos</span>) a la proyección de liquidación. Es idempotente: reimportar no duplica. La contabilidad oficial se conserva intacta.</p>
-              <div><label className="font-semibold block mb-1">Gasto canónico *</label>
-                <select value={gimpId} onChange={(e) => setGimpId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+              <div><label htmlFor="campo-gasto-canonico" className="font-semibold block mb-1">Gasto canónico *</label>
+                <select value={gimpId} onChange={(e) => setGimpId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                   id="campo-gasto-canonico">
                   {gastosCanonicosImportables.map((g) => (
                     <option key={g.id} value={g.id}>
                       {(g.fechaDevengo || '').slice(0, 10)} · {g.concepto || g.id} — {formatoImporteSepa(Number(g.importe) || 0)} € ({g.aCargoDe === 'arrendador' ? 'a cargo del propietario' : 'a cargo del inquilino'})
@@ -846,8 +896,9 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                   ))}
                 </select>
               </div>
-              <div><label className="font-semibold block mb-1">Imputación en liquidación</label>
-                <select value={gimpImputa} onChange={(e) => setGimpImputa(e.target.value as 'propietario' | 'inquilino')} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+              <div><label htmlFor="campo-imputacion-en-liquidacion" className="font-semibold block mb-1">Imputación en liquidación</label>
+                <select value={gimpImputa} onChange={(e) => setGimpImputa(e.target.value as 'propietario' | 'inquilino')} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                   id="campo-imputacion-en-liquidacion">
                   <option value="propietario">Propietario (descontable de su liquidación)</option>
                   <option value="inquilino">Inquilino (a recuperar)</option>
                 </select>
@@ -872,19 +923,21 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
       )}
 
       {pagoLiq && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="p-4 bg-emerald-700 text-white flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 overflow-y-auto">
+          <div ref={dialogoPago.refDialogo} {...dialogoPago.propsDialogo} className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto my-auto">
+            <div className="p-4 bg-emerald-700 text-white flex items-center justify-between sticky top-0 z-10">
               <h3 className="font-bold">Registrar pago — {pagoLiq.periodo}</h3>
-              <button onClick={() => setPagoLiq(null)} className="p-1 hover:bg-emerald-600 rounded-lg"><X className="w-5 h-5" /></button>
+              <button
+                aria-label="Cerrar" onClick={() => setPagoLiq(null)} className="p-1 hover:bg-emerald-600 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleConfirmarPago} className="p-5 space-y-3 text-xs">
               <p>Neto a transferir a <strong>{pagoLiq.propietarioNombre}</strong>: <strong className="font-mono text-emerald-700 text-base">{formatoImporteSepa(pagoLiq.netoPropietario)} €</strong></p>
               <p className="text-slate-500">IBAN destino: <span className="font-mono">{pagoLiq.cuentaAbonoIban}</span></p>
               {evidenciasPago.length > 0 && (
                 <div>
-                  <label className="font-semibold block mb-1">Evidencia: movimiento bancario conciliado (GAP 6)</label>
-                  <select value={pagoEvidenciaId} onChange={(e) => onElegirEvidencia(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                  <label htmlFor="campo-evidencia-movimiento-bancario-conciliado" className="font-semibold block mb-1">Evidencia: movimiento bancario conciliado (GAP 6)</label>
+                  <select value={pagoEvidenciaId} onChange={(e) => onElegirEvidencia(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                     id="campo-evidencia-movimiento-bancario-conciliado">
                     <option value="">— Introducir referencia manualmente —</option>
                     {evidenciasPago.map((ev) => (
                       <option key={ev.idMovimiento} value={ev.idMovimiento}>
@@ -895,8 +948,10 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                   <p className="text-[10px] text-slate-400 mt-1">Selección rellena referencia y fecha. El movimiento debe estar CONCILIADO/CONFIRMADO en Conciliación bancaria.</p>
                 </div>
               )}
-              <div><label className="font-semibold block mb-1">Referencia bancaria * (evidencia)</label><input value={pagoRef} onChange={(e) => setPagoRef(e.target.value)} placeholder="Ej. TRF-2026-09-001" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-              <div><label className="font-semibold block mb-1">Fecha de pago</label><input type="date" value={pagoFecha} onChange={(e) => setPagoFecha(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl" /></div>
+              <div><label htmlFor="campo-referencia-bancaria-evidencia" className="font-semibold block mb-1">Referencia bancaria * (evidencia)</label><input value={pagoRef} onChange={(e) => setPagoRef(e.target.value)} placeholder="Ej. TRF-2026-09-001" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                                           id="campo-referencia-bancaria-evidencia"/></div>
+              <div><label htmlFor="campo-fecha-de-pago" className="font-semibold block mb-1">Fecha de pago</label><input type="date" value={pagoFecha} onChange={(e) => setPagoFecha(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                                                                                       id="campo-fecha-de-pago"/></div>
               <div className="flex justify-end gap-2 pt-2 border-t"><button type="button" onClick={() => setPagoLiq(null)} className="px-4 py-2 border border-slate-200 rounded-xl font-semibold">Cancelar</button><button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold">Confirmar pago</button></div>
             </form>
           </div>
@@ -941,7 +996,8 @@ const FicherosList: React.FC<{ ficheros: FicheroSEPA[]; onDescargar: (f: Fichero
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[85vh] flex flex-col">
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <h3 className="font-bold text-sm font-mono">{verXml.msgId}.xml</h3>
-              <button onClick={() => setVerXml(null)} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
+              <button
+                aria-label="Cerrar" onClick={() => setVerXml(null)} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <pre className="p-4 text-[10px] font-mono overflow-auto flex-1 bg-slate-950 text-emerald-200 whitespace-pre-wrap">{verXml.xml}</pre>
             <div className="p-3 border-t flex justify-end gap-2 shrink-0"><button onClick={() => { onDescargar(verXml); setVerXml(null); }} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Descargar XML</button><button onClick={() => setVerXml(null)} className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold">Cerrar</button></div>
@@ -970,7 +1026,8 @@ const DetalleLiquidacionModal: React.FC<{
             <h3 className="font-bold">Liquidación {liq.periodo} — {liq.propietarioNombre}</h3>
             <p className="text-[11px] text-slate-300 font-mono">{liq.id} · hash {liq.hashCalculo} · <span className={`px-1.5 py-0.5 rounded ${badgeEstadoLiquidacion(liq.estado)}`}>{liq.estado}</span></p>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
+          <button
+            aria-label="Cerrar" onClick={onClose} className="p-1 hover:bg-slate-700 rounded-lg"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-5 space-y-4 text-xs overflow-y-auto flex-1">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">

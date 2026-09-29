@@ -22,6 +22,7 @@ import {
   UsuarioApp,
 } from '../../types';
 import { ESTADO_TRABAJO_LABELS, PRIORIDAD_TRABAJO_LABELS } from '../../utils/profesionalesEngine';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface HistorialTrabajosInmuebleModalProps {
   isOpen: boolean;
@@ -97,6 +98,7 @@ export const HistorialTrabajosInmuebleModal: React.FC<HistorialTrabajosInmuebleM
               </button>
             )}
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/60 transition-colors"
             >
@@ -142,6 +144,7 @@ export const HistorialTrabajosInmuebleModal: React.FC<HistorialTrabajosInmuebleM
 
                 return (
                   <div
+                    {...propsInteraccion(() => onSelectTrabajo && onSelectTrabajo(trab))}
                     key={trab.id}
                     onClick={() => onSelectTrabajo && onSelectTrabajo(trab)}
                     className="p-4 border border-slate-200 rounded-xl hover:border-blue-400 hover:shadow-xs transition-all cursor-pointer bg-white"

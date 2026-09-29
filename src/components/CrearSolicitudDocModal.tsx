@@ -32,6 +32,7 @@ import {
   Send,
 } from 'lucide-react';
 import { avisarOperacion } from '../feedback/canalFeedback';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface CrearSolicitudDocModalProps {
   candidato: Candidato;
@@ -50,6 +51,10 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
   onSaveSolicitud,
   onOpenWhatsapp,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Solicitud de Documentación Post-Visita'
+  );
   const [documentos, setDocumentos] = useState<ItemDocumentoSolicitado[]>([]);
   const [mensajePropietario, setMensajePropietario] = useState<string>(
     'Gracias por realizar la visita. Para formalizar la valoración de tu candidatura al alquiler, te solicitamos que aportes los siguientes documentos a través de este enlace seguro privado.'
@@ -207,7 +212,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={refDialogo} {...propsDialogo}
         className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -227,6 +232,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
           >
@@ -394,7 +400,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
 
               {/* Instructions / Message to Candidate */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-700">
+                <label htmlFor="campo-mensaje-instrucciones-para-el-candidato" className="block text-xs font-bold text-slate-700">
                   Mensaje / Instrucciones para el candidato:
                 </label>
                 <textarea
@@ -403,7 +409,8 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
                   onChange={(e) => setMensajePropietario(e.target.value)}
                   placeholder="Escribe instrucciones personalizadas para el candidato..."
                   className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder:text-slate-400"
-                />
+
+                   id="campo-mensaje-instrucciones-para-el-candidato"/>
               </div>
 
               {/* Documents to Request Checklist */}
@@ -437,6 +444,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-indigo-950">Añadir Documento Personalizado</span>
                       <button
+                        aria-label="Cerrar"
                         type="button"
                         onClick={() => setShowAddCustom(false)}
                         className="text-slate-400 hover:text-slate-600"
@@ -447,7 +455,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        <label htmlFor="campo-nombre-del-documento" className="block text-[11px] font-semibold text-slate-700 mb-1">
                           Nombre del Documento *
                         </label>
                         <input
@@ -457,18 +465,20 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
                           onChange={(e) => setCustomNombre(e.target.value)}
                           placeholder="Ej. Certificado de Empadronamiento"
                           className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
+
+                           id="campo-nombre-del-documento"/>
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        <label htmlFor="campo-tipo-categoria" className="block text-[11px] font-semibold text-slate-700 mb-1">
                           Tipo / Categoría
                         </label>
                         <select
                           value={customTipo}
                           onChange={(e) => setCustomTipo(e.target.value as TipoDocumento)}
                           className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
+
+                           id="campo-tipo-categoria">
                           <option value="otro">Otro / General</option>
                           <option value="dni_nie">Identidad (DNI / NIE)</option>
                           <option value="nomina">Nómina</option>
@@ -482,7 +492,7 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      <label htmlFor="campo-descripcion-o-instrucciones-especificas-" className="block text-[11px] font-semibold text-slate-700 mb-1">
                         Descripción o Instrucciones Específicas (Opcional)
                       </label>
                       <input
@@ -491,7 +501,8 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
                         onChange={(e) => setCustomDescripcion(e.target.value)}
                         placeholder="Ej. Emitido en los últimos 3 meses en PDF"
                         className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
+
+                         id="campo-descripcion-o-instrucciones-especificas-"/>
                     </div>
 
                     <div className="flex items-center justify-between pt-1">

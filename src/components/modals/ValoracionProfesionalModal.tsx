@@ -23,6 +23,7 @@ import {
   saveProfesionalFirestore,
 } from '../../lib/firebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface ValoracionProfesionalModalProps {
   isOpen: boolean;
@@ -51,8 +52,12 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Valoración del trabajo realizado'
+  );
 
+  if (!isOpen) return null;
   const renderStarSelector = (value: number, onChange: (val: number) => void) => {
     return (
       <div className="flex items-center space-x-1">
@@ -157,7 +162,7 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
       id="valoracion-profesional-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg my-8 overflow-hidden flex flex-col">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg my-8 overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -172,6 +177,7 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -234,8 +240,9 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
           {/* Result Buttons */}
           <div>
             <label className="text-xs font-bold text-slate-700 block mb-1.5">Resultado de la Intervención</label>
-            <div className="grid grid-cols-3 gap-2 text-xs font-semibold">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-semibold">
               <button
+                aria-current={resultado === 'SATISFACTORIO' ? 'true' : undefined}
                 type="button"
                 onClick={() => setResultado('SATISFACTORIO')}
                 className={`p-2.5 rounded-xl border text-center transition-all ${
@@ -247,6 +254,7 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
                 Satisfactorio
               </button>
               <button
+                aria-current={resultado === 'ACEPTABLE' ? 'true' : undefined}
                 type="button"
                 onClick={() => setResultado('ACEPTABLE')}
                 className={`p-2.5 rounded-xl border text-center transition-all ${
@@ -258,6 +266,7 @@ export const ValoracionProfesionalModal: React.FC<ValoracionProfesionalModalProp
                 Aceptable
               </button>
               <button
+                aria-current={resultado === 'DEFICIENTE' ? 'true' : undefined}
                 type="button"
                 onClick={() => setResultado('DEFICIENTE')}
                 className={`p-2.5 rounded-xl border text-center transition-all ${

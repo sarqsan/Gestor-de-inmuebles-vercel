@@ -193,6 +193,7 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -244,8 +245,9 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
           </div>
 
           <div>
-            <label className={labelCls}>Inmueble *</label>
-            <select className={inputCls} value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)} disabled={isEditing}>
+            <label htmlFor="campo-inmueble" className={labelCls}>Inmueble *</label>
+            <select className={inputCls} value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)} disabled={isEditing}
+               id="campo-inmueble">
               {inmuebles.length === 0 && <option value="">Sin inmuebles</option>}
               {inmuebles.map((i) => (
                 <option key={i.id} value={i.id}>
@@ -257,8 +259,9 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>Categoría *</label>
-              <select className={inputCls} value={categoria} onChange={(e) => handleSeleccionCategoria(e.target.value as CategoriaGasto)}>
+              <label htmlFor="campo-categoria" className={labelCls}>Categoría *</label>
+              <select className={inputCls} value={categoria} onChange={(e) => handleSeleccionCategoria(e.target.value as CategoriaGasto)}
+                 id="campo-categoria">
                 {categoriasDelTipo.map((c) => (
                   <option key={c.value} value={c.value}>
                     {c.label}
@@ -267,20 +270,21 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
               </select>
             </div>
             <div>
-              <label className={labelCls}>Concepto</label>
+              <label htmlFor="campo-concepto" className={labelCls}>Concepto</label>
               <input
                 type="text"
                 className={inputCls}
                 value={concepto}
                 onChange={(e) => setConcepto(e.target.value)}
                 placeholder={categoriaDef(categoria).label}
-              />
+
+                 id="campo-concepto"/>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div>
-              <label className={labelCls}>Importe (€) *</label>
+              <label htmlFor="campo-importe" className={labelCls}>Importe (€) *</label>
               <input
                 type="number"
                 step="0.01"
@@ -289,11 +293,14 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
                 value={importe}
                 onChange={(e) => setImporte(e.target.value)}
                 placeholder="0,00"
-              />
+
+                inputMode="decimal"
+                 id="campo-importe"/>
             </div>
             <div>
-              <label className={labelCls}>Frecuencia *</label>
-              <select className={inputCls} value={frecuencia} onChange={(e) => setFrecuencia(e.target.value as FrecuenciaRecurrente)}>
+              <label htmlFor="campo-frecuencia" className={labelCls}>Frecuencia *</label>
+              <select className={inputCls} value={frecuencia} onChange={(e) => setFrecuencia(e.target.value as FrecuenciaRecurrente)}
+                 id="campo-frecuencia">
                 {(Object.keys(FRECUENCIA_LABEL) as FrecuenciaRecurrente[]).map((f) => (
                   <option key={f} value={f}>
                     {FRECUENCIA_LABEL[f]}
@@ -302,7 +309,7 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
               </select>
             </div>
             <div>
-              <label className={labelCls}>Día de vencimiento</label>
+              <label htmlFor="campo-dia-de-vencimiento" className={labelCls}>Día de vencimiento</label>
               <input
                 type="number"
                 min="1"
@@ -310,26 +317,31 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
                 className={inputCls}
                 value={diaVencimiento}
                 onChange={(e) => setDiaVencimiento(e.target.value)}
-              />
+
+                inputMode="decimal"
+                 id="campo-dia-de-vencimiento"/>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div>
-              <label className={labelCls}>Mes de inicio *</label>
-              <input type="month" className={inputCls} value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} />
+              <label htmlFor="campo-mes-de-inicio" className={labelCls}>Mes de inicio *</label>
+              <input type="month" className={inputCls} value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)}
+                 id="campo-mes-de-inicio"/>
             </div>
             <div>
-              <label className={labelCls}>Mes de fin (opcional)</label>
-              <input type="month" className={inputCls} value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} />
+              <label htmlFor="campo-mes-de-fin-opcional" className={labelCls}>Mes de fin (opcional)</label>
+              <input type="month" className={inputCls} value={fechaFin} onChange={(e) => setFechaFin(e.target.value)}
+                 id="campo-mes-de-fin-opcional"/>
             </div>
             <div>
-              <label className={labelCls}>Coste a cargo de</label>
+              <label htmlFor="campo-coste-a-cargo-de" className={labelCls}>Coste a cargo de</label>
               <select
                 className={inputCls}
                 value={aCargoDe}
                 onChange={(e) => setACargoDe(e.target.value as 'arrendador' | 'arrendatario')}
-              >
+
+                 id="campo-coste-a-cargo-de">
                 <option value="arrendador">Arrendador</option>
                 <option value="arrendatario">Arrendatario</option>
               </select>
@@ -338,8 +350,9 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>Método de pago</label>
-              <select className={inputCls} value={metodoPago} onChange={(e) => setMetodoPago(e.target.value as Gasto['metodoPago'])}>
+              <label htmlFor="campo-metodo-de-pago" className={labelCls}>Método de pago</label>
+              <select className={inputCls} value={metodoPago} onChange={(e) => setMetodoPago(e.target.value as Gasto['metodoPago'])}
+                 id="campo-metodo-de-pago">
                 <option value="domiciliacion">Domiciliación</option>
                 <option value="transferencia">Transferencia</option>
                 <option value="bizum">Bizum</option>
@@ -383,8 +396,9 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
           </div>
 
           <div>
-            <label className={labelCls}>Notas</label>
-            <textarea className={inputCls} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            <label htmlFor="campo-notas" className={labelCls}>Notas</label>
+            <textarea className={inputCls} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)}
+               id="campo-notas"/>
           </div>
 
           <p className="text-[11px] text-slate-400 leading-relaxed">

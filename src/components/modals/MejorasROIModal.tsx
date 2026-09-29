@@ -239,7 +239,8 @@ export const MejorasROIModal: React.FC<Props> = ({
             >
               <Plus className="w-4 h-4" /> Añadir manual
             </button>
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
+            <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -391,28 +392,35 @@ export const MejorasROIModal: React.FC<Props> = ({
                           <label className="block text-[9px] font-semibold text-slate-400">Coste mín.</label>
                           <input type="number" min="0" className={inputCls} value={m.costeEstimadoMin ?? ''}
                             onChange={(e) => handleEditar(m.id, { costeEstimadoMin: e.target.value === '' ? undefined : Number(e.target.value) })}
-                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }} />
+                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }}
+                            inputMode="decimal"/>
                         </div>
                         <div>
-                          <label className="block text-[9px] font-semibold text-slate-400">Coste máx.</label>
+                          <label htmlFor="campo-coste-max" className="block text-[9px] font-semibold text-slate-400">Coste máx.</label>
                           <input type="number" min="0" className={inputCls} value={m.costeEstimadoMax ?? ''}
                             onChange={(e) => handleEditar(m.id, { costeEstimadoMax: e.target.value === '' ? undefined : Number(e.target.value) })}
-                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }} />
+                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }}
+                            inputMode="decimal"
+                             id="campo-coste-max"/>
                         </div>
                       </div>
 
                       <div className="col-span-6 md:col-span-3 grid grid-cols-2 gap-1.5">
                         <div>
-                          <label className="block text-[9px] font-semibold text-slate-400">+€ renta/mes</label>
+                          <label htmlFor="campo-renta-mes" className="block text-[9px] font-semibold text-slate-400">+€ renta/mes</label>
                           <input type="number" min="0" className={inputCls} value={m.incrementoRentaMensual ?? ''}
                             onChange={(e) => handleEditar(m.id, { incrementoRentaMensual: e.target.value === '' ? undefined : Number(e.target.value) })}
-                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }} />
+                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }}
+                            inputMode="decimal"
+                             id="campo-renta-mes"/>
                         </div>
                         <div>
-                          <label className="block text-[9px] font-semibold text-slate-400">+€ valor</label>
+                          <label htmlFor="campo-valor" className="block text-[9px] font-semibold text-slate-400">+€ valor</label>
                           <input type="number" min="0" className={inputCls} value={m.incrementoValoracion ?? ''}
                             onChange={(e) => handleEditar(m.id, { incrementoValoracion: e.target.value === '' ? undefined : Number(e.target.value) })}
-                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }} />
+                            onBlur={() => { const actual = mejoras.find((x) => x.id === m.id); if (actual) handleGuardarFila(actual); }}
+                            inputMode="decimal"
+                             id="campo-valor"/>
                         </div>
                       </div>
 

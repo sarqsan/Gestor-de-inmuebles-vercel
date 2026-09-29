@@ -328,7 +328,8 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
             <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${metaEstado.color}`}>
               {metaEstado.label}
             </span>
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
+            <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -372,34 +373,40 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
           {!esEstadoCierre(estado) && (
             <div className="rounded-xl border border-slate-200 p-4 space-y-3 bg-slate-50/50">
               <h4 className="text-xs font-bold text-slate-700">Salida del inquilino</h4>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className={labelCls}>Comunicación</label>
-                  <input type="date" className={inputCls} value={fechaComunicacion} onChange={(e) => setFechaComunicacion(e.target.value)} />
+                  <label htmlFor="campo-comunicacion" className={labelCls}>Comunicación</label>
+                  <input type="date" className={inputCls} value={fechaComunicacion} onChange={(e) => setFechaComunicacion(e.target.value)}
+                     id="campo-comunicacion"/>
                 </div>
                 <div>
-                  <label className={labelCls}>Salida prevista</label>
-                  <input type="date" className={inputCls} value={fechaPrevistaSalida} onChange={(e) => setFechaPrevistaSalida(e.target.value)} />
+                  <label htmlFor="campo-salida-prevista" className={labelCls}>Salida prevista</label>
+                  <input type="date" className={inputCls} value={fechaPrevistaSalida} onChange={(e) => setFechaPrevistaSalida(e.target.value)}
+                     id="campo-salida-prevista"/>
                 </div>
                 <div>
-                  <label className={labelCls}>Entrega de llaves</label>
+                  <label htmlFor="campo-entrega-de-llaves" className={labelCls}>Entrega de llaves</label>
                   <input
                     type="date"
                     className={inputCls}
                     value={fechaEntregaLlaves}
                     onChange={(e) => setFechaEntregaLlaves(e.target.value)}
                     disabled={estado === 'REVISION_PENDIENTE'}
-                  />
+
+                     id="campo-entrega-de-llaves"/>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className={labelCls}>Fianza a devolver (€)</label>
-                  <input type="number" step="0.01" min="0" className={inputCls} value={fianza} onChange={(e) => setFianza(e.target.value)} />
+                  <label htmlFor="campo-fianza-a-devolver" className={labelCls}>Fianza a devolver (€)</label>
+                  <input type="number" step="0.01" min="0" className={inputCls} value={fianza} onChange={(e) => setFianza(e.target.value)}
+                    inputMode="decimal"
+                     id="campo-fianza-a-devolver"/>
                 </div>
                 <div className="col-span-2">
-                  <label className={labelCls}>Observaciones</label>
-                  <input type="text" className={inputCls} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} />
+                  <label htmlFor="campo-observaciones" className={labelCls}>Observaciones</label>
+                  <input type="text" className={inputCls} value={observaciones} onChange={(e) => setObservaciones(e.target.value)}
+                     id="campo-observaciones"/>
                 </div>
               </div>
               <div className="flex justify-end">

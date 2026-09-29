@@ -42,6 +42,7 @@ import {
   saveIncidenciaFirestore,
 } from '../../lib/firebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface TrabajoProfesionalModalProps {
   isOpen: boolean;
@@ -127,8 +128,12 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Orden de trabajo'
+  );
 
+  if (!isOpen) return null;
   const inmuebleSeleccionado = inmuebles.find((i) => i.id === inmuebleId);
   const profesionalSeleccionado = profesionales.find((p) => p.id === profesionalId);
 
@@ -348,7 +353,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
       id="trabajo-profesional-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden flex flex-col max-h-[90vh]">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -365,6 +370,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -383,7 +389,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
           {/* Section 1: Inmueble & Incidencia Vinculada */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
+              <label htmlFor="campo-inmueble-vivienda" className="text-xs font-bold text-slate-700 block mb-1">
                 Inmueble / Vivienda <span className="text-red-500">*</span>
               </label>
               <select
@@ -394,7 +400,8 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                 }}
                 required
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500"
-              >
+
+                 id="campo-inmueble-vivienda">
                 <option value="">Selecciona una vivienda...</option>
                 {inmuebles.map((inm) => (
                   <option key={inm.id} value={inm.id}>
@@ -405,7 +412,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
+              <label htmlFor="campo-incidencia-relacionada-opcional" className="text-xs font-bold text-slate-700 block mb-1">
                 Incidencia Relacionada <span className="text-slate-400 font-normal">(Opcional)</span>
               </label>
               <select
@@ -422,7 +429,8 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                   }
                 }}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500"
-              >
+
+                 id="campo-incidencia-relacionada-opcional">
                 <option value="">Independiente (Sin incidencia previa)</option>
                 {incidenciasDelInmueble.map((inc) => (
                   <option key={inc.id} value={inc.id}>
@@ -436,12 +444,13 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
           {/* Section 2: Tipo de Trabajo & Categoría */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Tipo de Trabajo</label>
+              <label htmlFor="campo-tipo-de-trabajo" className="text-xs font-bold text-slate-700 block mb-1">Tipo de Trabajo</label>
               <select
                 value={tipoTrabajo}
                 onChange={(e) => setTipoTrabajo(e.target.value as any)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
-              >
+
+                 id="campo-tipo-de-trabajo">
                 <option value="REPARACION_INCIDENCIA">Reparación de Avería / Incidencia</option>
                 <option value="MANTENIMIENTO_PREVENTIVO">Mantenimiento Preventivo / Revisión</option>
                 <option value="REFORMA">Reforma / Acondicionamiento</option>
@@ -452,12 +461,13 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Especialidad Requerida</label>
+              <label htmlFor="campo-especialidad-requerida" className="text-xs font-bold text-slate-700 block mb-1">Especialidad Requerida</label>
               <select
                 value={categoria}
                 onChange={(e) => setCategoria(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-medium"
-              >
+
+                 id="campo-especialidad-requerida">
                 {ESPECIALIDADES_CATALOGO.map((esp) => (
                   <option key={esp.codigo} value={esp.codigo}>
                     {esp.nombre} - {esp.descripcion.slice(0, 45)}...
@@ -470,7 +480,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
           {/* Section 3: Título & Descripción */}
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
+              <label htmlFor="campo-titulo-del-trabajo" className="text-xs font-bold text-slate-700 block mb-1">
                 Título del Trabajo <span className="text-red-500">*</span>
               </label>
               <input
@@ -480,18 +490,20 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 font-medium"
-              />
+
+                 id="campo-titulo-del-trabajo"/>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Descripción Detallada del Alcance</label>
+              <label htmlFor="campo-descripcion-detallada-del-alcance" className="text-xs font-bold text-slate-700 block mb-1">Descripción Detallada del Alcance</label>
               <textarea
                 rows={3}
                 placeholder="Indica los detalles del trabajo, especificaciones técnicas, piezas a sustituir o instrucciones de acceso..."
                 value={descripcion}
                 onChange={(e) => setDescripcion(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500"
-              />
+
+                 id="campo-descripcion-detallada-del-alcance"/>
             </div>
           </div>
 
@@ -499,7 +511,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">Nivel de Prioridad</label>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                 {(['BAJA', 'NORMAL', 'ALTA', 'URGENTE'] as PrioridadIncidencia[]).map((p) => {
                   const pInfo = PRIORIDAD_TRABAJO_LABELS[p];
                   return (
@@ -579,7 +591,8 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                     value={importeEstimado}
                     onChange={(e) => setImporteEstimado(e.target.value)}
                     className="w-full text-xs pl-7 p-2.5 border border-slate-300 rounded-xl bg-white"
-                  />
+
+                    inputMode="decimal"/>
                 </div>
               </div>
             </div>
@@ -609,7 +622,8 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                     value={importeFinal}
                     onChange={(e) => setImporteFinal(e.target.value)}
                     className="w-full text-xs pl-7 p-2.5 border border-emerald-300 bg-emerald-50/30 rounded-xl focus:ring-2 focus:ring-emerald-500 font-semibold text-emerald-900"
-                  />
+
+                    inputMode="decimal"/>
                 </div>
                 <p className="text-[10px] text-slate-400 mt-0.5">
                   Importe que se utilizará para registrar el gasto de reparación contable al finalizar.
@@ -661,22 +675,24 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
           {/* Section 6: Fechas Previstas */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Fecha Prevista de Inicio</label>
+              <label htmlFor="campo-fecha-prevista-de-inicio" className="text-xs font-bold text-slate-700 block mb-1">Fecha Prevista de Inicio</label>
               <input
                 type="date"
                 value={fechaInicio}
                 onChange={(e) => setFechaInicio(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
-              />
+
+                 id="campo-fecha-prevista-de-inicio"/>
             </div>
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Fecha Límite / Finalización</label>
+              <label htmlFor="campo-fecha-limite-finalizacion" className="text-xs font-bold text-slate-700 block mb-1">Fecha Límite / Finalización</label>
               <input
                 type="date"
                 value={fechaFinalizacion}
                 onChange={(e) => setFechaFinalizacion(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
-              />
+
+                 id="campo-fecha-limite-finalizacion"/>
             </div>
           </div>
 
@@ -709,6 +725,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
                       <span className="truncate font-medium text-slate-700">{doc.nombre}</span>
                     </div>
                     <button
+                      aria-label="Eliminar"
                       type="button"
                       onClick={() => handleEliminarAdjunto(doc.id)}
                       className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"

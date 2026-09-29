@@ -232,7 +232,8 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
               {ESTADO_EXPEDIENTE_LABELS[exp.estado]} · v{exp.versionEstado}
             </span>
           </div>
-          <button onClick={onCerrar} className="shrink-0 text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
+          <button
+            aria-label="Cerrar" onClick={onCerrar} className="shrink-0 text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
         </header>
 
         <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -247,7 +248,8 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
             aviso.tipo === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' : aviso.tipo === 'aviso' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
           }`}>
             <span className="flex-1 whitespace-pre-wrap">{aviso.texto}</span>
-            <button onClick={() => setAviso(null)}><X className="w-4 h-4" /></button>
+            <button
+              aria-label="Cerrar" onClick={() => setAviso(null)}><X className="w-4 h-4" /></button>
           </div>
         )}
 
@@ -362,7 +364,8 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
                     </select>
                   </label>
                   <label className="flex flex-col gap-1">Importe recibido
-                    <input type="number" step="0.01" value={pagoImporte} onChange={(e) => setPagoImporte(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5" />
+                    <input type="number" step="0.01" value={pagoImporte} onChange={(e) => setPagoImporte(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5"
+                      inputMode="decimal"/>
                   </label>
                   <label className="flex flex-col gap-1">Fecha de pago
                     <input type="date" value={pagoFecha} onChange={(e) => setPagoFecha(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5" />
@@ -406,13 +409,16 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
               {accion === 'compromiso' && (
                 <div className="grid md:grid-cols-5 gap-3 text-xs">
                   <label className="flex flex-col gap-1">Importe del acuerdo
-                    <input type="number" step="0.01" value={cmpImporte} onChange={(e) => setCmpImporte(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5" />
+                    <input type="number" step="0.01" value={cmpImporte} onChange={(e) => setCmpImporte(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5"
+                      inputMode="decimal"/>
                   </label>
                   <label className="flex flex-col gap-1">Nº de pagos
-                    <input type="number" min={1} value={cmpNumPagos} onChange={(e) => setCmpNumPagos(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5" />
+                    <input type="number" min={1} value={cmpNumPagos} onChange={(e) => setCmpNumPagos(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5"
+                      inputMode="decimal"/>
                   </label>
                   <label className="flex flex-col gap-1">Periodicidad (días)
-                    <input type="number" min={1} value={cmpPeriodicidad} onChange={(e) => setCmpPeriodicidad(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5" />
+                    <input type="number" min={1} value={cmpPeriodicidad} onChange={(e) => setCmpPeriodicidad(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5"
+                      inputMode="decimal"/>
                   </label>
                   <label className="flex flex-col gap-1">1ª cuota (opcional)
                     <input type="date" value={cmpPrimeraFecha} onChange={(e) => setCmpPrimeraFecha(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5" />
@@ -545,7 +551,8 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
               {accion === 'intereses' && (
                 <div className="grid md:grid-cols-4 gap-3 text-xs">
                   <label className="flex flex-col gap-1">Tipo anual % (lo aporta el usuario)
-                    <input type="number" step="0.001" value={tipoInteres} onChange={(e) => setTipoInteres(e.target.value)} placeholder="p. ej. 5" className="border border-slate-300 rounded px-2 py-1.5" />
+                    <input type="number" step="0.001" value={tipoInteres} onChange={(e) => setTipoInteres(e.target.value)} placeholder="p. ej. 5" className="border border-slate-300 rounded px-2 py-1.5"
+                      inputMode="decimal"/>
                   </label>
                   <label className="flex flex-col gap-1">Desde (fecha del requerimiento)
                     <input type="date" value={desdeFecha} onChange={(e) => setDesdeFecha(e.target.value)} className="border border-slate-300 rounded px-2 py-1.5" />

@@ -5,6 +5,7 @@ import { ejecutarOperacion } from '../service.ts';
 import { permitido, type IdentidadCanonica } from '../persistence/authorization.ts';
 import { CAMPOS_FORMULARIO, camposEdicion, instruccionFormulario, NOMBRES, valoresEntidad, type Campo } from './forms.ts';
 import { VistaOperaciones, type Filtro } from './view.tsx';
+import { useDialogoAccesible } from '../../../accesibilidad/dialogo';
 export type Editor = { modo: 'CREAR'|'MODIFICAR'|'ANOTAR'|'ESTADO'|'DOCUMENTO'|'FACTURA'; tipo: TipoEntidad; entidad?: EntidadOperativa; estado?: string };
 export function instruccionEditor(editor: Editor, values: Record<string,string>, fecha: string, id: string): InstruccionOperativa {
   const e=editor.entidad;
@@ -24,9 +25,16 @@ function camposEditor(editor:Editor): readonly Campo[]{
   return [];
 }
 export function FormularioOperacion({editor,entidades,seleccion,ocupado,bloqueado,error,onGuardar,onCancelar}:{editor:Editor;entidades:readonly EntidadOperativa[];seleccion:EntidadOperativa|null;ocupado:boolean;bloqueado?:boolean;error?:string;onGuardar:(values:Record<string,string>)=>void;onCancelar:()=>void}){
+  // UX-6 §11/§12: el editor de operaciones mantiene el foco dentro y se cierra con Escape
+  // (misma acción que el botón Cancelar; la operación y sus validaciones no cambian).
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onCancelar, cerrableConEscape: !ocupado },
+    undefined,
+    'op-editor-titulo'
+  );
   const initial=editor.entidad?valoresEntidad(editor.entidad):{fecha:new Date().toISOString().slice(0,10),activo:'SI',origen:'MANUAL',prioridad:'MEDIA',alcance:'INMUEBLE',clase:'DIAGNOSTICO'};
   if(!editor.entidad&&seleccion){if(seleccion.tipo==='incidencia')initial.incidenciaId=seleccion.id;else if('incidenciaId'in seleccion)initial.incidenciaId=seleccion.incidenciaId;if('equipoId'in seleccion&&seleccion.equipoId)initial.equipoId=seleccion.equipoId;}
-  return <div role="dialog" aria-modal="true" aria-labelledby="op-editor-titulo" className="fixed inset-0 z-50 overflow-auto bg-slate-900/50 p-4"><form className="mx-auto max-w-2xl rounded-xl bg-white p-6 space-y-4" onSubmit={(ev)=>{ev.preventDefault();onGuardar(Object.fromEntries(new FormData(ev.currentTarget).entries()) as Record<string,string>);}}>
+  return <div ref={refDialogo} {...propsDialogo} className="fixed inset-0 z-50 overflow-auto bg-slate-900/50 p-4"><form className="mx-auto max-w-2xl rounded-xl bg-white p-6 space-y-4" onSubmit={(ev)=>{ev.preventDefault();onGuardar(Object.fromEntries(new FormData(ev.currentTarget).entries()) as Record<string,string>);}}>
     {error&&<p role="alert" className="rounded bg-red-50 p-3 text-red-900">{error}</p>}
     <h2 id="op-editor-titulo" className="text-xl font-bold">{editor.modo} · {NOMBRES[editor.tipo]} {editor.estado??''}</h2>
     <p className="text-sm text-slate-600">Datos explícitos. Sin cargas de archivos, inferencias de cobertura ni autorización automática. Las referencias deben pertenecer al mismo inmueble.</p>

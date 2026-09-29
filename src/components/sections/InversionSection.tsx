@@ -524,14 +524,15 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
           {/* Selector inmueble existente */}
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-slate-600">Analizar inmueble existente de cartera</label>
+              <label htmlFor="campo-analizar-inmueble-existente-de-cartera" className="text-xs font-semibold text-slate-600">Analizar inmueble existente de cartera</label>
               <select
                 onChange={(e) => {
                   if (e.target.value) handleNuevo(e.target.value);
                 }}
                 defaultValue=""
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white"
-              >
+
+                 id="campo-analizar-inmueble-existente-de-cartera">
                 <option value="">Selecciona inmueble para analizar…</option>
                 {inmuebles.map((i) => (
                   <option key={i.id} value={i.id}>
@@ -542,14 +543,15 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
               <p className="text-[11px] text-slate-400 mt-1">No crea inmueble real automáticamente. Registro independiente.</p>
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-600">Buscar análisis guardados</label>
+              <label htmlFor="campo-buscar-analisis-guardados" className="text-xs font-semibold text-slate-600">Buscar análisis guardados</label>
               <input
                 type="text"
                 value={filtroTexto}
                 onChange={(e) => setFiltroTexto(e.target.value)}
                 placeholder="Filtrar por título, dirección, ciudad…"
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-              />
+
+                 id="campo-buscar-analisis-guardados"/>
             </div>
           </div>
         </div>
@@ -623,18 +625,21 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                     <Eye className="w-3.5 h-3.5" /> Ver
                   </button>
                   <button
+                    aria-label="Editar"
                     onClick={() => handleEditar(a)}
                     className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                   </button>
                   <button
+                    aria-label="Copiar"
                     onClick={() => handleDuplicar(a)}
                     className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
                   <button
+                    aria-label="Eliminar"
                     onClick={() => handleEliminar(a.id)}
                     className="px-3 py-2 bg-white border border-rose-100 text-rose-600 rounded-xl text-xs font-semibold"
                   >
@@ -663,7 +668,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => setSelectedId(null)} className="p-2 bg-white border border-slate-200 rounded-xl">
+          <button
+            aria-label="Anterior" onClick={() => setSelectedId(null)} className="p-2 bg-white border border-slate-200 rounded-xl">
             <ArrowLeft className="w-4 h-4" />
           </button>
           <h2 className="font-bold text-slate-900">{a.titulo}</h2>
@@ -865,6 +871,7 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <button
+          aria-label="Anterior"
           onClick={() => {
             setIsCreating(false);
             setForm(null);
@@ -955,11 +962,12 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold">Habitaciones / Baños / Planta</span>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     <input
                       type="number"
                       placeholder="Hab"
@@ -971,7 +979,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                     <input
                       type="number"
                       placeholder="Baños"
@@ -983,7 +992,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                     <input
                       placeholder="Planta"
                       value={draft.datosInmueble?.planta || ''}
@@ -994,7 +1004,7 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold">Tipo inmueble / Estado / Ascensor</span>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     <select
                       value={draft.datosInmueble?.tipoInmueble || 'piso'}
                       onChange={(e) => setForm({ ...draft, datosInmueble: { ...draft.datosInmueble!, tipoInmueble: e.target.value } })}
@@ -1046,7 +1056,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                     <input
                       type="number"
                       placeholder="Previsto compra"
@@ -1061,7 +1072,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </div>
                 </label>
                 <label className="space-y-1 md:col-span-2">
@@ -1107,7 +1119,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
                     placeholder="Ej 185000"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold">Precio solicitado (dato introducido)</span>
@@ -1121,11 +1134,12 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold">Escenarios valoración (dato introducido opcional)</span>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     <input
                       type="number"
                       placeholder="Conservador"
@@ -1137,7 +1151,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                     <input
                       type="number"
                       placeholder="Central"
@@ -1149,7 +1164,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                     <input
                       type="number"
                       placeholder="Favorable"
@@ -1161,7 +1177,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </div>
                 </label>
                 <label className="space-y-1">
@@ -1224,7 +1241,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         setForm({ ...draft, comparables: arr });
                       }}
                       className="px-2 py-1.5 border border-slate-200 rounded-lg"
-                    />
+
+                      inputMode="decimal"/>
                     <input
                       type="number"
                       placeholder="Precio"
@@ -1235,7 +1253,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         setForm({ ...draft, comparables: arr });
                       }}
                       className="px-2 py-1.5 border border-slate-200 rounded-lg"
-                    />
+
+                      inputMode="decimal"/>
                     <div className="px-2 py-1.5 bg-slate-50 rounded-lg">{formatM2(c.precioM2 ?? calcularPrecioM2(c.precio, c.superficie))}</div>
                     <input
                       placeholder="Fuente"
@@ -1305,7 +1324,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, costeCompra: { ...draft.costeCompra!, precioCompra: e.target.value ? Number(e.target.value) : 0 } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="space-y-1">
@@ -1317,7 +1337,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         setForm({ ...draft, costeCompra: { ...draft.costeCompra!, impuestos: e.target.value ? Number(e.target.value) : undefined } })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Notaría (dato introducido)</span>
@@ -1328,7 +1349,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         setForm({ ...draft, costeCompra: { ...draft.costeCompra!, notaria: e.target.value ? Number(e.target.value) : undefined } })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Registro (dato introducido)</span>
@@ -1339,7 +1361,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         setForm({ ...draft, costeCompra: { ...draft.costeCompra!, registro: e.target.value ? Number(e.target.value) : undefined } })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Gestoría (dato introducido)</span>
@@ -1350,7 +1373,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         setForm({ ...draft, costeCompra: { ...draft.costeCompra!, gestoria: e.target.value ? Number(e.target.value) : undefined } })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Otros gastos (dato introducido)</span>
@@ -1364,7 +1388,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Otros costes (dato introducido)</span>
@@ -1378,7 +1403,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                 </div>
               </div>
@@ -1429,7 +1455,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Tipo interés anual % (dato introducido)</span>
@@ -1444,7 +1471,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Plazo meses (dato introducido)</span>
@@ -1458,7 +1486,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs">Gastos financieros (dato introducido)</span>
@@ -1472,7 +1501,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         })
                       }
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    />
+
+                      inputMode="decimal"/>
                   </label>
                 </div>
               )}
@@ -1507,7 +1537,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, alquiler: { ...draft.alquiler!, alquilerMensual: e.target.value ? Number(e.target.value) : undefined } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Ocupación prevista % (dato introducido)</span>
@@ -1521,7 +1552,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Meses vacancia (dato introducido)</span>
@@ -1532,7 +1564,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, alquiler: { ...draft.alquiler!, mesesVacancia: e.target.value ? Number(e.target.value) : undefined } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Comunidad anual (dato introducido)</span>
@@ -1543,7 +1576,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, alquiler: { ...draft.alquiler!, gastosComunidad: e.target.value ? Number(e.target.value) : undefined } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">IBI anual (dato introducido)</span>
@@ -1554,7 +1588,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, alquiler: { ...draft.alquiler!, ibi: e.target.value ? Number(e.target.value) : undefined } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Seguro anual (dato introducido)</span>
@@ -1565,7 +1600,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, alquiler: { ...draft.alquiler!, seguro: e.target.value ? Number(e.target.value) : undefined } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Mantenimiento anual (dato introducido)</span>
@@ -1576,7 +1612,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, alquiler: { ...draft.alquiler!, mantenimiento: e.target.value ? Number(e.target.value) : undefined } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Otros gastos anuales (dato introducido)</span>
@@ -1590,7 +1627,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
               </div>
 
@@ -1659,7 +1697,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                         setForm({ ...draft, reforma: { ...draft.reforma!, partidas: arr } });
                       }}
                       className="px-2 py-1.5 border border-slate-200 rounded-lg"
-                    />
+
+                      inputMode="decimal"/>
                     <input
                       placeholder="Observaciones"
                       value={p.observaciones || ''}
@@ -1702,7 +1741,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       setForm({ ...draft, reforma: { ...draft.reforma!, contingenciaPct: e.target.value ? Number(e.target.value) : undefined } })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <div className="bg-slate-50 rounded-xl p-3">
                   <div className="text-slate-500">Coste total reforma (calculado)</div>
@@ -1735,7 +1775,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Valor después (dato introducido)</span>
@@ -1752,7 +1793,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Alquiler antes mensual (dato introducido)</span>
@@ -1769,7 +1811,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs">Alquiler después mensual (dato introducido)</span>
@@ -1786,7 +1829,8 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
                       })
                     }
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                  />
+
+                    inputMode="decimal"/>
                 </label>
               </div>
 

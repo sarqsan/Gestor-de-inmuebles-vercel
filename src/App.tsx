@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { UserPlus, X } from 'lucide-react';
 import {
   SectionType,
@@ -163,6 +163,7 @@ import {
   reconciliarDesdeStorage,
 } from './lib/sincronizacionPestanas';
 
+import { useDialogoAccesible } from './accesibilidad/dialogo';
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
 import { Header } from './components/Header';
@@ -906,8 +907,24 @@ export default function App() {
   // §6 F4: proveedor IA (Gemini vía servidor; sin clave → el motor cae al resolutor local) y
   // ejecución de acciones validadas del asistente con los medios del host (route guard intacto).
   const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  const mainRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (activeSection !== 'inmuebles') setInmuebleContextualIA(null);
+  }, [activeSection]);
+
+  // BLOQUE 10 · UX-5 §7: al cambiar de sección la vista vuelve arriba y el foco pasa al
+  // contenido, para que la nueva pantalla no aparezca «abierta por la mitad» (sobre todo
+  // al navegar desde el menú móvil). No se ejecuta en la primera carga: mover el foco
+  // durante el arranque desorienta a lectores de pantalla.
+  const primerRenderSeccion = useRef(true);
+  useEffect(() => {
+    if (primerRenderSeccion.current) {
+      primerRenderSeccion.current = false;
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    mainRef.current?.focus();
   }, [activeSection]);
   useEffect(() => setInmuebleContextualIA(null), [currentUser?.id]);
   const inmuebleVisibleContextual = activeSection === 'inmuebles'
@@ -3731,8 +3748,13 @@ export default function App() {
     );
   }
 
+  // UX-6 §11: el modal de nuevo candidato es un diálogo con foco y Escape.
+  const dialogoNuevoCandidato = useDialogoAccesible(
+    { abierto: showNuevoCandidatoModal, onCerrar: () => setShowNuevoCandidatoModal(false) },
+    'Registrar nuevo candidato'
+  );
   return (
-    <div className="min-h-screen bg-slate-100/70 font-sans text-slate-800 flex flex-col md:flex-row pb-16 md:pb-0 antialiased">
+    <div className="min-h-screen bg-slate-100/70 font-sans text-slate-800 flex flex-col md:flex-row antialiased">
       {/* Desktop Sidebar Navigation */}
       <Sidebar
         activeSection={activeSection}
@@ -3806,7 +3828,11 @@ export default function App() {
         />
 
         {/* Dynamic Section Renderer */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+        <main
+          ref={mainRef}
+          tabIndex={-1}
+          className="flex-1 p-4 sm:p-6 lg:p-8 pb-20 md:pb-8 max-w-7xl w-full mx-auto outline-none"
+        >
           {/* UX-2: ninguna pantalla afirma «no hay datos» mientras su lectura esté
               pendiente o haya fallado (carga clara / error accionable + Reintentar). */}
           <PuertaEstadoDatos
@@ -4528,7 +4554,7 @@ export default function App() {
       {/* Nuevo Candidato Modal */}
       {showNuevoCandidatoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-fadeIn">
-          <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col border border-slate-200">
+          <div ref={dialogoNuevoCandidato.refDialogo} {...dialogoNuevoCandidato.propsDialogo} className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col border border-slate-200">
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-blue-400" />

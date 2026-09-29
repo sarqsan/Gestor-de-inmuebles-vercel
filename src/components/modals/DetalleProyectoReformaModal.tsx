@@ -61,6 +61,7 @@ import {
   saveGastoFirestore,
 } from '../../lib/firebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface DetalleProyectoReformaModalProps {
   isOpen: boolean;
@@ -366,6 +367,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
               </button>
             )}
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
             >
@@ -834,6 +836,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
                 <div className="space-y-2.5">
                   {otsDelProyecto.map((ot) => (
                     <div
+                      {...propsInteraccion(() => onAbrirOT && onAbrirOT(ot))}
                       key={ot.id}
                       onClick={() => onAbrirOT && onAbrirOT(ot)}
                       className="p-3.5 bg-white border border-slate-200 hover:border-blue-400 rounded-xl flex items-center justify-between cursor-pointer transition-all"
@@ -1027,7 +1030,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
               <h4 className="text-base font-bold text-slate-900">Añadir Partida de Obra</h4>
               <form onSubmit={handleCrearPartida} className="space-y-3 text-xs">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Concepto / Actuación</label>
+                  <label htmlFor="campo-concepto-actuacion" className="font-bold text-slate-700 block mb-1">Concepto / Actuación</label>
                   <input
                     type="text"
                     placeholder="Ej: Alicatado de paredes con azulejo porcelánico"
@@ -1035,17 +1038,19 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
                     onChange={(e) => setPartConcepto(e.target.value)}
                     className="w-full p-2 border border-slate-300 rounded-xl"
                     required
-                  />
+
+                     id="campo-concepto-actuacion"/>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">Categoría</label>
+                    <label htmlFor="campo-categoria" className="font-bold text-slate-700 block mb-1">Categoría</label>
                     <select
                       value={partCategoria}
                       onChange={(e) => setPartCategoria(e.target.value as CategoriaPartidaReforma)}
                       className="w-full p-2 border border-slate-300 rounded-xl bg-white"
-                    >
+
+                       id="campo-categoria">
                       {['ALBANILERIA', 'ELECTRICIDAD', 'FONTANERIA', 'PINTURA', 'CARPINTERIA', 'CLIMATIZACION', 'COCINA', 'BANO', 'SUELO', 'VENTANAS', 'OTROS'].map((c) => (
                         <option key={c} value={c}>
                           {c}
@@ -1054,30 +1059,33 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
                     </select>
                   </div>
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">Unidad</label>
+                    <label htmlFor="campo-unidad" className="font-bold text-slate-700 block mb-1">Unidad</label>
                     <input
                       type="text"
                       placeholder="m2, ud, ml..."
                       value={partUnidad}
                       onChange={(e) => setPartUnidad(e.target.value)}
                       className="w-full p-2 border border-slate-300 rounded-xl"
-                    />
+
+                       id="campo-unidad"/>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">Cantidad</label>
+                    <label htmlFor="campo-cantidad" className="font-bold text-slate-700 block mb-1">Cantidad</label>
                     <input
                       type="number"
                       step="0.01"
                       value={partCantidad}
                       onChange={(e) => setPartCantidad(e.target.value)}
                       className="w-full p-2 border border-slate-300 rounded-xl"
-                    />
+
+                      inputMode="decimal"
+                       id="campo-cantidad"/>
                   </div>
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">Precio Estimado (€)</label>
+                    <label htmlFor="campo-precio-estimado" className="font-bold text-slate-700 block mb-1">Precio Estimado (€)</label>
                     <input
                       type="number"
                       step="0.01"
@@ -1086,7 +1094,9 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
                       onChange={(e) => setPartPrecioEst(e.target.value)}
                       className="w-full p-2 border border-slate-300 rounded-xl"
                       required
-                    />
+
+                      inputMode="decimal"
+                       id="campo-precio-estimado"/>
                   </div>
                 </div>
 
@@ -1118,7 +1128,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
               <p className="text-slate-500">{selectedPartidaParaCoste.concepto}</p>
               <form onSubmit={handleRegistrarCostePartida} className="space-y-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Importe Real Liquidado (€)</label>
+                  <label htmlFor="campo-importe-real-liquidado" className="font-bold text-slate-700 block mb-1">Importe Real Liquidado (€)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1126,7 +1136,9 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
                     onChange={(e) => setCosteRealInput(e.target.value)}
                     className="w-full p-2 border border-slate-300 rounded-xl text-sm font-bold"
                     required
-                  />
+
+                    inputMode="decimal"
+                     id="campo-importe-real-liquidado"/>
                 </div>
                 <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
                   <button
@@ -1156,7 +1168,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
               </p>
               <form onSubmit={handleAdjudicarPresupuesto} className="space-y-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Motivo / Justificación de la Adjudicación (Obligatorio)</label>
+                  <label htmlFor="campo-motivo-justificacion-de-la-adjudicacion-" className="font-bold text-slate-700 block mb-1">Motivo / Justificación de la Adjudicación (Obligatorio)</label>
                   <textarea
                     rows={3}
                     placeholder="Ej: Mejor relación calidad-precio y disponibilidad inmediata para inicio de obra."
@@ -1164,7 +1176,8 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
                     onChange={(e) => setMotivoAdjudicacion(e.target.value)}
                     className="w-full p-2.5 border border-slate-300 rounded-xl"
                     required
-                  />
+
+                     id="campo-motivo-justificacion-de-la-adjudicacion-"/>
                 </div>
                 <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
                   <button
@@ -1198,14 +1211,15 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
               </p>
               <div className="space-y-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Observaciones de Cierre (Opcional)</label>
+                  <label htmlFor="campo-observaciones-de-cierre-opcional" className="font-bold text-slate-700 block mb-1">Observaciones de Cierre (Opcional)</label>
                   <textarea
                     rows={3}
                     placeholder="Indica notas sobre acabados, garantías, entrega de llaves o detalles de recepción de obra..."
                     value={observacionesCierre}
                     onChange={(e) => setObservacionesCierre(e.target.value)}
                     className="w-full p-2.5 border border-slate-300 rounded-xl"
-                  />
+
+                     id="campo-observaciones-de-cierre-opcional"/>
                 </div>
                 <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
                   <button

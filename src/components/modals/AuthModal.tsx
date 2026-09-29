@@ -13,6 +13,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { UsuarioApp } from '../../types';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface AuthModalProps {
   currentUser: UsuarioApp | null;
@@ -25,8 +26,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onLogout,
   onClose,
 }) => {
-  if (!currentUser) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: Boolean(currentUser), onCerrar: onClose },
+    'Mi Perfil de Usuario'
+  );
 
+  if (!currentUser) return null;
   const getPerfilBadge = (perfil: string) => {
     switch (perfil) {
       case 'ADMINISTRADOR':
@@ -62,7 +67,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     >
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md my-8 overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <div ref={refDialogo} {...propsDialogo} className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700">
               <User className="w-5 h-5" />
@@ -77,6 +82,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer"
           >

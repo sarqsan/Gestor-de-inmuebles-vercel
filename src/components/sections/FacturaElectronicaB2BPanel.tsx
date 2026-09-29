@@ -409,7 +409,8 @@ export const FacturaElectronicaB2BPanel: React.FC<{
 
             {historialDe === feb.id && (
               <div className="mt-2 border-t border-slate-100 pt-2">
-                <table className="w-full text-[11px]">
+                <div className="scroll-x-controlado">
+                <table className="min-w-[520px] w-full text-[11px]">
                   <thead>
                     <tr className="text-left text-slate-400">
                       <th className="py-0.5 pr-2">Fecha</th>
@@ -436,6 +437,7 @@ export const FacturaElectronicaB2BPanel: React.FC<{
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
           </div>

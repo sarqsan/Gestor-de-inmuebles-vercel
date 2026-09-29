@@ -135,6 +135,7 @@ export const SolicitudDetailModal: React.FC<SolicitudDetailModalProps> = ({
             </p>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 transition-all"
           >

@@ -253,7 +253,17 @@ export const RentabilidadPanel: React.FC<RentabilidadPanelProps> = ({
                     <td className="px-4 py-2.5 max-w-[200px]">
                       <div className="flex items-center gap-1">
                         <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                        <span className="font-medium text-slate-800 line-clamp-1">{f.direccion}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInmuebleSeleccionado(f.inmuebleId);
+                          }}
+                          className="font-medium text-slate-800 line-clamp-1 hover:text-emerald-700 hover:underline cursor-pointer text-left"
+                          aria-label={`Ver detalle de ${f.direccion}`}
+                        >
+                          {f.direccion}
+                        </button>
                       </div>
                       <div className="flex items-center gap-1.5 text-[10px] text-slate-400 pl-4">
                         <span className="capitalize">{f.ciudad}</span>

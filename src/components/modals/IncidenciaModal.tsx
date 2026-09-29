@@ -30,6 +30,8 @@ import {
   Loader2,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface IncidenciaModalProps {
   isOpen: boolean;
@@ -61,7 +63,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
   const [prioridad, setPrioridad] = useState<PrioridadIncidencia>('NORMAL');
   const [origen, setOrigen] = useState<OrigenIncidencia>('INQUILINO');
   const [observaciones, setObservaciones] = useState<string>('');
-  
+
   // Archivos adjuntos
   const [fotografias, setFotografias] = useState<AdjuntoIncidencia[]>([]);
   const [documentos, setDocumentos] = useState<AdjuntoIncidencia[]>([]);
@@ -100,8 +102,12 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
     }
   }, [isOpen, incidenciaToEdit, defaultInmuebleId, inmuebles, currentUser]);
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Incidencia'
+  );
 
+  if (!isOpen) return null;
   const selectedInmueble = inmuebles.find((i) => i.id === inmuebleId);
   // Buscar contrato activo para asociar inquilino automáticamente
   const activeContract = contratos.find(
@@ -286,7 +292,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -303,6 +309,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
@@ -384,7 +391,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
 
           {/* Título de la Incidencia */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="campo-titulo-descriptivo-de-la-incidencia" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Título descriptivo de la incidencia *
             </label>
             <input
@@ -394,20 +401,22 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
               placeholder="Ej: Fuga de agua en latiguillo del fregadero / Caldera no enciende error E04"
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
               required
-            />
+
+               id="campo-titulo-descriptivo-de-la-incidencia"/>
           </div>
 
           {/* Categoría y Prioridad */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-categoria-tecnica" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Categoría Técnica *
               </label>
               <select
                 value={categoria}
                 onChange={(e) => setCategoria(e.target.value as CategoriaIncidencia)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
-              >
+
+                 id="campo-categoria-tecnica">
                 {Object.entries(CATEGORIAS_INCIDENCIA_LABELS).map(([catKey, val]) => (
                   <option key={catKey} value={catKey}>
                     {val.label}
@@ -417,14 +426,15 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-prioridad-nivel-de-urgencia" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Prioridad / Nivel de Urgencia *
               </label>
               <select
                 value={prioridad}
                 onChange={(e) => setPrioridad(e.target.value as PrioridadIncidencia)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
-              >
+
+                 id="campo-prioridad-nivel-de-urgencia">
                 {Object.entries(PRIORIDADES_INCIDENCIA_LABELS).map(([prioKey, val]) => (
                   <option key={prioKey} value={prioKey}>
                     {val.label}
@@ -436,7 +446,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
 
           {/* Descripción */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="campo-descripcion-detallada-de-los-danos-o-hec" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Descripción detallada de los daños o hechos *
             </label>
             <textarea
@@ -446,7 +456,8 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
               placeholder="Describa qué ocurre, cuándo comenzó, si afecta a otras estancias o vecinos colindantes, y las medidas provisionales tomadas (ej. corte de agua general, colocación de recipiente, bajada de térmico)..."
               className="w-full p-3.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
               required
-            />
+
+               id="campo-descripcion-detallada-de-los-danos-o-hec"/>
           </div>
 
           {/* Subida de Fotografías y Documentos */}
@@ -459,6 +470,7 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
             </div>
 
             <div
+              {...propsInteraccion(() => fileInputRef.current?.click())}
               onClick={() => fileInputRef.current?.click()}
               className="border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50/40 rounded-xl p-4 text-center cursor-pointer transition-colors"
             >

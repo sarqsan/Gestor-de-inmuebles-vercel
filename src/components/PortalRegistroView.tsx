@@ -700,7 +700,7 @@ export const PortalRegistroView: React.FC<PortalRegistroViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                  <label htmlFor="campo-municipio-principal" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                     Municipio Principal
                   </label>
                   <input
@@ -709,7 +709,8 @@ export const PortalRegistroView: React.FC<PortalRegistroViewProps> = ({
                     onChange={(e) => setMunicipio(e.target.value)}
                     placeholder="Ej. Vera"
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                  />
+
+                     id="campo-municipio-principal"/>
                 </div>
               </div>
             </div>

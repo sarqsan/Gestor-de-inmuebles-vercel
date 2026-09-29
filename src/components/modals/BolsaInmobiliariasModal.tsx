@@ -376,7 +376,8 @@ export const BolsaInmobiliariasModal: React.FC<Props> = ({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
+          <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -515,7 +516,8 @@ export const BolsaInmobiliariasModal: React.FC<Props> = ({
                   <input className={inputCls} placeholder="Honorarios (ej. 1 mes + IVA / 3%)"
                     value={propuestaForm.honorarios} onChange={(e) => setPropuestaForm({ ...propuestaForm, honorarios: e.target.value })} />
                   <input className={inputCls} type="number" placeholder="Plazo estimado (días)"
-                    value={propuestaForm.plazo} onChange={(e) => setPropuestaForm({ ...propuestaForm, plazo: e.target.value })} />
+                    value={propuestaForm.plazo} onChange={(e) => setPropuestaForm({ ...propuestaForm, plazo: e.target.value })}
+                    inputMode="decimal"/>
                   <input className={inputCls} placeholder="Servicios (fotos, contrato, filtrado…)"
                     value={propuestaForm.servicios} onChange={(e) => setPropuestaForm({ ...propuestaForm, servicios: e.target.value })} />
                 </div>

@@ -437,6 +437,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/60 transition-colors cursor-pointer"
           >
@@ -476,7 +477,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
           {/* Section 1: Trabajo y Profesional */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
+              <label htmlFor="campo-orden-de-trabajo-asignacion" className="text-xs font-bold text-slate-700 block mb-1">
                 Orden de Trabajo / Asignación <span className="text-rose-500">*</span>
               </label>
               <select
@@ -485,7 +486,8 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                 value={trabajoId}
                 onChange={(e) => setTrabajoId(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-medium disabled:bg-slate-100"
-              >
+
+                 id="campo-orden-de-trabajo-asignacion">
                 {trabajoPreseleccionado && !trabajos.some((t) => t.id === trabajoPreseleccionado.id) && (
                   <option value={trabajoPreseleccionado.id}>
                     {trabajoPreseleccionado.titulo} ({trabajoPreseleccionado.id.slice(-6)})
@@ -500,7 +502,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
+              <label htmlFor="campo-profesional-emisor" className="text-xs font-bold text-slate-700 block mb-1">
                 Profesional Emisor <span className="text-rose-500">*</span>
               </label>
               <select
@@ -508,7 +510,8 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                 value={profesionalId}
                 onChange={(e) => setProfesionalId(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white font-medium"
-              >
+
+                 id="campo-profesional-emisor">
                 {profesionales.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.nombreComercial || p.nombre || 'Profesional'} {p.cifNif ? `(${p.cifNif})` : ''}
@@ -521,7 +524,7 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
           {/* Section 2: Número, Fecha y Validez */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
+              <label htmlFor="campo-no-de-presupuesto-referencia" className="text-xs font-bold text-slate-700 block mb-1">
                 Nº de Presupuesto / Referencia
               </label>
               <input
@@ -530,22 +533,24 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                 value={numeroPresupuesto}
                 onChange={(e) => setNumeroPresupuesto(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-mono font-medium"
-              />
+
+                 id="campo-no-de-presupuesto-referencia"/>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Fecha de Emisión</label>
+              <label htmlFor="campo-fecha-de-emision" className="text-xs font-bold text-slate-700 block mb-1">Fecha de Emisión</label>
               <input
                 type="date"
                 required
                 value={fecha}
                 onChange={(e) => setFecha(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-medium"
-              />
+
+                 id="campo-fecha-de-emision"/>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Validez de la Oferta</label>
+              <label htmlFor="campo-validez-de-la-oferta" className="text-xs font-bold text-slate-700 block mb-1">Validez de la Oferta</label>
               <input
                 type="text"
                 required
@@ -553,13 +558,14 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
                 onChange={(e) => setValidez(e.target.value)}
                 placeholder="Ej: 30 días, Hasta 31/12/2026..."
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-medium"
-              />
+
+                 id="campo-validez-de-la-oferta"/>
             </div>
           </div>
 
           {/* Section 3: Objeto / Resumen */}
           <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">
+            <label htmlFor="campo-objeto-resumen-del-presupuesto" className="text-xs font-bold text-slate-700 block mb-1">
               Objeto / Resumen del Presupuesto
             </label>
             <input
@@ -568,7 +574,8 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
               value={descripcion}
               onChange={(e) => setDescripcion(e.target.value)}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-medium"
-            />
+
+               id="campo-objeto-resumen-del-presupuesto"/>
           </div>
 
           {/* Section 4: Desglose de Partidas */}
@@ -588,68 +595,73 @@ export const PresupuestoProfesionalModal: React.FC<PresupuestoProfesionalModalPr
             </div>
 
             <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                  <tr>
-                    <th className="p-2.5 pl-3">Concepto / Unidad de Obra</th>
-                    <th className="p-2.5 w-20 text-center">Cant.</th>
-                    <th className="p-2.5 w-28 text-right">Precio Ud (€)</th>
-                    <th className="p-2.5 w-28 text-right">Importe (€)</th>
-                    <th className="p-2.5 w-10 text-center"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {partidas.map((p, idx) => (
-                    <tr key={p.id || idx}>
-                      <td className="p-2 pl-3">
-                        <input
-                          type="text"
-                          required
-                          value={p.concepto}
-                          onChange={(e) => handleUpdatePartida(idx, 'concepto', e.target.value)}
-                          className="w-full p-1.5 border border-slate-200 rounded-lg text-xs"
-                        />
-                      </td>
-                      <td className="p-2 text-center">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          required
-                          value={p.cantidad}
-                          onChange={(e) => handleUpdatePartida(idx, 'cantidad', e.target.value)}
-                          className="w-full p-1.5 border border-slate-200 rounded-lg text-xs text-center"
-                        />
-                      </td>
-                      <td className="p-2 text-right">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          required
-                          value={p.precioUnitario}
-                          onChange={(e) => handleUpdatePartida(idx, 'precioUnitario', e.target.value)}
-                          className="w-full p-1.5 border border-slate-200 rounded-lg text-xs text-right"
-                        />
-                      </td>
-                      <td className="p-2 text-right font-bold text-slate-800 pr-3 font-mono">
-                        {p.importe.toFixed(2)} €
-                      </td>
-                      <td className="p-2 text-center">
-                        {partidas.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemovePartida(idx)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                              <div className="scroll-x-controlado">
+                  <table className="min-w-[640px] w-full text-xs text-left">
+                                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                                    <tr>
+                                      <th className="p-2.5 pl-3">Concepto / Unidad de Obra</th>
+                                      <th className="p-2.5 w-20 text-center">Cant.</th>
+                                      <th className="p-2.5 w-28 text-right">Precio Ud (€)</th>
+                                      <th className="p-2.5 w-28 text-right">Importe (€)</th>
+                                      <th className="p-2.5 w-10 text-center"></th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 bg-white">
+                                    {partidas.map((p, idx) => (
+                                      <tr key={p.id || idx}>
+                                        <td className="p-2 pl-3">
+                                          <input
+                                            type="text"
+                                            required
+                                            value={p.concepto}
+                                            onChange={(e) => handleUpdatePartida(idx, 'concepto', e.target.value)}
+                                            className="w-full p-1.5 border border-slate-200 rounded-lg text-xs"
+                                          />
+                                        </td>
+                                        <td className="p-2 text-center">
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0.01"
+                                            required
+                                            value={p.cantidad}
+                                            onChange={(e) => handleUpdatePartida(idx, 'cantidad', e.target.value)}
+                                            className="w-full p-1.5 border border-slate-200 rounded-lg text-xs text-center"
+
+                                            inputMode="decimal"/>
+                                        </td>
+                                        <td className="p-2 text-right">
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            required
+                                            value={p.precioUnitario}
+                                            onChange={(e) => handleUpdatePartida(idx, 'precioUnitario', e.target.value)}
+                                            className="w-full p-1.5 border border-slate-200 rounded-lg text-xs text-right"
+
+                                            inputMode="decimal"/>
+                                        </td>
+                                        <td className="p-2 text-right font-bold text-slate-800 pr-3 font-mono">
+                                          {p.importe.toFixed(2)} €
+                                        </td>
+                                        <td className="p-2 text-center">
+                                          {partidas.length > 1 && (
+                                            <button
+                                              aria-label="Eliminar"
+                                              type="button"
+                                              onClick={() => handleRemovePartida(idx)}
+                                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                </div>
             </div>
           </div>
 

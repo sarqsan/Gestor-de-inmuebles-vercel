@@ -21,6 +21,7 @@ import {
   DollarSign,
   AlertCircle,
 } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface SmartReportModalProps {
   candidato: Candidato;
@@ -43,6 +44,10 @@ export const SmartReportModal: React.FC<SmartReportModalProps> = ({
   onSelectHistoryReport,
   onOpenSolvenciaBreakdown,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'INFORME INTELIGENTE DEL CANDIDATO'
+  );
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [showDesgloseScore, setShowDesgloseScore] = useState<boolean>(false);
 
@@ -74,7 +79,7 @@ export const SmartReportModal: React.FC<SmartReportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={refDialogo} {...propsDialogo}
         className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto max-h-[94vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -102,6 +107,7 @@ export const SmartReportModal: React.FC<SmartReportModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
             >

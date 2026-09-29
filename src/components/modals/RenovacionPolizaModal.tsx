@@ -3,6 +3,7 @@ import { PolizaSeguro, EstadoRenovacionPoliza, UsuarioApp } from '../../types';
 import { ESTADO_RENOVACION_LABELS, crearHistorialPolizaItem, calcularDiasRestantes } from '../../utils/segurosEngine';
 import { X, Clock, ShieldCheck, AlertTriangle, CheckCircle2, FileText, User } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface RenovacionPolizaModalProps {
   isOpen: boolean;
@@ -27,8 +28,12 @@ export const RenovacionPolizaModal: React.FC<RenovacionPolizaModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Comprobar renovación de póliza'
+  );
 
+  if (!isOpen) return null;
   const diasRestantes = calcularDiasRestantes(poliza.fechaVencimiento);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -103,7 +108,7 @@ export const RenovacionPolizaModal: React.FC<RenovacionPolizaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="bg-gradient-to-r from-slate-900 to-blue-950 text-white p-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400">
@@ -116,7 +121,8 @@ export const RenovacionPolizaModal: React.FC<RenovacionPolizaModalProps> = ({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg">
+          <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -140,12 +146,13 @@ export const RenovacionPolizaModal: React.FC<RenovacionPolizaModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Estado de Renovación *</label>
+            <label htmlFor="campo-estado-de-renovacion" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Estado de Renovación *</label>
             <select
               value={estadoRenovacion}
               onChange={(e) => setEstadoRenovacion(e.target.value as EstadoRenovacionPoliza)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-            >
+
+               id="campo-estado-de-renovacion">
               {Object.entries(ESTADO_RENOVACION_LABELS).map(([key, val]) => (
                 <option key={key} value={key}>
                   {val.label} — {val.descripcion}
@@ -155,7 +162,7 @@ export const RenovacionPolizaModal: React.FC<RenovacionPolizaModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Resultado de la Comprobación *</label>
+            <label htmlFor="campo-resultado-de-la-comprobacion" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Resultado de la Comprobación *</label>
             <input
               type="text"
               value={resultado}
@@ -163,18 +170,20 @@ export const RenovacionPolizaModal: React.FC<RenovacionPolizaModalProps> = ({
               placeholder="Ej: Contactado con Mapfre, condiciones recibidas, pendiente de decisión..."
               className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
               required
-            />
+
+               id="campo-resultado-de-la-comprobacion"/>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Observaciones</label>
+            <label htmlFor="campo-observaciones" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Observaciones</label>
             <textarea
               rows={3}
               value={observaciones}
               onChange={(e) => setObservaciones(e.target.value)}
               placeholder="Detalles adicionales, teléfono de contacto, referencia de carta, etc."
               className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-            />
+
+               id="campo-observaciones"/>
           </div>
 
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">

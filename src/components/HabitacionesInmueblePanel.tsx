@@ -264,7 +264,16 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
                     const d = disponibilidadHabitacion(h, contratos);
                     return (
                       <tr key={h.id} className="border-t cursor-pointer hover:bg-slate-50" onClick={() => setDetalleId(h.id)}>
-                        <td className="p-2 font-semibold">{h.nombre}</td>
+                        <td className="p-2 font-semibold">
+                          <button
+                            type="button"
+                            onClick={() => setDetalleId(h.id)}
+                            className="font-semibold text-left hover:text-blue-700 hover:underline cursor-pointer"
+                            aria-label={`Ver detalle de la habitación ${h.nombre}`}
+                          >
+                            {h.nombre}
+                          </button>
+                        </td>
                         <td className="p-2">{ESTADO_HABITACION_LABELS[d.estado]}</td>
                         <td className="p-2">{d.inquilino || '—'}</td>
                         <td className="p-2">{verEco ? `${(d.renta || h.precioObjetivo || 0).toLocaleString('es-ES')} €` : '—'}</td>
@@ -330,10 +339,13 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
                 <option key={s} value={s}>{ESTADO_HABITACION_LABELS[s]}</option>
               ))}
             </select>
-            <div className="grid grid-cols-3 gap-2">
-              <input type="number" min={0} value={superficie || ''} onChange={(e) => setSuperficie(Number(e.target.value))} placeholder="m²" className="px-3 py-2 border rounded-xl" />
-              <input type="number" min={0} value={precio || ''} onChange={(e) => setPrecio(Number(e.target.value))} placeholder="€/mes" className="px-3 py-2 border rounded-xl" />
-              <input type="number" min={0} value={fianza || ''} onChange={(e) => setFianza(Number(e.target.value))} placeholder="Fianza €" className="px-3 py-2 border rounded-xl" />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <input type="number" min={0} value={superficie || ''} onChange={(e) => setSuperficie(Number(e.target.value))} placeholder="m²" className="px-3 py-2 border rounded-xl"
+                inputMode="decimal"/>
+              <input type="number" min={0} value={precio || ''} onChange={(e) => setPrecio(Number(e.target.value))} placeholder="€/mes" className="px-3 py-2 border rounded-xl"
+                inputMode="decimal"/>
+              <input type="number" min={0} value={fianza || ''} onChange={(e) => setFianza(Number(e.target.value))} placeholder="Fianza €" className="px-3 py-2 border rounded-xl"
+                inputMode="decimal"/>
             </div>
             <input value={caracteristicas} onChange={(e) => setCaracteristicas(e.target.value)} placeholder="Características" className="w-full px-3 py-2 border rounded-xl" />
             <div className="flex justify-end gap-2">

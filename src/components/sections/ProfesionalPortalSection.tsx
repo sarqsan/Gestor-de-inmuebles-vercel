@@ -52,6 +52,7 @@ import {
 } from '../../lib/firebase';
 import { DetalleTrabajoProfesionalModal } from '../modals/DetalleTrabajoProfesionalModal';
 import { TrabajoProfesionalModal } from '../modals/TrabajoProfesionalModal';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface ProfesionalPortalSectionProps {
   currentUser: UsuarioApp;
@@ -462,7 +463,7 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-nombre-comercial" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     Nombre Comercial *
                   </label>
                   <input
@@ -471,11 +472,12 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                     value={nombreComercial}
                     onChange={(e) => setNombreComercial(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
+
+                     id="campo-nombre-comercial"/>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-razon-social" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     Razón Social
                   </label>
                   <input
@@ -483,11 +485,12 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                     value={razonSocial}
                     onChange={(e) => setRazonSocial(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
+
+                     id="campo-razon-social"/>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-cif-nif" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     CIF / NIF
                   </label>
                   <input
@@ -495,11 +498,12 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                     value={cifNif}
                     onChange={(e) => setCifNif(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
+
+                     id="campo-cif-nif"/>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-persona-de-contacto" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     Persona de Contacto
                   </label>
                   <input
@@ -507,11 +511,12 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                     value={contactoNombre}
                     onChange={(e) => setContactoNombre(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
+
+                     id="campo-persona-de-contacto"/>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-email-de-contacto" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     Email de Contacto
                   </label>
                   <input
@@ -519,11 +524,12 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
+
+                     id="campo-email-de-contacto"/>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label htmlFor="campo-telefono" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                     Teléfono
                   </label>
                   <input
@@ -531,12 +537,13 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                     value={telefono}
                     onChange={(e) => setTelefono(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
+
+                     id="campo-telefono"/>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label htmlFor="campo-sitio-web" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                   Sitio Web
                 </label>
                 <input
@@ -545,7 +552,8 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                   onChange={(e) => setWeb(e.target.value)}
                   placeholder="https://..."
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                />
+
+                   id="campo-sitio-web"/>
               </div>
 
               <div className="pt-2">
@@ -627,6 +635,7 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                       {z.municipio && <span className="text-slate-600">· {z.municipio}</span>}
                     </div>
                     <button
+                      aria-label="Eliminar"
                       type="button"
                       onClick={() => handleRemoveZona(z.id)}
                       className="p-1 text-slate-400 hover:text-red-600 rounded-md cursor-pointer"
@@ -654,6 +663,7 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                   className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl"
                 />
                 <button
+            aria-label="Añadir"
                   type="button"
                   onClick={handleAddZona}
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
@@ -918,6 +928,7 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                                   {incAsociada.fotografias.map((foto) => (
                                     <div
+                                      {...propsInteraccion(() => setSelectedPhotoUrl(foto.url), `Ampliar foto ${foto.nombre}`)}
                                       key={foto.id}
                                       onClick={() => setSelectedPhotoUrl(foto.url)}
                                       className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-300 shrink-0 cursor-pointer group shadow-2xs hover:border-blue-500 transition-all"
@@ -1079,6 +1090,7 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
         >
           <div className="relative max-w-4xl max-h-[90vh] w-full flex flex-col items-center">
             <button
+              aria-label="Cerrar"
               onClick={() => setSelectedPhotoUrl(null)}
               className="absolute -top-12 right-0 p-2 text-white/80 hover:text-white rounded-full bg-white/10 hover:bg-white/20 transition-colors"
             >

@@ -13,6 +13,7 @@ import {
   Building,
   User,
 } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface EnviarCuestionarioModalProps {
   isOpen: boolean;
@@ -31,6 +32,10 @@ export const EnviarCuestionarioModal: React.FC<EnviarCuestionarioModalProps> = (
   onUpdateCandidateToken,
   onOpenPublicView,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'ENVIAR CUESTIONARIO'
+  );
   const [copied, setCopied] = useState(false);
 
   if (!isOpen || !candidato) return null;
@@ -57,10 +62,11 @@ export const EnviarCuestionarioModal: React.FC<EnviarCuestionarioModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden space-y-0">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden space-y-0">
         {/* Modal Header */}
         <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-6 relative">
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="absolute top-5 right-5 p-2 text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-colors"
           >

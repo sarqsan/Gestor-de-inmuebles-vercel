@@ -24,6 +24,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface GarantiaModalProps {
   isOpen: boolean;
@@ -99,8 +100,12 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
     setError(null);
   }, [isOpen, garantiaToEdit, defaultInmuebleId, inmuebles]);
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Garantía de reparación'
+  );
 
+  if (!isOpen) return null;
   const handleFechaInicioChange = (fIni: string) => {
     setFechaInicio(fIni);
     if (fIni && duracionMeses > 0) {
@@ -195,7 +200,7 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-emerald-50/70">
           <div className="flex items-center gap-3">
@@ -212,6 +217,7 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
           >
@@ -269,7 +275,7 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
 
           {/* Título de la Garantía */}
           <div>
-            <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+            <label htmlFor="campo-concepto-titulo-de-la-reparacion" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
               Concepto / Título de la Reparación <span className="text-rose-500">*</span>
             </label>
             <input
@@ -279,20 +285,22 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
               placeholder="Ej. Sustitución de bomba de circulación de calefacción"
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-emerald-500 outline-none font-semibold"
               required
-            />
+
+               id="campo-concepto-titulo-de-la-reparacion"/>
           </div>
 
           {/* Profesional / Proveedor emisor */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+              <label htmlFor="campo-profesional-registrado" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
                 Profesional Registrado
               </label>
               <select
                 value={profesionalId}
                 onChange={(e) => handleProfesionalChange(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-emerald-500 outline-none"
-              >
+
+                 id="campo-profesional-registrado">
                 <option value="">Otro proveedor / externo</option>
                 {profesionales.map((prof) => (
                   <option key={prof.id} value={prof.id}>
@@ -388,7 +396,7 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
 
           {/* Notas */}
           <div>
-            <label className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
+            <label htmlFor="campo-notas-adicionales-referencia-de-factura" className="block font-semibold uppercase tracking-wider text-slate-600 mb-1">
               Notas Adicionales / Referencia de Factura
             </label>
             <input
@@ -397,7 +405,8 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
               onChange={(e) => setNotas(e.target.value)}
               placeholder="Ej. Factura F-2026/0412 — SAT Oficial"
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:border-emerald-500 outline-none"
-            />
+
+               id="campo-notas-adicionales-referencia-de-factura"/>
           </div>
 
           {/* Pie y Guardar */}

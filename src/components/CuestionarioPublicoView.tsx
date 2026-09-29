@@ -783,7 +783,8 @@ export const CuestionarioPublicoView: React.FC<CuestionarioPublicoViewProps> = (
                   value={numPersonas}
                   onChange={(e) => setNumPersonas(Math.max(1, parseInt(e.target.value) || 1))}
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+
+                  inputMode="decimal"/>
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Incluyendo titulares, familiares, menores u otros convivientes.
@@ -942,7 +943,8 @@ export const CuestionarioPublicoView: React.FC<CuestionarioPublicoViewProps> = (
                       onChange={(e) => setIngresosNetos(e.target.value === '' ? '' : Number(e.target.value))}
                       placeholder="Ej. 2100"
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+
+                      inputMode="decimal"/>
                   </div>
                   <span className="text-[10px] text-slate-400 block mt-0.5">Sueldo neto percibido en nómina</span>
                 </div>
@@ -961,7 +963,8 @@ export const CuestionarioPublicoView: React.FC<CuestionarioPublicoViewProps> = (
                       onChange={(e) => setOtrosIngresos(e.target.value === '' ? '' : Number(e.target.value))}
                       placeholder="0"
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+
+                      inputMode="decimal"/>
                   </div>
                   <span className="text-[10px] text-slate-400 block mt-0.5">Pensión, rentas, extras demostrables</span>
                 </div>
@@ -1082,7 +1085,8 @@ export const CuestionarioPublicoView: React.FC<CuestionarioPublicoViewProps> = (
                         onChange={(e) => setCotitularIngresosNetos(e.target.value === '' ? '' : Number(e.target.value))}
                         placeholder="Ej. 1850"
                         className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+
+                        inputMode="decimal"/>
                     </div>
                     <span className="text-[10px] text-slate-400 block mt-0.5">Sueldo neto del cotitular</span>
                   </div>
@@ -1101,7 +1105,8 @@ export const CuestionarioPublicoView: React.FC<CuestionarioPublicoViewProps> = (
                         onChange={(e) => setCotitularOtrosIngresos(e.target.value === '' ? '' : Number(e.target.value))}
                         placeholder="0"
                         className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+
+                        inputMode="decimal"/>
                     </div>
                   </div>
                 </div>

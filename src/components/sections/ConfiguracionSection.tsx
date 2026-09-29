@@ -127,43 +127,47 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre Completo</label>
+              <label htmlFor="campo-nombre-completo" className="block text-xs font-semibold text-slate-700 mb-1">Nombre Completo</label>
               <input
                 type="text"
                 value={formData.nombre}
                 onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+
+                 id="campo-nombre-completo"/>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre de la Empresa o Agencia</label>
+              <label htmlFor="campo-nombre-de-la-empresa-o-agencia" className="block text-xs font-semibold text-slate-700 mb-1">Nombre de la Empresa o Agencia</label>
               <input
                 type="text"
                 value={formData.empresa || ''}
                 onChange={(e) => setFormData({ ...formData, empresa: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+
+                 id="campo-nombre-de-la-empresa-o-agencia"/>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Email de Contacto</label>
+              <label htmlFor="campo-email-de-contacto" className="block text-xs font-semibold text-slate-700 mb-1">Email de Contacto</label>
               <input
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+
+                 id="campo-email-de-contacto"/>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Teléfono</label>
+              <label htmlFor="campo-telefono" className="block text-xs font-semibold text-slate-700 mb-1">Teléfono</label>
               <input
                 type="tel"
                 value={formData.telefono}
                 onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+
+                 id="campo-telefono"/>
             </div>
           </div>
         </div>
@@ -188,7 +192,8 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
                   value={formData.ratioSolvenciaMaximo}
                   onChange={(e) => setFormData({ ...formData, ratioSolvenciaMaximo: Number(e.target.value) || 35 })}
                   className="w-24 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
-                />
+
+                  inputMode="decimal"/>
                 <span className="text-xs text-slate-500">
                   (El estándar recomendado del mercado para alquiler es del 30% al 35%)
                 </span>

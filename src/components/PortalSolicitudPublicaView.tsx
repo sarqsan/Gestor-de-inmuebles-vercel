@@ -464,7 +464,7 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre completo *</label>
+                <label htmlFor="campo-nombre-completo" className="block text-xs font-bold text-slate-700 mb-1">Nombre completo *</label>
                 <input
                   type="text"
                   required
@@ -472,12 +472,13 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
                   value={nombre}
                   onChange={(e) => setNombre(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
+
+                   id="campo-nombre-completo"/>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Teléfono *</label>
+                  <label htmlFor="campo-telefono" className="block text-xs font-bold text-slate-700 mb-1">Teléfono *</label>
                   <input
                     type="tel"
                     required
@@ -485,10 +486,11 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
                     value={telefono}
                     onChange={(e) => setTelefono(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  />
+
+                     id="campo-telefono"/>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Email *</label>
+                  <label htmlFor="campo-email" className="block text-xs font-bold text-slate-700 mb-1">Email *</label>
                   <input
                     type="email"
                     required
@@ -496,31 +498,36 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  />
+
+                     id="campo-email"/>
                 </div>
               </div>
 
               {/* Occupants grid */}
-              <div className="grid grid-cols-3 gap-3 p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Adultos</label>
+                  <label htmlFor="campo-adultos" className="block text-[11px] font-bold text-slate-600 mb-1">Adultos</label>
                   <input
                     type="number"
                     min="1"
                     value={numAdultos}
                     onChange={(e) => setNumAdultos(parseInt(e.target.value) || 1)}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 text-center"
-                  />
+
+                    inputMode="decimal"
+                     id="campo-adultos"/>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Menores</label>
+                  <label htmlFor="campo-menores" className="block text-[11px] font-bold text-slate-600 mb-1">Menores</label>
                   <input
                     type="number"
                     min="0"
                     value={numMenores}
                     onChange={(e) => setNumMenores(parseInt(e.target.value) || 0)}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 text-center"
-                  />
+
+                    inputMode="decimal"
+                     id="campo-menores"/>
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">Total personas</label>
@@ -541,12 +548,13 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Duración prevista del alquiler</label>
+                  <label htmlFor="campo-duracion-prevista-del-alquiler" className="block text-xs font-bold text-slate-700 mb-1">Duración prevista del alquiler</label>
                   <select
                     value={duracionPrevista}
                     onChange={(e) => setDuracionPrevista(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium"
-                  >
+
+                     id="campo-duracion-prevista-del-alquiler">
                     <option value="1 año">1 año</option>
                     <option value="Múltiples años">Múltiples años / Larga estancia</option>
                     <option value="6-12 meses">6 a 12 meses</option>
@@ -586,14 +594,15 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
 
                 {tieneMascotas && (
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Tipo y número de mascotas</label>
+                    <label htmlFor="campo-tipo-y-numero-de-mascotas" className="block text-[11px] font-bold text-slate-600 mb-1">Tipo y número de mascotas</label>
                     <input
                       type="text"
                       placeholder="Ej. 1 perro pequeño (Caniche)"
                       value={detallesMascotas}
                       onChange={(e) => setDetallesMascotas(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800"
-                    />
+
+                       id="campo-tipo-y-numero-de-mascotas"/>
                   </div>
                 )}
 
@@ -661,12 +670,13 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Situación laboral</label>
+                <label htmlFor="campo-situacion-laboral" className="block text-xs font-bold text-slate-700 mb-1">Situación laboral</label>
                 <select
                   value={situacionLaboral}
                   onChange={(e) => setSituacionLaboral(e.target.value as EmploymentType)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium"
-                >
+
+                   id="campo-situacion-laboral">
                   <option value="cuenta_ajena">Trabajador por Cuenta Ajena</option>
                   <option value="autonomo">Trabajador Autónomo</option>
                   <option value="funcionario">Funcionario / Empleado Público</option>
@@ -677,35 +687,38 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Empresa / Empleador</label>
+                  <label htmlFor="campo-empresa-empleador" className="block text-xs font-bold text-slate-700 mb-1">Empresa / Empleador</label>
                   <input
                     type="text"
                     placeholder="Nombre de la empresa"
                     value={empresa}
                     onChange={(e) => setEmpresa(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-                  />
+
+                     id="campo-empresa-empleador"/>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Puesto / Cargo</label>
+                  <label htmlFor="campo-puesto-cargo" className="block text-xs font-bold text-slate-700 mb-1">Puesto / Cargo</label>
                   <input
                     type="text"
                     placeholder="Puesto de trabajo"
                     value={puesto}
                     onChange={(e) => setPuesto(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-                  />
+
+                     id="campo-puesto-cargo"/>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tipo de contrato</label>
+                  <label htmlFor="campo-tipo-de-contrato" className="block text-xs font-bold text-slate-700 mb-1">Tipo de contrato</label>
                   <select
                     value={tipoContrato}
                     onChange={(e) => setTipoContrato(e.target.value as ContractType)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium"
-                  >
+
+                     id="campo-tipo-de-contrato">
                     <option value="indefinido">Indefinido</option>
                     <option value="temporal">Temporal</option>
                     <option value="fijo_discontinuo">Fijo Discontinuo</option>
@@ -714,20 +727,21 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Antigüedad en la empresa</label>
+                  <label htmlFor="campo-antiguedad-en-la-empresa" className="block text-xs font-bold text-slate-700 mb-1">Antigüedad en la empresa</label>
                   <input
                     type="text"
                     placeholder="Ej. 2 años y 6 meses"
                     value={antiguedad}
                     onChange={(e) => setAntiguedad(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-                  />
+
+                     id="campo-antiguedad-en-la-empresa"/>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Ingresos netos mensuales (€) *</label>
+                  <label htmlFor="campo-ingresos-netos-mensuales" className="block text-xs font-bold text-slate-700 mb-1">Ingresos netos mensuales (€) *</label>
                   <input
                     type="number"
                     required
@@ -735,17 +749,21 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
                     value={ingresosNetos}
                     onChange={(e) => setIngresosNetos(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-bold"
-                  />
+
+                    inputMode="decimal"
+                     id="campo-ingresos-netos-mensuales"/>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Otros ingresos mensuales (€)</label>
+                  <label htmlFor="campo-otros-ingresos-mensuales" className="block text-xs font-bold text-slate-700 mb-1">Otros ingresos mensuales (€)</label>
                   <input
                     type="number"
                     placeholder="Ej. 300"
                     value={otrosIngresos}
                     onChange={(e) => setOtrosIngresos(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-bold"
-                  />
+
+                    inputMode="decimal"
+                     id="campo-otros-ingresos-mensuales"/>
                 </div>
               </div>
 
@@ -781,34 +799,38 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
                 {tieneAvalista && (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Ingresos aprox. avalista (€)</label>
+                      <label htmlFor="campo-ingresos-aprox-avalista" className="block text-[11px] font-bold text-slate-600 mb-1">Ingresos aprox. avalista (€)</label>
                       <input
                         type="number"
                         placeholder="2500"
                         value={avalIngresos}
                         onChange={(e) => setAvalIngresos(e.target.value)}
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-ingresos-aprox-avalista"/>
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Situación laboral</label>
+                      <label htmlFor="campo-situacion-laboral-2" className="block text-[11px] font-bold text-slate-600 mb-1">Situación laboral</label>
                       <input
                         type="text"
                         placeholder="Cuenta ajena / Funcionario"
                         value={avalSituacion}
                         onChange={(e) => setAvalSituacion(e.target.value)}
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800"
-                      />
+
+                         id="campo-situacion-laboral-2"/>
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Tipo de contrato</label>
+                      <label htmlFor="campo-tipo-de-contrato-2" className="block text-[11px] font-bold text-slate-600 mb-1">Tipo de contrato</label>
                       <input
                         type="text"
                         placeholder="Indefinido"
                         value={avalContrato}
                         onChange={(e) => setAvalContrato(e.target.value)}
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800"
-                      />
+
+                         id="campo-tipo-de-contrato-2"/>
                     </div>
                   </div>
                 )}

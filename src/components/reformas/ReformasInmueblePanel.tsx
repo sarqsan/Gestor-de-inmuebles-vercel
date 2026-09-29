@@ -40,6 +40,7 @@ import {
 } from '../../lib/firebase';
 import { NecesidadReformaModal } from '../modals/NecesidadReformaModal';
 import { DetalleProyectoReformaModal } from '../modals/DetalleProyectoReformaModal';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface ReformasInmueblePanelProps {
   inmueble: Inmueble;
@@ -218,6 +219,7 @@ export const ReformasInmueblePanel: React.FC<ReformasInmueblePanelProps> = ({
               };
               return (
                 <div
+                  {...propsInteraccion(() => setSelectedProyectoParaDetalle(proj))}
                   key={proj.id}
                   onClick={() => setSelectedProyectoParaDetalle(proj)}
                   className="p-3.5 bg-white border border-slate-200 hover:border-purple-300 hover:shadow-2xs rounded-xl flex items-center justify-between cursor-pointer transition-all"

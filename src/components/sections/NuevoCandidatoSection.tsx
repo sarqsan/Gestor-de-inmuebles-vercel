@@ -319,14 +319,15 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label htmlFor="campo-vivienda-de-interes-opcional" className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Vivienda de Interés (Opcional)
                 </label>
                 <select
                   value={formData.inmuebleId}
                   onChange={(e) => setFormData({ ...formData, inmuebleId: e.target.value })}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
+
+                   id="campo-vivienda-de-interes-opcional">
                   <option value="">Sin inmueble asignado por ahora</option>
                   {inmuebles.map((inm) => (
                     <option key={inm.id} value={inm.id}>
@@ -348,7 +349,7 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre y Apellidos *</label>
+                    <label htmlFor="campo-nombre-y-apellidos" className="block text-xs font-semibold text-slate-700 mb-1">Nombre y Apellidos *</label>
                     <input
                       type="text"
                       required
@@ -356,16 +357,18 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
                       value={formData.nombre}
                       onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
-                    />
+
+                       id="campo-nombre-y-apellidos"/>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Inmueble al que Opta</label>
+                    <label htmlFor="campo-inmueble-al-que-opta" className="block text-xs font-semibold text-slate-700 mb-1">Inmueble al que Opta</label>
                     <select
                       value={formData.inmuebleId}
                       onChange={(e) => setFormData({ ...formData, inmuebleId: e.target.value })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                    >
+
+                       id="campo-inmueble-al-que-opta">
                       <option value="">Sin inmueble asignado</option>
                       {inmuebles.map((inm) => (
                         <option key={inm.id} value={inm.id}>
@@ -376,25 +379,27 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Teléfono de Contacto</label>
+                    <label htmlFor="campo-telefono-de-contacto" className="block text-xs font-semibold text-slate-700 mb-1">Teléfono de Contacto</label>
                     <input
                       type="tel"
                       placeholder="Ej. +34 612 345 678"
                       value={formData.telefono}
                       onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+
+                       id="campo-telefono-de-contacto"/>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Correo Electrónico</label>
+                    <label htmlFor="campo-correo-electronico" className="block text-xs font-semibold text-slate-700 mb-1">Correo Electrónico</label>
                     <input
                       type="email"
                       placeholder="Ej. ana.martinez@email.com"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+
+                       id="campo-correo-electronico"/>
                   </div>
                 </div>
               </div>
@@ -408,7 +413,7 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Ingresos Netos Mensuales (€)</label>
+                    <label htmlFor="campo-ingresos-netos-mensuales" className="block text-xs font-semibold text-slate-700 mb-1">Ingresos Netos Mensuales (€)</label>
                     <input
                       type="number"
                       min="0"
@@ -416,16 +421,19 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
                       value={formData.ingresosNetos}
                       onChange={(e) => setFormData({ ...formData, ingresosNetos: parseFloat(e.target.value) || 0 })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+
+                      inputMode="decimal"
+                       id="campo-ingresos-netos-mensuales"/>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo de Empleo</label>
+                    <label htmlFor="campo-tipo-de-empleo" className="block text-xs font-semibold text-slate-700 mb-1">Tipo de Empleo</label>
                     <select
                       value={formData.tipoEmpleo}
                       onChange={(e) => setFormData({ ...formData, tipoEmpleo: e.target.value as EmploymentType })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
+
+                       id="campo-tipo-de-empleo">
                       <option value="cuenta_ajena">Por cuenta ajena</option>
                       <option value="autonomo">Autónomo</option>
                       <option value="funcionario">Funcionario / Empleo Público</option>
@@ -435,12 +443,13 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo de Contrato</label>
+                    <label htmlFor="campo-tipo-de-contrato" className="block text-xs font-semibold text-slate-700 mb-1">Tipo de Contrato</label>
                     <select
                       value={formData.tipoContrato}
                       onChange={(e) => setFormData({ ...formData, tipoContrato: e.target.value as ContractType })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
+
+                       id="campo-tipo-de-contrato">
                       <option value="indefinido">Indefinido</option>
                       <option value="temporal">Temporal</option>
                       <option value="practicas">En prácticas</option>
@@ -450,14 +459,15 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Antigüedad Laboral</label>
+                    <label htmlFor="campo-antiguedad-laboral" className="block text-xs font-semibold text-slate-700 mb-1">Antigüedad Laboral</label>
                     <input
                       type="text"
                       placeholder="Ej. 2 años"
                       value={formData.antiguedadLaboral}
                       onChange={(e) => setFormData({ ...formData, antiguedadLaboral: e.target.value })}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+
+                       id="campo-antiguedad-laboral"/>
                   </div>
                 </div>
               </div>

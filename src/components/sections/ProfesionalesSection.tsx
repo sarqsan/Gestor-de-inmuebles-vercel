@@ -77,6 +77,7 @@ import {
   Layers,
   Award,
 } from 'lucide-react';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface ProfesionalesSectionProps {
   inmuebles: Inmueble[];
@@ -708,7 +709,8 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
                       </div>
                     </div>
 
-                    <div className="cursor-pointer" onClick={() => setTrabajoSeleccionado(trabajo)}>
+                    <div
+                      {...propsInteraccion(() => setTrabajoSeleccionado(trabajo))} className="cursor-pointer" onClick={() => setTrabajoSeleccionado(trabajo)}>
                       <h3 className="font-bold text-slate-900 text-base hover:text-blue-600 transition-colors">
                         {trabajo.titulo}
                       </h3>

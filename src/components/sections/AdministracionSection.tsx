@@ -1014,6 +1014,7 @@ export const AdministracionSection: React.FC<AdministracionSectionProps> = ({
                       </button>
 
                       <button
+                        aria-label="Eliminar"
                         onClick={() => {
                           void confirmar({
                             titulo: 'Eliminar especialidad',

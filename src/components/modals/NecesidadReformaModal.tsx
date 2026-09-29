@@ -27,6 +27,7 @@ import {
 } from '../../utils/reformasEngine';
 import { saveNecesidadReformaFirestore } from '../../lib/firebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface NecesidadReformaModalProps {
   isOpen: boolean;
@@ -78,8 +79,12 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Necesidad de reforma'
+  );
 
+  if (!isOpen) return null;
   const inmuebleSeleccionado = inmuebles.find((i) => i.id === inmuebleId);
   const propietarioId =
     inmuebleSeleccionado?.propietarioId ||
@@ -154,7 +159,7 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[90vh]">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -171,6 +176,7 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -189,13 +195,14 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
 
           {/* Inmueble Selection */}
           <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">Inmueble Afectado</label>
+            <label htmlFor="campo-inmueble-afectado" className="text-xs font-bold text-slate-700 block mb-1">Inmueble Afectado</label>
             <select
               value={inmuebleId}
               onChange={(e) => setInmuebleId(e.target.value)}
               disabled={isEditing && Boolean(necesidadParaEditar?.inmuebleId)}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-purple-500"
-            >
+
+               id="campo-inmueble-afectado">
               {inmuebles.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.alias || i.direccion} ({i.ciudad || 'Sin municipio'})
@@ -207,7 +214,7 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
           {/* Title & Category */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
-              <label className="text-xs font-bold text-slate-700 block mb-1">Título de la Reforma</label>
+              <label htmlFor="campo-titulo-de-la-reforma" className="text-xs font-bold text-slate-700 block mb-1">Título de la Reforma</label>
               <input
                 type="text"
                 placeholder="Ej: Reforma integral de cocina y sustitución de encimera"
@@ -215,16 +222,18 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
                 onChange={(e) => setTitulo(e.target.value)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 font-medium"
                 required
-              />
+
+                 id="campo-titulo-de-la-reforma"/>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Tipo / Categoría</label>
+              <label htmlFor="campo-tipo-categoria" className="text-xs font-bold text-slate-700 block mb-1">Tipo / Categoría</label>
               <select
                 value={categoria}
                 onChange={(e) => setCategoria(e.target.value as CategoriaReforma)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-purple-500 font-medium"
-              >
+
+                 id="campo-tipo-categoria">
                 {Object.entries(CATEGORIA_REFORMA_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v.label}
@@ -236,7 +245,7 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
 
           {/* Description */}
           <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">Descripción de la Necesidad y Alcance</label>
+            <label htmlFor="campo-descripcion-de-la-necesidad-y-alcance" className="text-xs font-bold text-slate-700 block mb-1">Descripción de la Necesidad y Alcance</label>
             <textarea
               rows={3}
               placeholder="Detalla el estado actual, motivos de la reforma, elementos a renovar y expectativas técnicas..."
@@ -244,18 +253,20 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
               onChange={(e) => setDescripcion(e.target.value)}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500"
               required
-            />
+
+               id="campo-descripcion-de-la-necesidad-y-alcance"/>
           </div>
 
           {/* Priority & Status */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Nivel de Prioridad</label>
+              <label htmlFor="campo-nivel-de-prioridad" className="text-xs font-bold text-slate-700 block mb-1">Nivel de Prioridad</label>
               <select
                 value={prioridad}
                 onChange={(e) => setPrioridad(e.target.value as PrioridadIncidencia)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-purple-500"
-              >
+
+                 id="campo-nivel-de-prioridad">
                 <option value="BAJA">Baja (Mejora estética no urgente)</option>
                 <option value="NORMAL">Normal (Planificada)</option>
                 <option value="ALTA">Alta (Necesaria antes de comercializar)</option>
@@ -264,12 +275,13 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Estado de la Necesidad</label>
+              <label htmlFor="campo-estado-de-la-necesidad" className="text-xs font-bold text-slate-700 block mb-1">Estado de la Necesidad</label>
               <select
                 value={estado}
                 onChange={(e) => setEstado(e.target.value as EstadoNecesidadReforma)}
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-purple-500"
-              >
+
+                 id="campo-estado-de-la-necesidad">
                 {Object.entries(ESTADO_NECESIDAD_REFORMA_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v.label}
@@ -286,7 +298,7 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
             </span>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-2xs text-purple-800 font-semibold block mb-1">Presupuesto Mínimo (€)</label>
+                <label htmlFor="campo-presupuesto-minimo" className="text-2xs text-purple-800 font-semibold block mb-1">Presupuesto Mínimo (€)</label>
                 <input
                   type="number"
                   step="10"
@@ -294,11 +306,13 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
                   value={presupuestoEstimadoMin}
                   onChange={(e) => setPresupuestoEstimadoMin(e.target.value)}
                   className="w-full text-xs p-2 border border-purple-200 rounded-lg bg-white"
-                />
+
+                  inputMode="decimal"
+                   id="campo-presupuesto-minimo"/>
               </div>
 
               <div>
-                <label className="text-2xs text-purple-800 font-semibold block mb-1">Presupuesto Máximo (€)</label>
+                <label htmlFor="campo-presupuesto-maximo" className="text-2xs text-purple-800 font-semibold block mb-1">Presupuesto Máximo (€)</label>
                 <input
                   type="number"
                   step="10"
@@ -306,21 +320,24 @@ export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
                   value={presupuestoEstimadoMax}
                   onChange={(e) => setPresupuestoEstimadoMax(e.target.value)}
                   className="w-full text-xs p-2 border border-purple-200 rounded-lg bg-white"
-                />
+
+                  inputMode="decimal"
+                   id="campo-presupuesto-maximo"/>
               </div>
             </div>
           </div>
 
           {/* Observaciones */}
           <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">Observaciones / Notas Internas</label>
+            <label htmlFor="campo-observaciones-notas-internas" className="text-xs font-bold text-slate-700 block mb-1">Observaciones / Notas Internas</label>
             <textarea
               rows={2}
               placeholder="Instrucciones de acceso, consideraciones de comunidad de propietarios, plazos deseados..."
               value={observaciones}
               onChange={(e) => setObservaciones(e.target.value)}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500"
-            />
+
+               id="campo-observaciones-notas-internas"/>
           </div>
 
           {/* Footer Buttons */}

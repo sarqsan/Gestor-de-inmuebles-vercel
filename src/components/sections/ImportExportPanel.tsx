@@ -407,11 +407,13 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
           <h3>Importación / Exportación canónica (erp-import-export-v1)</h3>
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={() => setPestana('importar')}
+          <button
+            aria-current={pestana === 'importar' ? 'true' : undefined} type="button" onClick={() => setPestana('importar')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold ${pestana === 'importar' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
             Importar
           </button>
-          <button type="button" onClick={() => setPestana('exportar')}
+          <button
+            aria-current={pestana === 'exportar' ? 'true' : undefined} type="button" onClick={() => setPestana('exportar')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold ${pestana === 'exportar' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
             Exportar
           </button>

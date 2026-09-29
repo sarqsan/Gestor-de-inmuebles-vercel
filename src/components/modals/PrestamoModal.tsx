@@ -245,6 +245,7 @@ export const PrestamoModal: React.FC<Props> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -311,8 +312,9 @@ export const PrestamoModal: React.FC<Props> = ({
           </div>
 
           <div>
-            <label className={labelCls}>Inmueble vinculado *</label>
-            <select className={inputCls} value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)} disabled={isEditing}>
+            <label htmlFor="campo-inmueble-vinculado" className={labelCls}>Inmueble vinculado *</label>
+            <select className={inputCls} value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)} disabled={isEditing}
+               id="campo-inmueble-vinculado">
               {inmuebles.length === 0 && <option value="">Sin inmuebles</option>}
               {inmuebles.map((i) => (
                 <option key={i.id} value={i.id}>
@@ -324,41 +326,52 @@ export const PrestamoModal: React.FC<Props> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>Tipo de financiación</label>
-              <select className={inputCls} value={tipo} onChange={(e) => setTipo(e.target.value as TipoPrestamo)}>
+              <label htmlFor="campo-tipo-de-financiacion" className={labelCls}>Tipo de financiación</label>
+              <select className={inputCls} value={tipo} onChange={(e) => setTipo(e.target.value as TipoPrestamo)}
+                 id="campo-tipo-de-financiacion">
                 <option value="HIPOTECARIO">Préstamo hipotecario</option>
                 <option value="PERSONAL">Préstamo personal</option>
               </select>
             </div>
             <div>
-              <label className={labelCls}>Entidad / banco</label>
-              <input type="text" className={inputCls} value={entidad} onChange={(e) => setEntidad(e.target.value)} placeholder="IBERCAJA, ING…" />
+              <label htmlFor="campo-entidad-banco" className={labelCls}>Entidad / banco</label>
+              <input type="text" className={inputCls} value={entidad} onChange={(e) => setEntidad(e.target.value)} placeholder="IBERCAJA, ING…"
+                 id="campo-entidad-banco"/>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div>
-              <label className={labelCls}>Capital pendiente (€) *</label>
-              <input type="number" step="1000" min="0" className={inputCls} value={capital} onChange={(e) => setCapital(e.target.value)} placeholder="150000" />
+              <label htmlFor="campo-capital-pendiente" className={labelCls}>Capital pendiente (€) *</label>
+              <input type="number" step="1000" min="0" className={inputCls} value={capital} onChange={(e) => setCapital(e.target.value)} placeholder="150000"
+                inputMode="decimal"
+                 id="campo-capital-pendiente"/>
             </div>
             <div>
-              <label className={labelCls}>TIN anual (%) *</label>
-              <input type="number" step="0.01" min="0" className={inputCls} value={tin} onChange={(e) => setTin(e.target.value)} placeholder="3,5" />
+              <label htmlFor="campo-tin-anual" className={labelCls}>TIN anual (%) *</label>
+              <input type="number" step="0.01" min="0" className={inputCls} value={tin} onChange={(e) => setTin(e.target.value)} placeholder="3,5"
+                inputMode="decimal"
+                 id="campo-tin-anual"/>
             </div>
             <div>
-              <label className={labelCls}>Plazo (meses) *</label>
-              <input type="number" step="12" min="1" max="600" className={inputCls} value={plazoMeses} onChange={(e) => setPlazoMeses(e.target.value)} placeholder="360" />
+              <label htmlFor="campo-plazo-meses" className={labelCls}>Plazo (meses) *</label>
+              <input type="number" step="12" min="1" max="600" className={inputCls} value={plazoMeses} onChange={(e) => setPlazoMeses(e.target.value)} placeholder="360"
+                inputMode="decimal"
+                 id="campo-plazo-meses"/>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div>
-              <label className={labelCls}>Primera cuota *</label>
-              <input type="month" className={inputCls} value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} />
+              <label htmlFor="campo-primera-cuota" className={labelCls}>Primera cuota *</label>
+              <input type="month" className={inputCls} value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)}
+                 id="campo-primera-cuota"/>
             </div>
             <div>
-              <label className={labelCls}>Día de cargo</label>
-              <input type="number" min="1" max="28" className={inputCls} value={diaVencimiento} onChange={(e) => setDiaVencimiento(e.target.value)} />
+              <label htmlFor="campo-dia-de-cargo" className={labelCls}>Día de cargo</label>
+              <input type="number" min="1" max="28" className={inputCls} value={diaVencimiento} onChange={(e) => setDiaVencimiento(e.target.value)}
+                inputMode="decimal"
+                 id="campo-dia-de-cargo"/>
             </div>
             <div className="flex items-end pb-2">
               <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
@@ -374,7 +387,7 @@ export const PrestamoModal: React.FC<Props> = ({
           </div>
 
           {/* Carencia inicial */}
-          <div className="grid grid-cols-3 gap-4 items-end">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 items-end">
             <div>
               <label className={labelCls}>Carencia inicial (meses)</label>
               <input
@@ -384,16 +397,18 @@ export const PrestamoModal: React.FC<Props> = ({
                 className={inputCls}
                 value={carenciaMeses}
                 onChange={(e) => setCarenciaMeses(e.target.value)}
-              />
+
+                inputMode="decimal"/>
             </div>
             <div>
-              <label className={labelCls}>Tipo de carencia</label>
+              <label htmlFor="campo-tipo-de-carencia" className={labelCls}>Tipo de carencia</label>
               <select
                 className={inputCls}
                 value={tipoCarencia}
                 onChange={(e) => setTipoCarencia(e.target.value as TipoCarencia)}
                 disabled={carenciaNum === 0}
-              >
+
+                 id="campo-tipo-de-carencia">
                 <option value="TOTAL">Total (no se paga)</option>
                 <option value="PARCIAL">Parcial (sólo intereses)</option>
               </select>
@@ -455,9 +470,11 @@ export const PrestamoModal: React.FC<Props> = ({
                         prev.map((x) => (x.id === t.id ? { ...x, tasa: e.target.value } : x))
                       )
                     }
-                  />
+
+                    inputMode="decimal"/>
                   <span className="col-span-2 text-[11px] text-slate-400">% TIN</span>
                   <button
+                    aria-label="Eliminar"
                     type="button"
                     onClick={() => setTramos((prev) => prev.filter((x) => x.id !== t.id))}
                     className="col-span-1 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg justify-self-end"
@@ -517,7 +534,8 @@ export const PrestamoModal: React.FC<Props> = ({
                         prev.map((x) => (x.id === a.id ? { ...x, importe: e.target.value } : x))
                       )
                     }
-                  />
+
+                    inputMode="decimal"/>
                   <select
                     className={inputCls + ' col-span-4'}
                     value={a.modalidad}
@@ -533,6 +551,7 @@ export const PrestamoModal: React.FC<Props> = ({
                     <option value="REDUCE_CUOTA">Reduce cuota</option>
                   </select>
                   <button
+                    aria-label="Eliminar"
                     type="button"
                     onClick={() => setAmortizaciones((prev) => prev.filter((x) => x.id !== a.id))}
                     className="col-span-1 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg justify-self-end"
@@ -545,13 +564,15 @@ export const PrestamoModal: React.FC<Props> = ({
           </div>
 
           <div>
-            <label className={labelCls}>Descripción</label>
-            <input type="text" className={inputCls} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
+            <label htmlFor="campo-descripcion" className={labelCls}>Descripción</label>
+            <input type="text" className={inputCls} value={descripcion} onChange={(e) => setDescripcion(e.target.value)}
+               id="campo-descripcion"/>
           </div>
 
           <div>
-            <label className={labelCls}>Notas</label>
-            <textarea className={inputCls} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            <label htmlFor="campo-notas" className={labelCls}>Notas</label>
+            <textarea className={inputCls} rows={2} value={notas} onChange={(e) => setNotas(e.target.value)}
+               id="campo-notas"/>
           </div>
 
           <p className="text-[11px] text-slate-400 leading-relaxed">

@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface FormalizacionSectionProps {
   contratos: ContratoFormalizacion[];
@@ -267,8 +268,13 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
               ) : (
                 candidatosDisponibles.map((cand) => {
                   const prop = inmuebles.find((i) => i.id === cand.inmuebleId);
+                  const seleccionarCandidato = () => {
+                    setShowNewContractSelector(false);
+                    onOpenFormalizarModal(cand, prop);
+                  };
                   return (
                     <div
+                      {...propsInteraccion(seleccionarCandidato, `Formalizar contrato con ${cand.nombre}`)}
                       key={cand.id}
                       onClick={() => {
                         setShowNewContractSelector(false);

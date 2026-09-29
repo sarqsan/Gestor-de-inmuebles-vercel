@@ -321,6 +321,7 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/70 p-1">
             <button
+              aria-current={vista === 'gastos' ? 'true' : undefined}
               onClick={() => setVista('gastos')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 vista === 'gastos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -329,6 +330,7 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               <LayoutList className="w-3.5 h-3.5" /> Gastos
             </button>
             <button
+              aria-current={vista === 'recurrentes' ? 'true' : undefined}
               onClick={() => setVista('recurrentes')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 vista === 'recurrentes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -337,6 +339,7 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               <Repeat className="w-3.5 h-3.5" /> Recurrentes
             </button>
             <button
+              aria-current={vista === 'prestamos' ? 'true' : undefined}
               onClick={() => setVista('prestamos')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 vista === 'prestamos' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -345,6 +348,7 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               <Landmark className="w-3.5 h-3.5" /> Préstamos
             </button>
             <button
+              aria-current={vista === 'rentabilidad' ? 'true' : undefined}
               onClick={() => setVista('rentabilidad')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 vista === 'rentabilidad' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'

@@ -5,6 +5,7 @@ import { getTipoDocumentoLabel } from '../utils/formatters';
 import { INITIAL_ASEGURADORAS } from '../data/mockData';
 import { confirmar } from '../feedback/confirmacion';
 import { ejecutarOperacion } from '../feedback/operaciones';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface ConfiguracionAseguradorasModalProps {
   aseguradoras: ConfiguracionAseguradora[];
@@ -22,6 +23,10 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
   onSaveAseguradora,
   onDeleteAseguradora,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Configuración de Aseguradoras de Impago'
+  );
   const initialSelected =
     aseguradoras.find((a) => a.id === 'seag') || aseguradoras[0] || INITIAL_ASEGURADORAS[0];
 
@@ -124,7 +129,7 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={refDialogo} {...propsDialogo}
         className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -142,6 +147,7 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors"
           >
@@ -256,25 +262,27 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Nombre de la Entidad:</label>
+                <label htmlFor="campo-nombre-de-la-entidad" className="text-xs font-bold text-slate-700 block mb-1">Nombre de la Entidad:</label>
                 <input
                   type="text"
                   value={editingAseg.nombre}
                   onChange={(e) => setEditingAseg({ ...editingAseg, nombre: e.target.value })}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Ej: ARAG Seguros"
-                />
+
+                   id="campo-nombre-de-la-entidad"/>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Nombre Comercial del Producto:</label>
+                <label htmlFor="campo-nombre-comercial-del-producto" className="text-xs font-bold text-slate-700 block mb-1">Nombre Comercial del Producto:</label>
                 <input
                   type="text"
                   value={editingAseg.nombreComercial}
                   onChange={(e) => setEditingAseg({ ...editingAseg, nombreComercial: e.target.value })}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Ej: ARAG Alquiler Protección"
-                />
+
+                   id="campo-nombre-comercial-del-producto"/>
               </div>
 
               <div className="sm:col-span-2">
@@ -292,7 +300,7 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
+                <label htmlFor="campo-ratio-de-esfuerzo-maximo" className="text-xs font-bold text-slate-700 block mb-1">
                   Ratio de Esfuerzo Máximo (%):
                 </label>
                 <input
@@ -302,12 +310,14 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
                   value={editingAseg.ratioEsfuerzoMaximo}
                   onChange={(e) => setEditingAseg({ ...editingAseg, ratioEsfuerzoMaximo: Number(e.target.value) })}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+
+                  inputMode="decimal"
+                   id="campo-ratio-de-esfuerzo-maximo"/>
                 <span className="text-[10px] text-slate-400">Normalmente 35% a 40% de los ingresos netos.</span>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
+                <label htmlFor="campo-antiguedad-laboral-minima-meses" className="text-xs font-bold text-slate-700 block mb-1">
                   Antigüedad Laboral Mínima (meses):
                 </label>
                 <input
@@ -317,12 +327,14 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
                   value={editingAseg.antiguedadMinimaMeses}
                   onChange={(e) => setEditingAseg({ ...editingAseg, antiguedadMinimaMeses: Number(e.target.value) })}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+
+                  inputMode="decimal"
+                   id="campo-antiguedad-laboral-minima-meses"/>
                 <span className="text-[10px] text-slate-400">Superación de periodo de prueba o meses de contrato.</span>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
+                <label htmlFor="campo-tasa-de-prima-anual-estimada" className="text-xs font-bold text-slate-700 block mb-1">
                   Tasa de Prima Anual Estimada (%):
                 </label>
                 <input
@@ -333,19 +345,22 @@ export const ConfiguracionAseguradorasModal: React.FC<ConfiguracionAseguradorasM
                   value={editingAseg.tasaPrimaAnualPorcentaje}
                   onChange={(e) => setEditingAseg({ ...editingAseg, tasaPrimaAnualPorcentaje: Number(e.target.value) })}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+
+                  inputMode="decimal"
+                   id="campo-tasa-de-prima-anual-estimada"/>
                 <span className="text-[10px] text-slate-400">Ej: 4.25% sobre la renta anual (renta × 12 × 4.25%).</span>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
+                <label htmlFor="campo-meses-de-cobertura-de-impago" className="text-xs font-bold text-slate-700 block mb-1">
                   Meses de Cobertura de Impago:
                 </label>
                 <select
                   value={editingAseg.mesesCoberturaImpago}
                   onChange={(e) => setEditingAseg({ ...editingAseg, mesesCoberturaImpago: Number(e.target.value) })}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                >
+
+                   id="campo-meses-de-cobertura-de-impago">
                   <option value={6}>6 Meses</option>
                   <option value={12}>12 Meses (Estándar)</option>
                   <option value={18}>18 Meses</option>

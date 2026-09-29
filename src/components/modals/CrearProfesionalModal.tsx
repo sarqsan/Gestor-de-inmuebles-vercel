@@ -188,6 +188,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
@@ -208,7 +209,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
               Tipo de Entidad *
             </label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {(['AUTONOMO', 'EMPRESA', 'PARTICULAR'] as TipoProfesional[]).map((t) => (
                 <button
                   type="button"
@@ -277,7 +278,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-persona-de-contacto" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Persona de Contacto
               </label>
               <input
@@ -286,7 +287,8 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
                 onChange={(e) => setContactoNombre(e.target.value)}
                 placeholder="Ej. Juan García"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-              />
+
+                 id="campo-persona-de-contacto"/>
             </div>
 
             <div>
@@ -376,6 +378,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
                     )}
                   </div>
                   <button
+                    aria-label="Eliminar"
                     type="button"
                     onClick={() => handleRemoveZona(z.id)}
                     className="p-1 text-slate-400 hover:text-red-600 rounded-md cursor-pointer"

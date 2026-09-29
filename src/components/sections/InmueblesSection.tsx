@@ -94,8 +94,10 @@ import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFormulario';
 import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { avisarOperacion } from '../../feedback/canalFeedback';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface InmueblesSectionProps {
   inmuebles: Inmueble[];
@@ -330,6 +332,26 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
   // Modal para registrar cobro rápido desde la ficha del inmueble
   const [cobroToPay, setCobroToPay] = useState<CobroPeriodo | null>(null);
+
+  // UX-6 §11: semántica de diálogo, foco dentro y Escape en los cuatro diálogos de la
+  // sección (edición, alta, formalizar contrato y registrar cobro).
+  const dialogoEdicion = useDialogoAccesible(
+    { abierto: Boolean(inmuebleToEdit), onCerrar: () => setInmuebleToEdit(null) },
+    'Editar inmueble y apartado fiscal'
+  );
+  const dialogoAlta = useDialogoAccesible(
+    { abierto: showAddModal, onCerrar: () => setShowAddModal(false) },
+    'Añadir nuevo inmueble y apartado fiscal'
+  );
+  const dialogoFormalizar = useDialogoAccesible(
+    { abierto: showFormalizarNuevoContratoModal, onCerrar: () => setShowFormalizarNuevoContratoModal(false) },
+    'Formalizar nuevo contrato'
+  );
+  const dialogoCobro = useDialogoAccesible(
+    { abierto: Boolean(cobroToPay), onCerrar: () => setCobroToPay(null) },
+    'Registrar cobro'
+  );
+
   const [payImporte, setPayImporte] = useState<number>(0);
   const [payFecha, setPayFecha] = useState<string>(new Date().toISOString().split('T')[0]);
   const [payMetodo, setPayMetodo] = useState<'transferencia' | 'domiciliacion' | 'bizum' | 'efectivo' | 'otro'>('transferencia');
@@ -1863,6 +1885,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {interestedCandidates.map((cand) => (
                 <div
+                  {...propsInteraccion(() => onSelectCandidate(cand))}
                   key={cand.id}
                   onClick={() => onSelectCandidate(cand)}
                   className="p-4 rounded-xl border border-slate-200/80 hover:border-blue-400 bg-slate-50/50 hover:bg-slate-50 transition-all cursor-pointer space-y-3 group"
@@ -2209,10 +2232,18 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     </button>
                   )}
 
-                  <span className="text-slate-500 font-medium group-hover:text-blue-600 flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seleccionarInmueble(inm.id);
+                    }}
+                    className="text-slate-500 font-medium group-hover:text-blue-600 flex items-center gap-0.5 cursor-pointer"
+                    aria-label={`Ver ficha de ${inm.direccion}`}
+                  >
                     Ver
                     <ChevronRight className="w-4 h-4" />
-                  </span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -2225,13 +2256,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       {/* EDIT PROPERTY MODAL DIALOG */}
       {inmuebleToEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200 my-auto">
+          <div ref={dialogoEdicion.refDialogo} {...dialogoEdicion.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200 my-auto">
             <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white shrink-0">
               <div className="flex items-center gap-2">
                 <Edit className="w-5 h-5 text-blue-400" />
                 <h3 className="font-bold text-base">Editar Inmueble & Apartado Fiscal</h3>
               </div>
               <button
+                aria-label="Cerrar"
                 onClick={() => setInmuebleToEdit(null)}
                 className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
               >
@@ -2288,7 +2320,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                   {erroresTitularidad.length > 0 && <ResumenErrores mensaje={erroresTitularidad.join(' ')} />}
 
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Dirección del Inmueble *</label>
+                    <label htmlFor="campo-direccion-del-inmueble" className="block font-semibold text-slate-700 mb-1">Dirección del Inmueble *</label>
                     <input
                       type="text"
                       required
@@ -2297,13 +2329,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       value={editDireccion}
                       onChange={(e) => setEditDireccion(e.target.value)}
                       className={`${claseEntrada(erroresEdicion.direccion)} font-semibold text-slate-900`}
-                    />
-                    <ErrorCampo mensaje={erroresEdicion.direccion} />
+
+                      aria-describedby="error-direccion"
+                       id="campo-direccion-del-inmueble"/>
+                    <ErrorCampo id="error-direccion" mensaje={erroresEdicion.direccion} />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Ciudad *</label>
+                      <label htmlFor="campo-ciudad" className="block font-semibold text-slate-700 mb-1">Ciudad *</label>
                       <input
                         type="text"
                         required
@@ -2312,11 +2346,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         value={editCiudad}
                         onChange={(e) => setEditCiudad(e.target.value)}
                         className={`${claseEntrada(erroresEdicion.ciudad)} font-semibold text-slate-900`}
-                      />
-                      <ErrorCampo mensaje={erroresEdicion.ciudad} />
+
+                        aria-describedby="error-ciudad"
+                         id="campo-ciudad"/>
+                      <ErrorCampo id="error-ciudad" mensaje={erroresEdicion.ciudad} />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes) *</label>
+                      <label htmlFor="campo-precio-alquiler-mes" className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes) *</label>
                       <input
                         type="number"
                         required
@@ -2324,57 +2360,66 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         value={editPrecio}
                         onChange={(e) => setEditPrecio(Number(e.target.value))}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-extrabold text-sm text-blue-700"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-precio-alquiler-mes"/>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Descripción de la Vivienda</label>
+                    <label htmlFor="campo-descripcion-de-la-vivienda" className="block font-semibold text-slate-700 mb-1">Descripción de la Vivienda</label>
                     <textarea
                       rows={3}
                       placeholder="Añade detalles sobre la propiedad, reformas, estado, equipamiento..."
                       value={editDescripcion}
                       onChange={(e) => setEditDescripcion(e.target.value)}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs text-slate-800"
-                    />
+
+                       id="campo-descripcion-de-la-vivienda"/>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Habitaciones</label>
+                      <label htmlFor="campo-habitaciones" className="block font-semibold text-slate-700 mb-1">Habitaciones</label>
                       <input
                         type="number"
                         min="1"
                         value={editHabitaciones}
                         onChange={(e) => setEditHabitaciones(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-habitaciones"/>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Baños</label>
+                      <label htmlFor="campo-banos" className="block font-semibold text-slate-700 mb-1">Baños</label>
                       <input
                         type="number"
                         min="1"
                         value={editBanos}
                         onChange={(e) => setEditBanos(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-banos"/>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Superficie (m²)</label>
+                      <label htmlFor="campo-superficie-m2" className="block font-semibold text-slate-700 mb-1">Superficie (m²)</label>
                       <input
                         type="number"
                         min="10"
                         value={editSuperficie}
                         onChange={(e) => setEditSuperficie(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-superficie-m2"/>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3 pt-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Fianza (Meses)</label>
+                      <label htmlFor="campo-fianza-meses" className="block font-semibold text-slate-700 mb-1">Fianza (Meses)</label>
                       <input
                         type="number"
                         min="0"
@@ -2382,26 +2427,30 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         value={editFianza}
                         onChange={(e) => setEditFianza(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-fianza-meses"/>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Estado</label>
+                      <label htmlFor="campo-estado" className="block font-semibold text-slate-700 mb-1">Estado</label>
                       <select
                         value={editEstado}
                         onChange={(e) => setEditEstado(e.target.value as 'disponible' | 'alquilado')}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
-                      >
+
+                         id="campo-estado">
                         <option value="disponible">Disponible</option>
                         <option value="alquilado">Alquilado</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Modalidad</label>
+                      <label htmlFor="campo-modalidad" className="block font-semibold text-slate-700 mb-1">Modalidad</label>
                       <select
                         value={editModalidadAlquiler}
                         onChange={(e) => setEditModalidadAlquiler(e.target.value as 'completo' | 'habitaciones')}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
-                      >
+
+                         id="campo-modalidad">
                         <option value="completo">Completo</option>
                         <option value="habitaciones">Por Habitaciones</option>
                       </select>
@@ -2474,24 +2523,26 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                   {/* Property Data */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Referencia Catastral</label>
+                      <label htmlFor="campo-referencia-catastral" className="block font-semibold text-slate-700 mb-1">Referencia Catastral</label>
                       <input
                         type="text"
                         placeholder="Ej. 9876543VK4797S0001TR (20 caracteres)"
                         value={editReferenciaCatastral}
                         onChange={(e) => setEditReferenciaCatastral(e.target.value)}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs text-slate-900"
-                      />
+
+                         id="campo-referencia-catastral"/>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Código Postal</label>
+                      <label htmlFor="campo-codigo-postal" className="block font-semibold text-slate-700 mb-1">Código Postal</label>
                       <input
                         type="text"
                         placeholder="Ej. 28001"
                         value={editCodigoPostal}
                         onChange={(e) => setEditCodigoPostal(e.target.value)}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs text-slate-900"
-                      />
+
+                         id="campo-codigo-postal"/>
                     </div>
                   </div>
 
@@ -2532,37 +2583,43 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                           value={editCatastro.anioConstruccion ?? ''}
                           onChange={(e) => setEditCatastro((p) => ({ ...p, anioConstruccion: e.target.value === '' ? undefined : Number(e.target.value) }))}
                           className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
-                        />
+
+                          inputMode="decimal"/>
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">m² catastrales</label>
+                        <label htmlFor="campo-m2-catastrales" className="block text-[10px] font-semibold text-slate-500 mb-1">m² catastrales</label>
                         <input
                           type="number"
                           placeholder="Ej. 92"
                           value={editCatastro.superficieCatastralConstruida ?? ''}
                           onChange={(e) => setEditCatastro((p) => ({ ...p, superficieCatastralConstruida: e.target.value === '' ? undefined : Number(e.target.value) }))}
                           className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
-                        />
+
+                          inputMode="decimal"
+                           id="campo-m2-catastrales"/>
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Valor catastral (€)</label>
+                        <label htmlFor="campo-valor-catastral" className="block text-[10px] font-semibold text-slate-500 mb-1">Valor catastral (€)</label>
                         <input
                           type="number"
                           placeholder="Del IBI"
                           value={editCatastro.valorCatastral ?? ''}
                           onChange={(e) => setEditCatastro((p) => ({ ...p, valorCatastral: e.target.value === '' ? undefined : Number(e.target.value) }))}
                           className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
-                        />
+
+                          inputMode="decimal"
+                           id="campo-valor-catastral"/>
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">Planta</label>
+                        <label htmlFor="campo-planta" className="block text-[10px] font-semibold text-slate-500 mb-1">Planta</label>
                         <input
                           type="text"
                           placeholder="Ej. 3º"
                           value={editCatastro.planta ?? ''}
                           onChange={(e) => setEditCatastro((p) => ({ ...p, planta: e.target.value }))}
                           className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
-                        />
+
+                           id="campo-planta"/>
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-500">
@@ -2629,14 +2686,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Nº Registro de la Propiedad (Opcional)</label>
+                      <label htmlFor="campo-no-registro-de-la-propiedad-opcional" className="block font-semibold text-slate-700 mb-1">Nº Registro de la Propiedad (Opcional)</label>
                       <input
                         type="text"
                         placeholder="Ej. Registro nº 12 de Madrid, Tomo 1420, Finca 45120"
                         value={editNumeroRegistroPropiedad}
                         onChange={(e) => setEditNumeroRegistroPropiedad(e.target.value)}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs text-slate-900"
-                      />
+
+                         id="campo-no-registro-de-la-propiedad-opcional"/>
                     </div>
                   </div>
 
@@ -2670,47 +2728,51 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">NIF / CIF / DNI</label>
+                        <label htmlFor="campo-nif-cif-dni" className="block font-semibold text-slate-700 mb-1">NIF / CIF / DNI</label>
                         <input
                           type="text"
                           placeholder="Ej. B-87654321 o 12345678Z"
                           value={editPropNif}
                           onChange={(e) => setEditPropNif(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
-                        />
+
+                           id="campo-nif-cif-dni"/>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="sm:col-span-1">
-                        <label className="block font-semibold text-slate-700 mb-1">Dirección Fiscal</label>
+                        <label htmlFor="campo-direccion-fiscal" className="block font-semibold text-slate-700 mb-1">Dirección Fiscal</label>
                         <input
                           type="text"
                           placeholder="Calle, número, ciudad"
                           value={editPropDireccion}
                           onChange={(e) => setEditPropDireccion(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
+
+                           id="campo-direccion-fiscal"/>
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Teléfono</label>
+                        <label htmlFor="campo-telefono" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
                         <input
                           type="tel"
                           placeholder="600000000"
                           value={editPropTelefono}
                           onChange={(e) => setEditPropTelefono(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
+
+                           id="campo-telefono"/>
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Email</label>
+                        <label htmlFor="campo-email" className="block font-semibold text-slate-700 mb-1">Email</label>
                         <input
                           type="email"
                           placeholder="propietario@correo.com"
                           value={editPropEmail}
                           onChange={(e) => setEditPropEmail(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
+
+                           id="campo-email"/>
                       </div>
                     </div>
                   </div>
@@ -2754,57 +2816,62 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Nombre Completo 2º Propietario</label>
+                            <label htmlFor="campo-nombre-completo-2o-propietario" className="block font-semibold text-slate-700 mb-1">Nombre Completo 2º Propietario</label>
                             <input
                               type="text"
                               placeholder="Ej. María López"
                               value={editProp2Nombre}
                               onChange={(e) => setEditProp2Nombre(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-nombre-completo-2o-propietario"/>
                           </div>
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">NIF / DNI 2º Propietario</label>
+                            <label htmlFor="campo-nif-dni-2o-propietario" className="block font-semibold text-slate-700 mb-1">NIF / DNI 2º Propietario</label>
                             <input
                               type="text"
                               placeholder="87654321A"
                               value={editProp2Nif}
                               onChange={(e) => setEditProp2Nif(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono text-xs"
-                            />
+
+                               id="campo-nif-dni-2o-propietario"/>
                           </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Dirección</label>
+                            <label htmlFor="campo-direccion" className="block font-semibold text-slate-700 mb-1">Dirección</label>
                             <input
                               type="text"
                               placeholder="Dirección completa"
                               value={editProp2Direccion}
                               onChange={(e) => setEditProp2Direccion(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-direccion"/>
                           </div>
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Teléfono</label>
+                            <label htmlFor="campo-telefono-2" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
                             <input
                               type="tel"
                               placeholder="611223344"
                               value={editProp2Telefono}
                               onChange={(e) => setEditProp2Telefono(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-telefono-2"/>
                           </div>
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Email</label>
+                            <label htmlFor="campo-email-2" className="block font-semibold text-slate-700 mb-1">Email</label>
                             <input
                               type="email"
                               placeholder="co-propietario@correo.com"
                               value={editProp2Email}
                               onChange={(e) => setEditProp2Email(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-email-2"/>
                           </div>
                         </div>
                       </div>
@@ -2851,13 +2918,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       {/* Add New Property Modal Dialog */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200 my-auto">
+          <div ref={dialogoAlta.refDialogo} {...dialogoAlta.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200 my-auto">
             <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white shrink-0">
               <div className="flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-blue-400" />
                 <h3 className="font-bold text-base">Añadir Nuevo Inmueble & Apartado Fiscal</h3>
               </div>
               <button
+                aria-label="Cerrar"
                 onClick={() => setShowAddModal(false)}
                 className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
               >
@@ -2914,7 +2982,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-2">
-                      <label className="block font-semibold text-slate-700 mb-1">Dirección del Inmueble *</label>
+                      <label htmlFor="campo-direccion-del-inmueble-2" className="block font-semibold text-slate-700 mb-1">Dirección del Inmueble *</label>
                       <input
                         type="text"
                         required
@@ -2924,11 +2992,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         value={newDireccion}
                         onChange={(e) => setNewDireccion(e.target.value)}
                         className={claseEntrada(erroresAlta.direccion)}
-                      />
-                      <ErrorCampo mensaje={erroresAlta.direccion} />
+
+                        aria-describedby="error-direccion-2"
+                         id="campo-direccion-del-inmueble-2"/>
+                      <ErrorCampo id="error-direccion-2" mensaje={erroresAlta.direccion} />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">ID Físico (Opcional)</label>
+                      <label htmlFor="campo-id-fisico-opcional" className="block font-semibold text-slate-700 mb-1">ID Físico (Opcional)</label>
                       <input
                         type="text"
                         placeholder="Auto (inm-...)"
@@ -2936,13 +3006,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         onChange={(e) => setNewIdPersonalizado(e.target.value)}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:ring-2 focus:ring-blue-500"
                         title="Identificador físico permanente opcional. Si se deja vacío se genera automáticamente."
-                      />
+
+                         id="campo-id-fisico-opcional"/>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Ciudad *</label>
+                      <label htmlFor="campo-ciudad-2" className="block font-semibold text-slate-700 mb-1">Ciudad *</label>
                       <input
                         type="text"
                         required
@@ -2952,11 +3023,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         value={newCiudad}
                         onChange={(e) => setNewCiudad(e.target.value)}
                         className={claseEntrada(erroresAlta.ciudad)}
-                      />
-                      <ErrorCampo mensaje={erroresAlta.ciudad} />
+
+                        aria-describedby="error-ciudad-2"
+                         id="campo-ciudad-2"/>
+                      <ErrorCampo id="error-ciudad-2" mensaje={erroresAlta.ciudad} />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes) *</label>
+                      <label htmlFor="campo-precio-alquiler-mes-2" className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes) *</label>
                       <input
                         type="number"
                         required
@@ -2966,58 +3039,68 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         value={newPrecio}
                         onChange={(e) => setNewPrecio(Number(e.target.value))}
                         className={`${claseEntrada(erroresAlta.precioAlquiler)} font-bold text-blue-700`}
-                      />
-                      <ErrorCampo mensaje={erroresAlta.precioAlquiler} />
+
+                        aria-describedby="error-precioalquiler"
+                        inputMode="decimal"
+                         id="campo-precio-alquiler-mes-2"/>
+                      <ErrorCampo id="error-precioalquiler" mensaje={erroresAlta.precioAlquiler} />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Descripción de la Vivienda</label>
+                    <label htmlFor="campo-descripcion-de-la-vivienda-2" className="block font-semibold text-slate-700 mb-1">Descripción de la Vivienda</label>
                     <textarea
                       rows={2}
                       placeholder="Detalles sobre la propiedad, equipamiento, zona..."
                       value={newDescripcion}
                       onChange={(e) => setNewDescripcion(e.target.value)}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs text-slate-800"
-                    />
+
+                       id="campo-descripcion-de-la-vivienda-2"/>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Habitaciones</label>
+                      <label htmlFor="campo-habitaciones-2" className="block font-semibold text-slate-700 mb-1">Habitaciones</label>
                       <input
                         type="number"
                         min="1"
                         value={newHabitaciones}
                         onChange={(e) => setNewHabitaciones(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-habitaciones-2"/>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Baños</label>
+                      <label htmlFor="campo-banos-2" className="block font-semibold text-slate-700 mb-1">Baños</label>
                       <input
                         type="number"
                         min="1"
                         value={newBanos}
                         onChange={(e) => setNewBanos(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-banos-2"/>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Superficie (m²)</label>
+                      <label htmlFor="campo-superficie-m2-2" className="block font-semibold text-slate-700 mb-1">Superficie (m²)</label>
                       <input
                         type="number"
                         min="10"
                         value={newSuperficie}
                         onChange={(e) => setNewSuperficie(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-superficie-m2-2"/>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3 pt-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Fianza (Meses)</label>
+                      <label htmlFor="campo-fianza-meses-2" className="block font-semibold text-slate-700 mb-1">Fianza (Meses)</label>
                       <input
                         type="number"
                         min="0"
@@ -3025,26 +3108,30 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         value={newFianza}
                         onChange={(e) => setNewFianza(Number(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      />
+
+                        inputMode="decimal"
+                         id="campo-fianza-meses-2"/>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Estado Inicial</label>
+                      <label htmlFor="campo-estado-inicial" className="block font-semibold text-slate-700 mb-1">Estado Inicial</label>
                       <select
                         value={newEstado}
                         onChange={(e) => setNewEstado(e.target.value as 'disponible' | 'alquilado')}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      >
+
+                         id="campo-estado-inicial">
                         <option value="disponible">Disponible</option>
                         <option value="alquilado">Alquilado</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Modalidad</label>
+                      <label htmlFor="campo-modalidad-2" className="block font-semibold text-slate-700 mb-1">Modalidad</label>
                       <select
                         value={newModalidadAlquiler}
                         onChange={(e) => setNewModalidadAlquiler(e.target.value as 'completo' | 'habitaciones')}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                      >
+
+                         id="campo-modalidad-2">
                         <option value="completo">Completo</option>
                         <option value="habitaciones">Por Habitaciones</option>
                       </select>
@@ -3213,14 +3300,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Código Postal</label>
+                      <label htmlFor="campo-codigo-postal-2" className="block font-semibold text-slate-700 mb-1">Código Postal</label>
                       <input
                         type="text"
                         placeholder="Ej. 28001"
                         value={newCodigoPostal}
                         onChange={(e) => setNewCodigoPostal(e.target.value)}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs text-slate-900"
-                      />
+
+                         id="campo-codigo-postal-2"/>
                     </div>
                   </div>
 
@@ -3281,14 +3369,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Nº Registro de la Propiedad (Opcional)</label>
+                      <label htmlFor="campo-no-registro-de-la-propiedad-opcional-2" className="block font-semibold text-slate-700 mb-1">Nº Registro de la Propiedad (Opcional)</label>
                       <input
                         type="text"
                         placeholder="Ej. Registro nº 12 de Madrid, Tomo 1420, Finca 45120"
                         value={newNumeroRegistroPropiedad}
                         onChange={(e) => setNewNumeroRegistroPropiedad(e.target.value)}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs text-slate-900"
-                      />
+
+                         id="campo-no-registro-de-la-propiedad-opcional-2"/>
                     </div>
                   </div>
 
@@ -3322,47 +3411,51 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">NIF / CIF / DNI</label>
+                        <label htmlFor="campo-nif-cif-dni-2" className="block font-semibold text-slate-700 mb-1">NIF / CIF / DNI</label>
                         <input
                           type="text"
                           placeholder="Ej. 12345678Z o B-87654321"
                           value={newPropNif}
                           onChange={(e) => setNewPropNif(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
-                        />
+
+                           id="campo-nif-cif-dni-2"/>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="sm:col-span-1">
-                        <label className="block font-semibold text-slate-700 mb-1">Dirección Fiscal</label>
+                        <label htmlFor="campo-direccion-fiscal-2" className="block font-semibold text-slate-700 mb-1">Dirección Fiscal</label>
                         <input
                           type="text"
                           placeholder="Calle, número, ciudad"
                           value={newPropDireccion}
                           onChange={(e) => setNewPropDireccion(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
+
+                           id="campo-direccion-fiscal-2"/>
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Teléfono</label>
+                        <label htmlFor="campo-telefono-3" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
                         <input
                           type="tel"
                           placeholder="600000000"
                           value={newPropTelefono}
                           onChange={(e) => setNewPropTelefono(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
+
+                           id="campo-telefono-3"/>
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Email</label>
+                        <label htmlFor="campo-email-3" className="block font-semibold text-slate-700 mb-1">Email</label>
                         <input
                           type="email"
                           placeholder="propietario@correo.com"
                           value={newPropEmail}
                           onChange={(e) => setNewPropEmail(e.target.value)}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
+
+                           id="campo-email-3"/>
                       </div>
                     </div>
                   </div>
@@ -3406,57 +3499,62 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Nombre Completo 2º Propietario</label>
+                            <label htmlFor="campo-nombre-completo-2o-propietario-2" className="block font-semibold text-slate-700 mb-1">Nombre Completo 2º Propietario</label>
                             <input
                               type="text"
                               placeholder="Ej. María López"
                               value={newProp2Nombre}
                               onChange={(e) => setNewProp2Nombre(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-nombre-completo-2o-propietario-2"/>
                           </div>
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">NIF / DNI 2º Propietario</label>
+                            <label htmlFor="campo-nif-dni-2o-propietario-2" className="block font-semibold text-slate-700 mb-1">NIF / DNI 2º Propietario</label>
                             <input
                               type="text"
                               placeholder="87654321A"
                               value={newProp2Nif}
                               onChange={(e) => setNewProp2Nif(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono text-xs"
-                            />
+
+                               id="campo-nif-dni-2o-propietario-2"/>
                           </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Dirección</label>
+                            <label htmlFor="campo-direccion-2" className="block font-semibold text-slate-700 mb-1">Dirección</label>
                             <input
                               type="text"
                               placeholder="Dirección completa"
                               value={newProp2Direccion}
                               onChange={(e) => setNewProp2Direccion(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-direccion-2"/>
                           </div>
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Teléfono</label>
+                            <label htmlFor="campo-telefono-4" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
                             <input
                               type="tel"
                               placeholder="611223344"
                               value={newProp2Telefono}
                               onChange={(e) => setNewProp2Telefono(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-telefono-4"/>
                           </div>
                           <div>
-                            <label className="block font-semibold text-slate-700 mb-1">Email</label>
+                            <label htmlFor="campo-email-4" className="block font-semibold text-slate-700 mb-1">Email</label>
                             <input
                               type="email"
                               placeholder="co-propietario@correo.com"
                               value={newProp2Email}
                               onChange={(e) => setNewProp2Email(e.target.value)}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-                            />
+
+                               id="campo-email-4"/>
                           </div>
                         </div>
                       </div>
@@ -3487,14 +3585,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
       {/* Formalizar Nuevo Contrato Modal */}
       {showFormalizarNuevoContratoModal && selectedInmueble && onOpenFormalizarModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div ref={dialogoFormalizar.refDialogo} {...dialogoFormalizar.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-lg max-h-[90vh] overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white sticky top-0 z-10">
               <div className="flex items-center gap-2">
                 <FileSignature className="w-5 h-5 text-indigo-400" />
                 <h3 className="font-bold text-base">Formalizar Nuevo Contrato</h3>
               </div>
               <button
+                aria-label="Cerrar"
                 type="button"
                 onClick={() => setShowFormalizarNuevoContratoModal(false)}
                 className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
@@ -3629,14 +3728,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       )}
       {/* Modal Registrar Cobro en Ficha de Inmueble */}
       {cobroToPay && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div ref={dialogoCobro.refDialogo} {...dialogoCobro.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-md max-h-[90vh] overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white sticky top-0 z-10">
               <div className="flex items-center gap-2">
                 <Banknote className="w-5 h-5 text-emerald-400" />
                 <h3 className="font-bold text-base">Registrar Cobro: {cobroToPay.nombreMes}</h3>
               </div>
               <button
+                aria-label="Cerrar"
                 type="button"
                 onClick={() => setCobroToPay(null)}
                 className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
@@ -3669,28 +3769,31 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     value={payImporte}
                     onChange={(e) => setPayImporte(Number(e.target.value))}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm font-bold text-slate-900"
-                  />
+
+                    inputMode="decimal"/>
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Fecha de Cobro *</label>
+                  <label htmlFor="campo-fecha-de-cobro" className="block font-semibold text-slate-700 mb-1">Fecha de Cobro *</label>
                   <input
                     type="date"
                     required
                     value={payFecha}
                     onChange={(e) => setPayFecha(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900"
-                  />
+
+                     id="campo-fecha-de-cobro"/>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Método de Pago</label>
+                  <label htmlFor="campo-metodo-de-pago" className="block font-semibold text-slate-700 mb-1">Método de Pago</label>
                   <select
                     value={payMetodo}
                     onChange={(e) => setPayMetodo(e.target.value as any)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900"
-                  >
+
+                     id="campo-metodo-de-pago">
                     <option value="transferencia">Transferencia Bancaria</option>
                     <option value="domiciliacion">Domiciliación</option>
                     <option value="bizum">Bizum</option>
@@ -3699,12 +3802,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Estado</label>
+                  <label htmlFor="campo-estado-2" className="block font-semibold text-slate-700 mb-1">Estado</label>
                   <select
                     value={payEstado}
                     onChange={(e) => setPayEstado(e.target.value as EstadoCobroAlquiler)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900"
-                  >
+
+                     id="campo-estado-2">
                     <option value="RECIBIDO">RECIBIDO</option>
                     <option value="VERIFICADO">VERIFICADO</option>
                     <option value="PENDIENTE">PENDIENTE</option>
@@ -3715,7 +3819,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Justificante (PDF o Imagen)</label>
+                <label htmlFor="campo-justificante-pdf-o-imagen" className="block font-semibold text-slate-700 mb-1">Justificante (PDF o Imagen)</label>
                 <input
                   type="file"
                   accept=".pdf,image/*"
@@ -3725,18 +3829,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     }
                   }}
                   className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                />
+
+                   id="campo-justificante-pdf-o-imagen"/>
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Observaciones</label>
+                <label htmlFor="campo-observaciones" className="block font-semibold text-slate-700 mb-1">Observaciones</label>
                 <textarea
                   rows={2}
                   placeholder="Notas adicionales sobre el pago..."
                   value={payObservaciones}
                   onChange={(e) => setPayObservaciones(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
-                />
+
+                   id="campo-observaciones"/>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">

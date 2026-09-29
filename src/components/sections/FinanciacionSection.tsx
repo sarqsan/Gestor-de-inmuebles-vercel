@@ -37,6 +37,7 @@ import {
   X,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface FinanciacionSectionProps {
   inmuebles: Inmueble[];
@@ -138,6 +139,7 @@ export const FinanciacionSection: React.FC<FinanciacionSectionProps> = ({
           const inm = inmuebles.find((i) => i.id === fin.inmuebleId);
           return (
             <div
+              {...propsInteraccion(() => setSelectedId(fin.id))}
               key={fin.id}
               onClick={() => setSelectedId(fin.id)}
               className="bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer"
@@ -280,6 +282,7 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
           <Building2 className="w-5 h-5 text-blue-600" /> Nueva financiación
         </h3>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer">
+          aria-label="Cerrar"
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -314,7 +317,8 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
             value={importe}
             onChange={(e) => setImporte(Number(e.target.value))}
             className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-          />
+
+            inputMode="decimal"/>
         </label>
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Valor de referencia (€)</span>
@@ -325,7 +329,8 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
             onChange={(e) => setValorRef(Number(e.target.value))}
             placeholder={inm?.valorAdquisicion ? `Ej. tasación ${inm.valorAdquisicion}` : 'Valor de tasación/adquisición'}
             className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-          />
+
+            inputMode="decimal"/>
         </label>
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Plazo (meses)</span>
@@ -335,7 +340,8 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
             value={plazo}
             onChange={(e) => setPlazo(Number(e.target.value))}
             className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-          />
+
+            inputMode="decimal"/>
         </label>
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Tipo de interés anual (%)</span>
@@ -346,7 +352,8 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
             value={tipo}
             onChange={(e) => setTipo(Number(e.target.value))}
             className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-          />
+
+            inputMode="decimal"/>
         </label>
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Modalidad de interés</span>
@@ -393,7 +400,8 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
               value={carenciaMeses}
               onChange={(e) => setCarenciaMeses(Number(e.target.value))}
               className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-            />
+
+              inputMode="decimal"/>
           </label>
         )}
         <label className="block text-sm">
@@ -414,7 +422,8 @@ function FormularioFinanciacion({ inmuebles, propietarios, currentUser, onClose,
             value={gastos}
             onChange={(e) => setGastos(Number(e.target.value))}
             className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-          />
+
+            inputMode="decimal"/>
         </label>
       </div>
 
@@ -527,6 +536,7 @@ function DetalleFinanciacion({
               <Trash2 className="w-4 h-4" />
             </button>
             <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer">
+              aria-label="Cerrar"
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -603,7 +613,8 @@ function DetalleFinanciacion({
                 value={antImporte}
                 onChange={(e) => setAntImporte(Number(e.target.value))}
                 className="mt-1 border border-amber-300 rounded-lg px-3 py-2 text-sm bg-white"
-              />
+
+                inputMode="decimal"/>
             </label>
             <label className="block text-sm">
               <span className="text-amber-800/80 font-medium">Modalidad</span>

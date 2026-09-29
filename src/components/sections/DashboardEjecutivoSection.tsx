@@ -555,12 +555,13 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
             </div>
             <div className="flex flex-col gap-2 shrink-0">
               <div className="flex items-center gap-2">
-                <label className="text-[11px] text-slate-400 uppercase font-bold tracking-wider">Periodo análisis:</label>
+                <label htmlFor="campo-periodo-analisis" className="text-[11px] text-slate-400 uppercase font-bold tracking-wider">Periodo análisis:</label>
                 <select
                   value={periodoFiltro}
                   onChange={(e) => setPeriodoFiltro(e.target.value as PeriodoFiltro)}
                   className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-white rounded-xl text-xs font-semibold focus:border-blue-500 outline-none"
-                >
+
+                   id="campo-periodo-analisis">
                   <option value="MES_ACTUAL">Mes actual</option>
                   <option value="ULT_3M">Últimos 3 meses</option>
                   <option value="ULT_6M">Últimos 6 meses</option>

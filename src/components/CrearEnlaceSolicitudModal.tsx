@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Inmueble } from '../types';
 import { X, Copy, Check, ExternalLink, Link as LinkIcon, Building2, Sparkles } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface CrearEnlaceSolicitudModalProps {
   inmueble: Inmueble;
@@ -13,6 +14,10 @@ export const CrearEnlaceSolicitudModal: React.FC<CrearEnlaceSolicitudModalProps>
   onClose,
   onOpenPortal,
 }) => {
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Enlace Público de Solicitud'
+  );
   const [copied, setCopied] = useState(false);
 
   const publicToken = inmueble.tokenSolicitud || `sol-${inmueble.id}`;
@@ -27,7 +32,7 @@ export const CrearEnlaceSolicitudModal: React.FC<CrearEnlaceSolicitudModalProps>
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-6 shadow-2xl border border-slate-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-6 shadow-2xl border border-slate-200">
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <div className="flex items-center gap-2.5">
             <div className="p-2.5 bg-blue-50 text-blue-600 rounded-2xl">
@@ -38,7 +43,8 @@ export const CrearEnlaceSolicitudModal: React.FC<CrearEnlaceSolicitudModalProps>
               <p className="text-xs text-slate-500 line-clamp-1">{inmueble.direccion}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 rounded-full">
+          <button
+            aria-label="Cerrar" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 rounded-full">
             <X className="w-5 h-5" />
           </button>
         </div>

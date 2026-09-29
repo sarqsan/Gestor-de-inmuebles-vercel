@@ -23,6 +23,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface PolizaModalProps {
   isOpen: boolean;
@@ -143,8 +144,12 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
     }
   }, [isOpen, polizaToEdit, defaultInmuebleId, inmuebles]);
 
-  if (!isOpen) return null;
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Póliza de seguro'
+  );
 
+  if (!isOpen) return null;
   const selectedInmueble = inmuebles.find((i) => i.id === inmuebleId);
 
   const toggleCobertura = (cob: string) => {
@@ -223,7 +228,7 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div ref={refDialogo} {...propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="bg-gradient-to-r from-slate-900 to-blue-950 text-white p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -240,6 +245,7 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
             </div>
           </div>
           <button
+            aria-label="Cerrar"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
@@ -301,7 +307,7 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
           {/* Aseguradora y Número de Póliza */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-entidad-aseguradora" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Entidad Aseguradora *
               </label>
               <input
@@ -312,7 +318,8 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
                 placeholder="Ej: Mapfre, Caser, Mutua de Propietarios..."
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
                 required
-              />
+
+                 id="campo-entidad-aseguradora"/>
               <datalist id="aseguradoras-list">
                 {ASEGURADORAS_SUGERIDAS.map((a) => (
                   <option key={a} value={a} />
@@ -321,7 +328,7 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-numero-de-poliza-expediente" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Número de Póliza / Expediente *
               </label>
               <input
@@ -331,14 +338,15 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
                 placeholder="Ej: MAP-8492048-H"
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
                 required
-              />
+
+                 id="campo-numero-de-poliza-expediente"/>
             </div>
           </div>
 
           {/* Fechas de Vigencia y Estado */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-fecha-de-efecto" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Fecha de Efecto *
               </label>
               <input
@@ -347,11 +355,12 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
                 onChange={(e) => setFechaInicio(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
                 required
-              />
+
+                 id="campo-fecha-de-efecto"/>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-fecha-vencimiento" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Fecha Vencimiento *
               </label>
               <input
@@ -360,18 +369,20 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
                 onChange={(e) => setFechaVencimiento(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
                 required
-              />
+
+                 id="campo-fecha-vencimiento"/>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="campo-estado" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 Estado *
               </label>
               <select
                 value={estado}
                 onChange={(e) => setEstado(e.target.value as EstadoPolizaSeguro)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
-              >
+
+                 id="campo-estado">
                 <option value="VIGENTE">Vigente</option>
                 <option value="EN_TRAMITE">En Trámite</option>
                 <option value="VENCIDA">Vencida</option>
@@ -395,7 +406,8 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
                   onChange={(e) => setFranquicia(e.target.value)}
                   placeholder="0 si no aplica"
                   className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
-                />
+
+                  inputMode="decimal"/>
                 <Euro className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
             </div>
@@ -413,7 +425,8 @@ export const PolizaModal: React.FC<PolizaModalProps> = ({
                   onChange={(e) => setPrimaAnual(e.target.value)}
                   placeholder="Ej: 245.50"
                   className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
-                />
+
+                  inputMode="decimal"/>
                 <Euro className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
               </div>
             </div>

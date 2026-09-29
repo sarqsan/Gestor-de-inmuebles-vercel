@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFormulario';
 import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { Propietario, CuentaBancariaPropietario, TipoPropietario, Inmueble } from '../../types';
 import {
@@ -67,9 +68,30 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
   // Form State for Main Modal
   const [formTipo, setFormTipo] = useState<TipoPropietario>('persona_fisica');
+  // UX-6 §11: semántica de diálogo, foco dentro y Escape en los tres diálogos.
+  const dialogoPropietario = useDialogoAccesible(
+    { abierto: showModal, onCerrar: () => setShowModal(false) },
+    editingPropietario ? 'Editar propietario' : 'Nuevo propietario'
+  );
+  const dialogoCuentaBanco = useDialogoAccesible(
+    { abierto: Boolean(quickBankModalOwner), onCerrar: () => setQuickBankModalOwner(null) },
+    'Añadir cuenta bancaria (IBAN)'
+  );
+  const dialogoEliminarPropietario = useDialogoAccesible(
+    { abierto: Boolean(ownerToDelete), onCerrar: () => setOwnerToDelete(null) },
+    'Eliminar propietario'
+  );
+
   // UX-4: errores por campo (antes un único `alert` al guardar).
   const [erroresPropietario, setErroresPropietario] = useState<ErroresFormulario>({});
   const [erroresCuentaBanco, setErroresCuentaBanco] = useState<ErroresFormulario>({});
+
+  // UX-6 §12: el foco va al primer campo con error al fallar la validación.
+  useEffect(() => {
+    if (!hayErrores(erroresPropietario)) return;
+    const contenedor = dialogoPropietario.refDialogo.current;
+    contenedor?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [erroresPropietario, dialogoPropietario.refDialogo]);
   const [formNombre, setFormNombre] = useState('');
   const [formNifCif, setFormNifCif] = useState('');
   const [formTelefono, setFormTelefono] = useState('');
@@ -731,7 +753,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
       {/* Main Add/Edit Propietario Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div ref={dialogoPropietario.refDialogo} {...dialogoPropietario.propsDialogo} className="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
               <div className="flex items-center gap-3">
@@ -749,6 +771,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
               </div>
 
               <button
+                aria-label="Cerrar"
                 onClick={() => setShowModal(false)}
                 className="p-2 text-slate-400 hover:text-white rounded-xl transition-colors"
               >
@@ -789,7 +812,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                       Tipo de Titularidad / Régimen
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       {[
                         { id: 'persona_fisica', label: 'Persona Física', icon: UserCheck },
                         { id: 'persona_juridica', label: 'Sociedad / S.L. / S.A.', icon: Building2 },
@@ -841,8 +864,9 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         onChange={(e) => setFormNombre(e.target.value)}
                         aria-invalid={Boolean(erroresPropietario.nombre)}
                         className={claseEntrada(erroresPropietario.nombre)}
-                      />
-                      <ErrorCampo mensaje={erroresPropietario.nombre} />
+
+                        aria-describedby="error-nombre"/>
+                      <ErrorCampo id="error-nombre" mensaje={erroresPropietario.nombre} />
                     </div>
 
                     <div>
@@ -857,14 +881,15 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         onChange={(e) => setFormNifCif(e.target.value.toUpperCase())}
                         aria-invalid={Boolean(erroresPropietario.nifCif)}
                         className={`${claseEntrada(erroresPropietario.nifCif)} font-mono uppercase`}
-                      />
-                      <ErrorCampo mensaje={erroresPropietario.nifCif} />
+
+                        aria-describedby="error-nifcif"/>
+                      <ErrorCampo id="error-nifcif" mensaje={erroresPropietario.nifCif} />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      <label htmlFor="campo-telefono-de-contacto" className="block text-xs font-bold text-slate-700 mb-1.5">
                         Teléfono de Contacto
                       </label>
                       <input
@@ -873,11 +898,12 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         value={formTelefono}
                         onChange={(e) => setFormTelefono(e.target.value)}
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                      />
+
+                         id="campo-telefono-de-contacto"/>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      <label htmlFor="campo-correo-electronico-notificaciones" className="block text-xs font-bold text-slate-700 mb-1.5">
                         Correo Electrónico (Notificaciones)
                       </label>
                       <input
@@ -886,7 +912,8 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         value={formEmail}
                         onChange={(e) => setFormEmail(e.target.value)}
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                      />
+
+                         id="campo-correo-electronico-notificaciones"/>
                     </div>
                   </div>
                 </div>
@@ -900,7 +927,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    <label htmlFor="campo-direccion-calle-numero-piso-puerta" className="block text-xs font-bold text-slate-700 mb-1.5">
                       Dirección (Calle, Número, Piso, Puerta)
                     </label>
                     <input
@@ -909,39 +936,43 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                       value={formDireccion}
                       onChange={(e) => setFormDireccion(e.target.value)}
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                    />
+
+                       id="campo-direccion-calle-numero-piso-puerta"/>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">Código Postal</label>
+                      <label htmlFor="campo-codigo-postal" className="block text-xs font-bold text-slate-700 mb-1.5">Código Postal</label>
                       <input
                         type="text"
                         placeholder="28013"
                         value={formCodigoPostal}
                         onChange={(e) => setFormCodigoPostal(e.target.value)}
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                      />
+
+                         id="campo-codigo-postal"/>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">Ciudad / Municipio</label>
+                      <label htmlFor="campo-ciudad-municipio" className="block text-xs font-bold text-slate-700 mb-1.5">Ciudad / Municipio</label>
                       <input
                         type="text"
                         placeholder="Madrid"
                         value={formCiudad}
                         onChange={(e) => setFormCiudad(e.target.value)}
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                      />
+
+                         id="campo-ciudad-municipio"/>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">Provincia</label>
+                      <label htmlFor="campo-provincia" className="block text-xs font-bold text-slate-700 mb-1.5">Provincia</label>
                       <input
                         type="text"
                         placeholder="Madrid"
                         value={formProvincia}
                         onChange={(e) => setFormProvincia(e.target.value)}
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                      />
+
+                         id="campo-provincia"/>
                     </div>
                   </div>
                 </div>
@@ -980,7 +1011,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          <label htmlFor="campo-nif-nie-del-representante" className="block text-xs font-bold text-slate-700 mb-1.5">
                             NIF / NIE del Representante *
                           </label>
                           <input
@@ -989,7 +1020,8 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                             value={formNifRepresentante}
                             onChange={(e) => setFormNifRepresentante(e.target.value.toUpperCase())}
                             className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm font-mono uppercase focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                          />
+
+                             id="campo-nif-nie-del-representante"/>
                         </div>
                       </div>
 
@@ -1007,7 +1039,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        <label htmlFor="campo-titulo-de-representacion-datos-notariale" className="block text-xs font-bold text-slate-700 mb-1.5">
                           Título de Representación / Datos Notariales
                         </label>
                         <textarea
@@ -1016,7 +1048,8 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                           value={formTituloRepresentacion}
                           onChange={(e) => setFormTituloRepresentacion(e.target.value)}
                           className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                        />
+
+                           id="campo-titulo-de-representacion-datos-notariale"/>
                       </div>
                     </div>
                   )}
@@ -1060,6 +1093,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                           Nueva Cuenta Bancaria
                         </span>
                         <button
+                          aria-label="Cerrar"
                           type="button"
                           onClick={() => setShowAddAccountForm(false)}
                           className="text-slate-400 hover:text-slate-600"
@@ -1070,7 +1104,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          <label htmlFor="campo-alias-identificador-de-la-cuenta" className="block text-[11px] font-bold text-slate-700 mb-1">
                             Alias / Identificador de la Cuenta *
                           </label>
                           <input
@@ -1079,24 +1113,26 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                             value={newAccAlias}
                             onChange={(e) => setNewAccAlias(e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                          />
+
+                             id="campo-alias-identificador-de-la-cuenta"/>
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">Banco / Entidad</label>
+                          <label htmlFor="campo-banco-entidad" className="block text-[11px] font-bold text-slate-700 mb-1">Banco / Entidad</label>
                           <input
                             type="text"
                             placeholder="Ej: Banco Santander, BBVA, CaixaBank"
                             value={newAccBanco}
                             onChange={(e) => setNewAccBanco(e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                          />
+
+                             id="campo-banco-entidad"/>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          <label htmlFor="campo-numero-de-cuenta-iban" className="block text-[11px] font-bold text-slate-700 mb-1">
                             Número de Cuenta IBAN *
                           </label>
                           <input
@@ -1105,18 +1141,20 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                             value={newAccIban}
                             onChange={(e) => setNewAccIban(formatIbanInput(e.target.value))}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none uppercase"
-                          />
+
+                             id="campo-numero-de-cuenta-iban"/>
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">Titular de la Cuenta</label>
+                          <label htmlFor="campo-titular-de-la-cuenta" className="block text-[11px] font-bold text-slate-700 mb-1">Titular de la Cuenta</label>
                           <input
                             type="text"
                             placeholder="Ej: Manuel Gómez Rodríguez"
                             value={newAccTitular}
                             onChange={(e) => setNewAccTitular(e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                          />
+
+                             id="campo-titular-de-la-cuenta"/>
                         </div>
                       </div>
 
@@ -1177,6 +1215,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                               </button>
                             )}
                             <button
+                              aria-label="Eliminar"
                               type="button"
                               onClick={() => handleRemoveAccountFromForm(acc.id)}
                               className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
@@ -1253,9 +1292,9 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
       {/* Quick Add Bank Account Modal */}
       {quickBankModalOwner && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div ref={dialogoCuentaBanco.refDialogo} {...dialogoCuentaBanco.propsDialogo} className="bg-white rounded-3xl max-w-md w-full max-h-[90vh] my-auto shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-2.5">
                 <CreditCard className="w-5 h-5 text-blue-400" />
                 <div>
@@ -1266,6 +1305,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                 </div>
               </div>
               <button
+                aria-label="Cerrar"
                 onClick={() => setQuickBankModalOwner(null)}
                 className="text-slate-400 hover:text-white"
               >
@@ -1275,7 +1315,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
             <form onSubmit={handleQuickAddBankSubmit} className="p-6 space-y-3.5">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label htmlFor="campo-alias-de-la-cuenta" className="block text-xs font-bold text-slate-700 mb-1">
                   Alias de la Cuenta *
                 </label>
                 <input
@@ -1284,22 +1324,24 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                   value={quickAlias}
                   onChange={(e) => setQuickAlias(e.target.value)}
                   className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                />
+
+                   id="campo-alias-de-la-cuenta"/>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Banco / Entidad</label>
+                <label htmlFor="campo-banco-entidad-2" className="block text-xs font-bold text-slate-700 mb-1">Banco / Entidad</label>
                 <input
                   type="text"
                   placeholder="Ej: Banco Santander, CaixaBank"
                   value={quickBanco}
                   onChange={(e) => setQuickBanco(e.target.value)}
                   className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                />
+
+                   id="campo-banco-entidad-2"/>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label htmlFor="campo-numero-de-cuenta-iban-2" className="block text-xs font-bold text-slate-700 mb-1">
                   Número de Cuenta IBAN *
                 </label>
                 <input
@@ -1310,19 +1352,22 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                   onChange={(e) => setQuickIban(formatIbanInput(e.target.value))}
                   aria-invalid={Boolean(erroresCuentaBanco.iban)}
                   className={`${claseEntrada(erroresCuentaBanco.iban)} font-mono font-bold uppercase`}
-                />
-                <ErrorCampo mensaje={erroresCuentaBanco.iban} />
+
+                  aria-describedby="error-iban"
+                   id="campo-numero-de-cuenta-iban-2"/>
+                <ErrorCampo id="error-iban" mensaje={erroresCuentaBanco.iban} />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Titular</label>
+                <label htmlFor="campo-titular" className="block text-xs font-bold text-slate-700 mb-1">Titular</label>
                 <input
                   type="text"
                   placeholder="Titular de la cuenta"
                   value={quickTitular}
                   onChange={(e) => setQuickTitular(e.target.value)}
                   className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
-                />
+
+                   id="campo-titular"/>
               </div>
 
               <div className="pt-1">
@@ -1361,8 +1406,8 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
       {/* Delete Confirmation Dialog */}
       {ownerToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div ref={dialogoEliminarPropietario.refDialogo} {...dialogoEliminarPropietario.propsDialogo} className="bg-white rounded-3xl max-w-sm w-full max-h-[90vh] my-auto p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in-95">
             <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-3">
               <AlertCircle className="w-6 h-6" />
             </div>

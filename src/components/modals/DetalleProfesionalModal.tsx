@@ -40,6 +40,7 @@ import {
   calcularMetricasProfesional,
 } from '../../utils/profesionalesEngine';
 import { uploadProfesionalDocumentoStorage, saveProfesionalFirestore } from '../../lib/firebase';
+import { propsInteraccion } from '../../accesibilidad/interaccion';
 
 interface DetalleProfesionalModalProps {
   isOpen: boolean;
@@ -175,6 +176,7 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
               </button>
             )}
             <button
+            aria-label="Cerrar"
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/60 transition-colors"
             >
@@ -457,12 +459,13 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Tipo de Documento</label>
+                    <label htmlFor="campo-tipo-de-documento" className="text-xs font-medium text-slate-600 block mb-1">Tipo de Documento</label>
                     <select
                       value={tipoDocSeleccionado}
                       onChange={(e) => setTipoDocSeleccionado(e.target.value as any)}
                       className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-                    >
+
+                       id="campo-tipo-de-documento">
                       <option value="SEGURO_RC">Póliza de Seguro de RC</option>
                       <option value="ALTA_IAE">Alta IAE / Autónomos</option>
                       <option value="PREVENCION_RIESGOS">Prevención Riesgos Laborales</option>
@@ -472,14 +475,15 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Nombre Descriptivo</label>
+                    <label htmlFor="campo-nombre-descriptivo" className="text-xs font-medium text-slate-600 block mb-1">Nombre Descriptivo</label>
                     <input
                       type="text"
                       placeholder="Ej: Seguro RC Mapfre 2025"
                       value={nombreDoc}
                       onChange={(e) => setNombreDoc(e.target.value)}
                       className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-                    />
+
+                       id="campo-nombre-descriptivo"/>
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-600 block mb-1">Seleccionar Archivo (PDF / JPG)</label>
@@ -562,6 +566,7 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
                   const estInfo = ESTADO_TRABAJO_LABELS[trabajo.estado] || ESTADO_TRABAJO_LABELS.PENDIENTE;
                   return (
                     <div
+                      {...propsInteraccion(() => onSelectTrabajo && onSelectTrabajo(trabajo))}
                       key={trabajo.id}
                       onClick={() => onSelectTrabajo && onSelectTrabajo(trabajo)}
                       className="p-4 border border-slate-200 rounded-xl hover:border-blue-400 hover:shadow-xs transition-all cursor-pointer bg-white"

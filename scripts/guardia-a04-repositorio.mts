@@ -24,8 +24,14 @@ import { fileURLToPath } from 'node:url';
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RAMA_POR_DEFECTO = 'arena/01a0e939-gestor-de-inmuebles-vercel';
 
-/** Referencias conocidas y su valor esperado (se sobreescriben con --esperado). */
-const MAIN_ESPERADO = 'c0c82245d1adccf752903765ea554cb3544f1072';
+/**
+ * Commit histórico de `main` en el momento de la auditoría (sólo se usa si no hay
+ * `origin/main` con el que contrastar y no se pasa `--main`). Tras la integración
+ * de la Arena, `main` avanza legítimamente: la comprobación por defecto es
+ * `main local == origin/main`, y `--main <sha>` permite fijar un valor concreto
+ * (auditorías pre-merge).
+ */
+const MAIN_HISTORICO = 'c0c82245d1adccf752903765ea554cb3544f1072';
 
 type Nivel = 'OK' | 'WARNING' | 'BLOCKED';
 type Hallazgo = { nivel: Nivel; codigo: string; detalle: string };
@@ -36,7 +42,6 @@ const arg = (nombre: string, porDefecto: string): string => {
   return i >= 0 && args[i + 1] ? args[i + 1] : porDefecto;
 };
 const RAMA = arg('rama', RAMA_POR_DEFECTO);
-const MAIN = arg('main', MAIN_ESPERADO);
 
 function git(...comando: string[]): string {
   return execFileSync('git', comando, { cwd: RAIZ, encoding: 'utf8' }).trim();
@@ -50,7 +55,17 @@ function gitSuave(...comando: string[]): { ok: boolean; salida: string } {
   }
 }
 
+/** `main` esperado: `--main`, si no `origin/main`, si no el valor histórico. */
+const MAIN = (() => {
+  const explicito = args.indexOf('--main');
+  if (explicito >= 0 && args[explicito + 1]) return args[explicito + 1];
+  const remotoMain = gitSuave('rev-parse', '--verify', 'refs/remotes/origin/main');
+  return remotoMain.ok ? remotoMain.salida : MAIN_HISTORICO;
+})();
+
 const hallazgos: Hallazgo[] = [];
+/** Observaciones informativas: NO indican daño de custodia ni alteran el veredicto. */
+const notas: string[] = [];
 const anota = (nivel: Nivel, codigo: string, detalle: string): void => {
   hallazgos.push({ nivel, codigo, detalle });
 };
@@ -75,6 +90,10 @@ if (ramaActual.ok) {
   anota('BLOCKED', 'sin-rama', `no se puede leer la rama: ${ramaActual.salida}`);
 }
 
+// Ref remota de la rama esperada (se usa para decidir la severidad de head-en-main
+// y para la comprobación de divergencia).
+const originRama = gitSuave('rev-parse', '--verify', `refs/remotes/origin/${RAMA}`);
+
 // 3 · HEAD y su relación con main (el síntoma central del incidente)
 const head = gitSuave('rev-parse', 'HEAD');
 const rama = gitSuave('rev-parse', '--verify', `refs/heads/${RAMA}`);
@@ -82,8 +101,27 @@ const main = gitSuave('rev-parse', '--verify', `refs/heads/main`);
 if (!head.ok) anota('BLOCKED', 'sin-head', 'no se puede resolver HEAD');
 if (!rama.ok) anota('BLOCKED', 'rama-ausente', `la rama «${RAMA}» no existe como ref local`);
 if (!main.ok) anota('WARNING', 'main-ausente', 'no existe la ref local main');
-if (head.ok && main.ok && head.salida === main.salida) {
-  anota('BLOCKED', 'head-en-main', 'HEAD apunta al mismo commit que main: síntoma «HEAD→main tras snapshot»');
+// El síntoma «HEAD→main tras snapshot» es que la rama de trabajo se quede en el
+// commit de main SIN estar en main. Coincidir con main es el estado NORMAL tras
+// integrar (y al validar sobre main), así que sólo se eleva a BLOCKED cuando
+// además se cumplen las señales que acompañaron a las 9 pérdidas observadas:
+// falta la ref de la rama esperada, falta `origin/<rama>` o el árbol aparece con
+// cientos de ficheros «modificados». Sin esas señales es un aviso informativo.
+if (head.ok && main.ok && head.salida === main.salida && ramaActual.salida !== 'main') {
+  const statusTemprano = gitSuave('status', '--porcelain=v1');
+  const entradas = statusTemprano.ok && statusTemprano.salida ? statusTemprano.salida.split('\n').filter(Boolean).length : 0;
+  const corroboran = !rama.ok || !originRama.ok || entradas > 150;
+  if (corroboran) {
+    anota(
+      'BLOCKED',
+      'head-en-main',
+      'HEAD coincide con main sin estar en main y faltan refs/el árbol está masivamente modificado: síntoma del incidente de custodia'
+    );
+  } else {
+    notas.push(
+      'HEAD coincide con la punta de main sin estar en main: es el estado esperado tras integrar la rama (o antes de empezar un bloque nuevo); refs, origin/<rama> y árbol son consistentes.'
+    );
+  }
 }
 if (head.ok && rama.ok && head.salida !== rama.salida) {
   anota('BLOCKED', 'head-fuera-de-rama', `HEAD (${head.salida.slice(0, 8)}) ≠ punta de ${RAMA} (${rama.salida.slice(0, 8)})`);
@@ -116,7 +154,7 @@ else if (diffIndex.salida.length > 0) {
 }
 
 // 6 · Divergencia con el remoto (si la ref existe)
-const remoto = gitSuave('rev-parse', '--verify', `refs/remotes/origin/${RAMA}`);
+const remoto = originRama;
 if (!remoto.ok) {
   anota('WARNING', 'origin-ausente', `no existe refs/remotes/origin/${RAMA} (puede faltar tras un snapshot)`);
 } else if (head.ok && remoto.salida !== head.salida) {
@@ -153,6 +191,7 @@ console.log(`main          : ${main.ok ? main.salida.slice(0, 12) : 'AUSENTE'} (
 console.log(`origin/${RAMA}: ${remoto.ok ? remoto.salida.slice(0, 12) : 'AUSENTE'}`);
 console.log(`entradas status: ${estado.ok ? (estado.salida ? estado.salida.split('\n').length : 0) : '??'}`);
 for (const h of hallazgos) console.log(`  [${h.nivel}] ${h.codigo}: ${h.detalle}`);
+for (const n of notas) console.log(`  [nota] ${n}`);
 if (nivel !== 'OK') {
   console.log('');
   console.log('Protocolo manual (NO destructivo) — ver docs/BLOQUE-12-REPARACION-INTEGRAL-CIERRE.md §D:');

@@ -110,7 +110,9 @@ if (!main.ok) anota('WARNING', 'main-ausente', 'no existe la ref local main');
 if (head.ok && main.ok && head.salida === main.salida && ramaActual.salida !== 'main') {
   const statusTemprano = gitSuave('status', '--porcelain=v1');
   const entradas = statusTemprano.ok && statusTemprano.salida ? statusTemprano.salida.split('\n').filter(Boolean).length : 0;
-  const corroboran = !rama.ok || !originRama.ok || entradas > 150;
+  // Señales que SÍ acompañaron a las 9 pérdidas de refs observadas. Si aparece
+  // cualquiera de ellas, el síntoma «HEAD→main» se mantiene como BLOCKED.
+  const corroboran = !rama.ok || rama.salida !== head.salida || !originRama.ok || entradas > 150;
   if (corroboran) {
     anota(
       'BLOCKED',

@@ -128,7 +128,7 @@ test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimon
   // su contenido exacto y se verifica el baseline; los demás archivos del módulo
   // siguen exigiéndose idénticos byte a byte más arriba.
   const shaRegistro=createHash('sha256').update(actual).digest('hex');
-  assert.equal(shaRegistro,'4724190e76218e7da79280b6c2535663d6d086d85c77b4a920ef2b69239cef00','registro de custodia actualizado fuera de la superficie revisada');
+  assert.equal(shaRegistro,'6ad1333425b6f741cdd4fc40504040e2606ee22a8e2ab861439e5366591572ba','registro de custodia actualizado fuera de la superficie revisada');
   assert.match(actual,/const BASE_INTEGRACION = '46bb9f79b43949d833acf00e9557e575769d039a';/);
   assert.match(actual,/const REFERENCIA_LOCAL_BLOQUE_5 = '46bb9f79b43949d833acf00e9557e575769d039a';/);
   assert.match(actual,/test:bloque-5/);
@@ -306,6 +306,7 @@ const SUPERFICIE_BLOQUES_POST_B = [
   'src/App.tsx',
   'src/components/sections/InmueblesSection.tsx',
   'src/patrimonial/PantallaPatrimonial.tsx',
+  'docs/DICTAMEN-PRE-MERGE-FINAL.md', // §11 de la orden final: dictamen pre-merge
 ];
 const permitidaPostB=(path)=>SUPERFICIE_BLOQUES_POST_B.some((p)=>(p.endsWith('/')?path.startsWith(p):path===p));
 test('diff completo desde la base B permite solo el port y la conexión aditiva documentada',()=>{

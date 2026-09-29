@@ -389,6 +389,7 @@ const SUPERFICIE_BLOQUES_POST_B = [
   'src/App.tsx',
   'src/components/sections/InmueblesSection.tsx',
   'src/patrimonial/PantallaPatrimonial.tsx',
+  'docs/DICTAMEN-PRE-MERGE-FINAL.md', // §11 de la orden final: dictamen pre-merge
 ];
 const permitidaPostB = (path) =>
   SUPERFICIE_BLOQUES_POST_B.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p));

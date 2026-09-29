@@ -498,6 +498,12 @@ export default function App() {
 
   // State for Nuevo Candidato Modal
   const [showNuevoCandidatoModal, setShowNuevoCandidatoModal] = useState<boolean>(false);
+  // UX-6 §11: el hook del diálogo debe ejecutarse en todos los renders de App,
+  // también durante la carga de Auth y en la vista anónima.
+  const dialogoNuevoCandidato = useDialogoAccesible(
+    { abierto: showNuevoCandidatoModal, onCerrar: () => setShowNuevoCandidatoModal(false) },
+    'Registrar nuevo candidato'
+  );
 
   // --- NUEVA CAPA DE USUARIOS, PERFILES, PERMISOS E INVITACIONES ---
   const [usuarios, setUsuarios] = useState<UsuarioApp[]>([]);
@@ -3757,11 +3763,6 @@ export default function App() {
     );
   }
 
-  // UX-6 §11: el modal de nuevo candidato es un diálogo con foco y Escape.
-  const dialogoNuevoCandidato = useDialogoAccesible(
-    { abierto: showNuevoCandidatoModal, onCerrar: () => setShowNuevoCandidatoModal(false) },
-    'Registrar nuevo candidato'
-  );
   return (
     <div className="min-h-screen bg-slate-100/70 font-sans text-slate-800 flex flex-col md:flex-row antialiased">
       {/* Desktop Sidebar Navigation */}

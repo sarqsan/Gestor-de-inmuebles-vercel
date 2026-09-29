@@ -2,10 +2,27 @@
  * BLOQUE B — Persistencia Firestore de tesorería (aditivo; no toca firebase.ts).
  * Colecciones: liquidaciones_propietarios, gastos_inmuebles, ordenes_pago,
  * ficheros_sepa, mandatos_sepa, config_liquidacion.
+ *
+ * ÁMBITOS DE LECTURA (guards de suscripción, sin tocar firestore.rules):
+ *  · `ficheros_sepa`, `ordenes_pago`, `mandatos_sepa`: `list` SOLO master
+ *    (`isMasterAdmin()` en las reglas). Un contexto no master NO ejecuta
+ *    `onSnapshot`: ni query, ni permission-denied, ni aviso.
+ *  · `liquidaciones_propietarios`, `gastos_inmuebles`: master/administración
+ *    conserva la lectura de colección completa; PROPIETARIO consulta SIEMPRE
+ *    acotada en origen `where('propietarioId', '==', propietarioIdActual)`
+ *    (es la única forma que las reglas pueden demostrar en un `list`; una
+ *    consulta global la deniegan, y el filtro posterior en memoria no la
+ *    legaliza). Sin rama de lectura (p. ej. PROFESIONAL) no se abre ninguna
+ *    consulta.
+ *  · El propietarioId procede del contexto `UsuarioApp` del usuario de la
+ *    sesión (mismo modelo que usa App), nunca de datos arbitrarios de la UI.
  */
-import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, sanitizeObjectForFirestore } from './firebase';
 import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
+// Helper canónico de la cuenta maestra (no se comparan emails a mano).
+import { esUsuarioMaster } from './adminUsuarios';
+import type { UsuarioApp } from '../types';
 import type {
   ConfigFiscalLiquidacion,
   FicheroSEPA,
@@ -22,9 +39,24 @@ export const FICHEROS_SEPA_COL = collection(db, 'ficheros_sepa');
 export const MANDATOS_SEPA_COL = collection(db, 'mandatos_sepa');
 
 // --- Liquidaciones ---
-export function subscribeLiquidaciones(callback: (items: LiquidacionPropietario[]) => void) {
+export function subscribeLiquidaciones(
+  callback: (items: LiquidacionPropietario[]) => void,
+  scope?: UsuarioApp | null,
+) {
+  // MASTER / ADMINISTRACIÓN: comportamiento conservado (colección completa).
+  const esAdmin = !!scope && (esUsuarioMaster(scope) || scope.tipoPerfil === 'ADMINISTRADOR');
+  // PROPIETARIO: ámbito obligatorio por su propietarioId del contexto de sesión.
+  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId ?? '' : '';
+  if (!esAdmin && !pid) {
+    // Sin contexto o perfil sin rama de lectura en las reglas: NO QUERY.
+    callback([]);
+    return () => {};
+  }
+  const ref = esAdmin
+    ? LIQUIDACIONES_COL
+    : query(LIQUIDACIONES_COL, where('propietarioId', '==', pid));
   return onSnapshot(
-    LIQUIDACIONES_COL,
+    ref,
     (snap) => {
       const items: LiquidacionPropietario[] = [];
       snap.forEach((d) => items.push({ id: d.id, ...d.data() } as LiquidacionPropietario));
@@ -46,9 +78,24 @@ export async function deleteLiquidacionFirestore(id: string): Promise<void> {
 }
 
 // --- Gastos ---
-export function subscribeGastos(callback: (items: GastoInmueble[]) => void) {
+export function subscribeGastos(
+  callback: (items: GastoInmueble[]) => void,
+  scope?: UsuarioApp | null,
+) {
+  // MASTER / ADMINISTRACIÓN: comportamiento conservado (colección completa).
+  const esAdmin = !!scope && (esUsuarioMaster(scope) || scope.tipoPerfil === 'ADMINISTRADOR');
+  // PROPIETARIO: ámbito obligatorio por su propietarioId del contexto de sesión.
+  const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId ?? '' : '';
+  if (!esAdmin && !pid) {
+    // Sin contexto o perfil sin rama de lectura en las reglas: NO QUERY.
+    callback([]);
+    return () => {};
+  }
+  const ref = esAdmin
+    ? GASTOS_COL
+    : query(GASTOS_COL, where('propietarioId', '==', pid));
   return onSnapshot(
-    GASTOS_COL,
+    ref,
     (snap) => {
       const items: GastoInmueble[] = [];
       snap.forEach((d) => items.push({ id: d.id, ...d.data() } as GastoInmueble));
@@ -69,7 +116,15 @@ export async function deleteGastoFirestore(id: string): Promise<void> {
 }
 
 // --- Órdenes de pago ---
-export function subscribeOrdenesPago(callback: (items: OrdenPago[]) => void) {
+export function subscribeOrdenesPago(
+  callback: (items: OrdenPago[]) => void,
+  scope?: UsuarioApp | null,
+) {
+  // Reglas §28: `list` SOLO master. Sin contexto master NO se ejecuta onSnapshot.
+  if (!esUsuarioMaster(scope)) {
+    callback([]);
+    return () => {};
+  }
   return onSnapshot(
     ORDENES_PAGO_COL,
     (snap) => {
@@ -88,7 +143,15 @@ export async function saveOrdenPagoFirestore(orden: OrdenPago): Promise<void> {
 }
 
 // --- Ficheros SEPA ---
-export function subscribeFicherosSepa(callback: (items: FicheroSEPA[]) => void) {
+export function subscribeFicherosSepa(
+  callback: (items: FicheroSEPA[]) => void,
+  scope?: UsuarioApp | null,
+) {
+  // Reglas §29: `list` SOLO master. Sin contexto master NO se ejecuta onSnapshot.
+  if (!esUsuarioMaster(scope)) {
+    callback([]);
+    return () => {};
+  }
   return onSnapshot(
     FICHEROS_SEPA_COL,
     (snap) => {
@@ -107,7 +170,15 @@ export async function saveFicheroSepaFirestore(fichero: FicheroSEPA): Promise<vo
 }
 
 // --- Mandatos SEPA ---
-export function subscribeMandatosSepa(callback: (items: MandatoSEPA[]) => void) {
+export function subscribeMandatosSepa(
+  callback: (items: MandatoSEPA[]) => void,
+  scope?: UsuarioApp | null,
+) {
+  // Reglas §30: `list` SOLO master. Sin contexto master NO se ejecuta onSnapshot.
+  if (!esUsuarioMaster(scope)) {
+    callback([]);
+    return () => {};
+  }
   return onSnapshot(
     MANDATOS_SEPA_COL,
     (snap) => {

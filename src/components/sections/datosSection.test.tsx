@@ -44,14 +44,21 @@ describe('sección «datos» (Importar / Exportar) — auditoría UX propietario
     panelMock.mockClear();
   });
 
-  it('monta el motor canónico con los inmuebles y el usuario del ámbito (sin motor paralelo)', () => {
+  it('monta el motor canónico SIN inyectar usuario: este autocarga identidad y DataAccessScope', () => {
     render(<DatosSection inmuebles={INMUEBLES} usuario={USUARIO} />);
 
     expect(screen.getByTestId('motor-importexport')).toBeTruthy();
     expect(panelMock).toHaveBeenCalledTimes(1);
     const props = panelMock.mock.calls[0][0];
     expect(props.inmuebles).toBe(INMUEBLES);
-    expect(props.usuario).toBe(USUARIO);
+    // REVISIÓN PR #13: con `usuario` inyectado el panel NO construía su
+    // `DataAccessScope` (scopeEf undefined → consulta global denegada por Rules
+    // para PROPIETARIO/gestor). Sin inyección, autocarga el contexto acotado,
+    // exactamente como hace el montaje de Configuración (camino cubierto por
+    // `tests/import-export-panel.test.tsx`).
+    expect(props.usuario).toBeUndefined();
+    // …y aun así la sección sigue orientando al propietario en el copy:
+    expect(screen.getAllByText(/ámbito de propietario/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('explica las garantías de seguridad antes de escribir (vista previa, vínculos fiscales, fiscal → Informes)', () => {

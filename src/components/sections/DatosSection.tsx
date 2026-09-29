@@ -14,6 +14,13 @@
  *
  * El ámbito efectivo lo fijan SIEMPRE las reglas de Firestore (el panel solo
  * restringe la consulta); esta sección no concede ningún permiso nuevo.
+ *
+ * REVISIÓN PR #13 (2026-09-29): el panel NO recibe `usuario` por props — recibía
+ * identidad inyectada y eso apagaba su autocarga y su `DataAccessScope` (bug
+ * detectado en la revisión final). Montarlo sin `usuario` reproduce el camino
+ * canónico ya probado desde Configuración, con scope acotado por perfil y
+ * fail-closed sin sesión. El copy de arriba sigue usando `usuario` SOLO para
+ * orientar el texto (nunca define ámbito).
  */
 import React from 'react';
 import { ArrowDownUp, FileSpreadsheet, Info, ShieldCheck, Upload } from 'lucide-react';
@@ -63,9 +70,17 @@ export const DatosSection: React.FC<DatosSectionProps> = ({ inmuebles, usuario }
         </span>
       </div>
 
-      {/* Motor canónico, sin modificar */}
+      {/* Motor canónico, sin modificar.
+          REVISIÓN PR #13 (2026-09-29): NO pasar `usuario` por props — con esa
+          identidad inyectada el panel desactivaba su autocarga y `scopeEf`
+          quedaba `undefined` (consulta a la colección entera → denegación de
+          Rules + timeout para PROPIETARIO y para gestores de cartera). Al no
+          inyectarlo, el panel construye él mismo su `DataAccessScope` (mismo
+          camino probado del montaje de Configuración): propietario → su ficha;
+          gestor → sus carteras; sin sesión → bloqueo honesto fail-closed.
+          El `usuario` de esta sección se usa solo para la orientación textual. */}
       <div data-tour="datos-panel">
-        <ImportExportPanel inmuebles={inmuebles} usuario={usuario ?? undefined} />
+        <ImportExportPanel inmuebles={inmuebles} />
       </div>
     </div>
   );

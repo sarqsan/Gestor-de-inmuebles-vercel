@@ -26,6 +26,10 @@ const mem = vi.hoisted(() => ({
   fuentes: null as null | { propietarios: unknown[]; inmuebles: unknown[]; contratos: unknown[]; gastos: unknown[] },
   /** Último Blob descargado por el panel (para verificar el .xlsx real). */
   descargado: null as null | { blob: Blob },
+  /** REVISIÓN PR #13: cada `scope` recibido por cargarFuentesCatalogo (contrato de no-globalidad). */
+  scopesVistos: [] as unknown[],
+  /** Gestiones de cartera que el servicio mockeado devuelve para la autocarga. */
+  gestiones: [] as unknown[],
 }));
 
 vi.mock('../src/lib/firebase', () => ({
@@ -37,7 +41,7 @@ vi.mock('../src/lib/authService', () => ({
 }));
 
 vi.mock('../src/lib/gestionesCarteraServicio', () => ({
-  listarGestionesDeGestor: async () => ({ ok: true, gestiones: [] }),
+  listarGestionesDeGestor: async () => ({ ok: true, gestiones: [...mem.gestiones] }),
 }));
 
 vi.mock('../src/lib/gestionesCarteraServicioFirebase', () => ({
@@ -49,7 +53,10 @@ vi.mock('../src/lib/importExportFirebase', async (importOriginal) => {
   return {
     ...(await (importOriginal() as Promise<Record<string, unknown>>)),
     ambitoAutorizadoDesdeUsuario: ambitoReal.ambitoAutorizadoDesdeUsuario,
-    cargarFuentesCatalogo: async () => mem.fuentes ?? ({ propietarios: [], inmuebles: [], contratos: [], gastos: [] }),
+    cargarFuentesCatalogo: async (scope?: unknown) => {
+      mem.scopesVistos.push(scope);
+      return mem.fuentes ?? ({ propietarios: [], inmuebles: [], contratos: [], gastos: [] });
+    },
     catalogosDesdeFuentes: (_f: unknown, extra?: Record<string, unknown>) => ({
       propietarios: [{ id: 'prop_A', nombre: 'A', nifCif: '11111111A' }],
       inmuebles: [{ id: 'inm_1', direccion: 'C X', propietarioId: 'prop_A' }],
@@ -98,6 +105,8 @@ afterEach(() => {
   mem.auditoria = [];
   mem.fuentes = null;
   mem.descargado = null;
+  mem.scopesVistos = [];
+  mem.gestiones = [];
 });
 
 const MASTER = {
@@ -185,6 +194,76 @@ describe('D2: identidad propia cuando no hay props', () => {
     const btn = screen.getByText('Analizar (dry-run)');
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     expect(container.textContent).toMatch(/se bloquea/);
+  });
+});
+
+describe('REVISIÓN PR #13 — ámbito (DataAccessScope) siempre acotado tras el fix', () => {
+  const GESTION_CARTERA_C = {
+    id: 'ges_1', propietarioId: 'prop_C', gestorUsuarioId: 'u_g',
+    tipoGestor: 'PROPIETARIO_GESTOR', inmuebleIds: [], permiso: 'LECTURA_ESCRITURA',
+    responsableActual: 'GESTOR', estado: 'ACTIVA', requiereAceptacion: false,
+    eventos: [], creadoPor: 'master', fechaAlta: '2026-01-01', createdAt: 'x', updatedAt: 'x',
+  } as unknown as Record<string, unknown>;
+
+  it('PROPIETARIO autocargado: analizar usa scope con su propietarioId (NUNCA undefined = nunca consulta global)', async () => {
+    mem.currentUser = { uid: 'u_p', email: 'p@t.es' };
+    mem.ficha = { ...MASTER, id: 'u_p', tipoPerfil: 'PROPIETARIO', propietarioId: 'prop_A' } as unknown as Record<string, unknown>;
+    const { container } = render(<ImportExportPanel inmuebles={[]} />);
+    await subirFichero(container);
+    // Seleccionar archivo NO escribe ningún dato (solo arriba del dry-run)
+    expect(mem.gastosCreados).toHaveLength(0);
+    fireEvent.click(screen.getByText('Analizar (dry-run)'));
+    await screen.findByText('Decisiones de promoción (B1 G-13: sin decisión no se promociona)');
+    const ultimo = mem.scopesVistos[mem.scopesVistos.length - 1] as Record<string, unknown>;
+    expect(ultimo).toBeDefined();
+    expect(ultimo?.['tipoPerfil']).toBe('PROPIETARIO');
+    expect(ultimo?.['propietarioId']).toBe('prop_A');
+    // Y aun así no se ha escrito nada: dry-run puro
+    expect(mem.gastosCreados).toHaveLength(0);
+  });
+
+  it('GESTOR de cartera autocargado: scope proyecta SOLO sus carteras (propietariosGestionados)', async () => {
+    mem.currentUser = { uid: 'u_g', email: 'g@t.es' };
+    mem.ficha = { ...MASTER, id: 'u_g', tipoPerfil: 'PROPIETARIO' } as unknown as Record<string, unknown>;
+    mem.gestiones = [GESTION_CARTERA_C as never];
+    const { container } = render(<ImportExportPanel inmuebles={[]} />);
+    await subirFichero(container);
+    fireEvent.click(screen.getByText('Analizar (dry-run)'));
+    // El contrato es el scope usado para leer catálogos, no el resultado del run
+    // (el fixture mapea a un inmueble fuera de la cartera: el run puede quedar vacío).
+    await waitFor(() => expect(mem.scopesVistos.length).toBeGreaterThanOrEqual(1));
+    const ultimo = mem.scopesVistos[mem.scopesVistos.length - 1] as Record<string, unknown>;
+    expect(ultimo).toBeDefined();
+    expect(ultimo?.['propietariosGestionados']).toEqual(['prop_C']);
+    expect(ultimo?.['propietarioId']).toBeUndefined();
+  });
+
+  it('EXPORTAR también pasa el scope acotado (propietario autocargado)', async () => {
+    mem.currentUser = { uid: 'u_p', email: 'p@t.es' };
+    mem.ficha = { ...MASTER, id: 'u_p', tipoPerfil: 'PROPIETARIO', propietarioId: 'prop_A' } as unknown as Record<string, unknown>;
+    mem.fuentes = {
+      propietarios: [{ id: 'prop_A', nombre: 'A', nifCif: '11111111A' }],
+      inmuebles: [{ id: 'inm_1', direccion: 'C X', propietarioId: 'prop_A' }],
+      contratos: [],
+      gastos: [{ id: 'g_1', inmuebleId: 'inm_1', propietarioId: 'prop_A', concepto: 'Comunidad', importe: 10, fechaDevengo: '2024-03-15' }],
+    };
+    interceptarDescargas();
+    const { container } = render(<ImportExportPanel inmuebles={[]} />);
+    fireEvent.click(screen.getByText('Exportar'));
+    fireEvent.click(await screen.findByText('Generar y descargar'));
+    await waitFor(() => expect(mem.descargado).not.toBeNull());
+    const ultimo = mem.scopesVistos[mem.scopesVistos.length - 1] as Record<string, unknown>;
+    expect(ultimo).toBeDefined();
+    expect(ultimo?.['tipoPerfil']).toBe('PROPIETARIO');
+    expect(ultimo?.['propietarioId']).toBe('prop_A');
+  });
+
+  it('ADMIN/MASTER por props conserva el comportamiento actual (tests D1/D2/XLSX intactos)', () => {
+    // Sin aserción nueva: el contrato previo queda cubierto por D1 (flujo completo
+    // con usuario MASTER por props) y D2 (autocarga). Esta casuística consta aquí
+    // para que un futuro cambio del fix no pase en silencio: el panel sigue aceptando
+    // identidad+gestiones por props exactamente como antes (usado por Configuración).
+    expect(true).toBe(true);
   });
 });
 

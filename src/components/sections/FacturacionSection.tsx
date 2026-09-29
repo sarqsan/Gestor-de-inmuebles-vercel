@@ -61,6 +61,7 @@ import {
   Send,
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface FacturacionSectionProps {
   inmuebles: Inmueble[];
@@ -591,6 +592,22 @@ function DetalleFactura({
       .sort((a, b) => a.fechaHoraHusoGenRegistro.localeCompare(b.fechaHoraHusoGenRegistro));
   }, [registros, factura]);
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Factura no encontrada'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Detalle de factura'
+  );
+
   const verificacion = useMemo(() => {
     if (registrosDelPropietario.length === 0) return null;
     return verificarCadenaFacturacion(registrosDelPropietario);
@@ -619,7 +636,7 @@ function DetalleFactura({
   if (!factura) {
     return (
       <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 z-50 overflow-y-auto" onClick={onClose}>
-        <div className="bg-white rounded-2xl max-w-2xl w-full my-6 p-6" onClick={(e) => e.stopPropagation()}>
+        <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-2xl max-w-2xl w-full my-6 p-6" onClick={(e) => e.stopPropagation()}>
           Factura no encontrada.
           <button onClick={onClose} className="ml-3 text-blue-600 font-medium cursor-pointer">Cerrar</button>
         </div>
@@ -697,7 +714,7 @@ function DetalleFactura({
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 z-50 overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-3xl w-full my-6 p-6" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl max-w-3xl w-full my-6 p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="text-lg font-bold text-slate-800">

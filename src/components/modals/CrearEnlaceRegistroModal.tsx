@@ -7,6 +7,7 @@ import {
   generarIdEnlace,
 } from '../../lib/accesoPropietarios';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface CrearEnlaceRegistroModalProps {
   enlaceParaEditar?: EnlaceRegistro | null;
@@ -59,6 +60,14 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [copiado, setCopiado] = useState(false);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose, cerrableConEscape: !guardando },
+    'Enlace de registro'
+  );
 
   // ACCESO-PROPIETARIOS: candidatos a invitación nominal (pendientes sin acceso).
   const usuariosPendientes = usuarios.filter(
@@ -177,7 +186,7 @@ export const CrearEnlaceRegistroModal: React.FC<CrearEnlaceRegistroModalProps> =
       id="crear-enlace-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl my-8 overflow-hidden flex flex-col">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl my-8 overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">

@@ -38,6 +38,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { confirmar } from '../feedback/confirmacion';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface DetalleSolicitudDocModalProps {
   solicitud: SolicitudDocumentacion;
@@ -72,6 +73,14 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
   const [analyzingDocIds, setAnalyzingDocIds] = useState<string[]>([]);
   const [aiAnalysisResults, setAiAnalysisResults] = useState<Record<string, any>>({});
   const [isAnalyzingAll, setIsAnalyzingAll] = useState<boolean>(false);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Gestión de documentación solicitada'
+  );
 
   // Synchronize state when prop updates from Firestore or parent
   useEffect(() => {
@@ -376,7 +385,7 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo}
         className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >

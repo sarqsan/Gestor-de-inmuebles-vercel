@@ -24,6 +24,7 @@ import {
   normalizarRecurrente,
   periodoActual,
 } from '../../utils/gastosEngine';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface Props {
   plantillaParaEditar?: GastoRecurrente | null;
@@ -88,6 +89,14 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
   const categoriasDelTipo = useMemo(
     () => CATEGORIAS_GASTO.filter((c) => c.tipo === tipo),
     [tipo]
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Gasto recurrente'
   );
 
   const seleccionarTipo = (nuevoTipo: TipoGasto) => {
@@ -168,7 +177,7 @@ export const GastoRecurrenteModal: React.FC<Props> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
       onClick={onClose}
     >
-      <div
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo}
         className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >

@@ -15,6 +15,7 @@ import type { ExpedienteRecomercializacion, Inmueble, KitPublicacion } from '../
 import { DESTINO_INMUEBLE_LABEL } from '../../utils/recomercializacionEngine';
 import { generarKitPublicacion } from '../../utils/kitPublicacionIa';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -50,7 +51,7 @@ const SeccionChips: React.FC<{
           <span key={`${v}-${i}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${color}`}>
             {v}
             <button
-              aria-label="Cerrar" type="button" onClick={() => onRemove(i)} className="opacity-60 hover:opacity-100">
+              aria-label="Quitar" type="button" onClick={() => onRemove(i)} className="opacity-60 hover:opacity-100">
               <X className="w-3 h-3" />
             </button>
           </span>
@@ -86,6 +87,14 @@ export const KitPublicacionModal: React.FC<Props> = ({ expediente, inmueble, onG
   const [guardando, setGuardando] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const [aviso, setAviso] = useState('');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose, cerrableConEscape: !guardando },
+    'Kit de publicación del anuncio'
+  );
 
   const construirKit = (fecha?: string): KitPublicacion => ({
     titulo: titulo.trim() || undefined,
@@ -189,7 +198,7 @@ export const KitPublicacionModal: React.FC<Props> = ({ expediente, inmueble, onG
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
       onClick={onClose}
     >
-      <div
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo}
         className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-8 overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >

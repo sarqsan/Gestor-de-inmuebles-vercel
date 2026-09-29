@@ -43,6 +43,7 @@ import {
   Layers,
   FileText,
 } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface Props {
   inmueble: Inmueble;
@@ -95,6 +96,14 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
   const [estado, setEstado] = useState<EstadoInventario>('BUEN_ESTADO');
   const [ubicacion, setUbicacion] = useState('');
   const [observaciones, setObservaciones] = useState('');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setFormOpen(false) },
+    'Ficha técnica del inventario'
+  );
 
   useEffect(() => {
     setProvincia(inmueble.provincia || '');
@@ -670,7 +679,7 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
 
       {formOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3 text-xs shadow-xl">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3 text-xs shadow-xl">
             <h4 className="font-bold text-sm text-slate-900">{editItem ? 'Editar elemento de inventario' : 'Nuevo elemento de inventario'}</h4>
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Nombre *</label>

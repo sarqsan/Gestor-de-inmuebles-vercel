@@ -46,6 +46,7 @@ import { crearEvidencia } from '../../utils/morosidad/morosidadEngine';
 import { obtenerUrlEvidenciaMorosidad, subirEvidenciaMorosidadStorage } from '../../lib/morosidadEvidenciasStorage';
 import { TRANSICIONES_MOROSIDAD } from '../../utils/morosidad/morosidadEstados';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface Props {
   expediente: ExpedienteMorosidad;
@@ -133,6 +134,14 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
     };
   }, [exp.piezasDeuda]);
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onCerrar },
+    'Expediente de morosidad'
+  );
+
   const ejecutar = async (fn: () => Promise<{ ok: boolean; errores?: string[]; bloqueos?: string[]; advertencias?: string[] }>, ok: string) => {
     setEspera(true);
     try {
@@ -218,7 +227,7 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/50 p-4 overflow-y-auto">
-      <div className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl my-6">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl my-6">
         <header className="px-6 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600">Expediente de morosidad</p>

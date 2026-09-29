@@ -18,26 +18,6 @@ export function claseEntrada(error?: string, foco: 'blue' | 'amber' | 'emerald' 
   return `${CLASE_ENTRADA_BASE} ${color}`;
 }
 
-export const EtiquetaCampo: React.FC<{
-  htmlFor?: string;
-  children: React.ReactNode;
-  obligatorio?: boolean;
-  className?: string;
-}> = ({ htmlFor, children, obligatorio, className = 'block font-semibold text-slate-700 mb-1' }) => (
-  <label htmlFor={htmlFor} className={className}>
-    {children}
-    {obligatorio && (
-      <>
-        {' '}
-        <span className="text-rose-600" aria-hidden="true">
-          *
-        </span>
-        <span className="sr-only"> (obligatorio)</span>
-      </>
-    )}
-  </label>
-);
-
 /** Mensaje de error del campo, junto al control. */
 export const ErrorCampo: React.FC<{ id?: string; mensaje?: string }> = ({ id, mensaje }) => {
   if (!mensaje) return null;

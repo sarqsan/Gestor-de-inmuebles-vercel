@@ -62,6 +62,7 @@ import { registrarGarantiaDesdeTrabajo } from '../../utils/mantenimientoEngine';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface DetalleTrabajoProfesionalModalProps {
   isOpen: boolean;
@@ -123,6 +124,38 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   const [profesionalSeleccionadoId, setProfesionalSeleccionadoId] = useState<string>('');
   const [motivoCambioProf, setMotivoCambioProf] = useState<string>('');
   const [errorCambioProf, setErrorCambioProf] = useState<string>('');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo4 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setDialogCambiarProfOpen(false) },
+    'Cambiar profesional'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo3 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setEditandoCosteReal(false) },
+    'Modificar coste real'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setDialogFinalizarOpen(false) },
+    'Finalizar orden de trabajo'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Detalle de la orden de trabajo'
+  );
 
   useEffect(() => {
     setLocalTrabajo(trabajo);
@@ -589,7 +622,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
       id="detalle-trabajo-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-8 overflow-hidden flex flex-col max-h-[92vh]">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-8 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3.5">
@@ -1378,7 +1411,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
         {/* SUB-DIALOG: FINALIZAR Y LIQUIDAR TRABAJO */}
         {dialogFinalizarOpen && (
           <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center space-x-2 text-emerald-700">
                   <CheckCircle2 className="w-5 h-5" />
@@ -1496,7 +1529,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
         {/* SUB-DIALOG: EDITAR COSTE REAL POSTERIORMENTE */}
         {editandoCosteReal && (
           <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-5 space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+            <div ref={dialogo3.refDialogo} {...dialogo3.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-5 space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
                 <h3 className="font-bold text-slate-900 text-sm">Modificar Coste Real</h3>
                 <button
@@ -1558,7 +1591,7 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
         {/* SUB-DIALOG: ASIGNAR / CAMBIAR PROFESIONAL (MOTOR DE COMPATIBILIDAD) */}
         {dialogCambiarProfOpen && (
           <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div ref={dialogo4.refDialogo} {...dialogo4.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center space-x-2 text-blue-700">
                   <Wrench className="w-5 h-5" />

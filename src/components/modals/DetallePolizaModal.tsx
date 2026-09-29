@@ -48,6 +48,7 @@ import {
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface DetallePolizaModalProps {
   isOpen: boolean;
@@ -86,6 +87,14 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
   const [extraccionError, setExtraccionError] = useState('');
   const [datosExtraidosPreview, setDatosExtraidosPreview] = useState<DatosExtraidosRenovacion | null>(
     poliza.datosExtraidosRenovacion || null
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose, cerrableConEscape: !isSaving },
+    'Detalle de la póliza'
   );
 
   useEffect(() => {
@@ -391,7 +400,7 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-6 overflow-hidden flex flex-col max-h-[92vh]">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-6 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="bg-slate-900 text-white p-5 flex items-start justify-between gap-4 shrink-0">
           <div className="space-y-1.5 flex-1">

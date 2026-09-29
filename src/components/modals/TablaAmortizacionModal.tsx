@@ -6,6 +6,7 @@ import {
   resumenPrestamo,
   tasaEnPeriodo,
 } from '../../utils/prestamosEngine';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface Props {
   prestamo: Prestamo;
@@ -29,6 +30,14 @@ const mesLargo = (periodo: string): string => {
 export const TablaAmortizacionModal: React.FC<Props> = ({ prestamo, direccionInmueble, onClose }) => {
   const tabla = useMemo(() => generarTablaAmortizacion(prestamo), [prestamo]);
   const r = useMemo(() => resumenPrestamo(prestamo), [prestamo]);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Cuadro de amortización'
+  );
   const tasaFila = (periodo: string): number => tasaEnPeriodo(prestamo, periodo);
   const periodoActual = (() => {
     const h = new Date();
@@ -84,7 +93,7 @@ export const TablaAmortizacionModal: React.FC<Props> = ({ prestamo, direccionInm
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
       onClick={onClose}
     >
-      <div
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo}
         className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >

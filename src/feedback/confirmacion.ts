@@ -181,11 +181,6 @@ async function ejecutarEnDegradacion(
   return { confirmado: true, texto };
 }
 
-/** Confirmación de una acción destructiva que ejecuta y cierra mostrando el resultado. */
-export async function confirmarYEjecutar(opciones: OpcionesConfirmacion): Promise<ResultadoConfirmacion> {
-  return confirmar(opciones);
-}
-
 function cerrar(resultado: ResultadoConfirmacion): void {
   const item = pendienteActual;
   pendienteActual = null;

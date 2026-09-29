@@ -16,6 +16,14 @@ export const ConfirmWhatsappSentModal: React.FC<ConfirmWhatsappSentModalProps> =
   onConfirmSent,
   onClose,
 }) => {
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: invitacion, onCerrar: onClose },
+    'Confirmar envío por WhatsApp'
+  );
   const { refDialogo, propsDialogo } = useDialogoAccesible(
     { abierto: Boolean(invitacion), onCerrar: onClose },
     '¿Has enviado la invitación por WhatsApp?'
@@ -24,7 +32,7 @@ export const ConfirmWhatsappSentModal: React.FC<ConfirmWhatsappSentModalProps> =
   if (!invitacion) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
-      <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 relative overflow-hidden">
+      <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 relative overflow-hidden">
         {/* Close button */}
         <button
             aria-label="Cerrar"

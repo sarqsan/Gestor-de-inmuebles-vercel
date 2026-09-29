@@ -48,9 +48,3 @@ export function propsInteraccion(
     ...(etiqueta ? { 'aria-label': etiqueta } : {}),
   };
 }
-
-/** `true` si el elemento ya es un control interactivo nativo (para no envolverlo). */
-export function esControlNativo(elemento: Element | null): boolean {
-  if (!elemento) return false;
-  return ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(elemento.tagName);
-}

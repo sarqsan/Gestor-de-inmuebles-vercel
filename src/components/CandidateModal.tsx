@@ -61,6 +61,7 @@ import {
   Key,
 } from 'lucide-react';
 import { avisarOperacion } from '../feedback/canalFeedback';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface CandidateModalProps {
   candidato: Candidato | null;
@@ -105,6 +106,14 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [nuevaNotaTexto, setNuevaNotaTexto] = useState('');
   const [isAddingNota, setIsAddingNota] = useState(false);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: candidato, onCerrar: onClose },
+    'Confirmar acción'
+  );
 
   if (!candidato) return null;
 
@@ -220,7 +229,7 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
-      <div
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo}
         className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >

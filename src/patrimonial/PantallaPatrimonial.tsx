@@ -255,7 +255,7 @@ export function PantallaPatrimonial({ propietarios, usuarioActual, onCrearPropie
 
   return (
     <section className="patrimonial-inc06" aria-label="Patrimonial: fichas e importación controlada" style={{ margin: '24px 0', padding: 16, border: '1px solid #d7dbe3', borderRadius: 8 }}>
-      <h2>Patrimonial (INC-06)</h2>
+      <h2>Patrimonial</h2>
       <p style={{ opacity: 0.75 }}>
         Fichas patrimoniales persistentes e importación controlada con destino explícito.
         La previsualización no escribe; la ejecución confirmada audita cada operación.

@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface FinanciacionSectionProps {
   inmuebles: Inmueble[];
@@ -482,6 +483,14 @@ function DetalleFinanciacion({
     );
   }, [fin, antImporte, antModalidad]);
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: Boolean(fin), onCerrar: onClose },
+    'Cuadro de amortización'
+  );
+
   if (!fin) {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl p-6 text-slate-500">
@@ -525,7 +534,7 @@ function DetalleFinanciacion({
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 z-50 overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-4xl w-full my-6 p-6" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl max-w-4xl w-full my-6 p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-5">
           <div>
             <h3 className="text-lg font-bold text-slate-800">{fin.entidad.nombre}</h3>

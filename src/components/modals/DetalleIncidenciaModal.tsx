@@ -69,6 +69,7 @@ import {
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface DetalleIncidenciaModalProps {
   isOpen: boolean;
@@ -150,6 +151,14 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
   const [presupuestoSeleccionadoDetalle, setPresupuestoSeleccionadoDetalle] = useState<PresupuestoProfesional | null>(null);
   const [trabajoParaPresupuesto, setTrabajoParaPresupuesto] = useState<TrabajoProfesional | null>(null);
   const [garantias, setGarantias] = useState<GarantiaReparacion[]>([]);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Detalle de la incidencia'
+  );
 
   useEffect(() => {
     const unsubGarantias = subscribeGarantiasReparacion((items) => {
@@ -446,7 +455,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-6 overflow-hidden flex flex-col max-h-[90vh]">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-6 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Cabecera Principal */}
         <div className="bg-slate-900 text-white p-5 sm:p-6 shrink-0">
           <div className="flex items-start justify-between gap-4">

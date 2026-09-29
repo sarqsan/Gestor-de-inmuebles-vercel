@@ -669,7 +669,7 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
       <div className="space-y-6">
         <div className="flex items-center gap-3">
           <button
-            aria-label="Anterior" onClick={() => setSelectedId(null)} className="p-2 bg-white border border-slate-200 rounded-xl">
+            aria-label="Volver al listado" onClick={() => setSelectedId(null)} className="p-2 bg-white border border-slate-200 rounded-xl">
             <ArrowLeft className="w-4 h-4" />
           </button>
           <h2 className="font-bold text-slate-900">{a.titulo}</h2>
@@ -871,7 +871,7 @@ export const InversionSection: React.FC<InversionSectionProps> = ({ inmuebles, c
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <button
-          aria-label="Anterior"
+          aria-label="Volver al listado"
           onClick={() => {
             setIsCreating(false);
             setForm(null);

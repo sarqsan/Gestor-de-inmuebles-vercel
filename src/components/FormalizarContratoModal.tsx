@@ -91,6 +91,14 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
     return crearBorradorContrato(candidato, defaultInmueble, userProfile, solicitudDoc, propietarios);
   });
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Formalización del alquiler y contrato LAU'
+  );
+
   const [activeTab, setActiveTab] = useState<'asegurabilidad' | 'contrato' | 'acta' | 'firmas'>('asegurabilidad');
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
@@ -277,7 +285,7 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+      <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
         {/* Header Modal */}
         <div ref={refDialogo} {...propsDialogo} className="p-5 sm:p-6 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">

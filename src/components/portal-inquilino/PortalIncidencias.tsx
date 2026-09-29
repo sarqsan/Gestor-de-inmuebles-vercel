@@ -21,6 +21,7 @@ import type {
 } from '../../types';
 import { MiniaturaEvidencia } from './MiniaturaEvidencia';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface Props {
   usuario: UsuarioApp;
@@ -179,6 +180,14 @@ function NuevaIncidenciaModal({
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onCerrar, cerrableConEscape: !guardando },
+    'Notificar avería'
+  );
+
   const anadirFotos = (list: FileList | null) => {
     if (!list) return;
     const validas = Array.from(list).filter((f) => f.type.startsWith('image/')).slice(0, 6 - fotos.length);
@@ -274,7 +283,7 @@ function NuevaIncidenciaModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center" onClick={onCerrar}>
-      <div
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo}
         className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >

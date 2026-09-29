@@ -37,6 +37,7 @@ import {
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface FormalizacionSectionProps {
   contratos: ContratoFormalizacion[];
@@ -75,6 +76,14 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
 
   // GAP 2: habitaciones de los inmuebles con contratos de habitación (solo las necesarias)
   const [habitaciones, setHabitaciones] = useState<HabitacionInmueble[]>([]);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setShowNewContractSelector(false) },
+    'Nuevo contrato'
+  );
   const inmueblesConHabitaciones: string[] = [];
   contratos.forEach((c) => {
     if (c.habitacionId && !inmueblesConHabitaciones.includes(c.inmuebleId)) {
@@ -251,7 +260,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
       {/* Modal Selector para Nuevo Contrato si se pulsa el botón */}
       {showNewContractSelector && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4">
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Plus className="w-5 h-5 text-indigo-600" />
               Selecciona el Candidato a Formalizar

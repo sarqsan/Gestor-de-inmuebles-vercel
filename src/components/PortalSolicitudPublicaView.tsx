@@ -34,6 +34,7 @@ import {
   Cigarette,
   UserCheck,
 } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface PortalSolicitudPublicaViewProps {
   inmueble: Inmueble;
@@ -86,6 +87,14 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
   // Status flags
   const [submitted, setSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setShowPrivacyPolicyModal(false) },
+    'Política de privacidad'
+  );
 
   const numTotalPersonas = numAdultos + numMenores;
   const isAutonomo = situacionLaboral === 'autonomo';
@@ -1071,7 +1080,7 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
       {/* Privacy Policy Information Modal */}
       {showPrivacyPolicyModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-xl border border-slate-200">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-xl border border-slate-200">
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Lock className="w-5 h-5 text-blue-600" />
               <span>Información de Protección de Datos (RGPD)</span>

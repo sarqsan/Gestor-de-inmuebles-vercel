@@ -17,6 +17,7 @@ import { InvitacionVisita, VisitSlot, Inmueble } from '../types';
 import { bookSlotTransaction } from '../lib/firebase';
 import { confirmarReservaVisita } from '../lib/reservaVisita';
 import { PublicPropertyGallery } from './PublicPropertyGallery';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface PortalVisitaPublicaViewProps {
   token: string;
@@ -43,6 +44,14 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setShowCancelConfirm(false) },
+    'Cancelar la cita de visita'
+  );
 
   // Find invitation by token
   const invitacion = invitaciones.find((inv) => inv.token === token);
@@ -351,7 +360,7 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
         {/* CANCEL CONFIRMATION MODAL INSIDE PUBLIC VIEW */}
         {showCancelConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-            <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-6 text-center space-y-4">
+            <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-6 text-center space-y-4">
               <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
                 <AlertCircle className="w-6 h-6" />
               </div>

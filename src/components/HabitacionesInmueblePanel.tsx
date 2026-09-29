@@ -23,6 +23,7 @@ import {
 } from '../utils/habitacionesEngine';
 import { ingresosInmuebleDesdeCircuito, obtenerCobrosInmueble } from '../utils/cobrosEngine';
 import { mensajeDeErrorUsuario } from '../feedback/mensajes';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface Props {
   inmueble: Inmueble;
@@ -56,6 +57,14 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
   const [fianza, setFianza] = useState<number>(0);
   const [caracteristicas, setCaracteristicas] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setFormOpen(false) },
+    'Habitaciones del inmueble'
+  );
 
   useEffect(() => {
     if (!canView) {
@@ -330,7 +339,7 @@ export const HabitacionesInmueblePanel: React.FC<Props> = ({
 
       {formOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3 text-xs">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3 text-xs">
             <h4 className="font-bold text-sm">{editItem ? 'Editar habitación' : 'Nueva habitación'}</h4>
             <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre o número *" className="w-full px-3 py-2 border rounded-xl" />
             <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Descripción" className="w-full px-3 py-2 border rounded-xl" />

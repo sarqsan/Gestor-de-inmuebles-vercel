@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { avisarOperacion } from '../../feedback/canalFeedback';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface CobrosSectionProps {
   contratos: ContratoFormalizacion[];
@@ -113,6 +114,38 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
     const contratosAlDia = contratos.map((c) => actualizarEstadosVencimiento(c).contratoActualizado);
     return obtenerTodosCobros(contratosAlDia);
   }, [contratos]);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo4 = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setShowFiscalModal(false) },
+    'Resumen fiscal anual'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo3 = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setCobroParaTrazabilidad(null) },
+    'Trazabilidad del periodo'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setCobroParaIncidencia(null) },
+    'Registrar incidencia de cobro'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setCobroToEdit(null) },
+    'Registrar cobro de alquiler'
+  );
 
   // Avisos de seguimiento (vence pronto / plazo de cortesía / vencida / incidencia).
   // Respeta el filtro de inmueble pero no el de año/mes para no ocultar urgencias.
@@ -849,7 +882,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
       {/* MODAL 1: REGISTRAR / EDITAR PAGO */}
       {cobroToEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
               <div className="flex items-center gap-2">
                 <Banknote className="w-5 h-5 text-emerald-400" />
@@ -1074,7 +1107,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
       {/* MODAL 2: REPORTAR INCIDENCIA */}
       {cobroParaIncidencia && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+          <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-amber-600 text-white">
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-white" />
@@ -1140,7 +1173,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
       {/* MODAL 3: TRAZABILIDAD Y HISTORIAL DE CAMBIOS */}
       {cobroParaTrazabilidad && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] flex flex-col">
+          <div ref={dialogo3.refDialogo} {...dialogo3.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] flex flex-col">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white shrink-0">
               <div className="flex items-center gap-2">
                 <History className="w-5 h-5 text-indigo-400" />
@@ -1229,7 +1262,7 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
       {/* MODAL 4: PREPARACIÓN RESUMEN FISCAL ANUAL */}
       {showFiscalModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col my-auto">
+          <div ref={dialogo4.refDialogo} {...dialogo4.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col my-auto">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-indigo-900 text-white shrink-0">
               <div className="flex items-center gap-2">
                 <FileCheck2 className="w-5 h-5 text-indigo-300" />

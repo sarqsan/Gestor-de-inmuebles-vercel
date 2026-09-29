@@ -93,6 +93,14 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Configurar agenda de visitas'
+  );
+
   const selectedInmueble = inmuebles.find((i) => i.id === selectedInmuebleId);
 
   // Existing reserved slots for this property
@@ -375,7 +383,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
         {/* Header */}
         <div ref={refDialogo} {...propsDialogo} className="p-5 border-b border-slate-100 bg-slate-900 text-white flex items-center justify-between shrink-0">

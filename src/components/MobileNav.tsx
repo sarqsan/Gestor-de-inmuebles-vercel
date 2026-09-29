@@ -27,6 +27,8 @@ interface MobileNavProps {
   cobrosPendientesCount?: number;
   /** BLOQUE C: expedientes de morosidad con saldo pendiente. */
   morosidadAbiertaCount?: number;
+  /** Incidencias sin cerrar (mismo contador que el menú lateral). */
+  incidenciasAbiertasCount?: number;
   currentUser?: UsuarioApp;
   onOpenAddCandidateModal?: () => void;
   onOpenAuthModal?: () => void;
@@ -50,6 +52,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   solicitudesSeguroCount = 0,
   cobrosPendientesCount = 0,
   morosidadAbiertaCount = 0,
+  incidenciasAbiertasCount = 0,
   currentUser,
   onOpenAddCandidateModal,
   onOpenAuthModal,
@@ -75,6 +78,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
     solicitudesSeguro: solicitudesSeguroCount,
     cobrosPendientes: cobrosPendientesCount,
     morosidadAbierta: morosidadAbiertaCount,
+    incidenciasAbiertas: incidenciasAbiertasCount,
     candidatos: candidatos.length,
   };
   const gestorPatrimonial = Boolean(currentUser?.roles?.includes('GESTOR_PATRIMONIAL'));

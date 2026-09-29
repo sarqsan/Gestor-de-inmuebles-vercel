@@ -32,6 +32,7 @@ import {
   ExternalLink,
   Star,
 } from 'lucide-react';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface SolicitudDetailModalProps {
   solicitud: SolicitudAlquiler;
@@ -51,6 +52,14 @@ export const SolicitudDetailModal: React.FC<SolicitudDetailModalProps> = ({
   const [activeTab, setActiveTab] = useState<'resumen' | 'cuestionario' | 'documentos' | 'historial'>('resumen');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [ownerNote, setOwnerNote] = useState(solicitud.observacionesOwner || '');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Detalle de la solicitud'
+  );
 
   const formatNow = () =>
     new Date().toLocaleDateString('es-ES', {
@@ -116,7 +125,7 @@ export const SolicitudDetailModal: React.FC<SolicitudDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200/90 overflow-hidden">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200/90 overflow-hidden">
         {/* Modal Header */}
         <div className="p-5 sm:p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="space-y-1">

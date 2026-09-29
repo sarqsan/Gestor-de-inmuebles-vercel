@@ -12,6 +12,8 @@ import { saveActaFirestore, subscribeActas, uploadEvidenciaActaStorage, saveEvid
 import { registrarAuditoriaFirestore } from '../../lib/firebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { avisarOperacion } from '../../feedback/canalFeedback';
+import { confirmar } from '../../feedback/confirmacion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface ActasSectionProps {
   inmuebles: Inmueble[];
@@ -48,6 +50,14 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
     if (currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId) return currentUser.propietarioId;
     return inmuebles[0]?.propietarioId || inmuebles[0]?.propietarioPrincipalId || 'prop_demo';
   }, [currentUser, inmuebles]);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setShowCrearModal(false) },
+    'Nueva acta'
+  );
 
   // Subscribe actas
   useEffect(() => {
@@ -351,8 +361,25 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
   };
 
   const handleVersionarActa = async (acta: Acta) => {
-    const motivo = prompt('Motivo de versionado (obligatorio para trazabilidad):', 'Corrección tras firma / actualización requerida');
-    if (!motivo || !motivo.trim()) { avisarOperacion({ tipo: 'error', mensaje: 'Motivo obligatorio' }); return; }
+    // §8: mismo diálogo de confirmación que el resto de la aplicación (antes era un
+    // `window.prompt` nativo, único del árbol). El motivo sigue siendo obligatorio.
+    const { confirmado, texto } = await confirmar({
+      titulo: 'Versionar acta',
+      mensaje: `Se creará una nueva versión del acta ${acta.id} (v${acta.version}) y la versión anterior se conservará intacta.`,
+      detalle: 'El motivo queda registrado en la trazabilidad del acta.',
+      etiquetaConfirmar: 'Versionar',
+      etiquetaCancelar: 'Cancelar',
+      entradaTexto: {
+        etiqueta: 'Motivo del versionado',
+        marcador: 'Ej. corrección tras firma',
+        valorInicial: 'Corrección tras firma / actualización requerida',
+        obligatorio: true,
+        errorObligatorio: 'El motivo es obligatorio para la trazabilidad.',
+      },
+    });
+    if (!confirmado) return;
+    const motivo = (texto ?? '').trim();
+    if (!motivo) { avisarOperacion({ tipo: 'error', mensaje: 'Motivo obligatorio' }); return; }
     try {
       const { actaVersionada, actaOriginalPreservada } = versionarActa(acta, currentUser?.nombre || 'Propietario', motivo.trim(), currentUser?.id);
       // Preservar original intacta ya está en Firestore, no modificarla. Guardar nueva versión como nuevo documento.
@@ -437,7 +464,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
             <FileCheck className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold">Actas de Entrada y Salida — BLOQUE D</h2>
+            <h2 className="text-xl font-bold">Actas de Entrada y Salida</h2>
             <p className="text-xs text-slate-500">Circuito VIVIENDA/CONTRATO → ENTRADA → INVENTARIO/ESTADO/EVIDENCIAS → FIRMA → ESTANCIA → SALIDA → COMPARACIÓN → INCIDENCIAS → FIRMA → TRAZABILIDAD. Persistencia Firestore, Storage (no base64), auditoría canónica, OTP, PDF real.</p>
           </div>
           <div className="flex gap-2">
@@ -515,7 +542,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
               <p className="text-xs text-slate-500">Inmueble {selectedActa.propertyId} | Contrato {selectedActa.contractId || '—'} | Fecha acto {selectedActa.fechaActo} {selectedActa.horaActo||''} | Creada {selectedActa.fechaCreacion.slice(0,19)}</p>
             </div>
             <button
-              aria-label="Filtrar" onClick={()=>setSelectedActa(null)} className="p-1.5 bg-slate-100 rounded-lg"><Filter className="w-4 h-4" /></button>
+              aria-label="Cerrar" onClick={()=>setSelectedActa(null)} className="p-1.5 bg-slate-100 rounded-lg"><Filter className="w-4 h-4" /></button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
@@ -624,7 +651,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
           </div>
 
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
-            <p className="font-bold">BLOQUE D — Reglas de seguridad y auditoría</p>
+            <p className="font-bold">Reglas de seguridad y auditoría</p>
             <p>Acta vinculada versión concreta. Firmada no modificable silenciosamente → nueva versión. OTP generación/caducidad/intentos limitados/no texto plano/invalidación/trazabilidad/protección reutilización. Transporte externo PENDIENTE (adaptador preparado). PDF representa exactamente datos persistidos. Comparación determinista sin IA. Evidencias en Storage, referencia Firestore, sin base64. Auditoría canónica registrarAuditoriaFirestore, no segundo sistema.</p>
           </div>
         </div>
@@ -633,11 +660,11 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
       {/* Modal crear acta */}
       {showCrearModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col border border-slate-200">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col border border-slate-200">
             <div className="p-4 bg-violet-900 text-white flex items-center justify-between">
               <h3 className="font-bold text-sm">Crear Acta {tipoCrear} — 14 pasos flujo completo</h3>
               <button
-                aria-label="Filtrar" onClick={()=>{setShowCrearModal(false); resetForm();}} className="p-1 rounded-lg bg-white/10 hover:bg-white/20"><Filter className="w-4 h-4" /></button>
+                aria-label="Cerrar" onClick={()=>{setShowCrearModal(false); resetForm();}} className="p-1 rounded-lg bg-white/10 hover:bg-white/20"><Filter className="w-4 h-4" /></button>
             </div>
             <div className="p-4 overflow-y-auto flex-1 space-y-4 text-xs">
               <div className="flex gap-2 text-[11px]">

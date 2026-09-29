@@ -16,6 +16,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { Inmueble, VisitSlot, InvitacionVisita, Candidato } from '../types';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface VerAgendaInmuebleModalProps {
   inmueble: Inmueble;
@@ -42,6 +43,14 @@ export const VerAgendaInmuebleModal: React.FC<VerAgendaInmuebleModalProps> = ({
 }) => {
   const [confirmDeleteDay, setConfirmDeleteDay] = useState<string | null>(null);
   const [showConfirmDeleteAll, setShowConfirmDeleteAll] = useState<boolean>(false);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Agenda de visitas del inmueble'
+  );
 
   // Filter real slots belonging to this property
   const propertySlots = slots.filter((s) => s.inmuebleId === inmueble.id);
@@ -161,7 +170,7 @@ export const VerAgendaInmuebleModal: React.FC<VerAgendaInmuebleModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto animate-fade-in">
-      <div className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden my-6 flex flex-col max-h-[90vh]">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden my-6 flex flex-col max-h-[90vh]">
         {/* Modal Header */}
         <div className="p-5 bg-slate-900 text-white flex items-center justify-between relative shrink-0">
           <div className="space-y-1">

@@ -23,6 +23,7 @@ import {
 } from '../../types';
 import { ESTADO_TRABAJO_LABELS, PRIORIDAD_TRABAJO_LABELS } from '../../utils/profesionalesEngine';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface HistorialTrabajosInmuebleModalProps {
   isOpen: boolean;
@@ -49,6 +50,14 @@ export const HistorialTrabajosInmuebleModal: React.FC<HistorialTrabajosInmuebleM
 }) => {
   const [filtroCategoria, setFiltroCategoria] = useState<string>('TODAS');
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Historial de trabajos del inmueble'
+  );
+
   if (!isOpen) return null;
 
   const trabajosDelInmueble = trabajos.filter((t) => t.inmuebleId === inmueble.id);
@@ -72,7 +81,7 @@ export const HistorialTrabajosInmuebleModal: React.FC<HistorialTrabajosInmuebleM
       id="historial-trabajos-inmueble-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-8 overflow-hidden flex flex-col max-h-[92vh]">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-8 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3.5">

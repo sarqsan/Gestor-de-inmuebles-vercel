@@ -26,6 +26,7 @@ import {
 } from '../lib/firebase';
 import { getInmuebleCoverUrl } from '../utils/imageUtils';
 import { mensajeDeErrorUsuario } from '../feedback/mensajes';
+import { useDialogoAccesible } from '../accesibilidad/dialogo';
 
 interface GestionImagenesModalProps {
   isOpen: boolean;
@@ -58,6 +59,22 @@ export const GestionImagenesModal: React.FC<GestionImagenesModalProps> = ({
   // Direct URL input state
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlInputValue, setUrlInputValue] = useState('');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Galería de imágenes'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setImageToDelete(null) },
+    'Eliminar imagen'
+  );
 
   if (!isOpen) return null;
 
@@ -274,7 +291,7 @@ export const GestionImagenesModal: React.FC<GestionImagenesModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Header */}
         <div className="bg-slate-900 text-white p-5 sm:p-6 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -586,7 +603,7 @@ export const GestionImagenesModal: React.FC<GestionImagenesModalProps> = ({
       {/* DELETE CONFIRMATION DIALOG */}
       {imageToDelete && (
         <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-200 shadow-2xl text-center space-y-4">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-200 shadow-2xl text-center space-y-4">
             <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
               <Trash2 className="w-6 h-6" />
             </div>

@@ -79,7 +79,7 @@ export const Header: React.FC<HeaderProps> = ({
       case 'administracion':
         return { title: 'Administración Global & Seguridad', subtitle: 'Usuarios, roles, módulos, invitaciones y registro de auditoría' };
       case 'actas':
-        return { title: 'Actas de Entrada y Salida — BLOQUE D', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };
+        return { title: 'Actas de Entrada y Salida', subtitle: 'Inventario, estados, evidencias Storage, incidencias, comparación determinista, firma OTP, PDF y trazabilidad canónica' };
       case 'operaciones':
         return { title: 'Centro de Operaciones y Mantenimiento', subtitle: 'Coordinación de incidencias, mantenimiento, OOTT, reformas, garantías y seguros' };
       case 'financiacion':

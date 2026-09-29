@@ -342,7 +342,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
       onClose();
     } catch (err: any) {
       console.error('Error saving trabajo:', err);
-      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar la orden de trabajo en Firestore.'));
+      setErrorMsg(mensajeDeErrorUsuario(err, 'No se ha podido guardar la orden de trabajo. Inténtalo de nuevo.'));
     } finally {
       setGuardando(false);
     }

@@ -86,12 +86,6 @@ export function descartarAvisoOperacion(id: string): void {
   notificar();
 }
 
-export function descartarAvisosOperacion(): void {
-  if (avisos.length === 0) return;
-  avisos = [];
-  notificar();
-}
-
 /** Sólo para pruebas. */
 export function reiniciarAvisosOperacion(): void {
   avisos = [];

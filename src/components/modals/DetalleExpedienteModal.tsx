@@ -49,6 +49,7 @@ import { BolsaInmobiliariasModal } from './BolsaInmobiliariasModal';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { avisarOperacion } from '../../feedback/canalFeedback';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface Props {
   expediente: ExpedienteRecomercializacion;
@@ -135,6 +136,14 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
     expediente.modalidadElegida ?? ''
   );
   const [cerrando, setCerrando] = useState(false);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose, cerrableConEscape: !guardando },
+    'Progreso del expediente'
+  );
 
   const estado = expediente.estado;
   const metaEstado = ESTADOS_RECOMERCIALIZACION[estado];
@@ -303,7 +312,7 @@ export const DetalleExpedienteModal: React.FC<Props> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
       onClick={onClose}
     >
-      <div
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo}
         className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >

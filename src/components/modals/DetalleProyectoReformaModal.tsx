@@ -62,6 +62,7 @@ import {
 } from '../../lib/firebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface DetalleProyectoReformaModalProps {
   isOpen: boolean;
@@ -160,6 +161,46 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
       incluirNoCompatibles: true,
     });
   }, [inmueble, profesionales, proyecto]);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo5 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setShowFinalizarModal(false) },
+    'Finalizar proyecto de reforma'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo4 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setSelectedPptParaAdjudicar(null) },
+    'Adjudicar presupuesto'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo3 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setSelectedPartidaParaCoste(null) },
+    'Coste real de partida'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: () => setShowAddPartidaModal(false) },
+    'Añadir partida de obra'
+  );
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: isOpen, onCerrar: onClose },
+    'Detalle del proyecto de reforma'
+  );
 
   if (!isOpen) return null;
 
@@ -336,7 +377,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl my-6 overflow-hidden flex flex-col max-h-[92vh]">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl my-6 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -1026,7 +1067,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
         {/* Modal: Añadir Partida */}
         {showAddPartidaModal && (
           <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md space-y-4">
+            <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md space-y-4">
               <h4 className="text-base font-bold text-slate-900">Añadir Partida de Obra</h4>
               <form onSubmit={handleCrearPartida} className="space-y-3 text-xs">
                 <div>
@@ -1123,7 +1164,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
         {/* Modal: Registrar Coste Real de Partida */}
         {selectedPartidaParaCoste && (
           <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm space-y-4 text-xs">
+            <div ref={dialogo3.refDialogo} {...dialogo3.propsDialogo} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm space-y-4 text-xs">
               <h4 className="text-base font-bold text-slate-900">Coste Real de Partida</h4>
               <p className="text-slate-500">{selectedPartidaParaCoste.concepto}</p>
               <form onSubmit={handleRegistrarCostePartida} className="space-y-3">
@@ -1160,7 +1201,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
         {/* Modal: Adjudicar Presupuesto */}
         {selectedPptParaAdjudicar && (
           <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md space-y-4 text-xs">
+            <div ref={dialogo4.refDialogo} {...dialogo4.propsDialogo} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md space-y-4 text-xs">
               <h4 className="text-base font-bold text-slate-900">Adjudicar Presupuesto Formal</h4>
               <p className="text-slate-600">
                 Se adjudicará la propuesta de <span className="font-bold">{selectedPptParaAdjudicar.profesionalNombre}</span> por importe de{' '}
@@ -1203,7 +1244,7 @@ export const DetalleProyectoReformaModal: React.FC<DetalleProyectoReformaModalPr
         {/* Modal: Finalizar Reforma */}
         {showFinalizarModal && (
           <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md space-y-4 text-xs">
+            <div ref={dialogo5.refDialogo} {...dialogo5.propsDialogo} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md space-y-4 text-xs">
               <h4 className="text-base font-bold text-slate-900">Finalizar Proyecto de Reforma</h4>
               <p className="text-slate-600">
                 Esta acción consolidará el cierre técnico y económico del proyecto con un coste real acumulado de{' '}

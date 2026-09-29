@@ -21,6 +21,7 @@ import {
   UsuarioApp,
 } from '../../types';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface CrearProfesionalModalProps {
   profesionalParaEditar?: Profesional | null;
@@ -79,6 +80,14 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
 
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose, cerrableConEscape: !guardando },
+    'Alta de profesional'
+  );
 
   const handleEspecialidadToggle = (nombre: string) => {
     if (selectedEspecialidades.includes(nombre)) {
@@ -158,7 +167,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Error saving professional:', err);
-      setErrorMsg(mensajeDeErrorUsuario(err, 'Error al guardar el profesional en Firestore.'));
+      setErrorMsg(mensajeDeErrorUsuario(err, 'No se ha podido guardar el profesional. Inténtalo de nuevo.'));
     } finally {
       setGuardando(false);
     }
@@ -169,7 +178,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
       id="crear-profesional-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden flex flex-col max-h-[90vh]">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl my-8 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">

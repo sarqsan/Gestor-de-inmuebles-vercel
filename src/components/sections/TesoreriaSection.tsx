@@ -975,6 +975,14 @@ const PreviewCobros: React.FC<{ propietarioId: string; periodo: string; contrato
 
 const FicherosList: React.FC<{ ficheros: FicheroSEPA[]; onDescargar: (f: FicheroSEPA) => void }> = ({ ficheros, onDescargar }) => {
   const [verXml, setVerXml] = useState<FicheroSEPA | null>(null);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: () => setVerXml(null) },
+    'Visor del fichero XML'
+  );
   if (ficheros.length === 0) return <p className="text-xs text-slate-400 italic">Sin ficheros generados todavía.</p>;
   return (
     <div className="space-y-2">
@@ -993,7 +1001,7 @@ const FicherosList: React.FC<{ ficheros: FicheroSEPA[]; onDescargar: (f: Fichero
       ))}
       {verXml && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[85vh] flex flex-col">
+          <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[85vh] flex flex-col">
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <h3 className="font-bold text-sm font-mono">{verXml.msgId}.xml</h3>
               <button
@@ -1018,9 +1026,17 @@ const DetalleLiquidacionModal: React.FC<{
   onCrearOrden: (l: LiquidacionPropietario) => void;
   onPdf: (l: LiquidacionPropietario) => void;
 }> = ({ liq, onClose, onRecalcular, onAprobar, onAnular, onPagar, onCrearOrden, onPdf }) => {
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onClose },
+    'Detalle de la liquidación'
+  );
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden my-auto max-h-[90vh] flex flex-col">
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden my-auto max-h-[90vh] flex flex-col">
         <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-bold">Liquidación {liq.periodo} — {liq.propietarioNombre}</h3>

@@ -22,6 +22,7 @@ import type {
 } from '../../types';
 import { MiniaturaEvidencia } from './MiniaturaEvidencia';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface Props {
   usuario: UsuarioApp;
@@ -279,6 +280,14 @@ function NuevaLecturaModal({
   const [esCorreccion, setEsCorreccion] = useState(false);
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onCerrar, cerrableConEscape: !guardando },
+    'Nueva lectura del suministro'
+  );
   const unidad = unidadSugerida(suministro.tipo) || 'unidades';
 
   const guardar = async () => {
@@ -347,7 +356,7 @@ function NuevaLecturaModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center" onClick={onCerrar}>
-      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-extrabold">Nueva lectura · {NOMBRE_TIPO[suministro.tipo]}</h2>
           <button onClick={onCerrar} className="p-1.5 rounded-full hover:bg-slate-100 cursor-pointer" aria-label="Cerrar">
@@ -439,6 +448,14 @@ function CambioTitularModal({
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
 
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo = useDialogoAccesible(
+    { abierto: true, onCerrar: onCerrar, cerrableConEscape: !guardando },
+    'Cambio de titular del suministro'
+  );
+
   const guardar = async () => {
     const v = validarCambioTitular({ titularNuevoNombre: nombre, titularNuevoNif: nif, fechaEfecto: fecha });
     if (!v.ok) {
@@ -481,7 +498,7 @@ function CambioTitularModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-30 flex items-end sm:items-center justify-center" onClick={onCerrar}>
-      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogo.refDialogo} {...dialogo.propsDialogo} className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-extrabold">Cambio de titular · {NOMBRE_TIPO[suministro.tipo]}</h2>
           <button onClick={onCerrar} className="p-1.5 rounded-full hover:bg-slate-100 cursor-pointer" aria-label="Cerrar">

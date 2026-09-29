@@ -26,6 +26,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onLogout,
   onClose,
 }) => {
+
+  // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
+  // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
+  // al origen y `Tab` no se escapa; con diálogos superpuestos sólo manda el de arriba.
+  const dialogo2 = useDialogoAccesible(
+    { abierto: currentUser, onCerrar: onClose },
+    'Mi perfil de usuario'
+  );
   const { refDialogo, propsDialogo } = useDialogoAccesible(
     { abierto: Boolean(currentUser), onCerrar: onClose },
     'Mi Perfil de Usuario'
@@ -65,7 +73,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       id="user-profile-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto"
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md my-8 overflow-hidden flex flex-col">
+      <div ref={dialogo2.refDialogo} {...dialogo2.propsDialogo} className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md my-8 overflow-hidden flex flex-col">
         {/* Header */}
         <div ref={refDialogo} {...propsDialogo} className="px-6 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center space-x-3">

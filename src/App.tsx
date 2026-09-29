@@ -323,6 +323,7 @@ import { origenesActivosDePerfil, reportarResultadoGuardado } from './estadoDato
 import type { OrigenDatos } from './estadoDatos/canalIncidencias';
 import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
 import { ejecutarOperacion } from './feedback/operaciones';
+import { incidenciasNoCerradas } from './utils/operacionesEngine';
 
 // Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
 const SECCIONES_PROPIETARIO: SectionType[] = [
@@ -839,6 +840,14 @@ export default function App() {
     }
     return [];
   }, [currentUser, incidencias, scopedInmuebles]);
+
+  // UX-7 §4: contador real del menú (antes el badge de incidencias no se alimentaba
+  // nunca). Se apoya en el helper canónico del motor de operaciones sobre la misma
+  // lista acotada por perfil que ve la sección; no cambia ninguna regla de negocio.
+  const incidenciasAbiertasCount = useMemo(
+    () => incidenciasNoCerradas(scopedIncidencias).length,
+    [scopedIncidencias]
+  );
 
   // FASE 3.0: expedientes de recomercialización visibles (la suscripción ya
   // viene acotada por propietarioId; aquí se refuerza por inmueble asignado).
@@ -3768,6 +3777,7 @@ export default function App() {
         solicitudesSeguroCount={solicitudesSeguro.length}
         cobrosPendientesCount={cobrosPendientesCount}
         morosidadAbiertaCount={morosidadAbiertaCount}
+        incidenciasAbiertasCount={incidenciasAbiertasCount}
         currentUser={currentUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
         onLogout={handleLogout}
@@ -3789,6 +3799,7 @@ export default function App() {
           solicitudesSeguroCount={solicitudesSeguro.length}
           cobrosPendientesCount={cobrosPendientesCount}
           morosidadAbiertaCount={morosidadAbiertaCount}
+          incidenciasAbiertasCount={incidenciasAbiertasCount}
           onAccionAsistente={ejecutarAccionAsistente}
           onConsultarAsistente={consultarAsistente}
           contextoIA={contextoAsistente}

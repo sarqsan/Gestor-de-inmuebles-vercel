@@ -61,6 +61,7 @@ import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { avisarOperacion } from '../../feedback/canalFeedback';
+import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface AdminControlCenterProps {
   currentUser: UsuarioApp;
@@ -121,12 +122,21 @@ export const BajaUsuarioConfirmacion: React.FC<BajaUsuarioConfirmacionProps> = (
   guardando,
   onConfirm,
   onCancel,
-}) => (
+}) => {
+  // UX-7 §6: confirmación de una operación destructiva con el mismo patrón de diálogo
+  // (foco dentro, Escape para cancelar y sin cerrar mientras la operación está en curso).
+  const { refDialogo, propsDialogo } = useDialogoAccesible(
+    { abierto: true, onCerrar: onCancel, cerrableConEscape: !guardando },
+    'Dar de baja de acceso'
+  );
+  return (
   <div
+    ref={refDialogo}
+    {...propsDialogo}
     data-testid="baja-confirmacion"
-    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 overflow-y-auto"
   >
-    <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 space-y-4">
+    <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto my-auto p-6 space-y-4">
       <div>
         <h3 className="text-base font-bold text-white">Dar de baja de acceso</h3>
         <p className="text-xs text-slate-400 mt-1">
@@ -181,7 +191,10 @@ export const BajaUsuarioConfirmacion: React.FC<BajaUsuarioConfirmacionProps> = (
       </div>
     </div>
   </div>
-);
+  );
+};
+
+
 
 export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   currentUser,
@@ -350,6 +363,17 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
       return matchesSearch && matchesEstado && matchesPropietario;
     });
   }, [inmuebles, inmuebleSearch, inmuebleEstadoFilter, inmueblePropietarioFilter]);
+
+  // UX-7 §6: los dos modales de supervisión (ficha de inmueble y ficha de propietario)
+  // se comportan como diálogos: foco dentro, `Escape` para cerrar y foco devuelto al origen.
+  const dialogoDossier = useDialogoAccesible(
+    { abierto: Boolean(selectedInmuebleDossier), onCerrar: () => setSelectedInmuebleDossier(null) },
+    'Ficha de inmueble (supervisión)'
+  );
+  const dialogoDossierPropietario = useDialogoAccesible(
+    { abierto: Boolean(selectedPropietarioDetail), onCerrar: () => setSelectedPropietarioDetail(null) },
+    'Ficha del propietario (supervisión)'
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row antialiased">
@@ -1449,8 +1473,8 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
         {/* Modal: Ficha de Inmueble (Inspección de Administración) */}
         {selectedInmuebleDossier && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 text-xs text-slate-300 space-y-4">
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div ref={dialogoDossier.refDialogo} {...dialogoDossier.propsDialogo} className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto my-auto p-6 text-xs text-slate-300 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white">Ficha de Inmueble (Supervisión)</h3>
                 <button
@@ -1507,8 +1531,8 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
         {/* Modal: Ficha de Propietario */}
         {selectedPropietarioDetail && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 text-xs text-slate-300 space-y-4">
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div ref={dialogoDossierPropietario.refDialogo} {...dialogoDossierPropietario.propsDialogo} className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto my-auto p-6 text-xs text-slate-300 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white">Ficha del Propietario</h3>
                 <button

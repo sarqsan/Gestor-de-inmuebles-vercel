@@ -30,6 +30,8 @@ import {
   crearProyectoDesdeNecesidad,
 } from '../../utils/reformasEngine';
 import {
+  claveScope,
+  scopeDeUsuario,
   subscribeNecesidadesReforma,
   subscribeProyectosReforma,
   subscribePresupuestosProfesionales,
@@ -68,22 +70,27 @@ export const ReformasInmueblePanel: React.FC<ReformasInmueblePanelProps> = ({
   const [selectedNecesidadParaEditar, setSelectedNecesidadParaEditar] = useState<NecesidadReforma | null>(null);
   const [selectedProyectoParaDetalle, setSelectedProyectoParaDetalle] = useState<ProyectoReforma | null>(null);
 
+  // BLOQUE 12 · A-01: las consultas se acotan por ámbito (el filtrado local por
+  // inmueble se mantiene); sin ámbito, un titular no podría demostrar el `list`.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
+
   useEffect(() => {
     const unsubNec = subscribeNecesidadesReforma((data) => {
       setNecesidades(data || []);
-    });
+    }, scope);
     const unsubProj = subscribeProyectosReforma((data) => {
       setProyectos(data || []);
-    });
+    }, scope);
     const unsubPpt = subscribePresupuestosProfesionales((data) => {
       setPresupuestos(data || []);
-    });
+    }, scope);
     const unsubTrab = subscribeTrabajosProfesionales((data) => {
       setTrabajos(data || []);
-    });
+    }, scope);
     const unsubGast = subscribeGastos((data) => {
       setGastos(data || []);
-    });
+    }, scope);
 
     return () => {
       unsubNec();
@@ -92,7 +99,7 @@ export const ReformasInmueblePanel: React.FC<ReformasInmueblePanelProps> = ({
       unsubTrab();
       unsubGast();
     };
-  }, []);
+  }, [claveDelScope]);
 
   const necesidadesDelInmueble = useMemo(
     () => necesidades.filter((n) => n.inmuebleId === inmueble.id),

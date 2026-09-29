@@ -44,6 +44,8 @@ import type {
   ValoracionProfesionalTrabajo,
 } from '../../types';
 import {
+  claveScope,
+  scopeDeUsuario,
   saveIncidenciaFirestore,
   savePolizaFirestore,
   saveSiniestroFirestore,
@@ -232,21 +234,25 @@ export const OperacionesSection: React.FC<OperacionesSectionProps> = ({
   const [siniestroToEdit, setSiniestroToEdit] = useState<Siniestro | null>(null);
   const [isSiniestroModalOpen, setIsSiniestroModalOpen] = useState<boolean>(false);
 
-  // Suscripciones en tiempo real (mismo patrón que IncidenciasSection)
+  // Suscripciones en tiempo real (mismo patrón que IncidenciasSection).
+  // BLOQUE 12 · A-01: todas acotadas por ámbito; se desmontan al cambiar de
+  // titular/cartera o al revocarse el servicio.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
   useEffect(() => {
     setLoading(true);
     const unsubIncidencias = subscribeIncidencias((items) => {
       setIncidencias(items);
       setLoading(false);
-    });
-    const unsubTareas = subscribeTareasMantenimiento(setTareas);
-    const unsubTrabajos = subscribeTrabajosProfesionales(setTrabajos);
-    const unsubPresupuestos = subscribePresupuestosProfesionales(setPresupuestos);
-    const unsubGarantias = subscribeGarantiasReparacion(setGarantias);
-    const unsubSiniestros = subscribeSiniestros(setSiniestros);
-    const unsubPolizas = subscribePolizas(setPolizas);
-    const unsubNecesidades = subscribeNecesidadesReforma(setNecesidades);
-    const unsubProyectos = subscribeProyectosReforma(setProyectos);
+    }, scope);
+    const unsubTareas = subscribeTareasMantenimiento(setTareas, scope);
+    const unsubTrabajos = subscribeTrabajosProfesionales(setTrabajos, scope);
+    const unsubPresupuestos = subscribePresupuestosProfesionales(setPresupuestos, scope);
+    const unsubGarantias = subscribeGarantiasReparacion(setGarantias, scope);
+    const unsubSiniestros = subscribeSiniestros(setSiniestros, scope);
+    const unsubPolizas = subscribePolizas(setPolizas, scope);
+    const unsubNecesidades = subscribeNecesidadesReforma(setNecesidades, scope);
+    const unsubProyectos = subscribeProyectosReforma(setProyectos, scope);
     return () => {
       unsubIncidencias();
       unsubTareas();
@@ -258,19 +264,16 @@ export const OperacionesSection: React.FC<OperacionesSectionProps> = ({
       unsubNecesidades();
       unsubProyectos();
     };
-  }, []);
+  }, [claveDelScope]);
 
   // §10.9: valoraciones acotadas por propietario (where propietarioId) con el
-  // mismo ámbito de propietario que ya usa la sección (tipoPerfil/propietarioId).
+  // mismo ámbito canónico que el resto de la sección (A-01: L ∪ E incluido).
   useEffect(() => {
-    const unsubValoraciones = subscribeValoracionesProfesionales(setValoraciones, {
-      tipoPerfil: currentUser?.tipoPerfil,
-      propietarioId: currentUser?.propietarioId,
-    });
+    const unsubValoraciones = subscribeValoracionesProfesionales(setValoraciones, scope);
     return () => {
       unsubValoraciones();
     };
-  }, [currentUser?.tipoPerfil, currentUser?.propietarioId]);
+  }, [claveDelScope]);
 
   // Alcance RBAC en profundidad sobre listas ya acotadas por App
   const alcance: AlcanceOperativa = useMemo(

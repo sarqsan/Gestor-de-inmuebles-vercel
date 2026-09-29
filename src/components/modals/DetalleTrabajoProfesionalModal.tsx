@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Briefcase,
@@ -56,6 +56,8 @@ import {
   saveIncidenciaFirestore,
   saveGastoFirestore,
   saveGarantiaReparacionFirestore,
+  claveScope,
+  scopeDeUsuario,
   subscribeGastos,
 } from '../../lib/firebase';
 import { registrarGarantiaDesdeTrabajo } from '../../utils/mantenimientoEngine';
@@ -167,15 +169,19 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
     }
   }, [gastos]);
 
-  // Suscripción reactiva si no se pasan gastos como prop (solo para propietarios/administradores)
+  // Suscripción reactiva si no se pasan gastos como prop (solo para
+  // propietarios/administradores). BLOQUE 12 · A-01: acotada por ámbito.
+  const scopeGastos = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveScopeGastos = claveScope(scopeGastos);
+
   useEffect(() => {
     if (!gastos && currentUser?.tipoPerfil !== 'PROFESIONAL') {
       const unsub = subscribeGastos((data) => {
         setLocalGastos(data);
-      });
+      }, scopeGastos);
       return () => unsub();
     }
-  }, [gastos, currentUser]);
+  }, [gastos, currentUser, claveScopeGastos]);
 
   if (!isOpen) return null;
 

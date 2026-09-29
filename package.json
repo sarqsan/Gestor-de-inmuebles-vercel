@@ -15,6 +15,12 @@
     "test:bloque-7": "tsx scripts/test-bloque-7.ts",
     "test:bloque-8": "vitest run tests/bloque-8-migracion-historica.test.ts tests/migracion-dry-run-b4.test.ts tests/autorizacion-migracion-o7.test.ts tests/import-export-canonico.test.ts",
     "test:bloque-9": "vitest run src/experiencia/experiencia.test.ts src/experiencia/asistente.test.ts src/experiencia/consultasERP.test.ts src/experiencia/proveedorGemini.test.ts src/experiencia/limites.test.ts src/experiencia/progreso.test.ts src/experiencia/targets.test.ts src/components/experiencia/experiencia.ui.test.tsx src/components/experiencia/experiencia.f2.ui.test.tsx src/components/experiencia/experiencia.f3.ui.test.tsx src/components/experiencia/experiencia.f4.ui.test.tsx src/components/sections/centro-ayuda.b9.ui.test.tsx",
+    "test:operaciones": "node --import tsx --test \"src/features/operaciones/tests/*.test.mjs\"",
+    "test:patrimonial": "node --import tsx --test \"src/features/patrimonial/tests/*.test.mjs\"",
+    "test:integracion": "npm run test:operaciones && npm run test:patrimonial",
+    "test:emulador:operaciones": "node --import tsx --test src/features/operaciones/tests/emulator/operaciones.emulator.mjs",
+    "auditoria:repositorio": "tsx scripts/guardia-a04-repositorio.mts",
+    "auditoria:reglas:matriz": "tsx scripts/diagnostico-b12-list.mts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

@@ -45,10 +45,12 @@ import {
   crearItemHistorialTrabajo,
 } from '../../utils/profesionalesEngine';
 import {
+  claveScope,
   subscribeTrabajosProfesionales,
   subscribeIncidencias,
   saveTrabajoProfesionalFirestore,
   saveIncidenciaFirestore,
+  type DataAccessScope,
 } from '../../lib/firebase';
 import { DetalleTrabajoProfesionalModal } from '../modals/DetalleTrabajoProfesionalModal';
 import { TrabajoProfesionalModal } from '../modals/TrabajoProfesionalModal';
@@ -83,19 +85,32 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
+  // BLOQUE 12 · A-01: portal del profesional. Las reglas conceden `list` por
+  // `profesionalId` (trabajos) y `profesionalAsignadoId` (incidencias): antes
+  // se pedía la colección completa y las reglas la denegaban.
+  const scope = useMemo<DataAccessScope>(
+    () => ({
+      tipoPerfil: currentUser.tipoPerfil,
+      propietarioId: currentUser.propietarioId,
+      inmuebleIds: currentUser.inmuebleIds || [],
+      profesionalId: profesional?.id || currentUser.profesionalId,
+    }),
+    [currentUser, profesional?.id]
+  );
+  const claveDelScope = claveScope(scope);
   useEffect(() => {
     const unsubTrabajos = subscribeTrabajosProfesionales((data) => {
       setTrabajos(data || []);
-    });
+    }, scope);
     const unsubIncidencias = subscribeIncidencias((data) => {
       setIncidencias(data || []);
-    });
+    }, scope);
 
     return () => {
       unsubTrabajos();
       unsubIncidencias();
     };
-  }, []);
+  }, [claveDelScope]);
 
   // Local state for editing profile
   const [nombreComercial, setNombreComercial] = useState(

@@ -47,6 +47,8 @@ import {
 import { calcularResumenCobros, calcularAvisosCobros } from '../../utils/cobrosEngine';
 import { resumenGastos } from '../../utils/gastosEngine';
 import {
+  scopeDeUsuario,
+  claveScope,
   subscribeIncidencias,
   subscribeTareasMantenimiento,
   subscribePolizas,
@@ -55,6 +57,7 @@ import {
   subscribeExpedientesRecomercializacion,
   subscribeAuditLogs,
 } from '../../lib/firebase';
+import { esUsuarioMaster } from '../../lib/adminUsuarios';
 import { subscribeActas } from '../../lib/firebaseActas';
 import type { Acta } from '../../types/actas';
 import {
@@ -155,15 +158,20 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
 
   // Scope para filtrado cliente cuando el subscribe no lleva scope
   const allowedInmuebleIds = useMemo(() => new Set(inmuebles.map((i) => i.id)), [inmuebles]);
+  // BLOQUE 12 · A-01: ámbito memoizado (incluye carteras L ∪ E); al cambiar el
+  // titular, la cartera o los inmuebles, el efecto se re-ejecuta y desmonta las
+  // suscripciones anteriores.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
 
   useEffect(() => {
     setLoadingOps(true);
     setErrorOps(null);
     const subs: Array<() => void> = [];
     try {
-      const scope = currentUser
-        ? { tipoPerfil: currentUser.tipoPerfil, propietarioId: currentUser.propietarioId, inmuebleIds: currentUser.inmuebleIds || [] }
-        : undefined;
+      // BLOQUE 12 · A-01: ámbito canónico (incluye carteras L ∪ E) para TODAS
+      // las consultas de la sección; antes pólizas/siniestros/trabajos pedían
+      // la colección completa y las reglas las denegaban a todo perfil no master.
 
       subs.push(
         subscribeIncidencias((items) => {
@@ -182,19 +190,19 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
         subscribePolizas((items) => {
           const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => !it.inmuebleId || allowedInmuebleIds.has(it.inmuebleId)) : items;
           setPolizas(filtered);
-        })
+        }, scope)
       );
       subs.push(
         subscribeSiniestros((items) => {
           // Siniestros vinculados a incidencias ya filtradas; filtrado indirecto por inmueble via incidenciaId si posible
           setSiniestros(items);
-        })
+        }, scope)
       );
       subs.push(
         subscribeTrabajosProfesionales((items) => {
           const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => allowedInmuebleIds.has(it.inmuebleId)) : items;
           setTrabajos(filtered);
-        })
+        }, scope)
       );
       subs.push(
         subscribeExpedientesRecomercializacion((items) => {
@@ -208,14 +216,17 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
           setActas(filtered as any);
         }, scope as any)
       );
-      // Solo admin tiene audit logs; si falla, no rompe dashboard
-      try {
+      // Solo el master puede listar `audit_logs` (reglas: `allow read: if
+      // isMasterAdmin()`). BLOQUE 12 · A-01: se suscribe únicamente cuando la
+      // sesión es master; para el resto no se abre un listener que las reglas
+      // deniegan (antes generaba un error de lectura en cada carga).
+      if (esUsuarioMaster(currentUser)) {
         subs.push(
           subscribeAuditLogs((items) => {
             setAuditLogs(items);
           })
         );
-      } catch {}
+      }
       setLoadingOps(false);
     } catch (e: any) {
       setErrorOps(mensajeDeErrorUsuario(e, 'Error cargando operaciones'));
@@ -228,8 +239,8 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
         } catch {}
       });
     };
-    // Re-suscribir si cambian inmuebles permitidos (scope)
-  }, [currentUser?.id, currentUser?.tipoPerfil, inmuebles.length]);
+    // Re-suscribir si cambia el ámbito (titular, cartera o inmuebles)
+  }, [claveDelScope, inmuebles.length]);
 
   // ===================== CÁLCULOS DERIVADOS REALES =====================
   const resumenCobros = useMemo(() => calcularResumenCobros(cobros), [cobros]);

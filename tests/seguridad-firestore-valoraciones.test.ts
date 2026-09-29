@@ -307,19 +307,26 @@ describe('§10.9 — consulta del cliente compatible con `allow list`', () => {
     expect(fn).not.toMatch(/onSnapshot\(\s*VALORACIONES_PROFESIONALES_COL/);
     expect(fn).not.toContain('orderBy(');
   });
-  it('subscribeColeccionPropietario aplica where(propietarioId == pid) al PROPIETARIO y vacía al PROFESIONAL', () => {
+  it('subscribeColeccionPropietario delega el ámbito en el helper único (BLOQUE 12 · A-01)', () => {
+    // Antes contenía la lógica; ahora una sola implementación
+    // (`subscribeColeccionPorAmbito`) evita que las colecciones divergan.
     const i2 = FB_SRC.indexOf('function subscribeColeccionPropietario<');
     const cuerpo = FB_SRC.slice(i2, FB_SRC.indexOf('\n}\n', i2));
-    expect(cuerpo).toContain("scope?.tipoPerfil === 'PROFESIONAL'");
-    expect(cuerpo).toContain("where('propietarioId', '==', pid)");
+    expect(cuerpo).toContain('subscribeColeccionPorAmbito<');
+    const i3 = FB_SRC.indexOf('function subscribeColeccionPorAmbito<');
+    const canonico = FB_SRC.slice(i3, FB_SRC.indexOf('\n}\n', i3));
+    expect(canonico).toContain("perfil === 'PROFESIONAL'");
+    expect(canonico).toContain('vac');
+    expect(canonico).toContain("where(campo, '==', scope.profesionalId)");
+    expect(canonico).toContain('subscribeUnionPorCampo');
   });
-  it('OperacionesSection pasa tipoPerfil y propietarioId del usuario actual', () => {
+  it('OperacionesSection acota las valoraciones con el ámbito canónico del usuario actual', () => {
     const OP = readFileSync(resolve(RAIZ, 'src/components/sections/OperacionesSection.tsx'), 'utf8');
-    const i3 = OP.indexOf('subscribeValoracionesProfesionales(setValoraciones, {');
+    const i3 = OP.indexOf('subscribeValoracionesProfesionales(');
     expect(i3).toBeGreaterThan(0);
-    const llamada = OP.slice(i3, OP.indexOf('});', i3));
-    expect(llamada).toContain('tipoPerfil: currentUser?.tipoPerfil');
-    expect(llamada).toContain('propietarioId: currentUser?.propietarioId');
+    const llamada = OP.slice(i3, OP.indexOf(');', i3));
+    expect(llamada).toContain('scope');
+    expect(OP).toContain('scopeDeUsuario(currentUser)');
   });
   it('el modal escribe propietarioId desde el trabajo (nunca del usuario) y usuarioId solo como trazabilidad', () => {
     const MODAL = readFileSync(resolve(RAIZ, 'src/components/modals/ValoracionProfesionalModal.tsx'), 'utf8');

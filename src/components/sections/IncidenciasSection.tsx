@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Incidencia,
   PolizaSeguro,
@@ -16,6 +16,8 @@ import {
   TrabajoProfesional,
 } from '../../types';
 import {
+  claveScope,
+  scopeDeUsuario,
   subscribeIncidencias,
   saveIncidenciaFirestore,
   deleteIncidenciaFirestore,
@@ -118,33 +120,39 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
   const [isDetalleModalOpen, setIsDetalleModalOpen] = useState<boolean>(false);
   const [incidenciaDetalle, setIncidenciaDetalle] = useState<Incidencia | null>(null);
 
-  // Subscripción a colecciones en tiempo real
+  // Subscripción a colecciones en tiempo real.
+  // BLOQUE 12 · A-01: TODAS las consultas van acotadas por ámbito. Las reglas
+  // exigen condición por documento y Firestore no las usa como filtro, así que
+  // una consulta sin acotar se deniega para todo perfil que no sea master; el
+  // ámbito se recalcula al cambiar de sesión/servicio y el efecto se desmonta.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
   useEffect(() => {
     setLoading(true);
     const unsubIncidencias = subscribeIncidencias((items) => {
       setIncidencias(items);
       setLoading(false);
-    });
+    }, scope);
 
     const unsubPolizas = subscribePolizas((items) => {
       setPolizas(items);
-    });
+    }, scope);
 
     const unsubSiniestros = subscribeSiniestros((items) => {
       setSiniestros(items);
-    });
+    }, scope);
 
     const unsubTareas = subscribeTareasMantenimiento((items) => {
       setTareas(items);
-    });
+    }, scope);
 
     const unsubGarantias = subscribeGarantiasReparacion((items) => {
       setGarantias(items);
-    });
+    }, scope);
 
     const unsubTrabajos = subscribeTrabajosProfesionales((items) => {
       setTrabajos(items);
-    });
+    }, scope);
 
     return () => {
       unsubIncidencias();
@@ -154,7 +162,7 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
       unsubGarantias();
       unsubTrabajos();
     };
-  }, []);
+  }, [claveDelScope]);
 
   // Mantener actualizado el modal de detalle si la incidencia cambia en Firestore
   useEffect(() => {

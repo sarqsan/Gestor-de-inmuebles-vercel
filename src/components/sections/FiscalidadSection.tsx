@@ -13,7 +13,7 @@ import {
   ResumenFiscalAnual,
   integrarFiscalConRentabilidad,
 } from '../../utils/fiscalEngine';
-import { subscribeGastosSeguros } from '../../lib/firebase';
+import { claveScope, scopeDeUsuario, subscribeGastosSeguros } from '../../lib/firebase';
 import {
   Building2,
   Calendar,
@@ -63,13 +63,16 @@ export const FiscalidadSection: React.FC<FiscalidadSectionProps> = ({
       return;
     }
     if (gastosProp && gastosProp.length === 0) {
-      // Si prop es array vacío, intentar suscribir igualmente para obtener datos reales de Firestore
+      // Si prop es array vacío, intentar suscribir igualmente para obtener datos reales de Firestore.
+      // BLOQUE 12 · A-01: ámbito canónico (`scopeDeUsuario`, L ∪ E incluido);
+      // antes se pasaba el usuario crudo, que no proyecta carteras y dejaba la
+      // consulta del gestor sin la unión pid a pid que exigen las reglas.
       const unsub = subscribeGastosSeguros((items) => {
         if (items.length > 0) setGastosState(items);
-      }, currentUser as any);
+      }, scopeDeUsuario(currentUser));
       return () => unsub();
     }
-  }, [gastosProp, currentUser?.id]);
+  }, [gastosProp, currentUser?.id, claveScope(scopeDeUsuario(currentUser))]);
   const gastos = gastosProp && gastosProp.length > 0 ? gastosProp : gastosState;
 
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string>(

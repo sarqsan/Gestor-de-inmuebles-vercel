@@ -54,6 +54,7 @@ import {
   versionarPolitica,
   validarPolitica,
 } from '../../utils/morosidad/dunningPolicy';
+import { reportarErrorLectura } from '../../estadoDatos/canalIncidencias';
 import { progresoCompromiso } from '../../utils/morosidad/compromisos';
 import { describirEstado, TRANSICIONES_MOROSIDAD } from '../../utils/morosidad/morosidadEstados';
 import { resumenMorosidad } from '../../utils/morosidad/morosidadEngine';
@@ -180,7 +181,10 @@ export const MorosidadSection: React.FC<MorosidadSectionProps> = (props) => {
       ]);
       setHistorialDetalle(hist);
       setEvidenciasDetalle(evi);
-    } catch {
+    } catch (err) {
+      // BLOQUE 12 · A-07: antes se fijaba a [] sin aviso y parecía «sin datos».
+      // El canal de incidencias de lectura deja constancia visible del fallo.
+      reportarErrorLectura('morosidad_historial', err, 'No se pudo cargar el historial/evidencias del expediente:');
       setHistorialDetalle([]);
       setEvidenciasDetalle([]);
     }

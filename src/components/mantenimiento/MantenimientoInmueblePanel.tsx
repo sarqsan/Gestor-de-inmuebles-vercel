@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Inmueble,
   TareaMantenimiento,
@@ -10,6 +10,8 @@ import {
   UsuarioApp,
 } from '../../types';
 import {
+  claveScope,
+  scopeDeUsuario,
   subscribeTareasMantenimiento,
   subscribeGarantiasReparacion,
   subscribeTrabajosProfesionales,
@@ -52,24 +54,29 @@ export const MantenimientoInmueblePanel: React.FC<MantenimientoInmueblePanelProp
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // BLOQUE 12 · A-01: consultas acotadas por ámbito; el filtrado por inmueble
+  // se conserva como defensa en profundidad.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
+
   useEffect(() => {
     setLoading(true);
     const unsubTareas = subscribeTareasMantenimiento((items) => {
       setTareas(items.filter((t) => t.inmuebleId === inmueble.id));
       setLoading(false);
-    });
+    }, scope);
 
     const unsubGarantias = subscribeGarantiasReparacion((items) => {
       setGarantias(items.filter((g) => g.inmuebleId === inmueble.id));
-    });
+    }, scope);
 
     const unsubTrabajos = subscribeTrabajosProfesionales((items) => {
       setTrabajos(items.filter((t) => t.inmuebleId === inmueble.id));
-    });
+    }, scope);
 
     const unsubGastos = subscribeGastos((items) => {
       setGastos(items.filter((g) => g.inmuebleId === inmueble.id));
-    });
+    }, scope);
 
     return () => {
       unsubTareas();
@@ -77,7 +84,7 @@ export const MantenimientoInmueblePanel: React.FC<MantenimientoInmueblePanelProp
       unsubTrabajos();
       unsubGastos();
     };
-  }, [inmueble.id]);
+  }, [claveDelScope, inmueble.id]);
 
   // Resumen del inmueble
   const resumen = resumenMantenimientoInmueble(inmueble.id, tareas, garantias, trabajos, gastos);

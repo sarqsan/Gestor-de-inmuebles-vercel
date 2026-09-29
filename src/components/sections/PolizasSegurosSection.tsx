@@ -11,6 +11,8 @@ import {
   subscribePolizasSeguras,
   savePolizaFirestore,
   deletePolizaFirestore,
+  claveScope,
+  scopeDeUsuario,
 } from '../../lib/firebase';
 import {
   detectarPolizasProximasVencer,
@@ -77,14 +79,17 @@ export const PolizasSegurosSection: React.FC<PolizasSegurosSectionProps> = ({
   const [isDetalleOpen, setIsDetalleOpen] = useState(false);
   const [isRenovacionOpen, setIsRenovacionOpen] = useState(false);
 
+  // BLOQUE 12 · A-01: `polizas_seguros` exige consulta acotada (titular/cartera).
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
   useEffect(() => {
     setLoading(true);
     const unsub = subscribePolizasSeguras((items) => {
       setPolizas(items);
       setLoading(false);
-    });
+    }, scope);
     return () => unsub();
-  }, [currentUser?.id, (currentUser as any)?.propietarioId, JSON.stringify(currentUser?.inmuebleIds)]);
+  }, [claveDelScope]);
 
   // Escuchar eventos globales para abrir modales desde DetallePolizaModal
   useEffect(() => {

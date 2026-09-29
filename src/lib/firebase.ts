@@ -74,7 +74,7 @@ import type {
 } from '../types/facturacion';
 import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
 import type { GestionCartera } from './gestionesCartera';
-import type { InmuebleDelegadoParcial } from './carterasGestion';
+import { propietariosGestionadosDe, type InmuebleDelegadoParcial } from './carterasGestion';
 import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import {
   INITIAL_CANDIDATOS,
@@ -191,6 +191,18 @@ export interface DataAccessScope {
   /** IDs deducidos de gestiones parciales activas; solo acotan consultas. */
   inmueblesGestionadosParciales?: string[];
   ambitosParcialesGestionados?: InmuebleDelegadoParcial[];
+  /**
+   * BLOQUE 12 · A-01: profesional vinculado (`myProfId` en las reglas). Sólo
+   * acota la consulta de las colecciones cuyo `list` concede la rama
+   * profesional (`trabajos_profesionales`, `incidencias`, ...).
+   */
+  profesionalId?: string;
+  /**
+   * BLOQUE 12 · A-01: contratos visibles (`tenantContratoIds`/ámbito de
+   * inmueble en las reglas). `mensajes_portal` exige `contratoId` en el
+   * documento, así que se consulta contrato a contrato.
+   */
+  contratoIds?: string[];
 }
 
 /**
@@ -1401,9 +1413,30 @@ export async function deletePrestamoFirestore(prestamoId: string) {
 // por id de documento. Un listener revocado falla cerrado (error aislado,
 // resto intacto); el gestor nunca consulta la colección completa.
 // ============================================================
-function subscribeUnionPorPropietario<T extends { id: string }>(
+/**
+ * Campos de aislamiento con los que las reglas conceden `list` a un perfil no
+ * master. Son los MISMOS nombres que usan `firestore.rules` (`aisladoEsMio`,
+ * `ambitoPorInmuebleLectura`, `myProfId`, `profesionalAsignadoId`,
+ * `ambitoPorContratoLectura`): la consulta acotada debe declarar el campo que
+ * la regla compara.
+ */
+export type CampoAmbito =
+  | 'propietarioId'
+  | 'inmuebleId'
+  | 'profesionalId'
+  | 'profesionalAsignadoId'
+  | 'contratoId';
+
+/**
+ * BLOQUE 12 · A-01 — Unión de consultas acotadas por campo de aislamiento.
+ * Una consulta por valor (`where(campo,'==',valor)`) para que las reglas puedan
+ * demostrar la pertenencia documento a documento; Firestore NO usa reglas como
+ * filtros, de modo que una consulta sin acotar sobre una colección con
+ * condición por documento es denegada para todo perfil no master.
+ */
+function subscribeUnionDeFuentes<T extends { id: string }>(
   col: ReturnType<typeof collection>,
-  pids: Array<string | undefined>,
+  fuentesAmbito: Array<{ campo: CampoAmbito; valores: Array<string | undefined> }>,
   callback: (items: T[]) => void,
   etiqueta: string
 ): Unsubscribe {
@@ -1415,24 +1448,27 @@ function subscribeUnionPorPropietario<T extends { id: string }>(
     callback(Array.from(union.values()));
   };
   const vistos = new Set<string>();
-  for (const pid of pids) {
-    if (!pid || vistos.has(pid)) continue;
-    vistos.add(pid);
-    const clave = `pid:${pid}`;
-    fuentes.push(
-      onSnapshot(
-        query(col, where('propietarioId', '==', pid)),
-        (snap) => {
-          const parcial = new Map<string, T>();
-          snap.forEach((ds) => parcial.set(ds.id, { id: ds.id, ...ds.data() } as unknown as T));
-          porFuente.set(clave, parcial);
-          notificar();
-        },
-        (err) => {
-          reportarErrorLectura(etiqueta, err, `Firestore ${etiqueta} (${clave}) snapshot error:`);
-        }
-      )
-    );
+  for (const { campo, valores } of fuentesAmbito) {
+    for (const valor of valores) {
+      if (!valor) continue;
+      const clave = `${campo}:${valor}`;
+      if (vistos.has(clave)) continue;
+      vistos.add(clave);
+      fuentes.push(
+        onSnapshot(
+          query(col, where(campo, '==', valor)),
+          (snap) => {
+            const parcial = new Map<string, T>();
+            snap.forEach((ds) => parcial.set(ds.id, { id: ds.id, ...ds.data() } as unknown as T));
+            porFuente.set(clave, parcial);
+            notificar();
+          },
+          (err) => {
+            reportarErrorLectura(etiqueta, err, `Firestore ${etiqueta} (${clave}) snapshot error:`);
+          }
+        )
+      );
+    }
   }
   if (fuentes.length === 0) {
     callback([]);
@@ -1441,6 +1477,168 @@ function subscribeUnionPorPropietario<T extends { id: string }>(
   return () => {
     fuentes.forEach((u) => u());
   };
+}
+
+function subscribeUnionPorCampo<T extends { id: string }>(
+  col: ReturnType<typeof collection>,
+  campo: CampoAmbito,
+  valores: Array<string | undefined>,
+  callback: (items: T[]) => void,
+  etiqueta: string
+): Unsubscribe {
+  return subscribeUnionDeFuentes<T>(col, [{ campo, valores }], callback, etiqueta);
+}
+
+function subscribeUnionPorPropietario<T extends { id: string }>(
+  col: ReturnType<typeof collection>,
+  pids: Array<string | undefined>,
+  callback: (items: T[]) => void,
+  etiqueta: string
+): Unsubscribe {
+  return subscribeUnionPorCampo<T>(col, 'propietarioId', pids, callback, etiqueta);
+}
+
+/**
+ * BLOQUE 12 · A-01 — Ámbito de consulta derivado del usuario de sesión.
+ * Única derivación autorizada para las secciones: mismas claves que ya usa la
+ * capa global de `App.tsx` (`propietariosGestionadosDe` = L ∪ E). Las reglas
+ * revalidan cada consulta: esto sólo delimita lo que se pide.
+ */
+export function scopeDeUsuario(usuario?: UsuarioApp | null): DataAccessScope | undefined {
+  if (!usuario) return undefined;
+  return {
+    tipoPerfil: usuario.tipoPerfil,
+    propietarioId: usuario.propietarioId,
+    inmuebleIds: usuario.inmuebleIds || [],
+    profesionalId: usuario.profesionalId,
+    propietariosGestionados: propietariosGestionadosDe({
+      carterasL: usuario.carterasL || [],
+      carterasE: usuario.carterasE || [],
+    }),
+    inmueblesGestionadosParciales: usuario.inmueblesDelegadosParciales || [],
+  };
+}
+
+/**
+ * BLOQUE 12 · A-01 — Clave estable de un ámbito para dependencias de efecto.
+ * Las secciones la usan como dependencia: al cambiar el ámbito (otro titular,
+ * otra cartera, revocación o cambio de inmuebles) el efecto se re-ejecuta y las
+ * suscripciones anteriores se desmontan en su limpieza.
+ */
+export function claveScope(scope?: DataAccessScope): string {
+  if (!scope) return 'sin-ambito';
+  return JSON.stringify([
+    scope.tipoPerfil ?? '',
+    scope.propietarioId ?? '',
+    [...(scope.inmuebleIds ?? [])].sort(),
+    [...(scope.propietariosGestionados ?? [])].sort(),
+    [...(scope.inmueblesGestionadosParciales ?? [])].sort(),
+    scope.profesionalId ?? '',
+    [...(scope.contratoIds ?? [])].sort(),
+  ]);
+}
+
+/**
+ * BLOQUE 12 · A-01 — Suscripción acotada por ámbito y campo de aislamiento.
+ *
+ * Semántica (idéntica para todas las colecciones):
+ *  · sin ámbito o ADMINISTRADOR → colección completa (las reglas deciden; el
+ *    master es el único perfil con `list` global en las colecciones aisladas);
+ *  · PROPIETARIO → su pid (+ carteras si la colección las admite);
+ *  · PROFESIONAL → por `profesionalId`/`profesionalAsignadoId` o, en
+ *    colecciones con lectura de cartera, unión pid a pid; sin ámbito aplicable
+ *    devuelve vacío (fallo en cerrado, nunca consulta global);
+ *  · PROPIETARIO/PROFESIONAL por `inmuebleId`/`contratoId` → una consulta por
+ *    identificador permitido; sin identificadores, vacío.
+ */
+export function subscribeColeccionPorAmbito<T extends { id: string }>(
+  col: ReturnType<typeof collection>,
+  callback: (items: T[]) => void,
+  scope: DataAccessScope | undefined,
+  etiqueta: string,
+  opciones: {
+    campo?: CampoAmbito;
+    conCarteras?: boolean;
+    /**
+     * Campo con el que las reglas conceden `list` al profesional vinculado
+     * (`profesionalAsignadoId` en incidencias, `profesionalId` en trabajos y
+     * presupuestos). Se une a la consulta de cartera cuando el gestor además
+     * tiene titulares delegados.
+     */
+    campoProfesional?: 'profesionalId' | 'profesionalAsignadoId';
+  } = {}
+): Unsubscribe {
+  const campo: CampoAmbito = opciones.campo ?? 'propietarioId';
+  const conCarteras = opciones.conCarteras ?? false;
+  const perfil = scope?.tipoPerfil;
+  const mapear = (snap: QuerySnapshot) => {
+    const items: T[] = [];
+    snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as unknown as T));
+    callback(items);
+  };
+  const onError = (err: unknown) => reportarErrorLectura(etiqueta, err, `Firestore ${etiqueta} snapshot error:`);
+  const vacio = () => {
+    callback([]);
+    return () => {};
+  };
+
+  // Sin ámbito (master/admin de sistema) o ADMINISTRADOR: colección completa
+  // para las colecciones cuyo aislamiento es por propietario. Las colecciones
+  // que exigen una clave por documento (`inmuebleId`/`contratoId`) se resuelven
+  // por identificador también para el administrador: la condición documental
+  // no es demostrable sin el filtro.
+  const coleccionCompleta = perfil !== 'PROPIETARIO' && perfil !== 'PROFESIONAL';
+
+  if (campo === 'inmuebleId') {
+    // Titulares (propios ∪ autorizados) y delegaciones parciales activas; el
+    // gestor de cartera completa ve los inmuebles de su cartera porque el
+    // llamante ya entrega el conjunto acotado (p. ej. `scopedInmuebles`).
+    const ids = [...(scope?.inmuebleIds ?? []), ...(scope?.inmueblesGestionadosParciales ?? [])];
+    if (ids.length === 0) {
+      return coleccionCompleta ? onSnapshot(col, mapear, onError) : vacio();
+    }
+    return subscribeUnionPorCampo<T>(col, 'inmuebleId', ids, callback, etiqueta);
+  }
+
+  if (campo === 'contratoId') {
+    const ids = scope?.contratoIds ?? [];
+    if (ids.length === 0) {
+      return coleccionCompleta ? onSnapshot(col, mapear, onError) : vacio();
+    }
+    return subscribeUnionPorCampo<T>(col, 'contratoId', ids, callback, etiqueta);
+  }
+
+  if (!scope || perfil === 'ADMINISTRADOR' || !perfil) {
+    return onSnapshot(col, mapear, onError);
+  }
+
+  if (campo === 'profesionalId' || campo === 'profesionalAsignadoId') {
+    if (perfil !== 'PROFESIONAL' || !scope.profesionalId) return vacio();
+    return onSnapshot(query(col, where(campo, '==', scope.profesionalId)), mapear, onError);
+  }
+
+  // campo === 'propietarioId'
+  const gestionados = conCarteras ? (scope.propietariosGestionados ?? []) : [];
+  if (perfil === 'PROFESIONAL') {
+    const fuentes: Array<{ campo: CampoAmbito; valores: Array<string | undefined> }> = [];
+    if (gestionados.length > 0) fuentes.push({ campo: 'propietarioId', valores: gestionados });
+    if (opciones.campoProfesional && scope.profesionalId) {
+      fuentes.push({ campo: opciones.campoProfesional, valores: [scope.profesionalId] });
+    }
+    if (fuentes.length === 0) return vacio();
+    return subscribeUnionDeFuentes<T>(col, fuentes, callback, etiqueta);
+  }
+  if (perfil === 'PROPIETARIO') {
+    if (!scope.propietarioId && gestionados.length === 0) return vacio();
+    return subscribeUnionPorCampo<T>(
+      col,
+      'propietarioId',
+      [scope.propietarioId, ...gestionados],
+      callback,
+      etiqueta
+    );
+  }
+  return vacio();
 }
 
 /**
@@ -1501,39 +1699,11 @@ function subscribeColeccionPropietario<T extends { id: string }>(
   // aislamiento estricto por pid propio aunque el scope traiga carteras.
   conCarteras?: boolean
 ): Unsubscribe {
-  const mapear = (snap: QuerySnapshot) => {
-    const items: T[] = [];
-    snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as unknown as T));
-    callback(items);
-  };
-  const onError = (err: unknown) => reportarErrorLectura(etiqueta, err, `Firestore ${etiqueta} snapshot error:`);
-
-  // D2 (§2): gestor con carteras sobre una colección con lectura de cartera
-  // en Rules — une pid propio (si lo tiene) + carteras pid-a-pid.
-  const gestionados = conCarteras ? (scope?.propietariosGestionados ?? []) : [];
-  if (scope?.tipoPerfil === 'PROFESIONAL' && gestionados.length === 0) {
-    callback([]);
-    return () => {};
-  }
-  if (
-    gestionados.length > 0 &&
-    (scope?.tipoPerfil === 'PROPIETARIO' || scope?.tipoPerfil === 'PROFESIONAL')
-  ) {
-    const pids =
-      scope.tipoPerfil === 'PROPIETARIO' && scope.propietarioId
-        ? [scope.propietarioId, ...gestionados]
-        : gestionados;
-    return subscribeUnionPorPropietario<T>(col, pids, callback, etiqueta);
-  }
-  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
-    return onSnapshot(col, mapear, onError);
-  }
-  const pid = scope.propietarioId;
-  if (!pid) {
-    callback([]);
-    return () => {};
-  }
-  return onSnapshot(query(col, where('propietarioId', '==', pid)), mapear, onError);
+  // BLOQUE 12 · A-01: una sola implementación del aislamiento por propietario.
+  return subscribeColeccionPorAmbito<T>(col, callback, scope, etiqueta, {
+    campo: 'propietarioId',
+    conCarteras,
+  });
 }
 
 // ---- Expedientes de recomercialización ----
@@ -1673,12 +1843,16 @@ export function subscribeIncidencias(
   callback: (items: Incidencia[]) => void,
   scope?: DataAccessScope
 ): Unsubscribe {
-  return subscribeColeccionPropietario<Incidencia>(
+  // D2 (§2): Rules de incidencias con lectura de cartera.
+  // BLOQUE 12 · A-01: y con la rama del profesional asignado
+  // (`profesionalAsignadoId == myProfId()`): el gestor profesional que además
+  // tiene cartera recibe la unión de ambas, nunca la colección completa.
+  return subscribeColeccionPorAmbito<Incidencia>(
     INCIDENCIAS_COL,
     callback,
     scope,
     'incidencias',
-    true // D2 (§2): Rules de incidencias con lectura de cartera.
+    { campo: 'propietarioId', conCarteras: true, campoProfesional: 'profesionalAsignadoId' }
   );
 }
 export async function saveIncidenciaFirestore(item: Incidencia) {
@@ -2866,20 +3040,23 @@ export async function seedAuthAndRolesIfEmpty() {
 // PÓLIZAS DE SEGUROS Y SINIESTROS
 // =========================================================================
 
-export function subscribePolizas(callback: (items: PolizaSeguro[]) => void): Unsubscribe {
-  return onSnapshot(
+export function subscribePolizas(
+  callback: (items: PolizaSeguro[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // BLOQUE 12 · A-01: `polizas_seguros` concede `list` a titular y cartera
+  // (`aisladoEsMio`/`inmuebleEnCarteraGestionada`): la consulta se acota.
+  return subscribeColeccionPorAmbito<PolizaSeguro>(
     POLIZAS_SEGUROS_COL,
-    (snapshot) => {
-      const items: PolizaSeguro[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as PolizaSeguro);
-      });
-      items.sort((a, b) => new Date(b.createdAt || b.fechaInicio).getTime() - new Date(a.createdAt || a.fechaInicio).getTime());
-      callback(items);
+    (items) => {
+      const ordenadas = [...items].sort(
+        (a, b) => new Date(b.createdAt || b.fechaInicio).getTime() - new Date(a.createdAt || a.fechaInicio).getTime()
+      );
+      callback(ordenadas);
     },
-    (err) => {
-      reportarErrorLectura('polizas', err, 'Firestore polizas_seguros snapshot error:');
-    }
+    scope,
+    'polizas',
+    { campo: 'propietarioId', conCarteras: true }
   );
 }
 
@@ -2943,20 +3120,22 @@ export async function guardarPolizaConAuditoria(
   });
 }
 
-export function subscribeSiniestros(callback: (items: Siniestro[]) => void): Unsubscribe {
-  return onSnapshot(
+export function subscribeSiniestros(
+  callback: (items: Siniestro[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // BLOQUE 12 · A-01: `siniestros` concede `list` a titular y cartera.
+  return subscribeColeccionPorAmbito<Siniestro>(
     SINIESTROS_COL,
-    (snapshot) => {
-      const items: Siniestro[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as Siniestro);
-      });
-      items.sort((a, b) => new Date(b.fechaComunicacion).getTime() - new Date(a.fechaComunicacion).getTime());
-      callback(items);
+    (items) => {
+      const ordenados = [...items].sort(
+        (a, b) => new Date(b.fechaComunicacion).getTime() - new Date(a.fechaComunicacion).getTime()
+      );
+      callback(ordenados);
     },
-    (err) => {
-      reportarErrorLectura('siniestros', err, 'Firestore siniestros snapshot error:');
-    }
+    scope,
+    'siniestros',
+    { campo: 'propietarioId', conCarteras: true }
   );
 }
 
@@ -3008,20 +3187,24 @@ export async function uploadIncidenciaAdjuntoStorage(
 // TRABAJOS PROFESIONALES, PRESUPUESTOS Y VALORACIONES
 // =========================================================================
 
-export function subscribeTrabajosProfesionales(callback: (trabajos: TrabajoProfesional[]) => void): Unsubscribe {
-  return onSnapshot(
+export function subscribeTrabajosProfesionales(
+  callback: (items: TrabajoProfesional[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // BLOQUE 12 · A-01: `trabajos_profesionales` concede `list` al titular (propietarioId)
+  // y al profesional vinculado (profesionalId) cuando procede.
+  const campo = scope?.tipoPerfil === 'PROFESIONAL' ? ('profesionalId' as const) : ('propietarioId' as const);
+  return subscribeColeccionPorAmbito<TrabajoProfesional>(
     TRABAJOS_PROFESIONALES_COL,
-    (snapshot) => {
-      const items: TrabajoProfesional[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as TrabajoProfesional);
-      });
-      items.sort((a, b) => new Date(b.createdAt || b.fechaSolicitud).getTime() - new Date(a.createdAt || a.fechaSolicitud).getTime());
-      callback(items);
+    (items) => {
+      const ordenados = [...items].sort(
+        (a, b) => new Date(b.createdAt || b.fechaSolicitud).getTime() - new Date(a.createdAt || a.fechaSolicitud).getTime()
+      );
+      callback(ordenados);
     },
-    (err) => {
-      reportarErrorLectura('trabajos_profesionales', err, 'Firestore trabajos_profesionales snapshot error:');
-    }
+    scope,
+    'trabajos_profesionales',
+    { campo }
   );
 }
 
@@ -3047,20 +3230,24 @@ export async function deleteTrabajoProfesionalFirestore(trabajoId: string): Prom
   }
 }
 
-export function subscribePresupuestosProfesionales(callback: (presupuestos: PresupuestoProfesional[]) => void): Unsubscribe {
-  return onSnapshot(
+export function subscribePresupuestosProfesionales(
+  callback: (items: PresupuestoProfesional[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  // BLOQUE 12 · A-01: `presupuestos_profesionales` concede `list` al titular (propietarioId)
+  // y al profesional vinculado (profesionalId) cuando procede.
+  const campo = scope?.tipoPerfil === 'PROFESIONAL' ? ('profesionalId' as const) : ('propietarioId' as const);
+  return subscribeColeccionPorAmbito<PresupuestoProfesional>(
     PRESUPUESTOS_PROFESIONALES_COL,
-    (snapshot) => {
-      const items: PresupuestoProfesional[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as PresupuestoProfesional);
-      });
-      items.sort((a, b) => new Date(b.createdAt || b.fecha).getTime() - new Date(a.createdAt || a.fecha).getTime());
-      callback(items);
+    (items) => {
+      const ordenados = [...items].sort(
+        (a, b) => new Date(b.createdAt || b.fecha).getTime() - new Date(a.createdAt || a.fecha).getTime()
+      );
+      callback(ordenados);
     },
-    (err) => {
-      reportarErrorLectura('presupuestos_profesionales', err, 'Firestore presupuestos_profesionales snapshot error:');
-    }
+    scope,
+    'presupuestos_profesionales',
+    { campo }
   );
 }
 

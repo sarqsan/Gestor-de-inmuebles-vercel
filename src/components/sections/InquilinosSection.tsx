@@ -23,7 +23,9 @@ import {
   saveIncidenciaFirestore,
   saveUsuarioFirestore,
   subscribeEnlacesRegistro,
+  scopeDeUsuario,
   subscribeIncidencias,
+  type DataAccessScope,
 } from '../../lib/firebase';
 import {
   concederAccesoContrato,
@@ -62,16 +64,28 @@ export const InquilinosSection: React.FC<Props> = ({ currentUser, contratos, inm
   const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
   const [aviso, setAviso] = useState('');
 
+  // BLOQUE 12 · A-01: `mensajes_portal` exige `'contratoId' in resource.data` y
+  // ámbito de contrato, así que se consulta contrato a contrato con los que ya
+  // son visibles en la sección (antes la consulta global era denegada incluso
+  // para el master: la condición documental no es demostrable sin el filtro).
+  const claveContratos = useMemo(
+    () => [...contratos.map((c) => c.id)].sort().join('|'),
+    [contratos]
+  );
+  const scope = useMemo<DataAccessScope>(
+    () => ({ tipoPerfil: currentUser.tipoPerfil, propietarioId: currentUser.propietarioId, contratoIds: contratos.map((c) => c.id) }),
+    [currentUser.tipoPerfil, currentUser.propietarioId, claveContratos]
+  );
   useEffect(() => {
     const u1 = subscribeEnlacesRegistro(setEnlaces, currentUser);
-    const u2 = subscribeMensajesPortal(setMensajes);
-    const u3 = subscribeIncidencias(setIncidencias);
+    const u2 = subscribeMensajesPortal(setMensajes, scope);
+    const u3 = subscribeIncidencias(setIncidencias, scopeDeUsuario(currentUser));
     return () => {
       u1();
       u2();
       u3();
     };
-  }, []);
+  }, [scope]);
 
   const inquilinos = useMemo(() => usuarios.filter((u) => u.tipoPerfil === 'INQUILINO'), [usuarios]);
   const invitaciones = useMemo(() => enlaces.filter((e) => e.tipoPerfil === 'INQUILINO'), [enlaces]);

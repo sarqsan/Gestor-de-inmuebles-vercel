@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Profesional,
   TrabajoProfesional,
@@ -13,6 +13,8 @@ import {
   PrioridadIncidencia,
 } from '../../types';
 import {
+  claveScope,
+  scopeDeUsuario,
   subscribeProfesionales,
   subscribeTrabajosProfesionales,
   subscribePresupuestosProfesionales,
@@ -137,6 +139,12 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
   const [incidenciaSeleccionada, setIncidenciaSeleccionada] = useState<Incidencia | null>(null);
 
   // Firestore Subscriptions
+  // BLOQUE 12 · A-01: `profesionales` es directorio compartido (lectura global),
+  // pero trabajos, presupuestos, valoraciones e incidencias son patrimoniales:
+  // se piden acotados por ámbito y el filtrado por rol se mantiene después.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
+
   useEffect(() => {
     setLoading(true);
 
@@ -146,20 +154,20 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
 
     const unsubTrab = subscribeTrabajosProfesionales((data) => {
       setTrabajos(data);
-    });
+    }, scope);
 
     const unsubPres = subscribePresupuestosProfesionales((data) => {
       setPresupuestos(data);
-    });
+    }, scope);
 
     const unsubVal = subscribeValoracionesProfesionales((data) => {
       setValoraciones(data);
-    });
+    }, scope);
 
     const unsubInc = subscribeIncidencias((data) => {
       setIncidencias(data);
       setLoading(false);
-    });
+    }, scope);
 
     return () => {
       unsubProf();
@@ -168,7 +176,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
       unsubVal();
       unsubInc();
     };
-  }, []);
+  }, [claveDelScope]);
 
   // Filter Scopes for Owner vs Admin
   const isOwner = currentUser?.tipoPerfil === 'PROPIETARIO';

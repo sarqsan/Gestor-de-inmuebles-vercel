@@ -26,7 +26,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage, saveAuditLogFirestore } from './firebase';
+import { db, storage, saveAuditLogFirestore, subscribeColeccionPorAmbito, type DataAccessScope } from './firebase';
 import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import type {
   Suministro,
@@ -95,20 +95,26 @@ export const getCambiosByIds = (ids: string[]) => getByIds<CambioTitularSuminist
 // Suscripciones de gestión (personal; el inquilino usa get por índices)
 // ---------------------------------------------------------------------------
 
-function subscribeCol<T>(coleccion: string, cb: (items: T[]) => void): Unsubscribe {
-  return onSnapshot(
-    collection(db, coleccion),
-    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T)),
-    // UX-2 C2: un fallo de lectura se informa como ERROR (canal de incidencias).
-    // Nunca se traduce en `cb([])`: eso convertía un error en un falso vacío.
-    (err) => reportarErrorLectura('suministros', err, `Firestore ${coleccion} snapshot error:`)
-  );
-}
-
-export const subscribeSuministros = (cb: (items: Suministro[]) => void) => subscribeCol<Suministro>('suministros', cb);
-export const subscribeLecturas = (cb: (items: LecturaSuministro[]) => void) => subscribeCol<LecturaSuministro>('lecturas_suministro', cb);
-export const subscribeCambiosTitular = (cb: (items: CambioTitularSuministro[]) => void) => subscribeCol<CambioTitularSuministro>('cambios_titular', cb);
-export const subscribeMensajesPortal = (cb: (items: MensajePortal[]) => void) => subscribeCol<MensajePortal>('mensajes_portal', cb);
+/**
+ * BLOQUE 12 · A-01 — Suscripciones acotadas por ámbito.
+ *
+ * Las reglas de `suministros`, `lecturas_suministro` y `cambios_titular` exigen
+ * `'inmuebleId' in resource.data && ambitoPorInmuebleLectura(...)`, y las de
+ * `mensajes_portal` `'contratoId' in resource.data && ambitoPorContratoLectura(...)`.
+ * Firestore NO usa las reglas como filtro: sin la igualdad demostrable la
+ * consulta se deniega para todo perfil no master (el error se reporta y la
+ * sección quedaba sin datos). Por eso se consulta identificador a identificador
+ * con el conjunto que el llamante ya tiene acotado (`inmuebles`/`contratos`
+ * visibles) y, sin ámbito, se conserva la colección completa para el master.
+ */
+export const subscribeSuministros = (cb: (items: Suministro[]) => void, scope?: DataAccessScope) =>
+  subscribeColeccionPorAmbito<Suministro>(collection(db, 'suministros'), cb, scope, 'suministros', { campo: 'inmuebleId' });
+export const subscribeLecturas = (cb: (items: LecturaSuministro[]) => void, scope?: DataAccessScope) =>
+  subscribeColeccionPorAmbito<LecturaSuministro>(collection(db, 'lecturas_suministro'), cb, scope, 'suministros', { campo: 'inmuebleId' });
+export const subscribeCambiosTitular = (cb: (items: CambioTitularSuministro[]) => void, scope?: DataAccessScope) =>
+  subscribeColeccionPorAmbito<CambioTitularSuministro>(collection(db, 'cambios_titular'), cb, scope, 'suministros', { campo: 'inmuebleId' });
+export const subscribeMensajesPortal = (cb: (items: MensajePortal[]) => void, scope?: DataAccessScope) =>
+  subscribeColeccionPorAmbito<MensajePortal>(collection(db, 'mensajes_portal'), cb, scope, 'suministros', { campo: 'contratoId' });
 
 export function subscribeMensajesByContrato(contratoId: string, cb: (items: MensajePortal[]) => void): Unsubscribe {
   const q = query(MENSAJES_COL, where('contratoId', '==', contratoId));

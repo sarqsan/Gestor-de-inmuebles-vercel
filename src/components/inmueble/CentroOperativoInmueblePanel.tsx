@@ -24,6 +24,8 @@ import {
   UsuarioApp,
 } from '../../types';
 import {
+  claveScope,
+  scopeDeUsuario,
   subscribePolizasSeguras,
   subscribeIncidencias,
   subscribeTareasMantenimiento,
@@ -121,18 +123,25 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
   const [exportandoExpediente, setExportandoExpediente] = useState(false);
   const [mensajeExpediente, setMensajeExpediente] = useState<string | null>(null);
 
+  // BLOQUE 12 · A-01: consultas acotadas por ámbito; el filtrado por inmueble
+  // se conserva como defensa en profundidad.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
+
   useEffect(() => {
     setLoading(true);
     setAnalisisIncidenciaId(null);
     const unsubs = [
+      // El recorte por inmueble ya lo hace `polizasDelInmueble` (helper canónico);
+      // aquí sólo se acota la CONSULTA por ámbito (BLOQUE 12 · A-01).
       subscribePolizasSeguras((items) => {
         setPolizas(items);
         setLoading(false);
-      }),
-      subscribeIncidencias((items) => setIncidencias(items.filter((i) => i.inmuebleId === inmueble.id))),
-      subscribeTareasMantenimiento((items) => setTareas(items.filter((t) => t.inmuebleId === inmueble.id))),
-      subscribeGarantiasReparacion((items) => setGarantias(items.filter((g) => g.inmuebleId === inmueble.id))),
-      subscribeGastos((items) => setGastos(items.filter((g) => g.inmuebleId === inmueble.id))),
+      }, scope),
+      subscribeIncidencias((items) => setIncidencias(items.filter((i) => i.inmuebleId === inmueble.id)), scope),
+      subscribeTareasMantenimiento((items) => setTareas(items.filter((t) => t.inmuebleId === inmueble.id)), scope),
+      subscribeGarantiasReparacion((items) => setGarantias(items.filter((g) => g.inmuebleId === inmueble.id)), scope),
+      subscribeGastos((items) => setGastos(items.filter((g) => g.inmuebleId === inmueble.id)), scope),
       subscribeDocumentosPatrimoniales(inmueble.id, setDocumentosPatrimoniales, (error) => {
         setErrorAccion(mensajeDeErrorUsuario(error, 'No se pudo cargar la documentación patrimonial.'));
       }),
@@ -145,7 +154,7 @@ export const CentroOperativoInmueblePanel: React.FC<CentroOperativoInmueblePanel
       unsubs.forEach((u) => u());
       window.clearTimeout(fallback);
     };
-  }, [inmueble.id]);
+  }, [claveDelScope, inmueble.id]);
 
   const resumen: ResumenOperativoInmueble = useMemo(
     () =>

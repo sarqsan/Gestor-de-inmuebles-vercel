@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Incidencia,
   PolizaSeguro,
@@ -32,6 +32,8 @@ import {
   evaluarCompatibilidadProfesional,
 } from '../../utils/profesionalesEngine';
 import {
+  claveScope,
+  scopeDeUsuario,
   subscribeTrabajosProfesionales,
   subscribePresupuestosProfesionales,
   subscribeGarantiasReparacion,
@@ -160,14 +162,19 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
     'Detalle de la incidencia'
   );
 
+  // BLOQUE 12 · A-01: el modal se abre también desde secciones de titular
+  // (Incidencias/Operaciones), así que sus tres consultas van acotadas por el
+  // mismo ámbito de sesión y se desmontan al cambiar de titular/cartera.
+  const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
+  const claveDelScope = claveScope(scope);
   useEffect(() => {
     const unsubGarantias = subscribeGarantiasReparacion((items) => {
       setGarantias(items);
-    });
+    }, scope);
     return () => {
       unsubGarantias();
     };
-  }, []);
+  }, [claveDelScope]);
 
   // Sincronizar estados locales cuando cambie la incidencia
   useEffect(() => {
@@ -188,10 +195,10 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
     const unsubTrab = subscribeTrabajosProfesionales((data) => {
       const vinculados = data.filter((t) => t.incidenciaId === incidencia.id);
       setTrabajosVinculados(vinculados);
-    });
+    }, scope);
     const unsubPres = subscribePresupuestosProfesionales((data) => {
       setPresupuestosVinculados(data);
-    });
+    }, scope);
     return () => {
       unsubTrab();
       unsubPres();
@@ -203,7 +210,7 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
     const unsub = subscribeTrabajosProfesionales((data) => {
       const trabajosInm = data.filter((t) => t.inmuebleId === incidencia.inmuebleId);
       setTrabajosDelInmueble(trabajosInm);
-    });
+    }, scope);
     return () => unsub();
   }, [isOpen, incidencia?.inmuebleId]);
 

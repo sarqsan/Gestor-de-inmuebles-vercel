@@ -187,9 +187,9 @@ describe('UX-7 · guardas sobre el árbol real', () => {
       'components/DetalleSolicitudDocModal.tsx:920',
       'components/PublicPropertyGallery.tsx:150',
       'components/feedback/DialogoConfirmacion.tsx:46',
-      'components/modals/DetalleIncidenciaModal.tsx:2099',
+      'components/modals/DetalleIncidenciaModal.tsx:2106',
       'components/modals/InspeccionFotograficaModal.tsx:601',
-      'components/sections/ProfesionalPortalSection.tsx:1088',
+      'components/sections/ProfesionalPortalSection.tsx:1103',
     ]);
   });
 });

@@ -124,8 +124,83 @@ vi.mock('../../lib/firebase', async () => {
     saveUsuarioFirestore: async (u: Record<string, unknown>) => {
       await fs.setDoc(fs.doc(db, 'usuarios', String(u.id)), quitarUndefined(u), { merge: true });
     },
-    subscribeIncidencias: (cb: (items: unknown[]) => void) => {
-      cb(memoria.idsDe('incidencias').map((id) => ({ id, ...(memoria.leer('incidencias', id) as Record<string, unknown>) })));
+    // Ámbito del usuario (BLOQUE 12 · A-01): mismos campos que la canónica.
+    scopeDeUsuario: (usuario?: {
+      tipoPerfil?: string;
+      propietarioId?: string;
+      profesionalId?: string;
+      inmuebleIds?: string[];
+      carterasL?: string[];
+      carterasE?: string[];
+      inmueblesDelegadosParciales?: string[];
+    } | null) => {
+      if (!usuario) return undefined;
+      return {
+        tipoPerfil: usuario.tipoPerfil,
+        propietarioId: usuario.propietarioId,
+        inmuebleIds: usuario.inmuebleIds ?? [],
+        profesionalId: usuario.profesionalId,
+        propietariosGestionados: Array.from(new Set([...(usuario.carterasL ?? []), ...(usuario.carterasE ?? [])])),
+        inmueblesGestionadosParciales: usuario.inmueblesDelegadosParciales ?? [],
+      };
+    },
+    claveScope: (scope?: Record<string, unknown>) => (scope ? JSON.stringify(scope) : 'sin-ambito'),
+    // Lectura de colección acotada por ámbito (BLOQUE 12 · A-01): misma
+    // semántica que la canónica sobre la memoria del arnés (reactiva, vía el
+    // `onSnapshot` del módulo de Firestore en memoria). Sin ámbito (master)
+    // entrega la colección completa; con ámbito, sólo los documentos cuyo campo
+    // de ámbito está entre los valores autorizados (vacío si no hay ninguno).
+    subscribeColeccionPorAmbito: (
+      col: { __tipo: 'col'; coleccion: string },
+      cb: (items: unknown[]) => void,
+      scope?: {
+        tipoPerfil?: string;
+        propietarioId?: string;
+        propietariosGestionados?: string[];
+        inmuebleIds?: string[];
+        inmueblesGestionadosParciales?: string[];
+        contratoIds?: string[];
+      },
+      _etiqueta?: string,
+      opciones?: { campo?: string; conCarteras?: boolean }
+    ) => {
+      const campo = opciones?.campo ?? 'propietarioId';
+      const aItems = (docs: Array<{ id: string; data: () => Record<string, unknown> }>) =>
+        docs.map((d) => ({ id: d.id, ...d.data() }));
+      const completa = !scope || scope.tipoPerfil === 'ADMINISTRADOR';
+      if (completa) {
+        return fs.onSnapshot(col, (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => cb(aItems(snap.docs)));
+      }
+      let valores: string[] = [];
+      if (campo === 'contratoId') valores = scope.contratoIds ?? [];
+      else if (campo === 'inmuebleId') valores = [...(scope.inmuebleIds ?? []), ...(scope.inmueblesGestionadosParciales ?? [])];
+      else valores = [...(scope.propietarioId ? [scope.propietarioId] : []), ...(opciones?.conCarteras ? scope.propietariosGestionados ?? [] : [])];
+      if (valores.length === 0) {
+        cb([]);
+        return () => undefined;
+      }
+      const porFuente = new Map<string, Map<string, unknown>>();
+      const uniones = valores.map((valor) =>
+        fs.onSnapshot(
+          fs.query(col, fs.where(campo, '==', valor)),
+          (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
+            porFuente.set(valor, new Map(aItems(snap.docs).map((i) => [(i as { id: string }).id, i])));
+            const union = new Map<string, unknown>();
+            porFuente.forEach((fuente) => fuente.forEach((v, k) => union.set(k, v)));
+            cb(Array.from(union.values()));
+          }
+        )
+      );
+      return () => uniones.forEach((u) => u());
+    },
+    subscribeIncidencias: (cb: (items: unknown[]) => void, scope?: { tipoPerfil?: string; propietarioId?: string; propietariosGestionados?: string[] }) => {
+      const todos = memoria.idsDe('incidencias').map((id) => ({ id, ...(memoria.leer('incidencias', id) as Record<string, unknown>) }));
+      if (!scope || scope.tipoPerfil === 'ADMINISTRADOR') {
+        cb(todos);
+        return () => undefined;
+      }
+      const valores = [scope.propietarioId ?? '', ...(scope.propietariosGestionados ?? [])].filter(Boolean);
+      cb(valores.length === 0 ? [] : todos.filter((d) => valores.includes(String((d as Record<string, unknown>).propietarioId))));
       return () => undefined;
     },
     subscribeEnlacesRegistro: (cb: (items: unknown[]) => void) => {

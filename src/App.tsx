@@ -1320,7 +1320,7 @@ export default function App() {
     const unsubscribeTesoreriaOrdenes = subscribeOrdenesPago(conDatos<OrdenPago[]>('ordenes_pago', (data) => setTesoreriaOrdenesPago(data || [])));
     const unsubscribeTesoreriaFicheros = subscribeFicherosSepa((data) => setTesoreriaFicherosSepa(data || []));
     const unsubscribeTesoreriaMandatos = subscribeMandatosSepa((data) => setTesoreriaMandatosSepa(data || []));
-    const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []));
+    const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []), dataScope);
     // Puente GAP 6 → Tesorería: espejo de sesión de movimientos y propuestas
     const unsubscribeTesoreriaMovSesion = suscribirMovimientosSesion((data) => setTesoreriaSesionConciliacion(data));
 

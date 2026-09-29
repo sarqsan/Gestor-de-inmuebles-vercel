@@ -27,6 +27,7 @@ import {
   subscribeLecturas,
   subscribeSuministros,
 } from '../../lib/suministrosFirestore';
+import type { DataAccessScope } from '../../lib/firebase';
 import {
   calcularRepartoImporte,
   unidadSugerida,
@@ -79,16 +80,34 @@ export const SuministrosSection: React.FC<Props> = ({ currentUser, inmuebles }) 
   const [editar, setEditar] = useState<Suministro | null>(null);
   const [aviso, setAviso] = useState('');
 
+  // BLOQUE 12 · A-01 (y A-02): `subscribeCol` sin filtro era denegado por las
+  // reglas para todo perfil no master. Las tres colecciones exigen
+  // `'inmuebleId' in resource.data && ambitoPorInmuebleLectura(...)`: se pide
+  // inmueble a inmueble con los que la persona ya tiene acotados (`inmuebles`).
+  // El ámbito se reconstruye al cambiar de titular/cartera y desmonta los
+  // listeners anteriores en la limpieza del efecto.
+  const claveInmuebles = useMemo(
+    () => [...inmuebles.map((v) => v.id)].sort().join('|'),
+    [inmuebles]
+  );
+  const scope = useMemo<DataAccessScope>(
+    () => ({
+      tipoPerfil: currentUser.tipoPerfil,
+      propietarioId: currentUser.propietarioId,
+      inmuebleIds: inmuebles.map((v) => v.id),
+    }),
+    [currentUser.tipoPerfil, currentUser.propietarioId, claveInmuebles]
+  );
   useEffect(() => {
-    const u1 = subscribeSuministros(setSuministros);
-    const u2 = subscribeLecturas(setLecturas);
-    const u3 = subscribeCambiosTitular(setCambios);
+    const u1 = subscribeSuministros(setSuministros, scope);
+    const u2 = subscribeLecturas(setLecturas, scope);
+    const u3 = subscribeCambiosTitular(setCambios, scope);
     return () => {
       u1();
       u2();
       u3();
     };
-  }, []);
+  }, [scope]);
 
   const visibles = useMemo(() => {
     const ids = new Set(inmuebles.map((v) => v.id));

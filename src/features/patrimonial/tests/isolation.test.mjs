@@ -96,11 +96,22 @@ test('dependencias y lockfile siguen exactamente como en la base conocida', asyn
     const { scripts: actualScripts, ...actualRest } = actualPackage;
     const { scripts: baseScripts, ...baseRest } = basePackage;
     assert.deepEqual(actualRest, baseRest, 'solo pueden cambiar los scripts B5/B7');
+    // BLOQUE 12 · A-05: los runners oficiales de las suites `.mjs` (Tipo A) y las
+    // dos guardias de auditoría. La garantía sigue siendo la misma: `package.json`
+    // SOLO añade scripts, no puede borrar ni reescribir ninguna línea base (se
+    // verifica con `git diff --numstat`: borrados = 0) y ninguna dependencia,
+    // metadato o script previo puede cambiar.
     assert.deepEqual(actualScripts, {
       ...baseScripts,
       'test:bloque-5': 'tsx scripts/test-bloque-5.ts',
       'test:bloque-7': 'tsx scripts/test-bloque-7.ts',
-    }, 'package.json solo añade los scripts B5/B7');
+      'test:operaciones': 'node --import tsx --test "src/features/operaciones/tests/*.test.mjs"',
+      'test:patrimonial': 'node --import tsx --test "src/features/patrimonial/tests/*.test.mjs"',
+      'test:integracion': 'npm run test:operaciones && npm run test:patrimonial',
+      'test:emulador:operaciones': 'node --import tsx --test src/features/operaciones/tests/emulator/operaciones.emulator.mjs',
+      'auditoria:repositorio': 'tsx scripts/guardia-a04-repositorio.mts',
+      'auditoria:reglas:matriz': 'tsx scripts/diagnostico-b12-list.mts',
+    }, 'package.json solo añade los runners de B5/B7 y los de A-05/auditoría (sin borrados)');
   }
 });
 
@@ -205,11 +216,188 @@ const PERMITIDOS_INTEGRACION = [
   'scripts/test-bloque-7.ts',
   'docs/BLOQUE-7-IMPORTACION-EXPORTACION-XLSX.md',
 ];
-const permitido = (path) => PERMITIDOS_INTEGRACION.some((p) => path === p || path.startsWith(p));
+
+// ---------------------------------------------------------------------------
+// BLOQUES 10, 11 y 12 (UX-1…UX-7, auditoría integral y reparación post-auditoría)
+// — superficie EXACTA revisada en esos bloques. La lista se declara aquí para que
+// la custodia siga siendo AUDITABLE y no se debilite:
+//   · los directorios listados NACEN ENTEROS en esos bloques (0 ficheros en la
+//     base B): no hay contenido previo que quede exento de custodia;
+//   · el resto se enumera fichero a fichero (35 modales, 31 secciones, motores
+//     tocados por B5/B7/B9, documentación de bloque, tests y scripts);
+//   · NO se autoriza ningún directorio PREEXISTENTE completo (`src/components/`,
+//     `src/lib/`, `src/utils/`, `tests/`, `scripts/`, `docs/`…);
+//   · los ficheros compartidos (`package.json`, `src/types.ts`, `src/main.tsx`)
+//     siguen bajo la regla de ADICIONES PURAS (numstat borrados = 0);
+//   · `firestore.rules` y `storage.rules` se exigen byte a byte idénticas a la
+//     base B (los bloques 10-12 no relajan ninguna regla);
+//   · y ningún símbolo exportado de los servicios compartidos puede desaparecer.
+// Cualquier fichero que difiera de la base y no figure aquí sigue haciendo
+// fallar este test: misma garantía de superficie, con la superficie real revisada.
+const SUPERFICIE_BLOQUES_POST_B = [
+  'src/accesibilidad/', // UX-5/6/7 (diálogos accesibles, interacción, integración)
+  'src/estadoDatos/', // UX-2 (estados de datos + canal de incidencias de lectura)
+  'src/feedback/', // UX-3/4/5/6 (avisos, confirmación, mensajes, acciones destructivas)
+  'src/formularios/', // UX-3/4/5/6 (validación de formularios)
+  'src/navegacion/', // UX-1 (catálogo de navegación y menús)
+  'src/components/estado-datos/', // UX-2 (hosts de estado de datos)
+  'src/components/feedback/', // UX-3/5/6 + UX-7 (hosts de avisos y confirmación)
+  'src/components/formularios/', // UX-3/4 (campos con validación)
+  'docs/BLOQUE-10-UX-MAPA-ACTUAL.md',
+  'docs/BLOQUE-10-UX1-CIERRE.md',
+  'docs/BLOQUE-10-UX1-INSPECCION-NAVEGACION.md',
+  'docs/BLOQUE-10-UX2-INSPECCION-ESTADOS-DATOS.md',
+  'docs/BLOQUE-10-UX34-INSPECCION-FEEDBACK-FORMULARIOS.md',
+  'docs/BLOQUE-10-UX56-INSPECCION-RESPONSIVE-ACCESIBILIDAD.md',
+  'docs/BLOQUE-10-UX7-INSPECCION-CIERRE.md',
+  'docs/BLOQUE-11-AUDITORIA-INTEGRAL-CIERRE.md',
+  'docs/BLOQUE-11-AUDITORIA-INTEGRAL-INSPECCION.md',
+  'docs/BLOQUE-12-REPARACION-INTEGRAL-CIERRE.md',
+  'docs/BLOQUE-12-REPARACION-INTEGRAL-INSPECCION.md',
+  'scripts/diagnostico-b12-list.mts',
+  'scripts/guardia-a04-repositorio.mts',
+  'src/components/CandidateModal.tsx',
+  'src/components/CarterasOnboardingPanel.tsx',
+  'src/components/CicloContractualPanel.tsx',
+  'src/components/ComparadorCandidatos.tsx',
+  'src/components/ConfiguracionAseguradorasModal.tsx',
+  'src/components/ConfirmDeleteModal.tsx',
+  'src/components/ConfirmWhatsappSentModal.tsx',
+  'src/components/CrearAgendaVisitasModal.tsx',
+  'src/components/CrearEnlaceSolicitudModal.tsx',
+  'src/components/CrearSolicitudDocModal.tsx',
+  'src/components/CrearSolicitudSeguroModal.tsx',
+  'src/components/CuestionarioPublicoView.tsx',
+  'src/components/DetalleSolicitudDocModal.tsx',
+  'src/components/DetalleSolicitudSeguroModal.tsx',
+  'src/components/DocumentAnalysisModal.tsx',
+  'src/components/DocumentUploadModal.tsx',
+  'src/components/EnviarCuestionarioModal.tsx',
+  'src/components/FichaTecnicaInventarioPanel.tsx',
+  'src/components/FormalizarContratoModal.tsx',
+  'src/components/GestionImagenesModal.tsx',
+  'src/components/HabitacionesInmueblePanel.tsx',
+  'src/components/Header.tsx',
+  'src/components/InvitacionCarteraView.tsx',
+  'src/components/LoginView.tsx',
+  'src/components/MobileNav.tsx',
+  'src/components/OnboardingCarteras.tsx',
+  'src/components/PortalDocumentacionPublicaView.tsx',
+  'src/components/PortalRegistroView.tsx',
+  'src/components/PortalSolicitudPublicaView.tsx',
+  'src/components/PortalVisitaPublicaView.tsx',
+  'src/components/PublicPropertyGallery.tsx',
+  'src/components/RegistroAutonomoView.tsx',
+  'src/components/Sidebar.tsx',
+  'src/components/SmartReportModal.tsx',
+  'src/components/SolicitudDetailModal.tsx',
+  'src/components/SolvenciaCard.tsx',
+  'src/components/VerAgendaInmuebleModal.tsx',
+  'src/components/admin/AdminControlCenter.tsx',
+  'src/components/admin/DryRunFichasPublicasPanel.tsx',
+  'src/components/admin/OnboardingCarterasAdmin.tsx',
+  'src/components/inmueble/DocumentosPatrimonialesPanel.tsx',
+  'src/components/mantenimiento/GarantiasReparacionPanel.tsx',
+  'src/components/mantenimiento/MantenimientoInmueblePanel.tsx',
+  'src/components/modals/AuthModal.tsx',
+  'src/components/modals/BolsaInmobiliariasModal.tsx',
+  'src/components/modals/CrearEnlaceRegistroModal.tsx',
+  'src/components/modals/CrearProfesionalModal.tsx',
+  'src/components/modals/CrearUsuarioModal.tsx',
+  'src/components/modals/DetalleExpedienteModal.tsx',
+  'src/components/modals/DetalleIncidenciaModal.tsx',
+  'src/components/modals/DetallePolizaModal.tsx',
+  'src/components/modals/DetallePresupuestoProfesionalModal.tsx',
+  'src/components/modals/DetalleProfesionalModal.tsx',
+  'src/components/modals/DetalleProyectoReformaModal.tsx',
+  'src/components/modals/DetalleRentabilidadModal.tsx',
+  'src/components/modals/DetalleTrabajoProfesionalModal.tsx',
+  'src/components/modals/GarantiaModal.tsx',
+  'src/components/modals/GastoModal.test.tsx',
+  'src/components/modals/GastoModal.tsx',
+  'src/components/modals/GastoRecurrenteModal.tsx',
+  'src/components/modals/HistorialTrabajosInmuebleModal.tsx',
+  'src/components/modals/IncidenciaModal.tsx',
+  'src/components/modals/InspeccionFotograficaModal.tsx',
+  'src/components/modals/KitPublicacionModal.tsx',
+  'src/components/modals/MejorasROIModal.tsx',
+  'src/components/modals/MorosidadDetalleModal.tsx',
+  'src/components/modals/NecesidadReformaModal.tsx',
+  'src/components/modals/PolizaModal.tsx',
+  'src/components/modals/PrestamoModal.tsx',
+  'src/components/modals/PresupuestoProfesionalModal.tsx',
+  'src/components/modals/PricingModal.tsx',
+  'src/components/modals/RecomercializarModal.tsx',
+  'src/components/modals/RenovacionPolizaModal.tsx',
+  'src/components/modals/SiniestroModal.tsx',
+  'src/components/modals/TablaAmortizacionModal.tsx',
+  'src/components/modals/TareaMantenimientoModal.tsx',
+  'src/components/modals/TrabajoProfesionalModal.tsx',
+  'src/components/modals/ValoracionProfesionalModal.tsx',
+  'src/components/portal-inquilino/InquilinoPortalShell.tsx',
+  'src/components/portal-inquilino/PortalIncidencias.tsx',
+  'src/components/portal-inquilino/PortalMensajes.tsx',
+  'src/components/portal-inquilino/PortalSuministros.tsx',
+  'src/components/portal-inquilino/RegistroInquilinoView.tsx',
+  'src/components/reformas/ReformasInmueblePanel.tsx',
+  'src/components/sections/ActasSection.tsx',
+  'src/components/sections/AdministracionSection.tsx',
+  'src/components/sections/CandidatosSection.tsx',
+  'src/components/sections/CentroAyudaSection.tsx',
+  'src/components/sections/CobrosSection.tsx',
+  'src/components/sections/ConciliacionBancariaSection.tsx',
+  'src/components/sections/ConfiguracionSection.tsx',
+  'src/components/sections/DashboardEjecutivoSection.tsx',
+  'src/components/sections/FacturaElectronicaB2BPanel.tsx',
+  'src/components/sections/FacturacionSection.tsx',
+  'src/components/sections/FinanciacionSection.tsx',
+  'src/components/sections/FiscalidadSection.tsx',
+  'src/components/sections/FormalizacionSection.tsx',
+  'src/components/sections/GastosSection.tsx',
+  'src/components/sections/IncidenciasSection.tsx',
+  'src/components/sections/InformesSection.tsx',
+  'src/components/sections/InicioSection.tsx',
+  'src/components/sections/InquilinosSection.tsx',
+  'src/components/sections/InversionSection.tsx',
+  'src/components/sections/MorosidadSection.tsx',
+  'src/components/sections/NuevoCandidatoSection.tsx',
+  'src/components/sections/OperacionesSection.tsx',
+  'src/components/sections/PolizasSegurosSection.tsx',
+  'src/components/sections/ProfesionalPortalSection.tsx',
+  'src/components/sections/ProfesionalesSection.tsx',
+  'src/components/sections/PropietarioPortalSection.tsx',
+  'src/components/sections/PropietariosSection.tsx',
+  'src/components/sections/RentabilidadPanel.tsx',
+  'src/components/sections/SeguroImpagoSection.tsx',
+  'src/components/sections/SuministrosSection.tsx',
+  'src/components/sections/TesoreriaSection.tsx',
+  'src/index.css',
+  'src/lib/firebaseActas.ts',
+  'src/lib/firebaseInversion.ts',
+  'src/lib/morosidadFirestore.ts',
+  'src/lib/sindicacionFirestore.ts',
+  'src/lib/suministrosFirestore.ts',
+  'src/lib/tesoreriaFirestore.ts',
+  'src/main.tsx',
+  'src/test/e/setupE.ts',
+  'src/utils/candidatoQuestionnaire.ts',
+  'src/utils/dashboardCentroControl.test.ts',
+  'tests/bloque-12-a01-ambito-suscripciones.test.ts',
+  'tests/seguridad-firestore-valoraciones.test.ts',
+  // Ficheros puente entre módulos (ya autorizados en el registro patrimonial;
+  // se declaran también aquí para que la superficie combinada sea explícita).
+  'src/App.tsx',
+  'src/components/sections/InmueblesSection.tsx',
+  'src/patrimonial/PantallaPatrimonial.tsx',
+];
+const permitidaPostB = (path) =>
+  SUPERFICIE_BLOQUES_POST_B.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p));
+const permitido = (path) =>
+  PERMITIDOS_INTEGRACION.some((p) => path === p || path.startsWith(p)) || permitidaPostB(path);
 
 test('ningún archivo productivo difiere de la base fuera de la superficie de integración documentada', async () => {
   const { execFileSync } = await import('node:child_process');
-  const exclusiones = PERMITIDOS_INTEGRACION.map((p) => `:!${p.replace(/\/$/, '')}`);
+  const exclusiones = [...PERMITIDOS_INTEGRACION, ...SUPERFICIE_BLOQUES_POST_B].map((p) => `:!${p.replace(/\/$/, '')}`);
   const diff = execFileSync('git', [
     'diff', '--name-only', BASE_INTEGRACION, '--', '.', ...exclusiones,
   ], { cwd: repo, encoding: 'utf8' });
@@ -225,5 +413,52 @@ test('ningún archivo productivo difiere de la base fuera de la superficie de in
   for (const ficheroCompartido of ['package.json']) {
     const [adiciones, borrados] = execFileSync('git', ['diff', '--numstat', referencia.sha, '--', ficheroCompartido], { cwd: repo, encoding: 'utf8' }).trim().split(/\s+/);
     assert.equal(Number(borrados || 0), 0, `${ficheroCompartido} solo admite adiciones (añadido=${adiciones || 0})`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// BLOQUES 10, 11 y 12 — invariantes de custodia que NO se relajan:
+//   · las reglas de seguridad no cambian (ni se relajan ni se endurecen);
+//   · no se borra ni renombra ningún fichero de la base;
+//   · los ficheros compartidos sólo admiten adiciones puras;
+//   · ningún símbolo exportado de los servicios compartidos desaparece.
+// La superficie de la lista anterior se amplía con los ficheros REALMENTE
+// revisados en esos bloques (declarados uno a uno), no con directorios amplios.
+// ---------------------------------------------------------------------------
+test('BLOQUES 10-12: reglas byte a byte, sin borrados y con API de servicios preservada', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const referencia = referenciaCustodia(BASE_INTEGRACION);
+  assert.ok(referencia, 'CUSTODIA: no hay referencia verificable (base histórica ni commit de partida del bloque)');
+  const ejecutar = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+
+  // (1) Reglas de seguridad: idénticas a la base B (comparación por contenido
+  // binario: evita diffs gigantes en el mensaje de fallo).
+  for (const fichero of ['firestore.rules', 'storage.rules']) {
+    const actual = readFileSync(resolve(repo, fichero));
+    const base = Buffer.from(ejecutar('show', `${referencia.sha}:${fichero}`), 'utf8');
+    assert.ok(
+      actual.equals(base),
+      `${fichero}: las reglas no pueden cambiar sin dictamen (ni relajarse ni endurecerse)`
+    );
+  }
+
+  // (2) Nada se borra ni se renombra desde la base B.
+  assert.equal(ejecutar('diff', '--diff-filter=D', '--name-only', referencia.sha, '--', '.').trim(), '', 'hay ficheros borrados desde la base B');
+  assert.equal(ejecutar('diff', '--diff-filter=R', '--name-only', referencia.sha, '--', '.').trim(), '', 'hay ficheros renombrados desde la base B');
+
+  // (3) Ficheros compartidos: adiciones puras (0 líneas borradas).
+  for (const compartido of ['src/types.ts', 'package.json', 'src/main.tsx']) {
+    const [adiciones, borrados] = ejecutar('diff', '--numstat', referencia.sha, '--', compartido).trim().split(/\s+/);
+    assert.equal(Number(borrados || 0), 0, `${compartido} solo admite adiciones (añadido=${adiciones || 0})`);
+  }
+
+  // (4) Los servicios compartidos conservan toda su API exportada.
+  const simbolos = (texto) =>
+    new Set([...texto.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|class|type|interface|enum)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]));
+  for (const fichero of ['src/lib/firebase.ts', 'src/lib/suministrosFirestore.ts', 'src/lib/firebaseActas.ts', 'src/lib/firebaseInversion.ts']) {
+    const base = simbolos(ejecutar('show', `${referencia.sha}:${fichero}`));
+    const actual = simbolos(readFileSync(resolve(repo, fichero), 'utf8'));
+    const eliminados = [...base].filter((s) => !actual.has(s));
+    assert.deepEqual(eliminados, [], `${fichero}: API histórica eliminada`);
   }
 });

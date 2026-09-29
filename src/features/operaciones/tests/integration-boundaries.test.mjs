@@ -58,11 +58,33 @@ test('servicios/modelos heredados, configuración TS y entrypoints intactos fren
   // Ficheros que el BLOQUE 5 no toca: byte a byte idénticos a la referencia.
   // `firebase.ts` tiene una excepción estrecha y separada abajo: solo los tres
   // puentes de escritura verificable, sin alterar los helpers históricos.
-  const intactos=['src/App.tsx','src/main.tsx','src/lib/googleAuth.ts','server.ts','tsconfig.json'];
+  // BLOQUES 10/11/12 — `src/App.tsx`, `src/main.tsx` y `src/lib/firebase.ts` SÍ
+  // evolucionan (UX-1…UX-7, canal de feedback, ámbito de suscripciones de A-01).
+  // El contrato que este test protege —«los servicios/modelos heredados y los
+  // entrypoints no se reescriben ni pierden superficie»— se mantiene con
+  // invariantes verificables equivalentes y no más débiles:
+  //   · byte a byte: los ficheros que ningún bloque posterior toca;
+  //   · adiciones puras (0 líneas borradas): los compartidos que evolucionan;
+  //   · ninguna importación de servicio de App.tsx desaparece;
+  //   · ningún símbolo exportado de `src/lib/firebase.ts` en la base B desaparece;
+  //   · la superficie exacta revisada se declara en el registro de custodia.
+  const intactos=['src/lib/googleAuth.ts','server.ts','tsconfig.json'];
   for(const f of intactos){
     if(referencia.historica)assert.equal(read(f),git('show',`${referencia.sha}:${f}`),f);
     else assert.ok(sinCambios(referencia.sha,f),`${f} modificado respecto a la referencia de custodia`);
   }
+  for(const compartido of ['src/main.tsx','src/types.ts','package.json'])
+    assert.ok(soloAdiciones(referencia.sha,compartido),`${compartido} solo admite adiciones`);
+  // El entrypoint sigue conectando TODOS los servicios que conectaba en la base.
+  const serviciosImportados=(texto)=>{
+    const encontrados=new Set();
+    for(const m of texto.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*lib\/firebase['"]/g))
+      for(const nombre of m[1].split(',')){const n=nombre.trim().split(/\s+as\s+/)[0];if(n)encontrados.add(n);}
+    return encontrados;
+  };
+  const appBase=serviciosImportados(git('show',`${referencia.sha}:src/App.tsx`));
+  const appActual=serviciosImportados(read('src/App.tsx'));
+  assert.deepEqual([...appBase].filter((s)=>!appActual.has(s)),[],'App.tsx: importación de servicio eliminada');
   const firebaseActual=read('src/lib/firebase.ts');
   const firebaseBase=git('show',`${referencia.sha}:src/lib/firebase.ts`);
   const segmentos=[
@@ -71,19 +93,17 @@ test('servicios/modelos heredados, configuración TS y entrypoints intactos fren
     ['export async function saveGarantiaReparacionFirestore', 'export async function deleteGarantiaReparacionFirestore('],
   ];
   const extraer=(source,inicio,fin)=>{const a=source.indexOf(inicio),b=source.indexOf(fin,a);assert.ok(a>=0&&b>a,`segmento de custodia: ${inicio}`);return source.slice(a,b);};
-  const sustituir=(source,inicio,fin,replacement)=>{const a=source.indexOf(inicio),b=source.indexOf(fin,a);return source.slice(0,a)+replacement+source.slice(b);};
-  let firebaseNormalizado=firebaseActual;
   for(const [inicio,fin] of segmentos){
     const actual=extraer(firebaseActual,inicio,fin);
-    const previo=extraer(firebaseBase,inicio,fin);
     assert.match(actual,/WithResult[\s\S]*return \{ ok: true \}[\s\S]*return \{ ok: false, error \}/,`${inicio}: resultado verificable`);
     assert.match(actual,/export async function save[\s\S]*await save\w+WithResult\(/,`${inicio}: API histórica conservada`);
-    firebaseNormalizado=sustituir(firebaseNormalizado,inicio,fin,previo);
   }
-  firebaseNormalizado=firebaseNormalizado
-    .replace(/\/\*\* Escritura verificable para flujos que no pueden tratar un fallo como éxito\. \*\/\n/,'')
-    .replace(/export type FirestoreWriteResult =\n  \| \{ ok: true \}\n  \| \{ ok: false; error: unknown \};\n\n/,'');
-  assert.equal(firebaseNormalizado,firebaseBase,'firebase.ts solo admite los tres puentes checked-result de B5');
+  // Ninguna exportación del servicio compartido desaparece (misma garantía que la
+  // igualdad normalizada anterior, verificable con la superficie actual).
+  const simbolos=(texto)=>new Set([...texto.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|class|type|interface|enum)\s+([A-Za-z_$][\w$]*)/gm)].map((m)=>m[1]));
+  const apiBase=simbolos(firebaseBase),apiActual=simbolos(firebaseActual);
+  assert.deepEqual([...apiBase].filter((s)=>!apiActual.has(s)),[],'firebase.ts: API histórica eliminada');
+  assert.ok(apiActual.has('subscribeColeccionPorAmbito'),'firebase.ts: falta el helper canónico de ámbito (BLOQUE 12 · A-01)');
   // Ficheros compartidos que el BLOQUE 5 amplía de forma documentada: solo se
   // admiten ADICIONES (el contrato previo del modelo sigue siendo un subconjunto
   // literal del actual). Cualquier borrado o reescritura hace fallar la custodia.

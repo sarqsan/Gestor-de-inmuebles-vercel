@@ -324,6 +324,44 @@ describe('A-01 · aislamiento patrimonial por perfil', () => {
     expect(salas.consultas.every((c) => c.filtros.length === 1)).toBe(true);
   });
 
+  it('gestor LIMITADO a un solo titular no recibe nada del otro (A autorizado, B no)', async () => {
+    escenario = 'gestor';
+    const m = await cargar();
+    const gestorConDos = m.scopeDeUsuario(USUARIO('gestor'));
+    // Revocación/limitación: el gestor queda autorizado SOLO para PROP_A.
+    const gestorLimitado = { ...gestorConDos, propietariosGestionados: [PROP_A] };
+    const items: any[] = [];
+    m.subscribePolizas((x: any) => { items.push(...x); }, gestorLimitado);
+    expect(salas.consultas.map((c) => c.filtros)).toEqual([[{ campo: 'propietarioId', valor: PROP_A }]]);
+    const ids = new Set(items.map((i) => i.id));
+    expect(ids.has('p_a')).toBe(true);
+    expect(ids.has('p_b')).toBe(false);
+  });
+
+  it('titular sin ámbito (sin pid, sin inmuebles, sin cartera): vacío, nunca la colección', async () => {
+    escenario = 'propA';
+    const m = await cargar();
+    const sinAmbito = { tipoPerfil: 'PROPIETARIO' } as any;
+    const items: any[] = [];
+    m.subscribePolizas((x: any) => items.push(...x), sinAmbito);
+    m.subscribeIncidencias((x: any) => items.push(...x), sinAmbito);
+    expect(items).toEqual([]);
+    expect(salas.consultas).toEqual([]); // fallo en cerrado: ninguna consulta global
+  });
+
+  it('gestor sin cartera asignada al inicio: vacío y sin consulta global', async () => {
+    escenario = 'profesional';
+    const m = await cargar();
+    const items: any[] = [];
+    const gestorVacio = { tipoPerfil: 'PROFESIONAL', profesionalId: 'prof_1', propietariosGestionados: [] } as any;
+    m.subscribeIncidencias((x: any) => items.push(...x), gestorVacio);
+    // El profesional asignado sí puede ver sus incidencias asignadas (por
+    // `profesionalAsignadoId`), pero nunca la colección completa ni la de otros.
+    const ajenas = items.filter((i) => i.id !== 'i_a');
+    expect(ajenas).toEqual([]);
+    expect(salas.consultas.every((c) => c.filtros.length === 1)).toBe(true);
+  });
+
   it('profesional sin cartera: vacío, sin consulta global (fallo en cerrado)', async () => {
     escenario = 'profesional';
     const m = await cargar();

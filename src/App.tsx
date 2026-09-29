@@ -1321,11 +1321,11 @@ export default function App() {
         });
       });
     }
-    const unsubscribeTesoreriaLiq = subscribeLiquidaciones(conDatos<LiquidacionPropietario[]>('liquidaciones', (data) => setTesoreriaLiquidaciones(data || [])));
-    const unsubscribeTesoreriaGastos = subscribeGastosTesoreria(conDatos<GastoInmueble[]>('tesoreria_gastos', (data) => setTesoreriaGastos(data || [])));
-    const unsubscribeTesoreriaOrdenes = subscribeOrdenesPago(conDatos<OrdenPago[]>('ordenes_pago', (data) => setTesoreriaOrdenesPago(data || [])));
-    const unsubscribeTesoreriaFicheros = subscribeFicherosSepa((data) => setTesoreriaFicherosSepa(data || []));
-    const unsubscribeTesoreriaMandatos = subscribeMandatosSepa((data) => setTesoreriaMandatosSepa(data || []));
+    const unsubscribeTesoreriaLiq = subscribeLiquidaciones(conDatos<LiquidacionPropietario[]>('liquidaciones', (data) => setTesoreriaLiquidaciones(data || [])), currentUser);
+    const unsubscribeTesoreriaGastos = subscribeGastosTesoreria(conDatos<GastoInmueble[]>('tesoreria_gastos', (data) => setTesoreriaGastos(data || [])), currentUser);
+    const unsubscribeTesoreriaOrdenes = subscribeOrdenesPago(conDatos<OrdenPago[]>('ordenes_pago', (data) => setTesoreriaOrdenesPago(data || [])), currentUser);
+    const unsubscribeTesoreriaFicheros = subscribeFicherosSepa((data) => setTesoreriaFicherosSepa(data || []), currentUser);
+    const unsubscribeTesoreriaMandatos = subscribeMandatosSepa((data) => setTesoreriaMandatosSepa(data || []), currentUser);
     const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []), dataScope);
     // Puente GAP 6 → Tesorería: espejo de sesión de movimientos y propuestas
     const unsubscribeTesoreriaMovSesion = suscribirMovimientosSesion((data) => setTesoreriaSesionConciliacion(data));

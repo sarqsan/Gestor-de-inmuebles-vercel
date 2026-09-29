@@ -2720,8 +2720,12 @@ export async function deleteProfesionalFirestore(profesionalId: string): Promise
 // ENLACES DE REGISTRO E INVITACIONES
 // =========================================================================
 
-export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) => void, scope?: UsuarioApp) {
-  if (scope && !['ADMINISTRADOR', 'SUPERADMIN'].includes(String(scope.tipoPerfil))) {
+export function subscribeEnlacesRegistro(callback: (enlaces: EnlaceRegistro[]) => void, scope?: UsuarioApp | null) {
+  // Contexto autenticado/autorizado EXPLÍCITO antes de tocar Firestore: sin
+  // usuario (p. ej. el primer render de App con `currentUser === null`) NO se
+  // ejecuta ninguna query (ni permission-denied, ni aviso). El guard cubre
+  // también a los call sites que aún no han resuelto la sesión.
+  if (!scope || !['ADMINISTRADOR', 'SUPERADMIN'].includes(String(scope.tipoPerfil))) {
     // Private R02 invites are resolved by document ID only in the authenticated invitation view.
     callback([]);
     return () => {};

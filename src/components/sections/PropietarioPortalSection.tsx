@@ -83,6 +83,12 @@ interface PropietarioPortalSectionProps {
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
   onSavePropietario?: (propietario: Propietario) => Promise<void>;
   onNavigateToInmueble?: (inmuebleId: string) => void;
+  /**
+   * AUDITORÍA UX PROPIETARIO (2026-09-29 · FASE 11): alta de vivienda desde el portal.
+   * El host la lleva a la sección de inmuebles con la titularidad propia en contexto
+   * (misma ruta `propietarioContextoAltaId` que ya existía).
+   */
+  onCrearInmueble?: () => void;
 }
 
 export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> = ({
@@ -100,6 +106,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   onSaveProfesional,
   onSavePropietario,
   onNavigateToInmueble,
+  onCrearInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
     'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'morosidad' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
@@ -469,17 +476,40 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                     Por motivos de privacidad y seguridad, sólo puedes visualizar y operar sobre tus propias propiedades.
                   </p>
                 </div>
+                {onCrearInmueble && (
+                  <button
+                    type="button"
+                    data-tour="portal-anyadir-vivienda"
+                    onClick={onCrearInmueble}
+                    title="Dar de alta una vivienda vinculada a tu titularidad"
+                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs shrink-0"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Añadir vivienda
+                  </button>
+                )}
               </div>
 
               {misViviendas.length === 0 ? (
-                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-2">
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3">
                   <Home className="w-8 h-8 text-slate-400 mx-auto" />
                   <div className="text-xs font-bold text-slate-700">
                     No tienes viviendas asignadas todavía
                   </div>
                   <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    El administrador principal asignará tus inmuebles a tu cuenta. Contacta con la administración para vincular tus propiedades.
+                    Puedes dar de alta una vivienda tú mismo (quedará vinculada a tu titularidad) o esperar a que
+                    la administración la asigne a tu cuenta.
                   </p>
+                  {onCrearInmueble && (
+                    <button
+                      type="button"
+                      onClick={onCrearInmueble}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Dar de alta mi primera vivienda
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -498,8 +528,11 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                             <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-50 text-blue-700 rounded-md">
                               {inm.tipoInmueble || 'Vivienda'}
                             </span>
+                            {/* AUDITORÍA 2026-09-29: se pintaban campos inexistentes en el modelo
+                                (`precioRentaMensual`, `superficieConstruida`) → «undefined €/mes».
+                                Campos reales: `precio` (con `rentaMensual` como alias) y `superficie`. */}
                             <span className="text-sm font-bold text-slate-900">
-                              {inm.precioRentaMensual} €/mes
+                              {Number(inm.precio ?? inm.rentaMensual ?? 0).toLocaleString('es-ES')} €/mes
                             </span>
                           </div>
 
@@ -512,9 +545,23 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                             </div>
                           </div>
 
+                          {/* Titularidad visible también en la tarjeta (quién figura como titular) */}
+                          <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">
+                              Titular:{' '}
+                              <strong className="text-slate-700">
+                                {inm.datosFiscales?.propietarioPrincipal?.nombre || 'Sin configurar'}
+                              </strong>
+                              {inm.datosFiscales?.tieneSegundoPropietario && inm.datosFiscales?.segundoPropietario?.nombre && (
+                                <span className="text-slate-500"> (+1 cotitular)</span>
+                              )}
+                            </span>
+                          </div>
+
                           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-600">
                             <span>{inm.habitaciones || 0} hab · {inm.banos || 0} baños</span>
-                            <span>{inm.superficieConstruida || 0} m²</span>
+                            <span>{inm.superficie || 0} m²</span>
                           </div>
 
                           <div className="text-xs text-slate-500 flex items-center space-x-1">

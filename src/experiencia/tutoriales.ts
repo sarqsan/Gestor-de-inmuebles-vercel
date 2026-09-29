@@ -176,7 +176,70 @@ export const RECORRIDO_INVITAR_INQUILINO: Tutorial = {
   ],
 };
 
-export const TUTORIALES_REGISTRO: Tutorial[] = [TUTORIAL_LIQUIDACION, RECORRIDO_INVITAR_INQUILINO, RECORRIDO_PORTAL_INQUILINO];
+// ---------------------------------------------------------------------------
+// Recorrido real nº 4 — ERP · PROPIETARIO: primeros pasos (auditoría UX 2026-09-29)
+// ---------------------------------------------------------------------------
+export const RECORRIDO_PROPIETARIO_PRIMEROS_PASOS: Tutorial = {
+  id: 'recorrido.propietario.primeros-pasos',
+  title: 'Tus viviendas y tus datos, paso a paso',
+  description:
+    'Un recorrido práctico por lo esencial: dónde están tus viviendas, cómo dar de alta una, quién figura como titular, dónde consultar cobros y documentos y cómo importar o exportar tus datos.',
+  module: 'propietarios',
+  host: 'ERP',
+  roles: ['PROPIETARIO'],
+  minutes: 3,
+  steps: [
+    {
+      id: 'portal',
+      title: 'Tu portal de propietario',
+      description:
+        'En «Mi Portal Propietario» tienes el resumen de tu espacio: viviendas, cobros, gastos e incidencias. Desde la tarjeta de cada vivienda entras a su ficha, y con «Añadir vivienda» abres el alta con tu titularidad ya aplicada.',
+      route: 'propietarios',
+      target: selectorTour('nav-propietarios'),
+    },
+    {
+      id: 'viviendas',
+      title: 'Mis viviendas y el alta',
+      description:
+        'En «Mis Viviendas» está tu catálogo. Con «Nuevo Inmueble» (o «Añadir vivienda» en tu portal) das de alta una vivienda: el titular queda preseleccionado con tu ficha, y en la pestaña fiscal puedes añadir un cotitular para contratos.',
+      route: 'inmuebles',
+      target: selectorTour('nav-inmuebles'),
+    },
+    {
+      id: 'titularidad',
+      title: 'Quién figura como titular',
+      description:
+        'Abre la ficha de una vivienda: en la parte alta verás siempre la titularidad (titular y cotitular, si lo hay) y el botón «Editar titularidad». El cotitular fiscal aparece en contratos, pero no implica cuenta de acceso.',
+      route: 'inmuebles',
+    },
+    {
+      id: 'dinero',
+      title: 'Cobros, gastos y documentos',
+      description:
+        '«Mis Cobros» y «Mis Gastos» te muestran lo cobrado y lo imputado cada mes; los documentos y seguros de cada vivienda están en su ficha (Centro operativo → Expediente y Seguros), y las pólizas en «Pólizas y Seguros». En «Mis Liquidaciones» ves el neto transferido cada mes.',
+      route: 'cobros',
+      target: selectorTour('nav-cobros'),
+    },
+    {
+      id: 'datos',
+      title: 'Importar y exportar',
+      description:
+        'En «Importar / Exportar» puedes cargar datos desde JSON, CSV o Excel: el sistema analiza el archivo y te muestra una vista previa (nuevos, duplicados, problemas) antes de escribir nada. También descargas tus datos por entidad, inmueble y ejercicio en el mismo formato.',
+      route: 'datos',
+      target: selectorTour('nav-datos'),
+    },
+    {
+      id: 'ayuda',
+      title: 'Dónde pedir ayuda',
+      description:
+        'El botón «?» junto al título de cada pantalla abre la ayuda contextual de esa sección, y el «Centro de Ayuda» reúne todas las explicaciones y recorridos guiados como este.',
+      route: 'ayuda',
+      target: selectorTour('nav-ayuda'),
+    },
+  ],
+};
+
+export const TUTORIALES_REGISTRO: Tutorial[] = [TUTORIAL_LIQUIDACION, RECORRIDO_INVITAR_INQUILINO, RECORRIDO_PORTAL_INQUILINO, RECORRIDO_PROPIETARIO_PRIMEROS_PASOS];
 
 export interface OpcionesTutoriales {
   registro?: Tutorial[];

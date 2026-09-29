@@ -17,6 +17,7 @@
 import type { ComponentType } from 'react';
 import {
   Activity,
+  ArrowDownUp,
   Banknote,
   BarChart3,
   Building2,
@@ -159,6 +160,20 @@ export const NAVEGACION: readonly ItemNavDef[] = [
     // El portal del propietario era su primera entrada tras el panel (se conserva).
     ordenPorPerfil: { PROPIETARIO: -1 },
     contador: 'propietarios',
+  },
+  {
+    // AUDITORÍA UX PROPIETARIO (2026-09-29, FASE 16): el motor canónico de
+    // importar/exportar era indescubrible (solo bajo Configuración). Ahora es
+    // sección de primer nivel reutilizando el MISMO panel (sin duplicarlo).
+    section: 'datos',
+    grupo: 'CARTERA',
+    icono: ArrowDownUp,
+    etiquetas: { porDefecto: 'Importar / Exportar' },
+    descripciones: {
+      porDefecto: 'Importa o exporta datos (JSON, CSV y Excel) con vista previa',
+      PROPIETARIO: 'Carga o descarga tus datos con vista previa antes de escribir',
+    },
+    perfiles: ['ADMINISTRADOR', 'PROPIETARIO'],
   },
   {
     section: 'inversion',

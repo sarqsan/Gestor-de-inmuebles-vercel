@@ -108,7 +108,9 @@ describe('§6 · Centro de Ayuda', () => {
     render(<CentroAyudaSection usuario={propietario} onIniciarTutorial={iniciar} accessibleSections={['tesoreria', 'ayuda'] as SectionType[]} />);
     expect(screen.queryByRole('button', { name: 'Morosidad' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Portal de inquilinos' })).toBeNull();
-    expect(screen.getByText(/No hay tutoriales disponibles para tu perfil/)).toBeTruthy();
+    // AUDITORÍA 2026-09-29: el propietario ya SÍ tiene recorrido propio (antes mensaje vacío).
+    expect(screen.queryByText(/No hay tutoriales disponibles para tu perfil/)).toBeNull();
+    expect(screen.getByText(/Tus viviendas y tus datos, paso a paso/)).toBeTruthy();
   });
 
   it('lista de tutoriales: admin total sin bloqueos; gestor ve el aviso de pasos que requieren otro permiso; «Iniciar» delega en el host', () => {

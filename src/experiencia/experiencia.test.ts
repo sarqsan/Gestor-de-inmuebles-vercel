@@ -247,9 +247,11 @@ describe('§6 · Tutoriales', () => {
     expect(sinTarget.puedeEjecutar).toBe(true);
   });
 
-  it('tutoriales disponibles por rol: admin sí; propietario e inquilino no ven el de liquidaciones', () => {
+  it('tutoriales disponibles por rol: admin sí; el propietario tiene su propio recorrido y ninguno de gestión', () => {
     expect(tutorialesDisponibles(contextoDesdeUsuario(admin, 'inicio')).map((x) => x.id)).toEqual([t.id, 'recorrido.inquilinos.invitar']);
-    expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio'))).toEqual([]);
+    // AUDITORÍA UX PROPIETARIO (2026-09-29): el propietario tiene su recorrido
+    // «primeros pasos» y NO ve los de gestión (liquidaciones/invitar inquilino).
+    expect(tutorialesDisponibles(contextoDesdeUsuario(propietario, 'inicio')).map((x) => x.id)).toEqual(['recorrido.propietario.primeros-pasos']);
     // El inquilino en el ERP (host por defecto) no ve nada; en su portal ve su recorrido (F2)
     expect(tutorialesDisponibles(contextoDesdeUsuario(inquilino, 'inicio'))).toEqual([]);
     expect(tutorialesDisponibles(contextoDesdeUsuario(inquilino, 'inicio', { host: 'PORTAL_INQUILINO' })).map((x) => x.id)).toEqual(['recorrido.portal.primeros-pasos']);

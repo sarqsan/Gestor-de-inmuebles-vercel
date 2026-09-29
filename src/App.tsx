@@ -201,6 +201,7 @@ import { NuevoCandidatoSection } from './components/sections/NuevoCandidatoSecti
 import { CuestionarioSection } from './components/sections/CuestionarioSection';
 import { AnalisisSection } from './components/sections/AnalisisSection';
 import { ConfiguracionSection } from './components/sections/ConfiguracionSection';
+import { DatosSection } from './components/sections/DatosSection';
 // CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda, ayuda contextual y tutoriales
 import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
 import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
@@ -348,6 +349,8 @@ const SECCIONES_PROPIETARIO: SectionType[] = [
   'recomercializacion',
   // BLOQUE E (reconciliado): el propietario consulta los suministros de sus inmuebles
   'suministros',
+  // AUDITORÍA UX PROPIETARIO (2026-09-29): importar/exportar visible de primer nivel
+  'datos',
   'configuracion',
   // CAPA TRANSVERSAL §6: Centro de Ayuda (solo lectura)
   'ayuda',
@@ -3897,6 +3900,15 @@ export default function App() {
                   onSaveProfesional={handleSaveProfesional}
                   onSavePropietario={handleSavePropietario}
                   onNavigateToInmueble={() => setActiveSection('inmuebles')}
+                  // AUDITORÍA UX PROPIETARIO (2026-09-29 · FASE 11): alta de vivienda
+                  // alcanzable desde el portal con la titularidad propia en contexto
+                  // (misma ruta contextual ya existente `propietarioContextoAltaId`).
+                  onCrearInmueble={() => {
+                    if (currentUser?.propietarioId) {
+                      setAltaInmuebleDesdePropietarioId(currentUser.propietarioId);
+                    }
+                    setActiveSection('inmuebles');
+                  }}
                 />
               ) : (
                 <PropietariosSection
@@ -4261,6 +4273,10 @@ export default function App() {
               onSelectCandidateModal={(cand) => setSelectedCandidateForModal(cand)}
               onGenerarInforme={(cand) => handleOpenOrGenerateReport(cand)}
             />
+          )}
+
+          {activeSection === 'datos' && (
+            <DatosSection inmuebles={scopedInmuebles} usuario={currentUser} />
           )}
 
           {activeSection === 'configuracion' && (

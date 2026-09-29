@@ -6,7 +6,7 @@
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Inmueble, Propietario } from '../../types';
+import type { Inmueble, Propietario, UsuarioApp } from '../../types';
 import { InmueblesSection } from './InmueblesSection';
 import { PropietariosSection } from './PropietariosSection';
 
@@ -35,6 +35,7 @@ function renderAlta(opts: {
   onAdd: (inm: Inmueble) => void;
   contexto?: string | null;
   onConsumido?: () => void;
+  usuario?: UsuarioApp;
 }) {
   return render(
     <InmueblesSection
@@ -45,8 +46,25 @@ function renderAlta(opts: {
       onAddInmueble={opts.onAdd}
       propietarioContextoAltaId={opts.contexto}
       onContextoAltaConsumido={opts.onConsumido}
+      currentUser={opts.usuario}
     />,
   );
+}
+
+/** Usuario PROPIETARIO de pruebas vinculado a una ficha de propietario. */
+function usuarioPropietario(propietarioId?: string): UsuarioApp {
+  return {
+    id: 'u-prop',
+    nombre: 'Ana Propietaria',
+    email: 'ana@correo.test',
+    tipoPerfil: 'PROPIETARIO',
+    estado: 'ACTIVO',
+    roles: ['PROPIETARIO_ESTANDAR'],
+    permisos: [],
+    propietarioId,
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+  };
 }
 
 function rellenarMinimo() {
@@ -218,5 +236,62 @@ describe('alta de inmueble desde propietario', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /Crear inmueble/ }));
     expect(onCrear).toHaveBeenCalledWith('P1');
+  });
+
+  // ── AUDITORÍA UX PROPIETARIO (2026-09-29): alta del propietario ─────────────
+  it('E. un usuario PROPIETARIO ve su titular preseleccionado en el alta general y el guardado escribe su id', () => {
+    const onAdd = vi.fn();
+    renderAlta({ propietarios: [p1, p2], onAdd, usuario: usuarioPropietario('P1') });
+
+    fireEvent.click(screen.getByRole('button', { name: /Nuevo Inmueble/ }));
+    irAFiscal();
+    const selector = selectorTitular();
+    expect(selector.value).toBe('P1');
+    expect((screen.getByPlaceholderText('Ej. 12345678Z o B-87654321') as HTMLInputElement).value).toBe('NIF-P1');
+
+    irAGeneral();
+    rellenarMinimo();
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar Inmueble' }));
+
+    const creado = onAdd.mock.calls[0][0] as Inmueble;
+    expect(creado.propietarioId).toBe('P1');
+    expect(creado.propietarioPrincipalId).toBe('P1');
+    expect(creado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('P1');
+  });
+
+  it('F. el guardado se BLOQUEA si el propietario cambia el titular a manual/otro (guardia espejo de Firestore)', () => {
+    const onAdd = vi.fn();
+    renderAlta({ propietarios: [p1, p2], onAdd, usuario: usuarioPropietario('P1') });
+
+    fireEvent.click(screen.getByRole('button', { name: /Nuevo Inmueble/ }));
+    irAFiscal();
+    expect(selectorTitular().value).toBe('P1');
+    // El usuario limpia la preselección (quedaría con titular ajeno/vacío: las Rules lo rechazarían)
+    fireEvent.change(selectorTitular(), { target: { value: '' } });
+
+    irAGeneral();
+    rellenarMinimo();
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar Inmueble' }));
+
+    // No se crea y la UI devuelve al usuario a la pestaña fiscal con el error explicado
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByText(/titularidad económica/)).toBeTruthy();
+  });
+
+  it('G. un PROPIETARIO sin propietarioId vinculado no recibe preselección (no rompe el alta)', () => {
+    const onAdd = vi.fn();
+    renderAlta({ propietarios: [p1], onAdd, usuario: usuarioPropietario(undefined) });
+
+    fireEvent.click(screen.getByRole('button', { name: /Nuevo Inmueble/ }));
+    irAFiscal();
+    expect(selectorTitular().value).toBe('');
+
+    irAGeneral();
+    rellenarMinimo();
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar Inmueble' }));
+
+    // Sin titular propio vinculado, el alta sigue el camino manual de siempre (crea sin propietario)
+    const creado = onAdd.mock.calls[0][0] as Inmueble;
+    expect(creado.propietarioId).toBeUndefined();
   });
 });

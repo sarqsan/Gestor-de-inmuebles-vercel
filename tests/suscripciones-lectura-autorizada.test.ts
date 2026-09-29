@@ -12,9 +12,10 @@
  *  · TEST 2 (liquidaciones) y TEST 3 (gastos de tesorería): la consulta del
  *    PROPIETARIO lleva OBLIGATORIAMENTE `where('propietarioId', '==', pid)`
  *    con el `propietarioId` del contexto de sesión (no se usa la colección
- *    global ni un filtro posterior en memoria). Master/administración conserva
- *    el comportamiento actual (colección completa). Perfiles sin rama de
- *    lectura en las reglas: NO QUERY.
+ *    global ni un filtro posterior en memoria). SOLO master conserva el
+ *    comportamiento actual (colección completa, §26/§27 de las reglas); un
+ *    ADMINISTRADOR no master NO abre consulta porque las reglas no autorizan
+ *    su `list`. Perfiles sin rama de lectura: NO QUERY.
  *
  *  · TEST 4 (enlaces_registro): con `currentUser === null` (primer render de
  *    App) NO se ejecuta `onSnapshot`. Un usuario ADMINISTRADOR/SUPERADMIN
@@ -220,15 +221,19 @@ describe('TEST 2 — liquidaciones_propietarios', () => {
     expect(sdk.where).toHaveBeenCalledWith('propietarioId', '==', 'prop_X');
   });
 
-  it('MASTER y ADMINISTRACIÓN: conserva la lectura de colección completa (comportamiento actual)', () => {
-    for (const scope of [MASTER, ADMIN_NO_MASTER]) {
-      sdk.onSnapshot.mockClear();
-      subscribeLiquidaciones(vi.fn(), scope);
-      expect(sdk.onSnapshot).toHaveBeenCalledTimes(1);
-      const [ref] = sdk.onSnapshot.mock.calls[0];
-      expect((ref as { __col?: string }).__col).toBe('liquidaciones_propietarios');
-      expect(esColeccionCompleta(ref)).toBe(true);
-    }
+  it('MASTER: conserva la lectura de colección completa (comportamiento actual)', () => {
+    subscribeLiquidaciones(vi.fn(), MASTER);
+    expect(sdk.onSnapshot).toHaveBeenCalledTimes(1);
+    const [ref] = sdk.onSnapshot.mock.calls[0];
+    expect((ref as { __col?: string }).__col).toBe('liquidaciones_propietarios');
+    expect(esColeccionCompleta(ref)).toBe(true);
+  });
+
+  it('ADMINISTRADOR no master: NO QUERY (las reglas §26 solo autorizan master o propietario acotado)', () => {
+    const cb = vi.fn();
+    subscribeLiquidaciones(cb, ADMIN_NO_MASTER);
+    expect(sdk.onSnapshot).not.toHaveBeenCalled();
+    expect(cb).toHaveBeenCalledWith([]);
   });
 
   it('sin contexto, PROPIETARIO sin propietarioId o perfil sin rama de lectura: NO QUERY', () => {
@@ -256,15 +261,19 @@ describe('TEST 3 — gastos_inmuebles', () => {
     expect(sdk.where).toHaveBeenCalledWith('propietarioId', '==', 'prop_X');
   });
 
-  it('MASTER y ADMINISTRACIÓN: conserva la lectura de colección completa (comportamiento actual)', () => {
-    for (const scope of [MASTER, ADMIN_NO_MASTER]) {
-      sdk.onSnapshot.mockClear();
-      subscribeGastos(vi.fn(), scope);
-      expect(sdk.onSnapshot).toHaveBeenCalledTimes(1);
-      const [ref] = sdk.onSnapshot.mock.calls[0];
-      expect((ref as { __col?: string }).__col).toBe('gastos_inmuebles');
-      expect(esColeccionCompleta(ref)).toBe(true);
-    }
+  it('MASTER: conserva la lectura de colección completa (comportamiento actual)', () => {
+    subscribeGastos(vi.fn(), MASTER);
+    expect(sdk.onSnapshot).toHaveBeenCalledTimes(1);
+    const [ref] = sdk.onSnapshot.mock.calls[0];
+    expect((ref as { __col?: string }).__col).toBe('gastos_inmuebles');
+    expect(esColeccionCompleta(ref)).toBe(true);
+  });
+
+  it('ADMINISTRADOR no master: NO QUERY (las reglas §27 solo autorizan master o propietario acotado)', () => {
+    const cb = vi.fn();
+    subscribeGastos(cb, ADMIN_NO_MASTER);
+    expect(sdk.onSnapshot).not.toHaveBeenCalled();
+    expect(cb).toHaveBeenCalledWith([]);
   });
 
   it('sin contexto, PROPIETARIO sin propietarioId o perfil sin rama de lectura: NO QUERY', () => {

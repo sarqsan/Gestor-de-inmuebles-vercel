@@ -7,13 +7,14 @@
  *  · `ficheros_sepa`, `ordenes_pago`, `mandatos_sepa`: `list` SOLO master
  *    (`isMasterAdmin()` en las reglas). Un contexto no master NO ejecuta
  *    `onSnapshot`: ni query, ni permission-denied, ni aviso.
- *  · `liquidaciones_propietarios`, `gastos_inmuebles`: master/administración
- *    conserva la lectura de colección completa; PROPIETARIO consulta SIEMPRE
- *    acotada en origen `where('propietarioId', '==', propietarioIdActual)`
+ *  · `liquidaciones_propietarios`, `gastos_inmuebles`: SOLO master abre la
+ *    lectura de colección completa (es la única identidad que las reglas §26–§27
+ *    autorizan para un `list` sin filtro; un ADMINISTRADOR no master recibe
+ *    `permission-denied`, así que NO se le abre consulta). PROPIETARIO consulta
+ *    SIEMPRE acotada en origen `where('propietarioId', '==', propietarioIdActual)`
  *    (es la única forma que las reglas pueden demostrar en un `list`; una
  *    consulta global la deniegan, y el filtro posterior en memoria no la
- *    legaliza). Sin rama de lectura (p. ej. PROFESIONAL) no se abre ninguna
- *    consulta.
+ *    legaliza). Sin rama de lectura no se abre ninguna consulta.
  *  · El propietarioId procede del contexto `UsuarioApp` del usuario de la
  *    sesión (mismo modelo que usa App), nunca de datos arbitrarios de la UI.
  */
@@ -43,16 +44,17 @@ export function subscribeLiquidaciones(
   callback: (items: LiquidacionPropietario[]) => void,
   scope?: UsuarioApp | null,
 ) {
-  // MASTER / ADMINISTRACIÓN: comportamiento conservado (colección completa).
-  const esAdmin = !!scope && (esUsuarioMaster(scope) || scope.tipoPerfil === 'ADMINISTRADOR');
+  // SOLO master: es la única identidad autorizada por las reglas §26 para la
+  // lectura de colección completa (un ADMINISTRADOR no master la vería denegada).
+  const esMaster = !!scope && esUsuarioMaster(scope);
   // PROPIETARIO: ámbito obligatorio por su propietarioId del contexto de sesión.
   const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId ?? '' : '';
-  if (!esAdmin && !pid) {
+  if (!esMaster && !pid) {
     // Sin contexto o perfil sin rama de lectura en las reglas: NO QUERY.
     callback([]);
     return () => {};
   }
-  const ref = esAdmin
+  const ref = esMaster
     ? LIQUIDACIONES_COL
     : query(LIQUIDACIONES_COL, where('propietarioId', '==', pid));
   return onSnapshot(
@@ -82,16 +84,17 @@ export function subscribeGastos(
   callback: (items: GastoInmueble[]) => void,
   scope?: UsuarioApp | null,
 ) {
-  // MASTER / ADMINISTRACIÓN: comportamiento conservado (colección completa).
-  const esAdmin = !!scope && (esUsuarioMaster(scope) || scope.tipoPerfil === 'ADMINISTRADOR');
+  // SOLO master: es la única identidad autorizada por las reglas §27 para la
+  // lectura de colección completa (un ADMINISTRADOR no master la vería denegada).
+  const esMaster = !!scope && esUsuarioMaster(scope);
   // PROPIETARIO: ámbito obligatorio por su propietarioId del contexto de sesión.
   const pid = scope?.tipoPerfil === 'PROPIETARIO' ? scope.propietarioId ?? '' : '';
-  if (!esAdmin && !pid) {
+  if (!esMaster && !pid) {
     // Sin contexto o perfil sin rama de lectura en las reglas: NO QUERY.
     callback([]);
     return () => {};
   }
-  const ref = esAdmin
+  const ref = esMaster
     ? GASTOS_COL
     : query(GASTOS_COL, where('propietarioId', '==', pid));
   return onSnapshot(

@@ -67,6 +67,13 @@ test('edición de presupuesto preserva los múltiples conceptos originales, sin 
   assert.deepEqual(i.cambios,{referencia:'P-CORREGIDO'});
 });
 test('error de guardado visible dentro del diálogo; cancelar posible con reintento pendiente',()=>{
-  const tree=FormularioOperacion({editor:{modo:'ESTADO',tipo:'incidencia',estado:'EN_REVISION'},entidades:[],seleccion:null,ocupado:false,bloqueado:true,error:'Sin confirmación',onGuardar(){},onCancelar(){}});
-  assert.ok(text(tree).includes('Sin confirmación'));const buttons=nodes(tree).filter((n)=>n.type==='button');assert.equal(buttons.find((b)=>b.props.type==='submit').props.disabled,true);assert.equal(buttons.find((b)=>b.props.type==='button').props.disabled,false);
+  // El editor incorpora el hook accesible de diálogo (BLOQUE 10 · UX-5/6), así que se
+  // renderiza con React —igual que el resto de la suite— en lugar de invocarlo como
+  // función suelta: llamar a un componente con hooks fuera de un render es ilegal.
+  const html=renderToStaticMarkup(React.createElement(FormularioOperacion,{editor:{modo:'ESTADO',tipo:'incidencia',estado:'EN_REVISION'},entidades:[],seleccion:null,ocupado:false,bloqueado:true,error:'Sin confirmación',onGuardar(){},onCancelar(){}}));
+  assert.ok(html.includes('Sin confirmación'),'el error de guardado se muestra dentro del diálogo');
+  const guardar=html.match(/<button[^>]*type="submit"[^>]*>/);
+  const cancelar=html.match(/<button[^>]*type="button"[^>]*>/);
+  assert.ok(guardar&&guardar[0].includes('disabled'),'guardar queda bloqueado con reintento pendiente');
+  assert.ok(cancelar&&!cancelar[0].includes('disabled'),'cancelar sigue disponible');
 });

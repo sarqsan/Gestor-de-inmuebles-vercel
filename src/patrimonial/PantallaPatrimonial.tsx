@@ -97,6 +97,16 @@ export function PantallaPatrimonial({ propietarios, usuarioActual, onCrearPropie
     nombre: `${usuarioActual.nombre}${usuarioActual.apellidos ? ` ${usuarioActual.apellidos}` : ''}`,
   };
 
+  // AUDITORÍA UX PROPIETARIO (2026-09-29 · FASE 9): el alta de OTRO titular
+  // patrimonial (crea `propietarios/{id}` nuevo) solo la puede ejecutar el ámbito
+  // administrativo/master según las reglas actuales. Para el resto de perfiles la
+  // vista «Nuevo propietario» se sustituye por la explicación (honestidad UX; las
+  // reglas y el flujo de importación hacia la ficha propia quedan intactos).
+  const esAdministrador = usuarioActual.tipoPerfil === 'ADMINISTRADOR';
+  const vistasDisponibles: readonly Vista[] = esAdministrador
+    ? ['lista', 'alta', 'importacion']
+    : ['lista', 'importacion'];
+
   // Contexto de planificación: titularidad propia ∪ ámbito recibido. Para el
   // ámbito administrativo se listan las fichas visibles; la autorización
   // efectiva sigue en las reglas (esto es solo el snapshot del dry-run).
@@ -163,6 +173,12 @@ export function PantallaPatrimonial({ propietarios, usuarioActual, onCrearPropie
   }
 
   async function guardarAlta(datos: BorradorPropietario) {
+    // Defensa en profundidad (FASE 9): sin ámbito administrativo, el alta de otra
+    // ficha patrimonial sería denegada por Rules; se comunica aquí en claro.
+    if (!esAdministrador) {
+      setMensaje('La creación de nuevos titulares patrimoniales corresponde a la administración. Puedes importar datos hacia tu propia ficha.');
+      return;
+    }
     if (!modalidad) { setMensaje('Selecciona primero la modalidad de uso.'); return; }
     const hoy = new Date().toISOString().slice(0, 10);
     const nuevo: Propietario = {
@@ -261,13 +277,26 @@ export function PantallaPatrimonial({ propietarios, usuarioActual, onCrearPropie
         La previsualización no escribe; la ejecución confirmada audita cada operación.
       </p>
       <nav style={{ display: 'flex', gap: 8, margin: '12px 0' }}>
-        {(['lista', 'alta', 'importacion'] as const).map((v) => (
+        {(vistasDisponibles).map((v) => (
           <button key={v} type="button" onClick={() => setVista(v)} aria-pressed={vista === v}>
             {v === 'lista' ? 'Propietarios' : v === 'alta' ? 'Nuevo propietario' : 'Importación'}
           </button>
         ))}
       </nav>
       {mensaje && <p role="status" style={{ fontWeight: 600 }}>{mensaje}</p>}
+
+      {/* AUDITORÍA UX PROPIETARIO (2026-09-29 · FASES 8/9): creación de OTROS titulares
+          patrimoniales no está al alcance del rol propietario (Rules: create solo propia
+          ficha o master). Se explica aquí en lugar de dejar que el formulario falle al
+          confirmar. La importación sí está disponible: su destino es la ficha propia. */}
+      {!esAdministrador && (
+        <p role="note" style={{ margin: '0 0 12px', padding: '8px 12px', background: '#eef4ff', border: '1px solid #bfccf5', borderRadius: 8, fontSize: 13 }}>
+          Puedes completar la ficha patrimonial de tu titularidad e importar datos hacia ella.
+          La creación de <em>otros</em> titulares patrimoniales corresponde a la administración.
+          Para un <strong>cotitular fiscal</strong> de una vivienda (segundo arrendador en contrato),
+          edita la <strong>titularidad desde la ficha del inmueble</strong>.
+        </p>
+      )}
 
       {vista === 'lista' && (
         <>

@@ -62,7 +62,8 @@ const GRUPOS_ESPERADOS: { id: GrupoNavId; nombre: string }[] = [
 const ORDEN_ESPERADO: Record<PerfilNavegacion, SectionType[]> = {
   ADMINISTRADOR: [
     'dashboard', 'administracion',
-    'inmuebles', 'propietarios', 'inversion', 'inquilinos', 'suministros',
+    // AUDITORÍA 2026-09-29: `datos` tras `propietarios` (decisión deliberada FASE 16/22).
+    'inmuebles', 'propietarios', 'datos', 'inversion', 'inquilinos', 'suministros',
     'cobros', 'tesoreria', 'gastos', 'financiacion', 'conciliacion', 'facturacion', 'fiscal', 'informes', 'morosidad',
     'candidatos', 'preseleccionados', 'seguro_impago', 'formalizacion', 'recomercializacion', 'analisis',
     'incidencias', 'operaciones', 'polizas', 'actas',
@@ -70,7 +71,8 @@ const ORDEN_ESPERADO: Record<PerfilNavegacion, SectionType[]> = {
   ],
   PROPIETARIO: [
     'dashboard',
-    'propietarios', 'inmuebles', 'inversion', 'suministros',
+    // AUDITORÍA 2026-09-29: `datos` tras `propietarios` (Importar/Exportar de primer nivel).
+    'propietarios', 'inmuebles', 'datos', 'inversion', 'suministros',
     'cobros', 'tesoreria', 'gastos', 'financiacion', 'conciliacion', 'facturacion', 'fiscal', 'informes',
     'formalizacion', 'recomercializacion',
     'incidencias', 'operaciones', 'polizas', 'actas',
@@ -161,16 +163,19 @@ describe('UX-1 · A — Catálogo de navegación', () => {
 
 // ── B. Perfiles ──────────────────────────────────────────────────────────────
 describe('UX-1 · B — Navegación por perfil', () => {
-  it('ADMINISTRADOR: 28 destinos en el orden aprobado', () => {
+  it('ADMINISTRADOR: 29 destinos en el orden aprobado', () => {
     const s = seccionesDePerfil('ADMINISTRADOR');
     expect(s).toEqual(ORDEN_ESPERADO.ADMINISTRADOR);
-    expect(s.length).toBe(28);
+    expect(s.length).toBe(29);
   });
 
-  it('PROPIETARIO: 21 destinos, sin secciones de gestión interna', () => {
+  it('PROPIETARIO: 22 destinos, sin secciones de gestión interna', () => {
     const s = seccionesDePerfil('PROPIETARIO');
     expect(s).toEqual(ORDEN_ESPERADO.PROPIETARIO);
-    expect(s.length).toBe(21);
+    expect(s.length).toBe(22);
+    // AUDITORÍA 2026-09-29 (FASE 16): Importar/Exportar es destino de primer nivel.
+    expect(s).toContain('datos');
+    expect(s.indexOf('datos')).toBeLessThan(s.indexOf('inversion'));
     for (const prohibida of ['inquilinos', 'morosidad', 'candidatos', 'preseleccionados', 'seguro_impago', 'analisis', 'administracion'] as SectionType[]) {
       expect(s).not.toContain(prohibida);
     }
@@ -248,7 +253,8 @@ describe('UX-1 · E — Seis grupos aprobados', () => {
     const porGrupo = Object.fromEntries(gruposDePerfil('ADMINISTRADOR').map((g) => [g.id, g.items.map((i) => i.id)]));
     expect(porGrupo).toEqual({
       CONTROL: ['dashboard', 'administracion'],
-      CARTERA: ['inmuebles', 'propietarios', 'inversion', 'inquilinos', 'suministros'],
+      // AUDITORÍA 2026-09-29: `datos` se ofrece dentro de CARTERA (decisión deliberada).
+      CARTERA: ['inmuebles', 'propietarios', 'datos', 'inversion', 'inquilinos', 'suministros'],
       ECONOMICO: ['cobros', 'tesoreria', 'gastos', 'financiacion', 'conciliacion', 'facturacion', 'fiscal', 'informes', 'morosidad'],
       COMERCIAL: ['candidatos', 'preseleccionados', 'seguro_impago', 'formalizacion', 'recomercializacion', 'analisis'],
       OPERACIONES: ['incidencias', 'operaciones', 'polizas', 'actas'],

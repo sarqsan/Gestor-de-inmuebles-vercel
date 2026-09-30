@@ -461,6 +461,16 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       setNewPropEsPersonaJuridica(false);
       altaAplicoContexto.current = false;
     }
+    // AUDITORÍA UX PROPIETARIO (2026-09-29 · FASE 11): cuando quien abre el alta
+    // es un PROPIETARIO, su titular queda preseleccionado. Sin esto el alta salía
+    // con «Asignación manual» y el envío terminaba en denegación de Rules
+    // (`allow create` exige el propietarioId propio). El usuario puede cambiar la
+    // selección; el validador del envío vuelve a exigir coherencia con su cuenta.
+    const titularId =
+      currentUser?.tipoPerfil === 'PROPIETARIO' ? currentUser.propietarioId ?? null : null;
+    if (titularId && propietarios.some((p) => p.id === titularId)) {
+      handleSelectNewPropietario(titularId);
+    }
     setShowAddModal(true);
   };
 
@@ -636,6 +646,24 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     });
     if (erroresTitularidadAlta.length > 0) {
       setErroresTitularidad(erroresTitularidadAlta);
+      setNewTab('fiscal');
+      return;
+    }
+
+    // AUDITORÍA UX PROPIETARIO (2026-09-29 · FASE 11): espejo EN CLIENTE de la
+    // regla `allow create` (que exige el propietarioId propio). Mejor fallar con
+    // una explicación clara aquí que con un permission-denied tras el alta
+    // optimista. No amplía ningún permiso: reproduce exactamente lo que Rules
+    // exige ya en el servidor.
+    if (
+      currentUser?.tipoPerfil === 'PROPIETARIO' &&
+      currentUser.propietarioId &&
+      created.propietarioId !== currentUser.propietarioId
+    ) {
+      setErroresTitularidad([
+        'El inmueble debe quedar vinculado a tu titularidad económica (tu ficha de propietario). ' +
+          'Selecciónala en el desplegable «Titular económico» de esta pestaña antes de guardar.',
+      ]);
       setNewTab('fiscal');
       return;
     }
@@ -1165,6 +1193,44 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               <Users className="w-4 h-4 text-blue-600" />
               <span>Candidatos: <strong className="text-blue-600">{interestedCandidates.length}</strong></span>
             </div>
+          </div>
+
+          {/* AUDITORÍA UX PROPIETARIO (2026-09-29 · FASES 8/12): franja de titularidad
+              siempre visible en la parte alta de la ficha. Presenta lo que YA existe
+              (entidad vinculada y/o snapshot fiscal) y enlaza con el editor fiscal
+              existente; no duplica ni reescribe el apartado fiscal completo. */}
+          <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-2xl flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span className="text-slate-600">
+                Titular del inmueble:{' '}
+                <strong className="text-slate-900" data-tour="ficha-titular">
+                  {linkedPropietarioPrincipal?.nombre ||
+                    df?.propietarioPrincipal?.nombre ||
+                    'Sin configurar'}
+                </strong>
+                {(df?.propietarioPrincipal?.nifDni || linkedPropietarioPrincipal?.nifCif) && (
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {' '}
+                    · {df?.propietarioPrincipal?.nifDni || linkedPropietarioPrincipal?.nifCif}
+                  </span>
+                )}
+              </span>
+            </div>
+            {df?.tieneSegundoPropietario && df?.segundoPropietario && (
+              <span className="text-slate-600 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-indigo-500" />
+                Cotitular: <strong className="text-slate-900">{df.segundoPropietario.nombre}</strong>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => handleOpenEditModal(selectedInmueble, 'fiscal')}
+              className="ml-auto px-3 py-1.5 bg-white hover:bg-indigo-50 border border-indigo-300 text-indigo-700 rounded-xl text-[11px] font-bold transition-colors flex items-center gap-1.5"
+            >
+              <Edit className="w-3.5 h-3.5" />
+              {tieneDatosFiscales ? 'Editar titularidad' : 'Configurar titularidad'}
+            </button>
           </div>
 
           {/* FISCAL DATA CARD */}
@@ -3227,6 +3293,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               ) : (
                 /* NEW PROPERTY FISCAL TAB */
                 <div className="space-y-4">
+                  {/* AUDITORÍA UX PROPIETARIO: la guardia de titularidad propia falla
+                      con la pestaña fiscal activa — el aviso debe verse también aquí. */}
+                  {erroresTitularidad.length > 0 && <ResumenErrores mensaje={erroresTitularidad.join(' ')} />}
                   {/* Propietario Selector Card */}
                   <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl space-y-3">
                     <div className="flex items-center justify-between">

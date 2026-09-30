@@ -25,6 +25,7 @@ export type ModuloERP =
   | 'finanzas'
   | 'seguros'
   | 'administracion'
+  | 'datos' // Importar/Exportar (sección `datos`; mismo motor canónico que Configuración)
   | 'ayuda'
   | 'desconocido';
 

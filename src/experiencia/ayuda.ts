@@ -333,6 +333,43 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     content: 'Las opciones de configuración visibles dependen del perfil y de los permisos. Activar una opción visual no debe interpretarse como una autorización de datos o de escritura. Si una conexión de IA no está disponible, el asistente puede seguir ofreciendo la ayuda estática y la resolución local.',
     roles: ['ADMINISTRADOR'], permissions: ['administracion.configuracion'], keywords: ['configuración', 'ajustes', 'módulos', 'conexión', 'gemini'],
   },
+  // ── AUDITORÍA UX PROPIETARIO (2026-09-29): titularidad e importar/exportar ─────
+  {
+    id: 'ayuda.datos.importar', categoria: 'importacion_exportacion', module: 'datos', section: 'datos',
+    title: 'Importar datos paso a paso',
+    summary: 'Sube un archivo JSON, CSV o Excel y revísalo en vista previa antes de escribir nada.',
+    content:
+      'En la pestaña «Importar» eliges el archivo (JSON, CSV o .xlsx) y el tipo de datos (inmuebles, propietarios, contratos, cobros o gastos).\n\nAl pulsar «Analizar» se ejecuta una lectura de prueba que NO escribe nada: verás el resumen (nuevos, duplicados ya existentes, posibles conflictos y problemas de validación) y el detalle por registro.\n\nSolo cuando el resultado te convenga, confirmas la importación: se aplican exclusivamente los registros autorizados dentro de tu ámbito y queda registro de la operación. Si un dato no es tuyo, el sistema lo bloquea igual que en cualquier otra pantalla.',
+    keywords: ['importar', 'subir', 'excel', 'csv', 'json', 'vista previa', 'duplicados', 'datos'],
+    relatedTutorials: ['recorrido.propietario.primeros-pasos'],
+  },
+  {
+    id: 'ayuda.datos.exportar', categoria: 'importacion_exportacion', module: 'datos', section: 'datos',
+    title: 'Exportar tus datos',
+    summary: 'Descarga inmuebles, propietarios, contratos, cobros o gastos en JSON, CSV o Excel, por inmueble y por ejercicio.',
+    content:
+      'En la pestaña «Exportar» eliges qué datos quieres (inmuebles, propietarios, contratos, cobros o gastos) y el formato (JSON canónico, CSV o Excel).\n\nPuedes acotar la descarga por inmueble (lista de identificadores, dividida por comas) y, para cobros y gastos, por ejercicio fiscal. La exportación nunca incluye datos fuera de tu ámbito.\n\nPara el informe fiscal estructurado y la exportación fiscal CSV/JSON usa la sección «Informes & Export»: es un sistema distinto, pensado para revisión y preparación de la declaración, no para presentación oficial.',
+    keywords: ['exportar', 'descargar', 'excel', 'csv', 'json', 'copia', 'datos', 'ejercicio'],
+    relatedTutorials: ['recorrido.propietario.primeros-pasos'],
+  },
+  {
+    id: 'ayuda.inmuebles.titularidad', categoria: 'inmuebles', module: 'inmuebles', section: 'inmuebles',
+    title: 'Titularidad de un inmueble',
+    summary: 'Quién figura como titular, qué es el cotitular fiscal y cómo cambiarlos desde la ficha.',
+    content:
+      'En la parte alta de la ficha de cada inmueble verás siempre quién figura como titular (y el cotitular, si lo hay).\n\nEl «titular económico» es la ficha de propietario a la que se vinculan cobros, gastos y liquidaciones. El «segundo propietario» es un cotitular fiscal: aparece en contratos y pólizas, pero no tiene acceso a la aplicación por ese motivo.\n\nPara añadir o cambiar el cotitular usa «Editar titularidad» en la ficha: puedes elegir una ficha existente o escribir los datos fiscales a mano (nombre, NIF, dirección…). La titularidad de la ficha patrimonial (alta de otros titulares con cuenta propia) la gestiona la administración.',
+    keywords: ['titular', 'titularidad', 'segundo propietario', 'cotitular', 'arrendador', 'copropietario', 'fiscal'],
+    relatedTutorials: ['recorrido.propietario.primeros-pasos'],
+  },
+  {
+    id: 'ayuda.propietarios.titulares', categoria: 'titulares', module: 'propietarios', section: 'propietarios',
+    title: 'Titulares patrimoniales y cuentas de acceso',
+    summary: 'La ficha de titular (nombre, NIF, cuentas bancarias) es independiente de quién puede entrar en la aplicación.',
+    content:
+      'Un titular patrimonial es la identidad jurídica a la que pertenecen los inmuebles: lleva nombre, NIF, dirección fiscal y cuentas bancarias. Una cosa distinta es la cuenta de acceso a la aplicación (usuario y contraseña), que se concede por invitación.\n\nDesde esta pantalla puedes revisar y completar tu ficha e importar datos hacia ella. La creación de otros titulares patrimoniales corresponde a la administración: si necesitas añadir un nuevo titular independiente, solicítalo.\n\nPara que una vivienda tenga un cotitular fiscal (segundo arrendador en contratos) no hace falta crear nada aquí: se configura en la ficha del propio inmueble, en «Editar titularidad».',
+    keywords: ['titular', 'propietario', 'titulares', 'patrimonial', 'segundo propietario', 'cotitular', 'cuenta', 'acceso'],
+    relatedTutorials: ['recorrido.propietario.primeros-pasos'],
+  },
 ];
 
 /** Palabras vacías frecuentes en español que no deben puntuar en la búsqueda. */
@@ -468,6 +505,7 @@ export const NOMBRE_MODULO: Record<ModuloERP, string> = {
   finanzas: 'Finanzas y fiscalidad',
   seguros: 'Seguros',
   administracion: 'Administración',
+  datos: 'Importar / Exportar',
   ayuda: 'Ayuda',
   desconocido: 'Otros',
 };

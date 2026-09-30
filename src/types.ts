@@ -31,6 +31,9 @@ export type SectionType =
   | 'cuestionario'
   | 'analisis'
   | 'inversion'
+  // AUDITORÍA UX PROPIETARIO (2026-09-29): sección visible de importar/exportar
+  // (monta el MISMO ImportExportPanel canónico que Configuración, sin motor duplicado)
+  | 'datos'
   | 'configuracion'
   | 'administracion'
   | 'mis_profesionales'

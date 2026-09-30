@@ -88,6 +88,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Inversión y Valoración', subtitle: 'Analizador COMPRA→COSTES→REFORMA→ALQUILER→RENTABILIDAD→ESCENARIOS — sin datos ficticios, todo estimado' };
       case 'configuracion':
         return { title: 'Configuración del Sistema', subtitle: 'Preferencias, aseguradoras y conexión Google Workspace' };
+      case 'datos':
+        return { title: 'Importar / Exportar datos', subtitle: 'Carga o descarga tus datos (JSON, CSV y Excel) con vista previa antes de confirmar' };
       case 'ayuda':
         return { title: 'Centro de Ayuda', subtitle: 'Explicaciones por pantalla y tutoriales guiados según tu perfil' };
       default:

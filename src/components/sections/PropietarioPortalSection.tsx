@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Home,
   Wrench,
@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Save,
   Wallet,
+  Users,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -31,6 +32,17 @@ import {
   Incidencia,
   EstadoCobroAlquiler,
 } from '../../types';
+import type { CandidatoTitular, MotivoCierreTitularidad, Titularidad } from '../../types';
+// N TITULARES: la titularidad es una RELACIÓN PATRIMONIAL (no una cuenta de
+// acceso). El alta se persiste de forma ATÓMICA (titularidad + índice
+// `inmuebles.titularesIds`) y el CIERRE nunca borra: pasa a histórico.
+import {
+  cerrarTitularidad,
+  guardarTitularidad,
+  subscribeTitularidadesEscopo,
+} from '../../lib/titularidadesFirestore';
+import { TitularidadesPanel } from '../titularidades/TitularidadesPanel';
+import { ejecutarMutacion } from '../../utils/mutacionFirestore';
 import type { LiquidacionPropietario } from '../../tesoreria/tipos';
 // PORTAL PROPIETARIO — Gastos/Cobros/Incidencias: se reutilizan los MISMOS motores
 // puros que las secciones internas (sin lógica paralela): mismos resúmenes,
@@ -109,8 +121,21 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   onCrearInmueble,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'viviendas' | 'profesionales' | 'contratos' | 'liquidaciones' | 'morosidad' | 'gastos' | 'cobros' | 'incidencias' | 'perfil'
+    | 'viviendas'
+    | 'titularidades'
+    | 'profesionales'
+    | 'contratos'
+    | 'liquidaciones'
+    | 'morosidad'
+    | 'gastos'
+    | 'cobros'
+    | 'incidencias'
+    | 'perfil'
   >('viviendas');
+  // N TITULARES — titularidades de mis viviendas (F2: índice + claves
+  // deterministas; ni `list` global ni `or()`).
+  const [titularidades, setTitularidades] = useState<Titularidad[]>([]);
+  const [inmuebleTitularidadesId, setInmuebleTitularidadesId] = useState<string | null>(null);
   // BLOQUE C: aislamiento defensivo en profundidad — aunque el prop incoming contuviera
   // otra fila, el propietario solo ve las suyas (la regla de Firestore ya lo garantiza).
   const miMorosidad = (resumenMorosidad || []).filter(
@@ -162,7 +187,11 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
     const pid = currentUser.propietarioId;
     const isOwnerByPropietarioId = !!pid && (inm.propietarioId === pid || inm.propietarioPrincipalId === pid);
     const isOwnerByInmuebleIds = !!currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
-    return isOwnerByPropietarioId || isOwnerByInmuebleIds;
+    // N TITULARES: ser COTITULAR (índice `titularesIds` del inmueble) también
+    // da acceso a la vivienda. Así se ven las titularidades creadas por
+    // terceros sobre un inmueble propio sin conocer su id de antemano.
+    const isCotitular = !!pid && Array.isArray(inm.titularesIds) && inm.titularesIds.includes(pid);
+    return isOwnerByPropietarioId || isOwnerByInmuebleIds || isCotitular;
   });
 
   const misViviendasIds = misViviendas.map((v) => v.id);
@@ -176,6 +205,125 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   // Private professionals added by this owner
   const misProfesionalesPrivados = profesionales.filter(
     (p) => p.creadoPorPropietarioId === currentUser.id || p.creadoPorPropietarioId === currentUser.propietarioId
+  );
+
+  // N TITULARES — suscripción a las titularidades del ámbito del propietario.
+  // Se resuelve por el índice de cada vivienda y se leen las claves
+  // deterministas una a una (`get`): sin `list` global y sin `or()`.
+  const misViviendasRef = useRef(misViviendas);
+  misViviendasRef.current = misViviendas;
+  const claveViviendas = misViviendas.map((v) => v.id).join('|');
+  useEffect(() => {
+    const pid = currentUser?.propietarioId;
+    if (!pid && misViviendasRef.current.length === 0) {
+      setTitularidades([]);
+      return;
+    }
+    return subscribeTitularidadesEscopo(
+      { inmuebles: misViviendasRef.current, propietarioId: pid },
+      setTitularidades,
+    );
+  }, [claveViviendas, currentUser?.propietarioId]);
+
+  const nombresPropietarios = useMemo(() => {
+    const mapa: Record<string, string> = {};
+    for (const p of propietarios || []) if (p?.id) mapa[p.id] = p.nombre;
+    return mapa;
+  }, [propietarios]);
+
+  const inmuebleTitularidades =
+    misViviendas.find((v) => v.id === inmuebleTitularidadesId) || misViviendas[0] || null;
+
+  // Gestiona las titularidades quien es titular CANÓNICO del inmueble
+  // (las reglas no conceden escritura al mero cotitular ni al gestor).
+  const puedeGestionarTitularidades = (inm: Inmueble | null): boolean => {
+    const pid = currentUser?.propietarioId;
+    if (!inm || !pid) return false;
+    return inm.propietarioId === pid || inm.propietarioPrincipalId === pid;
+  };
+
+  /** Token del usuario para el endpoint de servidor (F3). */
+  const obtenerToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const { auth } = await import('../../lib/firebase');
+      return (await auth.currentUser?.getIdToken()) || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** Búsqueda de titulares en SERVIDOR: el cliente no tiene credenciales. */
+  const handleBuscarTitulares = useCallback(
+    async (inmuebleId: string, termino: string): Promise<CandidatoTitular[]> => {
+      const token = await obtenerToken();
+      const respuesta = await fetch('/api/titulares/buscar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ inmuebleId, termino }),
+      });
+      const datos = (await respuesta.json().catch(() => ({}))) as {
+        ok?: boolean;
+        resultados?: CandidatoTitular[];
+        detalle?: string;
+        error?: string;
+      };
+      if (!respuesta.ok) {
+        const mensaje = datos?.detalle || 'No se ha podido realizar la búsqueda de titulares.';
+        const error = new Error(mensaje) as Error & { detalle?: string; codigoHttp?: number };
+        error.detalle = mensaje;
+        error.codigoHttp = respuesta.status;
+        throw error;
+      }
+      return datos?.resultados || [];
+    },
+    [obtenerToken],
+  );
+
+  // Alta de titular: la confirmación visual la emite `ejecutarMutacion` SÓLO
+  // si la persistencia confirmó (contrato booleano + veredicto de la capa de
+  // datos). Crear titularidad NO crea ninguna cuenta de acceso.
+  const handleAnadirTitular = useCallback(
+    async (inmuebleId: string, propietarioId: string, porcentaje: number | null) => {
+      await ejecutarMutacion({
+        accion: () =>
+          guardarTitularidad({
+            inmuebleId,
+            propietarioId,
+            propietarioNombre: nombresPropietarios[propietarioId],
+            porcentaje,
+            actor: { id: currentUser?.id, nombre: currentUser?.nombre },
+          }),
+        mensajeExito: 'Titular añadido correctamente.',
+        mensajeError: 'No se ha podido añadir el titular.',
+        origenesDatos: ['titularidades'],
+      });
+    },
+    [currentUser?.id, currentUser?.nombre, nombresPropietarios],
+  );
+
+  // Cierre de titularidad: NUNCA borra. Registra fecha, motivo y detalle y
+  // deja la titularidad consultable en el histórico patrimonial.
+  const handleCerrarTitularidad = useCallback(
+    async (titularidadId: string, motivo: MotivoCierreTitularidad, detalle?: string) => {
+      const titularidad = titularidades.find((t) => t.id === titularidadId);
+      if (!titularidad) return;
+      await ejecutarMutacion({
+        accion: () =>
+          cerrarTitularidad({
+            titularidad,
+            motivo,
+            detalle,
+            actor: { id: currentUser?.id, nombre: currentUser?.nombre },
+          }),
+        mensajeExito: 'Titularidad cerrada. Sigue disponible en el histórico patrimonial.',
+        mensajeError: 'No se ha podido cerrar la titularidad.',
+        origenesDatos: ['titularidades'],
+      });
+    },
+    [currentUser?.id, currentUser?.nombre, titularidades],
   );
 
   // Associated Propietario record
@@ -420,6 +568,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
         <div className="flex overflow-x-auto border-b border-slate-200 scrollbar-none px-4">
           {[
             { id: 'viviendas', label: 'Mis Viviendas', icon: Home, count: misViviendas.length },
+            { id: 'titularidades', label: 'Titulares / Titularidades', icon: Users },
             {
               id: 'profesionales',
               label: 'Mis Profesionales',
@@ -589,6 +738,55 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                     );
                   })}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* SUBTAB 1.B: TITULARES / TITULARIDADES (N titulares) */}
+          {activeSubTab === 'titularidades' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Titulares y titularidades</h3>
+                  <p className="text-xs text-slate-500">
+                    Selecciona una vivienda para ver sus titulares actuales, añadir uno nuevo o cerrar una
+                    titularidad (el cierre nunca borra: queda en el histórico patrimonial).
+                  </p>
+                </div>
+                {misViviendas.length > 0 && (
+                  <select
+                    aria-label="Vivienda"
+                    value={inmuebleTitularidades?.id || ''}
+                    onChange={(e) => setInmuebleTitularidadesId(e.target.value)}
+                    className="text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white min-w-[220px]"
+                  >
+                    {misViviendas.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.alias || v.direccion}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {!inmuebleTitularidades ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-2">
+                  <Users className="w-8 h-8 text-slate-400 mx-auto" />
+                  <div className="text-xs font-bold text-slate-700">No tienes viviendas asignadas</div>
+                  <p className="text-xs text-slate-500">
+                    Cuando tengas una vivienda vinculada podrás gestionar aquí sus titulares.
+                  </p>
+                </div>
+              ) : (
+                <TitularidadesPanel
+                  inmueble={inmuebleTitularidades}
+                  titularidades={titularidades}
+                  nombresPropietarios={nombresPropietarios}
+                  puedeGestionar={puedeGestionarTitularidades(inmuebleTitularidades)}
+                  onAnadirTitular={handleAnadirTitular}
+                  onCerrarTitularidad={handleCerrarTitularidad}
+                  onBuscarTitulares={handleBuscarTitulares}
+                />
               )}
             </div>
           )}

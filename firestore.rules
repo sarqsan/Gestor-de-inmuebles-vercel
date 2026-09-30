@@ -223,9 +223,15 @@ service cloud.firestore {
     // valor sale de un `get` de ruta fija que se trata como constante; mismo
     // criterio que `contratoEsMio`).
     function inmuebleEsMio(d) {
+      // N TITULARES (F2): la cotitularidad TAMBIÉN da acceso al inmueble. El
+      // índice `titularesIds` del propio inmueble es la prueba: `array-contains`
+      // es demostrable para el motor en una consulta `list`, y `hasAny` lo es
+      // en un `get`. Así el cotitular ve la vivienda (y, con ella, el resto de
+      // titularidades por su clave determinista) sin conocer ids de terceros.
       return isPropietarioRole() && (
         ('propietarioId' in d && d.propietarioId == myPropId()) ||
-        ('propietarioPrincipalId' in d && d.propietarioPrincipalId == myPropId())
+        ('propietarioPrincipalId' in d && d.propietarioPrincipalId == myPropId()) ||
+        ('titularesIds' in d && d.titularesIds is list && d.titularesIds.hasAny([myPropId()]))
       );
     }
 
@@ -1081,6 +1087,87 @@ service cloud.firestore {
         && esInvitacionGestion(getEnlaceE(g.enlaceRegistroId))
         && destinatarioGestion(getEnlaceE(g.enlaceRegistroId))
         && getEnlaceE(g.enlaceRegistroId).gestionId == g.id;
+    }
+
+    // =========================================================================
+    // N TITULARES — TITULARIDADES (F2)
+    // -------------------------------------------------------------------------
+    // Colección inversa al índice `inmuebles.titularesIds[]`:
+    //  · clave DETERMINISTA `{inmuebleId}__{propietarioId}` ⇒ el acceso es un
+    //    `get` individual, demostrable para el motor de reglas.
+    //  · SIN `list`: la enumeración de titularidades NO existe. Se descubren
+    //    por el índice del inmueble, de modo que si un TERCERO crea una
+    //    titularidad sobre mi vivienda yo la veo sin conocer su id de antemano.
+    //  · SIN borrado: cerrar una titularidad es un cambio de estado
+    //    (`CERRADA` + fecha + motivo); el histórico permanece consultable.
+    //  · Crear una titularidad NO crea ninguna cuenta de acceso: la titularidad
+    //    es patrimonio; la identidad vive en `usuarios_auth` (sólo master).
+    // =========================================================================
+    match /titularidades/{titularidadId} {
+      function datosInmuebleTitularidad(inmId) {
+        return get(/databases/$(database)/documents/inmuebles/$(inmId)).data;
+      }
+      function soyCotitularDelInmueble(inmId) {
+        return isPropietarioRole() && inmId is string
+          && exists(/databases/$(database)/documents/inmuebles/$(inmId))
+          && 'titularesIds' in datosInmuebleTitularidad(inmId)
+          && datosInmuebleTitularidad(inmId).titularesIds is list
+          && datosInmuebleTitularidad(inmId).titularesIds.hasAny([myPropId()]);
+      }
+      function puedoLeerTitularidadDe(inmId) {
+        return esAdminInmuebles() || ambitoPorInmuebleLectura(inmId) || soyCotitularDelInmueble(inmId);
+      }
+      function puedoEscribirTitularidadDe(inmId) {
+        return esAdminInmuebles() || ambitoPorInmuebleEscritura(inmId);
+      }
+      // La clave es la IDENTIDAD del documento: inmuebleId+propietarioId deben
+      // coincidir con el id. Impide reescribir la relación "por detrás".
+      function claveCoherente(d) {
+        return d.inmuebleId is string && d.propietarioId is string
+          && titularidadId == d.inmuebleId + '__' + d.propietarioId;
+      }
+      function camposInmutables(d, previo) {
+        return d.inmuebleId == previo.inmuebleId && d.propietarioId == previo.propietarioId
+          && ('id' in d ? d.id : titularidadId) == ('id' in previo ? previo.id : titularidadId)
+          && ('fechaInicio' in d ? d.fechaInicio : '') == ('fechaInicio' in previo ? previo.fechaInicio : '');
+      }
+      // `null` = PENDIENTE (nunca se inventa un porcentaje).
+      function porcentajeValido(d) {
+        return !('porcentajeTitularidad' in d) || d.porcentajeTitularidad == null
+          || (d.porcentajeTitularidad is number && d.porcentajeTitularidad >= 0 && d.porcentajeTitularidad <= 100);
+      }
+      function estadoValido(d) {
+        return d.estado in ['VIGENTE', 'CERRADA'];
+      }
+      // Cerrar exige fecha y motivo: es un hecho patrimonial, no un trámite.
+      function cierreBienFormado(d) {
+        return d.estado != 'CERRADA'
+          || (('fechaCierre' in d) && d.fechaCierre is string
+              && ('motivoCierre' in d) && d.motivoCierre is string
+              && d.motivoCierre in ['VENTA', 'DONACION', 'HERENCIA', 'DIVORCIO',
+                                    'DISOLUCION_CONDOMINIO', 'ERROR_DATOS', 'OTRO']);
+      }
+
+      // get: una titularidad CONCRETA (por clave) cuando el inmueble está en mi
+      // ámbito, soy cotitular de él, o la titularidad es la mía propia.
+      allow get: if ('inmuebleId' in resource.data && puedoLeerTitularidadDe(resource.data.inmuebleId))
+        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      // list: DENEGADO. No hay enumeración global de titularidades: se conocen
+      // por el índice `titularesIds` de cada inmueble y se leen una a una.
+      allow list: if false;
+
+      allow create: if puedoEscribirTitularidadDe(incoming().inmuebleId)
+        && claveCoherente(incoming()) && estadoValido(incoming())
+        && porcentajeValido(incoming()) && cierreBienFormado(incoming());
+
+      allow update: if puedoEscribirTitularidadDe(existing().inmuebleId)
+        && puedoEscribirTitularidadDe(incoming().inmuebleId)
+        && camposInmutables(incoming(), existing()) && estadoValido(incoming())
+        && porcentajeValido(incoming()) && cierreBienFormado(incoming());
+
+      // NUNCA: el cierre de una titularidad es un cambio de estado, no un
+      // borrado. El histórico patrimonial se conserva siempre.
+      allow delete: if false;
     }
 
     // =========================================================================

@@ -559,6 +559,22 @@ export interface Inmueble {
   suministroIds?: string[];
   // BLOQUE E (reconciliado): contratos cuyos inquilinos pueden leer (get) este inmueble
   contratoIdsAutorizados?: string[];
+
+  // N TITULARES (F2) — índice de titularidades del inmueble.
+  // Es la ÚNICA forma de descubrir los titulares de una vivienda sin enumerar la
+  // colección `titularidades`: cada titularidad vive en una clave determinista
+  // `{inmuebleId}__{propietarioId}` y aquí se indexan los propietarioId con
+  // titularidad (vigente o histórica) sobre el inmueble.
+  titularesIds?: string[];
+
+  // CICLO PATRIMONIAL (baja / vendido + histórico).
+  // BAJA/VENDIDO ≠ BORRADO: el documento permanece y sigue siendo consultable.
+  estadoPatrimonial?: EstadoPatrimonial;
+  estadoExplotacion?: EstadoExplotacion;
+  bajaPatrimonial?: BajaPatrimonial;
+  fechaVenta?: string;
+  /** Bajas anteriores del inmueble: el histórico patrimonial NUNCA se borra. */
+  historialBajas?: BajaPatrimonial[];
 }
 
 export type CategoriaInventario =
@@ -4105,4 +4121,107 @@ export interface HistorialInquilinoItem {
   titulo: string;
   detalle?: string;
   entidadId?: string;
+}
+
+// =============================================================================
+// N TITULARES · TITULARIDADES Y CICLO PATRIMONIAL
+// -----------------------------------------------------------------------------
+// Modelo canónico de titularidad de un inmueble (N titulares, sin límite):
+//
+//  · `inmuebles.titularesIds[]`        → índice de propietarioIds con titularidad.
+//  · `titularidades/{inmuebleId}__{propietarioId}` → clave DETERMINISTA.
+//
+// Con eso el acceso es por `get` individual (demostrable para las reglas) y
+// NUNCA hace falta un `list` global ni `or()`: se conocen los ids por el índice
+// del inmueble, y si un TERCERO crea una titularidad sobre un inmueble del
+// propietario, el índice la revela sin conocer de antemano su id.
+//
+// Separación de conceptos (obligatoria):
+//  · TITULARIDAD  → relación jurídica con el inmueble (patrimonio).
+//  · CUENTA       → identidad de acceso (Firebase Auth). Crear una titularidad
+//                   NUNCA crea una cuenta de acceso.
+//  · HISTORIAL    → cierre de titularidad = estado CERRADA + fecha + motivo.
+//                   Nunca borrado físico.
+// =============================================================================
+
+/** Estado de la titularidad. CERRADA = histórico consultable, nunca borrado. */
+export type EstadoTitularidad = 'VIGENTE' | 'CERRADA';
+
+export type MotivoCierreTitularidad =
+  | 'VENTA'
+  | 'DONACION'
+  | 'HERENCIA'
+  | 'DIVORCIO'
+  | 'DISOLUCION_CONDOMINIO'
+  | 'ERROR_DATOS'
+  | 'OTRO';
+
+export const MOTIVO_CIERRE_TITULARIDAD_LABEL: Record<MotivoCierreTitularidad, string> = {
+  VENTA: 'Venta',
+  DONACION: 'Donación',
+  HERENCIA: 'Herencia',
+  DIVORCIO: 'Divorcio / adjudicación',
+  DISOLUCION_CONDOMINIO: 'Disolución de condominio',
+  ERROR_DATOS: 'Error de datos',
+  OTRO: 'Otro',
+};
+
+/**
+ * Titularidad de un propietario sobre un inmueble.
+ * `porcentajeTitularidad === null` ⇒ PORCENTAJE PENDIENTE (nunca se inventa).
+ */
+export interface Titularidad {
+  /** Clave determinista: `{inmuebleId}__{propietarioId}`. */
+  id: string;
+  inmuebleId: string;
+  propietarioId: string;
+  /** Denominación capturada en el momento del alta (sólo presentación). */
+  propietarioNombre?: string;
+  /** `null` = pendiente; NO se asume 50/50 ni ningún reparto por defecto. */
+  porcentajeTitularidad: number | null;
+  estado: EstadoTitularidad;
+  fechaInicio: string; // ISO
+  fechaCierre?: string; // ISO (sólo en estado CERRADA)
+  motivoCierre?: MotivoCierreTitularidad;
+  detalleCierre?: string;
+  // Trazabilidad
+  creadoPorId?: string;
+  creadoPorNombre?: string;
+  cerradoPorId?: string;
+  cerradoPorNombre?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Ciclo patrimonial del inmueble (la ENTIDAD FÍSICA; no el contrato). */
+export type EstadoPatrimonial = 'ACTIVO' | 'VENDIDO' | 'BAJA';
+
+export type EstadoExplotacion = 'EN_EXPLOTACION' | 'SIN_EXPLOTACION';
+
+export type MotivoBajaPatrimonial =
+  | 'VENTA'
+  | 'DONACION'
+  | 'HERENCIA'
+  | 'PERMUTA'
+  | 'DEMOLICION'
+  | 'BAJA_ADMINISTRATIVA'
+  | 'OTRO';
+
+/**
+ * Registro de baja patrimonial. Es un CAMBIO DE ESTADO con trazabilidad:
+ * el inmueble sigue existiendo en el histórico (nunca se borra).
+ */
+export interface BajaPatrimonial {
+  fecha: string; // ISO (fecha efectiva de la baja)
+  motivo: MotivoBajaPatrimonial;
+  detalle?: string;
+  usuarioId?: string;
+  usuarioNombre?: string;
+  registradaEn: string; // ISO (cuándo se registró)
+}
+
+/** Resultado de una búsqueda de titulares (F3): DATOS MÍNIMOS. */
+export interface CandidatoTitular {
+  id: string;
+  nombre: string;
 }

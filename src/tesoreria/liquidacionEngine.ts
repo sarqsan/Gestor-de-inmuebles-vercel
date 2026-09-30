@@ -12,7 +12,11 @@
  * - BORRADOR recalculable; APROBADA preparada para pago; PAGADA con evidencia;
  *   ANULADA/REVERSADA conservan trazabilidad. Sin borrado físico.
  */
-import type { CobroPeriodo, ContratoFormalizacion, Propietario } from '../types';
+import type { CobroPeriodo, ContratoFormalizacion, Propietario, Titularidad } from '../types';
+// F4 — Reparto entre N titulares: el MISMO motor puro que usan las pantallas de
+// titularidad. Sin lógica paralela y sin repartos inventados.
+import { calcularReparto } from '../utils/repartoTitularidades';
+import type { RepartoAplicado } from '../utils/repartoTitularidades';
 import {
   esPeriodoValido,
   formatoImporteSepa,
@@ -117,12 +121,25 @@ export interface EntradaLiquidacion {
   /** Cobros ya usados en otras liquidaciones (para evitar duplicar). */
   cobroIdsExcluidos?: string[];
   gastoIdsExcluidos?: string[];
+  /**
+   * F4 — titularidades VIGENTES de los inmuebles liquidados. Si no se
+   * aportan, se conserva el comportamiento anterior (reparto binario explícito
+   * de `repartoCopropiedad`, o nada).
+   */
+  titularidades?: readonly Titularidad[];
+  /** Nombres de los titulares para las líneas de reparto (sólo presentación). */
+  nombresTitulares?: Record<string, string>;
 }
 
 export interface ResultadoLiquidacion {
   ok: boolean;
   errores: string[];
   liquidacion?: LiquidacionPropietario;
+  /**
+   * F4 — reparto efectivamente aplicado entre los N titulares (sólo presente
+   * cuando la liquidación se ha podido construir).
+   */
+  reparto?: RepartoAplicado;
 }
 
 /**
@@ -303,18 +320,41 @@ export function construirBorradorLiquidacion(entrada: EntradaLiquidacion): Resul
   const totalDeducciones = redondear2(totalHonorarios + totalIvaHonorarios + totalGastos + totalRetenciones);
   let netoPropietario = redondear2(totalBrutoCobrado - totalDeducciones);
 
-  // --- Reparto copropiedad explícito (opcional) ---
-  if (config.repartoCopropiedad && netoPropietario !== 0) {
-    const pct2 = config.repartoCopropiedad.porcentajeSegundo;
-    const parteSegundo = redondear2((netoPropietario * pct2) / 100);
-    netoPropietario = redondear2(netoPropietario - parteSegundo);
-    lineas.push({
-      id: nid(),
-      naturaleza: 'retenido',
-      concepto: `Parte copropietario ${config.repartoCopropiedad.segundoPropietarioNombre} (${pct2}%)`,
-      importe: -parteSegundo,
-      detalle: 'Reparto explícito configurado; el neto mostrado corresponde al titular principal',
-    });
+  // --- Reparto entre N titulares (F4) -------------------------------------
+  // Orden: titularidades declaradas > reparto binario explícito heredado >
+  // sin reparto. NUNCA se inventa un porcentaje: si el reparto no es
+  // demostrable (porcentajes pendientes, suma incorrecta, 3+ titulares sin
+  // porcentaje suficiente) la liquidación se BLOQUEA aquí.
+  const reparto = calcularReparto(netoPropietario, entrada.titularidades || [], {
+    propietarioPrincipalId: propietario.id,
+    nombres: entrada.nombresTitulares,
+    repartoBinario: config.repartoCopropiedad
+      ? {
+          segundoPropietarioId: config.repartoCopropiedad.segundoPropietarioId,
+          porcentajeSegundo: config.repartoCopropiedad.porcentajeSegundo,
+          segundoPropietarioNombre: config.repartoCopropiedad.segundoPropietarioNombre,
+        }
+      : undefined,
+  });
+  if (!reparto.ok) {
+    errores.push(reparto.mensaje || 'El reparto entre titulares no es válido.');
+    return { ok: false, errores };
+  }
+  const repartoAplicado = reparto.reparto;
+  if (repartoAplicado && repartoAplicado.partes.length > 0 && netoPropietario !== 0) {
+    for (const parte of repartoAplicado.partes) {
+      lineas.push({
+        id: nid(),
+        naturaleza: 'retenido',
+        concepto: `Parte ${parte.nombre || parte.propietarioId} (${parte.porcentaje} %)`,
+        importe: -parte.importe,
+        detalle:
+          repartoAplicado.origen === 'TITULARIDADES'
+            ? 'Reparto según las titularidades declaradas del inmueble'
+            : 'Reparto explícito configurado; el neto mostrado corresponde al titular principal',
+      });
+    }
+    netoPropietario = repartoAplicado.importePrincipal;
   }
 
   // --- Cuadre: suma de líneas debe igualar el neto ---
@@ -403,7 +443,7 @@ export function construirBorradorLiquidacion(entrada: EntradaLiquidacion): Resul
     notas: entrada.notas,
   };
 
-  return { ok: true, errores: [], liquidacion };
+  return { ok: true, errores: [], liquidacion, reparto: repartoAplicado };
 }
 
 /** Recalcula un BORRADOR con los mismos u otros inputs (conserva id e historial). */

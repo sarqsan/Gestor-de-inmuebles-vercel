@@ -24,6 +24,7 @@ import {
 import { idempotenciaDeEvento } from './src/types/notificaciones';
 import { construirPromptAsistente, normalizarCuerpoInterpretar, parsearRespuestaModelo } from './src/experiencia/proveedorGemini';
 import { crearLimitadorVentana } from './src/experiencia/limites';
+import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorBuscarTitulares';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -2601,6 +2602,15 @@ Responde ÚNICAMENTE en formato JSON con la siguiente estructura:
     return res.status(500).json({ error: 'Error interno en análisis IA de incidencia' });
   }
 });
+
+// ---------------------------------------------------------------------------
+// F3 — BÚSQUEDA SEGURA DE TITULARES (N titulares).
+// Endpoint de servidor: autenticado, autorizado sobre el inmueble solicitado,
+// mínimo 3 caracteres, máximo 10 resultados y respuesta { id, nombre }.
+// Sin NIF, sin email, sin IBAN, sin datos fiscales y sin enumeración global.
+// La credencial de servicio vive SÓLO en el entorno del servidor.
+// ---------------------------------------------------------------------------
+app.post('/api/titulares/buscar', crearManejadorBuscarTitulares());
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

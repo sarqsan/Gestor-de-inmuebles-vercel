@@ -324,6 +324,32 @@ function subscribeUnionInmuebles(
 
   if (opts.propietarioId) escucharPorPropietario('propios', opts.propietarioId);
 
+  // N TITULARES (F2) — COTITULARIDAD: una ÚNICA consulta de igualdad por array
+  // (`array-contains`), que SÍ es demostrable para el motor de reglas (al
+  // contrario que `array-contains-any` combinado o un `or()`). Devuelve los
+  // inmuebles en los que el propietario aparece en el índice `titularesIds`
+  // aunque NO sea el titular canónico (`propietarioId`). Con eso el cotitular
+  // ve la vivienda y, a partir de su índice, el resto de titularidades por su
+  // clave determinista —sin conocer de antemano el id de los demás titulares—.
+  const escucharPorCotitularidad = (pid: string) => {
+    if (!pid) return;
+    fuentes.push(
+      onSnapshot(
+        query(INMUEBLES_COL, where('titularesIds', 'array-contains', pid)),
+        (snap) => {
+          const parcial = new Map<string, Inmueble>();
+          snap.forEach((ds) => parcial.set(ds.id, { id: ds.id, ...ds.data() } as Inmueble));
+          porFuente.set('cotitular', parcial);
+          notificar();
+        },
+        (err) => {
+          reportarErrorLectura('inmuebles', err, 'Firestore inmuebles (cotitularidad) snapshot error:');
+        }
+      )
+    );
+  };
+  if (opts.propietarioId) escucharPorCotitularidad(opts.propietarioId);
+
   // D2b: carteras gestionadas, un listener por propietario gestionado. Un
   // propietario que además gestiona carteras recibe la unión completa.
   for (const pid of opts.gestionadoIds) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Home,
   Wrench,
@@ -27,12 +27,38 @@ import {
   ContratoFormalizacion,
   Especialidad,
   Propietario,
+  Titularidad,
 } from '../../types';
 import type { LiquidacionPropietario } from '../../tesoreria/tipos';
 // BLOQUE C — Morosidad: el portal del propietario SOLO consume el espejo recortado
 // (`morosidad_resumen_propietario`); nunca lee expedientes, comunicaciones internas ni estrategias.
 import type { ResumenMorosidadPropietario } from '../../types/morosidad';
 import { formatoImporteSepa } from '../../tesoreria/sepaUtils';
+// BLOQUE 3 · 3.2: lectura correcta de renta y superficie (adiós a " €/mes" y "0 m²").
+import { formatearRentaMensual, formatearSuperficie } from '../../utils/fichaInmueblePresentacion';
+// BLOQUE 2/3: ciclo de vida patrimonial (cartera activa vs histórico) y N titulares.
+import {
+  estadoExplotacionDe,
+  esHistorico,
+  filtrarCarteraActiva,
+  filtrarHistorico,
+} from '../../utils/cicloPatrimonialEngine';
+import { filtrarInmueblesPorTitularidad, esTitularDelInmueble } from '../../utils/alcancePatrimonial';
+import { numeroTitulares } from '../../utils/titularidadesEngine';
+import {
+  etiquetaEstadoExplotacion,
+  etiquetaEstadoPatrimonial,
+} from '../../utils/titularidadesPresentacion';
+import { TitularidadesPanel } from '../TitularidadesPanel';
+
+/**
+ * ¿Puede el propietario gestionar la titularidad de este inmueble?
+ * Sólo si participa en la titularidad del inmueble. No se conceden funciones
+ * de administración: el portal del propietario no las necesita.
+ */
+function puedeGestionarTitularidad(inm: Inmueble, user: UsuarioApp): boolean {
+  return Boolean(user?.propietarioId) && esTitularDelInmueble(inm, user.propietarioId);
+}
 import { imprimirLiquidacionPDF } from '../../tesoreria/liquidacionPdf';
 
 interface PropietarioPortalSectionProps {
@@ -46,6 +72,19 @@ interface PropietarioPortalSectionProps {
   liquidaciones?: LiquidacionPropietario[];
   /** BLOQUE C — resumen de morosidad ya recortado (sin datos del inquilino ni de estrategia). */
   resumenMorosidad?: ResumenMorosidadPropietario[];
+
+  /* --- BLOQUE 2/3 · N titulares y ciclo de vida patrimonial --- */
+  /** Titularidades ya acotadas al ámbito del propietario. */
+  titularidades?: Titularidad[];
+  /** Marcar como VENDIDO (NO borra: sale de la cartera activa y pasa al histórico). */
+  onMarcarVendido?: (inmuebleId: string, datos?: { fecha?: string; motivo?: string }) => Promise<void>;
+  /** Dar de baja patrimonial (el mecanismo normal, no el borrado físico). */
+  onDarDeBaja?: (inmuebleId: string, datos?: { motivo?: string }) => Promise<void>;
+  /** Añadir un titular más (2º, 3º, 4º… N). */
+  onAnadirTitular?: (inmuebleId: string, propietarioId: string, porcentaje?: number | null) => Promise<void>;
+  /** Cerrar una titularidad (NUNCA borrarla). */
+  onCerrarTitularidad?: (titularidadId: string, motivo: string) => Promise<void>;
+
   onOpenCrearProfesionalModal: (profesional?: Profesional) => void;
   onSaveProfesional: (profesional: Profesional) => Promise<void>;
   onSavePropietario?: (propietario: Propietario) => Promise<void>;
@@ -61,6 +100,11 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   propietarios,
   liquidaciones = [],
   resumenMorosidad = [],
+  titularidades = [],
+  onMarcarVendido,
+  onDarDeBaja,
+  onAnadirTitular,
+  onCerrarTitularidad,
   onOpenCrearProfesionalModal,
   onSaveProfesional,
   onSavePropietario,
@@ -95,13 +139,18 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const [guardandoFicha, setGuardandoFicha] = useState<boolean>(false);
   const [mensajeFicha, setMensajeFicha] = useState<string | null>(null);
 
-  // Security check: Only filter properties that belong to this owner
-  const misViviendas = inmuebles.filter((inm) => {
-    const pid = currentUser.propietarioId;
-    const isOwnerByPropietarioId = !!pid && (inm.propietarioId === pid || inm.propietarioPrincipalId === pid);
-    const isOwnerByInmuebleIds = !!currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
-    return isOwnerByPropietarioId || isOwnerByInmuebleIds;
-  });
+  // Security check: Only filter properties that belong to this owner.
+  // BLOQUE 1 · Antes sólo se miraban `propietarioId` y `propietarioPrincipalId`:
+  // un COTITULAR quedaba fuera de su propia cartera. Ahora participa quien conste
+  // en cualquier ranura de titularidad (o tenga delegación explícita).
+  const misViviendas: Inmueble[] = filtrarInmueblesPorTitularidad<Inmueble>(inmuebles, currentUser);
+
+  // BLOQUE 2/3 · Dos vistas: CARTERA ACTIVA (lo que se explota hoy) e HISTÓRICO
+  // (vendido / transmitido / dado de baja). El histórico NO se pierde: se consulta.
+  const [vistaViviendas, setVistaViviendas] = useState<'ACTIVA' | 'HISTORICO'>('ACTIVA');
+  const carteraActiva: Inmueble[] = useMemo(() => filtrarCarteraActiva(misViviendas), [misViviendas]);
+  const historico: Inmueble[] = useMemo(() => filtrarHistorico(misViviendas), [misViviendas]);
+  const viviendasVisibles = vistaViviendas === 'HISTORICO' ? historico : carteraActiva;
 
   const misViviendasIds = misViviendas.map((v) => v.id);
 
@@ -303,24 +352,60 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                     Por motivos de privacidad y seguridad, sólo puedes visualizar y operar sobre tus propias propiedades.
                   </p>
                 </div>
+
+                {/* BLOQUE 3 · 3.1: distinguish cartera activa vs histórico.
+                    Un inmueble vendido o dado de baja NO desaparece: deja de estar
+                    en la cartera activa y pasa al histórico, donde sigue consultable
+                    con todo su expediente (contratos, recibos, gastos, documentos). */}
+                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setVistaViviendas('ACTIVA')}
+                    className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors ${
+                      vistaViviendas === 'ACTIVA'
+                        ? 'bg-white text-blue-700 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Cartera activa ({carteraActiva.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVistaViviendas('HISTORICO')}
+                    data-testid="toggle-historico"
+                    className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors ${
+                      vistaViviendas === 'HISTORICO'
+                        ? 'bg-white text-blue-700 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Histórico ({historico.length})
+                  </button>
+                </div>
               </div>
 
-              {misViviendas.length === 0 ? (
+              {viviendasVisibles.length === 0 ? (
                 <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-2">
                   <Home className="w-8 h-8 text-slate-400 mx-auto" />
                   <div className="text-xs font-bold text-slate-700">
-                    No tienes viviendas asignadas todavía
+                    {vistaViviendas === 'HISTORICO'
+                      ? 'No tienes inmuebles en el histórico'
+                      : 'No tienes viviendas asignadas todavía'}
                   </div>
                   <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    El administrador principal asignará tus inmuebles a tu cuenta. Contacta con la administración para vincular tus propiedades.
+                    {vistaViviendas === 'HISTORICO'
+                      ? 'Los inmuebles vendidos, transmitidos o dados de baja aparecerán aquí con todo su expediente. Nunca se borran.'
+                      : 'El administrador principal asignará tus inmuebles a tu cuenta. Contacta con la administración para vincular tus propiedades.'}
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {misViviendas.map((inm) => {
+                  {viviendasVisibles.map((inm) => {
                     const assignedProfs = profesionales.filter((p) =>
                       p.inmuebleIdsAsignados?.includes(inm.id)
                     );
+                    const enHistorico = esHistorico(inm);
+                    const explotacion = estadoExplotacionDe(inm);
 
                     return (
                       <div
@@ -328,12 +413,30 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                         className="rounded-2xl border border-slate-200 bg-white overflow-hidden hover:border-slate-300 transition-all flex flex-col justify-between shadow-xs"
                       >
                         <div className="p-4 space-y-3">
-                          <div className="flex items-start justify-between">
-                            <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-50 text-blue-700 rounded-md">
-                              {inm.tipoInmueble || 'Vivienda'}
-                            </span>
-                            <span className="text-sm font-bold text-slate-900">
-                              {inm.precioRentaMensual} €/mes
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-50 text-blue-700 rounded-md">
+                                {inm.tipoInmueble || 'Vivienda'}
+                              </span>
+                              {/* BLOQUE 2 · dos ejes ortogonales, ambos visibles */}
+                              <span
+                                data-testid="estado-patrimonial"
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
+                                  enHistorico
+                                    ? 'bg-slate-200 text-slate-700'
+                                    : 'bg-emerald-50 text-emerald-700'
+                                }`}
+                              >
+                                {etiquetaEstadoPatrimonial(inm.estadoPatrimonial)}
+                              </span>
+                              <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-600 rounded-md">
+                                {etiquetaEstadoExplotacion(explotacion)}
+                              </span>
+                            </div>
+                            {/* BLOQUE 3 · 3.2: antes se leía `precioRentaMensual`,
+                                un campo que NO existe en el modelo: mostraba " €/mes". */}
+                            <span className="text-sm font-bold text-slate-900" data-testid="renta-inmueble">
+                              {formatearRentaMensual(inm)}
                             </span>
                           </div>
 
@@ -348,7 +451,9 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
 
                           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-600">
                             <span>{inm.habitaciones || 0} hab · {inm.banos || 0} baños</span>
-                            <span>{inm.superficieConstruida || 0} m²</span>
+                            {/* BLOQUE 3 · 3.2: antes se leía `superficieConstruida`,
+                                que NO existe: mostraba "0 m²" aunque hubiera dato real. */}
+                            <span data-testid="superficie-inmueble">{formatearSuperficie(inm)}</span>
                           </div>
 
                           <div className="text-xs text-slate-500 flex items-center space-x-1">
@@ -361,7 +466,33 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                           </div>
                         </div>
 
-                        <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+                        {/* BLOQUE 2/3 · titularidad (N titulares y porcentajes reales) */}
+                        <details className="px-4 py-2 border-t border-slate-100">
+                          <summary className="cursor-pointer text-[11px] font-bold text-slate-600 select-none">
+                            Titularidad y porcentajes ({numeroTitulares(titularidades, inm.id)})
+                          </summary>
+                          <div className="pt-2">
+                            <TitularidadesPanel
+                              inmueble={inm}
+                              titularidades={titularidades}
+                              propietarios={propietarios}
+                              currentUser={currentUser}
+                              onAnadirTitular={
+                                puedeGestionarTitularidad(inm, currentUser)
+                                  ? onAnadirTitular
+                                  : undefined
+                              }
+                              onCerrarTitularidad={
+                                puedeGestionarTitularidad(inm, currentUser)
+                                  ? onCerrarTitularidad
+                                  : undefined
+                              }
+                              puedeGestionar={puedeGestionarTitularidad(inm, currentUser)}
+                            />
+                          </div>
+                        </details>
+
+                        <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
                           {onNavigateToInmueble && (
                             <button
                               onClick={() => onNavigateToInmueble(inm.id)}
@@ -370,6 +501,37 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                               <span>Ver detalles de vivienda</span>
                               <ArrowRight className="w-3.5 h-3.5" />
                             </button>
+                          )}
+
+                          {/* BLOQUE 2 · 2.11: el borrado físico NO es el mecanismo
+                              normal. La acción normal es "Marcar como vendido" o
+                              "Dar de baja": el inmueble sale de la cartera activa
+                              y pasa al histórico SIN perder nada. */}
+                          {!enHistorico && puedeGestionarTitularidad(inm, currentUser) && (
+                            <div className="flex items-center gap-2">
+                              {onMarcarVendido && (
+                                <button
+                                  type="button"
+                                  data-testid="marcar-vendido"
+                                  onClick={() => onMarcarVendido(inm.id)}
+                                  className="px-2.5 py-1.5 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
+                                >
+                                  Marcar como vendido
+                                </button>
+                              )}
+                              {onDarDeBaja && (
+                                <button
+                                  type="button"
+                                  data-testid="dar-de-baja"
+                                  onClick={() =>
+                                    onDarDeBaja(inm.id, { motivo: 'Baja solicitada desde el portal' })
+                                  }
+                                  className="px-2.5 py-1.5 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                                >
+                                  Dar de baja
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>

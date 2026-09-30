@@ -345,6 +345,45 @@ service cloud.firestore {
       return isSignedIn() && !isTenant();
     }
 
+    // =======================================================================
+    // BLOQUE 1 — AISLAMIENTO REAL DE CARTERAS (Portal Propietario)
+    // =======================================================================
+    // Antes `allow list` se apoyaba en `isStaff()`, que incluye a cualquier
+    // PROPIETARIO: eso permitía pedir la colección `inmuebles` COMPLETA y
+    // descargar en el navegador los inmuebles de todas las carteras (con IBAN,
+    // NIF, inquilino y notas internas). El filtrado se hacía sólo en React, y
+    // un simple cambio de pestaña o una consulta manual lo saltaba.
+    //
+    // Ahora `list` exige que la CONSULTA venga acotada por titularidad: si la
+    // petición no lleva el filtro, Firestore la deniega (las reglas no son un
+    // filtro, son una condición que la consulta debe poder satisfacer).
+    //
+    // Cobertura: los tres campos históricos de titular más el índice proyectado
+    // `titularesIds` (write-through calculado en `saveInmuebleFirestore`, nunca
+    // escrito a mano), de modo que el aislamiento funciona igual antes y después
+    // de la migración a N titulares del BLOQUE 2.
+    // =======================================================================
+    function miIdTitularValido() {
+      return isPropietarioRole() && myPropId() is string && myPropId().size() > 0;
+    }
+
+    function inmuebleAlcanzablePorTitularidad(d) {
+      return miIdTitularValido() && (
+          ('titularesIds' in d && d.titularesIds is list && d.titularesIds.hasAny([myPropId()]))
+          || ('propietarioId' in d && d.propietarioId == myPropId())
+          || ('propietarioPrincipalId' in d && d.propietarioPrincipalId == myPropId())
+          || ('propietarioSecundarioId' in d && d.propietarioSecundarioId == myPropId())
+        );
+    }
+
+    // Staff que NO es propietario: administración (perfil ADMINISTRADOR y
+    // administrador principal) y profesionales. Sigue viendo la cartera completa
+    // porque su función operativa lo requiere. El PROPIETARIO se excluye aquí de
+    // forma deliberada: su acceso se resuelve por titularidad, nunca en bloque.
+    function isStaffNoPropietario() {
+      return isSignedIn() && !isTenant() && !isPropietarioRole();
+    }
+
     function tenantContratoIds() {
       return (existeUsuarioActual() &&
         ('contratoIds' in getUsuarioActual()) &&
@@ -442,27 +481,162 @@ service cloud.firestore {
     // sin sesión). Escrituras: sin cambios.
     // =========================================================================
     match /inmuebles/{inmuebleId} {
-      allow get: if isStaff()
+      // BLOQUE 1 · `get` de un documento concreto: propietario por titularidad o
+      // por delegación explícita (inmueble compartido por administración).
+      allow get: if isStaffNoPropietario()
         || (isTenant() && (
           tenantVeContratos(campoListaActual('contratoIdsAutorizados'))
           || ('contratoActivoId' in resource.data && tenantTieneContrato(resource.data.contratoActivoId))
-        ));
-      allow list: if isStaff();
+        ))
+        || (inmuebleAlcanzablePorTitularidad(resource.data) || canReachInmuebleId(inmuebleId));
 
+      // BLOQUE 1 · `list` SÓLO con la consulta acotada por titularidad.
+      // Una petición sin filtro queda denegada: deja de ser posible descargar
+      // la cartera de otro titular cambiando el código del cliente.
+      allow list: if isStaffNoPropietario()
+        || inmuebleAlcanzablePorTitularidad(resource.data);
+
+      // BLOQUE 1 · Crear: el propietario sólo puede dar de alta inmuebles a su
+      // propio nombre. Antes bastaba con que UNO de los dos campos coincidiera,
+      // así que podía fijar `propietarioId` a un tercero y `propietarioPrincipalId`
+      // a sí mismo, colando el inmueble en otra cartera. Ahora TODO campo de
+      // titularidad presente debe pertenecerle.
       allow create: if isMasterAdmin() || (
-        isPropietarioRole() && (
-          ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
-          ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
-        )
+        isPropietarioRole()
+        && miIdTitularValido()
+        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+        && (!('propietarioPrincipalId' in incoming()) || incoming().propietarioPrincipalId == myPropId())
+        && (!('titularesIds' in incoming()) || (
+          incoming().titularesIds is list && incoming().titularesIds.hasAll([myPropId()])
+        ))
       );
+
+      // BLOQUE 1 · Actualizar: se puede editar lo que ya es tuyo, pero sin
+      // transferir la titularidad a otro (escalada de privilegios).
       allow update: if isMasterAdmin() || (
-        isPropietarioRole() && (
+        isPropietarioRole() && miIdTitularValido() && (
           ('propietarioId' in existing() && existing().propietarioId == myPropId()) ||
           ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId()) ||
           canReachInmuebleId(inmuebleId)
         )
+        && (!('propietarioId' in incoming()) || incoming().propietarioId == myPropId())
+        && (!('propietarioPrincipalId' in incoming()) || incoming().propietarioPrincipalId == myPropId())
+        && (!('titularesIds' in incoming()) || (
+          incoming().titularesIds is list && incoming().titularesIds.hasAll([myPropId()])
+        ))
       );
+
+      // BLOQUE 1 · El borrado físico NO es el mecanismo de baja (BLOQUE 2 lo
+      // sustituirá por `estadoPatrimonial` = VENDIDO/BAJA). Se mantiene vetado
+      // al propietario; el cliente ya no finge haberlo borrado: muestra el error.
       allow delete: if isMasterAdmin();
+    }
+
+    // =========================================================================
+    // BLOQUE 2 — TITULARIDADES: N TITULARES POR INMUEBLE
+    // -------------------------------------------------------------------------
+    // Colección RAÍZ `titularidades`, una relación por (inmueble, titular), con
+    // clave DETERMINISTA `inmuebleId__propietarioId`. Sustituye a los campos
+    // escalares (`propietarioId` / `propietarioPrincipalId` /
+    // `propietarioSecundarioId`), que se CONSERVAN por compatibilidad y NO se
+    // tocan: la migración es aditiva y reversible (BLOQUE 2 · 2.4).
+    //
+    // Los campos heredados NO se sustituyen por `propietarioTerciarioId`,
+    // `Cuarto`, `Quinto` ni nada parecido: el modelo es genuinamente N.
+    //
+    // NUNCA SE BORRA FÍSICAMENTE: las relaciones se CIERRAN (`estado` +
+    // `fechaHasta` + `motivoBaja`) y conservan su `historial`, de modo que el
+    // historial patrimonial es reconstruible (2.10). Por eso `delete` es `false`
+    // incluso para el administrador principal.
+    //
+    // Consecuencia documentada: la REVERSIÓN de la migración NO borra registros;
+    // los cierra (`estado: 'BAJA'`, `motivoBaja: 'REVERSION_MIGRACION'`) para
+    // que dejen de estar vigentes sin destruir trazabilidad. Ver
+    // `src/lib/migracionTitularidades.ts` → `planReversion`.
+    // =========================================================================
+    match /titularidades/{titularidadId} {
+      // Estado / rol / origen: catálogos cerrados, expresados con OR explícito
+      // (sin `in` sobre lista) para que la condición sea inequívoca.
+      function catalogosValidos(d) {
+        return (d.estado == 'ACTIVA' || d.estado == 'BAJA' || d.estado == 'TRANSMITIDA' || d.estado == 'PENDIENTE')
+          && (d.rol == 'PROPIETARIO' || d.rol == 'COTITULAR' || d.rol == 'USUFRUCTUARIO'
+              || d.rol == 'NUDO_PROPIETARIO' || d.rol == 'REPRESENTANTE' || d.rol == 'OTRO')
+          && (d.origen == 'ALTA' || d.origen == 'MIGRACION' || d.origen == 'IMPORTACION'
+              || d.origen == 'COMPRAVENTA' || d.origen == 'HERENCIA' || d.origen == 'APORTACION'
+              || d.origen == 'OTRO');
+      }
+
+      function titularidadEstructuralmenteValida(d) {
+        return d.inmuebleId is string && d.propietarioId is string
+          && d.inmuebleId.size() > 0 && d.propietarioId.size() > 0
+          && catalogosValidos(d)
+          && d.fechaDesde is string
+          && (d.fechaHasta is string || d.fechaHasta == null)
+          && d.version is int && d.version >= 1
+          // El porcentaje es un número 0-100 o `null` (pendiente). NUNCA se
+          // admite un valor inventado sin marcar la pendencia.
+          && (d.porcentaje == null || (d.porcentaje is number && d.porcentaje >= 0 && d.porcentaje <= 100))
+          && d.porcentajePendiente is bool
+          && (d.porcentaje != null || d.porcentajePendiente == true)
+          && d.esPrincipal is bool;
+      }
+
+      // ¿El inmueble al que se vincula la titularidad es alcanzable por quien
+      // escribe? Evita que un propietario se adjudique titularidad sobre un
+      // inmueble ajeno.
+      function inmuebleDeTitularidadEsMio(inmuebleId) {
+        return exists(/databases/$(database)/documents/inmuebles/$(inmuebleId))
+          && inmuebleAlcanzablePorTitularidad(
+               get(/databases/$(database)/documents/inmuebles/$(inmuebleId)).data);
+      }
+
+      // Un propietario ve SUS titularidades y las de los inmuebles en los que
+      // participa (necesario para ver con quién comparte un inmueble).
+      function titularidadVisible(d) {
+        return miIdTitularValido()
+          && (d.propietarioId == myPropId()
+              || inmuebleDeTitularidadEsMio(d.inmuebleId));
+      }
+
+      allow get: if isStaffNoPropietario() || titularidadVisible(resource.data);
+
+      // `list` exige consulta acotada: where('propietarioId','==', pid) o
+      // where('inmuebleId','==', id) sobre un inmueble propio.
+      allow list: if isStaffNoPropietario()
+        || (miIdTitularValido() && resource.data.propietarioId == myPropId());
+
+      allow create: if (isMasterAdmin()
+          || (isPropietarioRole()
+              && miIdTitularValido()
+              && inmuebleDeTitularidadEsMio(incoming().inmuebleId)))
+        && titularidadEstructuralmenteValida(incoming())
+        // La clave es INVARIANTE y derivada de los datos: impide crear una
+        // titularidad con un id arbitrario (suplantación de inmueble o titular).
+        && titularidadId == incoming().inmuebleId + '__' + incoming().propietarioId
+        && incoming().version == 1
+        && incoming().historial is list && incoming().historial.size() >= 1;
+
+      allow update: if (isMasterAdmin()
+          || (isPropietarioRole()
+              && miIdTitularValido()
+              && (resource.data.propietarioId == myPropId()
+                  || inmuebleDeTitularidadEsMio(resource.data.inmuebleId))))
+        && titularidadEstructuralmenteValida(incoming())
+        && titularidadId == incoming().inmuebleId + '__' + incoming().propietarioId
+        // Identidad inmutable: no se puede mover una titularidad de inmueble
+        // ni de titular; para eso se cierra una relación y se abre otra.
+        && incoming().id == resource.data.id
+        && incoming().inmuebleId == resource.data.inmuebleId
+        && incoming().propietarioId == resource.data.propietarioId
+        // Control de concurrencia y trazabilidad: la versión avanza de 1 en 1
+        // y el historial SIEMPRE crece (nunca se recorta).
+        && incoming().version == resource.data.version + 1
+        && incoming().historial is list
+        && resource.data.historial is list
+        && incoming().historial.size() >= resource.data.historial.size();
+
+      // NUNCA borrado físico: el histórico patrimonial no se destruye.
+      allow delete: if false;
     }
 
     // =========================================================================

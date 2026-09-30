@@ -14,8 +14,12 @@ import {
   runTransaction,
   query,
   where,
+  or,
   type Unsubscribe,
   type QuerySnapshot,
+  type QueryCompositeFilterConstraint,
+  type Query,
+  type DocumentData,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -234,42 +238,180 @@ export function subscribePropietarios(
 /**
  * Save / Update Propietario in Firestore
  */
-export async function savePropietarioFirestore(propietario: Propietario) {
+export async function savePropietarioFirestore(
+  propietario: Propietario,
+  opciones?: OpcionesEscritura
+): Promise<void> {
+  const propagar = opciones?.propagarError === true;
   try {
     const cleanProp = sanitizeObjectForFirestore(propietario);
     await setDoc(doc(db, 'propietarios', propietario.id), cleanProp, { merge: true });
   } catch (err) {
-    console.error('Error saving propietario to Firestore:', err);
+    manejarErrorEscritura(err, 'guardar titular', propagar);
   }
 }
 
 /**
  * Delete Propietario from Firestore
  */
-export async function deletePropietarioFirestore(propietarioId: string) {
+export async function deletePropietarioFirestore(
+  propietarioId: string,
+  opciones?: OpcionesEscritura
+): Promise<void> {
+  const propagar = opciones?.propagarError === true;
   try {
     await deleteDoc(doc(db, 'propietarios', propietarioId));
   } catch (err) {
-    console.error('Error deleting propietario from Firestore:', err);
+    manejarErrorEscritura(err, 'eliminar titular', propagar);
   }
 }
 
 /**
  * Real-time listener for Inmuebles
+ *
+ * BLOQUE 1 — AISLAMIENTO REAL DE CARTERAS.
+ *
+ * Antes: este listener pedía la **colección completa** (`INMUEBLES_COL`) y el
+ * filtrado por propietario se hacía después en React (`scopedInmuebles`). Eso
+ * significaba que cualquier propietario descargaba la ficha completa (IBAN, NIF,
+ * inquilino, notas internas) de TODOS los inmuebles de TODAS las carteras.
+ *
+ * Ahora, con ámbito PROPIETARIO, la consulta queda acotada en ORIGEN y la regla
+ * de Firestore (`allow list`) la exige: una petición sin filtro es denegada.
+ *
+ *   · PROPIETARIO A sólo recibe los inmuebles en los que participa.
+ *   · Un cotitular (ranura `propietarioSecundarioId`) recibe los suyos.
+ *   · Un titular sin relación NO recibe nada: ni siquiera llega al navegador.
+ *
+ * Los inmuebles delegados explícitamente por administración (`inmuebleIds` de la
+ * cuenta) NO se meten en la misma consulta: `where(documentId(),'in',...)` no es
+ * demostrable frente a la regla de `list`, así que se suscriben **uno a uno**
+ * (lectura `get`, evaluada documento a documento) y se fusionan aquí.
+ *
+ * ADMINISTRADOR / profesional / sin ámbito → suscripción completa (sin cambios).
  */
-export function subscribeInmuebles(callback: (inmuebles: Inmueble[]) => void) {
-  return onSnapshot(
-    INMUEBLES_COL,
-    (snapshot) => {
-      const items: Inmueble[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as Inmueble);
-      });
-      callback(items);
-    },
-    (err) => {
-      console.error('Firestore inmuebles snapshot error:', err);
-    }
+export function subscribeInmuebles(
+  callback: (inmuebles: Inmueble[]) => void,
+  scope?: DataAccessScope
+): Unsubscribe {
+  const onError = (err: unknown) => {
+    console.error('Firestore inmuebles snapshot error:', err);
+  };
+
+  // Perfil no propietario: colección completa (comportamiento previo).
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
+    return onSnapshot(
+      INMUEBLES_COL,
+      (snapshot) => {
+        const items: Inmueble[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push({ id: docSnap.id, ...docSnap.data() } as Inmueble);
+        });
+        callback(items);
+      },
+      onError
+    );
+  }
+
+  const porTitularidad = new Map<string, Inmueble>();
+  const porDelegacion = new Map<string, Inmueble>();
+
+  const emitir = () => {
+    // La titularidad tiene prioridad: si un inmueble llega por los dos caminos
+    // se devuelve una sola vez.
+    const fusion = new Map<string, Inmueble>();
+    porDelegacion.forEach((valor, clave) => fusion.set(clave, valor));
+    porTitularidad.forEach((valor, clave) => fusion.set(clave, valor));
+    callback(Array.from(fusion.values()));
+  };
+
+  const bajas: Unsubscribe[] = [];
+
+  // 1) Inmuebles por titularidad (consulta acotada, demostrable ante las reglas).
+  const q = construirConsultaInmuebles(scope);
+  if (q) {
+    bajas.push(
+      onSnapshot(
+        q,
+        (snapshot) => {
+          porTitularidad.clear();
+          snapshot.forEach((docSnap) => {
+            porTitularidad.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as Inmueble);
+          });
+          emitir();
+        },
+        onError
+      )
+    );
+  }
+
+  // 2) Inmuebles delegados: una escucha por documento (regla `get`).
+  const idsDelegados = (scope.inmuebleIds || []).filter(
+    (id): id is string => typeof id === 'string' && id.length > 0
+  );
+  for (const id of idsDelegados) {
+    bajas.push(
+      onSnapshot(
+        doc(db, 'inmuebles', id),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            porDelegacion.set(id, { id: docSnap.id, ...docSnap.data() } as Inmueble);
+          } else {
+            porDelegacion.delete(id);
+          }
+          emitir();
+        },
+        (err) => {
+          // Sin permiso o documento inexistente: simplemente no forma parte de la
+          // cartera. Nunca se propaga como "cartera vacía".
+          porDelegacion.delete(id);
+          emitir();
+          console.warn(`Sin acceso al inmueble delegado ${id}:`, err);
+        }
+      )
+    );
+  }
+
+  // Sin titularidad ni delegación: cartera legítimamente vacía.
+  if (bajas.length === 0) {
+    callback([]);
+    return () => {};
+  }
+
+  return () => {
+    bajas.forEach((baja) => baja());
+  };
+}
+
+/**
+ * Construye la consulta de inmuebles acotada por TITULARIDAD.
+ *
+ * Devuelve `null` cuando el propietario no tiene ninguna ranura de titularidad
+ * que consultar (sólo accedería por delegación, que se resuelve aparte).
+ *
+ * Las cláusulas coinciden EXACTAMENTE con la regla `inmuebleAlcanzablePorTitularidad`
+ * de `firestore.rules`, de modo que Firestore puede demostrar que la consulta
+ * satisface el `allow list`.
+ */
+export function construirConsultaInmuebles(
+  scope?: DataAccessScope
+): Query<DocumentData, DocumentData> | null {
+  if (!scope || scope.tipoPerfil !== 'PROPIETARIO' || !scope.propietarioId) {
+    return null;
+  }
+  return query(INMUEBLES_COL, filtroTitularidad(scope.propietarioId)) as Query<DocumentData, DocumentData>;
+}
+
+/**
+ * Filtro `or` de titularidad: réplica en cliente de la regla de Firestore.
+ * Cubre las tres ranuras históricas y el índice proyectado `titularesIds`.
+ */
+function filtroTitularidad(pid: string): QueryCompositeFilterConstraint {
+  return or(
+    where('propietarioId', '==', pid),
+    where('propietarioPrincipalId', '==', pid),
+    where('propietarioSecundarioId', '==', pid),
+    where('titularesIds', 'array-contains', pid)
   );
 }
 
@@ -346,29 +488,90 @@ export function sanitizeInmuebleForFirestore(inmueble: Inmueble): Inmueble {
   return clean;
 }
 
+/* ==========================================================================
+ * BLOQUE 1 — ESCRITURAS FIABLES Y AISLAMIENTO DE CARTERAS
+ * ========================================================================== */
+
+/**
+ * Proyección del índice de titulares de un inmueble.
+ *
+ * El documento `inmuebles/{id}` mantiene hoy la titularidad en campos escalares
+ * (`propietarioId`, `propietarioPrincipalId`, `propietarioSecundarioId`). Para
+ * que las reglas de Firestore puedan acotar un `list` de forma **demostrable**
+ * hace falta un campo array sobre el que consultar con `array-contains`.
+ *
+ * `titularesIds` es una proyección PURA de los campos escalares existentes:
+ *   · No inventa información. · No asume porcentajes.
+ *   · Es idempotente y reversible (se recalcula desde los campos de origen).
+ *
+ * En el BLOQUE 2 este índice pasará a alimentarse desde la colección
+ * `titularidades` (N titulares); la firma y el criterio no cambiarán.
+ */
+/** Reexportada desde `utils/alcancePatrimonial` para mantener un único punto de
+ *  verdad del criterio de titularidad (y poder testearlo sin inicializar Firebase). */
+export { proyectarTitularesIds } from '../utils/alcancePatrimonial';
+
+/** Opciones de escritura estricta (BLOQUE 1). */
+export interface OpcionesEscritura {
+  /**
+   * Si es `true`, el servicio **relanza** el error en lugar de tragárselo.
+   * Imprescindible para que el llamador pueda hacer rollback y avisar al usuario.
+   *
+   * Por defecto `false` para no romper los ~30 puntos de llamada existentes que
+   * hoy hacen "disparar y olvidar": con `false` el comportamiento es el anterior.
+   */
+  propagarError?: boolean;
+}
+
+/** Registra y, si procede, relanza. Centraliza el criterio del BLOQUE 1. */
+function manejarErrorEscritura(err: unknown, contexto: string, propagar: boolean): void {
+  console.error(`Error en Firestore (${contexto}):`, err);
+  if (propagar) throw err;
+}
+
 /**
  * Save / Update Inmueble in Firestore
+ *
+ * BLOQUE 1: mantiene el índice `titularesIds` y puede propagar el error.
  */
-export async function saveInmuebleFirestore(inmueble: Inmueble) {
+export async function saveInmuebleFirestore(
+  inmueble: Inmueble,
+  opciones?: OpcionesEscritura
+): Promise<void> {
+  const propagar = opciones?.propagarError === true;
   try {
     const cleanInmueble = sanitizeInmuebleForFirestore(inmueble);
+
+    // BLOQUE 1: write-through del índice de titulares. Siempre derivado de los
+    // campos de origen; nunca edita `propietarioId`/`propietarioPrincipalId`/
+    // `propietarioSecundarioId`, que siguen siendo la fuente de verdad.
+    cleanInmueble.titularesIds = proyectarTitularesIds(cleanInmueble);
+
     await setDoc(doc(db, 'inmuebles', cleanInmueble.id), cleanInmueble, { merge: true });
+
     // R3: espejo público mínimo (mejor esfuerzo: nunca rompe el guardado principal).
     try {
-      const ficha = buildFichaPublicaInmueble(inmueble);
+      const ficha = buildFichaPublicaInmueble(cleanInmueble);
       if (ficha) await saveFichaPublicaInmueble(ficha);
     } catch (errMirror) {
       console.warn('No se pudo actualizar la ficha pública del inmueble:', errMirror);
     }
   } catch (err) {
-    console.error('Error saving inmueble to Firestore:', err);
+    manejarErrorEscritura(err, 'guardar inmueble', propagar);
   }
 }
 
 /**
  * Delete Inmueble from Firestore
+ *
+ * BLOQUE 1: puede propagar el error para que el llamador NO confirme la operación
+ * ni ejecute efectos colaterales si Firestore la rechaza.
  */
-export async function deleteInmuebleFirestore(inmuebleId: string) {
+export async function deleteInmuebleFirestore(
+  inmuebleId: string,
+  opciones?: OpcionesEscritura
+): Promise<void> {
+  const propagar = opciones?.propagarError === true;
   try {
     await deleteDoc(doc(db, 'inmuebles', inmuebleId));
     // R3: la ficha pública no debe sobrevivir al documento (mejor esfuerzo).
@@ -378,11 +581,12 @@ export async function deleteInmuebleFirestore(inmuebleId: string) {
       console.warn('No se pudo eliminar la ficha pública del inmueble:', errMirror);
     }
   } catch (err) {
-    console.error('Error deleting inmueble from Firestore:', err);
+    manejarErrorEscritura(err, 'eliminar inmueble', propagar);
   }
 }
 
 import { compressImageForUpload } from '../utils/fileCompressor';
+import { proyectarTitularesIds } from '../utils/alcancePatrimonial';
 import { buildFichaPublicaInmueble, deleteFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
 
 /**
@@ -463,7 +667,11 @@ export function sanitizeDocForFirestore(docObj: Record<string, any>): Record<str
 /**
  * Save / Update Candidato in Firestore
  */
-export async function saveCandidatoFirestore(candidato: Candidato) {
+export async function saveCandidatoFirestore(
+  candidato: Candidato,
+  opciones?: OpcionesEscritura
+): Promise<void> {
+  const propagar = opciones?.propagarError === true;
   try {
     let cleanCand = deepCleanForFirestore(candidato);
     if (Array.isArray(cleanCand.documentosAnalizados)) {
@@ -482,18 +690,22 @@ export async function saveCandidatoFirestore(candidato: Candidato) {
     }
     await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
   } catch (err) {
-    console.error('Error saving candidato to Firestore:', err);
+    manejarErrorEscritura(err, 'guardar candidato', propagar);
   }
 }
 
 /**
  * Delete Candidato from Firestore
  */
-export async function deleteCandidatoFirestore(candidateId: string) {
+export async function deleteCandidatoFirestore(
+  candidateId: string,
+  opciones?: OpcionesEscritura
+): Promise<void> {
+  const propagar = opciones?.propagarError === true;
   try {
     await deleteDoc(doc(db, 'candidatos', candidateId));
   } catch (err) {
-    console.error('Error deleting candidato from Firestore:', err);
+    manejarErrorEscritura(err, 'eliminar candidato', propagar);
   }
 }
 
@@ -792,7 +1004,11 @@ export function subscribeContratos(
 /**
  * Save / Update Contrato de Formalización in Firestore
  */
-export async function saveContratoFirestore(contrato: ContratoFormalizacion) {
+/**
+ * Nota BLOQUE 1: este servicio SIEMPRE propagó el error (comportamiento
+ * histórico correcto). Se documenta para que nadie lo "normalice" tragándoselo.
+ */
+export async function saveContratoFirestore(contrato: ContratoFormalizacion): Promise<void> {
   try {
     const refC = doc(db, 'contratos_formalizacion', contrato.id);
     const existing = await getDoc(refC);
@@ -816,11 +1032,15 @@ export async function saveContratoFirestore(contrato: ContratoFormalizacion) {
 /**
  * Delete Contrato de Formalización from Firestore
  */
-export async function deleteContratoFirestore(contratoId: string) {
+export async function deleteContratoFirestore(
+  contratoId: string,
+  opciones?: OpcionesEscritura
+): Promise<void> {
+  const propagar = opciones?.propagarError === true;
   try {
     await deleteDoc(doc(db, 'contratos_formalizacion', contratoId));
   } catch (err) {
-    console.error('Error deleting contrato formalizacion from Firestore:', err);
+    manejarErrorEscritura(err, 'eliminar contrato', propagar);
   }
 }
 

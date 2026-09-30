@@ -372,26 +372,51 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
     expect(b).not.toContain('if true');
   });
 
-  it('§1 get: personal autenticado o inquilino vinculado a SU vivienda', () => {
+  it('§1 get: staff no propietario, inquilino vinculado a SU vivienda o titular', () => {
     const b = bloqueFs(INM);
-    expect(b).toContain('allow get: if isStaff()');
+    // BLOQUE 1: `isStaff()` incluía al PROPIETARIO y permitía pedir la colección
+    // entera; el acceso del propietario se resuelve ahora por titularidad.
+    expect(b).toContain('allow get: if isStaffNoPropietario()');
     expect(b).toContain('isTenant()');
     expect(b).toContain("contratoIdsAutorizados");
     expect(b).toContain('contratoActivoId');
     expect(b).toContain('tenantTieneContrato');
+    expect(b).toContain('inmuebleAlcanzablePorTitularidad(resource.data)');
+    expect(b).toContain('canReachInmuebleId(inmuebleId)');
   });
 
-  it('§1 list: solo personal autenticado (sin enumeración anónima)', () => {
+  it('§1 + BLOQUE 1: list exige consulta acotada por titularidad (aislamiento real)', () => {
     const b = bloqueFs(INM);
-    expect(b).toContain('allow list: if isStaff();');
+    // Sin filtro en la consulta, Firestore deniega: las reglas no son un filtro.
+    // Antes `allow list: if isStaff()` permitía descargar TODAS las carteras.
+    expect(b).not.toContain('allow list: if isStaff();');
+    expect(b).toContain('allow list: if isStaffNoPropietario()');
+    expect(b).toContain('inmuebleAlcanzablePorTitularidad(resource.data)');
   });
 
-  it('§1 escrituras INTACTAS (create/update/delete sin cambios R3)', () => {
+  it('§1 + BLOQUE 1: la titularidad cubre las 3 ranuras y el índice titularesIds', () => {
+    expect(FS_SRC).toContain("function inmuebleAlcanzablePorTitularidad(d)");
+    expect(FS_SRC).toContain("d.titularesIds.hasAny([myPropId()])");
+    expect(FS_SRC).toContain("d.propietarioId == myPropId()");
+    expect(FS_SRC).toContain("d.propietarioPrincipalId == myPropId()");
+    expect(FS_SRC).toContain("d.propietarioSecundarioId == myPropId()");
+    // El propietario queda EXCLUIDO del acceso en bloque.
+    expect(FS_SRC).toContain(
+      'function isStaffNoPropietario() {\n      return isSignedIn() && !isTenant() && !isPropietarioRole();'
+    );
+  });
+
+  it('§1 escrituras: create/update reforzados y delete vetado al propietario', () => {
     const b = bloqueFs(INM);
     expect(b).toContain('allow create: if isMasterAdmin() || (');
-    expect(b).toContain("'propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId()");
+    // BLOQUE 1: TODO campo de titularidad presente debe pertenecer al autor
+    // (antes bastaba con que UNO coincidiera: permitía colar el inmueble en otra cartera).
+    expect(b).toContain("incoming().propietarioId == myPropId()");
+    expect(b).toContain("('propietarioPrincipalId' in incoming()) || incoming().propietarioPrincipalId == myPropId()");
+    expect(b).toContain("incoming().titularesIds.hasAll([myPropId()])");
     expect(b).toContain('allow update: if isMasterAdmin() || (');
     expect(b).toContain('canReachInmuebleId(inmuebleId)');
+    // El borrado físico NO es el mecanismo de baja (BLOQUE 2 lo sustituirá).
     expect(b).toContain('allow delete: if isMasterAdmin();');
   });
 

@@ -142,6 +142,29 @@ import {
   saveAuditLogFirestore,
   saveModulosConfigFirestore,
 } from './lib/firebase';
+// BLOQUE 1 — Persistencia fiable: orquestador de mutaciones, errores comprensibles
+// y ámbito patrimonial (titularidad / aislamiento de carteras).
+import { ejecutarMutacionConfirmada } from './utils/mutacionFirestore';
+import { normalizarErrorFirestore, type ErrorFirestore } from './utils/erroresFirestore';
+import {
+  filtrarInmueblesPorTitularidad,
+  prepararAlcancePatrimonial,
+} from './utils/alcancePatrimonial';
+import type { EstadoSindicacionPortal, Titularidad } from './types';
+import { AvisoOperacionModal, type AvisoOperacion } from './components/AvisoOperacionModal';
+// BLOQUE 2/3 — N titulares y ciclo de vida patrimonial.
+import { subscribeTitularidades, saveTitularidadFirestore } from './lib/titularidadesFirestore';
+import {
+  listarEstadosSindicacionFirestore,
+  guardarEstadoSindicacionFirestore,
+} from './lib/sindicacionFirestore';
+import type { RegistroEstadoSindicacion } from './sindicacion/estadoRepositorio';
+import {
+  cerrarTitularidad,
+  crearTitularidad,
+} from './utils/titularidadesEngine';
+import { darDeBajaPatrimonial, marcarVendido } from './utils/cicloPatrimonialEngine';
+import { retirarPublicacionesTrasBaja, contarRetiradas } from './utils/publicacionCicloPatrimonial';
 
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
@@ -313,6 +336,26 @@ const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'in
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
+
+  // ── BLOQUE 1 · Aviso de operación ────────────────────────────────────────
+  // Resultado visible de toda escritura relevante. Antes, un rechazo de
+  // Firestore se quedaba en console.error y la UI confirmaba igualmente.
+  const [avisoOperacion, setAvisoOperacion] = useState<AvisoOperacion | null>(null);
+  const mostrarAvisoOperacion = useCallback((aviso: AvisoOperacion) => {
+    setAvisoOperacion(aviso);
+  }, []);
+  const mostrarErrorOperacion = useCallback(
+    (operacion: string, err: unknown, consecuencias: string) => {
+      const e: ErrorFirestore = normalizarErrorFirestore(err, operacion, consecuencias);
+      setAvisoOperacion({
+        tipo: 'error',
+        titulo: `No se ha podido completar: ${operacion}`,
+        mensaje: e.mensajeUsuario,
+        detalle: e.mensajeTecnico,
+      });
+    },
+    []
+  );
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_propietarios');
@@ -362,6 +405,10 @@ export default function App() {
     } catch (e) {}
     return INITIAL_SOLICITUDES_DOC;
   });
+  // BLOQUE 2 · Titularidades (N titulares por inmueble) y estados de publicación.
+  const [titularidades, setTitularidades] = useState<Titularidad[]>([]);
+  const [estadosSindicacion, setEstadosSindicacion] = useState<EstadoSindicacionPortal[]>([]);
+
   const [contratos, setContratos] = useState<ContratoFormalizacion[]>(() => {
     try {
       const cached = localStorage.getItem('rentselect_contratos');
@@ -538,10 +585,10 @@ export default function App() {
     if (!currentUser) return [];
     if (currentUser.tipoPerfil === 'ADMINISTRADOR') return inmuebles;
     if (currentUser.tipoPerfil === 'PROPIETARIO') {
-      return inmuebles.filter((i) =>
-        (currentUser.propietarioId && (i.propietarioId === currentUser.propietarioId || i.propietarioPrincipalId === currentUser.propietarioId)) ||
-        (currentUser.inmuebleIds && currentUser.inmuebleIds.includes(i.id))
-      );
+      // BLOQUE 1 · Antes sólo se miraban `propietarioId` y `propietarioPrincipalId`:
+      // un cotitular (ranura `propietarioSecundarioId`) quedaba fuera de su propia
+      // cartera. Ahora participa quien conste en CUALQUIER ranura de titularidad.
+      return filtrarInmueblesPorTitularidad(inmuebles, currentUser);
     }
     if (currentUser.tipoPerfil === 'PROFESIONAL') {
       const prof = profesionales.find((p) => p.id === currentUser.profesionalId || p.usuarioId === currentUser.id);
@@ -564,6 +611,19 @@ export default function App() {
     }
     return [];
   }, [currentUser, propietarios]);
+
+  /**
+   * BLOQUE 2 · Titularidades dentro del ámbito del usuario.
+   * Aislamiento en el CLIENTE (defensa en profundidad): el propietario sólo
+   * recibe sus propias titularidades; `firestore.rules` lo garantiza también
+   * en servidor (1.5).
+   */
+  const scopedTitularidades = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return titularidades;
+    const idsVisibles = new Set(scopedInmuebles.map((i) => i.id));
+    return titularidades.filter((t) => idsVisibles.has(t.inmuebleId));
+  }, [currentUser, titularidades, scopedInmuebles]);
 
   const scopedContratos = useMemo(() => {
     if (!currentUser) return [];
@@ -964,11 +1024,17 @@ export default function App() {
 
     // R3: suscripción completa de inmuebles, SOLO autenticada (las reglas §1
     // deniegan get/list anónimos; el funnel público usa la ficha espejo).
+    // BLOQUE 1 · La consulta ya va acotada en origen (ver `construirConsultaInmuebles`):
+    // un propietario NO descarga los inmuebles de otras carteras.
     const unsubscribeInm = subscribeInmuebles((data) => {
       if (data && data.length > 0) {
         setInmuebles(data);
         try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(data)); } catch (e) {}
-      } else {
+      } else if (currentUser.tipoPerfil === 'ADMINISTRADOR') {
+        // BLOQUE 1 · Antes este "else" reescribía TODA la caché local en Firestore
+        // sin await ni control. Con una consulta acotada, un propietario sin
+        // resultados habría provocado escrituras masivas e innecesarias (y
+        // potencialmente rechazadas). El sembrado sólo aplica a administración.
         setInmuebles((current) => {
           if (current.length > 0) {
             current.forEach((inm) => saveInmuebleFirestore(inm));
@@ -976,8 +1042,16 @@ export default function App() {
           }
           return [];
         });
+      } else {
+        // Sin titularidad ni delegación: cartera vacía, y es un estado LEGÍTIMO.
+        setInmuebles([]);
       }
-    });
+    }, dataScope);
+
+    // BLOQUE 2 · Titularidades: acotadas al ámbito (el propietario sólo recibe las suyas).
+    const unsubscribeTit = subscribeTitularidades((data) => {
+      setTitularidades(data);
+    }, dataScope);
 
     const unsubscribeCand = subscribeCandidatos((data) => {
       if (data && data.length > 0) {
@@ -1140,6 +1214,8 @@ export default function App() {
 
     return () => {
       unsubscribeInm();
+      unsubscribeTit();
+      unsubscribeTit();
       unsubscribeCand();
       unsubscribeProp();
       unsubscribeSol();
@@ -1178,6 +1254,216 @@ export default function App() {
   // Ref para evitar reescrituras innecesarias al materializar el calendario de cobros.
   // Clave: contrato.id -> firma (día actual + nº periodos + nº retrasados + último periodo).
   const cobrosEnsureRef = React.useRef<Map<string, string>>(new Map());
+
+  // ====================================================================
+  // BLOQUE 2/3 · CICLO DE VIDA PATRIMONIAL: vender / dar de baja ≠ borrar
+  // ====================================================================
+  // El mecanismo normal NO es el borrado físico: es el cambio de eje
+  // patrimonial a VENDIDO / BAJA. El inmueble sale de la cartera activa y
+  // pasa al histórico CONSERVANDO contratos, recibos, gastos, documentos,
+  // liquidaciones y fiscalidad (2.9).
+  const cambiarCicloPatrimonial = useCallback(
+    async (
+      inmuebleId: string,
+      transicion: (inmueble: Inmueble) => Inmueble,
+      etiqueta: string
+    ) => {
+      const inmueble = inmuebles.find((i) => i.id === inmuebleId);
+      if (!inmueble) {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: `No se ha podido ${etiqueta}`,
+          mensaje: `El inmueble ${inmuebleId} no está en la cartera cargada. Recarga la página y vuelve a intentarlo.`,
+        });
+        return;
+      }
+
+      const siguiente = transicion(inmueble);
+
+      await ejecutarMutacionConfirmada({
+        operacion: etiqueta,
+        persistir: async () => {
+          await saveInmuebleFirestore(siguiente, { propagarError: true });
+        },
+        // 3.6 · La venta/baja RETIRA la publicación activa conservando la
+        // trazabilidad: retirar ≠ borrar (el registro pasa a DESPUBLICADO).
+        efectos: async () => {
+          try {
+            const alcance = currentUser?.propietarioId
+              ? { propietarioId: currentUser.propietarioId }
+              : {};
+            const publicaciones = await listarEstadosSindicacionFirestore(inmuebleId, alcance);
+            const retiradas = retirarPublicacionesTrasBaja(
+              publicaciones,
+              inmuebleId,
+              `Retirada automática por ${etiqueta}`
+            );
+            const afectadas = retiradas.filter((r) => r.retirada);
+            for (const r of afectadas) {
+              await guardarEstadoSindicacionFirestore(
+                r.registro as unknown as RegistroEstadoSindicacion
+              );
+            }
+            if (afectadas.length > 0) {
+              mostrarAvisoOperacion({
+                tipo: 'exito',
+                titulo: `${etiqueta} aplicada y publicación retirada`,
+                mensaje: `Se han retirado ${afectadas.length} publicación(es) activa(s) sin borrarlas. El inmueble sigue consultable en el histórico con todo su expediente.`,
+              });
+            }
+          } catch (e) {
+            // El cambio patrimonial YA está confirmado: la publicación queda pendiente.
+            mostrarAvisoOperacion({
+              tipo: 'aviso',
+              titulo: `${etiqueta} guardada, publicación pendiente de retirar`,
+              mensaje:
+                'El cambio patrimonial se ha guardado, pero no se han podido retirar las publicaciones. Retíralas manualmente desde el panel de publicación.',
+              detalle: e instanceof Error ? e.message : String(e),
+            });
+          }
+        },
+        // 1.2 · La UI sólo cambia DESPUÉS de la confirmación de Firestore.
+        alConfirmar: () => {
+          setInmuebles((prev) => prev.map((i) => (i.id === inmuebleId ? siguiente : i)));
+          mostrarAvisoOperacion({
+            tipo: 'exito',
+            titulo: `Inmueble ${etiqueta}`,
+            mensaje:
+              'Sigue existiendo con todo su expediente: contratos, recibos, gastos, documentos, liquidaciones y fiscalidad. Pasa a la cartera histórica: no se borra.',
+          });
+        },
+        alError: (error) => {
+          mostrarAvisoOperacion({
+            tipo: 'error',
+            titulo: `No se ha podido ${etiqueta}`,
+            mensaje: error.mensajeUsuario,
+            detalle: error.mensajeTecnico,
+          });
+        },
+      });
+    },
+    [inmuebles, currentUser?.propietarioId, mostrarAvisoOperacion]
+  );
+
+  const handleMarcarVendido = useCallback(
+    async (inmuebleId: string, datos?: { fecha?: string; motivo?: string }) => {
+      await cambiarCicloPatrimonial(
+        inmuebleId,
+        (inmueble) => marcarVendido(inmueble, { fecha: datos?.fecha, motivo: datos?.motivo }),
+        'marcar como vendido'
+      );
+    },
+    [cambiarCicloPatrimonial]
+  );
+
+  const handleDarDeBaja = useCallback(
+    async (inmuebleId: string, datos?: { motivo?: string }) => {
+      await cambiarCicloPatrimonial(
+        inmuebleId,
+        (inmueble) => darDeBajaPatrimonial(inmueble, { motivo: datos?.motivo }),
+        'dar de baja'
+      );
+    },
+    [cambiarCicloPatrimonial]
+  );
+
+  // ====================================================================
+  // BLOQUE 2 · N TITULARES (2.6): añadir y cerrar, NUNCA borrar
+  // ====================================================================
+  const handleAnadirTitular = useCallback(
+    async (inmuebleId: string, propietarioId: string, porcentaje?: number | null) => {
+      // 2.3 · Si no se indica porcentaje NO se inventa: queda PENDIENTE.
+      const titularidad = crearTitularidad({
+        inmuebleId,
+        propietarioId,
+        porcentaje: porcentaje ?? null,
+        rol: 'COTITULAR',
+        origen: 'ALTA',
+      });
+
+      await ejecutarMutacionConfirmada({
+        operacion: 'Añadir titularidad',
+        persistir: async () => {
+          await saveTitularidadFirestore(titularidad);
+        },
+        efectos: async () => {
+          // Índice rápido en el inmueble (lecturas por titular).
+          const inmueble = inmuebles.find((i) => i.id === inmuebleId);
+          if (inmueble && !(inmueble.titularesIds || []).includes(propietarioId)) {
+            const actualizado = {
+              ...inmueble,
+              titularesIds: [...(inmueble.titularesIds || []), propietarioId],
+            };
+            await saveInmuebleFirestore(actualizado, { propagarError: true });
+            setInmuebles((prev) => prev.map((i) => (i.id === inmuebleId ? actualizado : i)));
+          }
+        },
+        alConfirmar: () => {
+          setTitularidades((prev) => [...prev, titularidad]);
+          mostrarAvisoOperacion({
+            tipo: 'exito',
+            titulo: 'Titularidad añadida',
+            mensaje:
+              porcentaje == null
+                ? 'El porcentaje queda marcado como PENDIENTE: no se inventa ningún reparto.'
+                : `Titularidad registrada con ${porcentaje} %.`,
+          });
+        },
+        alError: (error) => {
+          mostrarAvisoOperacion({
+            tipo: 'error',
+            titulo: 'No se ha podido añadir el titular',
+            mensaje: error.mensajeUsuario,
+            detalle: error.mensajeTecnico,
+          });
+        },
+      });
+    },
+    [inmuebles, mostrarAvisoOperacion]
+  );
+
+  const handleCerrarTitularidad = useCallback(
+    async (titularidadId: string, motivo: string) => {
+      const titularidad = titularidades.find((t) => t.id === titularidadId);
+      if (!titularidad) {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: 'No se ha podido cerrar la titularidad',
+          mensaje: `No se encuentra la titularidad ${titularidadId}.`,
+        });
+        return;
+      }
+      // CERRAR ≠ BORRAR: la relación queda en el histórico patrimonial (2.2/2.10).
+      const cerrada = cerrarTitularidad(titularidad, {
+        motivo,
+        fechaHasta: new Date().toISOString(),
+      });
+
+      await ejecutarMutacionConfirmada({
+        operacion: 'Cerrar titularidad',
+        persistir: async () => {
+          await saveTitularidadFirestore(cerrada);
+        },
+        alConfirmar: () => {
+          setTitularidades((prev) => prev.map((t) => (t.id === titularidadId ? cerrada : t)));
+          mostrarAvisoOperacion({
+            tipo: 'exito',
+            titulo: 'Titularidad cerrada',
+            mensaje: 'La relación queda conservada en el histórico patrimonial: no se borra.',
+          });
+        },
+        alError: (error) => {
+          mostrarAvisoOperacion({
+            tipo: 'error',
+            titulo: 'No se ha podido cerrar la titularidad',
+            mensaje: error.mensajeUsuario,
+            detalle: error.mensajeTecnico,
+          });
+        },
+      });
+    },
+    [titularidades, mostrarAvisoOperacion]
+  );
 
   // Fases 1.1 y 1.3 — Materializa el calendario de cobros y sincroniza estados por fecha.
   // Para cada contrato visible: se generan los periodos que falten y se pasa a RETRASADO
@@ -1602,7 +1888,7 @@ export default function App() {
   };
 
   // Delete candidate handler
-  const handleDeleteCandidato = (candidateId: string) => {
+  const handleDeleteCandidato = async (candidateId: string) => {
     // 1. Free any visit slots booked by this candidate
     const candidateInvitations = invitaciones.filter((inv) => inv.candidateId === candidateId);
     const candidateInvIds = new Set(candidateInvitations.map((inv) => inv.id));
@@ -1646,60 +1932,227 @@ export default function App() {
     setInvitaciones((prev) => prev.filter((inv) => inv.candidateId !== candidateId));
 
     // 3. Delete candidate
-    setCandidatos((prev) => prev.filter((c) => c.id !== candidateId));
-    deleteCandidatoFirestore(candidateId);
+    // BLOQUE 1 · La tarjeta desaparece SÓLO si Firestore confirma el borrado.
+    // Antes se filtraba la UI y se llamaba al servicio sin await: un rechazo
+    // (p.ej. `permission-denied`) dejaba un candidato "borrado" que seguía vivo.
+    const borroOk = await ejecutarMutacionConfirmada({
+      operacion: 'eliminación del candidato',
+      persistir: async () => {
+        await deleteCandidatoFirestore(candidateId, { propagarError: true });
+      },
+      alConfirmar: () => {
+        setCandidatos((prev) => {
+          const next = prev.filter((c) => c.id !== candidateId);
+          try {
+            localStorage.setItem('rentselect_candidatos', JSON.stringify(next));
+          } catch (e) {}
+          return next;
+        });
+      },
+      alError: (error) => {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: 'No se ha podido eliminar el candidato',
+          mensaje: error.mensajeUsuario,
+          detalle: error.mensajeTecnico,
+        });
+      },
+      avisoFallo: 'El candidato NO se ha eliminado: sigue existiendo en el sistema.',
+    });
 
-    if (selectedCandidateForModal?.id === candidateId) {
+    // Las vistas de detalle sólo se cierran si el borrado se confirmó; si no,
+    // el usuario debe seguir viendo el candidato que Firestore conserva.
+    if (borroOk.estado === 'OK' && selectedCandidateForModal?.id === candidateId) {
       setSelectedCandidateForModal(null);
     }
-    if (selectedCandidateForReport?.id === candidateId) {
+    if (borroOk.estado === 'OK' && selectedCandidateForReport?.id === candidateId) {
       setSelectedCandidateForReport(null);
       setActiveReport(null);
     }
   };
 
   // Delete inmueble handler
-  const handleDeleteInmueble = (inmuebleId: string) => {
-    setInmuebles((prev) => {
-      const next = prev.filter((i) => i.id !== inmuebleId);
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
-      return next;
-    });
-    deleteInmuebleFirestore(inmuebleId);
+  /**
+   * BLOQUE 1 · Eliminar inmueble.
+   *
+   * ANTES (antipatrón): se filtraba la tarjeta en la UI y se llamaba a
+   * `deleteInmuebleFirestore(id)` SIN await. Firestore podía rechazar la
+   * operación (p.ej. `permission-denied` en `allow delete`) y nadie se enteraba:
+   * la tarjeta desaparecía, el documento seguía en la base de datos y, además,
+   * los candidatos ya se habían desvinculado en caliente.
+   *
+   * AHORA: la UI sólo se actualiza DESPUÉS de que Firestore confirma. Si falla,
+   * la tarjeta sigue en pantalla, se muestra el motivo y NO se toca ningún
+   * candidato (1.3: una operación fallida no ejecuta efectos secundarios).
+   */
+  const handleDeleteInmueble = async (inmuebleId: string) => {
+    const candidatosAfectados = candidatos.filter((c) => c.inmuebleId === inmuebleId);
 
-    // Safely update candidates associated with this property
-    setCandidatos((prev) => {
-      const next = prev.map((c) => {
-        if (c.inmuebleId === inmuebleId) {
-          const updated = { ...c, inmuebleId: '', inmuebleNombre: 'Sin inmueble asignado' };
-          saveCandidatoFirestore(updated);
-          return updated;
+    const resultado = await ejecutarMutacionConfirmada({
+      operacion: 'eliminación del inmueble',
+      // Sin optimismo: la tarjeta NO desaparece hasta que Firestore confirma (1.2).
+      persistir: async () => {
+        await deleteInmuebleFirestore(inmuebleId, { propagarError: true });
+      },
+      // 1.3 · Efectos secundarios CONDICIONADOS al éxito de la operación principal.
+      efectos: async () => {
+        if (candidatosAfectados.length === 0) return;
+        const siguientes = candidatosAfectados.map((c) => ({
+          ...c,
+          inmuebleId: '',
+          inmuebleNombre: 'Sin inmueble asignado',
+        }));
+        for (const candidato of siguientes) {
+          await saveCandidatoFirestore(candidato, { propagarError: true });
         }
-        return c;
-      });
-      try { localStorage.setItem('rentselect_candidatos', JSON.stringify(next)); } catch (e) {}
-      return next;
+        setCandidatos((prev) => {
+          const ids = new Set(siguientes.map((c) => c.id));
+          const next = prev.map((c) => siguientes.find((u) => u.id === c.id) || c);
+          try {
+            localStorage.setItem('rentselect_candidatos', JSON.stringify(next));
+          } catch (e) {}
+          void ids;
+          return next;
+        });
+      },
+      alConfirmar: () => {
+        setInmuebles((prev) => {
+          const next = prev.filter((i) => i.id !== inmuebleId);
+          try {
+            localStorage.setItem('rentselect_inmuebles', JSON.stringify(next));
+          } catch (e) {}
+          return next;
+        });
+      },
+      alExito: () => {
+        mostrarAvisoOperacion({
+          tipo: 'exito',
+          titulo: 'Inmueble eliminado',
+          mensaje:
+            candidatosAfectados.length > 0
+              ? `El inmueble se ha eliminado correctamente y se han desvinculado ${candidatosAfectados.length} candidato(s).`
+              : 'El inmueble se ha eliminado correctamente.',
+        });
+      },
+      alError: (error) => {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: 'No se ha podido eliminar el inmueble',
+          mensaje: error.mensajeUsuario,
+          detalle: error.mensajeTecnico,
+        });
+      },
+      avisoFallo:
+        'El inmueble NO se ha eliminado: sigue apareciendo en tu cartera y ningún candidato ha sido modificado.',
     });
+
+    return resultado;
   };
 
   // Add inmueble handler
-  const handleAddInmueble = (newInmueble: Inmueble) => {
-    setInmuebles((prev) => {
-      const next = [newInmueble, ...prev];
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
-      return next;
+  const handleAddInmueble = async (nuevo: Inmueble) => {
+    // 1.4 · Ámbito patrimonial garantizado antes de tocar nada.
+    const alcance = prepararAlcancePatrimonial(nuevo, currentUser, propietarios);
+    if (alcance.estado !== 'OK') {
+      mostrarAvisoOperacion({
+        tipo: 'error',
+        titulo: 'No se puede dar de alta el inmueble',
+        mensaje: alcance.motivo,
+        detalle: `Código: ${alcance.codigo}`,
+      });
+      return;
+    }
+
+    const inmueble = alcance.inmueble;
+
+    await ejecutarMutacionConfirmada({
+      operacion: 'alta de inmueble',
+      // Sin optimismo: nada se confirma en pantalla hasta que Firestore responde.
+      persistir: async () => {
+        await saveInmuebleFirestore(inmueble, { propagarError: true });
+      },
+      alConfirmar: () => {
+        setInmuebles((prev) => {
+          const next = [inmueble, ...prev.filter((i) => i.id !== inmueble.id)];
+          try {
+            localStorage.setItem('rentselect_inmuebles', JSON.stringify(next));
+          } catch (e) {}
+          return next;
+        });
+      },
+      alExito: () => {
+        mostrarAvisoOperacion({
+          tipo: 'exito',
+          titulo: 'Inmueble dado de alta',
+          mensaje: 'El inmueble se ha guardado en el sistema y ya aparece en tu cartera.',
+        });
+      },
+      alError: (error) => {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: 'No se ha podido dar de alta el inmueble',
+          mensaje: error.mensajeUsuario,
+          detalle: error.mensajeTecnico,
+        });
+      },
+      avisoFallo:
+        'El inmueble NO se ha guardado: no existe en la base de datos, sólo en lo que ves en pantalla.',
     });
-    saveInmuebleFirestore(newInmueble);
   };
 
   // Update inmueble handler
-  const handleUpdateInmueble = (updatedInmueble: Inmueble) => {
-    setInmuebles((prev) => {
-      const next = prev.map((i) => (i.id === updatedInmueble.id ? updatedInmueble : i));
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
-      return next;
+  const handleUpdateInmueble = async (actualizado: Inmueble) => {
+    const existente = inmuebles.find((i) => i.id === actualizado.id);
+    const titularPreexistente =
+      existente?.propietarioId || existente?.propietarioPrincipalId || null;
+
+    // 1.4 · El ámbito patrimonial se revalida en cada edición.
+    const alcance = prepararAlcancePatrimonial(actualizado, currentUser, propietarios, {
+      titularPreexistente,
     });
-    saveInmuebleFirestore(updatedInmueble);
+    if (alcance.estado !== 'OK') {
+      mostrarAvisoOperacion({
+        tipo: 'error',
+        titulo: 'No se pueden guardar los cambios',
+        mensaje: alcance.motivo,
+        detalle: `Código: ${alcance.codigo}`,
+      });
+      return;
+    }
+
+    const inmueble = alcance.inmueble;
+
+    await ejecutarMutacionConfirmada({
+      operacion: 'guardado de los cambios del inmueble',
+      persistir: async () => {
+        await saveInmuebleFirestore(inmueble, { propagarError: true });
+      },
+      alConfirmar: () => {
+        setInmuebles((prev) => {
+          const next = prev.map((i) => (i.id === inmueble.id ? inmueble : i));
+          try {
+            localStorage.setItem('rentselect_inmuebles', JSON.stringify(next));
+          } catch (e) {}
+          return next;
+        });
+      },
+      alExito: () => {
+        mostrarAvisoOperacion({
+          tipo: 'exito',
+          titulo: 'Cambios guardados',
+          mensaje: 'Los datos del inmueble se han guardado correctamente.',
+        });
+      },
+      alError: (error) => {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: 'No se han podido guardar los cambios',
+          mensaje: error.mensajeUsuario,
+          detalle: error.mensajeTecnico,
+        });
+      },
+      avisoFallo: 'Los cambios NO se han guardado en el sistema.',
+    });
   };
 
   // Slot Handlers
@@ -2672,29 +3125,87 @@ export default function App() {
   };
 
   // Handlers for Propietarios y Cuentas Bancarias
+  /**
+   * BLOQUE 1 · Alta/edición de titular.
+   * Antes se actualizaba la UI y después se intentaba persistir; si Firestore
+   * rechazaba la escritura, el titular constaba en pantalla y en localStorage
+   * como si existiera. Ahora la UI se refresca SÓLO tras la confirmación.
+   */
   const handleSavePropietario = async (propietario: Propietario) => {
-    setPropietarios((prev) => {
-      const exists = prev.some((p) => p.id === propietario.id);
-      const updated = exists
-        ? prev.map((p) => (p.id === propietario.id ? propietario : p))
-        : [propietario, ...prev];
-      try {
-        localStorage.setItem('rentselect_propietarios', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
+    const esAlta = !propietarios.some((p) => p.id === propietario.id);
+
+    await ejecutarMutacionConfirmada({
+      operacion: esAlta ? 'alta del titular' : 'guardado de los datos del titular',
+      persistir: async () => {
+        await savePropietarioFirestore(propietario, { propagarError: true });
+      },
+      alConfirmar: () => {
+        setPropietarios((prev) => {
+          const exists = prev.some((p) => p.id === propietario.id);
+          const updated = exists
+            ? prev.map((p) => (p.id === propietario.id ? propietario : p))
+            : [propietario, ...prev];
+          try {
+            localStorage.setItem('rentselect_propietarios', JSON.stringify(updated));
+          } catch (e) {}
+          return updated;
+        });
+      },
+      alExito: () => {
+        mostrarAvisoOperacion({
+          tipo: 'exito',
+          titulo: esAlta ? 'Titular dado de alta' : 'Datos del titular guardados',
+          mensaje: 'La operación se ha guardado correctamente en el sistema.',
+        });
+      },
+      alError: (error) => {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: 'No se ha podido guardar el titular',
+          mensaje: error.mensajeUsuario,
+          detalle: error.mensajeTecnico,
+        });
+      },
+      avisoFallo: 'El titular NO se ha guardado en el sistema.',
     });
-    await savePropietarioFirestore(propietario);
   };
 
+  /**
+   * BLOQUE 1 · Borrado de titular.
+   * La ficha desaparece de la lista SÓLO si Firestore confirma el borrado.
+   */
   const handleDeletePropietario = async (propietarioId: string) => {
-    setPropietarios((prev) => {
-      const updated = prev.filter((p) => p.id !== propietarioId);
-      try {
-        localStorage.setItem('rentselect_propietarios', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
+    await ejecutarMutacionConfirmada({
+      operacion: 'eliminación del titular',
+      persistir: async () => {
+        await deletePropietarioFirestore(propietarioId, { propagarError: true });
+      },
+      alConfirmar: () => {
+        setPropietarios((prev) => {
+          const updated = prev.filter((p) => p.id !== propietarioId);
+          try {
+            localStorage.setItem('rentselect_propietarios', JSON.stringify(updated));
+          } catch (e) {}
+          return updated;
+        });
+      },
+      alExito: () => {
+        mostrarAvisoOperacion({
+          tipo: 'exito',
+          titulo: 'Titular eliminado',
+          mensaje: 'El titular se ha eliminado correctamente del sistema.',
+        });
+      },
+      alError: (error) => {
+        mostrarAvisoOperacion({
+          tipo: 'error',
+          titulo: 'No se ha podido eliminar el titular',
+          mensaje: error.mensajeUsuario,
+          detalle: error.mensajeTecnico,
+        });
+      },
+      avisoFallo: 'El titular NO se ha eliminado: sigue existiendo en el sistema.',
     });
-    await deletePropietarioFirestore(propietarioId);
   };
 
   // Handlers for Seguro de Impago
@@ -3394,6 +3905,11 @@ export default function App() {
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
+                titularidades={scopedTitularidades}
+                onMarcarVendido={handleMarcarVendido}
+                onDarDeBaja={handleDarDeBaja}
+                onAnadirTitular={handleAnadirTitular}
+                onCerrarTitularidad={handleCerrarTitularidad}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -3530,6 +4046,11 @@ export default function App() {
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
+                titularidades={scopedTitularidades}
+                onMarcarVendido={handleMarcarVendido}
+                onDarDeBaja={handleDarDeBaja}
+                onAnadirTitular={handleAnadirTitular}
+                onCerrarTitularidad={handleCerrarTitularidad}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -3816,6 +4337,11 @@ export default function App() {
                 propietarios={scopedPropietarios}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
+                titularidades={scopedTitularidades}
+                onMarcarVendido={handleMarcarVendido}
+                onDarDeBaja={handleDarDeBaja}
+                onAnadirTitular={handleAnadirTitular}
+                onCerrarTitularidad={handleCerrarTitularidad}
                 onOpenCrearProfesionalModal={(prof) => {
                   setSelectedProfForEdit(prof);
                   setShowCrearProfesionalModal(true);
@@ -4172,6 +4698,12 @@ export default function App() {
           }}
         />
       )}
+
+      {/* BLOQUE 1 · Resultado de la operación: siempre visible, nunca silencioso */}
+      <AvisoOperacionModal
+        aviso={avisoOperacion}
+        onClose={() => setAvisoOperacion(null)}
+      />
     </div>
   );
 }

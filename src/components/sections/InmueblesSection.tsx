@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   Inmueble,
   Candidato,
@@ -88,6 +88,7 @@ import {
   AlertCircle,
   Paperclip,
 } from 'lucide-react';
+import { resolverTitularDeCuenta } from '../../utils/alcancePatrimonial';
 
 interface InmueblesSectionProps {
   inmuebles: Inmueble[];
@@ -100,7 +101,7 @@ interface InmueblesSectionProps {
   currentUser?: UsuarioApp | null;
   onSelectCandidate: (candidato: Candidato) => void;
   onDeleteInmueble?: (inmuebleId: string) => void;
-  onAddInmueble?: (inmueble: Inmueble) => void;
+  onAddInmueble?: (inmueble: Inmueble) => void | Promise<unknown>;
   onOpenLinkModal?: (inmueble: Inmueble) => void;
   onOpenConfigurarAgenda?: (inmuebleId?: string) => void;
   onUpdateInmueble?: (inmueble: Inmueble) => void;
@@ -165,6 +166,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [newImagenPreview, setNewImagenPreview] = useState<string | null>(null);
 
   // New Property Fiscal & Owner Linking Fields
+  // BLOQUE 1 · Motivo por el que el alta no se ha aceptado (ámbito patrimonial).
+  const [errorAltaInmueble, setErrorAltaInmueble] = useState<string | null>(null);
   const [newSelectedPropId, setNewSelectedPropId] = useState<string>('');
   const [newSelectedCuentaId, setNewSelectedCuentaId] = useState<string>('');
   const [newSelectedProp2Id, setNewSelectedProp2Id] = useState<string>('');
@@ -258,6 +261,27 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       reader.readAsDataURL(file);
     }
   };
+
+  // ── BLOQUE 1 · Titular auto-identificado ────────────────────────────────
+  // Cuando quien da de alta es un PROPIETARIO, el sistema ya sabe quién es el
+  // titular: NO se le obliga a buscarse a sí mismo en un desplegable.
+  const esAltaDesdePortalPropietario = currentUser?.tipoPerfil === 'PROPIETARIO';
+  const vinculoAutoTitular = useMemo(
+    () => resolverTitularDeCuenta(currentUser, propietarios),
+    [currentUser, propietarios]
+  );
+  const titularAutomaticoId = vinculoAutoTitular.propietarioId || '';
+  const puedeElegirOtroTitular = !esAltaDesdePortalPropietario;
+
+  // Preselección: al abrir el alta, el titular queda identificado.
+  const abrirAltaInmueble = useCallback(() => {
+    setErrorAltaInmueble(null);
+    setNewTab('general');
+    if (esAltaDesdePortalPropietario && titularAutomaticoId) {
+      setNewSelectedPropId(titularAutomaticoId);
+    }
+    setShowAddModal(true);
+  }, [esAltaDesdePortalPropietario, titularAutomaticoId]);
 
   const selectedInmueble = inmuebles.find((i) => i.id === selectedInmuebleId);
 
@@ -443,9 +467,29 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     }
   };
 
-  const handleCreateInmuebleSubmit = (e: React.FormEvent) => {
+  const handleCreateInmuebleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDireccion || !newCiudad || !onAddInmueble) return;
+
+    // BLOQUE 1 · Ámbito patrimonial obligatorio: sin titular no hay cartera y no
+    // se puede garantizar quién verá el inmueble (1.4).
+    if (esAltaDesdePortalPropietario && !titularAutomaticoId) {
+      setErrorAltaInmueble(
+        vinculoAutoTitular.motivo ||
+          'No se ha podido identificar tu titularidad. No se puede dar de alta el inmueble.'
+      );
+      return;
+    }
+    if (esAltaDesdePortalPropietario && titularAutomaticoId) {
+      setNewSelectedPropId(titularAutomaticoId);
+    }
+    setErrorAltaInmueble(null);
+
+    // Titular efectivo de ESTA ejecución (el setState anterior aún no ha
+    // refrescado `newSelectedPropId` en este mismo render).
+    const propIdFinal = puedeElegirOtroTitular
+      ? newSelectedPropId
+      : titularAutomaticoId || newSelectedPropId;
 
     const hasCustomImage = !!(newImagenPreview || newImagenUrl.trim());
     const finalImageUrl =
@@ -460,7 +504,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       telefono: newPropTelefono.trim() || undefined,
       email: newPropEmail.trim() || undefined,
       esPersonaJuridica: newPropEsPersonaJuridica,
-      propietarioId: newSelectedPropId || undefined,
+      propietarioId: propIdFinal || undefined,
     };
 
     let segundoProp: PropietarioFiscal | undefined = undefined;
@@ -505,15 +549,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       imagenIa: !hasCustomImage,
       referenciaCatastral: newReferenciaCatastral.trim() || undefined,
       codigoPostal: newCodigoPostal.trim() || undefined,
-      propietarioId: newSelectedPropId || undefined,
-      propietarioPrincipalId: newSelectedPropId || undefined,
+      propietarioId: propIdFinal || undefined,
+      propietarioPrincipalId: propIdFinal || undefined,
       propietarioSecundarioId: newTieneSegundoProp && newSelectedProp2Id ? newSelectedProp2Id : undefined,
       cuentaBancariaCobroId: newSelectedCuentaId && newSelectedCuentaId !== 'custom' ? newSelectedCuentaId : undefined,
       ibanCobro: newIbanCobro.trim() || undefined,
       datosFiscales,
     };
 
-    onAddInmueble(created);
+    const resultado = await onAddInmueble(created);
+    // BLOQUE 1 · Si Firestore rechazó el alta el modal NO se cierra: el usuario
+    // conserva lo que escribió y ve el motivo en el aviso de la aplicación.
+    if (resultado && typeof resultado === 'object' && (resultado as { estado?: string }).estado === 'KO') {
+      return;
+    }
     setShowAddModal(false);
     setNewIdPersonalizado('');
     setNewModalidadAlquiler('completo');
@@ -1790,10 +1839,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
           {onAddInmueble && (
             <button
-              onClick={() => {
-                setNewTab('general');
-                setShowAddModal(true);
-              }}
+              onClick={abrirAltaInmueble}
               className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 shrink-0"
             >
               <Plus className="w-4 h-4" />
@@ -2975,23 +3021,56 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       )}
                     </div>
 
-                    <div>
-                      <select
-                        value={newSelectedPropId}
-                        onChange={(e) => handleSelectNewPropietario(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-white border border-blue-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                      >
-                        <option value="">-- Asignación manual / Personalizada --</option>
-                        {propietarios.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.nombre} ({p.nifCif}) — {p.cuentasBancarias.length} cuenta(s) bancaria(s)
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-[11px] text-blue-800/80 mt-1">
-                        Al elegir un propietario de la lista, sus datos fiscales y su cuenta bancaria se vincularán automáticamente al inmueble.
-                      </p>
-                    </div>
+                    {/* BLOQUE 1 · Titular auto-identificado en el portal del propietario.
+                        Antes el propietario tenía que encontrarse a sí mismo en el
+                        desplegable; si no lo hacía, el inmueble se guardaba SIN
+                        titular y quedaba fuera de su cartera (o "sólo en localStorage"). */}
+                    {esAltaDesdePortalPropietario ? (
+                      <div className="p-3 bg-white border border-blue-200 rounded-xl space-y-1">
+                        {titularAutomaticoId ? (
+                          <>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700">
+                                Titular del inmueble
+                              </span>
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-[10px] font-bold">
+                                {vinculoAutoTitular.propietario?.nifCif || ''}
+                              </span>
+                            </div>
+                            <p className="text-xs font-bold text-slate-900">
+                              {vinculoAutoTitular.propietario?.nombre || 'Titular'}
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              Identificado automáticamente a partir de tu cuenta. El inmueble
+                              quedará vinculado a tu titularidad.
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-[11px] font-semibold text-rose-700">
+                            No se ha podido identificar tu titularidad. Contacta con la
+                            administración: sin titular no se puede dar de alta el inmueble.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div>
+                        <select
+                          value={newSelectedPropId}
+                          onChange={(e) => handleSelectNewPropietario(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-white border border-blue-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                        >
+                          <option value="">-- Asignación manual / Personalizada --</option>
+                          {propietarios.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} ({p.nifCif}) — {p.cuentasBancarias.length} cuenta(s) bancaria(s)
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-blue-800/80 mt-1">
+                          Al elegir un propietario de la lista, sus datos fiscales y su cuenta bancaria se vincularán automáticamente al inmueble.
+                        </p>
+                      </div>
+                    )}
 
                     {/* Selected Owner Quick Info Badge */}
                     {newSelectedPropId && (() => {
@@ -3273,6 +3352,16 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* BLOQUE 1 · Motivo por el que el alta no se ha aceptado */}
+              {errorAltaInmueble && (
+                <div
+                  data-testid="error-alta-inmueble"
+                  className="mb-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-[11px] font-semibold text-rose-800"
+                >
+                  {errorAltaInmueble}
                 </div>
               )}
 

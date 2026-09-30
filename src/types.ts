@@ -475,6 +475,161 @@ export interface DatosFiscalesInmueble {
   segundoPropietario?: PropietarioFiscal;
 }
 
+/* ==========================================================================
+ * BLOQUE 2 — TITULARIDAD EXTENSIBLE A N TITULARES
+ * ==========================================================================
+ * La titularidad deja de vivir en campos escalares del inmueble
+ * (`propietarioId` / `propietarioPrincipalId` / `propietarioSecundarioId`) y
+ * pasa a una COLECCIÓN RAÍZ `titularidades`, con una relación por cada
+ * (inmueble, titular). NUNCA se añaden campos `propietarioTerciarioId`,
+ * `Cuarto` o `Quinto`: el modelo es genuinamente N.
+ *
+ * Las relaciones NO se borran físicamente nunca: se cierran (`fechaHasta` +
+ * `estado`) y conservan su `historial`, de modo que el historial patrimonial
+ * es reconstruible (2020 A50/B50 → 2025 A100 → 2028 VENDIDO).
+ * ========================================================================== */
+
+/** Papel del titular sobre el inmueble. */
+export type RolTitularidad =
+  | 'PROPIETARIO'        // titular pleno / principal
+  | 'COTITULAR'          // copropietario
+  | 'USUFRUCTUARIO'
+  | 'NUDO_PROPIETARIO'
+  | 'REPRESENTANTE'
+  | 'OTRO';
+
+/** Estado de la relación de titularidad. Cerrada ≠ borrada. */
+export type EstadoTitularidad =
+  | 'ACTIVA'
+  | 'BAJA'        // deja de ser titular (venta de su parte, renuncia…)
+  | 'TRANSMITIDA' // su parte se transmite a otro titular
+  | 'PENDIENTE';  // alta sin confirmar (p.ej. documentación pendiente)
+
+/** Procedencia del registro: imprescindible para auditar la migración. */
+export type OrigenTitularidad =
+  | 'ALTA'
+  | 'MIGRACION'
+  | 'IMPORTACION'
+  | 'COMPRAVENTA'
+  | 'HERENCIA'
+  | 'APORTACION'
+  | 'OTRO';
+
+/** Tipos de evento del historial de titularidad (append-only). */
+export type TipoEventoTitularidad =
+  | 'ALTA'
+  | 'MODIFICACION'
+  | 'BAJA'
+  | 'TRANSMISION'
+  | 'MIGRACION'
+  | 'REACTIVACION';
+
+export interface EventoTitularidad {
+  id: string;
+  fecha: string; // ISO
+  tipo: TipoEventoTitularidad;
+  actorId?: string;
+  actorNombre?: string;
+  estadoAnterior?: EstadoTitularidad;
+  estadoNuevo?: EstadoTitularidad;
+  porcentajeAnterior?: number | null;
+  porcentajeNuevo?: number | null;
+  motivo?: string;
+  detalle?: string;
+}
+
+export interface Titularidad {
+  /**
+   * Clave DETERMINISTA: `${inmuebleId}__${propietarioId}`.
+   * Garantiza idempotencia: migrar dos veces no crea duplicados.
+   */
+  id: string;
+  inmuebleId: string;
+  propietarioId: string;
+
+  /**
+   * Porcentaje de titularidad. `null` cuando NO se conoce.
+   * NUNCA se inventa: si no hay fuente fiable se marca
+   * `porcentajePendiente: true` y la UI lo muestra como pendiente.
+   */
+  porcentaje: number | null;
+  porcentajePendiente: boolean;
+
+  /** Un único titular principal por inmueble y momento. */
+  esPrincipal: boolean;
+  rol: RolTitularidad;
+
+  estado: EstadoTitularidad;
+  fechaDesde: string; // ISO
+  /** `null` mientras la titularidad sigue vigente. */
+  fechaHasta?: string | null;
+  motivoBaja?: string | null;
+
+  origen: OrigenTitularidad;
+  /** Se incrementa en cada modificación: permite detectar escrituras perdidas. */
+  version: number;
+  /** Append-only: nunca se recorta. */
+  historial: EventoTitularidad[];
+
+  /** La ficha del titular existe pero está incompleta (se creó al vuelo). */
+  fichaPendiente?: boolean;
+  notas?: string;
+
+  creadoPor?: string;
+  actualizadoPor?: string;
+  createdAt: string;
+  updatedAt: string;
+
+  /** Identificador del lote de migración que creó el registro (reversible). */
+  migracionId?: string;
+}
+
+/* --------------------------------------------------------------------------
+ * BLOQUE 2 — CICLO DE VIDA PATRIMONIAL (dos ejes ORTOGONALES)
+ * --------------------------------------------------------------------------
+ * EJE PATRIMONIAL: qué pasa con el inmueble como bien de la cartera.
+ * EJE DE EXPLOTACIÓN: qué pasa con su uso (alquiler, reforma…).
+ *
+ * Son independientes: un inmueble puede estar VENDIDO y conservar la
+ * explotación histórica, o estar ACTIVO y SIN_EXPLOTACION.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * EJE PATRIMONIAL. `ACTIVO` y `EN_VENTA` forman la CARTERA ACTIVA;
+ * `VENDIDO`/`TRANSMITIDO`/`BAJA`/`HISTORICO` forman el HISTÓRICO.
+ */
+export type EstadoPatrimonial =
+  | 'ACTIVO'
+  | 'EN_VENTA'
+  | 'VENDIDO'
+  | 'TRANSMITIDO'
+  | 'BAJA'
+  | 'HISTORICO';
+
+/** EJE DE EXPLOTACIÓN. Ortogonal al patrimonial. */
+export type EstadoExplotacion =
+  | 'DISPONIBLE'
+  | 'ALQUILADO'
+  | 'EN_REFORMA'
+  | 'NO_DISPONIBLE'
+  | 'SIN_EXPLOTACION';
+
+export interface BajaPatrimonial {
+  fecha: string; // ISO
+  tipo: 'VENTA' | 'TRANSMISION' | 'BAJA_DEFINITIVA' | 'OTRO';
+  motivo?: string;
+  actorId?: string;
+  actorNombre?: string;
+  estadoAnterior?: EstadoPatrimonial;
+  /** La publicación activa se retira, pero NO se borra: queda trazabilidad. */
+  publicacionRetirada?: boolean;
+  /**
+   * `true` POR DISEÑO en este modelo: la baja/venta NUNCA borra contratos,
+   * recibos, gastos, documentos, IBI, suministros, liquidaciones ni fiscalidad.
+   */
+  conservaHistorico: boolean;
+}
+
 export interface Inmueble {
   id: string;
   tokenSolicitud?: string; // Token público de solicitud p.ej. "sol-prop-1"
@@ -499,6 +654,41 @@ export interface Inmueble {
   propietarioId?: string; // ID permanente del Propietario titular vinculado
   propietarioPrincipalId?: string;
   propietarioSecundarioId?: string;
+
+  /* --- BLOQUE 2 · Ciclo de vida: DOS EJES ORTOGONALES ------------------- */
+
+  /**
+   * EJE PATRIMONIAL. `undefined` = `ACTIVO` (compatibilidad total con los
+   * documentos existentes; los inmuebles actuales NO cambian de estado).
+   */
+  estadoPatrimonial?: EstadoPatrimonial;
+  /**
+   * EJE DE EXPLOTACIÓN. Se DERIVA del campo `estado` ('disponible' → DISPONIBLE,
+   * 'alquilado' → ALQUILADO) para no romper la lógica existente; sólo se almacena
+   * cuando alguien fija explícitamente otro valor (EN_REFORMA, NO_DISPONIBLE…).
+   */
+  estadoExplotacion?: EstadoExplotacion;
+  /** Datos de la baja/venta. Ausente mientras el inmueble está en cartera activa. */
+  bajaPatrimonial?: BajaPatrimonial;
+  /** Fecha prevista/efectiva de venta (informativa, no sustituye a bajaPatrimonial). */
+  fechaVenta?: string;
+
+  /**
+   * BLOQUE 1 — ÍNDICE DE TITULARES (proyección de los tres campos anteriores).
+   *
+   * Existe para que las reglas de Firestore puedan acotar un `list` de forma
+   * demostrable (`array-contains`) y para que el aislamiento de carteras no
+   * dependa de filtrar en el cliente.
+   *
+   * · Se recalcula en cada escritura desde los campos escalares (write-through).
+   * · No introduce información nueva: es una proyección pura.
+   * · En el BLOQUE 2 pasará a alimentarse de la colección `titularidades`
+   *   (que sí soporta N titulares, porcentaje y vigencia).
+   *
+   * @see proyectarTitularesIds en src/lib/firebase.ts
+   */
+  titularesIds?: string[];
+
   cuentaBancariaCobroId?: string;
   ibanCobro?: string;
   datosFiscales?: DatosFiscalesInmueble;

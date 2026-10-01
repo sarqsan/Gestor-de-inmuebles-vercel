@@ -21,12 +21,15 @@ import { FichaTecnicaInventarioPanel } from '../FichaTecnicaInventarioPanel';
 import { HabitacionesInmueblePanel } from '../HabitacionesInmueblePanel';
 import { PublicacionInmueblesPanel } from '../PublicacionInmueblesPanel';
 import { CentroOperativoInmueblePanel } from '../inmueble/CentroOperativoInmueblePanel';
-import { ConfirmDeleteModal } from '../ConfirmDeleteModal';
+import { BajaInmuebleModal } from '../modals/BajaInmuebleModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
 import { getInmuebleCoverUrl } from '../../utils/imageUtils';
 import { validarCoherenciaTitularidad } from '../../lib/titularidadInmueble';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
+import { avisoCicloPatrimonial, claseCicloPatrimonial } from '../../utils/fichaInmueblePresentacion';
+import { inmuebleDadoDeBaja, type SolicitudBaja } from '../../utils/cicloPatrimonialEngine';
+import { inmueblesDadosDeBaja } from '../../utils/bajaPatrimonialInmueble';
 import {
   obtenerCobrosInmueble,
   calcularResumenCobros,
@@ -57,7 +60,6 @@ import {
   Mail,
   User,
   Plus,
-  Trash2,
   X,
   AlertTriangle,
   Sparkles,
@@ -109,7 +111,17 @@ interface InmueblesSectionProps {
   contratos?: ContratoFormalizacion[];
   currentUser?: UsuarioApp | null;
   onSelectCandidate: (candidato: Candidato) => void;
-  onDeleteInmueble?: (inmuebleId: string) => void;
+  /**
+   * BAJA PATRIMONIAL (sustituye al borrado físico): cambia el estado del
+   * inmueble y conserva todo su histórico. Devuelve `true` sólo si Firestore
+   * confirmó la baja; con `false` el inmueble permanece intacto en la interfaz.
+   */
+  onBajaInmueble?: (inmueble: Inmueble, solicitud: SolicitudBaja) => Promise<boolean>;
+  /**
+   * Autorización de escritura vigente sobre ese inmueble (espejo de las Rules).
+   * Sin ella no se ofrece la baja: un usuario de sólo lectura nunca la ve.
+   */
+  puedeDarDeBaja?: (inmueble: Inmueble) => boolean;
   onAddInmueble?: (inmueble: Inmueble) => void;
   onOpenLinkModal?: (inmueble: Inmueble) => void;
   onOpenConfigurarAgenda?: (inmuebleId?: string) => void;
@@ -150,7 +162,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   contratos = [],
   currentUser,
   onSelectCandidate,
-  onDeleteInmueble,
+  onBajaInmueble,
+  puedeDarDeBaja,
   onAddInmueble,
   onOpenLinkModal,
   onOpenConfigurarAgenda,
@@ -171,7 +184,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string | null>(null);
   const [filterState, setFilterState] = useState<'todos' | 'disponible' | 'alquilado'>('todos');
   const [searchTerm, setSearchTerm] = useState('');
-  const [inmuebleToDelete, setInmuebleToDelete] = useState<Inmueble | null>(null);
+  /**
+   * CICLO PATRIMONIAL: la vista activa muestra por defecto los inmuebles
+   * operativos. Los vendidos / dados de baja siguen accesibles desde el
+   * histórico (nunca se pierden: no hay borrado).
+   */
+  const [mostrarHistorico, setMostrarHistorico] = useState(false);
+  const [inmuebleABaja, setInmuebleABaja] = useState<Inmueble | null>(null);
   const [gestionImagenesInmueble, setGestionImagenesInmueble] = useState<Inmueble | null>(null);
   const [verAgendaInmueble, setVerAgendaInmueble] = useState<Inmueble | null>(null);
   const seleccionarInmueble = (id: string | null) => {
@@ -437,7 +456,18 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     return null;
   }, [selectedInmueble, propietarios]);
 
+  /** Inmuebles conservados en el histórico (vendidos o dados de baja). */
+  const inmueblesHistoricos = useMemo(() => inmueblesDadosDeBaja(inmuebles), [inmuebles]);
+
+  /**
+   * Autorización para ofrecer la baja: exige autorización de escritura (la que
+   * las Rules revalidan en el `update`) y que el inmueble siga operativo.
+   */
+  const puedeOfrecerBaja = (inm: Inmueble): boolean =>
+    Boolean(onBajaInmueble) && !inmuebleDadoDeBaja(inm) && (puedeDarDeBaja ? puedeDarDeBaja(inm) : true);
+
   const filteredInmuebles = inmuebles.filter((inm) => {
+    if (!mostrarHistorico && inmuebleDadoDeBaja(inm)) return false;
     const matchesSearch =
       inm.direccion.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inm.ciudad.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1007,6 +1037,16 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
         {/* Selected Property Header Detail */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs space-y-5">
+          {/* Ciclo patrimonial: el inmueble vendido/dado de baja se conserva en el histórico */}
+          {avisoCicloPatrimonial(selectedInmueble) && (
+            <div
+              className={`rounded-xl border border-slate-200 p-3 text-xs font-semibold flex items-start gap-2 ${claseCicloPatrimonial(selectedInmueble)}`}
+            >
+              <Archive className="w-4 h-4 shrink-0" />
+              <span>{avisoCicloPatrimonial(selectedInmueble)}</span>
+            </div>
+          )}
+
           {/* Property Image Banner */}
           <div className="relative h-48 sm:h-64 w-full bg-slate-100 rounded-xl overflow-hidden border border-slate-200/80 group">
             <img
@@ -1149,14 +1189,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                 </button>
               )}
 
-              {onDeleteInmueble && (
+              {puedeOfrecerBaja(selectedInmueble) && (
                 <button
-                  onClick={() => setInmuebleToDelete(selectedInmueble)}
-                  className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl transition-colors font-semibold text-xs flex items-center gap-1.5"
-                  title="Eliminar inmueble"
+                  onClick={() => setInmuebleABaja(selectedInmueble)}
+                  className="p-2 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl transition-colors font-semibold text-xs flex items-center gap-1.5"
+                  title="Dar de baja el inmueble (se conserva todo el histórico)"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span className="hidden sm:inline">Eliminar</span>
+                  <Archive className="w-4 h-4" />
+                  <span className="hidden sm:inline">Dar de baja</span>
                 </button>
               )}
             </div>
@@ -2022,7 +2062,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                 filterState === 'todos' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Todos ({inmuebles.length})
+              Todos ({inmuebles.length - inmueblesHistoricos.length})
             </button>
             <button
               onClick={() => setFilterState('disponible')}
@@ -2040,6 +2080,18 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             >
               Alquilados
             </button>
+            {inmueblesHistoricos.length > 0 && (
+              <button
+                onClick={() => setMostrarHistorico((previo) => !previo)}
+                title="Inmuebles vendidos o dados de baja: se conservan en el histórico"
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex-1 sm:flex-initial flex items-center gap-1.5 ${
+                  mostrarHistorico ? 'bg-white text-amber-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Archive className="w-3.5 h-3.5" />
+                Histórico ({inmueblesHistoricos.length})
+              </button>
+            )}
           </div>
 
           {onAddInmueble && (
@@ -2125,16 +2177,16 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <Edit className="w-3.5 h-3.5" />
                     </button>
 
-                    {onDeleteInmueble && (
+                    {puedeOfrecerBaja(inm) && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setInmuebleToDelete(inm);
+                          setInmuebleABaja(inm);
                         }}
-                        className="p-1.5 rounded-full bg-slate-900/80 hover:bg-rose-600 text-white backdrop-blur-xs transition-colors shadow-sm"
-                        title="Eliminar inmueble"
+                        className="p-1.5 rounded-full bg-slate-900/80 hover:bg-amber-600 text-white backdrop-blur-xs transition-colors shadow-sm"
+                        title="Dar de baja el inmueble (se conserva todo el histórico)"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Archive className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
@@ -2157,6 +2209,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       {propName && (
                         <span className="text-[10px] text-slate-600 truncate max-w-[170px]" title={propName}>
                           Prop: <strong className="text-slate-800 font-semibold">{propName}</strong>
+                        </span>
+                      )}
+                      {inmuebleDadoDeBaja(inm) && (
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${claseCicloPatrimonial(inm)}`}
+                        >
+                          {inm.estadoPatrimonial === 'VENDIDO' ? 'Vendido' : 'Baja'}
                         </span>
                       )}
                     </div>
@@ -3749,21 +3808,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
         </div>
       )}
 
-      {/* Confirm Delete Modal */}
-      <ConfirmDeleteModal
-        isOpen={!!inmuebleToDelete}
-        title="¿Eliminar inmueble?"
-        description={`¿Estás seguro de que deseas eliminar el inmueble "${inmuebleToDelete?.direccion}"? Los candidatos vinculados pasarán a estado 'Sin inmueble'.`}
-        onConfirm={() => {
-          if (inmuebleToDelete && onDeleteInmueble) {
-            onDeleteInmueble(inmuebleToDelete.id);
-            if (selectedInmuebleId === inmuebleToDelete.id) {
-              seleccionarInmueble(null);
-            }
-            setInmuebleToDelete(null);
-          }
+      {/* Confirmación de BAJA PATRIMONIAL (el inmueble y su histórico se conservan) */}
+      <BajaInmuebleModal
+        isOpen={!!inmuebleABaja}
+        inmueble={inmuebleABaja}
+        onConfirm={async (solicitud) => {
+          if (!inmuebleABaja || !onBajaInmueble) return false;
+          return onBajaInmueble(inmuebleABaja, solicitud);
         }}
-        onCancel={() => setInmuebleToDelete(null)}
+        onCancel={() => setInmuebleABaja(null)}
       />
 
       {/* Image Management Modal */}

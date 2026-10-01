@@ -559,27 +559,13 @@ export async function saveInmuebleFirestore(inmueble: Inmueble): Promise<boolean
   }
 }
 
-/**
- * Delete Inmueble from Firestore
- */
-export async function deleteInmuebleFirestore(inmuebleId: string): Promise<boolean> {
-  try {
-    await deleteDoc(doc(db, 'inmuebles', inmuebleId));
-    // R3: la ficha pública no debe sobrevivir al documento (mejor esfuerzo).
-    try {
-      await deleteFichaPublicaInmueble(inmuebleId);
-    } catch (errMirror) {
-      console.warn('No se pudo eliminar la ficha pública del inmueble:', errMirror);
-    }
-    return true;
-  } catch (err) {
-    reportarErrorGuardado('inmuebles', err, 'Error deleting inmueble from Firestore:');
-    return false;
-  }
-}
+// El borrado físico de inmuebles NO existe: la operación de usuario es la BAJA
+// PATRIMONIAL (`src/lib/bajaPatrimonialInmuebleFirestore.ts`), que hace `update`
+// del estado y CONSERVA el inmueble, sus titularidades y su histórico. El
+// documento sólo puede borrarlo la administración por otras vías auditadas.
 
 import { compressImageForUpload } from '../utils/fileCompressor';
-import { buildFichaPublicaInmueble, deleteFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
+import { buildFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
 
 /**
  * Recursively cleans any object or array to ensure it contains NO `undefined` values,

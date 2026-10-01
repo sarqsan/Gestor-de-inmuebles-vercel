@@ -1,3 +1,4 @@
+import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
 import React, { useMemo, useState } from 'react';
 import { X, Landmark, Save, AlertCircle, Calculator, Plus, Trash2 } from 'lucide-react';
 import type {
@@ -39,17 +40,23 @@ const euro = (n: number): string =>
 
 export const PrestamoModal: React.FC<Props> = ({
   prestamoParaEditar,
-  inmuebles,
+  inmuebles: carteraCompleta,
   inmuebleIdInicial,
   currentUser,
   onSave,
   onClose,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesParaSeleccion(carteraCompleta, prestamoParaEditar?.inmuebleId), [carteraCompleta, prestamoParaEditar?.inmuebleId]);
+
   const isEditing = !!prestamoParaEditar;
 
   const [inmuebleId, setInmuebleId] = useState<string>(
     prestamoParaEditar?.inmuebleId || inmuebleIdInicial || inmuebles[0]?.id || ''
   );
+  // Una selección antigua no puede mantener operativa una vivienda dada de baja.
+  React.useEffect(() => {
+    if (!inmuebles.some((i) => i.id === inmuebleId)) setInmuebleId(inmuebles[0]?.id || '');
+  }, [inmuebles, inmuebleId]);
   const [tipo, setTipo] = useState<TipoPrestamo>(prestamoParaEditar?.tipo || 'HIPOTECARIO');
   const [descripcion, setDescripcion] = useState<string>(
     prestamoParaEditar?.descripcion || 'Hipoteca de la vivienda'

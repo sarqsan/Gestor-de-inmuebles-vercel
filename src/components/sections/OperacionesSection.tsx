@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 /**
  * CENTRO DE OPERACIONES Y MANTENIMIENTO — capa de coordinación/visualización.
  *
@@ -607,8 +608,8 @@ export const OperacionesSection: React.FC<OperacionesSectionProps> = ({
           </h2>
           <p className="text-sm text-slate-500 mt-1">
             {alcance.esAdmin
-              ? `Visión global · ${inmuebles.length} inmuebles`
-              : `Tus inmuebles en seguimiento · ${inmuebles.length}`}{' '}
+              ? `Visión global · ${inmueblesOperativos(inmuebles).length} inmuebles`
+              : `Tus inmuebles en seguimiento · ${inmueblesOperativos(inmuebles).length}`}{' '}
             · {fmtFecha(hoyDia)} · Solo lectura: el detalle vive en cada módulo.
           </p>
         </div>

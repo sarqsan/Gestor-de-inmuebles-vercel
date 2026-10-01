@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useRef } from 'react';
 import { UserProfile, Candidato, Inmueble } from '../../types';
 import { ImportExportPanel } from './ImportExportPanel';
@@ -330,7 +331,7 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
             <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
               <span className="text-emerald-400 font-mono font-bold block">/inmuebles</span>
-              <span className="text-[11px] text-slate-400">Colección activa con {inmuebles.length} viviendas.</span>
+              <span className="text-[11px] text-slate-400">Colección activa con {inmueblesOperativos(inmuebles).length} viviendas.</span>
             </div>
             <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
               <span className="text-emerald-400 font-mono font-bold block">/candidatos</span>

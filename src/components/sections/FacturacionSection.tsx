@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Inmueble,
@@ -342,7 +343,7 @@ interface FormProps {
 }
 
 function FormularioFactura({ inmuebles, propietarios, series, facturas, registros, currentUser, onClose, onSaved }: FormProps) {
-  const [inmuebleId, setInmuebleId] = useState(inmuebles[0]?.id || '');
+  const [inmuebleId, setInmuebleId] = useState(inmueblesOperativos(inmuebles)[0]?.id || '');
   const [serieCodigo, setSerieCodigo] = useState('ALQ');
   const [concepto, setConcepto] = useState('Renta mensual');
   const [cantidad, setCantidad] = useState<number>(1);
@@ -473,8 +474,8 @@ function FormularioFactura({ inmuebles, propietarios, series, facturas, registro
         <label className="block text-sm">
           <span className="text-slate-600 font-medium">Inmueble</span>
           <select value={inmuebleId} onChange={(e) => setInmuebleId(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
-            {inmuebles.length === 0 && <option value="">Sin inmuebles</option>}
-            {inmuebles.map((i) => (
+            {inmueblesOperativos(inmuebles).length === 0 && <option value="">Sin inmuebles</option>}
+            {inmueblesOperativos(inmuebles).map((i) => (
               <option key={i.id} value={i.id}>{i.direccion || i.id}</option>
             ))}
           </select>

@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 /**
  * CENTRO DE CONTROL EJECUTIVO DEL ERP — DASHBOARD PRINCIPAL
  * ARENA D — Auditoría previa y fuentes reales documentadas:
@@ -131,7 +132,7 @@ function diasHasta(fechaISO?: string): number | null {
 }
 
 export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
-  inmuebles,
+  inmuebles: carteraCompleta,
   contratos,
   cobros,
   gastos,
@@ -141,6 +142,8 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
   onSelectSection,
   loadingMain = false,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesOperativos(carteraCompleta), [carteraCompleta]);
+
   // Subscripciones internas para completar el centro de control con datos reales existentes
   const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
   const [tareas, setTareas] = useState<TareaMantenimiento[]>([]);
@@ -176,19 +179,19 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
       subs.push(
         subscribeIncidencias((items) => {
           // Defensa en profundidad: filtrar por inmuebles permitidos si existen
-          const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => allowedInmuebleIds.has(it.inmuebleId)) : items;
+          const filtered = items.filter((it) => allowedInmuebleIds.has(it.inmuebleId));
           setIncidencias(filtered);
         }, scope as any)
       );
       subs.push(
         subscribeTareasMantenimiento((items) => {
-          const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => allowedInmuebleIds.has(it.inmuebleId)) : items;
+          const filtered = items.filter((it) => allowedInmuebleIds.has(it.inmuebleId));
           setTareas(filtered);
         }, scope as any)
       );
       subs.push(
         subscribePolizas((items) => {
-          const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => !it.inmuebleId || allowedInmuebleIds.has(it.inmuebleId)) : items;
+          const filtered = items.filter((it) => !it.inmuebleId || allowedInmuebleIds.has(it.inmuebleId));
           setPolizas(filtered);
         }, scope)
       );
@@ -200,19 +203,19 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
       );
       subs.push(
         subscribeTrabajosProfesionales((items) => {
-          const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => allowedInmuebleIds.has(it.inmuebleId)) : items;
+          const filtered = items.filter((it) => allowedInmuebleIds.has(it.inmuebleId));
           setTrabajos(filtered);
         }, scope)
       );
       subs.push(
         subscribeExpedientesRecomercializacion((items) => {
-          const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => allowedInmuebleIds.has(it.inmuebleId)) : items;
+          const filtered = items.filter((it) => allowedInmuebleIds.has(it.inmuebleId));
           setExpedientes(filtered);
         }, scope as any)
       );
       subs.push(
         subscribeActas((items) => {
-          const filtered = allowedInmuebleIds.size > 0 ? items.filter((it) => allowedInmuebleIds.has(it.propertyId)) : items;
+          const filtered = items.filter((it) => allowedInmuebleIds.has(it.propertyId));
           setActas(filtered as any);
         }, scope as any)
       );
@@ -240,7 +243,7 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
       });
     };
     // Re-suscribir si cambia el ámbito (titular, cartera o inmuebles)
-  }, [claveDelScope, inmuebles.length]);
+  }, [claveDelScope, allowedInmuebleIds]);
 
   // ===================== CÁLCULOS DERIVADOS REALES =====================
   const resumenCobros = useMemo(() => calcularResumenCobros(cobros), [cobros]);

@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Home,
@@ -183,7 +184,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const [incDetalleId, setIncDetalleId] = useState<string | null>(null);
 
   // Security check: Only filter properties that belong to this owner
-  const misViviendas = inmuebles.filter((inm) => {
+  const todasMisViviendas = inmuebles.filter((inm) => {
     const pid = currentUser.propietarioId;
     const isOwnerByPropietarioId = !!pid && (inm.propietarioId === pid || inm.propietarioPrincipalId === pid);
     const isOwnerByInmuebleIds = !!currentUser.inmuebleIds && currentUser.inmuebleIds.includes(inm.id);
@@ -194,7 +195,8 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
     return isOwnerByPropietarioId || isOwnerByInmuebleIds || isCotitular;
   });
 
-  const misViviendasIds = misViviendas.map((v) => v.id);
+  const misViviendas = inmueblesOperativos(todasMisViviendas);
+  const misViviendasIds = todasMisViviendas.map((v) => v.id);
 
   // Contracts belonging to this owner's properties
   const misContratos = contratos.filter((c) => misViviendasIds.includes(c.inmuebleId));
@@ -210,9 +212,9 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   // N TITULARES — suscripción a las titularidades del ámbito del propietario.
   // Se resuelve por el índice de cada vivienda y se leen las claves
   // deterministas una a una (`get`): sin `list` global y sin `or()`.
-  const misViviendasRef = useRef(misViviendas);
-  misViviendasRef.current = misViviendas;
-  const claveViviendas = misViviendas.map((v) => v.id).join('|');
+  const misViviendasRef = useRef(todasMisViviendas);
+  misViviendasRef.current = todasMisViviendas;
+  const claveViviendas = todasMisViviendas.map((v) => v.id).join('|');
   useEffect(() => {
     const pid = currentUser?.propietarioId;
     if (!pid && misViviendasRef.current.length === 0) {

@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 /**
  * BLOQUE B — Sección de Tesorería (Administración):
  * Liquidaciones · Gastos · SEPA pain.008 · SEPA pain.001 · Movimientos.
@@ -646,7 +647,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
               <div className="flex justify-between items-center flex-wrap gap-2">
                 <h4 className="text-xs font-bold text-slate-800">Gastos imputables ({gastos.length}) — base/IVA/total, origen trazable</h4>
                 <div className="flex gap-2">
-                  <button onClick={() => { setGInmuebleId(inmuebles[0]?.id || ''); setShowGasto(true); }} className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Plus className="w-4 h-4" /><span>Nuevo gasto</span></button>
+                  <button onClick={() => { setGInmuebleId(inmueblesOperativos(inmuebles)[0]?.id || ''); setShowGasto(true); }} className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Plus className="w-4 h-4" /><span>Nuevo gasto</span></button>
                   {gastosCanonicosImportables.length > 0 && (
                     <button onClick={() => { setGimpId(gastosCanonicosImportables[0].id); setGimpImputa('propietario'); setShowGastoImport(true); }} className="px-3 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Upload className="w-4 h-4" /><span>Importar de gastos canónicos ({gastosCanonicosImportables.length})</span></button>
                   )}
@@ -848,7 +849,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
             </div>
             <form onSubmit={handleCrearGasto} className="p-5 space-y-3 text-xs">
               <div><label htmlFor="campo-inmueble" className="font-semibold block mb-1">Inmueble *</label><select value={gInmuebleId} onChange={(e) => setGInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-                                                                                    id="campo-inmueble">{inmuebles.map((i) => <option key={i.id} value={i.id}>{i.direccion} ({i.ciudad})</option>)}</select></div>
+                                                                                    id="campo-inmueble">{inmueblesOperativos(inmuebles).map((i) => <option key={i.id} value={i.id}>{i.direccion} ({i.ciudad})</option>)}</select></div>
               <div><label htmlFor="campo-concepto" className="font-semibold block mb-1">Concepto *</label><input value={gConcepto} onChange={(e) => setGConcepto(e.target.value)} placeholder="Ej. Reparación caldera, cuota comunidad septiembre..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
                                                                                     id="campo-concepto"/></div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

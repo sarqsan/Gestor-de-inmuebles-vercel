@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Acta, TipoActa, EstadoActa, ParticipanteActa, ElementoActaInventario, LecturaContador, EvidenciaActa, IncidenciaActa, OtpActa } from '../../types/actas';
 import { Inmueble, ContratoFormalizacion, UsuarioApp } from '../../types';
@@ -676,7 +677,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
                   <h4 className="font-bold">Paso 1 — Seleccionar inmueble/contrato + crear acta base</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div><label htmlFor="campo-inmueble" className="block font-semibold">Inmueble *</label><select value={formInmuebleId} onChange={e=>setFormInmuebleId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
-                                                                                     id="campo-inmueble">{['', ...inmuebles.map(i=>i.id)].map(id=>{ const inm=inmuebles.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${inm?.direccion || id} — ${inm?.ciudad||''}` : 'Selecciona inmueble'}</option>; })}</select></div>
+                                                                                     id="campo-inmueble">{['', ...inmueblesOperativos(inmuebles).map(i=>i.id)].map(id=>{ const inm=inmuebles.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${inm?.direccion || id} — ${inm?.ciudad||''}` : 'Selecciona inmueble'}</option>; })}</select></div>
                     <div><label htmlFor="campo-contrato-opcional" className="block font-semibold">Contrato (opcional)</label><select value={formContratoId} onChange={e=>setFormContratoId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"
                                                                                               id="campo-contrato-opcional">{['', ...contratos.filter(c=>!formInmuebleId || c.inmuebleId===formInmuebleId).map(c=>c.id)].map(id=>{ const c=contratos.find(x=>x.id===id); return <option key={id} value={id}>{id ? `${c?.candidatoNombre || id} — ${c?.inmuebleNombre || ''}` : 'Sin contrato'}</option>; })}</select></div>
                     {tipoCrear==='SALIDA' && <div className="md:col-span-2"><label htmlFor="campo-acta-entrada-vinculada-para-salida" className="block font-semibold">Acta ENTRADA vinculada * (para SALIDA)</label><select value={formActaEntradaId} onChange={e=>setFormActaEntradaId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border rounded-xl"

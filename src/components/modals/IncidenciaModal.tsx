@@ -1,3 +1,4 @@
+import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Incidencia,
@@ -49,14 +50,20 @@ export const IncidenciaModal: React.FC<IncidenciaModalProps> = ({
   isOpen,
   onClose,
   onSave,
-  inmuebles,
+  inmuebles: carteraCompleta,
   propietarios,
   contratos,
   currentUser,
   incidenciaToEdit,
   defaultInmuebleId,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesParaSeleccion(carteraCompleta, incidenciaToEdit?.inmuebleId), [carteraCompleta, incidenciaToEdit?.inmuebleId]);
+
   const [inmuebleId, setInmuebleId] = useState<string>('');
+  // Una selección antigua no puede mantener operativa una vivienda dada de baja.
+  React.useEffect(() => {
+    if (!inmuebles.some((i) => i.id === inmuebleId)) setInmuebleId(inmuebles[0]?.id || '');
+  }, [inmuebles, inmuebleId]);
   const [titulo, setTitulo] = useState<string>('');
   const [descripcion, setDescripcion] = useState<string>('');
   const [categoria, setCategoria] = useState<CategoriaIncidencia>('AGUA');

@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React from 'react';
 import { Candidato, Inmueble, SectionType } from '../../types';
 import {
@@ -32,11 +33,13 @@ interface InicioSectionProps {
 
 export const InicioSection: React.FC<InicioSectionProps> = ({
   candidatos,
-  inmuebles,
+  inmuebles: carteraCompleta,
   onSelectCandidate,
   onSelectSection,
   onOpenAddCandidateModal,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesOperativos(carteraCompleta), [carteraCompleta]);
+
   // Metrics calculation
   const totalCandidatos = candidatos.length;
   const pendientesRevisar = candidatos.filter((c) => c.estado === 'nuevo').length;

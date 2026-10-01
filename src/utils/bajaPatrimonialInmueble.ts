@@ -34,12 +34,20 @@ export function etiquetaMotivoBaja(motivo: MotivoBajaPatrimonial | undefined | n
 }
 
 /** ¿El inmueble está operativo (no dado de baja)? */
-export function inmueblesOperativos(inmuebles: readonly Inmueble[]): Inmueble[] {
+export function inmueblesOperativos<T extends Inmueble>(inmuebles: readonly T[]): T[] {
   return inmuebles.filter((inmueble) => !inmuebleDadoDeBaja(inmueble));
 }
 
+/** Selector de alta: sólo cartera operativa. Al editar un registro histórico,
+ * conserva exclusivamente su referencia previa para no romper ni reasignar datos. */
+export function inmueblesParaSeleccion(inmuebles: readonly Inmueble[], referenciaHistorica?: string): Inmueble[] {
+  const operativos = inmueblesOperativos(inmuebles);
+  const previo = inmuebles.find((i) => i.id === referenciaHistorica);
+  return previo && inmuebleDadoDeBaja(previo) ? [...operativos, previo] : operativos;
+}
+
 /** Inmuebles conservados en el histórico por estar vendidos o dados de baja. */
-export function inmueblesDadosDeBaja(inmuebles: readonly Inmueble[]): Inmueble[] {
+export function inmueblesDadosDeBaja<T extends Inmueble>(inmuebles: readonly T[]): T[] {
   return inmuebles.filter((inmueble) => inmuebleDadoDeBaja(inmueble));
 }
 

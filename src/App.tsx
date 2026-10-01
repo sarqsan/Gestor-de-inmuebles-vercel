@@ -151,8 +151,9 @@ import { aplicarBajaAlEstado, etiquetaMotivoBaja, inmueblesOperativos } from './
 import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
-import type { GestionCartera } from './lib/gestionesCartera';
 import { detectarCambioTitularidad } from './lib/titularidadInmueble';
+import { asignarTitularesAlta, type TitularesAltaInmueble } from './lib/altaInmuebleTitulares';
+import { guardarTitularidad } from './lib/titularidadesFirestore';
 import { resolverTokensPublicos } from './lib/tokensPublicos';
 import {
   persistirMejorEsfuerzo,
@@ -327,6 +328,7 @@ import { PuertaEstadoDatos } from './components/estado-datos/EstadoDatosPantalla
 import { origenesActivosDePerfil, reportarResultadoGuardado } from './estadoDatos/canalIncidencias';
 import type { OrigenDatos } from './estadoDatos/canalIncidencias';
 import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
+import { useGestionesCarteraGestor } from './estadoDatos/useGestionesCarteraGestor';
 import { ejecutarOperacion } from './feedback/operaciones';
 import { incidenciasNoCerradas } from './utils/operacionesEngine';
 
@@ -546,6 +548,8 @@ export default function App() {
     marcarListo,
     iniciarLecturas,
     reintentar: reintentarLecturas,
+    reintentarCapacidad,
+    intentoDeCapacidad,
     estadoDePantalla,
     incidencias: incidenciasDatos,
     descartarIncidencia,
@@ -563,7 +567,6 @@ export default function App() {
     [marcarListo]
   );
   const [authLoading, setAuthLoading] = useState<boolean>(true);
-  const [gestionesCarteraGestor, setGestionesCarteraGestor] = useState<GestionCartera[]>([]);
 
   // 1. Suscripción a Firebase Authentication como única fuente de verdad
   useEffect(() => {
@@ -609,13 +612,15 @@ export default function App() {
   // ROADMAP-04: cargar solo las relaciones donde esta persona es gestora. La
   // lista resultante acota consultas; las Firestore Rules siguen siendo la
   // autoridad y vuelven a comprobar cada relación y cada inmueble.
-  useEffect(() => {
-    if (!currentUser || !['PROPIETARIO', 'PROFESIONAL'].includes(currentUser.tipoPerfil)) {
-      setGestionesCarteraGestor([]);
-      return;
-    }
-    return subscribeGestionesCarteraGestor(setGestionesCarteraGestor, currentUser.id);
-  }, [currentUser?.id, currentUser?.tipoPerfil]);
+  //
+  // CAPACIDAD ADICIONAL: Carteras no es una lectura primaria del Portal. Si se
+  // deniega, se registra el diagnóstico (`[diag:carteras]`, alcance CAPACIDAD) y
+  // la aplicación sigue sin carteras; el resto de datos no se ve afectado. Su
+  // reintento es propio (`intentoDeCapacidad`) y lo dispara el botón de su aviso
+  // específico vía `reintentarCapacidad('gestiones_cartera')`: no re-suscribe las
+  // lecturas primarias ni depende del «Reintentar» global.
+  const intentoCarteras = intentoDeCapacidad('gestiones_cartera');
+  const gestionesCarteraGestor = useGestionesCarteraGestor(currentUser, intentoCarteras, subscribeGestionesCarteraGestor);
 
   const inmuebleIdsParcialesGestionados = useMemo(
     () => currentUser ? inmueblesParcialesActivosDe(gestionesCarteraGestor, currentUser.id) : [],
@@ -2040,7 +2045,7 @@ export default function App() {
   };
 
   // Add inmueble handler
-  const handleAddInmueble = (newInmueble: Inmueble) => {
+  const handleAddInmueble = (newInmueble: Inmueble, titulares?: TitularesAltaInmueble) => {
     setInmuebles((prev) => {
       const next = [newInmueble, ...prev];
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
@@ -2048,7 +2053,23 @@ export default function App() {
     });
     // UX-2 §6: el resultado de la persistencia no se descarta: si no se guardó,
     // se avisa (el estado optimista se conserva; la reversión es UX-3).
-    void saveInmuebleFirestore(newInmueble).then((ok) => reportarResultadoGuardado('inmuebles', ok));
+    void saveInmuebleFirestore(newInmueble).then(async (ok) => {
+      reportarResultadoGuardado('inmuebles', ok);
+      // N-TITULARES: el alta sólo asigna titulares que YA EXISTEN. Las titularidades
+      // (`titularidades/{inmuebleId}__{propietarioId}` + índice `titularesIds`) se
+      // escriben DESPUÉS de que el inmueble esté guardado (las Rules comprueban el
+      // ámbito sobre el inmueble persistido) y en lote atómico por titular, de modo
+      // que el índice nunca apunta a una titularidad inexistente. Un fallo se
+      // informa desde la capa de datos y no se presenta como asignado.
+      if (!ok || !titulares || titulares.titularesIds.length === 0) return;
+      await asignarTitularesAlta({
+        inmuebleId: newInmueble.id,
+        titularesIds: titulares.titularesIds,
+        nombres: Object.fromEntries(propietarios.map((p) => [p.id, p.nombre])),
+        actor: { id: currentUser?.id, nombre: currentUser?.nombre },
+        guardar: guardarTitularidad,
+      });
+    });
   };
 
   // Update inmueble handler
@@ -3888,10 +3909,13 @@ export default function App() {
           accessibleSections={seccionesAccesibles}
         />
 
-        {/* BLOQUE 10 · UX-2: fallos de lectura/guardado antes invisibles (sólo consola). */}
+        {/* BLOQUE 10 · UX-2: fallos de lectura/guardado antes invisibles (sólo consola).
+            Las capacidades adicionales (Carteras) se avisan aparte, con su propio
+            reintento, y nunca dentro del aviso global de carga de datos. */}
         <AvisoIncidenciasDatos
           incidencias={incidenciasDatos}
           onReintentar={reintentarLecturas}
+          onReintentarCapacidad={reintentarCapacidad}
           onDescartar={descartarIncidencia}
           onDescartarTodas={descartarIncidencias}
         />

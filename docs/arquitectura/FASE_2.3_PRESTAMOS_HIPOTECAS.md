@@ -73,7 +73,8 @@ cuota constante) y lo traslada a los recibos.
 - `subscribePrestamos(cb, scope)` replica el patrón acotado; el `App` refuerza
   el filtrado y garantiza `propietarioId`.
 - Despliegue de reglas (no lo hace Vercel):
-  `firebase deploy --only firestore:rules --project startup-sanctuary-sln7n`.
+  `firebase deploy --only firestore:rules --project gestor-inmuebles-produccion`
+  (o sin `--project`: el destino por defecto lo fija el `.firebaserc` del repositorio).
 
 ## 6. Verificación
 

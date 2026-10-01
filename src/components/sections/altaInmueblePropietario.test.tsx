@@ -80,12 +80,9 @@ function selectorTitular(): HTMLSelectElement {
   return el as HTMLSelectElement;
 }
 
-function selectorSegundo(): HTMLSelectElement {
-  const el = screen.getAllByRole('combobox').find((node) =>
-    Array.from((node as HTMLSelectElement).options).some((opt) => opt.textContent?.includes('sin vincular')),
-  );
-  if (!el) throw new Error('No está el selector del segundo propietario');
-  return el as HTMLSelectElement;
+/** Casilla de un titular EXISTENTE para asignarlo como titular adicional del inmueble. */
+function casillaTitular(nombre: string): HTMLInputElement {
+  return screen.getByRole('checkbox', { name: new RegExp(nombre) }) as HTMLInputElement;
 }
 
 function irAGeneral() {
@@ -135,19 +132,19 @@ describe('alta de inmueble desde propietario', () => {
     expect(creado.ibanCobro).toBe('ES00P1');
   });
 
-  it('B. el selector sigue editable y el segundo titular no se toca al cambiar el principal', () => {
+  it('B. el selector sigue editable y los titulares adicionales elegidos no se tocan al cambiar el principal', () => {
     const onAdd = vi.fn();
     renderAlta({ propietarios: [p1, p2, p3], onAdd, contexto: 'P1' });
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Inmueble con Segundo Propietario / Co-Arrendador' }));
-    const segundo = selectorSegundo();
+    // N-TITULARES: el alta asigna titulares EXISTENTES (ya no hay «crear segundo propietario»).
+    expect(screen.queryByRole('checkbox', { name: 'Inmueble con Segundo Propietario / Co-Arrendador' })).toBeNull();
+    fireEvent.click(casillaTitular('Nombre P2'));
     const principal = selectorTitular();
-    fireEvent.change(segundo, { target: { value: 'P2' } });
     fireEvent.change(principal, { target: { value: 'P3' } });
 
     expect(principal.value).toBe('P3');
     expect((screen.getByPlaceholderText('Ej. Juan Pérez García o Arrendamientos SL') as HTMLInputElement).value).toBe('Nombre P3');
-    expect(segundo.value).toBe('P2');
+    expect(casillaTitular('Nombre P2').checked).toBe(true);
 
     irAGeneral();
     rellenarMinimo();
@@ -159,10 +156,13 @@ describe('alta de inmueble desde propietario', () => {
     expect(creado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('P3');
     expect(creado.datosFiscales?.propietarioPrincipal.nombre).toBe('Nombre P3');
     expect(creado.cuentaBancariaCobroId).toBe('cta-P3');
+    // Campos heredados derivados del titular EXISTENTE P2 (no tecleados en el alta).
     expect(creado.propietarioSecundarioId).toBe('P2');
     expect(creado.datosFiscales?.segundoPropietario?.propietarioId).toBe('P2');
     expect(creado.datosFiscales?.segundoPropietario?.nombre).toBe('Nombre P2');
     expect(creado.datosFiscales?.tieneSegundoPropietario).toBe(true);
+    // El host recibe los titulares elegidos (principal primero) para persistir sus titularidades.
+    expect(onAdd.mock.calls[0][1]).toEqual({ titularesIds: ['P3', 'P2'] });
   });
 
   it('C. el alta general sigue vacía y permite guardar sin propietario', () => {

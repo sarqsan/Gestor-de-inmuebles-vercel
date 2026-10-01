@@ -26,6 +26,12 @@ import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
 import { getInmuebleCoverUrl } from '../../utils/imageUtils';
 import { validarCoherenciaTitularidad } from '../../lib/titularidadInmueble';
+import {
+  MENSAJE_TITULAR_INEXISTENTE,
+  fiscalDesdePropietario,
+  resolverTitularesAlta,
+  type TitularesAltaInmueble,
+} from '../../lib/altaInmuebleTitulares';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
 import { avisoCicloPatrimonial, claseCicloPatrimonial } from '../../utils/fichaInmueblePresentacion';
 import { inmuebleDadoDeBaja, type SolicitudBaja } from '../../utils/cicloPatrimonialEngine';
@@ -122,7 +128,13 @@ interface InmueblesSectionProps {
    * Sin ella no se ofrece la baja: un usuario de sólo lectura nunca la ve.
    */
   puedeDarDeBaja?: (inmueble: Inmueble) => boolean;
-  onAddInmueble?: (inmueble: Inmueble) => void;
+  /**
+   * Alta de inmueble. El segundo argumento lleva los titulares EXISTENTES elegidos
+   * (principal primero): el host persiste el inmueble y, DESPUÉS, sus titularidades
+   * (`titularidades/{inmuebleId}__{propietarioId}` + índice `titularesIds`). El alta
+   * no crea propietarios.
+   */
+  onAddInmueble?: (inmueble: Inmueble, titulares?: TitularesAltaInmueble) => void;
   onOpenLinkModal?: (inmueble: Inmueble) => void;
   onOpenConfigurarAgenda?: (inmuebleId?: string) => void;
   onUpdateInmueble?: (inmueble: Inmueble) => void;
@@ -226,7 +238,6 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   // New Property Fiscal & Owner Linking Fields
   const [newSelectedPropId, setNewSelectedPropId] = useState<string>('');
   const [newSelectedCuentaId, setNewSelectedCuentaId] = useState<string>('');
-  const [newSelectedProp2Id, setNewSelectedProp2Id] = useState<string>('');
   const [newReferenciaCatastral, setNewReferenciaCatastral] = useState('');
   const [newCodigoPostal, setNewCodigoPostal] = useState('');
   const [newIbanCobro, setNewIbanCobro] = useState('');
@@ -238,13 +249,10 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [newPropTelefono, setNewPropTelefono] = useState('');
   const [newPropEmail, setNewPropEmail] = useState('');
   const [newPropEsPersonaJuridica, setNewPropEsPersonaJuridica] = useState(false);
-  const [newTieneSegundoProp, setNewTieneSegundoProp] = useState(false);
-  const [newProp2Nombre, setNewProp2Nombre] = useState('');
-  const [newProp2Nif, setNewProp2Nif] = useState('');
-  const [newProp2Direccion, setNewProp2Direccion] = useState('');
-  const [newProp2Telefono, setNewProp2Telefono] = useState('');
-  const [newProp2Email, setNewProp2Email] = useState('');
-  const [newProp2EsPersonaJuridica, setNewProp2EsPersonaJuridica] = useState(false);
+  // N-TITULARES: otros titulares del inmueble, SIEMPRE existentes (se eligen de la
+  // lista de propietarios registrados; el alta no crea personas). El principal es
+  // `newSelectedPropId`; el resto, en el orden en que se eligieron.
+  const [newTitularesAdicionalesIds, setNewTitularesAdicionalesIds] = useState<string[]>([]);
 
   // Modal State for Edit Property
   const [inmuebleToEdit, setInmuebleToEdit] = useState<Inmueble | null>(null);
@@ -480,6 +488,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
   const abrirAltaGeneral = () => {
     setNewTab('general');
+    // La elección de titulares adicionales nunca se arrastra de un alta a la siguiente.
+    setNewTitularesAdicionalesIds([]);
     if (altaAplicoContexto.current) {
       setNewSelectedPropId('');
       setNewSelectedCuentaId('');
@@ -507,6 +517,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
   const handleSelectNewPropietario = (propId: string) => {
     setNewSelectedPropId(propId);
+    setNewTitularesAdicionalesIds((previos) => previos.filter((id) => id !== propId));
     if (!propId) {
       setNewSelectedCuentaId('');
       return;
@@ -537,6 +548,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     if (!propietarioContextoAltaId) return;
     if (!propietarios.some((p) => p.id === propietarioContextoAltaId)) return;
     setNewTab('fiscal');
+    setNewTitularesAdicionalesIds([]);
     handleSelectNewPropietario(propietarioContextoAltaId);
     altaAplicoContexto.current = true;
     setShowAddModal(true);
@@ -555,22 +567,11 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     }
   };
 
-  const handleSelectNewProp2 = (propId: string) => {
-    setNewSelectedProp2Id(propId);
-    if (!propId) return;
-    const prop = propietarios.find((p) => p.id === propId);
-    if (prop) {
-      setNewProp2Nombre(prop.nombre);
-      setNewProp2Nif(prop.nifCif);
-      setNewProp2Direccion(`${prop.direccion}${prop.ciudad ? `, ${prop.ciudad}` : ''}`);
-      setNewProp2Telefono(prop.telefono || '');
-      setNewProp2Email(prop.email || '');
-      setNewProp2EsPersonaJuridica(
-        prop.tipo === 'sociedad_limitada' ||
-        prop.tipo === 'sociedad_anonima' ||
-        prop.tipo === 'comunidad_bienes'
-      );
-    }
+  /** Marca/desmarca a un titular EXISTENTE como titular adicional del inmueble. */
+  const toggleTitularAdicional = (propId: string) => {
+    setNewTitularesAdicionalesIds((previos) =>
+      previos.includes(propId) ? previos.filter((id) => id !== propId) : [...previos, propId],
+    );
   };
 
   // Reglas reales del formulario de alta de inmueble (UX-4 §8/§11).
@@ -616,18 +617,27 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       propietarioId: newSelectedPropId || undefined,
     };
 
-    let segundoProp: PropietarioFiscal | undefined = undefined;
-    if (newTieneSegundoProp && newProp2Nombre.trim()) {
-      segundoProp = {
-        nombre: newProp2Nombre.trim(),
-        nifDni: newProp2Nif.trim() || '',
-        direccion: newProp2Direccion.trim() || newPropDireccion.trim() || newDireccion,
-        telefono: newProp2Telefono.trim() || undefined,
-        email: newProp2Email.trim() || undefined,
-        esPersonaJuridica: newProp2EsPersonaJuridica,
-        propietarioId: newSelectedProp2Id || undefined,
-      };
+    // N-TITULARES: el alta sólo asigna titulares que YA EXISTEN. No se crea ningún
+    // propietario aquí: si falta, se crea antes desde Propietarios/Titulares.
+    if (newTitularesAdicionalesIds.length > 0 && !newSelectedPropId) {
+      setErroresTitularidad(['Selecciona primero el titular principal antes de añadir otros titulares.']);
+      setNewTab('fiscal');
+      return;
     }
+    const titulares = resolverTitularesAlta({
+      principalId: newSelectedPropId,
+      adicionalesIds: newTitularesAdicionalesIds,
+      existentes: propietarios,
+    });
+    const idsAdicionales = (titulares?.titularesIds ?? []).slice(1);
+    // Campos heredados (modelo binario que aún leen contratos e informes): el
+    // «segundo» es el primer titular adicional, derivado de la ENTIDAD existente.
+    const primerAdicional = idsAdicionales.length
+      ? propietarios.find((p) => p.id === idsAdicionales[0])
+      : undefined;
+    const segundoProp: PropietarioFiscal | undefined = primerAdicional
+      ? fiscalDesdePropietario(primerAdicional)
+      : undefined;
 
     const datosFiscales: DatosFiscalesInmueble = {
       referenciaCatastral: newReferenciaCatastral.trim() || undefined,
@@ -636,7 +646,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       certificadoEnergetico: newCertificadoEnergetico.trim() || undefined,
       numeroRegistroPropiedad: newNumeroRegistroPropiedad.trim() || undefined,
       propietarioPrincipal: propPrincipal,
-      tieneSegundoPropietario: newTieneSegundoProp,
+      tieneSegundoPropietario: Boolean(segundoProp),
       segundoPropietario: segundoProp,
     };
 
@@ -660,7 +670,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       codigoPostal: newCodigoPostal.trim() || undefined,
       propietarioId: newSelectedPropId || undefined,
       propietarioPrincipalId: newSelectedPropId || undefined,
-      propietarioSecundarioId: newTieneSegundoProp && newSelectedProp2Id ? newSelectedProp2Id : undefined,
+      propietarioSecundarioId: primerAdicional?.id,
       cuentaBancariaCobroId: newSelectedCuentaId && newSelectedCuentaId !== 'custom' ? newSelectedCuentaId : undefined,
       ibanCobro: newIbanCobro.trim() || undefined,
       datosFiscales,
@@ -700,7 +710,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     }
 
     void ejecutarOperacion({
-      accion: () => onAddInmueble(created),
+      accion: () => onAddInmueble(created, titulares),
       mensajeExito: 'Inmueble guardado correctamente.',
       mensajeError: 'No se ha podido guardar el inmueble.',
       origenesDatos: ['inmuebles'],
@@ -716,7 +726,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setNewImagenPreview(null);
     setNewSelectedPropId('');
     setNewSelectedCuentaId('');
-    setNewSelectedProp2Id('');
+    setNewTitularesAdicionalesIds([]);
     setNewReferenciaCatastral('');
     setNewCodigoPostal('');
     setNewIbanCobro('');
@@ -728,13 +738,6 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setNewPropTelefono('');
     setNewPropEmail('');
     setNewPropEsPersonaJuridica(false);
-    setNewTieneSegundoProp(false);
-    setNewProp2Nombre('');
-    setNewProp2Nif('');
-    setNewProp2Direccion('');
-    setNewProp2Telefono('');
-    setNewProp2Email('');
-    setNewProp2EsPersonaJuridica(false);
   };
 
   const handleSelectEditPropietario = (propId: string) => {
@@ -3426,6 +3429,63 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         </div>
                       );
                     })()}
+
+                    {/* N-TITULARES — otros titulares del inmueble: SÓLO titulares que ya existen.
+                        El alta no crea personas: si falta alguien, se crea antes y se asigna aquí. */}
+                    <div className="pt-2 border-t border-blue-200/70 space-y-2" data-testid="alta-titulares-adicionales">
+                      <div className="text-xs font-bold text-blue-950 uppercase tracking-wider">
+                        Otros titulares del inmueble (opcional)
+                      </div>
+                      {(() => {
+                        const candidatos = propietarios.filter((p) => p.id !== newSelectedPropId);
+                        if (candidatos.length === 0) {
+                          return (
+                            <p className="text-[11px] text-blue-800/80">
+                              No hay otros titulares registrados que puedas asignar a este inmueble.
+                            </p>
+                          );
+                        }
+                        return (
+                          <>
+                            {!newSelectedPropId && (
+                              <p className="text-[11px] text-blue-800/80">
+                                Selecciona primero el titular principal para poder añadir otros titulares.
+                              </p>
+                            )}
+                            <ul className="space-y-1 max-h-40 overflow-y-auto pr-1" aria-label="Otros titulares registrados">
+                              {candidatos.map((p) => (
+                                <li key={p.id}>
+                                  <label className="flex items-center gap-2 text-xs text-slate-800 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      disabled={!newSelectedPropId}
+                                      checked={newTitularesAdicionalesIds.includes(p.id)}
+                                      onChange={() => toggleTitularAdicional(p.id)}
+                                      className="w-4 h-4 rounded text-indigo-600"
+                                    />
+                                    <span>{p.nombre} ({p.nifCif})</span>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        );
+                      })()}
+                      {newSelectedPropId && newTitularesAdicionalesIds.length > 0 && (() => {
+                        const nombreDe = (id: string) => propietarios.find((p) => p.id === id)?.nombre || id;
+                        const [secundario, ...otros] = newTitularesAdicionalesIds;
+                        return (
+                          <p className="text-[11px] text-slate-700" data-testid="alta-resumen-titulares">
+                            <strong>Titulares:</strong> principal {nombreDe(newSelectedPropId)} · secundario {nombreDe(secundario)}
+                            {otros.length > 0 ? ` · otros: ${otros.map(nombreDe).join(', ')}` : ''}
+                          </p>
+                        );
+                      })()}
+                      <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-[11px] text-amber-900" role="note">
+                        <strong className="block">¿No encuentras al titular?</strong>
+                        <p data-testid="aviso-titular-inexistente">{MENSAJE_TITULAR_INEXISTENTE}</p>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Property Data */}
@@ -3599,107 +3659,6 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                            id="campo-email-3"/>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Segundo Propietario Toggle & Form */}
-                  <div className="pt-3 border-t border-slate-200 space-y-3">
-                    <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={newTieneSegundoProp}
-                        onChange={(e) => setNewTieneSegundoProp(e.target.checked)}
-                        className="w-4 h-4 rounded text-indigo-600"
-                      />
-                      <span>Inmueble con Segundo Propietario / Co-Arrendador</span>
-                    </label>
-
-                    {newTieneSegundoProp && (
-                      <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3 animate-in fade-in">
-                        {/* Selector for Owner 2 */}
-                        {propietarios.length > 0 && (
-                          <div>
-                            <label className="block font-semibold text-slate-700 text-xs mb-1">
-                              Seleccionar 2º Propietario Registrado
-                            </label>
-                            <select
-                              value={newSelectedProp2Id}
-                              onChange={(e) => handleSelectNewProp2(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500"
-                            >
-                              <option value="">-- Introducir datos manualmente o sin vincular --</option>
-                              {propietarios
-                                .filter((p) => p.id !== newSelectedPropId)
-                                .map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.nombre} ({p.nifCif})
-                                  </option>
-                                ))}
-                            </select>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label htmlFor="campo-nombre-completo-2o-propietario-2" className="block font-semibold text-slate-700 mb-1">Nombre Completo 2º Propietario</label>
-                            <input
-                              type="text"
-                              placeholder="Ej. María López"
-                              value={newProp2Nombre}
-                              onChange={(e) => setNewProp2Nombre(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-nombre-completo-2o-propietario-2"/>
-                          </div>
-                          <div>
-                            <label htmlFor="campo-nif-dni-2o-propietario-2" className="block font-semibold text-slate-700 mb-1">NIF / DNI 2º Propietario</label>
-                            <input
-                              type="text"
-                              placeholder="87654321A"
-                              value={newProp2Nif}
-                              onChange={(e) => setNewProp2Nif(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono text-xs"
-
-                               id="campo-nif-dni-2o-propietario-2"/>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div>
-                            <label htmlFor="campo-direccion-2" className="block font-semibold text-slate-700 mb-1">Dirección</label>
-                            <input
-                              type="text"
-                              placeholder="Dirección completa"
-                              value={newProp2Direccion}
-                              onChange={(e) => setNewProp2Direccion(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-direccion-2"/>
-                          </div>
-                          <div>
-                            <label htmlFor="campo-telefono-4" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
-                            <input
-                              type="tel"
-                              placeholder="611223344"
-                              value={newProp2Telefono}
-                              onChange={(e) => setNewProp2Telefono(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-telefono-4"/>
-                          </div>
-                          <div>
-                            <label htmlFor="campo-email-4" className="block font-semibold text-slate-700 mb-1">Email</label>
-                            <input
-                              type="email"
-                              placeholder="co-propietario@correo.com"
-                              value={newProp2Email}
-                              onChange={(e) => setNewProp2Email(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-email-4"/>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}

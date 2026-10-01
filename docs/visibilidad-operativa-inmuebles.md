@@ -20,6 +20,8 @@ Base verificada con `git fetch origin`: `origin/main` = `6d7e56ba8203a9fb3a0436b
 - Portal propietario separa tarjetas operativas de referencias completas de contratos y suscripción N-TITULARES.
 - InmueblesSection conserva el array completo para histórico, pero el listado normal y su contador derivan de la misma proyección. Histórico muestra sólo históricos. Hay mensaje de cartera vacía y aviso con acceso explícito al histórico ante una ficha abierta que recibe una baja.
 - Administración: indicadores de cartera operativa y filtro explícito de histórico en inspección global. Configuración y Operaciones: contadores operativos; los datos exportables y los registros históricos no se filtran.
+- Administración · Propietarios: «Inmuebles en Gestión» (tabla y ficha) cuenta `carteraOperativa`, igual que «Ver Inmuebles» (2026-10-01; antes sumaba las bajas). Test: `tests/admin-propietarios-contador-baja.test.tsx`.
+- Portal propietario: cabecera, pestaña, título, lista y perfil salen de `inmueblesOperativos`; cubierto con render real en `tests/portal-contador-viviendas-baja.test.tsx` (2 activas + 1 histórica → 2; 0 + 1 → 0; `SIN_EXPLOTACION` activa → 1).
 - Selectores de alta: gastos, gastos recurrentes, préstamos, pólizas, garantías, mantenimiento, incidencias, trabajos, reformas, recomercialización, suministros, facturación, tesorería, actas y asignación a profesionales usan la utilidad común.
 - `inmueblesParaSeleccion` permite conservar la referencia histórica de un registro **ya existente** al editarlo. No la ofrece en un alta normal ni reasigna el registro histórico. Los modales invalidan selecciones antiguas que dejan de pertenecer al conjunto seleccionable.
 

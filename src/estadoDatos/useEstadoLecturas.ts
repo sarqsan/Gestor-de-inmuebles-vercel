@@ -13,6 +13,10 @@
  * - `reintentar()` limpia el error, vuelve a `CARGANDO` y devuelve un contador que
  *   el host usa como dependencia para **volver a leer de verdad** (nuevas
  *   suscripciones; nunca recarga de página).
+ * - `reintentarCapacidad(origen)` es el reintento dirigido de una CAPACIDAD
+ *   ADICIONAL (hoy `gestiones_cartera` = carteras/delegaciones): limpia SÓLO su
+ *   aviso y devuelve su propio contador, sin tocar el estado de las lecturas
+ *   primarias ni re-suscribirlas.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -46,6 +50,14 @@ export interface EstadoLecturas {
   iniciarLecturas: () => void;
   /** Reintento real: limpia errores, vuelve a CARGANDO y fuerza una nueva lectura. */
   reintentar: () => void;
+  /**
+   * Reintento DIRIGIDO de una capacidad adicional: limpia SÓLO su aviso y devuelve
+   * un contador propio (`intentoDeCapacidad`) para reabrir SÓLO su lectura. No
+   * reinicia el estado de las lecturas primarias ni las re-suscribe.
+   */
+  reintentarCapacidad: (origen: OrigenDatos) => void;
+  /** Contador de reintentos de una capacidad adicional (dependencia de su efecto). */
+  intentoDeCapacidad: (origen: OrigenDatos) => number;
   readonly incidencias: readonly IncidenciaDatos[];
   descartarIncidencia: (id: string) => void;
   descartarIncidencias: () => void;
@@ -56,6 +68,9 @@ export function useEstadoLecturas(origenesActivos: readonly OrigenDatos[]): Esta
 
   const [estados, setEstados] = useState<MapaEstadosLectura>(() => sembrarEstados(origenesActivos));
   const [intento, setIntento] = useState(0);
+  // Reintento propio de cada capacidad adicional (no comparte contador con los datos
+  // primarios: reintentar Carteras no re-suscribe todo el Portal, y al revés).
+  const [intentosCapacidad, setIntentosCapacidad] = useState<Record<string, number>>({});
   const [incidencias, setIncidencias] = useState<readonly IncidenciaDatos[]>(() => incidenciasDatos());
 
   // Incidencias ya aplicadas al mapa de estados (evita reprocesar en cada notificación).
@@ -75,6 +90,9 @@ export function useEstadoLecturas(origenesActivos: readonly OrigenDatos[]): Esta
         setIncidencias(actuales);
         for (const incidencia of actuales) {
           if (incidencia.tipo !== 'LECTURA') continue;
+          // Una capacidad adicional nunca cambia el estado de pantalla: su fallo se
+          // avisa aparte y no puede presentarse como error de carga de los datos.
+          if (incidencia.alcance === 'CAPACIDAD') continue;
           if (aplicadasRef.current.has(incidencia.id)) continue;
           aplicadasRef.current.add(incidencia.id);
           setEstados((prev) => {
@@ -126,6 +144,18 @@ export function useEstadoLecturas(origenesActivos: readonly OrigenDatos[]): Esta
   const descartarIncidencia = useCallback((id: string) => descartarIncidenciaCanal(id), []);
   const descartarIncidencias = useCallback(() => descartarIncidenciasCanal(), []);
 
+  const intentoDeCapacidad = useCallback(
+    (origen: OrigenDatos): number => intentosCapacidad[origen] ?? 0,
+    [intentosCapacidad]
+  );
+
+  const reintentarCapacidad = useCallback((origen: OrigenDatos) => {
+    // Su aviso anterior se sustituye por el resultado de este intento; los avisos
+    // de los datos primarios y de las demás capacidades no se tocan.
+    limpiarIncidenciasDe(origen, 'LECTURA');
+    setIntentosCapacidad((prev) => ({ ...prev, [origen]: (prev[origen] ?? 0) + 1 }));
+  }, []);
+
   return {
     intento,
     estadoDe,
@@ -133,6 +163,8 @@ export function useEstadoLecturas(origenesActivos: readonly OrigenDatos[]): Esta
     marcarListo,
     iniciarLecturas,
     reintentar,
+    reintentarCapacidad,
+    intentoDeCapacidad,
     incidencias,
     descartarIncidencia,
     descartarIncidencias,

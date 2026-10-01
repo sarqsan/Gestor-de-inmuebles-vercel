@@ -12,7 +12,7 @@
  *  · NO SE INVENTAN PORCENTAJES: `porcentajeTitularidad === null` es PENDIENTE.
  *    No se asume 50/50, ni 33/33/34, ni ningún reparto por defecto.
  */
-import type { EstadoTitularidad, MotivoCierreTitularidad, Titularidad } from '../types';
+import type { EstadoTitularidad, Inmueble, MotivoCierreTitularidad, Titularidad } from '../types';
 
 /** Separador de la clave determinista. */
 export const SEPARADOR_CLAVE = '__';
@@ -20,6 +20,42 @@ export const SEPARADOR_CLAVE = '__';
 /** Construye el id determinista de la titularidad. */
 export function idTitularidad(inmuebleId: string, propietarioId: string): string {
   return `${inmuebleId}${SEPARADOR_CLAVE}${propietarioId}`;
+}
+
+/** Clave determinista de una titularidad concreta (con sus dos componentes). */
+export interface ClaveTitularidad {
+  inmuebleId: string;
+  propietarioId: string;
+  clave: string;
+}
+
+/**
+ * Claves deterministas de las titularidades que el ÍNDICE `titularesIds` de cada
+ * inmueble DECLARA. Es la única fuente legítima de claves a leer:
+ *
+ *  · El índice se escribe en el MISMO lote atómico que la titularidad
+ *    (`guardarTitularidad`), así que cada id indexado tiene su documento.
+ *  · NUNCA se deducen claves de `propietarioId`, `propietarioPrincipalId` ni del
+ *    usuario actual: sin índice (inmuebles anteriores a N-TITULARES, o altas que
+ *    aún no han creado titularidades) ese documento NO EXISTE y su `get` se
+ *    deniega por regla (`resource` nulo ⇒ la regla falla). Era la causa de los
+ *    avisos «Lectura · titularidades: No tienes permisos…».
+ *
+ * Orden estable por clave: el mismo ámbito produce siempre la misma lista.
+ */
+export function clavesTitularidadesIndexadas(
+  inmuebles: readonly Pick<Inmueble, 'id' | 'titularesIds'>[],
+): ClaveTitularidad[] {
+  const salida = new Map<string, ClaveTitularidad>();
+  for (const inmueble of inmuebles || []) {
+    if (!inmueble?.id || !Array.isArray(inmueble.titularesIds)) continue;
+    for (const propietarioId of inmueble.titularesIds) {
+      if (typeof propietarioId !== 'string' || propietarioId.length === 0) continue;
+      const clave = idTitularidad(inmueble.id, propietarioId);
+      if (!salida.has(clave)) salida.set(clave, { inmuebleId: inmueble.id, propietarioId, clave });
+    }
+  }
+  return Array.from(salida.values()).sort((a, b) => a.clave.localeCompare(b.clave));
 }
 
 /** ¿El id tiene la forma `{inmuebleId}__{propietarioId}`? */

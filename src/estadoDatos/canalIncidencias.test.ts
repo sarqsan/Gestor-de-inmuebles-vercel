@@ -15,14 +15,17 @@ import {
   codigoDeError,
   descartarIncidencias,
   descartarIncidencia,
+  esCapacidadAdicional,
   estadoDeLectura,
   etiquetaOrigen,
   incidenciasDatos,
   incidenciasPendientes,
   limpiarIncidenciasDe,
   mensajeLegible,
+  ORIGENES_CAPACIDAD_ADICIONAL,
   origenesActivosDePerfil,
   origenesDePantalla,
+  partirIncidenciasPorAlcance,
   reiniciarCanalIncidencias,
   reportarErrorGuardado,
   reportarErrorLectura,
@@ -125,6 +128,56 @@ describe('UX-2 · C2 — fallos de lectura: nunca se convierten en []', () => {
     const lectura = incidenciasPendientes('LECTURA');
     expect(lectura).toHaveLength(1);
     expect(lectura[0].codigo).toBe('permission-denied');
+  });
+});
+
+describe('2026-10-01 · CAPACIDAD ADICIONAL — Carteras se registra sin ser un error de datos', () => {
+  it('la lista de capacidades adicionales es explícita y no incluye datos primarios', () => {
+    expect([...ORIGENES_CAPACIDAD_ADICIONAL]).toEqual(['gestiones_cartera']);
+    expect(esCapacidadAdicional('gestiones_cartera')).toBe(true);
+    expect(esCapacidadAdicional('inmuebles')).toBe(false);
+    expect(esCapacidadAdicional('propietarios')).toBe(false);
+  });
+
+  it('un fallo de Carteras se registra con alcance CAPACIDAD (el fallo NO se oculta)', () => {
+    reportarErrorLectura('gestiones_cartera', { code: 'permission-denied' }, 'Firestore gestiones_cartera snapshot error:');
+
+    const incidencia = ultimaIncidenciaDe('gestiones_cartera', 'LECTURA');
+    expect(incidencia).toMatchObject({
+      origen: 'gestiones_cartera',
+      tipo: 'LECTURA',
+      alcance: 'CAPACIDAD',
+      codigo: 'permission-denied',
+      etiqueta: 'Carteras',
+    });
+  });
+
+  it('un fallo de una lectura primaria se registra con alcance DATOS', () => {
+    reportarErrorLectura('inmuebles', { code: 'permission-denied' });
+    expect(ultimaIncidenciaDe('inmuebles', 'LECTURA')?.alcance).toBe('DATOS');
+  });
+
+  it('el alcance puede declararse explícitamente (una capacidad futura no depende de la lista)', () => {
+    reportarErrorLectura('capacidad_futura', { code: 'unavailable' }, undefined, { alcance: 'CAPACIDAD' });
+    expect(ultimaIncidenciaDe('capacidad_futura', 'LECTURA')?.alcance).toBe('CAPACIDAD');
+  });
+
+  it('partirIncidenciasPorAlcance separa datos y capacidades (la interfaz no las mezcla)', () => {
+    reportarErrorLectura('inmuebles', { code: 'unavailable' });
+    reportarErrorLectura('gestiones_cartera', { code: 'permission-denied' });
+
+    const { datos, capacidades } = partirIncidenciasPorAlcance(incidenciasDatos());
+    expect(datos.map((i) => i.origen)).toEqual(['inmuebles']);
+    expect(capacidades.map((i) => i.origen)).toEqual(['gestiones_cartera']);
+  });
+
+  it('la capacidad no entra en el estado de ninguna pantalla ni en las lecturas activas', () => {
+    expect(origenesActivosDePerfil('PROPIETARIO', 'pid-1')).not.toContain('gestiones_cartera');
+    expect(origenesActivosDePerfil('PROFESIONAL', null)).not.toContain('gestiones_cartera');
+    for (const pantalla of ['propietarios', 'inmuebles', 'dashboard', 'tesoreria'] as const) {
+      expect(origenesDePantalla(pantalla)).not.toContain('gestiones_cartera');
+    }
+    expect(calcularEstadoDatosPantalla(['inmuebles'], { gestiones_cartera: 'ERROR' }).estado).toBe('LISTO');
   });
 });
 
@@ -244,6 +297,11 @@ describe('UX-2 §8/§10 — mensajes accionables y sin detalles técnicos', () =
   it('etiquetaOrigen traduce los orígenes conocidos y conserva los desconocidos', () => {
     expect(etiquetaOrigen('inmuebles')).toBe('Inmuebles');
     expect(etiquetaOrigen('origen_inventado')).toBe('origen_inventado');
+  });
+
+  it('titularidades y carteras tienen etiqueta legible (el aviso no expone la clave técnica)', () => {
+    expect(etiquetaOrigen('titularidades')).toBe('Titularidades');
+    expect(etiquetaOrigen('gestiones_cartera')).toBe('Carteras');
   });
 });
 

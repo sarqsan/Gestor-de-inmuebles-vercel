@@ -53,7 +53,7 @@
 | Rama de sesión actual | `arena/01a0e437-gestor-de-inmuebles-vercel` — reconciliación del assert E-62 con el ámbito D3 tras la integración del PR #6 |
 | `main` | **`3778a5a` — PUBLICADA y custodiada (`main = origin/main`, 2026-09-27).** Cadena D1R/D2/D2a/D2b/D3 + Arena C (`8a2fb20`) + INC-06 (`37341c6`) + cadena BLOQUE 6 (`414642b`→`c2b1087`, merge del PR #6 = `64fd0b2`) + reconciliación E-62/D3 (PR #7 = `3778a5a`): ver §13. La antigua línea paralela `4d420bd` (AI Studio) fue reconciliada históricamente en `5f7754b` (ver §9) |
 | Deploy | Vercel (`vercel.json`: build → `dist`, función serverless `api/index.ts` → Express, rewrites SPA) |
-| Firebase | Proyecto `startup-sanctuary-sln7n` · Firestore `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` · Storage `startup-sanctuary-sln7n.firebasestorage.app` |
+| Firebase | **Proyecto `gestor-inmuebles-produccion`** (el de `firebase-applet-config.json`, al que hablan la app y el preview de Vercel) · Firestore `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` · Storage `gestor-inmuebles-produccion.firebasestorage.app`. Las reglas se publican en ESTE proyecto (`.firebaserc` fija el destino por defecto). `startup-sanctuary-sln7n` NO es producción |
 | Base de datos | Firestore (~45 colecciones, ver §2.2) + Storage (rutas declaradas en `storage.rules`) |
 | IA | Gemini (`@google/genai`) vía endpoints Express de `server.ts` |
 | Secretos | `GEMINI_API_KEY` y `APP_URL` por secretos de entorno (`.env.example`). **Nunca** en código ni Firestore |
@@ -1320,7 +1320,7 @@ asistente) · Seguridad perimetral (reglas deny-by-default) · **BLOQUE B** ·
 | Elemento | Qué falta (fuera de Arena) |
 |---|---|
 | §6 F4 asistente IA | Llamada real a Gemini (`docs/F4-PRUEBA-REAL-GEMINI.md`, 5 casos) |
-| Reglas Firestore/Storage B, C, D, E, §6 F3 | Publicación manual `firebase deploy --only firestore:rules,storage --project startup-sanctuary-sln7n` + `firestore.indexes.json` (6 índices de D) |
+| Reglas Firestore/Storage B, C, D, E, §6 F3 | Publicación manual `firebase deploy --only firestore:rules,storage --project gestor-inmuebles-produccion` (o `firebase deploy --only firestore:rules,storage`, el destino por defecto lo fija `.firebaserc`) + `firestore.indexes.json` (6 índices de D) |
 | Reglas E y F3 contra Firebase real | Emulador/entorno real (sin Java ni red en el sandbox) |
 | Auth/Storage reales del Portal E | Registro por invitación y subida real a Storage en entorno real |
 

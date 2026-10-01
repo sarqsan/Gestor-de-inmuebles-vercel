@@ -1,4 +1,5 @@
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
+import { FIREBASE_PROYECTO_ID } from '../../lib/entornoFirebase';
 import React, { useState, useRef } from 'react';
 import { UserProfile, Candidato, Inmueble } from '../../types';
 import { ImportExportPanel } from './ImportExportPanel';
@@ -338,7 +339,7 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
               <span className="text-[11px] text-slate-400">Colección activa con {candidatos.length} candidatos.</span>
             </div>
             <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
-              <span className="text-emerald-400 font-mono font-bold block">startup-sanctuary-sln7n</span>
+              <span className="text-emerald-400 font-mono font-bold block" data-testid="proyecto-firebase-activo">{FIREBASE_PROYECTO_ID}</span>
               <span className="text-[11px] text-slate-400">ID del proyecto Firebase activo.</span>
             </div>
           </div>

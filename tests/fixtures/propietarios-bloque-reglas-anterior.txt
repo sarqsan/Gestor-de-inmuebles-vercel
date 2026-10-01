@@ -1,0 +1,55 @@
+    match /propietarios/{propietarioId} {
+      // INC-06 — ¿El propietario es una cartera que gestiono (proyección D2b
+      // carterasL ∪ carterasE del espejo, que SOLO el master escribe)? Da
+      // LECTURA de la ficha; la escritura exige carterasE y queda acotada.
+      function carteraGestionadaPorMi(pid) {
+        return activeUser() && pid is string && (
+          (('gestionesPorPropietario' in me() && pid in me().gestionesPorPropietario)
+            ? gestionActivaCompletaIndexada(pid)
+            : (carterasLectura().hasAny([pid]) || carterasEscritura().hasAny([pid])))
+        );
+      }
+
+      // Cada propietario sólo puede leer su propia ficha. El Administrador, todas.
+      // INC-06: el gestor con relación de cartera vigente (L o E) lee la ficha
+      // del propietario gestionado (mismo alcance D2b que ya tiene sobre los
+      // inmuebles de esa cartera). Sin relación, nada cambia.
+      allow get: if isMasterAdmin() || ownsPropietario(propietarioId)
+        || carteraGestionadaPorMi(propietarioId);
+      allow list: if isMasterAdmin();
+
+      // El propietario puede crear/editar únicamente SU ficha (id coincidente).
+      // (INC-06 no amplía la creación: crear propietario sigue siendo del
+      // titular o del master; el gestor NO crea propietarios — S3.)
+      allow create: if (isMasterAdmin() && propietarioPersonaCoherente(propietarioId, incoming())
+        && auditoriaVinculada(incoming(), 'propietarios/' + propietarioId)) || (
+        !isMasterAdmin() && isPropietarioRole()
+        && propietarioId == myPropId()
+        && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE'])
+        && !('personaId' in incoming())
+        && !('roadmap01AuditId' in incoming())
+        && 'id' in incoming() && incoming().id == propietarioId
+      );
+      allow update: if (isMasterAdmin()
+        && auditoriaNueva(incoming(), existing(), 'propietarios/' + propietarioId)
+        && propietarioPersonaCoherente(propietarioId, incoming())
+        && (!('personaId' in existing()) || ('personaId' in incoming()) ||
+          (existsAfter(/databases/$(database)/documents/personas/$(existing().personaId))
+           && !getAfter(/databases/$(database)/documents/personas/$(existing().personaId)).data.propietarioIds.hasAny([propietarioId])))) || (
+        !isMasterAdmin() && isPropietarioRole()
+        && propietarioId == myPropId()
+        && !incoming().diff(existing()).affectedKeys().hasAny(['personaId', 'roadmap01AuditId'])
+        && 'id' in existing() && existing().id == propietarioId
+      ) || (
+        // INC-06 — el gestor con cartera de ESCRITURA (carterasE: ACTIVA +
+        // LECTURA_ESCRITURA + responsableActual GESTOR, proyectadas por el
+        // master) puede actualizar SOLO el subobjeto `fichaPatrimonial`.
+        // carterasL (lectura histórica, S7) NO escribe. Ningún otro campo del
+        // propietario (datos, cuentas bancarias, notas) queda al alcance del
+        // gestor: la firma de la actualización es exactamente una clave.
+        !isMasterAdmin() && activeUser()
+        && carterasEscritura().hasAny([propietarioId])
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fichaPatrimonial'])
+      );
+      allow delete: if false; // identidad jurídica/histórico: desasociación auditada, no purga
+    }

@@ -17,11 +17,12 @@
  *   A. MENÚ: cada perfil que gestiona titulares tiene una entrada VISIBLE «Propietarios / Titulares»
  *      que navega a la sección correcta (escritorio y móvil); el PROFESIONAL no la tiene.
  *   B. PERMISOS: `permisosTitulares` reproduce `allow create/update` de `propietarios` (texto REAL
- *      de firestore.rules): master crea y edita todas; el PROPIETARIO edita la SUYA y solo la crea
- *      si no existe; nadie más crea. Nada de «Crear titular» que Firestore vaya a denegar.
- *   C. SECCIÓN: «Crear titular» visible para quien puede, ficha completa (personal + contacto +
- *      fiscal + IBAN) en un solo formulario; el PROPIETARIO mantiene su ficha y se le explica cómo
- *      se da de alta a otro titular.
+ *      de firestore.rules): master crea y edita todas; el PROPIETARIO crea y mantiene la SUYA y
+ *      TANTAS fichas de titular como necesite dentro de su ÁMBITO (sin tope: la cantidad no es parte
+ *      de ninguna condición); nadie más crea. Nada de «Crear titular» que Firestore vaya a denegar.
+ *   C. SECCIÓN: «Crear titular» visible para quien puede (también el PROPIETARIO, siempre), ficha
+ *      completa (personal + contacto + fiscal + IBAN) en un solo formulario; sin ningún mensaje que
+ *      remita a un administrador.
  *   D. ALTA DE INMUEBLE: el botón/atajo hacia Propietarios/Titulares existe y navega.
  *   E. CABLEADO de App.tsx: la ruta `titulares`, el route guard y el uso del helper de permisos.
  */
@@ -29,7 +30,7 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { Sidebar } from '../src/components/Sidebar';
 import { MobileNav } from '../src/components/MobileNav';
@@ -38,7 +39,6 @@ import { InmueblesSection } from '../src/components/sections/InmueblesSection';
 import { permisosTitulares } from '../src/utils/permisosTitulares';
 import { seccionesDePerfil, gruposDePerfil } from '../src/navegacion/navegacion';
 import { ADMIN_MASTER_EMAIL } from '../src/lib/authService';
-import { MENSAJE_ALTA_TITULAR_ADMINISTRACION } from '../src/lib/titularesModelo';
 import { crearEvaluadorReglas, type Peticion } from './harness/firestoreRulesEval';
 import type { Inmueble, Propietario, SectionType, UsuarioApp } from '../src/types';
 
@@ -174,17 +174,31 @@ describe('Titulares · B — permisos: la UI solo ofrece lo que las Rules permit
     expect(conMayusculas.esMaster).toBe(true);
   });
 
-  it('B2 · PROPIETARIO con ficha propia: edita SOLO la suya y no crea otras', () => {
+  it('B2 · PROPIETARIO con ficha propia: SIGUE pudiendo crear titulares (sin tope) y edita la suya', () => {
     const p = permisosTitulares(propietario, [ficha('prop_1')], ADMIN_MASTER_EMAIL);
     expect(p).toMatchObject({
-      esMaster: false, puedeGestionar: true, puedeCrear: false, idFichaPropia: 'prop_1', fichaPropiaExiste: true,
+      esMaster: false, puedeGestionar: true, puedeCrear: true, puedeCrearFichaPropia: false,
+      ambitoPropietarioId: 'prop_1', idFichaPropia: 'prop_1', fichaPropiaExiste: true,
     });
     expect(p.fichasEditablesIds).toEqual(['prop_1']);
   });
 
-  it('B3 · PROPIETARIO sin ficha propia todavía: puede crear LA SUYA (id fijado por las Rules)', () => {
+  it('B2b · con fichas de su ámbito: edita la suya y TODAS las de su ámbito (cualquier número), ninguna ajena', () => {
+    const delAmbito = Array.from({ length: 60 }, (_, i) => ficha(`tit_ambito${String(i).padStart(3, '0')}`, { ambitoPropietarioId: 'prop_1' }));
+    const ajenas = [ficha('prop_9'), ficha('tit_ajena0001', { ambitoPropietarioId: 'prop_2' })];
+    const p = permisosTitulares(propietario, [ficha('prop_1'), ...delAmbito, ...ajenas], ADMIN_MASTER_EMAIL);
+    // `puedeCrear` NO depende de cuántas haya: con 60 sigue siendo true.
+    expect(p.puedeCrear).toBe(true);
+    expect(p.fichasEditablesIds).toEqual(['prop_1', ...delAmbito.map((f) => f.id)]);
+    expect(p.fichasEditablesIds).not.toContain('prop_9');
+    expect(p.fichasEditablesIds).not.toContain('tit_ajena0001');
+  });
+
+  it('B3 · PROPIETARIO sin ficha propia todavía: puede crear titulares Y su ficha propia (id fijado por las Rules)', () => {
     const p = permisosTitulares(propietario, [], ADMIN_MASTER_EMAIL);
-    expect(p).toMatchObject({ puedeGestionar: true, puedeCrear: true, idFichaPropia: 'prop_1', fichaPropiaExiste: false });
+    expect(p).toMatchObject({
+      puedeGestionar: true, puedeCrear: true, puedeCrearFichaPropia: true, idFichaPropia: 'prop_1', fichaPropiaExiste: false,
+    });
   });
 
   it('B4 · sin propietarioId, ADMINISTRADOR no master, PROFESIONAL o sin sesión: consulta (nada que crear ni editar)', () => {
@@ -221,24 +235,41 @@ describe('Titulares · B — permisos: la UI solo ofrece lo que las Rules permit
     it('el PROPIETARIO crea SU ficha (id == propietarioId)…', () => {
       expect(permite('propietarios', 'create', peticion('prop_1', null, nueva('prop_1')))).toBe(true);
     });
-    it('…pero NO la de un tercero (p. ej. un cotitular): por eso la UI no le ofrece «Crear titular»', () => {
+    it('…y TANTAS fichas de titular como necesite en SU ámbito (id `tit_…` + ámbito propio): por eso la UI le ofrece «Crear titular»', () => {
+      const titular = (id: string) => ({ ...nueva(id), ambitoPropietarioId: 'prop_1' });
+      expect(permite('propietarios', 'create', peticion('tit_conyuge0001', null, titular('tit_conyuge0001')))).toBe(true);
+      expect(permite('propietarios', 'create', peticion('tit_sociedad001', null, titular('tit_sociedad001')))).toBe(true);
+    });
+    it('…pero NO fichas fuera de su ámbito ni en el id de otra ficha de cuenta: la UI nunca las ofrece', () => {
+      // sin ámbito (o con un ámbito ajeno) y/o con un id de cuenta ajeno
       expect(permite('propietarios', 'create', peticion('prop-nuevo', null, nueva('prop-nuevo')))).toBe(false);
       expect(permite('propietarios', 'create', peticion('prop_2', null, nueva('prop_2')))).toBe(false);
+      expect(permite('propietarios', 'create', peticion('prop_2', null, { ...nueva('prop_2'), ambitoPropietarioId: 'prop_1' }))).toBe(false);
+      expect(permite('propietarios', 'create', peticion('tit_ajeno000001', null, { ...nueva('tit_ajeno000001'), ambitoPropietarioId: 'prop_2' }))).toBe(false);
     });
-    it('edita la suya y no la ajena', () => {
+    it('edita la suya y la de su ámbito, no la ajena', () => {
       const editada = { ...(db['propietarios/prop_1'] as object), telefono: '600000000' };
       expect(permite('propietarios', 'update', peticion('prop_1', db['propietarios/prop_1'], editada))).toBe(true);
+      const delAmbito = { ...nueva('tit_conyuge0001'), ambitoPropietarioId: 'prop_1' };
+      expect(permite('propietarios', 'update', peticion('tit_conyuge0001', delAmbito, { ...delAmbito, telefono: '611111111' }))).toBe(true);
       const ajena = { ...(db['propietarios/prop_2'] as object), telefono: '600000000' };
       expect(permite('propietarios', 'update', peticion('prop_2', db['propietarios/prop_2'], ajena))).toBe(false);
     });
-    it('la ficha jurídica nunca se borra y `list` es solo del master (la UI no ofrece «Eliminar» al PROPIETARIO)', () => {
+    it('la ficha jurídica nunca se borra y `list` es del master o de la consulta por ámbito propio (la UI no ofrece «Eliminar»)', () => {
       expect(permite('propietarios', 'delete', peticion('prop_1', db['propietarios/prop_1'], null))).toBe(false);
+      // una ficha SIN ámbito no es listable por el PROPIETARIO…
       expect(permite('propietarios', 'list', peticion('prop_1', db['propietarios/prop_1'], null))).toBe(false);
+      // …y una de SU ámbito sí; una de otro ámbito, no.
+      const propia = { ...nueva('tit_conyuge0001'), ambitoPropietarioId: 'prop_1' };
+      const ajena = { ...nueva('tit_ajeno000001'), ambitoPropietarioId: 'prop_2' };
+      expect(permite('propietarios', 'list', peticion('tit_conyuge0001', propia, null))).toBe(true);
+      expect(permite('propietarios', 'list', peticion('tit_ajeno000001', ajena, null))).toBe(false);
     });
     it('los pines de fuente del helper siguen vigentes en las Rules', () => {
       const bloque = RULES.slice(RULES.indexOf('match /propietarios/{propietarioId}'), RULES.indexOf('match /inmuebles/{inmuebleId}'));
-      expect(bloque).toContain('allow list: if isMasterAdmin();');
+      expect(bloque).toContain('allow list: if isMasterAdmin() || titularEnMiAmbito(resource.data);');
       expect(bloque).toContain('&& propietarioId == myPropId()');
+      expect(bloque).toContain("d.ambitoPropietarioId == myPropId()");
       expect(bloque).toContain('allow delete: if false;');
     });
   });
@@ -255,6 +286,8 @@ describe('Titulares · C — la sección real según el perfil', () => {
         inmuebles={[]}
         puedeGestionar={permisos.puedeGestionar}
         puedeCrear={permisos.puedeCrear}
+        puedeCrearFichaPropia={permisos.puedeCrearFichaPropia}
+        ambitoPropietarioId={permisos.ambitoPropietarioId}
         fichasEditablesIds={permisos.fichasEditablesIds}
         idFichaPropia={permisos.idFichaPropia}
         onSavePropietario={onSave}
@@ -280,7 +313,7 @@ describe('Titulares · C — la sección real según el perfil', () => {
     cleanup();
   });
 
-  it('C2 · MASTER: guardar una ficha completa llama a `onSavePropietario` con datos personales, de contacto y fiscales', () => {
+  it('C2 · MASTER: guardar una ficha completa llama a `onSavePropietario` con datos personales, de contacto y fiscales', async () => {
     const onSave = vi.fn();
     montar(permisosTitulares(master, [], ADMIN_MASTER_EMAIL), [], onSave);
     fireEvent.click(screen.getByTestId('boton-crear-titular'));
@@ -293,7 +326,7 @@ describe('Titulares · C — la sección real según el perfil', () => {
     fireEvent.change(screen.getByPlaceholderText('Ej: Calle Gran Vía 28, 4º B'), { target: { value: 'Calle Mayor 1' } });
     fireEvent.click(screen.getByRole('button', { name: /Crear Propietario/ }));
 
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const guardado = onSave.mock.calls[0][0] as Propietario;
     // Ficha PERSONAL + CONTACTO + FISCAL en una sola alta.
     expect(guardado).toMatchObject({
@@ -301,59 +334,73 @@ describe('Titulares · C — la sección real según el perfil', () => {
       telefono: '600111222', email: 'ana@correo.test', direccion: 'Calle Mayor 1',
     });
     expect(guardado.id).toMatch(/^prop-\d+$/);
+    // El master NO crea fichas «de ámbito»: no lleva `ambitoPropietarioId`.
+    expect(guardado.ambitoPropietarioId).toBeUndefined();
     expect(Array.isArray(guardado.cuentasBancarias)).toBe(true);
   });
 
-  it('C3 · PROPIETARIO con ficha propia: ve su ficha y puede editarla, SIN «Crear titular» ni «Eliminar»; se le explica el alta de otros titulares', () => {
+  it('C3 · PROPIETARIO con ficha propia: «Crear titular» SIGUE visible, edita su ficha, sin «Eliminar» y SIN remitir a un administrador', () => {
     const onSave = vi.fn();
     montar(permisosTitulares(propietario, [ficha('prop_1')], ADMIN_MASTER_EMAIL), [ficha('prop_1')], onSave);
 
-    expect(screen.queryByTestId('boton-crear-titular')).toBeNull();
-    expect(screen.queryByText('Crear primer titular')).toBeNull();
+    // «Crear titular» está SIEMPRE: tener ya una ficha no lo oculta.
+    expect(screen.getByTestId('boton-crear-titular').textContent).toContain('Crear titular');
+    // Con su ficha propia ya creada no hay «Crear mi ficha» (sería duplicarla).
+    expect(screen.queryByTestId('boton-crear-mi-ficha')).toBeNull();
     expect(screen.getByText('Titular prop_1')).toBeTruthy();
     expect(screen.getByTitle('Editar titular')).toBeTruthy();
     expect(screen.queryByTitle('Eliminar titular')).toBeNull();
-    const aviso = screen.getByTestId('titulares-alta-administracion');
-    expect(aviso.textContent).toContain(MENSAJE_ALTA_TITULAR_ADMINISTRACION);
-    // No es el modo «solo consulta»: esa persona SÍ puede mantener su ficha.
+    // Ningún aviso de «acude a la administración» y no es el modo «solo consulta».
+    expect(screen.queryByTestId('titulares-alta-administracion')).toBeNull();
     expect(screen.queryByTestId('propietarios-solo-consulta')).toBeNull();
-    // Y no se le dice «créalo aquí» (Firestore lo denegaría): la guía habla de SU ficha y el aviso
-    // remite a quién da de alta a otros titulares.
-    expect(screen.queryByTestId('aviso-titular-inexistente-propietarios')).toBeNull();
-    expect(screen.getByText('1. Completa tu ficha')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/corresponde (a|al) (la )?administra/i);
+    expect(document.body.textContent).not.toMatch(/administrador principal/i);
+    // La guía es la de crear titulares (también para él).
+    expect(screen.getByTestId('aviso-titular-inexistente-propietarios')).toBeTruthy();
+    expect(screen.getByText('1. Crea el titular')).toBeTruthy();
+    expect(screen.getByTestId('titulares-ambito-ayuda').textContent).toMatch(/tantos titulares como necesites/);
   });
 
-  it('C4 · PROPIETARIO: editar su ficha conserva su id (la regla `update` exige id == propietarioId)', () => {
+  it('C4 · PROPIETARIO: editar su ficha conserva su id (la regla `update` exige id == propietarioId)', async () => {
     const onSave = vi.fn();
     const suya = ficha('prop_1', { nifCif: '12345678Z' }); // NIF válido: el formulario valida antes de guardar
     montar(permisosTitulares(propietario, [suya], ADMIN_MASTER_EMAIL), [suya], onSave);
     fireEvent.click(screen.getByTitle('Editar titular'));
     fireEvent.change(screen.getByPlaceholderText('Ej: +34 600 000 000'), { target: { value: '699999999' } });
     fireEvent.click(screen.getByRole('button', { name: /Guardar Cambios/ }));
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect((onSave.mock.calls[0][0] as Propietario).id).toBe('prop_1');
     expect((onSave.mock.calls[0][0] as Propietario).telefono).toBe('699999999');
   });
 
-  it('C5 · PROPIETARIO sin ficha propia: «Crear mi ficha de titular» la crea con SU id (no `prop-<fecha>`)', () => {
+  it('C5 · PROPIETARIO sin ficha propia: «Crear titular» Y «Crear mi ficha de titular» (esta la crea con SU id, sin ámbito)', async () => {
     const onSave = vi.fn();
     montar(permisosTitulares(propietario, [], ADMIN_MASTER_EMAIL), [], onSave);
-    const crear = screen.getByTestId('boton-crear-titular');
-    expect(crear.textContent).toContain('Crear mi ficha de titular');
-    fireEvent.click(crear);
+    expect(screen.getByTestId('boton-crear-titular').textContent).toContain('Crear titular');
+    const crearMia = screen.getByTestId('boton-crear-mi-ficha');
+    expect(crearMia.textContent).toContain('Crear mi ficha de titular');
+    expect(screen.getByTestId('titulares-ficha-propia-pendiente')).toBeTruthy();
+    fireEvent.click(crearMia);
     fireEvent.change(screen.getByPlaceholderText('Ej: Manuel Gómez Rodríguez'), { target: { value: 'Pedro Ruiz' } });
     fireEvent.change(screen.getByPlaceholderText('Ej: 12345678Z o B-12345678'), { target: { value: '12345678z' } });
     fireEvent.click(screen.getByRole('button', { name: /Crear Propietario/ }));
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect((onSave.mock.calls[0][0] as Propietario).id).toBe('prop_1');
-    expect((onSave.mock.calls[0][0] as Propietario).nifCif).toBe('12345678Z');
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const guardada = onSave.mock.calls[0][0] as Propietario;
+    expect(guardada.id).toBe('prop_1'); // las Rules solo permiten la ficha propia con id == propietarioId
+    expect(guardada.nifCif).toBe('12345678Z');
+    expect(guardada.ambitoPropietarioId).toBeUndefined(); // la ficha propia no entra en ningún ámbito
   });
 
-  it('C6 · una ficha AJENA visible (p. ej. por una cartera gestionada) no ofrece editar, eliminar ni añadir IBAN', () => {
-    montar(permisosTitulares(propietario, [ficha('prop_1'), ficha('prop_9')], ADMIN_MASTER_EMAIL), [ficha('prop_1'), ficha('prop_9')]);
-    // Solo la ficha propia tiene acción de edición.
-    expect(screen.getAllByTitle('Editar titular')).toHaveLength(1);
-    expect(screen.getAllByText('Añadir IBAN')).toHaveLength(1);
+  it('C6 · una ficha AJENA visible (p. ej. por una cartera gestionada) no ofrece editar, eliminar ni añadir IBAN; las de SU ámbito sí', () => {
+    const delAmbito = ficha('tit_conyuge0001', { ambitoPropietarioId: 'prop_1' });
+    const visibles = [ficha('prop_1'), delAmbito, ficha('prop_9')];
+    montar(permisosTitulares(propietario, visibles, ADMIN_MASTER_EMAIL), visibles);
+    // Editables: la propia y la de su ámbito. `prop_9` (ajena) no tiene ninguna acción.
+    expect(screen.getAllByTitle('Editar titular')).toHaveLength(2);
+    expect(screen.getAllByText('Añadir IBAN')).toHaveLength(2);
+    expect(screen.getByTestId('insignia-ficha-propia-prop_1')).toBeTruthy();
+    expect(screen.getByTestId('insignia-titular-ambito-tit_conyuge0001')).toBeTruthy();
+    expect(screen.queryByTestId('insignia-titular-ambito-prop_9')).toBeNull();
   });
 
   it('C7 · ADMINISTRADOR no master / gestor (consulta): ninguna acción de escritura y lo explica', () => {
@@ -410,15 +457,15 @@ describe('Titulares · D — desde el alta de inmueble se llega a Propietarios/T
     expect(alNavegar).toHaveBeenCalledTimes(1);
   });
 
-  it('D2 · el botón de cabecera cambia de texto según quién pueda crear: master «Crear titular…»; PROPIETARIO «Ir a…»', () => {
-    abrirAlta(master, vi.fn());
-    expect(screen.getByRole('button', { name: /Crear titular en Propietarios\/Titulares/ })).toBeTruthy();
-    cleanup();
-    const alNavegar = vi.fn();
-    abrirAlta(propietario, alNavegar);
-    expect(screen.queryByRole('button', { name: /Crear titular en Propietarios\/Titulares/ })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Ir a Propietarios\/Titulares/ }));
-    expect(alNavegar).toHaveBeenCalledTimes(1);
+  it('D2 · el botón de cabecera es «Crear titular en Propietarios/Titulares» para TODOS los que crean titulares (también el PROPIETARIO)', () => {
+    for (const usuario of [master, propietario]) {
+      const alNavegar = vi.fn();
+      abrirAlta(usuario, alNavegar);
+      expect(screen.queryByRole('button', { name: /Ir a Propietarios\/Titulares/ })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /Crear titular en Propietarios\/Titulares/ }));
+      expect(alNavegar).toHaveBeenCalledTimes(1);
+      cleanup();
+    }
   });
 });
 
@@ -439,8 +486,13 @@ describe('Titulares · E — cableado en App.tsx', () => {
 
   it('E2 · `titulares` se monta con la MISMA sección y el helper de permisos; el PROPIETARIO ya no recibe permisos «por defecto»', () => {
     expect(APP).toContain("{activeSection === 'titulares' && renderPropietariosTitulares()}");
-    expect(APP).toContain('const permisos = permisosTitulares(currentUser, scopedPropietarios, ADMIN_MASTER_EMAIL);');
+    // El helper se alimenta de `titularesVisibles` (ficha propia + titulares de su ámbito), no de la lista
+    // «solo propia» `scopedPropietarios`, que sigue siendo la de Tesorería/Facturación.
+    expect(APP).toContain('const permisos = permisosTitulares(currentUser, titularesVisibles, ADMIN_MASTER_EMAIL);');
+    expect(APP).toContain('propietarios={titularesVisibles}');
     expect(APP).toContain('puedeCrear={permisos.puedeCrear}');
+    expect(APP).toContain('puedeCrearFichaPropia={permisos.puedeCrearFichaPropia}');
+    expect(APP).toContain('ambitoPropietarioId={permisos.ambitoPropietarioId}');
     expect(APP).toContain('fichasEditablesIds={permisos.fichasEditablesIds}');
     expect(APP).toContain('idFichaPropia={permisos.idFichaPropia}');
     // `propietarios` sigue montando el portal para el PROPIETARIO y la sección para el resto.

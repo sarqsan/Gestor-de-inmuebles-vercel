@@ -33,6 +33,11 @@ export interface PanelTitularidadesInmuebleProps {
   inmueble: Inmueble;
   /** Titulares conocidos por el host (para nombres y fichas). */
   titulares?: readonly Propietario[];
+  /**
+   * Titulares que se ofrecen DIRECTAMENTE al añadir uno (los del ámbito del PROPIETARIO). Sin esta
+   * propiedad el panel solo ofrece la búsqueda de servidor, como antes (p. ej. para la administración).
+   */
+  candidatosLocales?: readonly Propietario[];
   /** ¿Puede LEER las titularidades de este inmueble? (espejo de las Rules). */
   puedeLeer?: boolean;
   /** ¿Puede AÑADIR/CERRAR/MODIFICAR relaciones de este inmueble? */
@@ -46,6 +51,7 @@ export interface PanelTitularidadesInmuebleProps {
 export const PanelTitularidadesInmueble: React.FC<PanelTitularidadesInmuebleProps> = ({
   inmueble,
   titulares = [],
+  candidatosLocales,
   puedeLeer = false,
   puedeGestionar = false,
   puedeCambiarPrincipal,
@@ -90,6 +96,11 @@ export const PanelTitularidadesInmueble: React.FC<PanelTitularidadesInmuebleProp
     for (const t of titularidades || []) if (t.propietarioNombre) mapa[t.propietarioId] = mapa[t.propietarioId] || t.propietarioNombre;
     return mapa;
   }, [titulares, titularidades]);
+
+  const candidatosPanel = useMemo<CandidatoTitular[] | undefined>(
+    () => candidatosLocales?.map((t) => ({ id: t.id, nombre: t.nombre })),
+    [candidatosLocales],
+  );
 
   if (!puedeLeer) {
     return (
@@ -181,6 +192,7 @@ export const PanelTitularidadesInmueble: React.FC<PanelTitularidadesInmuebleProp
       onBuscarTitulares={(_inmuebleId: string, termino: string): Promise<CandidatoTitular[]> =>
         buscarTitularesEnServidor(inmueble.id, termino)
       }
+      candidatosLocales={candidatosPanel}
     />
   );
 };

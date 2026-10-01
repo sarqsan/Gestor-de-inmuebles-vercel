@@ -103,6 +103,11 @@ export function PantallaPatrimonial({ propietarios, usuarioActual, onCrearPropie
   // vista «Nuevo propietario» se sustituye por la explicación (honestidad UX; las
   // reglas y el flujo de importación hacia la ficha propia quedan intactos).
   const esAdministrador = usuarioActual.tipoPerfil === 'ADMINISTRADOR';
+  // PR #19: el PROPIETARIO SÍ crea y mantiene tantos titulares como necesite, pero lo hace en
+  // «Propietarios / Titulares» (ficha completa e independiente por titular, en su ámbito). Esta
+  // pantalla es la ficha PATRIMONIAL (modalidad, vínculo, importación): su alta de otro propietario
+  // sigue siendo del ámbito administrativo, y al PROPIETARIO se le indica dónde crear titulares.
+  const esPropietario = usuarioActual.tipoPerfil === 'PROPIETARIO';
   const vistasDisponibles: readonly Vista[] = esAdministrador
     ? ['lista', 'alta', 'importacion']
     : ['lista', 'importacion'];
@@ -176,7 +181,11 @@ export function PantallaPatrimonial({ propietarios, usuarioActual, onCrearPropie
     // Defensa en profundidad (FASE 9): sin ámbito administrativo, el alta de otra
     // ficha patrimonial sería denegada por Rules; se comunica aquí en claro.
     if (!esAdministrador) {
-      setMensaje('La creación de nuevos titulares patrimoniales corresponde a la administración. Puedes importar datos hacia tu propia ficha.');
+      setMensaje(
+        esPropietario
+          ? 'Para crear otros titulares usa «Propietarios / Titulares». Aquí puedes importar datos hacia tu propia ficha.'
+          : 'La creación de nuevos titulares patrimoniales corresponde a la administración. Puedes importar datos hacia tu propia ficha.',
+      );
       return;
     }
     if (!modalidad) { setMensaje('Selecciona primero la modalidad de uso.'); return; }
@@ -285,11 +294,21 @@ export function PantallaPatrimonial({ propietarios, usuarioActual, onCrearPropie
       </nav>
       {mensaje && <p role="status" style={{ fontWeight: 600 }}>{mensaje}</p>}
 
-      {/* AUDITORÍA UX PROPIETARIO (2026-09-29 · FASES 8/9): creación de OTROS titulares
-          patrimoniales no está al alcance del rol propietario (Rules: create solo propia
-          ficha o master). Se explica aquí en lugar de dejar que el formulario falle al
-          confirmar. La importación sí está disponible: su destino es la ficha propia. */}
-      {!esAdministrador && (
+      {/* AUDITORÍA UX PROPIETARIO (2026-09-29 · FASES 8/9) + PR #19: el alta patrimonial de OTRO
+          propietario (esta pantalla) no es del rol propietario; los titulares de su ámbito los crea
+          en «Propietarios / Titulares» (Rules: create propia ficha, o titulares con su ámbito, o master).
+          Se explica aquí en lugar de dejar que el formulario falle al confirmar. La importación sí
+          está disponible: su destino es la ficha propia. */}
+      {!esAdministrador && esPropietario && (
+        <p role="note" style={{ margin: '0 0 12px', padding: '8px 12px', background: '#eef4ff', border: '1px solid #bfccf5', borderRadius: 8, fontSize: 13 }}>
+          Puedes completar la ficha patrimonial de tu titularidad e importar datos hacia ella.
+          Para crear <em>otros</em> titulares (cónyuge, copropietario, familiar, sociedad…) usa
+          {' '}<strong>Propietarios / Titulares</strong>: puedes crear tantos como necesites, cada uno con su propia ficha.
+          Para un <strong>cotitular fiscal</strong> de una vivienda (segundo arrendador en contrato),
+          asígnalo desde la <strong>titularidad en la ficha del inmueble</strong>.
+        </p>
+      )}
+      {!esAdministrador && !esPropietario && (
         <p role="note" style={{ margin: '0 0 12px', padding: '8px 12px', background: '#eef4ff', border: '1px solid #bfccf5', borderRadius: 8, fontSize: 13 }}>
           Puedes completar la ficha patrimonial de tu titularidad e importar datos hacia ella.
           La creación de <em>otros</em> titulares patrimoniales corresponde a la administración.

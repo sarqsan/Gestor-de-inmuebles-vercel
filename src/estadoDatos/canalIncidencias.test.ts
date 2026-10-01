@@ -133,8 +133,10 @@ describe('UX-2 · C2 — fallos de lectura: nunca se convierten en []', () => {
 
 describe('2026-10-01 · CAPACIDAD ADICIONAL — Carteras se registra sin ser un error de datos', () => {
   it('la lista de capacidades adicionales es explícita y no incluye datos primarios', () => {
-    expect([...ORIGENES_CAPACIDAD_ADICIONAL]).toEqual(['gestiones_cartera']);
+    // Carteras + las fichas de titular del ámbito del propietario (PR #19). Ningún dato primario.
+    expect([...ORIGENES_CAPACIDAD_ADICIONAL]).toEqual(['gestiones_cartera', 'titulares_ambito']);
     expect(esCapacidadAdicional('gestiones_cartera')).toBe(true);
+    expect(esCapacidadAdicional('titulares_ambito')).toBe(true);
     expect(esCapacidadAdicional('inmuebles')).toBe(false);
     expect(esCapacidadAdicional('propietarios')).toBe(false);
   });

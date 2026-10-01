@@ -86,6 +86,12 @@ interface PropietarioPortalSectionProps {
   contratos: ContratoFormalizacion[];
   especialidades: Especialidad[];
   propietarios: Propietario[];
+  /**
+   * Titulares que el propietario puede elegir al añadir uno a una vivienda: su ficha + TODAS las
+   * fichas de su ámbito (las que él creó), sin tope. Se ofrecen directamente en «Añadir titular»,
+   * sin depender de la búsqueda de servidor. Sin esta propiedad solo hay búsqueda de servidor.
+   */
+  titularesDisponibles?: Propietario[];
   /** BLOQUE B — liquidaciones (ya acotadas por propietario desde el App). */
   liquidaciones?: LiquidacionPropietario[];
   /** BLOQUE C — resumen de morosidad ya recortado (sin datos del inquilino ni de estrategia). */
@@ -114,6 +120,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   contratos,
   especialidades,
   propietarios,
+  titularesDisponibles,
   liquidaciones = [],
   resumenMorosidad = [],
   gastos = [],
@@ -246,8 +253,15 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const nombresPropietarios = useMemo(() => {
     const mapa: Record<string, string> = {};
     for (const p of propietarios || []) if (p?.id) mapa[p.id] = p.nombre;
+    for (const p of titularesDisponibles || []) if (p?.id) mapa[p.id] = p.nombre;
     return mapa;
-  }, [propietarios]);
+  }, [propietarios, titularesDisponibles]);
+
+  // Candidatos que se eligen directamente al añadir un titular (los del ámbito del propietario).
+  const candidatosLocalesTitulares = useMemo(
+    () => (titularesDisponibles || []).filter((p) => p?.id).map((p) => ({ id: p.id, nombre: p.nombre })),
+    [titularesDisponibles],
+  );
 
   const inmuebleTitularidades =
     misViviendas.find((v) => v.id === inmuebleTitularidadesId) || misViviendas[0] || null;
@@ -771,6 +785,7 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                   onAnadirTitular={handleAnadirTitular}
                   onCerrarTitularidad={handleCerrarTitularidad}
                   onBuscarTitulares={handleBuscarTitulares}
+                  candidatosLocales={candidatosLocalesTitulares}
                 />
               )}
             </div>

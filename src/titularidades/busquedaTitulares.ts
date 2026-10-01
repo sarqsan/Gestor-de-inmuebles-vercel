@@ -10,7 +10,11 @@
  *    campo nuevo y sensible en `propietarios` NO puede filtrarse por accidente;
  *  · sin enumeración global: la consulta es por PREFIJO y limitada;
  *  · sin segundo sistema de identidad: se buscan fichas de `propietarios` ya
- *    existentes. Crear una titularidad NO crea ninguna cuenta de acceso.
+ *    existentes. Crear una titularidad NO crea ninguna cuenta de acceso;
+ *  · AISLAMIENTO POR ÁMBITO (PR #19): una ficha de titular creada por un
+ *    PROPIETARIO en su ámbito (`ambitoPropietarioId`) solo se ofrece a ese
+ *    propietario y a la administración. Ilimitado no es global: el nombre de un
+ *    titular de otro ámbito no se revela. Ver `fichaDeAmbitoAjeno`.
  */
 
 /** Mínimo de caracteres para buscar. */
@@ -53,6 +57,20 @@ export function coincide(nombre: string, termino: string): boolean {
 export interface FichaBuscable {
   id: string;
   nombre: string;
+}
+
+/**
+ * ¿La ficha pertenece al ámbito de OTRO propietario? (`ambitoPropietarioId` informado y distinto del
+ * del llamador). Las fichas sin ámbito (cuenta propia, heredadas, del master) no están afectadas.
+ * El servidor excluye estas fichas para todo perfil que no sea master/ADMINISTRADOR.
+ */
+export function fichaDeAmbitoAjeno(
+  datos: Record<string, unknown> | null | undefined,
+  propietarioIdLlamador: string | null | undefined,
+): boolean {
+  const ambito = typeof datos?.ambitoPropietarioId === 'string' ? datos.ambitoPropietarioId.trim() : '';
+  if (!ambito) return false;
+  return ambito !== (propietarioIdLlamador || '').trim();
 }
 
 /**

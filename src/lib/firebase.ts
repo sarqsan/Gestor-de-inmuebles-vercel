@@ -275,6 +275,60 @@ export function subscribePropietarios(
   );
 }
 
+/** Textos de la capacidad `titulares_ambito`: el propietario puede actuar por sí mismo, nunca se le envía a nadie. */
+const MENSAJES_TITULARES_AMBITO: Readonly<Record<string, string>> = {
+  'permission-denied': 'El servidor no ha autorizado la consulta de las fichas de titular de tu ámbito.',
+  'failed-precondition': 'La consulta de las fichas de titular de tu ámbito necesita una configuración que todavía no está disponible.',
+};
+const DETALLE_TITULARES_AMBITO =
+  'Qué se ha comprobado: lectura de la colección de titulares filtrada por tu propio ámbito (ambitoPropietarioId igual a tu propietarioId). ' +
+  'Tu ficha propia y tus inmuebles se leen por otra vía y no se ven afectados. Las fichas creadas en esta sesión se siguen mostrando.';
+
+/**
+ * FICHAS DE TITULAR DEL ÁMBITO de un PROPIETARIO (PR #19) — CAPACIDAD ADICIONAL.
+ *
+ * Un PROPIETARIO crea y mantiene TANTAS fichas de titular como necesite (cónyuge, copropietario,
+ * sociedad…). Cada una lleva `ambitoPropietarioId == su propietarioId`; esta escucha las lee TODAS
+ * con una única consulta de igualdad —la misma forma que las Rules demuestran en `list`
+ * (`titularEnMiAmbito`: valor constante salido de un `get` de ruta fija, igual que `inmuebleEsMio`)—.
+ * No hay límite, paginación ni contador: lo que acota es el filtro de ámbito, no la cantidad.
+ *
+ * AISLAMIENTO: nunca consulta la colección entera ni ids ajenos; si el espejo del usuario no coincide
+ * con `propietarioId`, las Rules deniegan la consulta (no devuelven fichas ajenas «filtradas»).
+ *
+ * AISLADA DE LA LECTURA PRIMARIA: su fallo se registra con `alcance: 'CAPACIDAD'` y origen propio
+ * (`titulares_ambito`). No entra en el estado de pantalla, no dispara el aviso global ni el texto
+ * genérico «avisa a un administrador», y la ficha propia (`subscribePropietarios`) no depende de ella.
+ * Cada apertura (inicio o «Reintentar lectura») parte limpia: su aviso anterior se sustituye.
+ */
+export function subscribeTitularesAmbito(
+  callback: (titulares: Propietario[]) => void,
+  propietarioId?: string
+): Unsubscribe {
+  if (!propietarioId) {
+    callback([]);
+    return () => {};
+  }
+  limpiarIncidenciasDe('titulares_ambito', 'LECTURA');
+  return onSnapshot(
+    query(PROPIETARIOS_COL, where('ambitoPropietarioId', '==', propietarioId)),
+    (snapshot) => {
+      const items: Propietario[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Propietario);
+      });
+      callback(items);
+    },
+    (err) =>
+      reportarErrorLectura(
+        'titulares_ambito',
+        err,
+        `Firestore titulares de ámbito (ambitoPropietarioId=${propietarioId}) snapshot error:`,
+        { alcance: 'CAPACIDAD', mensajesPorCodigo: MENSAJES_TITULARES_AMBITO, detalle: DETALLE_TITULARES_AMBITO }
+      )
+  );
+}
+
 /**
  * Save / Update Propietario in Firestore
  */

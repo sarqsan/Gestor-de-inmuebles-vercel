@@ -357,17 +357,17 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     title: 'Titularidad de un inmueble',
     summary: 'Quién figura como titular, qué es el cotitular fiscal y cómo cambiarlos desde la ficha.',
     content:
-      'En la parte alta de la ficha de cada inmueble verás siempre quién figura como titular (y el cotitular, si lo hay).\n\nEl «titular económico» es la ficha de propietario a la que se vinculan cobros, gastos y liquidaciones. El «segundo propietario» es un cotitular fiscal: aparece en contratos y pólizas, pero no tiene acceso a la aplicación por ese motivo.\n\nPara añadir o cambiar el cotitular usa «Editar titularidad» en la ficha: puedes elegir una ficha existente o escribir los datos fiscales a mano (nombre, NIF, dirección…). La titularidad de la ficha patrimonial (alta de otros titulares con cuenta propia) la gestiona la administración.',
+      'En la parte alta de la ficha de cada inmueble verás siempre quién figura como titular (y los demás titulares, si los hay).\n\nEl «titular económico» es la ficha de propietario a la que se vinculan cobros, gastos y liquidaciones. Un inmueble puede tener tantos titulares como haga falta (cónyuge, copropietario, sociedad…): cada uno es una ficha completa con sus propios datos fiscales, y su relación con la vivienda (porcentaje, principal, fechas) se guarda aparte. Ser titular no da acceso a la aplicación.\n\nPara añadir o cambiar titulares usa «Editar titularidad» en la ficha: eliges fichas que ya existen. Si falta alguien, créalo antes en «Propietarios / Titulares»: puedes crear tantos titulares como necesites.',
     keywords: ['titular', 'titularidad', 'segundo propietario', 'cotitular', 'arrendador', 'copropietario', 'fiscal'],
     relatedTutorials: ['recorrido.propietario.primeros-pasos'],
   },
   {
     // Ayuda de la entrada «Propietarios / Titulares» del PROPIETARIO (sección `titulares`).
     id: 'ayuda.titulares.mi-ficha', categoria: 'titulares', module: 'propietarios', section: 'titulares',
-    title: 'Propietarios / Titulares: tu ficha de titular',
-    summary: 'Completas una sola vez tus datos personales, de contacto y fiscales; después se asignan a tus inmuebles.',
+    title: 'Propietarios / Titulares: tus fichas de titular',
+    summary: 'Creas tantos titulares como necesites; cada uno es una ficha completa e independiente que luego asignas a tus inmuebles.',
     content:
-      'Tu ficha de titular reúne tus datos personales, de contacto y fiscales (incluido tu IBAN). Se rellena una sola vez y es la fuente de verdad: al crear o editar un inmueble seleccionas tu ficha, no se vuelven a teclear esos datos.\n\nDar de alta a otra persona como titular (por ejemplo, un cotitular) corresponde a la administración principal, porque esa ficha contiene sus datos fiscales. Cuando el titular exista, lo añades a tu inmueble desde «Titulares del inmueble», con su porcentaje cuando lo conozcas.',
+      'En «Propietarios / Titulares» creas y mantienes las fichas de titular: la tuya y las de las demás personas o sociedades que figuran en tus inmuebles (cónyuge, copropietario, familiar, sociedad…). Puedes crear tantas como necesites: «Crear titular» está siempre disponible, también después de guardar una.\n\nCada ficha es completa e independiente: identificación, NIF, contacto, domicilio fiscal, representante, cuentas IBAN y notas. Los datos fiscales pertenecen a cada titular y no se copian de una ficha a otra; se rellenan una sola vez y son la fuente de verdad.\n\nDespués asignas cada titular a tus inmuebles al crearlos o desde «Titulares del inmueble», con su porcentaje cuando lo conozcas. Solo ves y mantienes las fichas de tu ámbito: las de otros propietarios no aparecen.',
     roles: ['PROPIETARIO'],
     keywords: ['titular', 'titulares', 'ficha', 'propietario', 'cotitular', 'datos fiscales', 'iban'],
   },
@@ -376,7 +376,7 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     title: 'Titulares patrimoniales y cuentas de acceso',
     summary: 'La ficha de titular (nombre, NIF, cuentas bancarias) es independiente de quién puede entrar en la aplicación.',
     content:
-      'Un titular patrimonial es la identidad jurídica a la que pertenecen los inmuebles: lleva nombre, NIF, dirección fiscal y cuentas bancarias. Una cosa distinta es la cuenta de acceso a la aplicación (usuario y contraseña), que se concede por invitación.\n\nDesde esta pantalla puedes revisar y completar tu ficha e importar datos hacia ella. La creación de otros titulares patrimoniales corresponde a la administración: si necesitas añadir un nuevo titular independiente, solicítalo.\n\nPara que una vivienda tenga un cotitular fiscal (segundo arrendador en contratos) no hace falta crear nada aquí: se configura en la ficha del propio inmueble, en «Editar titularidad».',
+      'Un titular patrimonial es la identidad jurídica a la que pertenecen los inmuebles: lleva nombre, NIF, dirección fiscal y cuentas bancarias. Una cosa distinta es la cuenta de acceso a la aplicación (usuario y contraseña), que se concede por invitación.\n\nDesde esta pantalla puedes revisar y completar tu ficha e importar datos hacia ella. Para crear otros titulares usa «Propietarios / Titulares»: puedes crear tantos como necesites, cada uno con su propia ficha.\n\nPara que una vivienda tenga un cotitular fiscal (segundo arrendador en contratos), crea su ficha en «Propietarios / Titulares» y asígnalo en la ficha del propio inmueble, en «Editar titularidad».',
     keywords: ['titular', 'propietario', 'titulares', 'patrimonial', 'segundo propietario', 'cotitular', 'cuenta', 'acceso'],
     relatedTutorials: ['recorrido.propietario.primeros-pasos'],
   },

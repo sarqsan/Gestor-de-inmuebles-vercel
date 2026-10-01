@@ -14,6 +14,8 @@
  *  · RESPUESTA `{ id, nombre }` Y NADA MÁS: ni NIF, ni email, ni IBAN, ni
  *    datos fiscales. La proyección es una lista blanca.
  *  · SIN ENUMERACIÓN GLOBAL: la consulta es por prefijo y está limitada.
+ *  · AISLAMIENTO POR ÁMBITO: las fichas de titular creadas por OTRO propietario en su
+ *    ámbito (`ambitoPropietarioId`) no se devuelven, salvo a master/ADMINISTRADOR.
  *  · SIN SEGUNDO SISTEMA DE IDENTIDAD: se buscan `propietarios` existentes.
  *    Crear una titularidad NO crea ninguna cuenta de acceso.
  *  · SIN CREDENCIALES EN EL CLIENTE: la credencial de servicio sólo existe en
@@ -33,6 +35,7 @@ import {
   LIMITE_LECTURA,
   MAXIMO_RESULTADOS,
   MINIMO_CARACTERES,
+  fichaDeAmbitoAjeno,
   normalizarTermino,
   proyectarResultados,
   seleccionarCoincidencias,
@@ -283,7 +286,13 @@ export async function buscarTitulares(
     const crudo = deps.consultarPrefijo
       ? await deps.consultarPrefijo('propietarios', 'nombre', terminoNormalizado, LIMITE_LECTURA)
       : [];
+    // AISLAMIENTO POR ÁMBITO: un PROPIETARIO puede crear tantos titulares como necesite, pero cada
+    // ficha vive en SU ámbito. Aquí la consulta es global por prefijo de nombre, así que se excluyen
+    // las fichas de ámbito AJENO (salvo para master/ADMINISTRADOR): el nombre de un titular de otro
+    // propietario no se revela. Las fichas propias y las que no tienen ámbito siguen apareciendo.
+    const veAmbitosAjenos = perfil.esMaster || perfil.tipoPerfil === 'ADMINISTRADOR';
     const candidatos = crudo
+      .filter((d) => veAmbitosAjenos || !fichaDeAmbitoAjeno(d.datos, perfil.propietarioId))
       .map((d) => ({ id: d.id, nombre: typeof d.datos?.nombre === 'string' ? d.datos.nombre : '' }))
       .filter((c) => c.id && c.nombre);
 

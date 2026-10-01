@@ -167,13 +167,14 @@ export const NAVEGACION: readonly ItemNavDef[] = [
   {
     // El PROPIETARIO no tenía ninguna entrada hacia Propietarios/Titulares (su `propietarios`
     // es el portal), así que el aviso «créalo desde Propietarios/Titulares» del alta de
-    // inmueble no llevaba a ningún sitio. Misma pantalla (`PropietariosSection`), en modo
-    // «mi ficha»: el propietario completa y mantiene la SUYA (lo que las Rules le permiten).
+    // inmueble no llevaba a ningún sitio. Misma pantalla (`PropietariosSection`): el propietario
+    // crea y mantiene TANTAS fichas de titular como necesite dentro de su ámbito (y la suya),
+    // sin pasar por ningún administrador (lo que las Rules le permiten).
     section: 'titulares',
     grupo: 'CARTERA',
     icono: Users,
     etiquetas: { porDefecto: 'Propietarios / Titulares' },
-    descripciones: { porDefecto: 'Tu ficha de titular: datos personales, contacto y fiscales' },
+    descripciones: { porDefecto: 'Crea tus titulares: datos personales, contacto, fiscales e IBAN' },
     perfiles: ['PROPIETARIO'],
   },
   {

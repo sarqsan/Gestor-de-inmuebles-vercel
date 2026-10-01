@@ -70,6 +70,12 @@ Este documento **revisa y sustituye el diseño D1 de FASE 5B §1–5** (que qued
 
 Regla conceptual anti-confusión: **la pantalla de onboarding crea CUENTAS; las fichas de terceros se crean en "Propietarios" del panel de gestión; el vínculo cuenta↔titular SOLO nace de (a) el alta propia del onboarding o (b) una invitación nominal aceptada.** Ningún otro flujo puede vincular.
 
+> **Nota (2026-10-01, PR #19).** «Solo su ficha» de la fila *Propietario* se refiere a su **cuenta** y a sus datos como propietario.
+> Una cuenta PROPIETARIO **también crea y mantiene tantas fichas de titular como necesite dentro de su ámbito**
+> (`Propietario.ambitoPropietarioId` = su `propietarioId`; ver `docs/auditoria/CARTERAS_Y_TITULARES_INTERVENCION_2026-10-01.md`).
+> Esas fichas **no son carteras ajenas ni cuentas**: no tienen acceso a la aplicación, no las ve ningún otro propietario y el gestor de
+> cartera no las hereda. Lo de «ver nada de terceros» se mantiene.
+
 ## 5. PROPIETARIO SIN CUENTA (ya posible; se formaliza)
 `propietarios/{id}` existe sin `usuarios` ni Auth (`estadoAcceso='SIN_CUENTA'`). Sus inmuebles/gastos/contratos/documentos se crean con `propietarioId` explícito por admin/gestor autorizado. **Flujo futuro "Dar acceso":** invitación nominal (caso 5) → al activarse, `estadoAcceso='ACTIVO'` sin cambiar: propietarioId, titularidad, histórico, inmuebles, gastos, contratos, documentación. (El flujo ya existe en `accesoPropietarios.ts`; solo falta el estado de conveniencia y la UI.)
 

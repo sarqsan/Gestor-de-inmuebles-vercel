@@ -151,7 +151,6 @@ import { aplicarBajaAlEstado, etiquetaMotivoBaja, inmueblesOperativos } from './
 import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
-import type { GestionCartera } from './lib/gestionesCartera';
 import { detectarCambioTitularidad } from './lib/titularidadInmueble';
 import { asignarTitularesAlta, type TitularesAltaInmueble } from './lib/altaInmuebleTitulares';
 import { guardarTitularidad } from './lib/titularidadesFirestore';
@@ -329,6 +328,7 @@ import { PuertaEstadoDatos } from './components/estado-datos/EstadoDatosPantalla
 import { origenesActivosDePerfil, reportarResultadoGuardado } from './estadoDatos/canalIncidencias';
 import type { OrigenDatos } from './estadoDatos/canalIncidencias';
 import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
+import { useGestionesCarteraGestor } from './estadoDatos/useGestionesCarteraGestor';
 import { ejecutarOperacion } from './feedback/operaciones';
 import { incidenciasNoCerradas } from './utils/operacionesEngine';
 
@@ -565,7 +565,6 @@ export default function App() {
     [marcarListo]
   );
   const [authLoading, setAuthLoading] = useState<boolean>(true);
-  const [gestionesCarteraGestor, setGestionesCarteraGestor] = useState<GestionCartera[]>([]);
 
   // 1. Suscripción a Firebase Authentication como única fuente de verdad
   useEffect(() => {
@@ -611,13 +610,9 @@ export default function App() {
   // ROADMAP-04: cargar solo las relaciones donde esta persona es gestora. La
   // lista resultante acota consultas; las Firestore Rules siguen siendo la
   // autoridad y vuelven a comprobar cada relación y cada inmueble.
-  useEffect(() => {
-    if (!currentUser || !['PROPIETARIO', 'PROFESIONAL'].includes(currentUser.tipoPerfil)) {
-      setGestionesCarteraGestor([]);
-      return;
-    }
-    return subscribeGestionesCarteraGestor(setGestionesCarteraGestor, currentUser.id);
-  }, [currentUser?.id, currentUser?.tipoPerfil]);
+  // «Reintentar lectura» (`intentoLecturas`) también reabre esta escucha: una
+  // escucha denegada no se reabre sola. Traza técnica: `[diag:carteras]`.
+  const gestionesCarteraGestor = useGestionesCarteraGestor(currentUser, intentoLecturas, subscribeGestionesCarteraGestor);
 
   const inmuebleIdsParcialesGestionados = useMemo(
     () => currentUser ? inmueblesParcialesActivosDe(gestionesCarteraGestor, currentUser.id) : [],

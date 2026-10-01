@@ -89,6 +89,13 @@ documentado `ROADMAP-02` y `DICTAMEN-PRE-MERGE-FINAL`. Causas candidatas, por or
 
 Mejora de diagnóstico, sin ocultar nada: el log técnico ahora incluye el `gestorUsuarioId` consultado.
 
+> **Actualización (Orden 2).** La auditoría completa, la matriz *consulta → usuario → regla → resultado*, la
+> instrumentación `[diag:carteras]` y la prueba concreta en Firebase real están en
+> `DIAGNOSTICO_LECTURA_CARTERAS_2026-10-01.md`. Resultado: **B** (la causa de la denegación depende del
+> Firebase publicado; el repositorio autoriza la consulta). Se corrigió además que «Reintentar lectura» no
+> reintentaba Carteras, y se halló que el proyecto de la app (`gestor-inmuebles-produccion`) no es el que
+> nombran las instrucciones de publicación de reglas (`startup-sanctuary-sln7n`).
+
 ## 3. Alta de inmueble
 
 **Antes.** «Nuevo inmueble» ofrecía «Inmueble con Segundo Propietario / Co-Arrendador», con selector de

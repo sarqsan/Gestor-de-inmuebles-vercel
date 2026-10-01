@@ -75,7 +75,22 @@ import type {
 import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
 import type { GestionCartera } from './gestionesCartera';
 import { propietariosGestionadosDe, type InmuebleDelegadoParcial } from './carterasGestion';
-import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
+import {
+  codigoDeError,
+  limpiarIncidenciasDe,
+  reportarErrorGuardado,
+  reportarErrorLectura,
+} from '../estadoDatos/canalIncidencias';
+import { FIREBASE_BASE_DATOS_ID, FIREBASE_PROYECTO_ID } from './entornoFirebase';
+import {
+  TRAZA_CARTERAS,
+  construirInformeCarteras,
+  esIdValido,
+  type ContextoConsultaCarteras,
+  type ContextoSuscripcionCarteras,
+  type LecturaDocumento,
+  type ResultadoReintento,
+} from './diagnosticoCarteras';
 import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
@@ -380,19 +395,118 @@ function subscribeUnionInmuebles(
   return () => fuentes.forEach((unsub) => unsub());
 }
 
-/** Suscribe únicamente las gestiones de cartera cuyo gestorUsuarioId coincide. */
+/** Lectura puntual de un documento PROPIO para el diagnóstico (nunca alimenta la interfaz). */
+async function leerDocumentoPropio(coleccion: string, id: string): Promise<LecturaDocumento> {
+  try {
+    const snap = await getDoc(doc(db, coleccion, id));
+    return snap.exists()
+      ? { estado: 'EXISTE', datos: snap.data() as Record<string, unknown> }
+      : { estado: 'NO_EXISTE' };
+  } catch (err) {
+    const codigo = codigoDeError(err);
+    return codigo === 'permission-denied' ? { estado: 'DENEGADA' } : { estado: 'ERROR', codigo };
+  }
+}
+
+/**
+ * DIAGNÓSTICO de «Lectura · Carteras: No tienes permisos…» (ver
+ * `src/lib/diagnosticoCarteras.ts`). Solo se ejecuta TRAS una denegación; lee
+ * únicamente los dos documentos propios que usa `perfilActualVeraz()` y repite la
+ * misma consulta una vez. Va a la consola técnica: no crea incidencias ni toca la
+ * interfaz, y nunca lanza.
+ */
+async function diagnosticarDenegacionCarteras(ctx: ContextoConsultaCarteras, err: unknown): Promise<void> {
+  try {
+    const codigoError = codigoDeError(err);
+    if (codigoError !== 'permission-denied') {
+      console.warn(TRAZA_CARTERAS, 'fallo de lectura distinto de permission-denied: no se diagnostica por reglas', {
+        momento: new Date().toISOString(),
+        codigo: codigoError,
+        gestorUsuarioId: ctx.gestorUsuarioId,
+      });
+      return;
+    }
+    const espejo = ctx.authUid ? await leerDocumentoPropio('usuarios_auth', ctx.authUid) : null;
+    const usuarioIdEspejo = espejo && espejo.estado === 'EXISTE' ? espejo.datos.usuarioId : undefined;
+    const perfil = esIdValido(usuarioIdEspejo) ? await leerDocumentoPropio('usuarios', usuarioIdEspejo) : null;
+    let reintento: ResultadoReintento;
+    try {
+      await getDocs(query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', ctx.gestorUsuarioId)));
+      reintento = 'OK';
+    } catch (errReintento) {
+      const codigo = codigoDeError(errReintento);
+      reintento = codigo === 'permission-denied' ? 'DENEGADO' : `ERROR:${codigo}`;
+    }
+    console.warn(
+      TRAZA_CARTERAS,
+      'denegada',
+      construirInformeCarteras({
+        ctx,
+        codigoError,
+        observacion: { espejo, perfil },
+        reintento,
+        momento: new Date().toISOString(),
+      })
+    );
+  } catch (fallo) {
+    console.warn(TRAZA_CARTERAS, 'el diagnóstico no pudo completarse', fallo);
+  }
+}
+
+/**
+ * Suscribe únicamente las gestiones de cartera cuyo gestorUsuarioId coincide.
+ *
+ * `gestorUsuarioId` es el id de PERFIL (`usuarios/{id}`) de quien consulta, no el
+ * UID de Firebase Auth: la regla `gestionInvolucraAMi` lo compara con
+ * `usuarios_auth/{uid}.usuarioId`. Traza técnica (consola, nunca interfaz): al abrir
+ * la escucha, en su primer resultado y, si Firestore la deniega, el diagnóstico
+ * completo de `diagnosticarDenegacionCarteras`.
+ */
 export function subscribeGestionesCarteraGestor(
   callback: (gestiones: GestionCartera[]) => void,
-  gestorUsuarioId?: string
+  gestorUsuarioId?: string,
+  contexto?: ContextoSuscripcionCarteras
 ): Unsubscribe {
   if (!gestorUsuarioId) {
     callback([]);
     return () => {};
   }
+  // Cada apertura (inicio o «Reintentar lectura») parte limpia: el aviso anterior
+  // de ESTE origen se sustituye por el resultado de este intento.
+  limpiarIncidenciasDe('gestiones_cartera', 'LECTURA');
+  const ctx: ContextoConsultaCarteras = {
+    authUid: auth.currentUser?.uid ?? null,
+    gestorUsuarioId,
+    tipoPerfil: contexto?.tipoPerfil ?? null,
+    roles: contexto?.roles ?? [],
+    motivo: (contexto?.intento ?? 0) > 0 ? 'reintento' : 'inicio',
+    proyecto: FIREBASE_PROYECTO_ID,
+    baseDeDatos: FIREBASE_BASE_DATOS_ID,
+  };
+  console.info(TRAZA_CARTERAS, 'consulta', {
+    momento: new Date().toISOString(),
+    ...ctx,
+    consulta: `gestiones_cartera where gestorUsuarioId == '${gestorUsuarioId}'`,
+  });
+  let primerResultado = true;
   return onSnapshot(
     query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', gestorUsuarioId)),
-    (snap) => callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera))),
-    (err) => reportarErrorLectura('gestiones_cartera', err, `Firestore gestiones_cartera (gestorUsuarioId=${gestorUsuarioId}) snapshot error:`)
+    (snap) => {
+      if (primerResultado) {
+        primerResultado = false;
+        console.info(TRAZA_CARTERAS, 'resultado', {
+          momento: new Date().toISOString(),
+          gestorUsuarioId,
+          documentos: snap.docs.length,
+          desdeCache: Boolean(snap.metadata?.fromCache),
+        });
+      }
+      callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera)));
+    },
+    (err) => {
+      reportarErrorLectura('gestiones_cartera', err, `Firestore gestiones_cartera (gestorUsuarioId=${gestorUsuarioId}) snapshot error:`);
+      void diagnosticarDenegacionCarteras(ctx, err);
+    }
   );
 }
 

@@ -1,3 +1,4 @@
+import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
 /**
  * BLOQUE E — Gestión ERP de suministros.
  * Administrador: alta, edición, lecturas, cambios y reparto.
@@ -495,7 +496,7 @@ function EstadoCambio({ estado }: { estado: string }) {
 
 // ------------------------------------------------------- alta / edición
 function SuministroModal({
-  currentUser, inmuebles, inicial, onCerrar, onGuardado,
+  currentUser, inmuebles: carteraCompleta, inicial, onCerrar, onGuardado,
 }: {
   currentUser: UsuarioApp;
   inmuebles: Inmueble[];
@@ -508,6 +509,7 @@ function SuministroModal({
     { abierto: true, onCerrar },
     inicial ? 'Editar suministro' : 'Alta de suministro'
   );
+  const inmuebles = React.useMemo(() => inmueblesParaSeleccion(carteraCompleta, inicial?.inmuebleId), [carteraCompleta, inicial?.inmuebleId]);
   const [inmuebleId, setInmuebleId] = useState(inicial?.inmuebleId || inmuebles[0]?.id || '');
   const [tipo, setTipo] = useState<TipoSuministro>(inicial?.tipo || 'LUZ');
   const [cups, setCups] = useState(inicial?.cups || '');

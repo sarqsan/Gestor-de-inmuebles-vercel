@@ -1,3 +1,4 @@
+import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
 import React, { useMemo, useState } from 'react';
 import { X, RefreshCw, AlertCircle, Save } from 'lucide-react';
 import type {
@@ -35,7 +36,7 @@ const labelInmueble = (i: Inmueble): string =>
 const hoy = () => new Date().toISOString().split('T')[0];
 
 export const RecomercializarModal: React.FC<Props> = ({
-  inmuebles,
+  inmuebles: carteraCompleta,
   contratos,
   contexto,
   expedientesAbiertos,
@@ -43,9 +44,15 @@ export const RecomercializarModal: React.FC<Props> = ({
   onCreate,
   onClose,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesParaSeleccion(carteraCompleta), [carteraCompleta]);
+
   const [inmuebleId, setInmuebleId] = useState<string>(
     contexto?.inmuebleId || inmuebles[0]?.id || ''
   );
+  // Una selección antigua no puede mantener operativa una vivienda dada de baja.
+  React.useEffect(() => {
+    if (!inmuebles.some((i) => i.id === inmuebleId)) setInmuebleId(inmuebles[0]?.id || '');
+  }, [inmuebles, inmuebleId]);
   const contratosDelInmueble = useMemo(
     () =>
       contratos

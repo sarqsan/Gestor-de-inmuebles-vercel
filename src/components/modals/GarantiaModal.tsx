@@ -1,3 +1,4 @@
+import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useEffect } from 'react';
 import {
   GarantiaReparacion,
@@ -42,14 +43,20 @@ export const GarantiaModal: React.FC<GarantiaModalProps> = ({
   isOpen,
   onClose,
   onSave,
-  inmuebles,
+  inmuebles: carteraCompleta,
   propietarios = [],
   profesionales = [],
   currentUser,
   garantiaToEdit,
   defaultInmuebleId,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesParaSeleccion(carteraCompleta, garantiaToEdit?.inmuebleId), [carteraCompleta, garantiaToEdit?.inmuebleId]);
+
   const [inmuebleId, setInmuebleId] = useState<string>('');
+  // Una selección antigua no puede mantener operativa una vivienda dada de baja.
+  React.useEffect(() => {
+    if (!inmuebles.some((i) => i.id === inmuebleId)) setInmuebleId(inmuebles[0]?.id || '');
+  }, [inmuebles, inmuebleId]);
   const [titulo, setTitulo] = useState<string>('');
   const [elementoNombre, setElementoNombre] = useState<string>('');
   const [descripcion, setDescripcion] = useState<string>('');

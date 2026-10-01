@@ -1,3 +1,4 @@
+import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState } from 'react';
 import {
   X,
@@ -43,18 +44,24 @@ interface NecesidadReformaModalProps {
 export const NecesidadReformaModal: React.FC<NecesidadReformaModalProps> = ({
   isOpen,
   onClose,
-  inmuebles,
+  inmuebles: carteraCompleta,
   inmueblePreseleccionado,
   necesidadParaEditar,
   currentUser,
   onSaveSuccess,
   onCrearProyecto,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesParaSeleccion(carteraCompleta, necesidadParaEditar?.inmuebleId), [carteraCompleta, necesidadParaEditar?.inmuebleId]);
+
   const isEditing = Boolean(necesidadParaEditar);
 
   const [inmuebleId, setInmuebleId] = useState<string>(
     necesidadParaEditar?.inmuebleId || inmueblePreseleccionado?.id || inmuebles[0]?.id || ''
   );
+  // Una selección antigua no puede mantener operativa una vivienda dada de baja.
+  React.useEffect(() => {
+    if (!inmuebles.some((i) => i.id === inmuebleId)) setInmuebleId(inmuebles[0]?.id || '');
+  }, [inmuebles, inmuebleId]);
   const [titulo, setTitulo] = useState<string>(necesidadParaEditar?.titulo || '');
   const [descripcion, setDescripcion] = useState<string>(necesidadParaEditar?.descripcion || '');
   const [categoria, setCategoria] = useState<CategoriaReforma>(

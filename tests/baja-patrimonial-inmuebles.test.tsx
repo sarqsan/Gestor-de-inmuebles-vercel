@@ -26,11 +26,14 @@ import {
   aplicarBajaAlEstado,
   inmueblesDadosDeBaja,
   inmueblesOperativos,
+  inmueblesParaSeleccion,
   registrosARetirarPorBaja,
   requiereRetiradaPublicacion,
   resumenBajaPatrimonial,
 } from '../src/utils/bajaPatrimonialInmueble';
 import { puedeDarDeBajaInmueble, type AmbitoEscrituraInmuebles } from '../src/utils/permisosInmueble';
+import { InicioSection } from '../src/components/sections/InicioSection';
+import { DashboardEjecutivoSection } from '../src/components/sections/DashboardEjecutivoSection';
 import { InmueblesSection } from '../src/components/sections/InmueblesSection';
 import type { Inmueble } from '../src/types';
 
@@ -77,6 +80,22 @@ vi.mock('firebase/firestore', () => ({
 
 vi.mock('../src/lib/firebase', () => ({
   db: {},
+  scopeDeUsuario: () => ({}),
+  claveScope: () => 'test',
+  subscribeIncidencias: () => () => undefined,
+  subscribeTareasMantenimiento: () => () => undefined,
+  subscribePolizas: () => () => undefined,
+  subscribeSiniestros: () => () => undefined,
+  subscribeTrabajosProfesionales: () => () => undefined,
+  subscribeExpedientesRecomercializacion: () => () => undefined,
+  subscribeAuditLogs: () => () => undefined,
+  subscribeGarantiasReparacion: () => () => undefined,
+  subscribeNecesidadesReforma: () => () => undefined,
+  subscribePolizasSeguras: () => () => undefined,
+  subscribeProyectosReforma: () => () => undefined,
+  subscribePresupuestosProfesionales: () => () => undefined,
+  subscribeGastos: () => () => undefined,
+
   // Paridad con el limpiador real: omite las claves `undefined` (Firestore las rechaza).
   deepCleanForFirestore: (valor: unknown): unknown => JSON.parse(JSON.stringify(valor ?? null)),
   sanitizeObjectForFirestore: (valor: unknown): unknown => JSON.parse(JSON.stringify(valor ?? null)),
@@ -500,5 +519,88 @@ describe('UI · el inmueble nunca desaparece por un fallo de persistencia', () =
     fireEvent.click(screen.getByRole('button', { name: /Histórico \(1\)/ }));
     expect(screen.getAllByText('Calle Histórica 9').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendido').length).toBeGreaterThan(0);
+  });
+});
+
+
+describe('visibilidad transversal · cartera operativa e histórico', () => {
+  const a = inmueble({ id: 'a', direccion: 'Activa A', titularesIds: ['p1', 'p2'], propietarioId: 'p1' });
+  const b = inmueble({ id: 'b', direccion: 'Activa B', estadoExplotacion: 'SIN_EXPLOTACION' });
+  const h = inmueble({ id: 'h', direccion: 'Histórica H', estadoPatrimonial: 'BAJA', titularesIds: ['p1', 'p2'] });
+  const mezcla = [a, b, h];
+
+  it('listado y contador usan el mismo conjunto; histórico exclusivamente histórico', () => {
+    renderSeccion({ inmuebles: mezcla });
+    expect(screen.getByRole('button', { name: 'Todos (2)' })).toBeTruthy();
+    expect(screen.getAllByText('Activa A').length).toBeGreaterThan(0);
+    expect(screen.getByText('Activa B')).toBeTruthy();
+    expect(screen.queryByText('Histórica H')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Histórico (1)' }));
+    expect(screen.getByText('Histórica H')).toBeTruthy();
+    expect(screen.queryByText('Activa A')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Todos (2)' }));
+    expect(screen.queryByText('Histórica H')).toBeNull();
+  });
+
+  it('inicio elimina tarjeta histórica y cuenta sólo activas sin depender del host', () => {
+    render(<InicioSection inmuebles={mezcla} candidatos={[]} onSelectCandidate={() => {}} onSelectSection={() => {}} />);
+    expect(screen.getByText('De 2 viviendas activas')).toBeTruthy();
+    expect(screen.getAllByText('Activa A').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Histórica H')).toBeNull();
+  });
+
+  it('dashboard no ofrece tarjetas históricas, incluso con props de caché completas', () => {
+    render(<DashboardEjecutivoSection inmuebles={mezcla} contratos={[]} cobros={[]} gastos={[]} candidatos={[]} onSelectSection={() => {}} />);
+    expect(screen.getAllByText('Activa A').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Activa B').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Histórica H')).toBeNull();
+  });
+
+  it('snapshot de baja con ficha abierta produce aviso, no una ficha vacía', () => {
+    const props = { candidatos: [], propietarios: [], onSelectCandidate: () => {} };
+    const { rerender } = render(<InmueblesSection {...props} inmuebles={[a]} />);
+    fireEvent.click(screen.getByText('Activa A'));
+    const actualizado = { ...a, estadoPatrimonial: 'BAJA' as const };
+    rerender(<InmueblesSection {...props} inmuebles={[actualizado]} />);
+    expect(screen.getByText('Inmueble histórico / dado de baja')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Consultar ficha histórica' }));
+    expect(screen.getAllByText('Activa A').length).toBeGreaterThan(0);
+  });
+
+  it('baja confirmada actualiza listado y contador sin recargar; conserva el documento', () => {
+    const props = { candidatos: [], propietarios: [], onSelectCandidate: () => {} };
+    const { rerender } = render(<InmueblesSection {...props} inmuebles={mezcla} />);
+    const siguiente = aplicarBajaAlEstado(mezcla, 'a', { ok: true, parche: { estadoPatrimonial: 'BAJA' } });
+    rerender(<InmueblesSection {...props} inmuebles={siguiente} />);
+    expect(screen.getByRole('button', { name: 'Todos (1)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Histórico (2)' })).toBeTruthy();
+    expect(screen.queryByText('Activa A')).toBeNull();
+    expect(siguiente).toHaveLength(3);
+  });
+
+  it.each(['p1', 'p2'])('N titulares: %s conserva acceso histórico y activo', (pid) => {
+    const autorizados = mezcla.filter(i => i.titularesIds?.includes(pid));
+    expect(inmueblesOperativos(autorizados)).toEqual([a]);
+    expect(inmueblesDadosDeBaja(autorizados)).toEqual([h]);
+    expect(inmueblesOperativos(autorizados)[0].titularesIds).toEqual(['p1', 'p2']);
+  });
+
+  it('selectores normales excluyen histórico; editar conserva la referencia histórica previa', () => {
+    expect(inmueblesParaSeleccion(mezcla)).toEqual([a, b]);
+    expect(inmueblesParaSeleccion(mezcla, 'h')).toEqual([a, b, h]);
+    expect(inmueblesParaSeleccion(mezcla, 'a')).toEqual([a, b]);
+  });
+
+  it('SIN_EXPLOTACION e historial de bajas previas no significan baja actual', () => {
+    expect(inmueblesOperativos([b, { ...a, estadoPatrimonial: 'ACTIVO', historialBajas: [h.bajaPatrimonial!] }])).toHaveLength(2);
+  });
+
+  it('App conecta cabeceras, dashboard y selectores al conjunto operativo sin mutilar histórico', () => {
+    const app = readFileSync(resolve(RAIZ, 'src/App.tsx'), 'utf8');
+    expect(app).not.toContain('inmueblesCount={scopedInmuebles.length}');
+    expect(app.match(/inmueblesCount=\{inmueblesCarteraOperativa.length\}/g)).toHaveLength(2);
+    expect(app).toMatch(/<DashboardEjecutivoSection\s+inmuebles=\{inmueblesCarteraOperativa\}/);
+    expect(app).toMatch(/<InmueblesSection\s+inmuebles=\{scopedInmuebles\}/);
+    expect(app).toContain('i.titularesIds?.includes(currentUser.propietarioId)');
   });
 });

@@ -1,3 +1,4 @@
+import { inmueblesOperativos, inmueblesDadosDeBaja } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   LayoutDashboard,
@@ -279,12 +280,13 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const totalUsuarios = usuarios.length;
   const totalPropietarios = propietarios.length;
   const totalProfesionales = profesionales.length;
-  const totalInmuebles = inmuebles.length;
+  const carteraOperativa = inmueblesOperativos(inmuebles);
+  const totalInmuebles = carteraOperativa.length;
   const totalContratos = contratos.length;
-  const viviendasAlquiladas = inmuebles.filter(
-    (i) => i.estado === 'alquilado' || i.estado === 'reservado'
+  const viviendasAlquiladas = carteraOperativa.filter(
+    (i) => ['alquilado', 'reservado'].includes(i.estado)
   ).length;
-  const viviendasDisponibles = inmuebles.filter((i) => i.estado === 'disponible').length;
+  const viviendasDisponibles = carteraOperativa.filter((i) => i.estado === 'disponible').length;
   const totalAuditLogs = auditLogs.length;
 
   const tasaOcupacion =
@@ -350,13 +352,14 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
   // Filtered Inmuebles for Global Inspection
   const filteredInmuebles = useMemo(() => {
-    return inmuebles.filter((inm) => {
+    const visibles = inmuebleEstadoFilter === 'HISTORICO' ? inmueblesDadosDeBaja(inmuebles) : inmueblesOperativos(inmuebles);
+    return visibles.filter((inm) => {
       const matchesSearch =
         inm.direccion.toLowerCase().includes(inmuebleSearch.toLowerCase()) ||
         inm.ciudad.toLowerCase().includes(inmuebleSearch.toLowerCase()) ||
-        (inm.nombre && inm.nombre.toLowerCase().includes(inmuebleSearch.toLowerCase()));
+        ('nombre' in inm && typeof inm.nombre === 'string' && inm.nombre.toLowerCase().includes(inmuebleSearch.toLowerCase()));
       const matchesEstado =
-        inmuebleEstadoFilter === 'TODOS' || inm.estado === inmuebleEstadoFilter;
+        inmuebleEstadoFilter === 'TODOS' || inmuebleEstadoFilter === 'HISTORICO' || inm.estado === inmuebleEstadoFilter;
       const matchesPropietario =
         inmueblePropietarioFilter === 'TODOS' ||
         inm.propietarioPrincipalId === inmueblePropietarioFilter;
@@ -969,7 +972,8 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   onChange={(e) => setInmuebleEstadoFilter(e.target.value)}
                   className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-hidden focus:ring-1 focus:ring-purple-500"
                 >
-                  <option value="TODOS">Todos los Estados</option>
+                  <option value="TODOS">Todos los Estados activos</option>
+                  <option value="HISTORICO">Histórico patrimonial</option>
                   <option value="disponible">Disponible</option>
                   <option value="alquilado">Alquilado</option>
                   <option value="reservado">Reservado</option>

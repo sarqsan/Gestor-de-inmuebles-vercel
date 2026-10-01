@@ -29,7 +29,7 @@ import { validarCoherenciaTitularidad } from '../../lib/titularidadInmueble';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
 import { avisoCicloPatrimonial, claseCicloPatrimonial } from '../../utils/fichaInmueblePresentacion';
 import { inmuebleDadoDeBaja, type SolicitudBaja } from '../../utils/cicloPatrimonialEngine';
-import { inmueblesDadosDeBaja } from '../../utils/bajaPatrimonialInmueble';
+import { inmueblesDadosDeBaja, inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import {
   obtenerCobrosInmueble,
   calcularResumenCobros,
@@ -466,8 +466,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const puedeOfrecerBaja = (inm: Inmueble): boolean =>
     Boolean(onBajaInmueble) && !inmuebleDadoDeBaja(inm) && (puedeDarDeBaja ? puedeDarDeBaja(inm) : true);
 
-  const filteredInmuebles = inmuebles.filter((inm) => {
-    if (!mostrarHistorico && inmuebleDadoDeBaja(inm)) return false;
+  const carteraOperativa = useMemo(() => inmueblesOperativos(inmuebles), [inmuebles]);
+  const carteraVisible = mostrarHistorico ? inmueblesHistoricos : carteraOperativa;
+  const filteredInmuebles = carteraVisible.filter((inm) => {
     const matchesSearch =
       inm.direccion.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inm.ciudad.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1024,7 +1025,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
   return (
     <div className="space-y-6">
-      {selectedInmueble ? (
+      {selectedInmueble && inmuebleDadoDeBaja(selectedInmueble) && !mostrarHistorico ? (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-6 space-y-3">
+          <h2 className="font-bold">Inmueble histórico / dado de baja</h2>
+          <p>{selectedInmueble.direccion}. Sus datos se conservan en el histórico.</p>
+          <button onClick={() => setMostrarHistorico(true)}>Consultar ficha histórica</button>
+          <button onClick={() => seleccionarInmueble(null)}>Volver a la cartera operativa</button>
+        </div>
+      ) : selectedInmueble ? (
         <div className="space-y-6">
           {/* Top Back Navigation */}
           <button
@@ -2039,6 +2047,11 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       </div>
     ) : (
       <>
+        {filteredInmuebles.length === 0 && (
+          <p role="status" className="rounded-xl bg-slate-50 p-4">
+            {mostrarHistorico ? 'No hay inmuebles históricos con estos filtros.' : 'No hay viviendas operativas con estos filtros. Las viviendas dadas de baja se conservan en Histórico.'}
+          </p>
+        )}
         {/* Controls: Search & Filters */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3">
         {/* Search */}
@@ -2057,12 +2070,12 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <div className="flex items-center gap-1.5 w-full sm:w-auto bg-slate-100 p-1 rounded-xl">
             <button
-              onClick={() => setFilterState('todos')}
+              onClick={() => { setMostrarHistorico(false); setFilterState('todos'); }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex-1 sm:flex-initial ${
                 filterState === 'todos' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Todos ({inmuebles.length - inmueblesHistoricos.length})
+              Todos ({carteraOperativa.length})
             </button>
             <button
               onClick={() => setFilterState('disponible')}
@@ -2082,7 +2095,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             </button>
             {inmueblesHistoricos.length > 0 && (
               <button
-                onClick={() => setMostrarHistorico((previo) => !previo)}
+                onClick={() => { setMostrarHistorico((previo) => !previo); setFilterState('todos'); }}
                 title="Inmuebles vendidos o dados de baja: se conservan en el histórico"
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex-1 sm:flex-initial flex items-center gap-1.5 ${
                   mostrarHistorico ? 'bg-white text-amber-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'

@@ -1,3 +1,4 @@
+import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState } from 'react';
 import {
   X,
@@ -61,7 +62,7 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   isOpen,
   onClose,
   trabajoParaEditar,
-  inmuebles,
+  inmuebles: carteraCompleta,
   incidencias,
   profesionales,
   currentUser,
@@ -69,12 +70,18 @@ export const TrabajoProfesionalModal: React.FC<TrabajoProfesionalModalProps> = (
   profesionalPreseleccionadoId,
   onSaveSuccess,
 }) => {
+  const inmuebles = React.useMemo(() => inmueblesParaSeleccion(carteraCompleta, trabajoParaEditar?.inmuebleId), [carteraCompleta, trabajoParaEditar?.inmuebleId]);
+
   const isEditing = !!trabajoParaEditar;
 
   // Initialize values
   const [inmuebleId, setInmuebleId] = useState<string>(
     trabajoParaEditar?.inmuebleId || incidenciaPreseleccionada?.inmuebleId || (inmuebles[0]?.id || '')
   );
+  // Una selección antigua no puede mantener operativa una vivienda dada de baja.
+  React.useEffect(() => {
+    if (!inmuebles.some((i) => i.id === inmuebleId)) setInmuebleId(inmuebles[0]?.id || '');
+  }, [inmuebles, inmuebleId]);
   const [incidenciaId, setIncidenciaId] = useState<string>(
     trabajoParaEditar?.incidenciaId || incidenciaPreseleccionada?.id || ''
   );

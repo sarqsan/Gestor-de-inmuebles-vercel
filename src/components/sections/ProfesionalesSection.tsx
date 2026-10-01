@@ -1,3 +1,4 @@
+import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Profesional,
@@ -483,7 +484,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
               className="p-2 border border-slate-300 rounded-xl bg-white font-medium"
             >
               <option value="TODOS">Todos los Inmuebles</option>
-              {inmuebles.map((inm) => (
+              {inmueblesOperativos(inmuebles).map((inm) => (
                 <option key={inm.id} value={inm.id}>
                   {inm.direccion} ({inm.ciudad})
                 </option>
@@ -956,7 +957,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
                 <option value="" disabled>
                   Consultar historial por vivienda...
                 </option>
-                {inmuebles.map((inm) => (
+                {inmueblesOperativos(inmuebles).map((inm) => (
                   <option key={inm.id} value={inm.id}>
                     {inm.direccion} ({inm.ciudad})
                   </option>

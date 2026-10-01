@@ -147,7 +147,7 @@ import {
 import { avisarOperacion } from './feedback/canalFeedback';
 import { darDeBajaInmuebleFirestore } from './lib/bajaPatrimonialInmuebleFirestore';
 import { puedeDarDeBajaInmueble, type AmbitoEscrituraInmuebles } from './utils/permisosInmueble';
-import { aplicarBajaAlEstado, etiquetaMotivoBaja } from './utils/bajaPatrimonialInmueble';
+import { aplicarBajaAlEstado, etiquetaMotivoBaja, inmueblesOperativos } from './utils/bajaPatrimonialInmueble';
 import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
@@ -687,7 +687,7 @@ export default function App() {
     const parciales = new Set(inmuebleIdsParcialesGestionados);
     if (currentUser.tipoPerfil === 'PROPIETARIO') {
       return inmuebles.filter((i) =>
-        (currentUser.propietarioId && (i.propietarioId === currentUser.propietarioId || i.propietarioPrincipalId === currentUser.propietarioId)) ||
+        (currentUser.propietarioId && (i.propietarioId === currentUser.propietarioId || i.propietarioPrincipalId === currentUser.propietarioId || i.titularesIds?.includes(currentUser.propietarioId))) ||
         (currentUser.inmuebleIds && currentUser.inmuebleIds.includes(i.id)) ||
         gestionadosPid.has(i.propietarioId || i.propietarioPrincipalId || '') || parciales.has(i.id)
       );
@@ -702,6 +702,10 @@ export default function App() {
     }
     return [];
   }, [currentUser, inmuebles, profesionales, inmuebleIdsParcialesGestionados]);
+
+  // Proyección, nunca otro estado: la baja y cada snapshot actualizan todas las
+  // vistas operativas a la vez. El ámbito completo conserva las referencias históricas.
+  const inmueblesCarteraOperativa = useMemo(() => inmueblesOperativos(scopedInmuebles), [scopedInmuebles]);
 
   const scopedPropietarios = useMemo(() => {
     if (!currentUser) return [];
@@ -3823,7 +3827,7 @@ export default function App() {
         activeSection={activeSection}
         onSelectSection={setActiveSection}
         candidatos={scopedCandidatos}
-        inmueblesCount={scopedInmuebles.length}
+        inmueblesCount={inmueblesCarteraOperativa.length}
         propietariosCount={scopedPropietarios.length}
         solicitudesCount={solicitudes.length}
         preseleccionadosCount={preselectedCount}
@@ -3845,7 +3849,7 @@ export default function App() {
           activeSection={activeSection}
           onSelectSection={setActiveSection}
           candidatos={scopedCandidatos}
-          inmueblesCount={scopedInmuebles.length}
+          inmueblesCount={inmueblesCarteraOperativa.length}
           propietariosCount={scopedPropietarios.length}
           solicitudesCount={solicitudes.length}
           preseleccionadosCount={preselectedCount}
@@ -3906,7 +3910,7 @@ export default function App() {
           >
           {activeSection === 'dashboard' && (
             <DashboardEjecutivoSection
-              inmuebles={scopedInmuebles}
+              inmuebles={inmueblesCarteraOperativa}
               contratos={scopedContratos}
               cobros={scopedCobros}
               gastos={scopedGastos}
@@ -3922,7 +3926,7 @@ export default function App() {
           {activeSection === 'inicio' && (
             <InicioSection
               candidatos={scopedCandidatos}
-              inmuebles={scopedInmuebles}
+              inmuebles={inmueblesCarteraOperativa}
               onSelectCandidate={(cand) => setSelectedCandidateForModal(cand)}
               onSelectSection={setActiveSection}
               onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
@@ -3963,7 +3967,7 @@ export default function App() {
               ) : (
                 <PropietariosSection
                   propietarios={scopedPropietarios}
-                  inmuebles={scopedInmuebles}
+                  inmuebles={inmueblesCarteraOperativa}
                   onSavePropietario={handleSavePropietario}
                   onDeletePropietario={handleDeletePropietario}
                   onSelectInmueble={() => setActiveSection('inmuebles')}
@@ -3986,7 +3990,7 @@ export default function App() {
           {activeSection === 'preseleccionados' && (
             <PreseleccionadosSection
               candidatos={scopedCandidatos}
-              inmuebles={scopedInmuebles}
+              inmuebles={inmueblesCarteraOperativa}
               invitaciones={invitaciones}
               solicitudes={solicitudes}
               slots={slots}
@@ -4200,7 +4204,7 @@ export default function App() {
           {activeSection === 'recomercializacion' && (
             <RecomercializacionSection
               expedientes={scopedExpedientesRecomerc}
-              inmuebles={scopedInmuebles}
+              inmuebles={inmueblesCarteraOperativa}
               contratos={scopedContratos}
               profesionales={scopedProfesionales}
               currentUser={currentUser}
@@ -4398,7 +4402,7 @@ export default function App() {
               <ProfesionalPortalSection
                 currentUser={currentUser}
                 profesional={scopedProfesionales.find((p) => p.id === currentUser.profesionalId || p.usuarioId === currentUser.id) || null}
-                inmuebles={scopedInmuebles}
+                inmuebles={inmueblesCarteraOperativa}
                 especialidades={especialidades}
                 onSaveProfesional={handleSaveProfesional}
               />
@@ -4602,7 +4606,7 @@ export default function App() {
         <CrearAgendaVisitasModal
           isOpen={showCrearAgendaModal}
           onClose={() => setShowCrearAgendaModal(false)}
-          inmuebles={inmuebles}
+          inmuebles={inmueblesCarteraOperativa}
           candidatos={candidatos}
           existingSlots={slots}
           existingInvitaciones={invitaciones}
@@ -4649,7 +4653,7 @@ export default function App() {
             </div>
             <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50/50">
               <NuevoCandidatoSection
-                inmuebles={inmuebles}
+                inmuebles={inmueblesCarteraOperativa}
                 onAddCandidato={handleAddCandidato}
                 onSelectSection={(sec) => {
                   setShowNuevoCandidatoModal(false);
@@ -4669,7 +4673,7 @@ export default function App() {
           candidato={candidateForCrearSeguro}
           inmueble={inmuebleForCrearSeguro}
           candidatosList={candidatos}
-          inmueblesList={inmuebles}
+          inmueblesList={inmueblesCarteraOperativa}
           aseguradoras={aseguradoras}
           onClose={() => {
             setShowCrearSeguroModal(false);
@@ -4741,7 +4745,7 @@ export default function App() {
         <CrearProfesionalModal
           profesionalParaEditar={selectedProfForEdit}
           especialidades={especialidades}
-          inmueblesDisponibles={inmuebles}
+          inmueblesDisponibles={inmueblesCarteraOperativa}
           currentUser={currentUser}
           onSave={async (p) => {
             await handleSaveProfesional(p);

@@ -121,6 +121,10 @@ embebidas en el inmueble y sin `titularesIds` ni `titularidades`.
 
 ## 4. Firestore Rules
 
+> **Actualización (Orden 3).** Carteras deja de reportarse como error de carga de datos: pasa a
+> **capacidad adicional** (aviso específico + reintento dirigido) y el despliegue de reglas queda
+> fijado a `gestor-inmuebles-produccion`. Ver `CARTERAS_CAPACIDAD_ADICIONAL_2026-10-01.md`.
+
 **No se ha modificado `firestore.rules`** (ni `storage.rules` ni los índices). Ninguna lectura legítima
 resultó bloqueada: las denegadas de titularidades eran sondeos de documentos inexistentes (innecesarios) y
 la de Carteras no es atribuible a las reglas del repositorio. Sigue prohibido: `list` de `titularidades`,

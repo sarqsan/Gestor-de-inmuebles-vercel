@@ -15,6 +15,14 @@
  * La suscripción llega inyectada (`suscribir`): este módulo no importa Firebase.
  * Quien suscribe es responsable de informar del error por el canal de incidencias
  * y de la instrumentación (ver `subscribeGestionesCarteraGestor`).
+ *
+ * CAPACIDAD ADICIONAL (2026-10-01): este hook es el único consumidor de la
+ * escucha de Carteras, una capacidad que AMPLÍA el ámbito del gestor pero que no
+ * es carga de datos del Portal. Si la lectura se deniega, el estado NO se vacía
+ * ni se degrada el resto de la aplicación: se conserva lo último entregado (si
+ * lo hubo), la incidencia se registra con `alcance: 'CAPACIDAD'` y el aviso
+ * específico ofrece reintentarla (el contador `intento` que recibe lo aporta el
+ * host desde `useEstadoLecturas.intentoDeCapacidad`).
  */
 import { useEffect, useState } from 'react';
 import type { ContextoSuscripcionCarteras } from '../lib/diagnosticoCarteras';

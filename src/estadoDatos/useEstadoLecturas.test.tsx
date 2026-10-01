@@ -244,6 +244,93 @@ describe('UX-2 · REINTENTAR: re-ejecuta la lectura real sin recargar la página
   });
 });
 
+describe('2026-10-01 · CAPACIDAD ADICIONAL: aviso específico y reintento dirigido', () => {
+  /** Host con una lectura primaria (`inmuebles`) y una capacidad (`gestiones_cartera`). */
+  function HostCapacidad({ fuente }: { fuente: FuenteFalsa }) {
+    const {
+      intento,
+      marcarListo,
+      iniciarLecturas,
+      reintentar,
+      reintentarCapacidad,
+      intentoDeCapacidad,
+      estadoDePantalla,
+      incidencias,
+      descartarIncidencia,
+      descartarIncidencias,
+    } = useEstadoLecturas(['inmuebles']);
+
+    useEffect(() => {
+      iniciarLecturas();
+      return fuente.suscribir('inmuebles', () => marcarListo('inmuebles'));
+    }, [intento, fuente, iniciarLecturas, marcarListo]);
+
+    const intentoCarteras = intentoDeCapacidad('gestiones_cartera');
+    useEffect(() => fuente.suscribir('gestiones_cartera', () => undefined), [intentoCarteras, fuente]);
+
+    return (
+      <div>
+        <AvisoIncidenciasDatos
+          incidencias={incidencias}
+          onReintentar={reintentar}
+          onReintentarCapacidad={reintentarCapacidad}
+          onDescartar={descartarIncidencia}
+          onDescartarTodas={descartarIncidencias}
+        />
+        <PuertaEstadoDatos estado={estadoDePantalla('inmuebles')} onReintentar={reintentar}>
+          <p data-testid="contenido">datos primarios</p>
+        </PuertaEstadoDatos>
+      </div>
+    );
+  }
+
+  const montarCapacidad = () => {
+    const fuente = new FuenteFalsa();
+    render(<HostCapacidad fuente={fuente} />);
+    return { fuente };
+  };
+
+  it('un fallo de la capacidad NO produce el aviso global ni el error de pantalla', () => {
+    const { fuente } = montarCapacidad();
+    entregar(fuente, []); // la lectura primaria terminó bien
+
+    fallarEnLectura('gestiones_cartera', { code: 'permission-denied' });
+
+    expect(screen.getByTestId('aviso-capacidad-adicional')).toBeTruthy();
+    expect(screen.getByText(/Carteras: no se han podido leer tus carteras ni delegaciones/)).toBeTruthy();
+    expect(screen.queryByTestId('aviso-incidencias-datos')).toBeNull();
+    expect(screen.queryByText(/No se han podido leer algunos datos/)).toBeNull();
+    expect(screen.queryByTestId('estado-error')).toBeNull();
+    expect(screen.getByTestId('contenido')).toBeTruthy();
+  });
+
+  it('su «Reintentar lectura» reabre SÓLO la capacidad, nunca las lecturas primarias', () => {
+    const { fuente } = montarCapacidad();
+    entregar(fuente, []);
+    expect(fuente.veces('inmuebles')).toBe(1);
+    expect(fuente.veces('gestiones_cartera')).toBe(1);
+
+    fallarEnLectura('gestiones_cartera', { code: 'permission-denied' });
+    fireEvent.click(screen.getByText('Reintentar lectura'));
+
+    expect(fuente.veces('gestiones_cartera')).toBe(2);
+    expect(fuente.veces('inmuebles')).toBe(1); // no se re-suscribe lo que no falló
+    expect(screen.queryByTestId('aviso-capacidad-adicional')).toBeNull();
+  });
+
+  it('el «Reintentar» general de los datos NO reabre la capacidad ni borra su aviso', () => {
+    const { fuente } = montarCapacidad();
+    fallarEnLectura('inmuebles', { code: 'unavailable' });
+    fallarEnLectura('gestiones_cartera', { code: 'permission-denied' });
+
+    fireEvent.click(screen.getByText('Reintentar'));
+
+    expect(fuente.veces('inmuebles')).toBe(2);
+    expect(fuente.veces('gestiones_cartera')).toBe(1); // su aviso y su lectura siguen pendientes
+    expect(screen.getByTestId('aviso-capacidad-adicional')).toBeTruthy();
+  });
+});
+
 describe('UX-2 · GUARDADO: un fallo de persistencia no se presenta como éxito', () => {
   it('un fallo de guardado se muestra al usuario y no se limpia al reintentar la lectura', () => {
     const { fuente } = montar();

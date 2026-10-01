@@ -548,6 +548,8 @@ export default function App() {
     marcarListo,
     iniciarLecturas,
     reintentar: reintentarLecturas,
+    reintentarCapacidad,
+    intentoDeCapacidad,
     estadoDePantalla,
     incidencias: incidenciasDatos,
     descartarIncidencia,
@@ -610,9 +612,15 @@ export default function App() {
   // ROADMAP-04: cargar solo las relaciones donde esta persona es gestora. La
   // lista resultante acota consultas; las Firestore Rules siguen siendo la
   // autoridad y vuelven a comprobar cada relación y cada inmueble.
-  // «Reintentar lectura» (`intentoLecturas`) también reabre esta escucha: una
-  // escucha denegada no se reabre sola. Traza técnica: `[diag:carteras]`.
-  const gestionesCarteraGestor = useGestionesCarteraGestor(currentUser, intentoLecturas, subscribeGestionesCarteraGestor);
+  //
+  // CAPACIDAD ADICIONAL: Carteras no es una lectura primaria del Portal. Si se
+  // deniega, se registra el diagnóstico (`[diag:carteras]`, alcance CAPACIDAD) y
+  // la aplicación sigue sin carteras; el resto de datos no se ve afectado. Su
+  // reintento es propio (`intentoDeCapacidad`) y lo dispara el botón de su aviso
+  // específico vía `reintentarCapacidad('gestiones_cartera')`: no re-suscribe las
+  // lecturas primarias ni depende del «Reintentar» global.
+  const intentoCarteras = intentoDeCapacidad('gestiones_cartera');
+  const gestionesCarteraGestor = useGestionesCarteraGestor(currentUser, intentoCarteras, subscribeGestionesCarteraGestor);
 
   const inmuebleIdsParcialesGestionados = useMemo(
     () => currentUser ? inmueblesParcialesActivosDe(gestionesCarteraGestor, currentUser.id) : [],
@@ -3901,10 +3909,13 @@ export default function App() {
           accessibleSections={seccionesAccesibles}
         />
 
-        {/* BLOQUE 10 · UX-2: fallos de lectura/guardado antes invisibles (sólo consola). */}
+        {/* BLOQUE 10 · UX-2: fallos de lectura/guardado antes invisibles (sólo consola).
+            Las capacidades adicionales (Carteras) se avisan aparte, con su propio
+            reintento, y nunca dentro del aviso global de carga de datos. */}
         <AvisoIncidenciasDatos
           incidencias={incidenciasDatos}
           onReintentar={reintentarLecturas}
+          onReintentarCapacidad={reintentarCapacidad}
           onDescartar={descartarIncidencia}
           onDescartarTodas={descartarIncidencias}
         />

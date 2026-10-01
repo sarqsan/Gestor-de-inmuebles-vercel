@@ -461,6 +461,13 @@ async function diagnosticarDenegacionCarteras(ctx: ContextoConsultaCarteras, err
  * `usuarios_auth/{uid}.usuarioId`. Traza técnica (consola, nunca interfaz): al abrir
  * la escucha, en su primer resultado y, si Firestore la deniega, el diagnóstico
  * completo de `diagnosticarDenegacionCarteras`.
+ *
+ * CAPACIDAD ADICIONAL (2026-10-01): la incidencia se registra con
+ * `alcance: 'CAPACIDAD'` — el error queda documentado igual (código + traza
+ * `[diag:carteras]`), pero NO se convierte en un error de carga de los datos del
+ * Portal: no entra en el aviso global «No se han podido leer algunos datos», no
+ * cambia el estado de ninguna pantalla y la aplicación sigue funcionando sin
+ * carteras. `useEstadoLecturas.reintentarCapacidad` vuelve a abrir ESTA escucha.
  */
 export function subscribeGestionesCarteraGestor(
   callback: (gestiones: GestionCartera[]) => void,
@@ -504,7 +511,12 @@ export function subscribeGestionesCarteraGestor(
       callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera)));
     },
     (err) => {
-      reportarErrorLectura('gestiones_cartera', err, `Firestore gestiones_cartera (gestorUsuarioId=${gestorUsuarioId}) snapshot error:`);
+      reportarErrorLectura(
+        'gestiones_cartera',
+        err,
+        `Firestore gestiones_cartera (gestorUsuarioId=${gestorUsuarioId}) snapshot error:`,
+        { alcance: 'CAPACIDAD' }
+      );
       void diagnosticarDenegacionCarteras(ctx, err);
     }
   );

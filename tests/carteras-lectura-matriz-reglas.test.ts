@@ -276,7 +276,13 @@ describe('Carteras · B — aislamiento por gestor', () => {
     expect(recibidas).toEqual([]);
     const incidencias = incidenciasCarteras(canal);
     expect(incidencias).toHaveLength(1);
-    expect(incidencias[0]).toMatchObject({ tipo: 'LECTURA', codigo: 'permission-denied', etiqueta: 'Carteras' });
+    expect(incidencias[0]).toMatchObject({
+      tipo: 'LECTURA',
+      // Capacidad adicional: se registra, pero no es un error de carga de los datos.
+      alcance: 'CAPACIDAD',
+      codigo: 'permission-denied',
+      etiqueta: 'Carteras',
+    });
     expect(incidencias[0].mensaje).toBe('No tienes permisos para consultar estos datos. Si crees que es un error, avisa a un administrador.');
     expect((await informeDeDenegacion()).causa).toBe('CONSULTA_DISTINTA_DEL_ESPEJO');
   });
@@ -522,6 +528,22 @@ describe('Carteras · E — el aviso «Lectura · Carteras» refleja el ÚLTIMO 
     consolas.error.mockClear();
     await abrirEscucha(fb, PERFIL, { tipoPerfil: 'PROPIETARIO', roles: [], intento: 1 });
     expect(incidenciasCarteras(canal)).toHaveLength(1);
+  });
+
+  it('E4 · la denegación se clasifica como CAPACIDAD: no puede producir el aviso global de datos', async () => {
+    mundo.authUid = UID; mundo.db = mundoPropietario();
+    delete mundo.db[`usuarios_auth/${UID}`];
+    const { fb, canal } = await cargar();
+    await abrirEscucha(fb, PERFIL);
+
+    // La incidencia NO se pierde (diagnóstico conservado)…
+    expect(incidenciasCarteras(canal)).toHaveLength(1);
+    expect(incidenciasCarteras(canal)[0].alcance).toBe('CAPACIDAD');
+    // …pero no hay ninguna incidencia de los DATOS del Portal: el aviso global
+    // «No se han podido leer algunos datos» no se activa por Carteras.
+    const { datos, capacidades } = canal.partirIncidenciasPorAlcance(canal.incidenciasDatos());
+    expect(datos).toEqual([]);
+    expect(capacidades.map((i) => i.origen)).toEqual(['gestiones_cartera']);
   });
 
   it('E3 · sin gestorUsuarioId no se abre ninguna consulta y se entrega vacío (fallo en cerrado)', async () => {

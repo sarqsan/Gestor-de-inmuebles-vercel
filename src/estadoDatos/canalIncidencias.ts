@@ -10,10 +10,42 @@
  *  - NO cambia el control de flujo de quien informa: es un observador.
  *  - Conserva siempre el registro técnico (quien reporta sigue haciendo su `console.error`).
  *  - El mensaje de usuario **nunca** expone detalles técnicos del SDK (UX-2 §10).
+ *
+ * ALCANCE (2026-10-01 · Carteras) — `alcance: 'DATOS' | 'CAPACIDAD'`:
+ *  - `DATOS`: lectura PRIMARIA del Portal. Su fallo es un error de carga de datos.
+ *  - `CAPACIDAD`: lectura ADICIONAL (hoy, `gestiones_cartera` = carteras y
+ *    delegaciones). Su fallo **se registra igual** (código, mensaje, traza), pero
+ *    NO se resume en el aviso global «No se han podido leer algunos datos», NO
+ *    entra en el estado de pantalla y NO deja la aplicación inutilizable: se
+ *    avisa en un mensaje específico con su propio «Reintentar lectura».
+ *    Ver `ORIGENES_CAPACIDAD_ADICIONAL` y `reportarErrorLectura`.
  */
 import type { SectionType } from '../types';
 
 export type TipoIncidenciaDatos = 'LECTURA' | 'GUARDADO';
+
+/**
+ * Alcance de una incidencia de datos:
+ *  - `DATOS`: forma parte de la carga de datos del Portal (fallo = ERROR de pantalla).
+ *  - `CAPACIDAD`: capacidad adicional (opcional); su fallo se registra y se avisa
+ *    aparte, sin bloquear el resto del Portal.
+ */
+export type AlcanceIncidencia = 'DATOS' | 'CAPACIDAD';
+
+/**
+ * Lecturas tratadas como CAPACIDAD ADICIONAL.
+ *
+ * `gestiones_cartera` (ROADMAP-04) son las carteras/delegaciones donde la persona
+ * es gestora: amplía el ámbito de inmuebles del gestor, pero un propietario sin
+ * cartera no necesita nada de ella (`[]`). Por eso su denegación no puede
+ * convertirse en un error de carga de los datos del Portal.
+ */
+export const ORIGENES_CAPACIDAD_ADICIONAL: readonly OrigenDatos[] = ['gestiones_cartera'];
+
+/** ¿La lectura de este origen es una capacidad adicional (no bloquea el Portal)? */
+export function esCapacidadAdicional(origen: OrigenDatos): boolean {
+  return ORIGENES_CAPACIDAD_ADICIONAL.includes(origen);
+}
 
 /** Orígenes conocidos (colección o ámbito funcional). Se admiten claves libres. */
 export const ORIGENES_CONOCIDOS = [
@@ -83,10 +115,27 @@ export interface IncidenciaDatos {
   readonly id: string;
   readonly origen: OrigenDatos;
   readonly tipo: TipoIncidenciaDatos;
+  /** `DATOS` = carga del Portal · `CAPACIDAD` = capacidad adicional (no bloquea). */
+  readonly alcance: AlcanceIncidencia;
   readonly codigo: string;
   readonly etiqueta: string;
   readonly mensaje: string;
   readonly ocurridoEn: number;
+}
+
+/**
+ * Separa las incidencias por alcance: las que son carga de datos del Portal y las
+ * de capacidades adicionales. La interfaz usa esta partición para no mezclar el
+ * aviso global con el aviso específico de una capacidad.
+ */
+export function partirIncidenciasPorAlcance(incidencias: readonly IncidenciaDatos[]): {
+  datos: readonly IncidenciaDatos[];
+  capacidades: readonly IncidenciaDatos[];
+} {
+  return {
+    datos: incidencias.filter((i) => i.alcance !== 'CAPACIDAD'),
+    capacidades: incidencias.filter((i) => i.alcance === 'CAPACIDAD'),
+  };
 }
 
 const ETIQUETAS_ORIGEN: Record<string, string> = {
@@ -236,12 +285,18 @@ export function incidenciasPendientes(tipo?: TipoIncidenciaDatos): readonly Inci
   return tipo ? incidencias.filter((i) => i.tipo === tipo) : incidencias;
 }
 
-function registrar(origen: OrigenDatos, tipo: TipoIncidenciaDatos, error: unknown): IncidenciaDatos {
+function registrar(
+  origen: OrigenDatos,
+  tipo: TipoIncidenciaDatos,
+  error: unknown,
+  alcance: AlcanceIncidencia = esCapacidadAdicional(origen) ? 'CAPACIDAD' : 'DATOS'
+): IncidenciaDatos {
   const codigo = codigoDeError(error);
   const incidencia: IncidenciaDatos = {
     id: `inc-${++secuencia}`,
     origen,
     tipo,
+    alcance,
     codigo,
     etiqueta: etiquetaOrigen(origen),
     mensaje: mensajeLegible(codigo, tipo),
@@ -256,10 +311,20 @@ function registrar(origen: OrigenDatos, tipo: TipoIncidenciaDatos, error: unknow
 /**
  * Informa de un fallo de LECTURA. Conserva el registro técnico llamando a `console.error`
  * con la misma etiqueta que usaba la capa de datos (si se aporta).
+ *
+ * `opciones.alcance` distingue una lectura PRIMARIA del Portal de una CAPACIDAD
+ * ADICIONAL. Por defecto, el origen decide (`esCapacidadAdicional`): una capacidad
+ * adicional se registra igual —el diagnóstico no se oculta— pero la interfaz la
+ * presenta aparte y nunca como error de carga de los datos del Portal.
  */
-export function reportarErrorLectura(origen: OrigenDatos, error: unknown, logTecnico?: string): void {
+export function reportarErrorLectura(
+  origen: OrigenDatos,
+  error: unknown,
+  logTecnico?: string,
+  opciones?: { alcance?: AlcanceIncidencia }
+): void {
   console.error(logTecnico ?? `Firestore ${origen} snapshot error:`, error);
-  registrar(origen, 'LECTURA', error);
+  registrar(origen, 'LECTURA', error, opciones?.alcance);
 }
 
 /**

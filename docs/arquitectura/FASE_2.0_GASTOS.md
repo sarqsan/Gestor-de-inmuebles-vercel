@@ -81,7 +81,8 @@ una etiqueta pero no entran en su caja.
   route guard del propietario. UI: `GastosSection` + `GastoModal`.
 
 > **Igual que en la Fase 1.4, las reglas las despliega Firebase CLI, no Vercel:**
-> `firebase deploy --only firestore:rules --project startup-sanctuary-sln7n`.
+> `firebase deploy --only firestore:rules --project gestor-inmuebles-produccion`
+> (o sin `--project`: el destino por defecto lo fija el `.firebaserc` del repositorio).
 
 ## 5. Próximas fases (no incluidas)
 

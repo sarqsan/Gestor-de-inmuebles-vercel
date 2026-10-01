@@ -73,18 +73,28 @@ demostrable para la consulta.
 
 ## 4. Despliegue de las reglas (NO lo hace Vercel)
 
-Vercel sólo compila la aplicación. Las reglas se publican con Firebase CLI
-(proyecto `startup-sanctuary-sln7n`), usando el `firebase.json` incluido, que
-apunta a la base de datos con nombre:
+Vercel sólo compila la aplicación. Las reglas se publican con Firebase CLI en el
+**proyecto real de la aplicación, `gestor-inmuebles-produccion`** (el mismo
+`projectId` de `firebase-applet-config.json`, con el que inicializa el SDK la app
+y el preview de Vercel), usando el `firebase.json` incluido, que apunta a la base
+de datos con nombre:
 
 ```bash
 npm i -g firebase-tools          # sólo la primera vez
 firebase login
 firebase deploy --only firestore:rules,storage
+# El proyecto destino por defecto lo fija el `.firebaserc` del repositorio
+# (gestor-inmuebles-produccion). También puede indicarse explícitamente:
+#   firebase deploy --only firestore:rules --project gestor-inmuebles-produccion
 # o por separado:
 #   firebase deploy --only firestore:rules
 #   firebase deploy --only storage
 ```
+
+> **`startup-sanctuary-sln7n` NO es producción.** Publicar allí deja la aplicación
+> (que habla con `gestor-inmuebles-produccion`) con las reglas antiguas, lo que
+> produce denegaciones como «Lectura · Carteras». Si el CLI se ejecuta con
+> `--project` explícito, debe ser `gestor-inmuebles-produccion`.
 
 > No hay credenciales de Firebase en el entorno de desarrollo: el despliegue de
 > las reglas es una acción manual del propietario del proyecto.

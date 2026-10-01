@@ -83,7 +83,8 @@ Los profesionales no tienen ninguna regla permitida → denegados por el
 catch-all. Listados demostrables por `propietarioId` (las reglas no filtran).
 
 > Despliegue (no lo hace Vercel):
-> `firebase deploy --only firestore:rules --project startup-sanctuary-sln7n`.
+> `firebase deploy --only firestore:rules --project gestor-inmuebles-produccion`
+> (o sin `--project`: el destino por defecto lo fija el `.firebaserc` del repositorio).
 
 ## 6. Verificación
 

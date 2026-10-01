@@ -135,9 +135,10 @@ describe('useGestionesCarteraGestor — cambio de persona y desmontaje', () => {
 describe('App.tsx — cableado del reintento', () => {
   const APP = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
 
-  it('App usa el hook con el contador de reintento y la suscripción real', () => {
+  it('App abre la escucha con el contador PROPIO de la capacidad y la suscripción real', () => {
+    expect(APP).toContain("const intentoCarteras = intentoDeCapacidad('gestiones_cartera');");
     expect(APP).toContain(
-      'const gestionesCarteraGestor = useGestionesCarteraGestor(currentUser, intentoLecturas, subscribeGestionesCarteraGestor);'
+      'const gestionesCarteraGestor = useGestionesCarteraGestor(currentUser, intentoCarteras, subscribeGestionesCarteraGestor);'
     );
   });
 
@@ -146,8 +147,12 @@ describe('App.tsx — cableado del reintento', () => {
     expect(APP).not.toContain('setGestionesCarteraGestor');
   });
 
-  it('`intentoLecturas` es el contador que incrementa «Reintentar lectura»', () => {
+  it('los contadores están SEPARADOS: datos (`intentoLecturas`) y Carteras (`intentoDeCapacidad`)', () => {
     expect(APP).toMatch(/intento: intentoLecturas,[\s\S]{0,200}reintentar: reintentarLecturas,/);
     expect(APP).toContain('onReintentar={reintentarLecturas}');
+    // «Reintentar lectura» del aviso específico de Carteras usa el reintento dirigido.
+    expect(APP).toContain('onReintentarCapacidad={reintentarCapacidad}');
+    // El reintento de los datos no puede volver a re-suscribir Carteras (ni al revés).
+    expect(APP).not.toMatch(/useGestionesCarteraGestor\(currentUser, intentoLecturas/);
   });
 });

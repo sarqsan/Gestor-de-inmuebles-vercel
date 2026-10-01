@@ -70,7 +70,8 @@ deducible, método de pago, `activo` y el cursor `ultimoPeriodoGenerado`.
   garantiza `propietarioId` al guardar.
 
 > Las reglas se despliegan con Firebase CLI, no con Vercel:
-> `firebase deploy --only firestore:rules,storage --project startup-sanctuary-sln7n`.
+> `firebase deploy --only firestore:rules,storage --project gestor-inmuebles-produccion`
+> (o sin `--project`: el destino por defecto lo fija el `.firebaserc` del repositorio).
 
 ## 4. UI
 

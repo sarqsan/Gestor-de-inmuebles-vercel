@@ -1,5 +1,12 @@
 # Diagnóstico «Lectura · Carteras: No tienes permisos…» — 2026-10-01 (Orden 2)
 
+> **CIERRE (Orden 3, mismo PR #17).** Resuelto: Carteras se trata como **capacidad adicional**
+> (aviso específico + reintento dirigido; ya no produce «No se han podido leer algunos datos» ni
+> puede dejar el Portal inutilizable) y el destino de publicación de reglas queda fijado a
+> **`gestor-inmuebles-produccion`** (`.firebaserc` + instrucciones corregidas). `firestore.rules`
+> sigue **sin cambios**: la regla del repositorio ya era la correcta y específica. Detalle y criterios
+> de cierre en `CARTERAS_CAPACIDAD_ADICIONAL_2026-10-01.md`.
+
 Rama `arena/01a0f801-gestor-de-inmuebles-vercel` · PR #17 · base `origin/main` `21afea4`.
 Complementa `ESTABILIZACION_PORTAL_TITULARES_2026-10-01.md` §2 («Carteras — qué se sabe y qué no»).
 
@@ -226,3 +233,8 @@ El diagnóstico solo lee los **dos documentos propios** que usa `perfilActualVer
   trabajo de CI/emulador como tarea independiente. No se tocó `main`.
 - **No se editaron** `firebase.json`, la configuración ni los documentos históricos que mencionan
   `startup-sanctuary-sln7n`: cuál de los dos proyectos es el vigente lo decide quien despliega.
+
+> **Actualización (Orden 3).** El destino ya no queda a criterio de quien despliega: se añadió
+> `.firebaserc` (`gestor-inmuebles-produccion`) y se corrigieron las instrucciones de publicación de
+> reglas, con guarda automática (`tests/reglas-despliegue-produccion.test.ts`). Ver
+> `CARTERAS_CAPACIDAD_ADICIONAL_2026-10-01.md`.

@@ -60,9 +60,9 @@ almacenadas de forma privada en Firebase Storage, avanzando el expediente de
 Esta fase añade una ruta nueva a **Storage Rules**; Firestore no cambia:
 
 ```bash
-firebase deploy --only storage --project startup-sanctuary-sln7n
+firebase deploy --only storage --project gestor-inmuebles-produccion
 # (si aún no se desplegó la Fase 3.0:)
-firebase deploy --only firestore:rules --project startup-sanctuary-sln7n
+firebase deploy --only firestore:rules --project gestor-inmuebles-produccion
 ```
 
 ## Pendiente para la 3.3

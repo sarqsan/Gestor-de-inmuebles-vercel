@@ -100,7 +100,6 @@ import {
   subscribeAuditLogs,
   subscribeModulosConfig,
   saveInmuebleFirestore,
-  deleteInmuebleFirestore,
   registrarAuditoriaFirestore,
   saveCandidatoFirestore,
   deleteCandidatoFirestore,
@@ -146,6 +145,10 @@ import {
   saveModulosConfigFirestore,
 } from './lib/firebase';
 import { avisarOperacion } from './feedback/canalFeedback';
+import { darDeBajaInmuebleFirestore } from './lib/bajaPatrimonialInmuebleFirestore';
+import { puedeDarDeBajaInmueble, type AmbitoEscrituraInmuebles } from './utils/permisosInmueble';
+import { aplicarBajaAlEstado, etiquetaMotivoBaja } from './utils/bajaPatrimonialInmueble';
+import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
 import type { GestionCartera } from './lib/gestionesCartera';
@@ -313,6 +316,7 @@ import {
   canWriteContrato,
   canAccessCandidato,
   syncAuthIndex,
+  ADMIN_MASTER_EMAIL,
 } from './lib/authService';
 import { AuthModal } from './components/modals/AuthModal';
 import { CrearUsuarioModal } from './components/modals/CrearUsuarioModal';
@@ -632,6 +636,25 @@ export default function App() {
     inmueblesDelegadosParciales: inmuebleIdsParcialesGestionados,
     inmueblesDelegadosParcialesEscritura: inmueblesParcialesConEscritura,
   }) : null, [currentUser, inmuebleIdsParcialesGestionados, inmueblesParcialesConEscritura]);
+
+  /**
+   * BAJA PATRIMONIAL — ámbito de ESCRITURA por inmueble (espejo de las Rules).
+   * Sólo se ofrece la baja a quien ya puede hacer `update` de ese inmueble:
+   * Administrador Principal, titular, autorización explícita (`inmuebleIds`),
+   * cartera con escritura o delegación parcial con escritura. Un usuario de
+   * SÓLO LECTURA no ve la acción (y las Rules la denegarían igualmente).
+   */
+  const ambitoEscrituraInmuebles = useMemo<AmbitoEscrituraInmuebles>(() => ({
+    tipoPerfil: currentUser?.tipoPerfil || null,
+    esMaster: (currentUser?.email || '').trim().toLowerCase() === ADMIN_MASTER_EMAIL.trim().toLowerCase(),
+    propietarioId: currentUser?.propietarioId || null,
+    inmuebleIdsAutorizados: currentUser?.inmuebleIds || [],
+    propietariosGestionadosEscritura: propietariosGestionadosDe({
+      carterasL: [],
+      carterasE: currentUser?.carterasE || [],
+    }),
+    inmueblesParcialesEscritura: inmueblesParcialesConEscritura,
+  }), [currentUser, inmueblesParcialesConEscritura]);
 
   // 2. Route Guard Estricto de Navegación por Perfil
   useEffect(() => {
@@ -1941,48 +1964,75 @@ export default function App() {
     }
   };
 
-  // Delete inmueble handler
-  const handleDeleteInmueble = (inmuebleId: string) => {
-    // D2 (§2): auditoría del borrado (solo si tuvo éxito).
-    const previoBorrado = inmuebles.find((i) => i.id === inmuebleId);
+  /**
+   * Baja patrimonial del inmueble (sustituye al borrado físico).
+   *
+   * Orden estricto de la operación — es lo que elimina el bug de producción:
+   *  1. se pide la baja a Firestore (`update` del estado patrimonial; NUNCA `delete`);
+   *  2. si falla: no se toca el estado ni la caché, se informa y se puede reintentar;
+   *  3. sólo si la persistencia confirma, se actualiza el estado con el parche
+   *     EXACTO que quedó guardado y se registra la auditoría.
+   *
+   * Los candidatos vinculados NO se reasignan: el inmueble sigue existiendo
+   * (queda en el histórico con todas sus referencias).
+   */
+  const handleBajaInmueble = async (inmueble: Inmueble, solicitud: SolicitudBaja): Promise<boolean> => {
+    const previo = inmuebles.find((i) => i.id === inmueble.id) || inmueble;
+    const resultado = await darDeBajaInmuebleFirestore(previo, solicitud, {
+      actor: currentUser ? { id: currentUser.id, nombre: currentUser.nombre, email: currentUser.email } : null,
+    });
+
+    if (!resultado.ok) {
+      // Transparencia UX-2: se registra el fallo real sin alterar los datos.
+      reportarResultadoGuardado('inmuebles', false, resultado.error);
+      avisarOperacion({
+        tipo: 'error',
+        mensaje: resultado.errorPermisos
+          ? 'No tienes permiso para dar de baja este inmueble: no se ha cambiado nada.'
+          : 'No se pudo dar de baja el inmueble. No se ha cambiado nada: puedes reintentarlo.',
+      });
+      return false;
+    }
+
+    // Persistencia confirmada: ahora sí cambia la vista (y sólo con el parche guardado).
     setInmuebles((prev) => {
-      const next = prev.filter((i) => i.id !== inmuebleId);
+      const next = aplicarBajaAlEstado(prev, previo.id, resultado);
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-    void deleteInmuebleFirestore(inmuebleId).then((ok) => {
-      if (!ok) reportarResultadoGuardado('inmuebles', false);
-      if (!ok) return;
-      void registrarAuditoriaFirestore({
-        usuarioId: currentUser?.id || 'system',
-        usuarioEmail: currentUser?.email || 'sistema',
-        usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
-        accion: 'INMUEBLE_ELIMINADO',
-        descripcion: `Inmueble ${inmuebleId} eliminado`,
-        entidadAfectada: 'inmueble',
-        idAfectado: inmuebleId,
-        resultado: 'EXITO',
-        detalles: {
-          propietarioId: previoBorrado?.propietarioId || '',
-          propietarioPrincipalId: previoBorrado?.propietarioPrincipalId || '',
-          propietarioSecundarioId: previoBorrado?.propietarioSecundarioId || '',
-        },
-      });
+
+    void registrarAuditoriaFirestore({
+      usuarioId: currentUser?.id || 'system',
+      usuarioEmail: currentUser?.email || 'sistema',
+      usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
+      accion: 'INMUEBLE_BAJA_PATRIMONIAL',
+      descripcion: `Inmueble ${previo.id} dado de baja (${etiquetaMotivoBaja(solicitud.motivo)}). El inmueble y su histórico se conservan.`,
+      entidadAfectada: 'inmueble',
+      idAfectado: previo.id,
+      resultado: 'EXITO',
+      detalles: {
+        motivo: solicitud.motivo,
+        fechaEfectiva: solicitud.fecha,
+        detalle: solicitud.detalle || null,
+        estadoPatrimonial: resultado.parche?.estadoPatrimonial || null,
+        estadoExplotacion: resultado.parche?.estadoExplotacion || null,
+        publicacionRetirada: resultado.publicacion.retirada,
+        portalesRetirados: resultado.publicacion.portales,
+        propietarioId: previo.propietarioId || '',
+        propietarioPrincipalId: previo.propietarioPrincipalId || '',
+        propietarioSecundarioId: previo.propietarioSecundarioId || '',
+      },
     });
 
-    // Safely update candidates associated with this property
-    setCandidatos((prev) => {
-      const next = prev.map((c) => {
-        if (c.inmuebleId === inmuebleId) {
-          const updated = { ...c, inmuebleId: '', inmuebleNombre: 'Sin inmueble asignado' };
-          saveCandidatoFirestore(updated);
-          return updated;
-        }
-        return c;
+    if (resultado.publicacion.aviso) {
+      avisarOperacion({ tipo: 'info', mensaje: `Inmueble dado de baja. ${resultado.publicacion.aviso}` });
+    } else {
+      avisarOperacion({
+        tipo: 'exito',
+        mensaje: `Inmueble dado de baja (${etiquetaMotivoBaja(solicitud.motivo)}). Se conserva todo el histórico.`,
       });
-      try { localStorage.setItem('rentselect_candidatos', JSON.stringify(next)); } catch (e) {}
-      return next;
-    });
+    }
+    return true;
   };
 
   // Add inmueble handler
@@ -4223,7 +4273,8 @@ export default function App() {
               slots={slots}
               invitaciones={invitaciones}
               onSelectCandidate={(cand) => setSelectedCandidateForModal(cand)}
-              onDeleteInmueble={handleDeleteInmueble}
+              onBajaInmueble={handleBajaInmueble}
+              puedeDarDeBaja={(inm) => puedeDarDeBajaInmueble(ambitoEscrituraInmuebles, inm)}
               onAddInmueble={handleAddInmueble}
               propietarioContextoAltaId={altaInmuebleDesdePropietarioId}
               onContextoAltaConsumido={() => setAltaInmuebleDesdePropietarioId(null)}

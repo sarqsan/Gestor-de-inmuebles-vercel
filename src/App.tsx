@@ -331,11 +331,14 @@ import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
 import { useGestionesCarteraGestor } from './estadoDatos/useGestionesCarteraGestor';
 import { ejecutarOperacion } from './feedback/operaciones';
 import { incidenciasNoCerradas } from './utils/operacionesEngine';
+import { permisosTitulares } from './utils/permisosTitulares';
 
 // Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
 const SECCIONES_PROPIETARIO: SectionType[] = [
   'dashboard',
   'propietarios',
+  // PROPIETARIOS / TITULARES para el propietario: su ficha de titular (antes no tenía entrada).
+  'titulares',
   'inmuebles',
   'inversion',
   'formalizacion',
@@ -3108,6 +3111,33 @@ export default function App() {
     throw new Error('No se puede eliminar una ficha jurídica con historial.');
   };
 
+  // PROPIETARIOS / TITULARES: UNA sola pantalla (`PropietariosSection`) para el ADMINISTRADOR
+  // (`propietarios`) y para el PROPIETARIO (`titulares`). Qué ofrece lo decide el espejo de las
+  // Rules (`permisosTitulares`): el master crea y edita todas las fichas; el PROPIETARIO edita
+  // la SUYA (y la crea solo si aún no existe); cualquier otro perfil queda en consulta. Nunca
+  // se ofrece una acción que Firestore vaya a denegar.
+  const renderPropietariosTitulares = () => {
+    if (!currentUser) return null;
+    const permisos = permisosTitulares(currentUser, scopedPropietarios, ADMIN_MASTER_EMAIL);
+    return (
+      <PropietariosSection
+        propietarios={scopedPropietarios}
+        inmuebles={inmueblesCarteraOperativa}
+        puedeGestionar={permisos.puedeGestionar}
+        puedeCrear={permisos.puedeCrear}
+        fichasEditablesIds={permisos.fichasEditablesIds}
+        idFichaPropia={permisos.idFichaPropia}
+        onSavePropietario={handleSavePropietario}
+        onDeletePropietario={handleDeletePropietario}
+        onSelectInmueble={() => setActiveSection('inmuebles')}
+        onCrearInmueble={(propietarioId) => {
+          setAltaInmuebleDesdePropietarioId(propietarioId);
+          setActiveSection('inmuebles');
+        }}
+      />
+    );
+  };
+
   // Handlers for Seguro de Impago
   const handleOpenCrearSeguroModal = (candidato?: Candidato, inmueble?: Inmueble) => {
     setCandidateForCrearSeguro(candidato || null);
@@ -3996,24 +4026,7 @@ export default function App() {
                   }}
                 />
               ) : (
-                <PropietariosSection
-                  propietarios={scopedPropietarios}
-                  inmuebles={inmueblesCarteraOperativa}
-                  // Espejo de las Rules: el master administra todas las fichas y
-                  // cada PROPIETARIO puede crear/editar la suya; el gestor no crea
-                  // propietarios (S3). Con `false` la sección queda en consulta.
-                  puedeGestionar={
-                    (currentUser.email || '').trim().toLowerCase() === ADMIN_MASTER_EMAIL.trim().toLowerCase() ||
-                    currentUser.tipoPerfil === 'PROPIETARIO'
-                  }
-                  onSavePropietario={handleSavePropietario}
-                  onDeletePropietario={handleDeletePropietario}
-                  onSelectInmueble={() => setActiveSection('inmuebles')}
-                  onCrearInmueble={(propietarioId) => {
-                    setAltaInmuebleDesdePropietarioId(propietarioId);
-                    setActiveSection('inmuebles');
-                  }}
-                />
+                renderPropietariosTitulares()
               )}
               {/* INC-06 — fichas patrimoniales persistentes e importación
                   controlada (destino explícito, preview dry-run, auditoría). */}
@@ -4024,6 +4037,11 @@ export default function App() {
               />
             </>
           )}
+
+          {/* PROPIETARIOS / TITULARES para el PROPIETARIO: misma pantalla, en modo «mi ficha»
+              (crea/edita la SUYA; las Rules no le permiten crear la de un tercero). El
+              ADMINISTRADOR llega a la misma pantalla por `propietarios`. */}
+          {activeSection === 'titulares' && renderPropietariosTitulares()}
 
           {activeSection === 'preseleccionados' && (
             <PreseleccionadosSection
@@ -4332,7 +4350,11 @@ export default function App() {
               onDeleteSlot={handleDeleteSlot}
               onDeleteSlotsBatch={handleDeleteSlotsBatch}
               onUpdateSlot={handleUpdateSlot}
-              onNavigateToPropietarios={() => setActiveSection('propietarios')}
+              // «Propietarios/Titulares» del alta de inmueble: el ADMINISTRADOR va a `propietarios`; el
+              // PROPIETARIO a `titulares` (su `propietarios` es el portal y no tiene ninguna alta).
+              onNavigateToPropietarios={() =>
+                setActiveSection(currentUser.tipoPerfil === 'PROPIETARIO' ? 'titulares' : 'propietarios')
+              }
               onAbrirSeccionGlobal={(seccion, inmuebleId) => {
                 if (seccion === 'polizas') setFiltroPolizasInmuebleId(inmuebleId);
                 setActiveSection(seccion as SectionType);

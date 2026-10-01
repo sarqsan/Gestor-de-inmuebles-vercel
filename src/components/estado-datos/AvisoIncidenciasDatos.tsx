@@ -113,6 +113,11 @@ const AvisoCapacidadAdicional: React.FC<{
     <div className="min-w-0 flex-1">
       <p className="text-xs font-bold text-sky-900">{tituloCapacidadAdicional(incidencia)}</p>
       <p className="text-[11px] text-sky-900/90 mt-1 leading-relaxed">{detalleCapacidadAdicional(incidencia)}</p>
+      {incidencia.detalle && (
+        <p className="text-[11px] text-sky-950 mt-1.5 leading-relaxed font-medium" data-testid="aviso-capacidad-causa">
+          {incidencia.detalle}
+        </p>
+      )}
 
       <div className="mt-2.5 flex items-center gap-2">
         {onReintentar && (

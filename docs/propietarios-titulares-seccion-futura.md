@@ -1,8 +1,13 @@
 # Sección «Propietarios / Titulares» — modelo y siguiente trabajo
 
-> **Estado: SOLO DISEÑO. La sección NO está construida.** Esta intervención únicamente
-> prepara el modelo y desacopla el alta de inmueble (ver §5). No se ha rediseñado la
-> pantalla de Propietarios ni se ha tocado `firestore.rules`.
+> **Estado actual:** la sección se construyó en ORDEN 4 (PR #18, `PropietariosSection`) y su
+> **acceso** se corrigió el 2026-10-01 (`docs/auditoria/CARTERAS_Y_TITULARES_INTERVENCION_2026-10-01.md`):
+> entrada de menú «Propietarios / Titulares» para el ADMINISTRADOR (`propietarios`) y para el PROPIETARIO
+> (`titulares`, su ficha). El punto abierto de §4 (quién crea la ficha de un tercero) **sigue abierto**: hoy solo el
+> master. El texto de abajo conserva el diseño original (cuando la sección aún no existía).
+>
+> *Estado original de este documento: SOLO DISEÑO. Esta intervención únicamente preparaba el modelo y desacoplaba el
+> alta de inmueble (ver §5), sin rediseñar la pantalla de Propietarios ni tocar `firestore.rules`.*
 
 Fecha: 2026-10-01 · Base: `origin/main` = `21afea4d45271070bee29f93aa9f1c6237834c10`.
 

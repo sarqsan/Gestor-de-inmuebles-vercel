@@ -1,5 +1,7 @@
 # Diagnóstico «Lectura · Carteras: No tienes permisos…» — 2026-10-01 (Orden 2)
 
+> **Actualización (misma fecha, PR siguiente):** el veredicto `REGLAS_PUBLICADAS_O_PLANIFICADOR` ya no termina en un aviso cuando todos los términos de la regla se cumplen: la capa de datos lee entonces las carteras **por relación** (un `get` por gestión indexada en el espejo propio) y solo avisa si ni el `get` se autoriza. Ver `CARTERAS_Y_TITULARES_INTERVENCION_2026-10-01.md`.
+
 > **CIERRE (Orden 3, mismo PR #17).** Resuelto: Carteras se trata como **capacidad adicional**
 > (aviso específico + reintento dirigido; ya no produce «No se han podido leer algunos datos» ni
 > puede dejar el Portal inutilizable) y el destino de publicación de reglas queda fijado a

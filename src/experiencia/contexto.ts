@@ -14,6 +14,7 @@ export const MODULO_POR_SECCION: Record<SectionType, ModuloERP> = {
   inicio: 'inicio',
   inmuebles: 'inmuebles',
   propietarios: 'propietarios',
+  titulares: 'propietarios',
   cobros: 'cobros',
   tesoreria: 'tesoreria',
   gastos: 'finanzas',

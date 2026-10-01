@@ -3,6 +3,9 @@ export type SectionType =
   | 'inicio'
   | 'inmuebles'
   | 'propietarios'
+  // Propietarios / Titulares para el perfil PROPIETARIO (su ficha de titular). El
+  // ADMINISTRADOR llega a la misma pantalla por `propietarios` («Propietarios / Titulares»).
+  | 'titulares'
   | 'cobros'
   // BLOQUE B (integración canónica 2026-09-20): tesorería y liquidaciones de propietarios
   | 'tesoreria'

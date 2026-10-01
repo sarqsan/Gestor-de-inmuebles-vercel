@@ -362,6 +362,16 @@ export const AYUDA_REGISTRO: HelpEntry[] = [
     relatedTutorials: ['recorrido.propietario.primeros-pasos'],
   },
   {
+    // Ayuda de la entrada «Propietarios / Titulares» del PROPIETARIO (sección `titulares`).
+    id: 'ayuda.titulares.mi-ficha', categoria: 'titulares', module: 'propietarios', section: 'titulares',
+    title: 'Propietarios / Titulares: tu ficha de titular',
+    summary: 'Completas una sola vez tus datos personales, de contacto y fiscales; después se asignan a tus inmuebles.',
+    content:
+      'Tu ficha de titular reúne tus datos personales, de contacto y fiscales (incluido tu IBAN). Se rellena una sola vez y es la fuente de verdad: al crear o editar un inmueble seleccionas tu ficha, no se vuelven a teclear esos datos.\n\nDar de alta a otra persona como titular (por ejemplo, un cotitular) corresponde a la administración principal, porque esa ficha contiene sus datos fiscales. Cuando el titular exista, lo añades a tu inmueble desde «Titulares del inmueble», con su porcentaje cuando lo conozcas.',
+    roles: ['PROPIETARIO'],
+    keywords: ['titular', 'titulares', 'ficha', 'propietario', 'cotitular', 'datos fiscales', 'iban'],
+  },
+  {
     id: 'ayuda.propietarios.titulares', categoria: 'titulares', module: 'propietarios', section: 'propietarios',
     title: 'Titulares patrimoniales y cuentas de acceso',
     summary: 'La ficha de titular (nombre, NIF, cuentas bancarias) es independiente de quién puede entrar en la aplicación.',

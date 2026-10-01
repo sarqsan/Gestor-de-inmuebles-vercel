@@ -145,6 +145,17 @@ export function filtrarTitularesLocales(
 export const MENSAJE_TITULAR_NO_EXISTE_SECCION =
   'Este titular todavía no existe. Créalo desde Propietarios/Titulares y después asígnalo a este inmueble.';
 
+/**
+ * Quién da de alta a OTRA persona como titular. Es lo que las Rules permiten hoy: la ficha
+ * de un tercero (p. ej. un cotitular) contiene SUS datos fiscales y solo la crea el
+ * Administrador Principal; cada PROPIETARIO crea y mantiene la suya. Se explica en la
+ * pantalla en lugar de ofrecer un botón que Firestore denegaría.
+ */
+export const MENSAJE_ALTA_TITULAR_ADMINISTRACION =
+  'Dar de alta a otra persona como titular (por ejemplo, un cotitular) corresponde a la administración principal, ' +
+  'porque la ficha contiene sus datos fiscales. Tú completas y mantienes tu propia ficha; cuando el titular exista, ' +
+  'lo asignas a tu inmueble desde «Titulares del inmueble».';
+
 /** Aviso de duplicado: se ofrece abrir la ficha existente, nunca crear otra. */
 export function mensajeTitularDuplicado(nombre: string): string {
   return `Ya existe un titular con este NIF/CIF: ${nombre}. Abre su ficha para editarla; no se crea una ficha duplicada.`;

@@ -1,5 +1,7 @@
 # Carteras como capacidad adicional — cierre de «Lectura · Carteras» (2026-10-01 · Orden 3)
 
+> **Actualización (misma fecha, PR siguiente):** además de ser una capacidad adicional con aviso propio y reintento, la lectura de Carteras ya no muestra un falso «No tienes permisos» cuando la persona está autorizada y solo se deniega la consulta de colección (lectura por relación). El aviso real incluye la causa y qué hacer. Ver `CARTERAS_Y_TITULARES_INTERVENCION_2026-10-01.md`.
+
 Rama `arena/01a0f801-gestor-de-inmuebles-vercel` (PR #17, base `origin/main` `21afea4`) ·
 commit de partida `ecf9380`. Este documento **cierra** el incidente descrito en
 `DIAGNOSTICO_LECTURA_CARTERAS_2026-10-01.md` y en `ESTABILIZACION_PORTAL_TITULARES_2026-10-01.md` §2.

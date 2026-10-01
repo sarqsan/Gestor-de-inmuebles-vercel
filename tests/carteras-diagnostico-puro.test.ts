@@ -19,8 +19,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ayudaUsuarioDeCausa,
   causaDeDenegacion,
   construirInformeCarteras,
+  EXPLICACION_CAUSA,
+  type CausaCarteras,
   esIdValido,
   evaluarComprobacionesCarteras,
   reglaDelGestorSeCumple,
@@ -314,5 +317,43 @@ describe('Carteras · diagnóstico — a qué base de datos publica `firebase.js
     const { FIREBASE_PROYECTO_ID, FIREBASE_BASE_DATOS_ID } = await import('../src/lib/entornoFirebase');
     expect(FIREBASE_PROYECTO_ID).toBe(config.projectId);
     expect(FIREBASE_BASE_DATOS_ID).toBe(config.firestoreDatabaseId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4 · Qué le dice el aviso a la PERSONA cuando la denegación es real
+// ---------------------------------------------------------------------------
+describe('Carteras · diagnóstico — ayuda para la persona (aviso)', () => {
+  const todas = Object.keys(EXPLICACION_CAUSA) as CausaCarteras[];
+
+  it('toda causa REAL tiene una ayuda con su código; las que se recuperan solas o se resuelven leyendo por relación, ninguna', () => {
+    const sinAviso: CausaCarteras[] = ['TRANSITORIA', 'SOLO_LA_CONSULTA_DE_COLECCION_DENEGADA'];
+    for (const causa of todas) {
+      const ayuda = ayudaUsuarioDeCausa(causa);
+      if (sinAviso.includes(causa)) {
+        expect(ayuda, causa).toBeUndefined();
+      } else {
+        expect(ayuda, causa).toBeTruthy();
+        expect(ayuda).toContain(`Código de diagnóstico: ${causa}.`);
+      }
+    }
+  });
+
+  it('el consejo se corresponde con la causa: sesión, perfil desincronizado o reglas publicadas', () => {
+    expect(ayudaUsuarioDeCausa('SIN_SESION_FIREBASE')).toMatch(/Cierra sesión y vuelve a entrar/);
+    for (const c of ['ESPEJO_AUSENTE', 'ESPEJO_NO_ACTIVO', 'PERFIL_AUTHUID_DISTINTO', 'PERFIL_NO_ACTIVO', 'CONSULTA_DISTINTA_DEL_ESPEJO'] as CausaCarteras[]) {
+      expect(ayudaUsuarioDeCausa(c), c).toMatch(/no están sincronizados/);
+    }
+    for (const c of ['REGLAS_PUBLICADAS_O_PLANIFICADOR', 'ESPEJO_ILEGIBLE_POR_SU_TITULAR'] as CausaCarteras[]) {
+      expect(ayudaUsuarioDeCausa(c), c).toMatch(/reglas de seguridad publicadas en Firebase/);
+    }
+    expect(ayudaUsuarioDeCausa('INCONCLUSA')).toMatch(/Reintenta/);
+  });
+
+  it('las ayudas no llevan correo, nombre ni identificadores: son textos fijos', () => {
+    for (const causa of todas) {
+      const ayuda = ayudaUsuarioDeCausa(causa) ?? '';
+      expect(ayuda).not.toMatch(/@|usr_|uid_|prop_/);
+    }
   });
 });

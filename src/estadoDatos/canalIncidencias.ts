@@ -120,6 +120,11 @@ export interface IncidenciaDatos {
   readonly codigo: string;
   readonly etiqueta: string;
   readonly mensaje: string;
+  /**
+   * Qué comprobación falló y qué puede hacer la persona (solo capacidades con diagnóstico propio,
+   * hoy Carteras). Texto sin datos personales; nunca sustituye a `mensaje`.
+   */
+  readonly detalle?: string;
   readonly ocurridoEn: number;
 }
 
@@ -289,7 +294,8 @@ function registrar(
   origen: OrigenDatos,
   tipo: TipoIncidenciaDatos,
   error: unknown,
-  alcance: AlcanceIncidencia = esCapacidadAdicional(origen) ? 'CAPACIDAD' : 'DATOS'
+  alcance: AlcanceIncidencia = esCapacidadAdicional(origen) ? 'CAPACIDAD' : 'DATOS',
+  detalle?: string
 ): IncidenciaDatos {
   const codigo = codigoDeError(error);
   const incidencia: IncidenciaDatos = {
@@ -300,6 +306,7 @@ function registrar(
     codigo,
     etiqueta: etiquetaOrigen(origen),
     mensaje: mensajeLegible(codigo, tipo),
+    ...(detalle ? { detalle } : {}),
     ocurridoEn: Date.now(),
   };
   // Una sola incidencia vigente por origen+tipo (se sustituye, sin duplicar el aviso).
@@ -316,15 +323,16 @@ function registrar(
  * ADICIONAL. Por defecto, el origen decide (`esCapacidadAdicional`): una capacidad
  * adicional se registra igual —el diagnóstico no se oculta— pero la interfaz la
  * presenta aparte y nunca como error de carga de los datos del Portal.
+ * `opciones.detalle` añade al aviso QUÉ comprobación falló y qué hacer (ver `IncidenciaDatos`).
  */
 export function reportarErrorLectura(
   origen: OrigenDatos,
   error: unknown,
   logTecnico?: string,
-  opciones?: { alcance?: AlcanceIncidencia }
+  opciones?: { alcance?: AlcanceIncidencia; detalle?: string }
 ): void {
   console.error(logTecnico ?? `Firestore ${origen} snapshot error:`, error);
-  registrar(origen, 'LECTURA', error, opciones?.alcance);
+  registrar(origen, 'LECTURA', error, opciones?.alcance, opciones?.detalle);
 }
 
 /**
@@ -449,6 +457,7 @@ const DEPENDENCIAS_PANTALLA: Partial<Record<SectionType, readonly OrigenDatos[]>
   inicio: ['candidatos', 'inmuebles'],
   inmuebles: ['inmuebles', 'propietarios', 'contratos'],
   propietarios: ['propietarios', 'inmuebles'],
+  titulares: ['propietarios', 'inmuebles'],
   inversion: ['inmuebles'],
   inquilinos: ['contratos', 'usuarios'],
   suministros: ['inmuebles'],

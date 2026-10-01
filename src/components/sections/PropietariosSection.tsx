@@ -4,7 +4,12 @@ import { hayErrores, resumenErrores, validarFormulario } from '../../formularios
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { Propietario, CuentaBancariaPropietario, TipoPropietario, Inmueble } from '../../types';
-import { MENSAJE_TITULAR_NO_EXISTE_SECCION, mensajeTitularDuplicado, titularDuplicado } from '../../lib/titularesModelo';
+import {
+  MENSAJE_ALTA_TITULAR_ADMINISTRACION,
+  MENSAJE_TITULAR_NO_EXISTE_SECCION,
+  mensajeTitularDuplicado,
+  titularDuplicado,
+} from '../../lib/titularesModelo';
 import {
   UserCheck,
   Building2,
@@ -45,6 +50,24 @@ interface PropietariosSectionProps {
    * nunca se ofrece una acción que Firestore vaya a denegar.
    */
   puedeGestionar?: boolean;
+  /**
+   * ¿Puede crear fichas NUEVAS? Espejo de `allow create` de `propietarios`: el master
+   * (cualquier ficha) o el PROPIETARIO solo para SU ficha. Por defecto, `puedeGestionar`.
+   * Con `false` (y `puedeGestionar`) la sección permite mantener la ficha propia y
+   * EXPLICA cómo se da de alta a otro titular, sin ofrecer un botón que se denegaría.
+   */
+  puedeCrear?: boolean;
+  /**
+   * Fichas que esta persona puede editar (espejo de `allow update`). `undefined` = todas
+   * (master). Un PROPIETARIO solo edita la suya: ni editar, ni añadir IBAN, ni eliminar
+   * se ofrecen sobre fichas ajenas.
+   */
+  fichasEditablesIds?: readonly string[];
+  /**
+   * Id de la ficha PROPIA del titular (modo «mi ficha»). Si esa ficha aún no existe, el
+   * alta la crea con ESTE id (las Rules solo permiten `propietarioId == myPropId()`).
+   */
+  idFichaPropia?: string;
 }
 
 export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
@@ -55,7 +78,18 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   onSelectInmueble,
   onCrearInmueble,
   puedeGestionar = true,
+  puedeCrear,
+  fichasEditablesIds,
+  idFichaPropia,
 }) => {
+  // Permisos derivados (espejo de las Rules; ver las props). Sin props nuevas = comportamiento previo.
+  const puedeCrearFichas = puedeGestionar && (puedeCrear ?? true);
+  const modoFichaPropia = Boolean(idFichaPropia);
+  const puedeEditarFicha = (prop: Pick<Propietario, 'id'>) =>
+    puedeGestionar && (!fichasEditablesIds || fichasEditablesIds.includes(prop.id));
+  // La ficha jurídica no se purga (Rules: `allow delete: if false`): el botón solo existe en la
+  // administración completa y nunca en el modo «mi ficha».
+  const puedeEliminarFichas = puedeGestionar && !fichasEditablesIds;
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTipo, setFilterTipo] = useState<string>('todos');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -321,7 +355,12 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
     }));
 
     const propietarioToSave: Propietario = {
-      id: editingPropietario ? editingPropietario.id : `prop-${Date.now()}`,
+      id: editingPropietario
+        ? editingPropietario.id
+        // Alta de la ficha PROPIA: las Rules solo la permiten con id == propietarioId del espejo.
+        : idFichaPropia && !propietarios.some((p) => p.id === idFichaPropia)
+          ? idFichaPropia
+          : `prop-${Date.now()}`,
       nombre: formNombre.trim(),
       nifCif: formNifCif.trim().toUpperCase(),
       tipoPropietario: formTipo,
@@ -437,13 +476,14 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
             </p>
           </div>
 
-          {puedeGestionar && (
+          {puedeCrearFichas && (
             <button
               onClick={handleOpenCreateModal}
+              data-testid="boton-crear-titular"
               className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all hover:shadow shrink-0"
             >
               <Plus className="w-4 h-4" />
-              <span>Crear titular</span>
+              <span>{modoFichaPropia ? 'Crear mi ficha de titular' : 'Crear titular'}</span>
             </button>
           )}
         </div>
@@ -476,8 +516,14 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
         <h2 className="text-sm font-bold text-slate-900">Cómo funciona</h2>
         <ol className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-600 list-none">
           <li className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-            <span className="font-bold text-slate-900">1. Crea el titular</span>
-            <p className="mt-1">Aquí, con sus datos personales, de contacto y fiscales completos.</p>
+            <span className="font-bold text-slate-900">
+              {puedeGestionar && !puedeCrearFichas ? '1. Completa tu ficha' : '1. Crea el titular'}
+            </span>
+            <p className="mt-1">
+              {puedeGestionar && !puedeCrearFichas
+                ? 'Aquí, con tus datos personales, de contacto y fiscales completos.'
+                : 'Aquí, con sus datos personales, de contacto y fiscales completos.'}
+            </p>
           </li>
           <li className="p-3 bg-slate-50 rounded-xl border border-slate-100">
             <span className="font-bold text-slate-900">2. Guarda la ficha</span>
@@ -492,12 +538,22 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
           Ser titular no crea ninguna cuenta de acceso, y tener cuenta no da la titularidad: son cosas distintas.
           La ficha del titular es la fuente de verdad de sus datos fiscales.
         </p>
-        <p className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
-          ¿Vienes del alta de un inmueble porque no encontrabas al titular? Estás en el sitio correcto.
-          <span className="block mt-1" data-testid="aviso-titular-inexistente-propietarios">
-            {MENSAJE_TITULAR_NO_EXISTE_SECCION}
-          </span>
-        </p>
+        {/* Quien no puede crear fichas de terceros (PROPIETARIO) lee abajo QUIÉN las crea: no se le
+            dice «créalo aquí» cuando Firestore lo denegaría. */}
+        {(puedeCrearFichas || !puedeGestionar) && (
+          <p className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+            ¿Vienes del alta de un inmueble porque no encontrabas al titular? Estás en el sitio correcto.
+            <span className="block mt-1" data-testid="aviso-titular-inexistente-propietarios">
+              {MENSAJE_TITULAR_NO_EXISTE_SECCION}
+            </span>
+          </p>
+        )}
+        {puedeGestionar && !puedeCrearFichas && (
+          <p className="mt-3 text-xs text-sky-900 bg-sky-50 border border-sky-200 rounded-xl p-3" data-testid="titulares-alta-administracion">
+            <strong className="block">Tu ficha de titular</strong>
+            {MENSAJE_ALTA_TITULAR_ADMINISTRACION}
+          </p>
+        )}
         {!puedeGestionar && (
           <p className="mt-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3" data-testid="propietarios-solo-consulta">
             Estás viendo las fichas en modo consulta: crear o editar titulares corresponde al administrador principal
@@ -557,13 +613,13 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
               ? 'Prueba a cambiar el término de búsqueda o limpia los filtros activos.'
               : 'Crea la primera ficha de titular con sus datos fiscales e IBAN: después podrás asignarla a tus inmuebles y usarla en los contratos.'}
           </p>
-          {puedeGestionar && (
+          {puedeCrearFichas && (
             <button
               onClick={handleOpenCreateModal}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all"
             >
               <Plus className="w-4 h-4" />
-              <span>Crear primer titular</span>
+              <span>{modoFichaPropia ? 'Crear mi ficha de titular' : 'Crear primer titular'}</span>
             </button>
           )}
         </div>
@@ -616,7 +672,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                     </div>
 
                     {/* Action buttons */}
-                    {puedeGestionar && (
+                    {puedeEditarFicha(prop) && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           onClick={() => handleOpenEditModal(prop)}
@@ -625,13 +681,15 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => setOwnerToDelete(prop)}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                          title="Eliminar titular"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {puedeEliminarFichas && (
+                          <button
+                            onClick={() => setOwnerToDelete(prop)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                            title="Eliminar titular"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -689,20 +747,22 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                       Cuentas Bancarias ({prop.cuentasBancarias?.length || 0})
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setQuickBankModalOwner(prop);
-                        setQuickAlias('');
-                        setQuickIban('');
-                        setQuickBanco('');
-                        setQuickTitular(prop.nombre);
-                        setQuickEsPrincipal((prop.cuentasBancarias?.length || 0) === 0);
-                      }}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Añadir IBAN</span>
-                    </button>
+                    {puedeEditarFicha(prop) && (
+                      <button
+                        onClick={() => {
+                          setQuickBankModalOwner(prop);
+                          setQuickAlias('');
+                          setQuickIban('');
+                          setQuickBanco('');
+                          setQuickTitular(prop.nombre);
+                          setQuickEsPrincipal((prop.cuentasBancarias?.length || 0) === 0);
+                        }}
+                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Añadir IBAN</span>
+                      </button>
+                    )}
                   </div>
 
                   {prop.cuentasBancarias && prop.cuentasBancarias.length > 0 ? (
@@ -755,19 +815,21 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                         <span>Sin cuentas bancarias registradas.</span>
                       </div>
-                      <button
-                        onClick={() => {
-                          setQuickBankModalOwner(prop);
-                          setQuickAlias('');
-                          setQuickIban('');
-                          setQuickBanco('');
-                          setQuickTitular(prop.nombre);
-                          setQuickEsPrincipal(true);
-                        }}
-                        className="font-bold text-blue-700 hover:underline shrink-0"
-                      >
-                        + Añadir ahora
-                      </button>
+                      {puedeEditarFicha(prop) && (
+                        <button
+                          onClick={() => {
+                            setQuickBankModalOwner(prop);
+                            setQuickAlias('');
+                            setQuickIban('');
+                            setQuickBanco('');
+                            setQuickTitular(prop.nombre);
+                            setQuickEsPrincipal(true);
+                          }}
+                          className="font-bold text-blue-700 hover:underline shrink-0"
+                        >
+                          + Añadir ahora
+                        </button>
+                      )}
                     </div>
                   )}
 

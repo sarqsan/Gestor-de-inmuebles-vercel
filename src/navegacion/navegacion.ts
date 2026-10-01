@@ -148,18 +148,33 @@ export const NAVEGACION: readonly ItemNavDef[] = [
     contador: 'inmuebles',
   },
   {
+    // PROPIETARIOS / TITULARES (punto oficial). Para el ADMINISTRADOR es la sección de
+    // fichas de titular («Crear titular»); el PROPIETARIO conserva aquí su portal y llega a
+    // su ficha de titular por la entrada `titulares` (justo debajo).
     section: 'propietarios',
     grupo: 'CARTERA',
     icono: UserCheck,
-    etiquetas: { porDefecto: 'Propietarios & IBAN', PROPIETARIO: 'Mi Portal Propietario' },
+    etiquetas: { porDefecto: 'Propietarios / Titulares', PROPIETARIO: 'Mi Portal Propietario' },
     descripciones: {
-      porDefecto: 'Base fiscal y cuentas bancarias',
+      porDefecto: 'Crear titulares: datos personales, contacto, fiscales e IBAN',
       PROPIETARIO: 'Servicios y profesionales',
     },
     perfiles: ['ADMINISTRADOR', 'PROPIETARIO'],
     // El portal del propietario era su primera entrada tras el panel (se conserva).
     ordenPorPerfil: { PROPIETARIO: -1 },
     contador: 'propietarios',
+  },
+  {
+    // El PROPIETARIO no tenía ninguna entrada hacia Propietarios/Titulares (su `propietarios`
+    // es el portal), así que el aviso «créalo desde Propietarios/Titulares» del alta de
+    // inmueble no llevaba a ningún sitio. Misma pantalla (`PropietariosSection`), en modo
+    // «mi ficha»: el propietario completa y mantiene la SUYA (lo que las Rules le permiten).
+    section: 'titulares',
+    grupo: 'CARTERA',
+    icono: Users,
+    etiquetas: { porDefecto: 'Propietarios / Titulares' },
+    descripciones: { porDefecto: 'Tu ficha de titular: datos personales, contacto y fiscales' },
+    perfiles: ['PROPIETARIO'],
   },
   {
     // AUDITORÍA UX PROPIETARIO (2026-09-29, FASE 16): el motor canónico de

@@ -59,7 +59,9 @@ export const Header: React.FC<HeaderProps> = ({
       case 'inmuebles':
         return { title: 'Gestión de Inmuebles', subtitle: 'Listado de viviendas en alquiler' };
       case 'propietarios':
-        return { title: 'Gestión de Propietarios e IBAN', subtitle: 'Base de datos de arrendadores, domicilios fiscales y cuentas bancarias' };
+        return { title: 'Propietarios / Titulares', subtitle: 'Crea y edita titulares: datos personales, contacto, fiscales y cuentas IBAN' };
+      case 'titulares':
+        return { title: 'Propietarios / Titulares', subtitle: 'Tu ficha de titular: datos personales, de contacto y fiscales' };
       case 'preseleccionados':
         return { title: 'Preseleccionados e Invitaciones', subtitle: 'Agenda de visitas a viviendas y citaciones por WhatsApp' };
       case 'solicitudes':

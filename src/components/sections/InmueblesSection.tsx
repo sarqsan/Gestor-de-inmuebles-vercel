@@ -3265,7 +3265,11 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                           className="text-[11px] font-semibold text-blue-700 hover:text-blue-900 underline flex items-center gap-1"
                         >
                           <Plus className="w-3 h-3" />
-                          <span>Crear titular en Propietarios/Titulares</span>
+                          <span>
+                            {currentUser?.tipoPerfil === 'PROPIETARIO'
+                              ? 'Ir a Propietarios/Titulares'
+                              : 'Crear titular en Propietarios/Titulares'}
+                          </span>
                         </button>
                       )}
                     </div>
@@ -3400,6 +3404,19 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-[11px] text-amber-900" role="note">
                         <strong className="block">¿No encuentras al titular?</strong>
                         <p data-testid="aviso-titular-inexistente">{MENSAJE_TITULAR_INEXISTENTE}</p>
+                        {onNavigateToPropietarios && (
+                          <button
+                            type="button"
+                            data-testid="ir-a-titulares-desde-aviso"
+                            onClick={() => {
+                              setShowAddModal(false);
+                              onNavigateToPropietarios();
+                            }}
+                            className="mt-1.5 inline-flex items-center gap-1 font-semibold text-blue-700 hover:text-blue-900 underline"
+                          >
+                            Abrir Propietarios/Titulares
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

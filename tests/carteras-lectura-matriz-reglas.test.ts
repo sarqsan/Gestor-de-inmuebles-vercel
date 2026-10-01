@@ -19,6 +19,10 @@
  *
  * Cada denegación se acompaña del veredicto del diagnóstico, para fijar que cada
  * causa posible queda DISTINGUIDA de las demás (y de «reglas publicadas distintas»).
+ *
+ * 2026-10-01: cuando TODOS los términos de la regla se cumplen y solo se deniega la
+ * CONSULTA, la capa de datos lee por relación (get) en lugar de avisar; eso se prueba a
+ * fondo en `carteras-lectura-por-relacion.test.ts`. Aquí queda fijado el contraste (C9/C9b).
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -87,6 +91,15 @@ vi.mock('firebase/firestore', () => {
       let vivo = true;
       void Promise.resolve().then(() => {
         if (!vivo) return;
+        if (ref.path && !ref.filtros) {
+          // Escucha de DOCUMENTO: se decide con `allow get` sobre el documento real.
+          const d = mundo.db[ref.path] ?? null;
+          let permitido = false;
+          try { permitido = permite(ref.__col, 'get', peticion(d, ref.id)); } catch { permitido = false; }
+          if (!permitido) { onError?.(errorPermisos()); return; }
+          onNext({ id: ref.id, exists: () => d !== null, data: () => d, metadata: { fromCache: false } });
+          return;
+        }
         if (!consultaAutorizada(ref.__col, ref.filtros)) { onError?.(errorPermisos()); return; }
         const docs = docsDe(ref.__col, ref.filtros);
         onNext({ docs, metadata: { fromCache: false } });
@@ -363,10 +376,15 @@ describe('Carteras · C — qué diría el diagnóstico en cada estado que provo
     expect(informe.causa).toBe(causa);
     expect(informe.reintento).toBe('DENEGADO');
     expect(informe.errorFirebase).toEqual({ codigo: 'permission-denied' });
+    // El aviso de una denegación REAL dice QUÉ comprobación falló y qué hacer (con el código del
+    // veredicto), sin datos personales: ya no hay que abrir la consola para saber por qué.
+    const detalle = incidenciasCarteras(canal)[0].detalle ?? '';
+    expect(detalle).toContain(`Código de diagnóstico: ${causa}.`);
+    expect(detalle).not.toContain('prop@test.local');
   });
 
-  it('C9 · TODO el estado observable cumple la regla del repo y aun así se deniega (reglas publicadas distintas) ⇒ el cliente NO afirma causa', async () => {
-    // «Reglas publicadas» más antiguas: `list` solo para el ámbito administrativo.
+  it('C9 · TODO el estado observable cumple la regla y SOLO se deniega la consulta (reglas publicadas distintas en `list`) ⇒ se lee por relación y NO hay falso aviso', async () => {
+    // «Reglas publicadas» más antiguas: `list` solo para el ámbito administrativo (`get` como en el repo).
     const antiguas = RULES.replace(
       'allow list: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);',
       'allow list: if esAdminInmuebles();'
@@ -376,17 +394,49 @@ describe('Carteras · C — qué diría el diagnóstico en cada estado que provo
 
     mundo.authUid = UID; mundo.db = mundoPropietario();
     const { fb, canal } = await cargar();
-    await abrirEscucha(fb, PERFIL);
+    const { recibidas } = await abrirEscucha(fb, PERFIL);
+
+    // Persona autorizada (estado veraz, sin relaciones indexadas): lista vacía y SIN aviso.
+    expect(recibidas).toEqual([[]]);
+    expect(incidenciasCarteras(canal)).toEqual([]);
 
     const informe = await informeDeDenegacion();
     expect(informe.comprobaciones.every((c: any) => c.ok === true)).toBe(true);
     expect(informe.reintento).toBe('DENEGADO');
-    expect(informe.causa).toBe('REGLAS_PUBLICADAS_O_PLANIFICADOR');
-    expect(informe.lectura).toMatch(/reglas PUBLICADAS/);
-    // …y le dice a quien lo lee DÓNDE comparar: proyecto y base reales de esta compilación.
+    expect(informe.lecturaPorRelacion).toBe('SIN_RELACIONES');
+    // El diagnóstico NO lo esconde: dice exactamente qué se deniega (solo la consulta) y dónde comparar las reglas.
+    expect(informe.causa).toBe('SOLO_LA_CONSULTA_DE_COLECCION_DENEGADA');
+    expect(informe.lectura).toMatch(/CONSULTA \(list\)/);
     expect(informe.dondeComprobarReglas).toContain(`proyecto «${CONFIG.projectId}»`);
     expect(informe.dondeComprobarReglas).toContain(`base de datos «${CONFIG.firestoreDatabaseId}»`);
+  });
+
+  it('C9b · el estado cumple la regla y NI la consulta NI el `get` por relación se autorizan ⇒ denegación REAL: se avisa y el veredicto apunta a las reglas publicadas', async () => {
+    // Reglas publicadas que no autorizan al gestor ni en `list` ni en `get` (rama «involucra a mi» ausente).
+    const antiguas = RULES
+      .replace('allow list: if esAdminInmuebles() || gestionInvolucraAMi(resource.data);', 'allow list: if esAdminInmuebles();')
+      .replace(
+        'allow get: if esAdminInmuebles() || gestionInvolucraAMi(resource.data) || leerGestionInvitada(resource.data);',
+        'allow get: if esAdminInmuebles();'
+      );
+    expect(antiguas.match(/allow (list|get): if esAdminInmuebles\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    permite = crearEvaluadorReglas(antiguas).permite;
+
+    mundo.authUid = UID_G; mundo.db = mundoGestor();
+    const { fb, canal } = await cargar();
+    const { recibidas } = await abrirEscucha(fb, PERFIL_G, { tipoPerfil: 'PROFESIONAL', roles: ['GESTOR_PATRIMONIAL'], intento: 0 });
+
+    // No se disfraza: la gestión indexada NO se pudo leer ⇒ aviso (capacidad adicional) y nada de datos ajenos.
+    expect(JSON.stringify(recibidas)).not.toContain('usr_otro');
     expect(incidenciasCarteras(canal)).toHaveLength(1);
+    expect(incidenciasCarteras(canal)[0]).toMatchObject({ alcance: 'CAPACIDAD', codigo: 'permission-denied' });
+    const informe = await informeDeDenegacion();
+    expect(informe.lecturaPorRelacion).toBe('DENEGADA');
+    expect(informe.causa).toBe('REGLAS_PUBLICADAS_O_PLANIFICADOR');
+    expect(informe.lectura).toMatch(/reglas publicadas distintas/);
+    // La persona lee la causa probable en el propio aviso: reglas publicadas ≠ aplicación.
+    expect(incidenciasCarteras(canal)[0].detalle).toMatch(/reglas de seguridad publicadas en Firebase/);
+    expect(incidenciasCarteras(canal)[0].detalle).toContain('Código de diagnóstico: REGLAS_PUBLICADAS_O_PLANIFICADOR.');
   });
 
   it('C10 · el UID no puede leer SU PROPIO espejo (imposible con las reglas del repo ⇒ reglas publicadas distintas) ⇒ ESPEJO_ILEGIBLE_POR_SU_TITULAR', async () => {

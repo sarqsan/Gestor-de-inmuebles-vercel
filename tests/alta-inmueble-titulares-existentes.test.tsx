@@ -107,8 +107,12 @@ function rellenarMinimo(direccion = 'Calle Mayor 1') {
 }
 
 function selectorPrincipal(): HTMLSelectElement {
+  // ORDEN 4: el alta sólo ofrece TITULARES EXISTENTES (nunca «Asignación manual»),
+  // así que el selector se localiza por su nombre accesible estable.
   const el = screen.getAllByRole('combobox').find((nodo) =>
-    Array.from((nodo as HTMLSelectElement).options).some((o) => o.textContent?.includes('Asignación manual')),
+    Array.from((nodo as HTMLSelectElement).options).some((o) =>
+      o.textContent?.includes('Selecciona un titular existente'),
+    ),
   );
   if (!el) throw new Error('No está el selector del titular principal');
   return el as HTMLSelectElement;

@@ -45,6 +45,7 @@ import {
 import { puedeLeerTitularidadesDe } from '../../lib/titularidadInmueble';
 import { clavesTitularidadesIndexadas } from '../../utils/titularidadesEngine';
 import { TitularidadesPanel } from '../titularidades/TitularidadesPanel';
+import { buscarTitularesEnServidor } from '../../lib/busquedaTitularesServidor';
 import { ejecutarMutacion } from '../../utils/mutacionFirestore';
 import type { LiquidacionPropietario } from '../../tesoreria/tipos';
 // PORTAL PROPIETARIO — Gastos/Cobros/Incidencias: se reutilizan los MISMOS motores
@@ -259,44 +260,11 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
     return inm.propietarioId === pid || inm.propietarioPrincipalId === pid;
   };
 
-  /** Token del usuario para el endpoint de servidor (F3). */
-  const obtenerToken = useCallback(async (): Promise<string | null> => {
-    try {
-      const { auth } = await import('../../lib/firebase');
-      return (await auth.currentUser?.getIdToken()) || null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  /** Búsqueda de titulares en SERVIDOR: el cliente no tiene credenciales. */
+  /** Búsqueda de titulares en SERVIDOR (F3): el cliente no tiene credenciales. */
   const handleBuscarTitulares = useCallback(
-    async (inmuebleId: string, termino: string): Promise<CandidatoTitular[]> => {
-      const token = await obtenerToken();
-      const respuesta = await fetch('/api/titulares/buscar', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ inmuebleId, termino }),
-      });
-      const datos = (await respuesta.json().catch(() => ({}))) as {
-        ok?: boolean;
-        resultados?: CandidatoTitular[];
-        detalle?: string;
-        error?: string;
-      };
-      if (!respuesta.ok) {
-        const mensaje = datos?.detalle || 'No se ha podido realizar la búsqueda de titulares.';
-        const error = new Error(mensaje) as Error & { detalle?: string; codigoHttp?: number };
-        error.detalle = mensaje;
-        error.codigoHttp = respuesta.status;
-        throw error;
-      }
-      return datos?.resultados || [];
-    },
-    [obtenerToken],
+    (inmuebleId: string, termino: string): Promise<CandidatoTitular[]> =>
+      buscarTitularesEnServidor(inmuebleId, termino),
+    [],
   );
 
   // Alta de titular: la confirmación visual la emite `ejecutarMutacion` SÓLO

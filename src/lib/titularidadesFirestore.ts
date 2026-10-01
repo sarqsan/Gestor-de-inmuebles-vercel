@@ -36,6 +36,7 @@ import {
   cerrarTitularidadEnMemoria,
   clavesTitularidadesIndexadas,
   construirTitularidad,
+  redondear2,
 } from '../utils/titularidadesEngine';
 import type { AltaTitularidad, CierreTitularidad, ClaveTitularidad } from '../utils/titularidadesEngine';
 
@@ -45,7 +46,9 @@ export const COLECCION_TITULARIDADES = 'titularidades';
  * Claves deterministas de las titularidades INDEXADAS (`titularesIds`) de estos
  * inmuebles. No genera claves hipotéticas: ver la cabecera del módulo.
  */
-export function clavesDeInmuebles(inmuebles: readonly Inmueble[]): ClaveTitularidad[] {
+export function clavesDeInmuebles(
+  inmuebles: readonly Pick<Inmueble, 'id' | 'titularesIds'>[],
+): ClaveTitularidad[] {
   return clavesTitularidadesIndexadas(inmuebles);
 }
 
@@ -54,8 +57,11 @@ export interface AlcanceTitularidades {
    * Inmuebles cuyo índice `titularesIds` se va a resolver. El llamador debe
    * pasar sólo aquellos cuyas titularidades sirven las Rules al usuario
    * (`puedeLeerTitularidadesDe`): titular canónico o cotitular indexado.
+   *
+   * Sólo se necesita la identidad y el índice (no la ficha completa), así que
+   * vale cualquier proyección del inmueble.
    */
-  inmuebles: readonly Inmueble[];
+  inmuebles: readonly Pick<Inmueble, 'id' | 'titularesIds'>[];
 }
 
 /**
@@ -136,6 +142,56 @@ export async function guardarTitularidad(alta: AltaTitularidad): Promise<boolean
     return true;
   } catch (err) {
     reportarErrorGuardado('titularidades', err, 'Error guardando titularidad:');
+    return false;
+  }
+}
+
+/**
+ * Actualiza el PORCENTAJE declarado de una titularidad (o lo deja PENDIENTE con
+ * `null`). NUNCA inventa un reparto: `null` significa «no consta».
+ *
+ * Sólo se escriben `porcentajeTitularidad` y `updatedAt`: los campos que las
+ * Rules declaran INMUTABLES (`inmuebleId`, `propietarioId`, `id`, `fechaInicio`)
+ * se conservan tal cual, y el estado/cierre no se tocan desde aquí.
+ */
+export async function actualizarPorcentajeTitularidad(
+  titularidad: Titularidad,
+  porcentaje: number | null,
+): Promise<boolean> {
+  try {
+    const limpio = porcentaje === null ? null : redondear2(porcentaje);
+    await setDoc(
+      doc(db, COLECCION_TITULARIDADES, titularidad.id),
+      { porcentajeTitularidad: limpio, updatedAt: new Date().toISOString() },
+      { merge: true },
+    );
+    return true;
+  } catch (err) {
+    reportarErrorGuardado('titularidades', err, 'Error actualizando el porcentaje de titularidad:');
+    return false;
+  }
+}
+
+/**
+ * Marca el TITULAR FISCAL PRINCIPAL del inmueble (`propietarioPrincipalId`).
+ *
+ * NO toca `propietarioId`: ese es el identificador CANÓNICO del ámbito y su
+ * cambio es una transmisión (flujo del master). Las Rules revalidan el update
+ * del inmueble; aquí no se amplía ningún permiso.
+ */
+export async function marcarTitularPrincipal(
+  inmuebleId: string,
+  propietarioId: string,
+): Promise<boolean> {
+  try {
+    await setDoc(
+      doc(db, 'inmuebles', inmuebleId),
+      { propietarioPrincipalId: propietarioId },
+      { merge: true },
+    );
+    return true;
+  } catch (err) {
+    reportarErrorGuardado('titularidades', err, 'Error marcando el titular principal del inmueble:');
     return false;
   }
 }

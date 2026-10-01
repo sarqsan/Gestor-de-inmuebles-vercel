@@ -25,6 +25,7 @@ import {
   validarPorcentajes,
 } from '../../utils/titularidadesEngine';
 import { MINIMO_CARACTERES, terminoValido } from '../../titularidades/busquedaTitulares';
+import { porcentajeDesdeTexto } from '../../lib/titularesModelo';
 import { confirmar } from '../../feedback/confirmacion';
 import { avisoCicloPatrimonial } from '../../utils/fichaInmueblePresentacion';
 
@@ -42,6 +43,19 @@ export interface TitularidadesPanelProps {
   onCerrarTitularidad?: (titularidadId: string, motivo: MotivoCierreTitularidad, detalle?: string) => Promise<void>;
   /** Búsqueda servidor (F3): mínimo 3 caracteres, máximo 10 resultados. */
   onBuscarTitulares?: (inmuebleId: string, termino: string) => Promise<CandidatoTitular[]>;
+  /**
+   * Cambiar el TITULAR FISCAL PRINCIPAL del inmueble. No transmite la
+   * titularidad canónica: sólo declara quién actúa como principal. La capa de
+   * datos y las Rules revalidan.
+   */
+  onCambiarPrincipal?: (inmuebleId: string, propietarioId: string) => Promise<void>;
+  /**
+   * Modificar el porcentaje declarado de una titularidad existente
+   * (`null` = PENDIENTE). Nunca se inventa un reparto.
+   */
+  onActualizarPorcentaje?: (titularidadId: string, porcentaje: number | null) => Promise<void>;
+  /** ¿Se ofrece cambiar de principal? (por defecto, sí cuando `puedeGestionar`). */
+  puedeCambiarPrincipal?: boolean;
 }
 
 const MOTIVOS: MotivoCierreTitularidad[] = [
@@ -62,6 +76,9 @@ export const TitularidadesPanel: React.FC<TitularidadesPanelProps> = ({
   onAnadirTitular,
   onCerrarTitularidad,
   onBuscarTitulares,
+  onCambiarPrincipal,
+  onActualizarPorcentaje,
+  puedeCambiarPrincipal,
 }) => {
   const nombreDe = useCallback(
     (propietarioId: string): string => nombresPropietarios[propietarioId] || propietarioId,
@@ -199,6 +216,61 @@ export const TitularidadesPanel: React.FC<TitularidadesPanelProps> = ({
     }
   };
 
+  // --- Principal fiscal y porcentaje (edición de una relación existente) ----
+  const esPrincipalFiscal = (t: Titularidad): boolean =>
+    (inmueble.propietarioPrincipalId || '').trim() === t.propietarioId ||
+    (inmueble.propietarioId || '').trim() === t.propietarioId;
+
+  const permiteCambiarPrincipal = puedeCambiarPrincipal ?? puedeGestionar;
+  const [principalEnCurso, setPrincipalEnCurso] = useState<string | null>(null);
+
+  const confirmarPrincipal = async (t: Titularidad) => {
+    if (!onCambiarPrincipal) return;
+    const { confirmado } = await confirmar({
+      titulo: 'Cambiar titular principal',
+      mensaje: `¿Declarar a ${nombreDe(t.propietarioId)} como titular principal del inmueble?`,
+      detalle:
+        'Cambia el titular fiscal principal (quién actúa como principal). No transmite la propiedad ni borra ninguna titularidad.',
+      etiquetaConfirmar: 'Sí, es el principal',
+    });
+    if (!confirmado) return;
+    setPrincipalEnCurso(t.id);
+    try {
+      await onCambiarPrincipal(inmueble.id, t.propietarioId);
+    } finally {
+      setPrincipalEnCurso(null);
+    }
+  };
+
+  const [porcentajeEnCurso, setPorcentajeEnCurso] = useState<string | null>(null);
+  const [porcentajeTexto, setPorcentajeTexto] = useState('');
+  const [guardandoPorcentaje, setGuardandoPorcentaje] = useState(false);
+  const [errorPorcentaje, setErrorPorcentaje] = useState<string | null>(null);
+
+  const abrirPorcentaje = (t: Titularidad) => {
+    setPorcentajeEnCurso(t.id);
+    setPorcentajeTexto(t.porcentajeTitularidad === null ? '' : String(t.porcentajeTitularidad));
+    setErrorPorcentaje(null);
+  };
+
+  const confirmarPorcentaje = async (t: Titularidad) => {
+    if (!onActualizarPorcentaje) return;
+    const pct = porcentajeDesdeTexto(porcentajeTexto);
+    if (pct === undefined) {
+      setErrorPorcentaje('Indica un porcentaje entre 0 y 100, o déjalo vacío para marcarlo como pendiente.');
+      return;
+    }
+    setErrorPorcentaje(null);
+    setGuardandoPorcentaje(true);
+    try {
+      await onActualizarPorcentaje(t.id, pct);
+      setPorcentajeEnCurso(null);
+      setPorcentajeTexto('');
+    } finally {
+      setGuardandoPorcentaje(false);
+    }
+  };
+
   const avisoCiclo = avisoCicloPatrimonial(inmueble);
 
   return (
@@ -333,39 +405,108 @@ export const TitularidadesPanel: React.FC<TitularidadesPanelProps> = ({
         </div>
       ) : (
         <ul className="divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white">
-          {vigentes.map((t) => (
-            <li key={t.id} className="px-4 py-3 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-900 truncate">{nombreDe(t.propietarioId)}</p>
-                <p className="text-[11px] text-slate-500">
-                  Desde {t.fechaInicio?.slice(0, 10) || '—'}
-                  {t.propietarioNombre ? ` · ${t.propietarioNombre}` : ''}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span
-                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                    t.porcentajeTitularidad === null
-                      ? 'bg-amber-100 text-amber-800'
-                      : 'bg-emerald-100 text-emerald-800'
-                  }`}
-                >
-                  {etiquetaPorcentaje(t)}
-                </span>
-                {puedeGestionar && onCerrarTitularidad && (
+          {vigentes.map((t) => {
+            const principal = esPrincipalFiscal(t);
+            return (
+              <li key={t.id} className="px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate flex items-center gap-2">
+                      {nombreDe(t.propietarioId)}
+                      {principal && (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800"
+                          data-testid="titular-principal"
+                        >
+                          Principal
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Desde {t.fechaInicio?.slice(0, 10) || '—'}
+                      {t.propietarioNombre ? ` · ${t.propietarioNombre}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                        t.porcentajeTitularidad === null
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
+                      {etiquetaPorcentaje(t)}
+                    </span>
+                    {puedeGestionar && onActualizarPorcentaje && (
+                      <button
+                        type="button"
+                        onClick={() => (porcentajeEnCurso === t.id ? setPorcentajeEnCurso(null) : abrirPorcentaje(t))}
+                        className="px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-blue-700 border border-slate-200 rounded-lg"
+                        data-testid={`editar-porcentaje-${t.id}`}
+                      >
+                        {porcentajeEnCurso === t.id ? 'Cancelar' : 'Editar %'}
+                      </button>
+                    )}
+                    {puedeGestionar && onCerrarTitularidad && (
+                      <button
+                        type="button"
+                        onClick={() => void confirmarCierre(t)}
+                        disabled={cierreEnCurso === t.id}
+                        className="px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-rose-700 border border-slate-200 rounded-lg"
+                        title="Cerrar (no borrar): pasa al histórico"
+                      >
+                        {cierreEnCurso === t.id ? 'Cerrando…' : 'Cerrar titularidad'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Cambiar principal: relación existente, sin transmisión ni borrado */}
+                {permiteCambiarPrincipal && !principal && onCambiarPrincipal && (
                   <button
                     type="button"
-                    onClick={() => void confirmarCierre(t)}
-                    disabled={cierreEnCurso === t.id}
-                    className="px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-rose-700 border border-slate-200 rounded-lg"
-                    title="Cerrar (no borrar): pasa al histórico"
+                    onClick={() => void confirmarPrincipal(t)}
+                    disabled={principalEnCurso === t.id}
+                    className="px-2 py-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 border border-indigo-200 bg-indigo-50 rounded-lg"
+                    data-testid={`marcar-principal-${t.id}`}
                   >
-                    {cierreEnCurso === t.id ? 'Cerrando…' : 'Cerrar titularidad'}
+                    {principalEnCurso === t.id ? 'Actualizando…' : 'Marcar como principal'}
                   </button>
                 )}
-              </div>
-            </li>
-          ))}
+
+                {/* Porcentaje: se declara si consta; vacío = PENDIENTE (nunca 50/50) */}
+                {porcentajeEnCurso === t.id && (
+                  <div className="flex flex-wrap items-end gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <label className="text-[11px] font-bold text-slate-700">
+                      Porcentaje (%)
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={porcentajeTexto}
+                        onChange={(e) => setPorcentajeTexto(e.target.value)}
+                        placeholder="Vacío = pendiente"
+                        aria-label={`Porcentaje de ${nombreDe(t.propietarioId)}`}
+                        className="ml-2 w-28 px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void confirmarPorcentaje(t)}
+                      disabled={guardandoPorcentaje}
+                      className="px-3 py-1.5 text-[11px] font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg"
+                      data-testid={`guardar-porcentaje-${t.id}`}
+                    >
+                      {guardandoPorcentaje ? 'Guardando…' : 'Guardar porcentaje'}
+                    </button>
+                    {errorPorcentaje && <p className="text-[11px] text-rose-700 w-full">{errorPorcentaje}</p>}
+                    <p className="text-[10px] text-slate-500 w-full">
+                      Si no consta, déjalo vacío: queda PENDIENTE. No se asume ningún reparto.
+                    </p>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

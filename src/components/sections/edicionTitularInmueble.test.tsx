@@ -81,11 +81,22 @@ function abrirFiscal() {
 }
 
 function selectorTitular(): HTMLSelectElement {
-  const el = screen.getAllByRole('combobox').find((node) =>
-    Array.from((node as HTMLSelectElement).options).some((opt) => opt.textContent?.includes('Asignación manual')),
+  // ORDEN 4: la edición asigna TITULARES EXISTENTES; ya no hay «Asignación manual».
+  return screen.getByRole('combobox', { name: 'Titular del inmueble' }) as HTMLSelectElement;
+}
+
+/** Resumen de sólo lectura de la ficha del titular elegido (fuente de los datos fiscales). */
+function resumenTitular(): string {
+  const nodo = screen.queryByTestId('resumen-titular-edicion');
+  return nodo?.textContent || '';
+}
+
+/** ¿Se ofrece algún control para teclear datos fiscales del titular? Debe ser NO. */
+function hayCamposFiscalesManuales(): boolean {
+  return (
+    screen.queryByPlaceholderText('Ej. Inmobiliaria SL o Juan Pérez') !== null ||
+    screen.queryByPlaceholderText('Ej. 12345678Z o B-87654321') !== null
   );
-  if (!el) throw new Error('No está el selector de arrendador principal');
-  return el as HTMLSelectElement;
 }
 
 function guardar() {
@@ -110,7 +121,10 @@ describe('edición: carga del titular principal', () => {
     });
     abrirFiscal();
     expect(selectorTitular().value).toBe('A');
-    expect((screen.getByPlaceholderText('Ej. Inmobiliaria SL o Juan Pérez') as HTMLInputElement).value).toBe('Snapshot A');
+    // La fuente es SIEMPRE la ficha: se muestra la entidad A, no el snapshot manual.
+    expect(resumenTitular()).toContain('Nombre A');
+    expect(resumenTitular()).toContain('NIF-A');
+    expect(hayCamposFiscalesManuales()).toBe(false);
   });
 
   it('2 y 4. solo propietarioId: muestra A y guardar escribe las tres referencias en A', () => {
@@ -125,13 +139,15 @@ describe('edición: carga del titular principal', () => {
     });
     abrirFiscal();
     expect(selectorTitular().value).toBe('A');
-    expect((screen.getByPlaceholderText('Ej. Inmobiliaria SL o Juan Pérez') as HTMLInputElement).value).toBe('Snapshot manual');
+    expect(resumenTitular()).toContain('Nombre A');
     guardar();
     const guardado = onUpdate.mock.calls[0][0] as Inmueble;
     expect(guardado.propietarioId).toBe('A');
     expect(guardado.propietarioPrincipalId).toBe('A');
+    // Las tres referencias apuntan a la ficha A y su instantánea fiscal se lee de ella.
     expect(guardado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('A');
-    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Snapshot manual');
+    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Nombre A');
+    expect(guardado.datosFiscales?.propietarioPrincipal.nifDni).toBe('NIF-A');
   });
 
   it('3. propietarioId A y principal B: el selector muestra A, no B', () => {
@@ -160,12 +176,13 @@ describe('edición: carga del titular principal', () => {
     });
     abrirFiscal();
     expect(selectorTitular().value).toBe('A');
+    expect(resumenTitular()).toContain('Nombre A');
     guardar();
     const guardado = onUpdate.mock.calls[0][0] as Inmueble;
     expect(guardado.propietarioId).toBe('A');
     expect(guardado.propietarioPrincipalId).toBe('A');
     expect(guardado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('A');
-    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Snapshot de B');
+    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Nombre A');
   });
 
   it('5. sin propietarioId, el principal es el fallback', () => {
@@ -189,7 +206,7 @@ describe('edición: carga del titular principal', () => {
     });
     abrirFiscal();
     expect(selectorTitular().value).toBe('B');
-    expect((screen.getByPlaceholderText('Ej. Inmobiliaria SL o Juan Pérez') as HTMLInputElement).value).toBe('Snapshot fiscal');
+    expect(resumenTitular()).toContain('Nombre B');
   });
 
   it('7. el NIF solo se usa si no hay ningún id', () => {
@@ -201,7 +218,7 @@ describe('edición: carga del titular principal', () => {
     });
     abrirFiscal();
     expect(selectorTitular().value).toBe('B');
-    expect((screen.getByPlaceholderText('Ej. Inmobiliaria SL o Juan Pérez') as HTMLInputElement).value).toBe('Solo NIF');
+    expect(resumenTitular()).toContain('Nombre B');
   });
 
   it('8. sin ninguna referencia el selector sigue vacío', () => {
@@ -232,7 +249,8 @@ describe('edición: carga del titular principal', () => {
     abrirFiscal();
     expect(selectorTitular().value).toBe('A');
     fireEvent.change(selectorTitular(), { target: { value: 'B' } });
-    expect((screen.getByPlaceholderText('Ej. Inmobiliaria SL o Juan Pérez') as HTMLInputElement).value).toBe('Nombre B');
+    expect(resumenTitular()).toContain('Nombre B');
+    expect(resumenTitular()).toContain('NIF-B');
     guardar();
     const guardado = onUpdate.mock.calls[0][0] as Inmueble;
     expect(guardado.propietarioId).toBe('B');

@@ -16,6 +16,15 @@
  *    propietario la ve igual: lee SU inmueble, lee el índice y hace los `get`
  *    deterministas. No necesita conocer de antemano el id del tercero.
  *
+ * REGLA DE LECTURA (diagnóstico «Lectura · titularidades: No tienes permisos»):
+ *  · SÓLO se leen claves que el ÍNDICE declara. NUNCA se sondean claves
+ *    hipotéticas (`propietarioId`, `propietarioPrincipalId`, usuario actual…):
+ *    si el inmueble no tiene titularidades (anterior a N-TITULARES, o recién
+ *    creado) ese documento NO EXISTE y las reglas evalúan `resource.data` sobre
+ *    un `null`, es decir, DENIEGAN el `get` ⇒ aviso visible sin que haya ningún
+ *    dato prohibido. Se elimina la lectura innecesaria; no se amplía ningún
+ *    permiso ni se silencia el error.
+ *
  * Escritura: ATÓMICA. La titularidad y el índice del inmueble se escriben en el
  * mismo `writeBatch` (o se queda todo como estaba).
  */
@@ -23,42 +32,30 @@ import { doc, getDoc, onSnapshot, setDoc, writeBatch, arrayUnion, type Unsubscri
 import { db } from './firebase';
 import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import type { Inmueble, Titularidad } from '../types';
-import { cerrarTitularidadEnMemoria, construirTitularidad, idTitularidad } from '../utils/titularidadesEngine';
-import type { AltaTitularidad, CierreTitularidad } from '../utils/titularidadesEngine';
+import {
+  cerrarTitularidadEnMemoria,
+  clavesTitularidadesIndexadas,
+  construirTitularidad,
+} from '../utils/titularidadesEngine';
+import type { AltaTitularidad, CierreTitularidad, ClaveTitularidad } from '../utils/titularidadesEngine';
 
 export const COLECCION_TITULARIDADES = 'titularidades';
 
-/** Claves deterministas de titularidad para estos inmuebles y propietarios. */
-export function clavesDeInmuebles(
-  inmuebles: readonly Inmueble[],
-  propietarioIdsAdicionales: readonly string[] = [],
-): Array<{ inmuebleId: string; propietarioId: string; clave: string }> {
-  const salida = new Map<string, { inmuebleId: string; propietarioId: string; clave: string }>();
-  for (const inm of inmuebles || []) {
-    if (!inm?.id) continue;
-    const ids = new Set<string>([
-      ...(inm.titularesIds || []),
-      ...(inm.propietarioId ? [inm.propietarioId] : []),
-      ...(inm.propietarioPrincipalId ? [inm.propietarioPrincipalId] : []),
-      ...propietarioIdsAdicionales,
-    ]);
-    for (const propietarioId of ids) {
-      if (!propietarioId) continue;
-      const clave = idTitularidad(inm.id, propietarioId);
-      if (!salida.has(clave)) salida.set(clave, { inmuebleId: inm.id, propietarioId, clave });
-    }
-  }
-  // Orden estable por clave: el mismo ámbito produce siempre la misma lista.
-  return Array.from(salida.values()).sort((a, b) => a.clave.localeCompare(b.clave));
+/**
+ * Claves deterministas de las titularidades INDEXADAS (`titularesIds`) de estos
+ * inmuebles. No genera claves hipotéticas: ver la cabecera del módulo.
+ */
+export function clavesDeInmuebles(inmuebles: readonly Inmueble[]): ClaveTitularidad[] {
+  return clavesTitularidadesIndexadas(inmuebles);
 }
 
 export interface AlcanceTitularidades {
-  /** Inmuebles cuyo índice `titularidadesIds` se va a resolver. */
+  /**
+   * Inmuebles cuyo índice `titularesIds` se va a resolver. El llamador debe
+   * pasar sólo aquellos cuyas titularidades sirven las Rules al usuario
+   * (`puedeLeerTitularidadesDe`): titular canónico o cotitular indexado.
+   */
   inmuebles: readonly Inmueble[];
-  /** Propietario actual (su propia titularidad aunque el índice esté vacío). */
-  propietarioId?: string;
-  /** Otros propietarioIds a resolver (p. ej. cotitulares conocidos). */
-  propietarioIds?: readonly string[];
 }
 
 /**
@@ -69,10 +66,7 @@ export function subscribeTitularidadesEscopo(
   alcance: AlcanceTitularidades,
   callback: (titularidades: Titularidad[]) => void,
 ): Unsubscribe {
-  const claves = clavesDeInmuebles(alcance.inmuebles || [], [
-    ...(alcance.propietarioId ? [alcance.propietarioId] : []),
-    ...(alcance.propietarioIds || []),
-  ]);
+  const claves = clavesDeInmuebles(alcance.inmuebles || []);
   if (claves.length === 0) {
     callback([]);
     return () => {};
@@ -98,8 +92,9 @@ export function subscribeTitularidadesEscopo(
         notificar();
       },
       (err) => {
-        // Un `permission-denied` sobre una clave ajena no contamina el resto:
-        // se informa por el canal de incidencias y se retira esa clave.
+        // Una clave INDEXADA que falla es un fallo real (índice sin documento o
+        // documento ilegible): se informa por el canal de incidencias —no se
+        // silencia— y se retira esa clave sin contaminar el resto.
         reportarErrorLectura('titularidades', err, `Firestore titularidad (${clave}) snapshot error:`);
         porClave.delete(clave);
         notificar();

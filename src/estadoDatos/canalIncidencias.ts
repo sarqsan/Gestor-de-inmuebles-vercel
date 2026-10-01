@@ -71,6 +71,7 @@ export const ORIGENES_CONOCIDOS = [
   'audit_logs',
   'modulos_config',
   'gestiones_cartera',
+  'titularidades',
   'inversion',
   'sindicacion',
 ] as const;
@@ -143,6 +144,7 @@ const ETIQUETAS_ORIGEN: Record<string, string> = {
   audit_logs: 'Auditoría',
   modulos_config: 'Módulos',
   gestiones_cartera: 'Carteras',
+  titularidades: 'Titularidades',
   inversion: 'Inversión y valoración',
   sindicacion: 'Sindicación',
 };

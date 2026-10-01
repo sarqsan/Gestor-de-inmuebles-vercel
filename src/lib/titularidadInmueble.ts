@@ -19,6 +19,8 @@
  *   cualquier edición de fichas legacy incoherentes).
  * - `esTitularDelInmueble` / `esSecundarioDelInmueble`: predicados de lectura
  *   para la UI (la autorización real la imponen las Rules).
+ * - `puedeLeerTitularidadesDe`: ¿sirven las Rules las titularidades (N-TITULARES)
+ *   de un inmueble a este propietario? Acota qué consulta la UI (nunca autoriza).
  */
 import type { Inmueble } from '../types';
 
@@ -99,4 +101,25 @@ export function esSecundarioDelInmueble(inmueble: Inmueble, propietarioId: strin
   const pid = norm(propietarioId);
   if (!pid) return false;
   return norm(inmueble.propietarioSecundarioId) === pid;
+}
+
+/**
+ * ¿Sirven las Rules las TITULARIDADES de este inmueble a este propietario?
+ *
+ * Espejo (sólo para decidir qué consultar; la autorización real la imponen las
+ * Rules) de `puedoLeerTitularidadDe` en `firestore.rules` para un PROPIETARIO sin
+ * cartera gestionada:
+ *  · titular canónico (`propietarioId`): lee las titularidades de su inmueble;
+ *  · cotitular indexado (`titularesIds`): también las lee.
+ *
+ * NO las concede (y por tanto NO deben consultarse): la autorización explícita
+ * por `inmuebleIds` (sólo permite ver la vivienda), ni `propietarioPrincipalId`
+ * sin figurar en el canónico ni en el índice. Consultarlas sólo produciría
+ * denegaciones evitables («Lectura · titularidades»).
+ */
+export function puedeLeerTitularidadesDe(inmueble: Inmueble, propietarioId: string | undefined): boolean {
+  const pid = norm(propietarioId);
+  if (!pid) return false;
+  if (norm(inmueble.propietarioId) === pid) return true;
+  return Array.isArray(inmueble.titularesIds) && inmueble.titularesIds.some((id) => norm(id) === pid);
 }

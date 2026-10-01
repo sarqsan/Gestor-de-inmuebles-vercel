@@ -153,6 +153,8 @@ import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
 import type { GestionCartera } from './lib/gestionesCartera';
 import { detectarCambioTitularidad } from './lib/titularidadInmueble';
+import { asignarTitularesAlta, type TitularesAltaInmueble } from './lib/altaInmuebleTitulares';
+import { guardarTitularidad } from './lib/titularidadesFirestore';
 import { resolverTokensPublicos } from './lib/tokensPublicos';
 import {
   persistirMejorEsfuerzo,
@@ -2040,7 +2042,7 @@ export default function App() {
   };
 
   // Add inmueble handler
-  const handleAddInmueble = (newInmueble: Inmueble) => {
+  const handleAddInmueble = (newInmueble: Inmueble, titulares?: TitularesAltaInmueble) => {
     setInmuebles((prev) => {
       const next = [newInmueble, ...prev];
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
@@ -2048,7 +2050,23 @@ export default function App() {
     });
     // UX-2 §6: el resultado de la persistencia no se descarta: si no se guardó,
     // se avisa (el estado optimista se conserva; la reversión es UX-3).
-    void saveInmuebleFirestore(newInmueble).then((ok) => reportarResultadoGuardado('inmuebles', ok));
+    void saveInmuebleFirestore(newInmueble).then(async (ok) => {
+      reportarResultadoGuardado('inmuebles', ok);
+      // N-TITULARES: el alta sólo asigna titulares que YA EXISTEN. Las titularidades
+      // (`titularidades/{inmuebleId}__{propietarioId}` + índice `titularesIds`) se
+      // escriben DESPUÉS de que el inmueble esté guardado (las Rules comprueban el
+      // ámbito sobre el inmueble persistido) y en lote atómico por titular, de modo
+      // que el índice nunca apunta a una titularidad inexistente. Un fallo se
+      // informa desde la capa de datos y no se presenta como asignado.
+      if (!ok || !titulares || titulares.titularesIds.length === 0) return;
+      await asignarTitularesAlta({
+        inmuebleId: newInmueble.id,
+        titularesIds: titulares.titularesIds,
+        nombres: Object.fromEntries(propietarios.map((p) => [p.id, p.nombre])),
+        actor: { id: currentUser?.id, nombre: currentUser?.nombre },
+        guardar: guardarTitularidad,
+      });
+    });
   };
 
   // Update inmueble handler

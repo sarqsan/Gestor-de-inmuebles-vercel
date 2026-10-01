@@ -42,6 +42,8 @@ import {
   guardarTitularidad,
   subscribeTitularidadesEscopo,
 } from '../../lib/titularidadesFirestore';
+import { puedeLeerTitularidadesDe } from '../../lib/titularidadInmueble';
+import { clavesTitularidadesIndexadas } from '../../utils/titularidadesEngine';
 import { TitularidadesPanel } from '../titularidades/TitularidadesPanel';
 import { ejecutarMutacion } from '../../utils/mutacionFirestore';
 import type { LiquidacionPropietario } from '../../tesoreria/tipos';
@@ -210,22 +212,35 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   );
 
   // N TITULARES — suscripción a las titularidades del ámbito del propietario.
-  // Se resuelve por el índice de cada vivienda y se leen las claves
-  // deterministas una a una (`get`): sin `list` global y sin `or()`.
-  const misViviendasRef = useRef(todasMisViviendas);
-  misViviendasRef.current = todasMisViviendas;
-  const claveViviendas = todasMisViviendas.map((v) => v.id).join('|');
+  // Se resuelve por el ÍNDICE `titularesIds` de cada vivienda y se leen las
+  // claves deterministas una a una (`get`): sin `list` global y sin `or()`.
+  //
+  // Lecturas ACOTADAS (diagnóstico «Lectura · titularidades: No tienes permisos»):
+  //  · sólo viviendas cuyas titularidades sirven las Rules a este usuario
+  //    (titular canónico o cotitular indexado); la mera autorización por
+  //    `inmuebleIds` no las concede;
+  //  · sólo claves que el índice declara: nunca se sondea un documento que puede
+  //    no existir (inmuebles sin titularidades todavía), porque su `get` se
+  //    deniega por regla. Es una lectura innecesaria que se elimina; no se
+  //    amplían permisos ni se silencia el error.
+  // La suscripción depende de las CLAVES (no sólo de los ids de vivienda): al
+  // añadir un titular cambia el índice y hay que escuchar su nueva clave.
+  const pidTitularidades = currentUser?.propietarioId;
+  const viviendasConTitularidades = todasMisViviendas.filter((inm) =>
+    puedeLeerTitularidadesDe(inm, pidTitularidades),
+  );
+  const viviendasConTitularidadesRef = useRef(viviendasConTitularidades);
+  viviendasConTitularidadesRef.current = viviendasConTitularidades;
+  const clavesTitularidades = clavesTitularidadesIndexadas(viviendasConTitularidades)
+    .map((c) => c.clave)
+    .join('|');
   useEffect(() => {
-    const pid = currentUser?.propietarioId;
-    if (!pid && misViviendasRef.current.length === 0) {
+    if (!clavesTitularidades) {
       setTitularidades([]);
       return;
     }
-    return subscribeTitularidadesEscopo(
-      { inmuebles: misViviendasRef.current, propietarioId: pid },
-      setTitularidades,
-    );
-  }, [claveViviendas, currentUser?.propietarioId]);
+    return subscribeTitularidadesEscopo({ inmuebles: viviendasConTitularidadesRef.current }, setTitularidades);
+  }, [clavesTitularidades]);
 
   const nombresPropietarios = useMemo(() => {
     const mapa: Record<string, string> = {};

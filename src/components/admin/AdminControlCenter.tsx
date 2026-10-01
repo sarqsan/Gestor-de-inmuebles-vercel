@@ -1091,7 +1091,9 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {propietarios.map((p) => {
-                      const inmCount = inmuebles.filter(
+                      // Misma cartera operativa que «Ver Inmuebles» y el resto del ERP:
+                      // un inmueble vendido / dado de baja no está «en gestión».
+                      const inmCount = carteraOperativa.filter(
                         (i) => i.propietarioPrincipalId === p.id
                       ).length;
                       return (
@@ -1567,7 +1569,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 </p>
                 <p>
                   <strong className="text-white">Inmuebles en Gestión:</strong>{' '}
-                  {inmuebles.filter((i) => i.propietarioPrincipalId === selectedPropietarioDetail.id).length}
+                  {carteraOperativa.filter((i) => i.propietarioPrincipalId === selectedPropietarioDetail.id).length}
                 </p>
               </div>
 

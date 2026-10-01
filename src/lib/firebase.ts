@@ -392,7 +392,7 @@ export function subscribeGestionesCarteraGestor(
   return onSnapshot(
     query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', gestorUsuarioId)),
     (snap) => callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera))),
-    (err) => reportarErrorLectura('gestiones_cartera', err, 'Firestore gestiones_cartera (gestor) snapshot error:')
+    (err) => reportarErrorLectura('gestiones_cartera', err, `Firestore gestiones_cartera (gestorUsuarioId=${gestorUsuarioId}) snapshot error:`)
   );
 }
 

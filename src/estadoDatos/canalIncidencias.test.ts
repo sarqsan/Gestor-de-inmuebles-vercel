@@ -245,6 +245,11 @@ describe('UX-2 §8/§10 — mensajes accionables y sin detalles técnicos', () =
     expect(etiquetaOrigen('inmuebles')).toBe('Inmuebles');
     expect(etiquetaOrigen('origen_inventado')).toBe('origen_inventado');
   });
+
+  it('titularidades y carteras tienen etiqueta legible (el aviso no expone la clave técnica)', () => {
+    expect(etiquetaOrigen('titularidades')).toBe('Titularidades');
+    expect(etiquetaOrigen('gestiones_cartera')).toBe('Carteras');
+  });
 });
 
 describe('UX-2 · C4 — lecturas activas por perfil', () => {

@@ -70,28 +70,35 @@ beforeEach(() => {
 });
 
 describe('F2 — índice y claves deterministas', () => {
-  it('las claves salen del índice titularesIds del inmueble', () => {
+  it('las claves salen SÓLO del índice titularesIds del inmueble (no de propietarioId)', () => {
     const claves = clavesDeInmuebles([inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['p2', 'p3'] })]);
-    expect(claves.map((c) => c.clave)).toEqual(['A__p1', 'A__p2', 'A__p3']);
+    expect(claves.map((c) => c.clave)).toEqual(['A__p2', 'A__p3']);
   });
 
   it('incluye la titularidad creada por un TERCERO sin conocer su id', () => {
     // El inmueble es de p1; pX creó una titularidad y quedó en el índice.
-    const claves = clavesDeInmuebles([inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['p1', 'pX'] })], ['p1']);
+    const claves = clavesDeInmuebles([inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['p1', 'pX'] })]);
     expect(claves.some((c) => c.propietarioId === 'pX')).toBe(true);
   });
 
   it('sin duplicados cuando el propietario aparece por varias vías', () => {
-    const claves = clavesDeInmuebles(
-      [inmueble({ id: 'A', propietarioId: 'p1', propietarioPrincipalId: 'p1', titularesIds: ['p1'] })],
-      ['p1'],
-    );
+    const claves = clavesDeInmuebles([
+      inmueble({ id: 'A', propietarioId: 'p1', propietarioPrincipalId: 'p1', titularesIds: ['p1', 'p1'] }),
+    ]);
     expect(claves).toHaveLength(1);
   });
 
   it('la clave es determinista y reversible', () => {
     expect(idTitularidad('A', 'p1')).toBe('A__p1');
-    expect(clavesDeInmuebles([inmueble({ id: 'A', propietarioId: 'p1' })])[0].clave).toBe(idTitularidad('A', 'p1'));
+    expect(clavesDeInmuebles([inmueble({ id: 'A', titularesIds: ['p1'] })])[0].clave).toBe(idTitularidad('A', 'p1'));
+  });
+
+  it('sin índice no hay claves: propietarioId y propietarioPrincipalId NO generan lecturas', () => {
+    // Un inmueble anterior a N-TITULARES (o recién creado) no tiene documentos de
+    // titularidad: leer `A__p1` sería un `get` sobre un documento inexistente, que
+    // las reglas deniegan (`resource` nulo). Esa lectura innecesaria ya no existe.
+    expect(clavesDeInmuebles([inmueble({ id: 'A', propietarioId: 'p1', propietarioPrincipalId: 'p2' })])).toEqual([]);
+    expect(clavesDeInmuebles([inmueble({ id: 'A', propietarioId: 'p1', titularesIds: [] })])).toEqual([]);
   });
 });
 
@@ -99,7 +106,7 @@ describe('F2 — suscripción por clave (ni list ni or)', () => {
   it('abre un listener por clave determinista y entrega todas las titularidades', () => {
     const recibidas: Titularidad[][] = [];
     const cancelar = subscribeTitularidadesEscopo(
-      { inmuebles: [inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['p1', 'pX'] })], propietarioId: 'p1' },
+      { inmuebles: [inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['p1', 'pX'] })] },
       (t) => recibidas.push(t),
     );
     expect(oyentes.map((o) => o.ref.id).sort()).toEqual(['A__p1', 'A__pX']);
@@ -114,9 +121,24 @@ describe('F2 — suscripción por clave (ni list ni or)', () => {
     expect(oyentes).toHaveLength(0);
   });
 
-  it('sin inmuebles ni propietario no abre ningún listener', () => {
+  it('sin inmuebles no abre ningún listener', () => {
     const cb = vi.fn();
     subscribeTitularidadesEscopo({ inmuebles: [] }, cb);
+    expect(oyentes).toHaveLength(0);
+    expect(cb).toHaveBeenCalledWith([]);
+  });
+
+  it('un inmueble SIN índice no abre ningún listener (no se sondean documentos que pueden no existir)', () => {
+    const cb = vi.fn();
+    subscribeTitularidadesEscopo(
+      {
+        inmuebles: [
+          inmueble({ id: 'A', propietarioId: 'p1', propietarioPrincipalId: 'p1' }),
+          inmueble({ id: 'B', propietarioId: 'p1', titularesIds: [] }),
+        ],
+      },
+      cb,
+    );
     expect(oyentes).toHaveLength(0);
     expect(cb).toHaveBeenCalledWith([]);
   });
@@ -124,7 +146,7 @@ describe('F2 — suscripción por clave (ni list ni or)', () => {
   it('un permiso denegado sobre una clave ajena no contamina las demás', () => {
     const recibidas: Titularidad[][] = [];
     subscribeTitularidadesEscopo(
-      { inmuebles: [inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['pX'] })], propietarioId: 'p1' },
+      { inmuebles: [inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['p1', 'pX'] })] },
       (t) => recibidas.push(t),
     );
     oyentes[0].ok({ id: 'A__p1', exists: () => true, data: () => ({ inmuebleId: 'A', propietarioId: 'p1', estado: 'VIGENTE' }) });

@@ -21,11 +21,18 @@ import { FichaTecnicaInventarioPanel } from '../FichaTecnicaInventarioPanel';
 import { HabitacionesInmueblePanel } from '../HabitacionesInmueblePanel';
 import { PublicacionInmueblesPanel } from '../PublicacionInmueblesPanel';
 import { CentroOperativoInmueblePanel } from '../inmueble/CentroOperativoInmueblePanel';
+import { PanelTitularidadesInmueble } from '../titularidades/PanelTitularidadesInmueble';
 import { BajaInmuebleModal } from '../modals/BajaInmuebleModal';
 import { GestionImagenesModal } from '../GestionImagenesModal';
 import { VerAgendaInmuebleModal } from '../VerAgendaInmuebleModal';
 import { getInmuebleCoverUrl } from '../../utils/imageUtils';
 import { validarCoherenciaTitularidad } from '../../lib/titularidadInmueble';
+import { analizarLegadoTitularidad } from '../../lib/legadoTitulares';
+import {
+  MENSAJE_TITULAR_NO_EXISTE_SECCION,
+  filtrarTitularesLocales,
+  resumenTitular,
+} from '../../lib/titularesModelo';
 import {
   MENSAJE_TITULAR_INEXISTENTE,
   fiscalDesdePropietario,
@@ -162,6 +169,17 @@ interface InmueblesSectionProps {
   onContextoAltaConsumido?: () => void;
   /** Contexto local para la ayuda/IA; el host vuelve a validar el ID contra inmuebles acotados. */
   onInmuebleSeleccionado?: (inmuebleId: string | null) => void;
+  /**
+   * ¿Puede esta persona LEER las titularidades (N-TITULARES) de este inmueble?
+   * Espejo de `puedoLeerTitularidadDe` de las Rules; sin él no se solicita
+   * ninguna lectura (evita denegaciones evitables).
+   */
+  puedeLeerTitularidades?: (inmueble: Inmueble) => boolean;
+  /**
+   * ¿Puede AÑADIR/CERRAR/MODIFICAR las titularidades de este inmueble? Espejo
+   * de `puedoEscribirTitularidadDe`; las Rules revalidan cada escritura.
+   */
+  puedeEscribirTitularidades?: (inmueble: Inmueble) => boolean;
 }
 
 export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
@@ -192,6 +210,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   propietarioContextoAltaId,
   onContextoAltaConsumido,
   onInmuebleSeleccionado,
+  puedeLeerTitularidades,
+  puedeEscribirTitularidades,
 }) => {
   const [selectedInmuebleId, setSelectedInmuebleId] = useState<string | null>(null);
   const [filterState, setFilterState] = useState<'todos' | 'disponible' | 'alquilado'>('todos');
@@ -243,12 +263,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [newIbanCobro, setNewIbanCobro] = useState('');
   const [newCertificadoEnergetico, setNewCertificadoEnergetico] = useState('');
   const [newNumeroRegistroPropiedad, setNewNumeroRegistroPropiedad] = useState('');
-  const [newPropNombre, setNewPropNombre] = useState('');
-  const [newPropNif, setNewPropNif] = useState('');
-  const [newPropDireccion, setNewPropDireccion] = useState('');
-  const [newPropTelefono, setNewPropTelefono] = useState('');
-  const [newPropEmail, setNewPropEmail] = useState('');
-  const [newPropEsPersonaJuridica, setNewPropEsPersonaJuridica] = useState(false);
+  // Búsqueda LOCAL de titulares del alta (nombre, NIF o ciudad). No crea personas:
+  // filtra las fichas existentes que el usuario ya puede ver.
+  const [newBusquedaTitular, setNewBusquedaTitular] = useState('');
   // N-TITULARES: otros titulares del inmueble, SIEMPRE existentes (se eligen de la
   // lista de propietarios registrados; el alta no crea personas). El principal es
   // `newSelectedPropId`; el resto, en el orden en que se eligieron.
@@ -256,7 +273,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
   // Modal State for Edit Property
   const [inmuebleToEdit, setInmuebleToEdit] = useState<Inmueble | null>(null);
-  const [editTab, setEditTab] = useState<'general' | 'fiscal'>('general');
+  const [editTab, setEditTab] = useState<'general' | 'fiscal' | 'titulares'>('general');
   const [editDireccion, setEditDireccion] = useState('');
   const [editCiudad, setEditCiudad] = useState('');
   const [editPrecio, setEditPrecio] = useState<number>(850);
@@ -271,7 +288,6 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   // Edit Fiscal & Owner Linking Fields
   const [editSelectedPropId, setEditSelectedPropId] = useState<string>('');
   const [editSelectedCuentaId, setEditSelectedCuentaId] = useState<string>('');
-  const [editSelectedProp2Id, setEditSelectedProp2Id] = useState<string>('');
   const [editReferenciaCatastral, setEditReferenciaCatastral] = useState('');
   // FASE 3.5.1 — detalle catastral
   const [editCatastro, setEditCatastro] = useState<Partial<DatosCatastrales>>({});
@@ -281,19 +297,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [editIbanCobro, setEditIbanCobro] = useState('');
   const [editCertificadoEnergetico, setEditCertificadoEnergetico] = useState('');
   const [editNumeroRegistroPropiedad, setEditNumeroRegistroPropiedad] = useState('');
-  const [editPropNombre, setEditPropNombre] = useState('');
-  const [editPropNif, setEditPropNif] = useState('');
-  const [editPropDireccion, setEditPropDireccion] = useState('');
-  const [editPropTelefono, setEditPropTelefono] = useState('');
-  const [editPropEmail, setEditPropEmail] = useState('');
-  const [editPropEsPersonaJuridica, setEditPropEsPersonaJuridica] = useState(false);
-  const [editTieneSegundoProp, setEditTieneSegundoProp] = useState(false);
-  const [editProp2Nombre, setEditProp2Nombre] = useState('');
-  const [editProp2Nif, setEditProp2Nif] = useState('');
-  const [editProp2Direccion, setEditProp2Direccion] = useState('');
-  const [editProp2Telefono, setEditProp2Telefono] = useState('');
-  const [editProp2Email, setEditProp2Email] = useState('');
-  const [editProp2EsPersonaJuridica, setEditProp2EsPersonaJuridica] = useState(false);
+  // Búsqueda LOCAL de titulares en la edición (igual que en el alta).
+  const [editBusquedaTitular, setEditBusquedaTitular] = useState('');
+  // El modelo binario («segundo propietario» tecleado) ya NO se edita aquí: sus
+  // datos guardados se conservan tal cual y se muestran como información heredada.
+  const legadoEdicion = useMemo(
+    () => analizarLegadoTitularidad(inmuebleToEdit, { titulares: propietarios }),
+    [inmuebleToEdit, propietarios],
+  );
 
   // New property physical identity & contract state
   const [newIdPersonalizado, setNewIdPersonalizado] = useState('');
@@ -474,6 +485,38 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const puedeOfrecerBaja = (inm: Inmueble): boolean =>
     Boolean(onBajaInmueble) && !inmuebleDadoDeBaja(inm) && (puedeDarDeBaja ? puedeDarDeBaja(inm) : true);
 
+  /**
+   * Titularidades del inmueble: los mismos espejos de las Rules que usa la baja.
+   * Si el host no los aporta, se derivan del usuario en sesión (administración y
+   * titularidad propia). Nunca se ofrece una acción sin alcance.
+   */
+  const esAdminTitularidades =
+    currentUser?.tipoPerfil === 'ADMINISTRADOR' ||
+    (currentUser?.email || '').trim().toLowerCase() === 'sarqsan2@gmail.com';
+  const puedoLeerTitularidadesDe = (inm: Inmueble): boolean =>
+    puedeLeerTitularidades
+      ? puedeLeerTitularidades(inm)
+      : esAdminTitularidades ||
+        Boolean(
+          currentUser?.propietarioId &&
+            (inm.propietarioId === currentUser.propietarioId ||
+              inm.propietarioPrincipalId === currentUser.propietarioId ||
+              (inm.titularesIds || []).includes(currentUser.propietarioId)),
+        );
+  const puedoEscribirTitularidadesDe = (inm: Inmueble): boolean =>
+    puedeEscribirTitularidades
+      ? puedeEscribirTitularidades(inm)
+      : esAdminTitularidades ||
+        Boolean(
+          currentUser?.propietarioId &&
+            (inm.propietarioId === currentUser.propietarioId ||
+              inm.propietarioPrincipalId === currentUser.propietarioId),
+        );
+  const actorTitularidades = useMemo(
+    () => ({ id: currentUser?.id, nombre: currentUser?.nombre }),
+    [currentUser?.id, currentUser?.nombre],
+  );
+
   const carteraOperativa = useMemo(() => inmueblesOperativos(inmuebles), [inmuebles]);
   const carteraVisible = mostrarHistorico ? inmueblesHistoricos : carteraOperativa;
   const filteredInmuebles = carteraVisible.filter((inm) => {
@@ -490,16 +533,11 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setNewTab('general');
     // La elección de titulares adicionales nunca se arrastra de un alta a la siguiente.
     setNewTitularesAdicionalesIds([]);
+    setNewBusquedaTitular('');
     if (altaAplicoContexto.current) {
       setNewSelectedPropId('');
       setNewSelectedCuentaId('');
       setNewIbanCobro('');
-      setNewPropNombre('');
-      setNewPropNif('');
-      setNewPropDireccion('');
-      setNewPropTelefono('');
-      setNewPropEmail('');
-      setNewPropEsPersonaJuridica(false);
       altaAplicoContexto.current = false;
     }
     // AUDITORÍA UX PROPIETARIO (2026-09-29 · FASE 11): cuando quien abre el alta
@@ -524,16 +562,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     }
     const prop = propietarios.find((p) => p.id === propId);
     if (prop) {
-      setNewPropNombre(prop.nombre);
-      setNewPropNif(prop.nifCif);
-      setNewPropDireccion(`${prop.direccion}${prop.ciudad ? `, ${prop.ciudad}` : ''}`);
-      setNewPropTelefono(prop.telefono || '');
-      setNewPropEmail(prop.email || '');
-      setNewPropEsPersonaJuridica(
-        prop.tipo === 'sociedad_limitada' ||
-        prop.tipo === 'sociedad_anonima' ||
-        prop.tipo === 'comunidad_bienes'
-      );
+      // Los datos fiscales del titular NO se copian a mano: se leen de su ficha
+      // (`fiscalDesdePropietario`) en el momento de guardar el inmueble.
       const principalAcc = prop.cuentasBancarias.find((c) => c.esPrincipal) || prop.cuentasBancarias[0];
       if (principalAcc) {
         setNewSelectedCuentaId(principalAcc.id);
@@ -607,23 +637,29 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       newImagenUrl.trim() ||
       'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&auto=format&fit=crop&q=80';
 
-    const propPrincipal: PropietarioFiscal = {
-      nombre: newPropNombre.trim() || 'Propietario / Arrendador',
-      nifDni: newPropNif.trim() || '',
-      direccion: newPropDireccion.trim() || newDireccion,
-      telefono: newPropTelefono.trim() || undefined,
-      email: newPropEmail.trim() || undefined,
-      esPersonaJuridica: newPropEsPersonaJuridica,
-      propietarioId: newSelectedPropId || undefined,
-    };
-
-    // N-TITULARES: el alta sólo asigna titulares que YA EXISTEN. No se crea ningún
-    // propietario aquí: si falta, se crea antes desde Propietarios/Titulares.
-    if (newTitularesAdicionalesIds.length > 0 && !newSelectedPropId) {
-      setErroresTitularidad(['Selecciona primero el titular principal antes de añadir otros titulares.']);
+    // TITULARES: el alta trabaja EXCLUSIVAMENTE con fichas que YA EXISTEN. Aquí no
+    // se teclea ningún dato de titular ni se crea a nadie: si falta, se crea
+    // antes en Propietarios/Titulares y después se asigna a este inmueble.
+    const titularPrincipal = newSelectedPropId
+      ? propietarios.find((p) => p.id === newSelectedPropId)
+      : undefined;
+    if (newSelectedPropId && !titularPrincipal) {
+      // El id no corresponde a ninguna ficha visible: nunca se inventa un titular.
+      setErroresTitularidad([
+        newTitularesAdicionalesIds.length > 0
+          ? 'Selecciona primero el titular principal antes de añadir otros titulares.'
+          : MENSAJE_TITULAR_NO_EXISTE_SECCION,
+      ]);
       setNewTab('fiscal');
       return;
     }
+    // Instantánea fiscal DERIVADA de la ficha (nunca tecleada en el inmueble): los
+    // datos fiscales pertenecen al titular y su fuente de verdad es su ficha. Sin
+    // ficha seleccionada se conserva el camino heredado (inmueble sin titular
+    // asignado todavía), exactamente igual que antes de esta intervención.
+    const propPrincipal: PropietarioFiscal = titularPrincipal
+      ? fiscalDesdePropietario(titularPrincipal)
+      : { nombre: 'Propietario / Arrendador', nifDni: '', direccion: newDireccion };
     const titulares = resolverTitularesAlta({
       principalId: newSelectedPropId,
       adicionalesIds: newTitularesAdicionalesIds,
@@ -732,12 +768,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setNewIbanCobro('');
     setNewCertificadoEnergetico('');
     setNewNumeroRegistroPropiedad('');
-    setNewPropNombre('');
-    setNewPropNif('');
-    setNewPropDireccion('');
-    setNewPropTelefono('');
-    setNewPropEmail('');
-    setNewPropEsPersonaJuridica(false);
+    setNewBusquedaTitular('');
   };
 
   const handleSelectEditPropietario = (propId: string) => {
@@ -746,18 +777,10 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       setEditSelectedCuentaId('');
       return;
     }
+    // Los datos fiscales del titular se LEEN de su ficha al guardar
+    // (`fiscalDesdePropietario`); aquí sólo se resuelve su cuenta bancaria.
     const prop = propietarios.find((p) => p.id === propId);
     if (prop) {
-      setEditPropNombre(prop.nombre);
-      setEditPropNif(prop.nifCif);
-      setEditPropDireccion(`${prop.direccion}${prop.ciudad ? `, ${prop.ciudad}` : ''}`);
-      setEditPropTelefono(prop.telefono || '');
-      setEditPropEmail(prop.email || '');
-      setEditPropEsPersonaJuridica(
-        prop.tipo === 'sociedad_limitada' ||
-        prop.tipo === 'sociedad_anonima' ||
-        prop.tipo === 'comunidad_bienes'
-      );
       const principalAcc = prop.cuentasBancarias.find((c) => c.esPrincipal) || prop.cuentasBancarias[0];
       if (principalAcc) {
         setEditSelectedCuentaId(principalAcc.id);
@@ -778,25 +801,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     }
   };
 
-  const handleSelectEditProp2 = (propId: string) => {
-    setEditSelectedProp2Id(propId);
-    if (!propId) return;
-    const prop = propietarios.find((p) => p.id === propId);
-    if (prop) {
-      setEditProp2Nombre(prop.nombre);
-      setEditProp2Nif(prop.nifCif);
-      setEditProp2Direccion(`${prop.direccion}${prop.ciudad ? `, ${prop.ciudad}` : ''}`);
-      setEditProp2Telefono(prop.telefono || '');
-      setEditProp2Email(prop.email || '');
-      setEditProp2EsPersonaJuridica(
-        prop.tipo === 'sociedad_limitada' ||
-        prop.tipo === 'sociedad_anonima' ||
-        prop.tipo === 'comunidad_bienes'
-      );
-    }
-  };
 
-  const handleOpenEditModal = (inm: Inmueble, defaultTab: 'general' | 'fiscal' = 'general') => {
+  const handleOpenEditModal = (inm: Inmueble, defaultTab: 'general' | 'fiscal' | 'titulares' = 'general') => {
     setInmuebleToEdit(inm);
     setEditTab(defaultTab);
     setEditDireccion(inm.direccion);
@@ -845,27 +851,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       setEditSelectedCuentaId(inm.cuentaBancariaCobroId || (currentIban ? 'custom' : ''));
     }
 
-    setEditPropNombre(df?.propietarioPrincipal?.nombre || '');
-    setEditPropNif(df?.propietarioPrincipal?.nifDni || '');
-    setEditPropDireccion(df?.propietarioPrincipal?.direccion || '');
-    setEditPropTelefono(df?.propietarioPrincipal?.telefono || '');
-    setEditPropEmail(df?.propietarioPrincipal?.email || '');
-    setEditPropEsPersonaJuridica(df?.propietarioPrincipal?.esPersonaJuridica || false);
-
-    // Resolve owner 2
-    const prop2Id =
-      inm.propietarioSecundarioId ||
-      df?.segundoPropietario?.propietarioId ||
-      propietarios.find((p) => df?.segundoPropietario?.nifDni && p.nifCif.toLowerCase() === df.segundoPropietario.nifDni.toLowerCase())?.id ||
-      '';
-    setEditSelectedProp2Id(prop2Id);
-    setEditTieneSegundoProp(df?.tieneSegundoPropietario || false);
-    setEditProp2Nombre(df?.segundoPropietario?.nombre || '');
-    setEditProp2Nif(df?.segundoPropietario?.nifDni || '');
-    setEditProp2Direccion(df?.segundoPropietario?.direccion || '');
-    setEditProp2Telefono(df?.segundoPropietario?.telefono || '');
-    setEditProp2Email(df?.segundoPropietario?.email || '');
-    setEditProp2EsPersonaJuridica(df?.segundoPropietario?.esPersonaJuridica || false);
+    // Los datos fiscales manuales del modelo anterior NO se cargan en campos
+    // editables: se muestran como información heredada y se conservan sin tocar.
+    setEditBusquedaTitular('');
   };
 
   // FASE 3.5.1 — valida/localiza la referencia en el Catastro (servicio público OVC)
@@ -921,28 +909,22 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       return;
     }
 
-    const propPrincipal: PropietarioFiscal = {
-      nombre: editPropNombre.trim() || 'Propietario / Arrendador',
-      nifDni: editPropNif.trim() || '',
-      direccion: editPropDireccion.trim() || editDireccion,
-      telefono: editPropTelefono.trim() || undefined,
-      email: editPropEmail.trim() || undefined,
-      esPersonaJuridica: editPropEsPersonaJuridica,
-      propietarioId: editSelectedPropId || undefined,
-    };
+    // TITULARES: el inmueble sólo se relaciona con FICHAS EXISTENTES. Si hay una
+    // ficha seleccionada, su instantánea fiscal se LEE de ella; si no la hay (ficha
+    // heredada de un inmueble antiguo), los datos guardados se conservan intactos.
+    const titularPrincipalEdit = propietarios.find((p) => p.id === editSelectedPropId);
+    const propPrincipal: PropietarioFiscal = titularPrincipalEdit
+      ? fiscalDesdePropietario(titularPrincipalEdit)
+      : (inmuebleToEdit.datosFiscales?.propietarioPrincipal || {
+          nombre: 'Propietario / Arrendador',
+          nifDni: '',
+          direccion: editDireccion,
+        });
 
-    let segundoProp: PropietarioFiscal | undefined = undefined;
-    if (editTieneSegundoProp && editProp2Nombre.trim()) {
-      segundoProp = {
-        nombre: editProp2Nombre.trim(),
-        nifDni: editProp2Nif.trim() || '',
-        direccion: editProp2Direccion.trim() || editPropDireccion.trim() || editDireccion,
-        telefono: editProp2Telefono.trim() || undefined,
-        email: editProp2Email.trim() || undefined,
-        esPersonaJuridica: editProp2EsPersonaJuridica,
-        propietarioId: editSelectedProp2Id || undefined,
-      };
-    }
+    // El modelo binario NO se reescribe desde el formulario: el segundo propietario
+    // guardado (si lo hay) se conserva exactamente igual. La relación de titulares
+    // se gestiona en el apartado «Titulares del inmueble» (N titulares).
+    const segundoProp: PropietarioFiscal | undefined = inmuebleToEdit.datosFiscales?.segundoPropietario;
 
     const datosFiscales: DatosFiscalesInmueble = {
       referenciaCatastral: editReferenciaCatastral.trim() || undefined,
@@ -951,7 +933,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       certificadoEnergetico: editCertificadoEnergetico.trim() || undefined,
       numeroRegistroPropiedad: editNumeroRegistroPropiedad.trim() || undefined,
       propietarioPrincipal: propPrincipal,
-      tieneSegundoPropietario: editTieneSegundoProp,
+      tieneSegundoPropietario: Boolean(segundoProp) || Boolean(inmuebleToEdit.datosFiscales?.tieneSegundoPropietario),
       segundoPropietario: segundoProp,
     };
 
@@ -989,7 +971,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       codigoPostal: editCodigoPostal.trim() || undefined,
       propietarioId: editSelectedPropId || undefined,
       propietarioPrincipalId: editSelectedPropId || undefined,
-      propietarioSecundarioId: editTieneSegundoProp && editSelectedProp2Id ? editSelectedProp2Id : undefined,
+      // Conservado tal cual: el modelo binario no se edita desde el inmueble.
+      propietarioSecundarioId: inmuebleToEdit.propietarioSecundarioId,
       cuentaBancariaCobroId: editSelectedCuentaId && editSelectedCuentaId !== 'custom' ? editSelectedCuentaId : undefined,
       ibanCobro: editIbanCobro.trim() || undefined,
       datosFiscales,
@@ -2336,6 +2319,19 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      handleOpenEditModal(inm, 'titulares');
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-700 rounded-xl font-bold flex items-center gap-1 shadow-2xs transition-all"
+                    title="Gestionar los titulares de este inmueble"
+                    data-testid={`abrir-titulares-${inm.id}`}
+                  >
+                    <Users className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Titulares</span>
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setVerAgendaInmueble(inm);
                     }}
                     className="px-2.5 py-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 rounded-xl font-bold flex items-center gap-1 shadow-2xs transition-all"
@@ -2437,6 +2433,19 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               >
                 <FileCheck2 className="w-4 h-4" />
                 <span>Apartado Fiscal & Arrendador</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditTab('titulares')}
+                data-testid="tab-titulares"
+                className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 ${
+                  editTab === 'titulares'
+                    ? 'border-emerald-600 text-emerald-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Titulares del inmueble</span>
               </button>
             </div>
 
@@ -2598,69 +2607,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     </div>
                   </div>
                 </>
-              ) : (
+              ) : editTab === 'fiscal' ? (
                 /* FISCAL TAB */
                 <div className="space-y-4">
-                  {/* Propietario Selector Card */}
-                  <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-blue-700" />
-                        <span className="text-xs font-bold text-blue-950 uppercase tracking-wider">
-                          Seleccionar Propietario Registrado
-                        </span>
-                      </div>
-                      {onNavigateToPropietarios && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInmuebleToEdit(null);
-                            onNavigateToPropietarios();
-                          }}
-                          className="text-[11px] font-semibold text-blue-700 hover:text-blue-900 underline flex items-center gap-1"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Gestionar Propietarios</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div>
-                      <select
-                        value={editSelectedPropId}
-                        onChange={(e) => handleSelectEditPropietario(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-white border border-blue-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                      >
-                        <option value="">-- Asignación manual / Personalizada --</option>
-                        {propietarios.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.nombre} ({p.nifCif}) — {p.cuentasBancarias.length} cuenta(s) bancaria(s)
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-[11px] text-blue-800/80 mt-1">
-                        Al elegir un propietario de la lista, sus datos fiscales y su cuenta bancaria se vincularán automáticamente.
-                      </p>
-                    </div>
-
-                    {/* Selected Owner Quick Info Badge */}
-                    {editSelectedPropId && (() => {
-                      const selectedProp = propietarios.find((p) => p.id === editSelectedPropId);
-                      if (!selectedProp) return null;
-                      return (
-                        <div className="p-2.5 bg-white/90 border border-blue-200/80 rounded-lg text-xs space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-slate-900">{selectedProp.nombre}</span>
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-[10px] font-bold">
-                              {selectedProp.nifCif}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-600 truncate">{selectedProp.direccion}{selectedProp.ciudad ? `, ${selectedProp.ciudad}` : ''}</p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
                   {/* Property Data */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -2839,185 +2788,111 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     </div>
                   </div>
 
-                  {/* Arrendador Principal Details Form */}
-                  <div className="pt-3 border-t border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
+                  {/* TITULAR DEL INMUEBLE — SÓLO fichas existentes (N-TITULARES).
+                      Aquí no se teclean datos de personas ni se crea un «segundo propietario»:
+                      la relación se declara seleccionando titulares y se gestiona en el
+                      apartado «Titulares». Los datos fiscales se leen de la ficha. */}
+                  <div className="pt-3 border-t border-slate-200 space-y-3" data-testid="edicion-titular">
+                    <div className="flex items-center justify-between gap-2">
                       <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1 text-indigo-700">
                         <User className="w-4 h-4 text-indigo-600" />
-                        Datos del Arrendador Principal
+                        Titular del inmueble
                       </h4>
-                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={editPropEsPersonaJuridica}
-                          onChange={(e) => setEditPropEsPersonaJuridica(e.target.checked)}
-                          className="w-4 h-4 rounded text-indigo-600"
-                        />
-                        <span>¿Es Empresa / Persona Jurídica?</span>
-                      </label>
+                      <span className="text-[11px] text-slate-500">La ficha se edita en Propietarios/Titulares</span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Nombre o Razón Social</label>
-                        <input
-                          type="text"
-                          placeholder="Ej. Inmobiliaria SL o Juan Pérez"
-                          value={editPropNombre}
-                          onChange={(e) => setEditPropNombre(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="campo-nif-cif-dni" className="block font-semibold text-slate-700 mb-1">NIF / CIF / DNI</label>
-                        <input
-                          type="text"
-                          placeholder="Ej. B-87654321 o 12345678Z"
-                          value={editPropNif}
-                          onChange={(e) => setEditPropNif(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
-
-                           id="campo-nif-cif-dni"/>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="sm:col-span-1">
-                        <label htmlFor="campo-direccion-fiscal" className="block font-semibold text-slate-700 mb-1">Dirección Fiscal</label>
-                        <input
-                          type="text"
-                          placeholder="Calle, número, ciudad"
-                          value={editPropDireccion}
-                          onChange={(e) => setEditPropDireccion(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-
-                           id="campo-direccion-fiscal"/>
-                      </div>
-                      <div>
-                        <label htmlFor="campo-telefono" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
-                        <input
-                          type="tel"
-                          placeholder="600000000"
-                          value={editPropTelefono}
-                          onChange={(e) => setEditPropTelefono(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-
-                           id="campo-telefono"/>
-                      </div>
-                      <div>
-                        <label htmlFor="campo-email" className="block font-semibold text-slate-700 mb-1">Email</label>
-                        <input
-                          type="email"
-                          placeholder="propietario@correo.com"
-                          value={editPropEmail}
-                          onChange={(e) => setEditPropEmail(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-
-                           id="campo-email"/>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Segundo Propietario Toggle & Form */}
-                  <div className="pt-3 border-t border-slate-200 space-y-3">
-                    <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 text-xs">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                       <input
-                        type="checkbox"
-                        checked={editTieneSegundoProp}
-                        onChange={(e) => setEditTieneSegundoProp(e.target.checked)}
-                        className="w-4 h-4 rounded text-indigo-600"
+                        type="text"
+                        value={editBusquedaTitular}
+                        onChange={(e) => setEditBusquedaTitular(e.target.value)}
+                        placeholder="Buscar titular por nombre, NIF o ciudad…"
+                        aria-label="Buscar titular"
+                        data-testid="buscar-titular-edicion"
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
                       />
-                      <span>Inmueble con Segundo Propietario / Co-Arrendador</span>
-                    </label>
+                    </div>
 
-                    {editTieneSegundoProp && (
-                      <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3 animate-in fade-in">
-                        {/* Selector for Owner 2 */}
-                        {propietarios.length > 0 && (
-                          <div>
-                            <label className="block font-semibold text-slate-700 text-xs mb-1">
-                              Seleccionar 2º Propietario Registrado
-                            </label>
-                            <select
-                              value={editSelectedProp2Id}
-                              onChange={(e) => handleSelectEditProp2(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500"
-                            >
-                              <option value="">-- Introducir datos manualmente o sin vincular --</option>
-                              {propietarios
-                                .filter((p) => p.id !== editSelectedPropId)
-                                .map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.nombre} ({p.nifCif})
-                                  </option>
-                                ))}
-                            </select>
+                    <select
+                      value={editSelectedPropId}
+                      onChange={(e) => handleSelectEditPropietario(e.target.value)}
+                      aria-label="Titular del inmueble"
+                      data-testid="select-titular-edicion"
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="">-- Sin titular asignado (ficha heredada) --</option>
+                      {(() => {
+                        const visibles = filtrarTitularesLocales(propietarios, editBusquedaTitular);
+                        const seleccionado = propietarios.find((p) => p.id === editSelectedPropId);
+                        const opciones = seleccionado && !visibles.some((p) => p.id === seleccionado.id)
+                          ? [seleccionado, ...visibles]
+                          : visibles;
+                        return opciones.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre} ({p.nifCif})
+                          </option>
+                        ));
+                      })()}
+                    </select>
+
+                    {(() => {
+                      const selected = propietarios.find((p) => p.id === editSelectedPropId);
+                      if (!selected) return null;
+                      const r = resumenTitular(selected);
+                      return (
+                        <div className="p-2.5 bg-white border border-slate-200 rounded-lg text-xs space-y-1" data-testid="resumen-titular-edicion">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-900">{r.nombre}</span>
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[10px] font-bold">{r.nifCif}</span>
                           </div>
-                        )}
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label htmlFor="campo-nombre-completo-2o-propietario" className="block font-semibold text-slate-700 mb-1">Nombre Completo 2º Propietario</label>
-                            <input
-                              type="text"
-                              placeholder="Ej. María López"
-                              value={editProp2Nombre}
-                              onChange={(e) => setEditProp2Nombre(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-nombre-completo-2o-propietario"/>
-                          </div>
-                          <div>
-                            <label htmlFor="campo-nif-dni-2o-propietario" className="block font-semibold text-slate-700 mb-1">NIF / DNI 2º Propietario</label>
-                            <input
-                              type="text"
-                              placeholder="87654321A"
-                              value={editProp2Nif}
-                              onChange={(e) => setEditProp2Nif(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono text-xs"
-
-                               id="campo-nif-dni-2o-propietario"/>
-                          </div>
+                          <p className="text-[11px] text-slate-600 truncate">
+                            {r.etiquetaTipo}{r.domicilioFiscal ? ` · ${r.domicilioFiscal}` : ''}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Datos leídos de su ficha: guardar el inmueble no modifica al titular.
+                          </p>
                         </div>
+                      );
+                    })()}
 
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div>
-                            <label htmlFor="campo-direccion" className="block font-semibold text-slate-700 mb-1">Dirección</label>
-                            <input
-                              type="text"
-                              placeholder="Dirección completa"
-                              value={editProp2Direccion}
-                              onChange={(e) => setEditProp2Direccion(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-direccion"/>
-                          </div>
-                          <div>
-                            <label htmlFor="campo-telefono-2" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
-                            <input
-                              type="tel"
-                              placeholder="611223344"
-                              value={editProp2Telefono}
-                              onChange={(e) => setEditProp2Telefono(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-telefono-2"/>
-                          </div>
-                          <div>
-                            <label htmlFor="campo-email-2" className="block font-semibold text-slate-700 mb-1">Email</label>
-                            <input
-                              type="email"
-                              placeholder="co-propietario@correo.com"
-                              value={editProp2Email}
-                              onChange={(e) => setEditProp2Email(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-
-                               id="campo-email-2"/>
-                          </div>
+                    {(() => {
+                      const legado = legadoEdicion;
+                      const conSegundo = Boolean(inmuebleToEdit?.datosFiscales?.segundoPropietario);
+                      if (!legado.tieneLegado && !conSegundo) return null;
+                      return (
+                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-1" data-testid="legado-titularidad">
+                          <strong className="block">Datos heredados del modelo anterior (se conservan)</strong>
+                          {conSegundo && inmuebleToEdit?.datosFiscales?.segundoPropietario && (
+                            <p>
+                              Cotitular guardado: <b>{inmuebleToEdit.datosFiscales.segundoPropietario.nombre}</b>
+                              {inmuebleToEdit.datosFiscales.segundoPropietario.nifDni ? ` (${inmuebleToEdit.datosFiscales.segundoPropietario.nifDni})` : ''}
+                              {legado.segundoConFicha ? ' · con ficha de titular' : ' · sin ficha de titular'}
+                            </p>
+                          )}
+                          <p>{legado.mensaje || 'Este inmueble conserva datos del modelo binario anterior; no se modifican ni se borran.'}</p>
+                          {legado.principalSinFicha && (
+                            <p className="font-semibold" data-testid="aviso-titular-inexistente-edicion">
+                              {MENSAJE_TITULAR_NO_EXISTE_SECCION}
+                            </p>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
+                </div>
+              ) : (
+                <div className="space-y-3" data-testid="edicion-titulares">
+                  {inmuebleToEdit && (
+                    <PanelTitularidadesInmueble
+                      inmueble={inmuebleToEdit}
+                      titulares={propietarios}
+                      puedeLeer={puedoLeerTitularidadesDe(inmuebleToEdit)}
+                      puedeGestionar={puedoEscribirTitularidadesDe(inmuebleToEdit)}
+                      puedeCambiarPrincipal={puedoEscribirTitularidadesDe(inmuebleToEdit)}
+                      actor={actorTitularidades}
+                    />
+                  )}
                 </div>
               )}
 
@@ -3377,7 +3252,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <div className="flex items-center gap-2">
                         <Users className="w-4 h-4 text-blue-700" />
                         <span className="text-xs font-bold text-blue-950 uppercase tracking-wider">
-                          Seleccionar Propietario Registrado
+                          Titular principal del inmueble
                         </span>
                       </div>
                       {onNavigateToPropietarios && (
@@ -3390,42 +3265,74 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                           className="text-[11px] font-semibold text-blue-700 hover:text-blue-900 underline flex items-center gap-1"
                         >
                           <Plus className="w-3 h-3" />
-                          <span>Gestionar Propietarios</span>
+                          <span>Crear titular en Propietarios/Titulares</span>
                         </button>
                       )}
                     </div>
 
-                    <div>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="text"
+                          value={newBusquedaTitular}
+                          onChange={(e) => setNewBusquedaTitular(e.target.value)}
+                          placeholder="Buscar titular por nombre, NIF o ciudad…"
+                          aria-label="Buscar titular"
+                          data-testid="buscar-titular-alta"
+                          className="w-full pl-9 pr-3 py-2 bg-white border border-blue-200 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
                       <select
                         value={newSelectedPropId}
                         onChange={(e) => handleSelectNewPropietario(e.target.value)}
+                        aria-label="Titular principal"
+                        data-testid="select-titular-principal"
                         className="w-full px-3.5 py-2.5 bg-white border border-blue-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 shadow-2xs"
                       >
-                        <option value="">-- Asignación manual / Personalizada --</option>
-                        {propietarios.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.nombre} ({p.nifCif}) — {p.cuentasBancarias.length} cuenta(s) bancaria(s)
-                          </option>
-                        ))}
+                        <option value="">-- Selecciona un titular existente --</option>
+                        {(() => {
+                          const visibles = filtrarTitularesLocales(propietarios, newBusquedaTitular);
+                          const seleccionado = propietarios.find((p) => p.id === newSelectedPropId);
+                          const opciones = seleccionado && !visibles.some((p) => p.id === seleccionado.id)
+                            ? [seleccionado, ...visibles]
+                            : visibles;
+                          return opciones.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} ({p.nifCif}) — {p.cuentasBancarias.length} cuenta(s) bancaria(s)
+                            </option>
+                          ));
+                        })()}
                       </select>
-                      <p className="text-[11px] text-blue-800/80 mt-1">
-                        Al elegir un propietario de la lista, sus datos fiscales y su cuenta bancaria se vincularán automáticamente al inmueble.
+                      <p className="text-[11px] text-blue-800/80">
+                        El inmueble se relaciona con titulares que ya existen: al elegirlo se leen sus datos fiscales y su
+                        cuenta bancaria. Este formulario no crea ni modifica la ficha del titular.
                       </p>
                     </div>
 
-                    {/* Selected Owner Quick Info Badge */}
+                    {/* Ficha del titular elegido: SÓLO LECTURA. Los datos fiscales se leen
+                        de su ficha; editarlos es cosa de Propietarios/Titulares. */}
                     {newSelectedPropId && (() => {
                       const selectedProp = propietarios.find((p) => p.id === newSelectedPropId);
                       if (!selectedProp) return null;
+                      const r = resumenTitular(selectedProp);
                       return (
-                        <div className="p-2.5 bg-white/90 border border-blue-200/80 rounded-lg text-xs space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-slate-900">{selectedProp.nombre}</span>
+                        <div className="p-2.5 bg-white/90 border border-blue-200/80 rounded-lg text-xs space-y-1" data-testid="ficha-titular-principal">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-900">{r.nombre}</span>
                             <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-[10px] font-bold">
-                              {selectedProp.nifCif}
+                              {r.nifCif}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-600 truncate">{selectedProp.direccion}{selectedProp.ciudad ? `, ${selectedProp.ciudad}` : ''}</p>
+                          <p className="text-[11px] text-slate-600 truncate">
+                            {r.etiquetaTipo}{r.domicilioFiscal ? ` · ${r.domicilioFiscal}` : ''}
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {[r.telefono, r.email].filter(Boolean).join(' · ') || 'Sin datos de contacto en la ficha'}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Datos leídos de su ficha. Se actualizan desde Propietarios/Titulares.
+                          </p>
                         </div>
                       );
                     })()}
@@ -3437,11 +3344,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         Otros titulares del inmueble (opcional)
                       </div>
                       {(() => {
-                        const candidatos = propietarios.filter((p) => p.id !== newSelectedPropId);
-                        if (candidatos.length === 0) {
+                        const otros = propietarios.filter((p) => p.id !== newSelectedPropId);
+                        // La búsqueda del alta también filtra los titulares adicionales.
+                        const candidatos = filtrarTitularesLocales(otros, newBusquedaTitular);
+                        if (otros.length === 0) {
                           return (
                             <p className="text-[11px] text-blue-800/80">
                               No hay otros titulares registrados que puedas asignar a este inmueble.
+                            </p>
+                          );
+                        }
+                        if (candidatos.length === 0) {
+                          return (
+                            <p className="text-[11px] text-blue-800/80">
+                              Ningún titular coincide con «{newBusquedaTitular.trim()}».
                             </p>
                           );
                         }
@@ -3582,84 +3498,12 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     </div>
                   </div>
 
-                  {/* Arrendador Principal Form */}
-                  <div className="pt-3 border-t border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1 text-indigo-700">
-                        <User className="w-4 h-4 text-indigo-600" />
-                        Datos del Arrendador Principal
-                      </h4>
-                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={newPropEsPersonaJuridica}
-                          onChange={(e) => setNewPropEsPersonaJuridica(e.target.checked)}
-                          className="w-4 h-4 rounded text-indigo-600"
-                        />
-                        <span>¿Es Empresa / Persona Jurídica?</span>
-                      </label>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Nombre o Razón Social</label>
-                        <input
-                          type="text"
-                          placeholder="Ej. Juan Pérez García o Arrendamientos SL"
-                          value={newPropNombre}
-                          onChange={(e) => setNewPropNombre(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="campo-nif-cif-dni-2" className="block font-semibold text-slate-700 mb-1">NIF / CIF / DNI</label>
-                        <input
-                          type="text"
-                          placeholder="Ej. 12345678Z o B-87654321"
-                          value={newPropNif}
-                          onChange={(e) => setNewPropNif(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
-
-                           id="campo-nif-cif-dni-2"/>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="sm:col-span-1">
-                        <label htmlFor="campo-direccion-fiscal-2" className="block font-semibold text-slate-700 mb-1">Dirección Fiscal</label>
-                        <input
-                          type="text"
-                          placeholder="Calle, número, ciudad"
-                          value={newPropDireccion}
-                          onChange={(e) => setNewPropDireccion(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-
-                           id="campo-direccion-fiscal-2"/>
-                      </div>
-                      <div>
-                        <label htmlFor="campo-telefono-3" className="block font-semibold text-slate-700 mb-1">Teléfono</label>
-                        <input
-                          type="tel"
-                          placeholder="600000000"
-                          value={newPropTelefono}
-                          onChange={(e) => setNewPropTelefono(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-
-                           id="campo-telefono-3"/>
-                      </div>
-                      <div>
-                        <label htmlFor="campo-email-3" className="block font-semibold text-slate-700 mb-1">Email</label>
-                        <input
-                          type="email"
-                          placeholder="propietario@correo.com"
-                          value={newPropEmail}
-                          onChange={(e) => setNewPropEmail(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-xs"
-
-                           id="campo-email-3"/>
-                      </div>
-                    </div>
-                  </div>
+                  {/* Los datos fiscales del titular NO se teclean aquí: se leen de su
+                      ficha al asignarlo. Así editar el inmueble nunca modifica al titular. */}
+                  <p className="text-[11px] text-slate-500 pt-3 border-t border-slate-200">
+                    Los datos fiscales y de contacto del titular se toman de su ficha (Propietarios/Titulares) y no se
+                    editan desde el inmueble.
+                  </p>
                 </div>
               )}
 

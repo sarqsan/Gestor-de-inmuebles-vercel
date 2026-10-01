@@ -146,7 +146,7 @@ import {
 } from './lib/firebase';
 import { avisarOperacion } from './feedback/canalFeedback';
 import { darDeBajaInmuebleFirestore } from './lib/bajaPatrimonialInmuebleFirestore';
-import { puedeDarDeBajaInmueble, type AmbitoEscrituraInmuebles } from './utils/permisosInmueble';
+import { puedeDarDeBajaInmueble, puedeLeerTitularidadesInmueble, tieneEscrituraInmueble, type AmbitoEscrituraInmuebles } from './utils/permisosInmueble';
 import { aplicarBajaAlEstado, etiquetaMotivoBaja, inmueblesOperativos } from './utils/bajaPatrimonialInmueble';
 import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
@@ -659,7 +659,14 @@ export default function App() {
       carterasE: currentUser?.carterasE || [],
     }),
     inmueblesParcialesEscritura: inmueblesParcialesConEscritura,
-  }), [currentUser, inmueblesParcialesConEscritura]);
+    // Lectura (carterasL y delegaciones parciales de sólo lectura): sirve para
+    // decidir QUÉ titularidades se consultan; no concede escritura.
+    propietariosGestionadosLectura: propietariosGestionadosDe({
+      carterasL: currentUser?.carterasL || [],
+      carterasE: [],
+    }),
+    inmueblesParcialesLectura: inmuebleIdsParcialesGestionados,
+  }), [currentUser, inmueblesParcialesConEscritura, inmuebleIdsParcialesGestionados]);
 
   // 2. Route Guard Estricto de Navegación por Perfil
   useEffect(() => {
@@ -3992,6 +3999,13 @@ export default function App() {
                 <PropietariosSection
                   propietarios={scopedPropietarios}
                   inmuebles={inmueblesCarteraOperativa}
+                  // Espejo de las Rules: el master administra todas las fichas y
+                  // cada PROPIETARIO puede crear/editar la suya; el gestor no crea
+                  // propietarios (S3). Con `false` la sección queda en consulta.
+                  puedeGestionar={
+                    (currentUser.email || '').trim().toLowerCase() === ADMIN_MASTER_EMAIL.trim().toLowerCase() ||
+                    currentUser.tipoPerfil === 'PROPIETARIO'
+                  }
                   onSavePropietario={handleSavePropietario}
                   onDeletePropietario={handleDeletePropietario}
                   onSelectInmueble={() => setActiveSection('inmuebles')}
@@ -4303,6 +4317,8 @@ export default function App() {
               onSelectCandidate={(cand) => setSelectedCandidateForModal(cand)}
               onBajaInmueble={handleBajaInmueble}
               puedeDarDeBaja={(inm) => puedeDarDeBajaInmueble(ambitoEscrituraInmuebles, inm)}
+              puedeLeerTitularidades={(inm) => puedeLeerTitularidadesInmueble(ambitoEscrituraInmuebles, inm)}
+              puedeEscribirTitularidades={(inm) => tieneEscrituraInmueble(ambitoEscrituraInmuebles, inm)}
               onAddInmueble={handleAddInmueble}
               propietarioContextoAltaId={altaInmuebleDesdePropietarioId}
               onContextoAltaConsumido={() => setAltaInmuebleDesdePropietarioId(null)}

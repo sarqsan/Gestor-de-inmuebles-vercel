@@ -73,11 +73,20 @@ function rellenarMinimo() {
 }
 
 function selectorTitular(): HTMLSelectElement {
+  // ORDEN 4: el alta asigna TITULARES EXISTENTES; no existe «Asignación manual».
   const el = screen.getAllByRole('combobox').find((node) =>
-    Array.from((node as HTMLSelectElement).options).some((opt) => opt.textContent?.includes('Asignación manual')),
+    Array.from((node as HTMLSelectElement).options).some((opt) =>
+      opt.textContent?.includes('Selecciona un titular existente'),
+    ),
   );
-  if (!el) throw new Error('No está el selector de arrendador principal');
+  if (!el) throw new Error('No está el selector de titular principal');
   return el as HTMLSelectElement;
+}
+
+/** Ficha de sólo lectura del titular elegido (fuente de los datos fiscales del alta). */
+function fichaTitular(): string {
+  const nodo = screen.queryByTestId('ficha-titular-principal');
+  return nodo?.textContent || '';
 }
 
 /** Casilla de un titular EXISTENTE para asignarlo como titular adicional del inmueble. */
@@ -109,9 +118,12 @@ describe('alta de inmueble desde propietario', () => {
     const selector = selectorTitular();
     expect(selector.value).toBe('P1');
     expect(selector.disabled).toBe(false);
-    expect((screen.getByPlaceholderText('Ej. Juan Pérez García o Arrendamientos SL') as HTMLInputElement).value).toBe('Nombre P1');
-    expect((screen.getByPlaceholderText('Ej. 12345678Z o B-87654321') as HTMLInputElement).value).toBe('NIF-P1');
-    expect((screen.getByPlaceholderText('Calle, número, ciudad') as HTMLInputElement).value).toBe('Calle P1, Madrid');
+    // Los datos del titular se LEEN de su ficha; el alta no los teclea ni los edita.
+    expect(fichaTitular()).toContain('Nombre P1');
+    expect(fichaTitular()).toContain('NIF-P1');
+    expect(fichaTitular()).toContain(p1.telefono);
+    expect(fichaTitular()).toContain(p1.email);
+    expect(screen.queryByPlaceholderText('Ej. Juan Pérez García o Arrendamientos SL')).toBeNull();
     expect(onConsumido).toHaveBeenCalledTimes(1);
 
     irAGeneral();
@@ -143,7 +155,7 @@ describe('alta de inmueble desde propietario', () => {
     fireEvent.change(principal, { target: { value: 'P3' } });
 
     expect(principal.value).toBe('P3');
-    expect((screen.getByPlaceholderText('Ej. Juan Pérez García o Arrendamientos SL') as HTMLInputElement).value).toBe('Nombre P3');
+    expect(fichaTitular()).toContain('Nombre P3');
     expect(casillaTitular('Nombre P2').checked).toBe(true);
 
     irAGeneral();
@@ -191,7 +203,7 @@ describe('alta de inmueble desde propietario', () => {
     fireEvent.click(screen.getByRole('button', { name: /Nuevo Inmueble/ }));
     irAFiscal();
     fireEvent.change(selectorTitular(), { target: { value: 'P2' } });
-    expect((screen.getByPlaceholderText('Ej. 12345678Z o B-87654321') as HTMLInputElement).value).toBe('NIF-P2');
+    expect(fichaTitular()).toContain('NIF-P2');
 
     irAGeneral();
     rellenarMinimo();
@@ -212,7 +224,7 @@ describe('alta de inmueble desde propietario', () => {
     fireEvent.click(screen.getByRole('button', { name: /Nuevo Inmueble/ }));
     irAFiscal();
     expect(selectorTitular().value).toBe('');
-    expect((screen.getByPlaceholderText('Ej. Juan Pérez García o Arrendamientos SL') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByTestId('ficha-titular-principal')).toBeNull();
 
     irAGeneral();
     rellenarMinimo();
@@ -247,7 +259,7 @@ describe('alta de inmueble desde propietario', () => {
     irAFiscal();
     const selector = selectorTitular();
     expect(selector.value).toBe('P1');
-    expect((screen.getByPlaceholderText('Ej. 12345678Z o B-87654321') as HTMLInputElement).value).toBe('NIF-P1');
+    expect(fichaTitular()).toContain('NIF-P1');
 
     irAGeneral();
     rellenarMinimo();

@@ -4,6 +4,7 @@ import { hayErrores, resumenErrores, validarFormulario } from '../../formularios
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { Propietario, CuentaBancariaPropietario, TipoPropietario, Inmueble } from '../../types';
+import { MENSAJE_TITULAR_NO_EXISTE_SECCION, mensajeTitularDuplicado, titularDuplicado } from '../../lib/titularesModelo';
 import {
   UserCheck,
   Building2,
@@ -37,6 +38,13 @@ interface PropietariosSectionProps {
   onSelectInmueble?: (inmuebleId: string) => void;
   /** Abre el alta de inmueble ya en el contexto de este propietario. */
   onCrearInmueble?: (propietarioId: string) => void;
+  /**
+   * ¿Puede esta persona crear/editar fichas de titular? Es un espejo de las
+   * Rules (master y el propio titular sobre su ficha; el gestor NO crea
+   * propietarios — S3). Con `false` la sección queda en consulta y lo explica;
+   * nunca se ofrece una acción que Firestore vaya a denegar.
+   */
+  puedeGestionar?: boolean;
 }
 
 export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
@@ -46,6 +54,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   onDeletePropietario,
   onSelectInmueble,
   onCrearInmueble,
+  puedeGestionar = true,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTipo, setFilterTipo] = useState<string>('todos');
@@ -165,6 +174,16 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   const totalCuentas = useMemo(() => {
     return propietarios.reduce((acc, p) => acc + (p.cuentasBancarias?.length || 0), 0);
   }, [propietarios]);
+
+  /**
+   * Duplicado por NIF/CIF: la ficha de un titular se crea UNA vez. Se detecta
+   * mientras se escribe (aviso inmediato, con acceso a la ficha existente) y se
+   * bloquea al guardar; nunca se crea una persona duplicada.
+   */
+  const duplicadoPorNif = useMemo(
+    () => titularDuplicado(propietarios, { nifCif: formNifCif, idExcluido: editingPropietario?.id }),
+    [propietarios, formNifCif, editingPropietario?.id],
+  );
 
   const totalInmueblesVinculados = useMemo(() => {
     const linkedIds = new Set<string>();
@@ -287,6 +306,11 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
       setErroresPropietario(validos);
       return;
     }
+    if (duplicadoPorNif) {
+      // Una persona = una ficha. Se ofrece abrir la existente en vez de duplicar.
+      setErroresPropietario({ nifCif: mensajeTitularDuplicado(duplicadoPorNif.nombre) });
+      return;
+    }
     setErroresPropietario({});
 
     const now = new Date().toISOString();
@@ -401,24 +425,27 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">
               <ShieldCheck className="w-4 h-4" />
-              Base de Datos Fiscal & Arrendadores
+              Titulares del patrimonio · fuente de verdad fiscal
             </div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Gestión de Propietarios y Cuentas Bancarias
+              Propietarios / Titulares
             </h1>
             <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-              Registra los datos fiscales completos de los arrendadores y sus números de cuenta (IBAN) para
-              vincularlos a los inmuebles y redactar automáticamente los contratos de arrendamiento LAU.
+              Aquí se crea el titular una sola vez, con todos sus datos personales, de contacto y fiscales
+              (incluido su IBAN). Después se asigna a los inmuebles que correspondan; la relación con cada
+              inmueble es la titularidad, y no copia ni modifica los datos de la ficha.
             </p>
           </div>
 
-          <button
-            onClick={handleOpenCreateModal}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all hover:shadow shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nuevo Propietario</span>
-          </button>
+          {puedeGestionar && (
+            <button
+              onClick={handleOpenCreateModal}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all hover:shadow shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Crear titular</span>
+            </button>
+          )}
         </div>
 
         {/* Counter KPI Chips */}
@@ -442,6 +469,41 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Guía del flujo definitivo: el titular se crea AQUÍ y luego se asigna al inmueble. */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-5" data-testid="flujo-propietarios-titulares">
+        <h2 className="text-sm font-bold text-slate-900">Cómo funciona</h2>
+        <ol className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-600 list-none">
+          <li className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="font-bold text-slate-900">1. Crea el titular</span>
+            <p className="mt-1">Aquí, con sus datos personales, de contacto y fiscales completos.</p>
+          </li>
+          <li className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="font-bold text-slate-900">2. Guarda la ficha</span>
+            <p className="mt-1">Queda lista para asignarse: no hay que completarla en otro sitio.</p>
+          </li>
+          <li className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="font-bold text-slate-900">3. Asígnala al inmueble</span>
+            <p className="mt-1">Selecciónalo al crear o editar el inmueble e indica su participación (si la conoces).</p>
+          </li>
+        </ol>
+        <p className="mt-3 text-xs text-slate-500">
+          Ser titular no crea ninguna cuenta de acceso, y tener cuenta no da la titularidad: son cosas distintas.
+          La ficha del titular es la fuente de verdad de sus datos fiscales.
+        </p>
+        <p className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+          ¿Vienes del alta de un inmueble porque no encontrabas al titular? Estás en el sitio correcto.
+          <span className="block mt-1" data-testid="aviso-titular-inexistente-propietarios">
+            {MENSAJE_TITULAR_NO_EXISTE_SECCION}
+          </span>
+        </p>
+        {!puedeGestionar && (
+          <p className="mt-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3" data-testid="propietarios-solo-consulta">
+            Estás viendo las fichas en modo consulta: crear o editar titulares corresponde al administrador principal
+            y, para su propia ficha, a cada titular.
+          </p>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -487,21 +549,23 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
           </div>
           <h3 className="text-lg font-bold text-slate-900">
             {searchTerm || filterTipo !== 'todos'
-              ? 'No se encontraron propietarios con esos filtros'
-              : 'No hay propietarios registrados todavía'}
+              ? 'No se encontraron titulares con esos filtros'
+              : 'No hay titulares registrados todavía'}
           </h3>
           <p className="text-sm text-slate-500 mt-2 mb-6">
             {searchTerm || filterTipo !== 'todos'
               ? 'Prueba a cambiar el término de búsqueda o limpia los filtros activos.'
-              : 'Crea tu primera ficha de propietario con sus datos fiscales e IBAN para asignarlo a tus inmuebles y generar contratos con un solo clic.'}
+              : 'Crea la primera ficha de titular con sus datos fiscales e IBAN: después podrás asignarla a tus inmuebles y usarla en los contratos.'}
           </p>
-          <button
-            onClick={handleOpenCreateModal}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Crear Primer Propietario</span>
-          </button>
+          {puedeGestionar && (
+            <button
+              onClick={handleOpenCreateModal}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Crear primer titular</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -552,22 +616,24 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                     </div>
 
                     {/* Action buttons */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => handleOpenEditModal(prop)}
-                        className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
-                        title="Editar propietario"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setOwnerToDelete(prop)}
-                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                        title="Eliminar propietario"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {puedeGestionar && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleOpenEditModal(prop)}
+                          className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                          title="Editar titular"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setOwnerToDelete(prop)}
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                          title="Eliminar titular"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Contact Info & Fiscal Address */}
@@ -762,10 +828,10 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                 </div>
                 <div>
                   <h3 className="text-lg font-bold">
-                    {editingPropietario ? 'Editar Propietario / Arrendador' : 'Nuevo Propietario / Arrendador'}
+                    {editingPropietario ? 'Editar titular' : 'Nuevo titular'}
                   </h3>
                   <p className="text-xs text-slate-300">
-                    Datos fiscales y domicilios para la redacción de contratos LAU
+                    Ficha completa del titular: identificación, contacto, domicilio fiscal, representación y cuentas
                   </p>
                 </div>
               </div>
@@ -884,8 +950,30 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
                         aria-describedby="error-nifcif"/>
                       <ErrorCampo id="error-nifcif" mensaje={erroresPropietario.nifCif} />
+                      {duplicadoPorNif && (
+                        <div
+                          className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2"
+                          data-testid="titular-duplicado"
+                          role="alert"
+                        >
+                          <p>{mensajeTitularDuplicado(duplicadoPorNif.nombre)}</p>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(duplicadoPorNif)}
+                            className="inline-flex items-center gap-1 font-bold text-amber-900 hover:text-amber-950 underline"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Abrir ficha de {duplicadoPorNif.nombre}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
+
+                  <p className="text-[11px] text-slate-500">
+                    Estos datos son del titular y se guardan una sola vez: al asignarlo a un inmueble no se copian ni
+                    se modifican, y editar el inmueble nunca cambia esta ficha.
+                  </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>

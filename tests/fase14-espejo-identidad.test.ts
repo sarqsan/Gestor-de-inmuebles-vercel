@@ -623,6 +623,15 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
       path.basename(f) === 'gestionesCarteraServicioFirebase.ts' && esProyeccionAuditada(f);
     const esProyeccionOnboarding = (f: string): boolean =>
       path.basename(f) === 'onboardingCarterasFirebase.ts' && esProyeccionAuditada(f);
+    // LECTURA POR RELACIÓN DE CARTERAS (2026-10-01, revisión explícita D.6): `indiceEspejoCarteras.ts`
+    // SOLO LEE el índice `gestionesPorPropietario` del espejo PROPIO (`onSnapshot(doc(db,
+    // 'usuarios_auth', uid))`) para localizar las gestiones del gestor cuando la consulta de
+    // colección se deniega con el estado cumplido. Jamás escribe (ni identidad ni carteras) y no
+    // importa `firebase.ts`. Lista cerrada: un segundo lector exige nueva revisión explícita aquí.
+    const esLectorIndiceCarteras = (f: string): boolean =>
+      path.basename(f) === 'indiceEspejoCarteras.ts'
+      && !/setDoc|updateDoc|deleteDoc|addDoc|writeBatch|runTransaction/.test(readFileSync(f, 'utf8'))
+      && !/from ['"][^'"]*\/firebase['"]/.test(readFileSync(f, 'utf8'));
     const esHelperAuditado = (f:string):boolean => {
       if (!/lib[\\/]auditoriaAccesoFirebase\.ts$/.test(f)) return false;
       const src=readFileSync(f,'utf8');
@@ -643,13 +652,14 @@ describe('FASE 1.4 · D. `syncAuthIndex`: el cliente escribe el espejo que leen 
       return !/from ['"][^'"]*firebase|\b(setDoc|updateDoc|deleteDoc|addDoc|writeBatch|runTransaction|doc|collection)\s*\(/.test(src);
     };
     expect(citan.filter(esAuditorPuro).map(f => path.basename(f))).toEqual(['auditoriaHistoricaRoadmap01.ts']);
-    const escritoresDelEspejo = citan.filter((f) => !esAuditorPuro(f) && !esHelperAuditado(f) && !esFirebaseCanonico(f) && !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f) && !esNucleoContratoGestiones(f) && !esEscritorProyeccionGestiones(f) && !esProyeccionOnboarding(f)).map((f) => path.basename(f));
+    const escritoresDelEspejo = citan.filter((f) => !esAuditorPuro(f) && !esHelperAuditado(f) && !esFirebaseCanonico(f) && !esConsumidorLegitimoDeSubcoleccion(f) && !esLectorBindingOperaciones(f) && !esNucleoContratoGestiones(f) && !esEscritorProyeccionGestiones(f) && !esProyeccionOnboarding(f) && !esLectorIndiceCarteras(f)).map((f) => path.basename(f));
     expect(citan.filter(esHelperAuditado).map(f=>path.basename(f))).toEqual(['auditoriaAccesoFirebase.ts']);
     expect(citan.filter(esFirebaseCanonico).map(f=>path.basename(f))).toEqual(['firebase.ts']);
     // el ÚNICO fichero que escribe la IDENTIDAD del espejo es authService.ts
     // (la proyección master carterasL/E tiene su excepción revisada aparte)
     expect(escritoresDelEspejo).toEqual(['authService.ts']);
     expect(citan.filter(esProyeccionOnboarding).map(f => path.basename(f))).toEqual(['onboardingCarterasFirebase.ts']);
+    expect(citan.filter(esLectorIndiceCarteras).map((f) => path.basename(f))).toEqual(['indiceEspejoCarteras.ts']);
     expect(citan.filter(esLectorBindingOperaciones).map((f) => path.basename(f))).toEqual(['firebase.ts']);
     expect(citan.filter(esNucleoContratoGestiones).map((f) => path.basename(f))).toEqual(['gestionesCarteraServicio.ts']);
     expect(citan.filter(esEscritorProyeccionGestiones).map((f) => path.basename(f))).toEqual(['gestionesCarteraServicioFirebase.ts']);

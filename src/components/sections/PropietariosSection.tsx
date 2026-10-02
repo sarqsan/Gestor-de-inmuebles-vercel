@@ -4,7 +4,13 @@ import { hayErrores, resumenErrores, validarFormulario } from '../../formularios
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { Propietario, CuentaBancariaPropietario, TipoPropietario, Inmueble } from '../../types';
-import { MENSAJE_TITULAR_NO_EXISTE_SECCION, mensajeTitularDuplicado, titularDuplicado } from '../../lib/titularesModelo';
+import {
+  MENSAJE_TITULAR_NO_EXISTE_SECCION,
+  generarIdTitularAmbito,
+  mensajeErrorGuardadoTitular,
+  mensajeTitularDuplicado,
+  titularDuplicado,
+} from '../../lib/titularesModelo';
 import {
   UserCheck,
   Building2,
@@ -33,18 +39,44 @@ import {
 interface PropietariosSectionProps {
   propietarios: Propietario[];
   inmuebles: Inmueble[];
-  onSavePropietario: (propietario: Propietario) => void;
+  /**
+   * Guarda una ficha. Puede devolver una promesa: la sección ESPERA, y si se rechaza mantiene el
+   * formulario abierto con el error visible (nunca cierra el modal ni pierde lo escrito).
+   */
+  onSavePropietario: (propietario: Propietario) => void | Promise<void>;
   onDeletePropietario: (propietarioId: string) => void;
   onSelectInmueble?: (inmuebleId: string) => void;
   /** Abre el alta de inmueble ya en el contexto de este propietario. */
   onCrearInmueble?: (propietarioId: string) => void;
   /**
-   * ¿Puede esta persona crear/editar fichas de titular? Es un espejo de las
-   * Rules (master y el propio titular sobre su ficha; el gestor NO crea
-   * propietarios — S3). Con `false` la sección queda en consulta y lo explica;
-   * nunca se ofrece una acción que Firestore vaya a denegar.
+   * ¿Puede esta persona crear/editar fichas de titular? Es un espejo de las Rules (master, y el
+   * PROPIETARIO sobre su ficha y las de su ámbito; el gestor NO crea propietarios — S3). Con `false`
+   * la sección queda en consulta; nunca se ofrece una acción que Firestore vaya a denegar.
    */
   puedeGestionar?: boolean;
+  /**
+   * ¿Puede crear fichas NUEVAS? Espejo de `allow create` de `propietarios`. Por defecto,
+   * `puedeGestionar`. Para el PROPIETARIO es siempre `true`: puede crear TANTOS titulares como
+   * necesite; el botón «Crear titular» no depende de cuántos haya ya ni desaparece tras guardar.
+   */
+  puedeCrear?: boolean;
+  /**
+   * Fichas que esta persona puede editar (espejo de `allow update`). `undefined` = todas
+   * (master). Un PROPIETARIO edita la suya y las de su ámbito; las ajenas no se ofrecen.
+   */
+  fichasEditablesIds?: readonly string[];
+  /**
+   * Id de la ficha PROPIA del titular (PROPIETARIO). «Crear mi ficha» la crea con ESTE id (las Rules
+   * solo permiten `propietarioId == myPropId()`).
+   */
+  idFichaPropia?: string;
+  /**
+   * PROPIETARIO: su `propietarioId`. Cada ficha NUEVA que crea «Crear titular» lleva este valor en
+   * `ambitoPropietarioId` y un id reservado `tit_<token>` único. Sin él (master) el alta es la de siempre.
+   */
+  ambitoPropietarioId?: string;
+  /** PROPIETARIO sin ficha propia: puede además crearla («Crear mi ficha de titular»). */
+  puedeCrearFichaPropia?: boolean;
 }
 
 export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
@@ -55,7 +87,21 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   onSelectInmueble,
   onCrearInmueble,
   puedeGestionar = true,
+  puedeCrear,
+  fichasEditablesIds,
+  idFichaPropia,
+  ambitoPropietarioId,
+  puedeCrearFichaPropia = false,
 }) => {
+  // Permisos derivados (espejo de las Rules; ver las props). Sin props nuevas = comportamiento previo.
+  // NINGUNA de estas condiciones depende de cuántas fichas existan: no hay contador ni tope.
+  const puedeCrearFichas = puedeGestionar && (puedeCrear ?? true);
+  const puedeCrearMiFicha = puedeGestionar && puedeCrearFichaPropia && Boolean(idFichaPropia);
+  const puedeEditarFicha = (prop: Pick<Propietario, 'id'>) =>
+    puedeGestionar && (!fichasEditablesIds || fichasEditablesIds.includes(prop.id));
+  // La ficha jurídica no se purga (Rules: `allow delete: if false`): el botón solo existe en la
+  // administración completa y nunca para el PROPIETARIO.
+  const puedeEliminarFichas = puedeGestionar && !fichasEditablesIds;
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTipo, setFilterTipo] = useState<string>('todos');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -63,6 +109,14 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   // Modal States
   const [showModal, setShowModal] = useState(false);
   const [editingPropietario, setEditingPropietario] = useState<Propietario | null>(null);
+  // Qué crea el alta abierta: un titular del ámbito (por defecto) o la ficha PROPIA del propietario.
+  const [modoAlta, setModoAlta] = useState<'titular' | 'propia'>('titular');
+  // Guardado asíncrono: el modal espera, y si falla sigue abierto con el error a la vista.
+  const [guardando, setGuardando] = useState(false);
+  const [errorGuardado, setErrorGuardado] = useState<string | null>(null);
+  const [avisoGuardado, setAvisoGuardado] = useState<{ nombre: string; nueva: boolean } | null>(null);
+  const [guardandoCuenta, setGuardandoCuenta] = useState(false);
+  const [errorGuardadoCuenta, setErrorGuardadoCuenta] = useState<string | null>(null);
 
   // Quick Add Bank Account Modal
   const [quickBankModalOwner, setQuickBankModalOwner] = useState<Propietario | null>(null);
@@ -78,12 +132,20 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   // Form State for Main Modal
   const [formTipo, setFormTipo] = useState<TipoPropietario>('persona_fisica');
   // UX-6 §11: semántica de diálogo, foco dentro y Escape en los tres diálogos.
+  const cerrarModalPropietario = () => {
+    setShowModal(false);
+    setErrorGuardado(null);
+  };
+  const cerrarModalCuenta = () => {
+    setQuickBankModalOwner(null);
+    setErrorGuardadoCuenta(null);
+  };
   const dialogoPropietario = useDialogoAccesible(
-    { abierto: showModal, onCerrar: () => setShowModal(false) },
+    { abierto: showModal, onCerrar: cerrarModalPropietario },
     editingPropietario ? 'Editar propietario' : 'Nuevo propietario'
   );
   const dialogoCuentaBanco = useDialogoAccesible(
-    { abierto: Boolean(quickBankModalOwner), onCerrar: () => setQuickBankModalOwner(null) },
+    { abierto: Boolean(quickBankModalOwner), onCerrar: cerrarModalCuenta },
     'Añadir cuenta bancaria (IBAN)'
   );
   const dialogoEliminarPropietario = useDialogoAccesible(
@@ -146,6 +208,9 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
         inm.propietarioId === propId ||
         inm.propietarioPrincipalId === propId ||
         inm.propietarioSecundarioId === propId ||
+        // N-TITULARES: los titulares asignados (cónyuge, copropietario, sociedad…) figuran en el índice
+        // `titularesIds` del inmueble, no en el principal/secundario heredados.
+        (Array.isArray(inm.titularesIds) && inm.titularesIds.includes(propId)) ||
         (inm.datosFiscales?.propietarioPrincipal?.nifDni &&
           inm.datosFiscales.propietarioPrincipal.nifDni.toUpperCase() === propNif.toUpperCase()) ||
         (inm.datosFiscales?.segundoPropietario?.nifDni &&
@@ -188,15 +253,18 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
   const totalInmueblesVinculados = useMemo(() => {
     const linkedIds = new Set<string>();
     inmuebles.forEach((inm) => {
-      if (inm.propietarioPrincipalId || inm.propietarioSecundarioId) {
+      if (inm.propietarioPrincipalId || inm.propietarioSecundarioId || (Array.isArray(inm.titularesIds) && inm.titularesIds.length > 0)) {
         linkedIds.add(inm.id);
       }
     });
     return linkedIds.size;
   }, [inmuebles]);
 
-  const handleOpenCreateModal = () => {
+  const handleOpenCreateModal = (modo: 'titular' | 'propia' = 'titular') => {
     setEditingPropietario(null);
+    setModoAlta(modo);
+    setErrorGuardado(null);
+    setAvisoGuardado(null);
     setFormTipo('persona_fisica');
     setFormNombre('');
     setFormNifCif('');
@@ -220,6 +288,8 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
   const handleOpenEditModal = (prop: Propietario) => {
     setEditingPropietario(prop);
+    setErrorGuardado(null);
+    setAvisoGuardado(null);
     setFormTipo(prop.tipoPropietario || 'persona_fisica');
     setFormNombre(prop.nombre);
     setFormNifCif(prop.nifCif);
@@ -287,8 +357,9 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
     );
   };
 
-  const handleSavePropietarioSubmit = (e: React.FormEvent) => {
+  const handleSavePropietarioSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (guardando) return; // un solo guardado a la vez: un doble clic no crea dos fichas
     // UX-4 §8: reglas reales del formulario, con el mensaje junto al campo.
     const validos = validarFormulario(
       { nombre: formNombre, nifCif: formNifCif, email: formEmail },
@@ -302,13 +373,17 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
         email: { etiqueta: 'Email', email: true },
       }
     );
+    // Nombre, NIF y email viven en la pestaña «Datos Fiscales»: si falla alguno hay que llevar a la
+    // persona allí, o el mensaje quedaría oculto en otra pestaña (se guardaba «sin reacción»).
     if (hayErrores(validos)) {
       setErroresPropietario(validos);
+      setActiveTab('fiscal');
       return;
     }
     if (duplicadoPorNif) {
       // Una persona = una ficha. Se ofrece abrir la existente en vez de duplicar.
       setErroresPropietario({ nifCif: mensajeTitularDuplicado(duplicadoPorNif.nombre) });
+      setActiveTab('fiscal');
       return;
     }
     setErroresPropietario({});
@@ -320,8 +395,29 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
       esPrincipal: c.esPrincipal || (idx === 0 && formCuentas.every((x) => !x.esPrincipal)),
     }));
 
+    // Quién es la ficha y de qué ámbito cuelga:
+    //  · edición → conserva su id y su ámbito (el ámbito es inmutable: lo exigen las Rules);
+    //  · «Crear mi ficha» → id == propietarioId del espejo (las Rules solo lo permiten así), sin ámbito;
+    //  · «Crear titular» del PROPIETARIO → ficha NUEVA e independiente en SU ámbito: id reservado único
+    //    (`tit_<token>`) + `ambitoPropietarioId`. Tantas como necesite: cada alta genera un id distinto,
+    //    sin contador ni tope y sin copiar nada de ninguna otra ficha;
+    //  · master → alta de siempre (`prop-<marca de tiempo>`).
+    const nuevaPropia =
+      !editingPropietario && modoAlta === 'propia' && Boolean(idFichaPropia) && !propietarios.some((p) => p.id === idFichaPropia);
+    const identidadFicha: Pick<Propietario, 'id' | 'ambitoPropietarioId'> = editingPropietario
+      ? { id: editingPropietario.id, ambitoPropietarioId: editingPropietario.ambitoPropietarioId }
+      : nuevaPropia
+        ? { id: idFichaPropia as string }
+        : ambitoPropietarioId
+          ? {
+              id: generarIdTitularAmbito({ existentes: propietarios.map((p) => p.id) }),
+              ambitoPropietarioId,
+            }
+          : { id: `prop-${Date.now()}` };
+
     const propietarioToSave: Propietario = {
-      id: editingPropietario ? editingPropietario.id : `prop-${Date.now()}`,
+      id: identidadFicha.id,
+      ...(identidadFicha.ambitoPropietarioId ? { ambitoPropietarioId: identidadFicha.ambitoPropietarioId } : {}),
       nombre: formNombre.trim(),
       nifCif: formNifCif.trim().toUpperCase(),
       tipoPropietario: formTipo,
@@ -342,13 +438,26 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
       fechaActualizacion: now,
     };
 
-    onSavePropietario(propietarioToSave);
+    setGuardando(true);
+    setErrorGuardado(null);
+    try {
+      await onSavePropietario(propietarioToSave);
+    } catch (error) {
+      // Guardado rechazado: el formulario SIGUE abierto con lo escrito y el motivo a la vista.
+      console.error('No se pudo guardar la ficha de titular:', error);
+      setErrorGuardado(mensajeErrorGuardadoTitular(error));
+      setGuardando(false);
+      return;
+    }
+    setGuardando(false);
     setShowModal(false);
+    setAvisoGuardado({ nombre: propietarioToSave.nombre, nueva: !editingPropietario });
   };
 
   // Quick Add Bank Account Submission
-  const handleQuickAddBankSubmit = (e: React.FormEvent) => {
+  const handleQuickAddBankSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (guardandoCuenta) return;
     // UX-4: el botón ya se deshabilitaba sin explicar el motivo; ahora se dice qué falta.
     const validosCuenta = validarFormulario(
       { iban: quickIban },
@@ -382,7 +491,17 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
       fechaActualizacion: new Date().toISOString(),
     };
 
-    onSavePropietario(updatedOwner);
+    setGuardandoCuenta(true);
+    setErrorGuardadoCuenta(null);
+    try {
+      await onSavePropietario(updatedOwner);
+    } catch (error) {
+      console.error('No se pudo guardar la cuenta bancaria del titular:', error);
+      setErrorGuardadoCuenta(mensajeErrorGuardadoTitular(error));
+      setGuardandoCuenta(false);
+      return;
+    }
+    setGuardandoCuenta(false);
     setQuickBankModalOwner(null);
     setQuickAlias('');
     setQuickIban('');
@@ -437,16 +556,51 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
             </p>
           </div>
 
-          {puedeGestionar && (
-            <button
-              onClick={handleOpenCreateModal}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all hover:shadow shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Crear titular</span>
-            </button>
+          {(puedeCrearFichas || puedeCrearMiFicha) && (
+            <div className="flex flex-col sm:flex-row md:flex-col lg:flex-row gap-2 shrink-0">
+              {/* «Crear titular» es SIEMPRE el mismo botón: no se oculta ni se desactiva por cuántas
+                  fichas haya ya ni tras guardar una; se puede pulsar tantas veces como haga falta. */}
+              {puedeCrearFichas && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenCreateModal('titular')}
+                  data-testid="boton-crear-titular"
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all hover:shadow"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Crear titular</span>
+                </button>
+              )}
+              {puedeCrearMiFicha && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenCreateModal('propia')}
+                  data-testid="boton-crear-mi-ficha"
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white hover:bg-blue-50 text-blue-700 text-sm font-semibold rounded-xl border border-blue-200 transition-all"
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>Crear mi ficha de titular</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
+
+        {/* Confirmación de la última ficha guardada: no bloquea; el botón «Crear titular» sigue ahí. */}
+        {avisoGuardado && (
+          <p
+            role="status"
+            data-testid="titular-guardado-aviso"
+            className="mt-4 flex items-start gap-2 text-xs text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-xl p-3"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              {avisoGuardado.nueva
+                ? `Titular «${avisoGuardado.nombre}» creado. Ya puedes asignarlo a tus inmuebles o crear otro titular.`
+                : `Ficha de «${avisoGuardado.nombre}» guardada.`}
+            </span>
+          </p>
+        )}
 
         {/* Counter KPI Chips */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-100">
@@ -477,7 +631,9 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
         <ol className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-600 list-none">
           <li className="p-3 bg-slate-50 rounded-xl border border-slate-100">
             <span className="font-bold text-slate-900">1. Crea el titular</span>
-            <p className="mt-1">Aquí, con sus datos personales, de contacto y fiscales completos.</p>
+            <p className="mt-1">
+              Aquí, con sus datos personales, de contacto y fiscales completos. Cada titular tiene su propia ficha.
+            </p>
           </li>
           <li className="p-3 bg-slate-50 rounded-xl border border-slate-100">
             <span className="font-bold text-slate-900">2. Guarda la ficha</span>
@@ -492,16 +648,30 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
           Ser titular no crea ninguna cuenta de acceso, y tener cuenta no da la titularidad: son cosas distintas.
           La ficha del titular es la fuente de verdad de sus datos fiscales.
         </p>
-        <p className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
-          ¿Vienes del alta de un inmueble porque no encontrabas al titular? Estás en el sitio correcto.
-          <span className="block mt-1" data-testid="aviso-titular-inexistente-propietarios">
-            {MENSAJE_TITULAR_NO_EXISTE_SECCION}
-          </span>
-        </p>
+        {ambitoPropietarioId && (
+          <p className="mt-2 text-xs text-slate-600" data-testid="titulares-ambito-ayuda">
+            Puedes crear tantos titulares como necesites (cónyuge, copropietario, familiar, sociedad…). Cada ficha es
+            independiente: tiene sus propios datos fiscales, no se copian de otra, y queda en tu ámbito.
+          </p>
+        )}
+        {(puedeCrearFichas || !puedeGestionar) && (
+          <p className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+            ¿Vienes del alta de un inmueble porque no encontrabas al titular? Estás en el sitio correcto.
+            <span className="block mt-1" data-testid="aviso-titular-inexistente-propietarios">
+              {MENSAJE_TITULAR_NO_EXISTE_SECCION}
+            </span>
+          </p>
+        )}
+        {puedeCrearMiFicha && (
+          <p className="mt-3 text-xs text-sky-900 bg-sky-50 border border-sky-200 rounded-xl p-3" data-testid="titulares-ficha-propia-pendiente">
+            <strong className="block">Aún no has creado tu propia ficha de titular</strong>
+            Es la del titular principal de tus inmuebles: créala con «Crear mi ficha de titular». Después puedes crear
+            los demás titulares con «Crear titular».
+          </p>
+        )}
         {!puedeGestionar && (
           <p className="mt-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3" data-testid="propietarios-solo-consulta">
-            Estás viendo las fichas en modo consulta: crear o editar titulares corresponde al administrador principal
-            y, para su propia ficha, a cada titular.
+            Estás viendo las fichas en modo consulta: tu perfil no puede crear ni editar titulares.
           </p>
         )}
       </div>
@@ -557,9 +727,11 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
               ? 'Prueba a cambiar el término de búsqueda o limpia los filtros activos.'
               : 'Crea la primera ficha de titular con sus datos fiscales e IBAN: después podrás asignarla a tus inmuebles y usarla en los contratos.'}
           </p>
-          {puedeGestionar && (
+          {puedeCrearFichas && (
             <button
-              onClick={handleOpenCreateModal}
+              type="button"
+              onClick={() => handleOpenCreateModal('titular')}
+              data-testid="boton-crear-primer-titular"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-all"
             >
               <Plus className="w-4 h-4" />
@@ -594,6 +766,22 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                             {prop.nombre}
                           </h3>
                           {getTipoBadge(prop.tipoPropietario)}
+                          {idFichaPropia && prop.id === idFichaPropia && (
+                            <span
+                              data-testid={`insignia-ficha-propia-${prop.id}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"
+                            >
+                              Tu ficha
+                            </span>
+                          )}
+                          {ambitoPropietarioId && prop.ambitoPropietarioId === ambitoPropietarioId && (
+                            <span
+                              data-testid={`insignia-titular-ambito-${prop.id}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-200"
+                            >
+                              Titular de tu ámbito
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2 mt-1">
@@ -616,7 +804,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                     </div>
 
                     {/* Action buttons */}
-                    {puedeGestionar && (
+                    {puedeEditarFicha(prop) && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           onClick={() => handleOpenEditModal(prop)}
@@ -625,13 +813,15 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => setOwnerToDelete(prop)}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                          title="Eliminar titular"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {puedeEliminarFichas && (
+                          <button
+                            onClick={() => setOwnerToDelete(prop)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                            title="Eliminar titular"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -689,20 +879,22 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                       Cuentas Bancarias ({prop.cuentasBancarias?.length || 0})
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setQuickBankModalOwner(prop);
-                        setQuickAlias('');
-                        setQuickIban('');
-                        setQuickBanco('');
-                        setQuickTitular(prop.nombre);
-                        setQuickEsPrincipal((prop.cuentasBancarias?.length || 0) === 0);
-                      }}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Añadir IBAN</span>
-                    </button>
+                    {puedeEditarFicha(prop) && (
+                      <button
+                        onClick={() => {
+                          setQuickBankModalOwner(prop);
+                          setQuickAlias('');
+                          setQuickIban('');
+                          setQuickBanco('');
+                          setQuickTitular(prop.nombre);
+                          setQuickEsPrincipal((prop.cuentasBancarias?.length || 0) === 0);
+                        }}
+                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Añadir IBAN</span>
+                      </button>
+                    )}
                   </div>
 
                   {prop.cuentasBancarias && prop.cuentasBancarias.length > 0 ? (
@@ -755,19 +947,21 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                         <span>Sin cuentas bancarias registradas.</span>
                       </div>
-                      <button
-                        onClick={() => {
-                          setQuickBankModalOwner(prop);
-                          setQuickAlias('');
-                          setQuickIban('');
-                          setQuickBanco('');
-                          setQuickTitular(prop.nombre);
-                          setQuickEsPrincipal(true);
-                        }}
-                        className="font-bold text-blue-700 hover:underline shrink-0"
-                      >
-                        + Añadir ahora
-                      </button>
+                      {puedeEditarFicha(prop) && (
+                        <button
+                          onClick={() => {
+                            setQuickBankModalOwner(prop);
+                            setQuickAlias('');
+                            setQuickIban('');
+                            setQuickBanco('');
+                            setQuickTitular(prop.nombre);
+                            setQuickEsPrincipal(true);
+                          }}
+                          className="font-bold text-blue-700 hover:underline shrink-0"
+                        >
+                          + Añadir ahora
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -778,7 +972,9 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                         <Home className="w-3.5 h-3.5 text-slate-400" />
                         Inmuebles Asignados ({linkedProps.length})
                       </span>
-                      {onCrearInmueble && (
+                      {/* Un PROPIETARIO solo crea inmuebles a nombre de SU ficha (las Rules de `inmuebles`
+                          exigen su propietarioId): sobre un titular de su ámbito no se ofrece, se asigna después. */}
+                      {onCrearInmueble && (!idFichaPropia || prop.id === idFichaPropia) && (
                         <button
                           type="button"
                           onClick={() => onCrearInmueble(prop.id)}
@@ -828,7 +1024,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
                 </div>
                 <div>
                   <h3 className="text-lg font-bold">
-                    {editingPropietario ? 'Editar titular' : 'Nuevo titular'}
+                    {editingPropietario ? 'Editar titular' : modoAlta === 'propia' ? 'Mi ficha de titular' : 'Nuevo titular'}
                   </h3>
                   <p className="text-xs text-slate-300">
                     Ficha completa del titular: identificación, contacto, domicilio fiscal, representación y cuentas
@@ -838,7 +1034,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
               <button
                 aria-label="Cerrar"
-                onClick={() => setShowModal(false)}
+                onClick={cerrarModalPropietario}
                 className="p-2 text-slate-400 hover:text-white rounded-xl transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -871,6 +1067,22 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
             {/* Modal Body */}
             <form onSubmit={handleSavePropietarioSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
+              {/* Fallo de guardado: visible en TODAS las pestañas, sin cerrar el formulario ni perder lo escrito. */}
+              {errorGuardado && (
+                <p
+                  role="alert"
+                  data-testid="titular-error-guardado"
+                  className="flex items-start gap-2 text-xs text-rose-900 bg-rose-50 border border-rose-200 rounded-xl p-3"
+                >
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{errorGuardado}</span>
+                </p>
+              )}
+              {!editingPropietario && modoAlta === 'titular' && ambitoPropietarioId && (
+                <p className="text-[11px] text-slate-500" data-testid="titular-nuevo-independiente">
+                  Ficha nueva e independiente: se rellena aquí, con sus propios datos fiscales. No se copia nada de otros titulares.
+                </p>
+              )}
               {/* TAB 1: IDENTIFICACIÓN Y FISCAL */}
               {activeTab === 'fiscal' && (
                 <div className="space-y-4">
@@ -1342,7 +1554,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
               <div className="pt-4 border-t border-slate-200 flex items-center justify-between gap-3">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={cerrarModalPropietario}
                   className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
                 >
                   Cancelar
@@ -1366,10 +1578,11 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
                   <button
                     type="submit"
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                    disabled={guardando}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-wait text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>{editingPropietario ? 'Guardar Cambios' : 'Crear Propietario'}</span>
+                    <span>{guardando ? 'Guardando…' : editingPropietario ? 'Guardar Cambios' : 'Crear Propietario'}</span>
                   </button>
                 </div>
               </div>
@@ -1394,7 +1607,7 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
               </div>
               <button
                 aria-label="Cerrar"
-                onClick={() => setQuickBankModalOwner(null)}
+                onClick={cerrarModalCuenta}
                 className="text-slate-400 hover:text-white"
               >
                 <X className="w-4 h-4" />
@@ -1402,6 +1615,16 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
             </div>
 
             <form onSubmit={handleQuickAddBankSubmit} className="p-6 space-y-3.5">
+              {errorGuardadoCuenta && (
+                <p
+                  role="alert"
+                  data-testid="titular-error-guardado-cuenta"
+                  className="flex items-start gap-2 text-xs text-rose-900 bg-rose-50 border border-rose-200 rounded-xl p-3"
+                >
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{errorGuardadoCuenta}</span>
+                </p>
+              )}
               <div>
                 <label htmlFor="campo-alias-de-la-cuenta" className="block text-xs font-bold text-slate-700 mb-1">
                   Alias de la Cuenta *
@@ -1473,14 +1696,14 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setQuickBankModalOwner(null)}
+                  onClick={cerrarModalCuenta}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 rounded-xl"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={!quickIban.trim()}
+                  disabled={!quickIban.trim() || guardandoCuenta}
                   title={!quickIban.trim() ? 'Introduce el número de cuenta IBAN para guardar.' : undefined}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
                 >

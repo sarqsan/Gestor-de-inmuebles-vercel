@@ -75,6 +75,7 @@ import type {
 import type { FacturaElectronicaB2B } from '../types/facturaElectronicaB2B';
 import type { GestionCartera } from './gestionesCartera';
 import { propietariosGestionadosDe, type InmuebleDelegadoParcial } from './carterasGestion';
+import { escucharIndiceRelaciones } from './indiceEspejoCarteras';
 import {
   codigoDeError,
   limpiarIncidenciasDe,
@@ -84,11 +85,18 @@ import {
 import { FIREBASE_BASE_DATOS_ID, FIREBASE_PROYECTO_ID } from './entornoFirebase';
 import {
   TRAZA_CARTERAS,
+  ayudaUsuarioDeCausa,
+  causaDeDenegacion,
   construirInformeCarteras,
+  decidirTrasDenegacion,
   esIdValido,
+  evaluarComprobacionesCarteras,
+  type AccionTrasDenegacion,
   type ContextoConsultaCarteras,
   type ContextoSuscripcionCarteras,
   type LecturaDocumento,
+  type ObservacionDocumentos,
+  type ResultadoLecturaRelaciones,
   type ResultadoReintento,
 } from './diagnosticoCarteras';
 import {
@@ -267,6 +275,60 @@ export function subscribePropietarios(
   );
 }
 
+/** Textos de la capacidad `titulares_ambito`: el propietario puede actuar por sí mismo, nunca se le envía a nadie. */
+const MENSAJES_TITULARES_AMBITO: Readonly<Record<string, string>> = {
+  'permission-denied': 'El servidor no ha autorizado la consulta de las fichas de titular de tu ámbito.',
+  'failed-precondition': 'La consulta de las fichas de titular de tu ámbito necesita una configuración que todavía no está disponible.',
+};
+const DETALLE_TITULARES_AMBITO =
+  'Qué se ha comprobado: lectura de la colección de titulares filtrada por tu propio ámbito (ambitoPropietarioId igual a tu propietarioId). ' +
+  'Tu ficha propia y tus inmuebles se leen por otra vía y no se ven afectados. Las fichas creadas en esta sesión se siguen mostrando.';
+
+/**
+ * FICHAS DE TITULAR DEL ÁMBITO de un PROPIETARIO (PR #19) — CAPACIDAD ADICIONAL.
+ *
+ * Un PROPIETARIO crea y mantiene TANTAS fichas de titular como necesite (cónyuge, copropietario,
+ * sociedad…). Cada una lleva `ambitoPropietarioId == su propietarioId`; esta escucha las lee TODAS
+ * con una única consulta de igualdad —la misma forma que las Rules demuestran en `list`
+ * (`titularEnMiAmbito`: valor constante salido de un `get` de ruta fija, igual que `inmuebleEsMio`)—.
+ * No hay límite, paginación ni contador: lo que acota es el filtro de ámbito, no la cantidad.
+ *
+ * AISLAMIENTO: nunca consulta la colección entera ni ids ajenos; si el espejo del usuario no coincide
+ * con `propietarioId`, las Rules deniegan la consulta (no devuelven fichas ajenas «filtradas»).
+ *
+ * AISLADA DE LA LECTURA PRIMARIA: su fallo se registra con `alcance: 'CAPACIDAD'` y origen propio
+ * (`titulares_ambito`). No entra en el estado de pantalla, no dispara el aviso global ni el texto
+ * genérico «avisa a un administrador», y la ficha propia (`subscribePropietarios`) no depende de ella.
+ * Cada apertura (inicio o «Reintentar lectura») parte limpia: su aviso anterior se sustituye.
+ */
+export function subscribeTitularesAmbito(
+  callback: (titulares: Propietario[]) => void,
+  propietarioId?: string
+): Unsubscribe {
+  if (!propietarioId) {
+    callback([]);
+    return () => {};
+  }
+  limpiarIncidenciasDe('titulares_ambito', 'LECTURA');
+  return onSnapshot(
+    query(PROPIETARIOS_COL, where('ambitoPropietarioId', '==', propietarioId)),
+    (snapshot) => {
+      const items: Propietario[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Propietario);
+      });
+      callback(items);
+    },
+    (err) =>
+      reportarErrorLectura(
+        'titulares_ambito',
+        err,
+        `Firestore titulares de ámbito (ambitoPropietarioId=${propietarioId}) snapshot error:`,
+        { alcance: 'CAPACIDAD', mensajesPorCodigo: MENSAJES_TITULARES_AMBITO, detalle: DETALLE_TITULARES_AMBITO }
+      )
+  );
+}
+
 /**
  * Save / Update Propietario in Firestore
  */
@@ -409,23 +471,24 @@ async function leerDocumentoPropio(coleccion: string, id: string): Promise<Lectu
 }
 
 /**
- * DIAGNÓSTICO de «Lectura · Carteras: No tienes permisos…» (ver
- * `src/lib/diagnosticoCarteras.ts`). Solo se ejecuta TRAS una denegación; lee
- * únicamente los dos documentos propios que usa `perfilActualVeraz()` y repite la
- * misma consulta una vez. Va a la consola técnica: no crea incidencias ni toca la
- * interfaz, y nunca lanza.
+ * Lo que averigua el diagnóstico de «Lectura · Carteras» tras una CONSULTA denegada: sus
+ * dos documentos propios (los que lee `perfilActualVeraz()`), un reintento de la misma
+ * consulta y la acción que corresponde (`decidirTrasDenegacion`). Solo lee; nunca escribe,
+ * nunca toca la interfaz y nunca lanza.
  */
-async function diagnosticarDenegacionCarteras(ctx: ContextoConsultaCarteras, err: unknown): Promise<void> {
+interface InvestigacionCarteras {
+  codigoError: string;
+  observacion: ObservacionDocumentos;
+  reintento: ResultadoReintento;
+  accion: AccionTrasDenegacion;
+}
+
+async function investigarDenegacionCarteras(
+  ctx: ContextoConsultaCarteras,
+  err: unknown
+): Promise<InvestigacionCarteras | null> {
   try {
     const codigoError = codigoDeError(err);
-    if (codigoError !== 'permission-denied') {
-      console.warn(TRAZA_CARTERAS, 'fallo de lectura distinto de permission-denied: no se diagnostica por reglas', {
-        momento: new Date().toISOString(),
-        codigo: codigoError,
-        gestorUsuarioId: ctx.gestorUsuarioId,
-      });
-      return;
-    }
     const espejo = ctx.authUid ? await leerDocumentoPropio('usuarios_auth', ctx.authUid) : null;
     const usuarioIdEspejo = espejo && espejo.estado === 'EXISTE' ? espejo.datos.usuarioId : undefined;
     const perfil = esIdValido(usuarioIdEspejo) ? await leerDocumentoPropio('usuarios', usuarioIdEspejo) : null;
@@ -437,14 +500,31 @@ async function diagnosticarDenegacionCarteras(ctx: ContextoConsultaCarteras, err
       const codigo = codigoDeError(errReintento);
       reintento = codigo === 'permission-denied' ? 'DENEGADO' : `ERROR:${codigo}`;
     }
+    const observacion: ObservacionDocumentos = { espejo, perfil };
+    const comprobaciones = evaluarComprobacionesCarteras(ctx, observacion);
+    return { codigoError, observacion, reintento, accion: decidirTrasDenegacion(comprobaciones, reintento) };
+  } catch (fallo) {
+    console.warn(TRAZA_CARTERAS, 'el diagnóstico no pudo completarse', fallo);
+    return null;
+  }
+}
+
+/** Traza técnica (consola) del veredicto: solo identificadores, estados y contadores. */
+function registrarInformeCarteras(
+  ctx: ContextoConsultaCarteras,
+  inv: InvestigacionCarteras,
+  lecturaPorRelacion?: ResultadoLecturaRelaciones
+): void {
+  try {
     console.warn(
       TRAZA_CARTERAS,
       'denegada',
       construirInformeCarteras({
         ctx,
-        codigoError,
-        observacion: { espejo, perfil },
-        reintento,
+        codigoError: inv.codigoError,
+        observacion: inv.observacion,
+        reintento: inv.reintento,
+        lecturaPorRelacion,
         momento: new Date().toISOString(),
       })
     );
@@ -454,20 +534,37 @@ async function diagnosticarDenegacionCarteras(ctx: ContextoConsultaCarteras, err
 }
 
 /**
- * Suscribe únicamente las gestiones de cartera cuyo gestorUsuarioId coincide.
+ * Suscribe las gestiones de cartera de ESTA persona como gestora.
  *
- * `gestorUsuarioId` es el id de PERFIL (`usuarios/{id}`) de quien consulta, no el
- * UID de Firebase Auth: la regla `gestionInvolucraAMi` lo compara con
- * `usuarios_auth/{uid}.usuarioId`. Traza técnica (consola, nunca interfaz): al abrir
- * la escucha, en su primer resultado y, si Firestore la deniega, el diagnóstico
- * completo de `diagnosticarDenegacionCarteras`.
+ * `gestorUsuarioId` es el id de PERFIL (`usuarios/{id}`) de quien consulta, no el UID de
+ * Firebase Auth: la regla `gestionInvolucraAMi` lo compara con
+ * `usuarios_auth/{uid}.usuarioId`. Traza técnica (consola, nunca interfaz): al abrir la
+ * escucha, en su primer resultado y, si Firestore la deniega, el diagnóstico completo.
  *
- * CAPACIDAD ADICIONAL (2026-10-01): la incidencia se registra con
- * `alcance: 'CAPACIDAD'` — el error queda documentado igual (código + traza
- * `[diag:carteras]`), pero NO se convierte en un error de carga de los datos del
- * Portal: no entra en el aviso global «No se han podido leer algunos datos», no
- * cambia el estado de ninguna pantalla y la aplicación sigue funcionando sin
- * carteras. `useEstadoLecturas.reintentarCapacidad` vuelve a abrir ESTA escucha.
+ * CÓMO SE LEE (2026-10-01 · «falso No tienes permisos»)
+ *  1. CONSULTA de colección `where gestorUsuarioId == <id>` (la lectura documentada y viva).
+ *  2. Si Firestore la DENIEGA, `investigarDenegacionCarteras` observa los dos documentos
+ *     propios que usa la regla y reintenta la consulta; `decidirTrasDenegacion` decide:
+ *      · reintento autorizado → denegación transitoria: se REABRE la consulta (una vez);
+ *      · TODOS los términos de la regla cumplidos y la consulta sigue denegada → la
+ *        denegación no la explica el estado de la persona sino la propia CONSULTA
+ *        (reglas publicadas distintas en `allow list` o consulta que el motor no
+ *        demuestra; ninguna es comprobable fuera de Firebase). Se lee entonces POR
+ *        RELACIÓN: un `get` de cada gestión indexada en el espejo propio
+ *        (`gestionesPorPropietario`, el mismo índice con que las Rules autorizan los
+ *        inmuebles delegados). `get` comparte predicado con `list` y se evalúa sobre el
+ *        documento real, sin planificador. Si se autoriza, no hay aviso; si alguna se
+ *        deniega, es una denegación REAL y se avisa;
+ *      · cualquier causa observable (espejo ausente, ficha no enlazada, id de consulta
+ *        distinto del que enlaza el espejo, sin sesión…) → se avisa como siempre. El
+ *        aislamiento por gestor no se esquiva: la lectura por relación solo se abre con
+ *        la regla del gestor cumplida y solo accede a lo que cada `get` autoriza.
+ *  Ninguna regla se relaja.
+ *
+ * CAPACIDAD ADICIONAL: la incidencia se registra con `alcance: 'CAPACIDAD'` — el error
+ * queda documentado igual (código + traza `[diag:carteras]`), pero NO se convierte en un
+ * error de carga de los datos del Portal. `useEstadoLecturas.reintentarCapacidad` vuelve
+ * a abrir ESTA escucha (de nuevo por la consulta, que es la lectura documentada).
  */
 export function subscribeGestionesCarteraGestor(
   callback: (gestiones: GestionCartera[]) => void,
@@ -495,31 +592,187 @@ export function subscribeGestionesCarteraGestor(
     ...ctx,
     consulta: `gestiones_cartera where gestorUsuarioId == '${gestorUsuarioId}'`,
   });
-  let primerResultado = true;
-  return onSnapshot(
-    query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', gestorUsuarioId)),
-    (snap) => {
-      if (primerResultado) {
-        primerResultado = false;
-        console.info(TRAZA_CARTERAS, 'resultado', {
-          momento: new Date().toISOString(),
-          gestorUsuarioId,
-          documentos: snap.docs.length,
-          desdeCache: Boolean(snap.metadata?.fromCache),
+
+  let cerrada = false;
+  /** Baja de la lectura que esté viva en cada momento (consulta o lectura por relación). */
+  let bajaViva: Unsubscribe = () => {};
+  /** Una única reapertura automática tras una denegación transitoria (nunca un bucle). */
+  let reaperturasDisponibles = 1;
+
+  const reportar = (err: unknown, detalle?: string) => {
+    reportarErrorLectura(
+      'gestiones_cartera',
+      err,
+      `Firestore gestiones_cartera (gestorUsuarioId=${gestorUsuarioId}) snapshot error:`,
+      { alcance: 'CAPACIDAD', ...(detalle ? { detalle } : {}) }
+    );
+  };
+  /** Qué comprobación falló y qué hacer, para el aviso de la persona (solo si la denegación es real). */
+  const detalleDeCausa = (inv: InvestigacionCarteras, lecturaPorRelacion?: ResultadoLecturaRelaciones) =>
+    ayudaUsuarioDeCausa(
+      causaDeDenegacion(evaluarComprobacionesCarteras(ctx, inv.observacion), inv.reintento, lecturaPorRelacion)
+    );
+
+  /**
+   * Lectura DETERMINISTA por relación (ver cabecera). Escucha el espejo propio y, por cada
+   * gestión que indexa, el documento de esa gestión. Entrega la lista cuando todas las
+   * respuestas iniciales han llegado y la mantiene viva: cambios de estado de una gestión
+   * o del índice se reflejan sin recargar.
+   */
+  const abrirLecturaPorRelacion = (inv: InvestigacionCarteras) => {
+    const uid = ctx.authUid;
+    if (!uid) {
+      // Imposible con la regla cumplida (exige sesión), pero se falla en cerrado.
+      reportar({ code: 'permission-denied' });
+      registrarInformeCarteras(ctx, inv);
+      return;
+    }
+    let informado = false;
+    let fallo: ResultadoLecturaRelaciones | null = null;
+    let claveIndice: string | null = null;
+    let bajasGestiones: Unsubscribe[] = [];
+
+    const alFallar = (errRel: unknown) => {
+      if (cerrada) return;
+      const primero = fallo === null;
+      const codigo = codigoDeError(errRel);
+      fallo = fallo ?? (codigo === 'permission-denied' ? 'DENEGADA' : `ERROR:${codigo}`);
+      // Denegación REAL: el estado cumple la regla y ni el `get` por relación se autoriza.
+      // Un fallo de red no es «reglas publicadas»: solo la denegación del `get` apunta a ellas.
+      if (primero) reportar(errRel, fallo === 'DENEGADA' ? detalleDeCausa(inv, 'DENEGADA') : ayudaUsuarioDeCausa('INCONCLUSA'));
+    };
+    const liquidar = (total: number, entregadas: number) => {
+      if (informado) return;
+      informado = true;
+      console.info(TRAZA_CARTERAS, 'resultado-por-relacion', {
+        momento: new Date().toISOString(),
+        gestorUsuarioId,
+        relacionesIndexadas: total,
+        documentos: entregadas,
+      });
+      registrarInformeCarteras(ctx, inv, total === 0 ? 'SIN_RELACIONES' : fallo ?? 'OK');
+    };
+    const cerrarGestiones = () => {
+      bajasGestiones.forEach((baja) => baja());
+      bajasGestiones = [];
+    };
+    const escucharGestiones = (ids: string[]) => {
+      if (ids.length === 0) {
+        callback([]);
+        liquidar(0, 0);
+        return;
+      }
+      const porId = new Map<string, GestionCartera>();
+      const pendientes = new Set(ids);
+      const entregar = () => {
+        if (cerrada || pendientes.size > 0) return;
+        callback(Array.from(porId.values()));
+        liquidar(ids.length, porId.size);
+      };
+      bajasGestiones = ids.map((id) =>
+        onSnapshot(
+          doc(db, 'gestiones_cartera', id),
+          (ds) => {
+            pendientes.delete(id);
+            if (ds.exists()) porId.set(id, { id: ds.id, ...ds.data() } as GestionCartera);
+            else porId.delete(id);
+            entregar();
+          },
+          (errRel) => {
+            pendientes.delete(id);
+            alFallar(errRel);
+            entregar();
+          }
+        )
+      );
+    };
+
+    const bajaEspejo = escucharIndiceRelaciones(
+      db,
+      uid,
+      (ids) => {
+        const clave = [...ids].sort().join('|');
+        // Cada login reescribe `updatedAt` del espejo: solo un cambio del ÍNDICE reabre.
+        if (clave === claveIndice) return;
+        claveIndice = clave;
+        cerrarGestiones();
+        escucharGestiones(ids);
+      },
+      (errEspejo) => {
+        alFallar(errEspejo);
+        liquidar(1, 0);
+      }
+    );
+    bajaViva = () => {
+      bajaEspejo();
+      cerrarGestiones();
+    };
+  };
+
+  /** Decide qué hacer con una consulta denegada (ver cabecera). */
+  const resolverDenegacion = async (err: unknown) => {
+    const inv = await investigarDenegacionCarteras(ctx, err);
+    if (cerrada) return;
+    if (!inv) {
+      reportar(err);
+      return;
+    }
+    if (inv.accion === 'REABRIR_CONSULTA' && reaperturasDisponibles > 0) {
+      reaperturasDisponibles -= 1;
+      registrarInformeCarteras(ctx, inv);
+      abrirConsulta();
+      return;
+    }
+    if (inv.accion === 'LEER_POR_RELACION') {
+      abrirLecturaPorRelacion(inv);
+      return;
+    }
+    reportar(err, detalleDeCausa(inv));
+    registrarInformeCarteras(ctx, inv);
+  };
+
+  const abrirConsulta = () => {
+    let primerResultado = true;
+    bajaViva = onSnapshot(
+      query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', gestorUsuarioId)),
+      (snap) => {
+        if (primerResultado) {
+          primerResultado = false;
+          console.info(TRAZA_CARTERAS, 'resultado', {
+            momento: new Date().toISOString(),
+            gestorUsuarioId,
+            documentos: snap.docs.length,
+            desdeCache: Boolean(snap.metadata?.fromCache),
+          });
+        }
+        callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera)));
+      },
+      (err) => {
+        if (cerrada) return;
+        if (codigoDeError(err) !== 'permission-denied') {
+          reportar(err);
+          console.warn(TRAZA_CARTERAS, 'fallo de lectura distinto de permission-denied: no se diagnostica por reglas', {
+            momento: new Date().toISOString(),
+            codigo: codigoDeError(err),
+            gestorUsuarioId: ctx.gestorUsuarioId,
+          });
+          return;
+        }
+        // `resolverDenegacion` no debería lanzar (el diagnóstico captura sus errores); si lo hiciera, la
+        // denegación sigue siendo la original y se avisa: jamás una promesa sin manejar ni una lista inventada.
+        void resolverDenegacion(err).catch((fallo) => {
+          console.warn(TRAZA_CARTERAS, 'el diagnóstico no pudo completarse', fallo);
+          if (!cerrada) reportar(err);
         });
       }
-      callback(snap.docs.map((ds) => ({ id: ds.id, ...ds.data() } as GestionCartera)));
-    },
-    (err) => {
-      reportarErrorLectura(
-        'gestiones_cartera',
-        err,
-        `Firestore gestiones_cartera (gestorUsuarioId=${gestorUsuarioId}) snapshot error:`,
-        { alcance: 'CAPACIDAD' }
-      );
-      void diagnosticarDenegacionCarteras(ctx, err);
-    }
-  );
+    );
+  };
+
+  abrirConsulta();
+  return () => {
+    cerrada = true;
+    bajaViva();
+  };
 }
 
 /**

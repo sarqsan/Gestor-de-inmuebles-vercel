@@ -32,6 +32,20 @@
  *    denegación persiste; lo que falta por comprobar queda fuera del cliente
  *    (reglas PUBLICADAS en Firebase o planificador de consultas).
  *
+ * LECTURA POR RELACIÓN (2026-10-01) — qué se hace con ese veredicto
+ *  Cuando TODOS los términos observables de la regla del gestor se cumplen y aun así
+ *  la CONSULTA de colección (`list`) se deniega, la denegación no la explica el estado
+ *  de la persona: la explica la propia consulta (reglas publicadas distintas en
+ *  `allow list` o una consulta que el motor no demuestra; ninguna de las dos es
+ *  comprobable fuera de Firebase). Pero `get` y `list` de `gestiones_cartera` comparten
+ *  el mismo predicado (`gestionInvolucraAMi`) y `get` se evalúa sobre el documento
+ *  REAL, sin planificador. El espejo propio indexa las relaciones del gestor
+ *  (`gestionesPorPropietario`: titular → id de gestión; es el mismo índice que usan las
+ *  reglas para autorizar inmuebles delegados), así que la capa de datos puede leer
+ *  cada relación por su id. Si esas lecturas se autorizan, la persona SÍ está
+ *  autorizada y no se le muestra un falso «No tienes permisos». Si alguna se deniega,
+ *  la denegación es real y se avisa. Ninguna regla se relaja en ningún caso.
+ *
  * Módulo PURO: cero imports de Firebase (el adaptador vive en `firebase.ts`).
  * Se mantiene sincronizado con las reglas mediante
  * `tests/carteras-diagnostico-puro.test.ts` (equivalencia con la regla y pines de
@@ -104,6 +118,21 @@ export interface Comprobacion {
 
 export type ResultadoReintento = 'OK' | 'DENEGADO' | `ERROR:${string}`;
 
+/**
+ * Resultado de la lectura DETERMINISTA por relación (un `get` por cada gestión
+ * indexada en el espejo propio). `SIN_RELACIONES`: el índice está vacío, no hay nada
+ * que leer (no es una confirmación de `get`, pero tampoco hay delegación que perder).
+ */
+export type ResultadoLecturaRelaciones = 'OK' | 'SIN_RELACIONES' | 'DENEGADA' | `ERROR:${string}`;
+
+/**
+ * Qué hace la capa de datos tras una consulta denegada:
+ *  · `REABRIR_CONSULTA`: el reintento inmediato SÍ se autoriza (denegación transitoria).
+ *  · `LEER_POR_RELACION`: el estado cumple la regla pero la consulta sigue denegada.
+ *  · `AVISAR`: la denegación tiene causa observable (o no es concluyente): es real.
+ */
+export type AccionTrasDenegacion = 'REABRIR_CONSULTA' | 'LEER_POR_RELACION' | 'AVISAR';
+
 export type CausaCarteras =
   | 'TRANSITORIA'
   | 'SIN_SESION_FIREBASE'
@@ -116,6 +145,7 @@ export type CausaCarteras =
   | 'PERFIL_NO_ACTIVO'
   | 'PERFIL_TIPO_DISTINTO_DEL_ESPEJO'
   | 'CONSULTA_DISTINTA_DEL_ESPEJO'
+  | 'SOLO_LA_CONSULTA_DE_COLECCION_DENEGADA'
   | 'REGLAS_PUBLICADAS_O_PLANIFICADOR'
   | 'INCONCLUSA';
 
@@ -257,14 +287,38 @@ const CAUSA_POR_COMPROBACION: Record<IdComprobacion, CausaCarteras> = {
  */
 export function causaDeDenegacion(
   comprobaciones: readonly Comprobacion[],
-  reintento: ResultadoReintento
+  reintento: ResultadoReintento,
+  lecturaPorRelacion?: ResultadoLecturaRelaciones
 ): CausaCarteras {
   if (reintento === 'OK') return 'TRANSITORIA';
   const fallo = comprobaciones.find((c) => c.ok === false);
   if (fallo) return CAUSA_POR_COMPROBACION[fallo.id];
   if (comprobaciones.some((c) => c.ok === null)) return 'INCONCLUSA';
-  if (reintento === 'DENEGADO') return 'REGLAS_PUBLICADAS_O_PLANIFICADOR';
+  if (reintento === 'DENEGADO') {
+    // Estado cumplido + consulta denegada: si las relaciones se leen (o no hay ninguna que
+    // leer) lo único denegado es la CONSULTA de colección. Si ni el `get` por relación se
+    // autoriza, la diferencia está en las reglas publicadas.
+    return lecturaPorRelacion === 'OK' || lecturaPorRelacion === 'SIN_RELACIONES'
+      ? 'SOLO_LA_CONSULTA_DE_COLECCION_DENEGADA'
+      : 'REGLAS_PUBLICADAS_O_PLANIFICADOR';
+  }
   return 'INCONCLUSA';
+}
+
+/**
+ * Acción de la capa de datos tras una consulta denegada (ver «LECTURA POR RELACIÓN»
+ * en la cabecera). Pura y exhaustiva: solo `REGLAS_PUBLICADAS_O_PLANIFICADOR` (todos
+ * los términos cumplidos y reintento denegado) habilita la lectura por relación; toda
+ * causa observable —incluida la consulta con un id distinto del que enlaza el
+ * espejo— se sigue avisando, así que el aislamiento por gestor no se puede esquivar.
+ */
+export function decidirTrasDenegacion(
+  comprobaciones: readonly Comprobacion[],
+  reintento: ResultadoReintento
+): AccionTrasDenegacion {
+  if (reintento === 'OK') return 'REABRIR_CONSULTA';
+  if (reintento === 'DENEGADO' && reglaDelGestorSeCumple(comprobaciones)) return 'LEER_POR_RELACION';
+  return 'AVISAR';
 }
 
 export const EXPLICACION_CAUSA: Record<CausaCarteras, string> = {
@@ -288,13 +342,51 @@ export const EXPLICACION_CAUSA: Record<CausaCarteras, string> = {
   CONSULTA_DISTINTA_DEL_ESPEJO:
     'La consulta pide gestorUsuarioId = X pero el espejo enlaza a otro usuarioId: la regla compara contra el del espejo, así que ' +
     'pedir otro id se deniega (aislamiento por gestor). El cliente usa un id de perfil distinto del que enlaza el espejo.',
+  SOLO_LA_CONSULTA_DE_COLECCION_DENEGADA:
+    'El estado observable cumple TODOS los términos de la regla del gestor y la consulta de colección sigue denegada, pero la lectura ' +
+    'de cada relación por su id (get) SÍ se autoriza o no hay relaciones que leer. Lo único denegado es la CONSULTA (list): reglas ' +
+    'PUBLICADAS distintas de firestore.rules en `allow list`, o una consulta que el motor no demuestra. La aplicación lee las carteras ' +
+    'por relación y no muestra aviso; ninguna regla se ha relajado. Si quieres la consulta de colección, compara las reglas publicadas ' +
+    'con el repositorio.',
   REGLAS_PUBLICADAS_O_PLANIFICADOR:
     'El estado observable cumple TODOS los términos de la regla del repositorio y el reintento también es denegado. El repositorio ' +
     'autoriza esta consulta, así que la diferencia no está en el cliente: reglas PUBLICADAS en Firebase distintas de firestore.rules ' +
-    'o consulta no demostrable para el motor. Siguiente paso: comparar las reglas publicadas con el repositorio.',
+    'o consulta no demostrable para el motor. Si además la lectura por relación (get) también se deniega, no es el planificador (el ' +
+    '`get` no lo usa) y apunta a reglas publicadas distintas. Siguiente paso: comparar las reglas publicadas con el repositorio.',
   INCONCLUSA:
     'No se pudo completar la comprobación (lecturas o reintento con error distinto de permission-denied). Repite con conexión estable.',
 };
+
+/**
+ * Texto para la PERSONA (no para la consola) cuando la denegación es REAL: qué comprobación falló y
+ * qué puede hacer. Sin datos personales; incluye el código de la causa para el soporte.
+ * `undefined` = no hay nada que decirle (`TRANSITORIA` se recupera sola y `SOLO_LA_CONSULTA…` se
+ * resuelve leyendo por relación): jamás se muestra un aviso por ellas.
+ */
+export function ayudaUsuarioDeCausa(causa: CausaCarteras): string | undefined {
+  const codigo = `Código de diagnóstico: ${causa}.`;
+  switch (causa) {
+    case 'TRANSITORIA':
+    case 'SOLO_LA_CONSULTA_DE_COLECCION_DENEGADA':
+      return undefined;
+    case 'SIN_SESION_FIREBASE':
+      return `Tu sesión ya no es válida. Cierra sesión y vuelve a entrar. ${codigo}`;
+    case 'ESPEJO_ILEGIBLE_POR_SU_TITULAR':
+    case 'REGLAS_PUBLICADAS_O_PLANIFICADOR':
+      return (
+        'Tu perfil y tu sesión están correctos, pero las reglas de seguridad publicadas en Firebase no coinciden con las de ' +
+        `esta versión de la aplicación: avisa al administrador para que las publique. ${codigo}`
+      );
+    case 'INCONCLUSA':
+      return `No se pudo comprobar la causa. Reintenta la lectura; si el aviso persiste, avisa al administrador. ${codigo}`;
+    default:
+      // Espejo ausente/no activo, ficha no enlazada/no activa, tipo distinto, id de consulta ajeno…
+      return (
+        'Tu perfil y tu sesión no están sincronizados. Cierra sesión y vuelve a entrar para resincronizarlos; ' +
+        `si el aviso persiste, avisa al administrador. ${codigo}`
+      );
+  }
+}
 
 export interface InformeDenegacionCarteras {
   momento: string;
@@ -311,6 +403,8 @@ export interface InformeDenegacionCarteras {
   perfil: Record<string, unknown> | null;
   comprobaciones: readonly Comprobacion[];
   reintento: ResultadoReintento;
+  /** Resultado de la lectura por relación (`undefined` si no se llegó a intentar). */
+  lecturaPorRelacion?: ResultadoLecturaRelaciones;
   causa: CausaCarteras;
   lectura: string;
   /** Dónde comparar las reglas publicadas con `firestore.rules` (proyecto y base reales de esta compilación). */
@@ -347,11 +441,13 @@ export function construirInformeCarteras(entrada: {
   codigoError: string;
   observacion: ObservacionDocumentos;
   reintento: ResultadoReintento;
+  /** Resultado de la lectura por relación, si se intentó (solo tras `LEER_POR_RELACION`). */
+  lecturaPorRelacion?: ResultadoLecturaRelaciones;
   momento: string;
 }): InformeDenegacionCarteras {
-  const { ctx, observacion, reintento } = entrada;
+  const { ctx, observacion, reintento, lecturaPorRelacion } = entrada;
   const comprobaciones = evaluarComprobacionesCarteras(ctx, observacion);
-  const causa = causaDeDenegacion(comprobaciones, reintento);
+  const causa = causaDeDenegacion(comprobaciones, reintento, lecturaPorRelacion);
   return {
     momento: entrada.momento,
     motivo: ctx.motivo,
@@ -367,6 +463,7 @@ export function construirInformeCarteras(entrada: {
     perfil: resumenPerfil(observacion.perfil),
     comprobaciones,
     reintento,
+    ...(lecturaPorRelacion ? { lecturaPorRelacion } : {}),
     causa,
     lectura: EXPLICACION_CAUSA[causa],
     dondeComprobarReglas:

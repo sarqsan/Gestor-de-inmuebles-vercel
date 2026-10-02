@@ -14,7 +14,8 @@
  * ALCANCE (2026-10-01 · Carteras) — `alcance: 'DATOS' | 'CAPACIDAD'`:
  *  - `DATOS`: lectura PRIMARIA del Portal. Su fallo es un error de carga de datos.
  *  - `CAPACIDAD`: lectura ADICIONAL (hoy, `gestiones_cartera` = carteras y
- *    delegaciones). Su fallo **se registra igual** (código, mensaje, traza), pero
+ *    delegaciones, y `titulares_ambito` = fichas de titular del ámbito del
+ *    propietario). Su fallo **se registra igual** (código, mensaje, traza), pero
  *    NO se resume en el aviso global «No se han podido leer algunos datos», NO
  *    entra en el estado de pantalla y NO deja la aplicación inutilizable: se
  *    avisa en un mensaje específico con su propio «Reintentar lectura».
@@ -39,8 +40,13 @@ export type AlcanceIncidencia = 'DATOS' | 'CAPACIDAD';
  * es gestora: amplía el ámbito de inmuebles del gestor, pero un propietario sin
  * cartera no necesita nada de ella (`[]`). Por eso su denegación no puede
  * convertirse en un error de carga de los datos del Portal.
+ *
+ * `titulares_ambito` (2026-10-01) son las fichas de titular que el PROPIETARIO crea
+ * dentro de su ámbito (`propietarios where ambitoPropietarioId == su id`). Un propietario
+ * que aún no ha creado ninguna recibe `[]`; su ficha propia, sus inmuebles y el resto del
+ * Portal no dependen de esta lectura, así que su denegación tampoco puede bloquearlos.
  */
-export const ORIGENES_CAPACIDAD_ADICIONAL: readonly OrigenDatos[] = ['gestiones_cartera'];
+export const ORIGENES_CAPACIDAD_ADICIONAL: readonly OrigenDatos[] = ['gestiones_cartera', 'titulares_ambito'];
 
 /** ¿La lectura de este origen es una capacidad adicional (no bloquea el Portal)? */
 export function esCapacidadAdicional(origen: OrigenDatos): boolean {
@@ -103,6 +109,7 @@ export const ORIGENES_CONOCIDOS = [
   'audit_logs',
   'modulos_config',
   'gestiones_cartera',
+  'titulares_ambito',
   'titularidades',
   'inversion',
   'sindicacion',
@@ -120,6 +127,11 @@ export interface IncidenciaDatos {
   readonly codigo: string;
   readonly etiqueta: string;
   readonly mensaje: string;
+  /**
+   * Qué comprobación falló y qué puede hacer la persona (solo capacidades con diagnóstico propio,
+   * hoy Carteras). Texto sin datos personales; nunca sustituye a `mensaje`.
+   */
+  readonly detalle?: string;
   readonly ocurridoEn: number;
 }
 
@@ -193,6 +205,7 @@ const ETIQUETAS_ORIGEN: Record<string, string> = {
   audit_logs: 'Auditoría',
   modulos_config: 'Módulos',
   gestiones_cartera: 'Carteras',
+  titulares_ambito: 'Titulares',
   titularidades: 'Titularidades',
   inversion: 'Inversión y valoración',
   sindicacion: 'Sindicación',
@@ -289,7 +302,9 @@ function registrar(
   origen: OrigenDatos,
   tipo: TipoIncidenciaDatos,
   error: unknown,
-  alcance: AlcanceIncidencia = esCapacidadAdicional(origen) ? 'CAPACIDAD' : 'DATOS'
+  alcance: AlcanceIncidencia = esCapacidadAdicional(origen) ? 'CAPACIDAD' : 'DATOS',
+  detalle?: string,
+  mensajesPorCodigo?: Readonly<Record<string, string>>
 ): IncidenciaDatos {
   const codigo = codigoDeError(error);
   const incidencia: IncidenciaDatos = {
@@ -299,7 +314,8 @@ function registrar(
     alcance,
     codigo,
     etiqueta: etiquetaOrigen(origen),
-    mensaje: mensajeLegible(codigo, tipo),
+    mensaje: mensajesPorCodigo?.[codigo] ?? mensajeLegible(codigo, tipo),
+    ...(detalle ? { detalle } : {}),
     ocurridoEn: Date.now(),
   };
   // Una sola incidencia vigente por origen+tipo (se sustituye, sin duplicar el aviso).
@@ -316,15 +332,19 @@ function registrar(
  * ADICIONAL. Por defecto, el origen decide (`esCapacidadAdicional`): una capacidad
  * adicional se registra igual —el diagnóstico no se oculta— pero la interfaz la
  * presenta aparte y nunca como error de carga de los datos del Portal.
+ * `opciones.detalle` añade al aviso QUÉ comprobación falló y qué hacer (ver `IncidenciaDatos`).
+ * `opciones.mensajesPorCodigo` sustituye el texto genérico SOLO para los códigos indicados
+ * (p. ej. `permission-denied`, cuyo texto genérico remite a «un administrador»): lo usan las
+ * capacidades cuyo propietario puede actuar por sí mismo y no debe ser enviado a nadie.
  */
 export function reportarErrorLectura(
   origen: OrigenDatos,
   error: unknown,
   logTecnico?: string,
-  opciones?: { alcance?: AlcanceIncidencia }
+  opciones?: { alcance?: AlcanceIncidencia; detalle?: string; mensajesPorCodigo?: Readonly<Record<string, string>> }
 ): void {
   console.error(logTecnico ?? `Firestore ${origen} snapshot error:`, error);
-  registrar(origen, 'LECTURA', error, opciones?.alcance);
+  registrar(origen, 'LECTURA', error, opciones?.alcance, opciones?.detalle, opciones?.mensajesPorCodigo);
 }
 
 /**
@@ -449,6 +469,7 @@ const DEPENDENCIAS_PANTALLA: Partial<Record<SectionType, readonly OrigenDatos[]>
   inicio: ['candidatos', 'inmuebles'],
   inmuebles: ['inmuebles', 'propietarios', 'contratos'],
   propietarios: ['propietarios', 'inmuebles'],
+  titulares: ['propietarios', 'inmuebles'],
   inversion: ['inmuebles'],
   inquilinos: ['contratos', 'usuarios'],
   suministros: ['inmuebles'],

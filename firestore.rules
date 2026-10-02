@@ -807,21 +807,65 @@ service cloud.firestore {
         );
       }
 
-      // Cada propietario sólo puede leer su propia ficha. El Administrador, todas.
+      // TITULARES EN EL ÁMBITO DEL PROPIETARIO (2026-10-01, PR #19).
+      // Un PROPIETARIO crea y mantiene TANTAS fichas de titular como necesite (cónyuge,
+      // copropietario, familiar, sociedad, otro titular patrimonial…) sin pasar por el
+      // administrador. NO EXISTE contador, tope ni cuota en ninguna regla: la cantidad
+      // nunca forma parte de la condición. El único límite es de AUTORIZACIÓN/ÁMBITO:
+      // una ficha está «en mi ámbito» cuando su `ambitoPropietarioId` es MI propietarioId
+      // (el del espejo `usuarios_auth`, que solo escribe el master). Ilimitado NO es global:
+      //   · get/list: solo fichas con MI ámbito (más la propia y las carteras que gestiono,
+      //     como antes). Nadie lista `propietarios` entero salvo el master.
+      //   · create: ámbito == el mío; id de forma RESERVADA `tit_<token>` (las fichas de cuenta
+      //     —id == propietarioId— nunca la usan, y la rama propia la prohíbe: nadie puede
+      //     adelantarse a ocupar el id de la ficha propia de otro) y sin campos de
+      //     identidad/auditoría/cartera. La forma no contiene `__` (clave de titularidad
+      //     `{inmuebleId}__{propietarioId}`) ni `~`, `/` ni `.`.
+      //   · update: solo fichas que YA están en mi ámbito; ámbito e id inmutables.
+      //   · delete: nunca (identidad jurídica e histórico).
+      // Helpers LOCALES a este match: los de ámbito raíz se compilan en cada `match` hijo
+      // y el conjunto del ruleset tiene un tope de tamaño compilado.
+      function titularEnMiAmbito(d) {
+        return isPropietarioRole() && myPropId() is string && myPropId().size() > 0
+          && 'ambitoPropietarioId' in d && d.ambitoPropietarioId == myPropId();
+      }
+      // Id RESERVADO a fichas de titular de ámbito: `tit_` + token minúsculas/dígitos. Los dos
+      // espacios de ids (ficha de cuenta vs. ficha de titular) son disjuntos por construcción.
+      // (Operativa del master: el propietarioId que asigna a una CUENTA no debe tener esta forma;
+      // si la tuviera, su ficha de cuenta se rechaza aquí en vez de colisionar con un titular de ámbito.)
+      function idDeTitularDeAmbito(id) {
+        return id is string && id.matches('^tit_[a-z0-9]{8,48}$');
+      }
+
+      // Cada propietario lee su propia ficha y las fichas de titular de SU ámbito. El
+      // Administrador, todas.
       // INC-06: el gestor con relación de cartera vigente (L o E) lee la ficha
       // del propietario gestionado (mismo alcance D2b que ya tiene sobre los
       // inmuebles de esa cartera). Sin relación, nada cambia.
       allow get: if isMasterAdmin() || ownsPropietario(propietarioId)
-        || carteraGestionadaPorMi(propietarioId);
-      allow list: if isMasterAdmin();
+        || carteraGestionadaPorMi(propietarioId)
+        || titularEnMiAmbito(resource.data);
+      // `list`: master (todo) o consulta acotada `where('ambitoPropietarioId','==', mi id)`
+      // (misma forma demostrable que `inmuebleEsMio`: valor constante salido de `get` de ruta fija).
+      allow list: if isMasterAdmin() || titularEnMiAmbito(resource.data);
 
-      // El propietario puede crear/editar únicamente SU ficha (id coincidente).
-      // (INC-06 no amplía la creación: crear propietario sigue siendo del
-      // titular o del master; el gestor NO crea propietarios — S3.)
+      // El propietario puede crear/editar SU ficha (id coincidente) y, además, crear y
+      // mantener tantas fichas de titular como necesite DENTRO de su ámbito.
+      // (INC-06 no amplía la creación: el gestor NO crea propietarios — S3.)
       allow create: if (isMasterAdmin() && propietarioPersonaCoherente(propietarioId, incoming())
         && auditoriaVinculada(incoming(), 'propietarios/' + propietarioId)) || (
         !isMasterAdmin() && isPropietarioRole()
         && propietarioId == myPropId()
+        && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE'])
+        && !('personaId' in incoming())
+        && !('roadmap01AuditId' in incoming())
+        && 'id' in incoming() && incoming().id == propietarioId
+        && !('ambitoPropietarioId' in incoming())
+        && !idDeTitularDeAmbito(propietarioId)
+      ) || (
+        // Titular en MI ámbito: cualquier cantidad, siempre con mi ámbito y con id reservado.
+        !isMasterAdmin() && titularEnMiAmbito(incoming())
+        && idDeTitularDeAmbito(propietarioId)
         && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE'])
         && !('personaId' in incoming())
         && !('roadmap01AuditId' in incoming())
@@ -836,6 +880,7 @@ service cloud.firestore {
         !isMasterAdmin() && isPropietarioRole()
         && propietarioId == myPropId()
         && !incoming().diff(existing()).affectedKeys().hasAny(['personaId', 'roadmap01AuditId'])
+        && !incoming().diff(existing()).affectedKeys().hasAny(['ambitoPropietarioId'])
         && 'id' in existing() && existing().id == propietarioId
       ) || (
         // INC-06 — el gestor con cartera de ESCRITURA (carterasE: ACTIVA +
@@ -847,6 +892,13 @@ service cloud.firestore {
         !isMasterAdmin() && activeUser()
         && carterasEscritura().hasAny([propietarioId])
         && incoming().diff(existing()).affectedKeys().hasOnly(['fichaPatrimonial'])
+      ) || (
+        // Titular que YA está en mi ámbito: puedo mantenerlo (datos fiscales, contacto, IBAN…),
+        // pero no mover su ámbito, su id ni los campos de identidad/auditoría/cartera.
+        !isMasterAdmin() && titularEnMiAmbito(existing())
+        && 'ambitoPropietarioId' in incoming() && incoming().ambitoPropietarioId == existing().ambitoPropietarioId
+        && !incoming().diff(existing()).affectedKeys().hasAny(['id', 'personaId', 'roadmap01AuditId', 'isStaff', 'isTenant', 'gestionesPorPropietario', 'carterasL', 'carterasE'])
+        && 'id' in existing() && existing().id == propietarioId
       );
       allow delete: if false; // identidad jurídica/histórico: desasociación auditada, no purga
     }

@@ -72,7 +72,9 @@ const ORDEN_ESPERADO: Record<PerfilNavegacion, SectionType[]> = {
   PROPIETARIO: [
     'dashboard',
     // AUDITORÍA 2026-09-29: `datos` tras `propietarios` (Importar/Exportar de primer nivel).
-    'propietarios', 'inmuebles', 'datos', 'inversion', 'suministros',
+    // 2026-10-01: `titulares` («Propietarios / Titulares») es la entrada del PROPIETARIO hacia su
+    // ficha de titular; antes el aviso «créalo desde Propietarios/Titulares» no llevaba a ningún sitio.
+    'propietarios', 'inmuebles', 'titulares', 'datos', 'inversion', 'suministros',
     'cobros', 'tesoreria', 'gastos', 'financiacion', 'conciliacion', 'facturacion', 'fiscal', 'informes',
     'formalizacion', 'recomercializacion',
     'incidencias', 'operaciones', 'polizas', 'actas',
@@ -169,10 +171,10 @@ describe('UX-1 · B — Navegación por perfil', () => {
     expect(s.length).toBe(29);
   });
 
-  it('PROPIETARIO: 22 destinos, sin secciones de gestión interna', () => {
+  it('PROPIETARIO: 23 destinos, sin secciones de gestión interna', () => {
     const s = seccionesDePerfil('PROPIETARIO');
     expect(s).toEqual(ORDEN_ESPERADO.PROPIETARIO);
-    expect(s.length).toBe(22);
+    expect(s.length).toBe(23);
     // AUDITORÍA 2026-09-29 (FASE 16): Importar/Exportar es destino de primer nivel.
     expect(s).toContain('datos');
     expect(s.indexOf('datos')).toBeLessThan(s.indexOf('inversion'));
@@ -211,7 +213,8 @@ describe('UX-1 · D — Invariante menú ⊆ acceso (guard intacto)', () => {
   const guardPropietario = guardDeApp('SECCIONES_PROPIETARIO');
   const guardProfesional = guardDeApp('SECCIONES_PROFESIONAL');
 
-  it('el guard real sigue declarado en App.tsx y no se ha tocado para UX-1', () => {
+  it('el guard real sigue declarado en App.tsx (sólo se ha ampliado con `titulares`, la ficha de titular del propietario)', () => {
+    expect(guardPropietario).toContain('titulares');
     expect(guardPropietario).toContain('suministros');
     expect(guardPropietario).not.toContain('inquilinos');
     expect(guardPropietario).not.toContain('morosidad');

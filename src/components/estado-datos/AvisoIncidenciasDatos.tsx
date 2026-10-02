@@ -80,6 +80,12 @@ export function detalleAviso(incidencias: readonly IncidenciaDatos[]): string {
  */
 const TITULO_CAPACIDAD: Record<string, string> = {
   gestiones_cartera: 'Carteras: no se han podido leer tus carteras ni delegaciones',
+  titulares_ambito: 'Titulares: no se han podido leer las fichas de titular de tu ámbito',
+};
+
+/** Qué sigue funcionando mientras esa capacidad falla (por defecto: inmuebles, titulares y demás datos). */
+const CONTINUIDAD_CAPACIDAD: Record<string, string> = {
+  titulares_ambito: 'tus inmuebles, tu ficha de titular y demás datos',
 };
 
 export function tituloCapacidadAdicional(incidencia: IncidenciaDatos): string {
@@ -89,7 +95,8 @@ export function tituloCapacidadAdicional(incidencia: IncidenciaDatos): string {
 export function detalleCapacidadAdicional(incidencia: IncidenciaDatos): string {
   return (
     `${incidencia.mensaje} Es una capacidad adicional: el resto del Portal sigue funcionando ` +
-    `con tus inmuebles, titulares y demás datos. Puedes reintentar su lectura cuando quieras; ` +
+    `con ${CONTINUIDAD_CAPACIDAD[incidencia.origen] ?? 'tus inmuebles, titulares y demás datos'}. ` +
+    `Puedes reintentar su lectura cuando quieras; ` +
     `el detalle técnico queda registrado para el diagnóstico.`
   );
 }
@@ -113,6 +120,11 @@ const AvisoCapacidadAdicional: React.FC<{
     <div className="min-w-0 flex-1">
       <p className="text-xs font-bold text-sky-900">{tituloCapacidadAdicional(incidencia)}</p>
       <p className="text-[11px] text-sky-900/90 mt-1 leading-relaxed">{detalleCapacidadAdicional(incidencia)}</p>
+      {incidencia.detalle && (
+        <p className="text-[11px] text-sky-950 mt-1.5 leading-relaxed font-medium" data-testid="aviso-capacidad-causa">
+          {incidencia.detalle}
+        </p>
+      )}
 
       <div className="mt-2.5 flex items-center gap-2">
         {onReintentar && (

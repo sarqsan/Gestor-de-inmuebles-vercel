@@ -74,6 +74,7 @@ import {
   subscribeInmuebles,
   subscribeCandidatos,
   subscribePropietarios,
+  subscribeTitularesAmbito,
   subscribeSolicitudes,
   subscribeInvitaciones,
   subscribeVisitSlots,
@@ -329,13 +330,18 @@ import { origenesActivosDePerfil, reportarResultadoGuardado } from './estadoDato
 import type { OrigenDatos } from './estadoDatos/canalIncidencias';
 import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
 import { useGestionesCarteraGestor } from './estadoDatos/useGestionesCarteraGestor';
+import { useTitularesAmbito } from './estadoDatos/useTitularesAmbito';
 import { ejecutarOperacion } from './feedback/operaciones';
 import { incidenciasNoCerradas } from './utils/operacionesEngine';
+import { permisosTitulares } from './utils/permisosTitulares';
+import { fichasVisiblesDelPropietario } from './lib/titularesModelo';
 
 // Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
 const SECCIONES_PROPIETARIO: SectionType[] = [
   'dashboard',
   'propietarios',
+  // PROPIETARIOS / TITULARES para el propietario: su ficha de titular (antes no tenía entrada).
+  'titulares',
   'inmuebles',
   'inversion',
   'formalizacion',
@@ -622,6 +628,14 @@ export default function App() {
   const intentoCarteras = intentoDeCapacidad('gestiones_cartera');
   const gestionesCarteraGestor = useGestionesCarteraGestor(currentUser, intentoCarteras, subscribeGestionesCarteraGestor);
 
+  // FICHAS DE TITULAR DEL ÁMBITO (PR #19). Un PROPIETARIO crea y mantiene TANTAS fichas de titular
+  // como necesite; cada una lleva `ambitoPropietarioId == su propietarioId` y esta escucha las lee
+  // todas con UNA consulta de igualdad por ese campo (sin tope ni contador). También es CAPACIDAD
+  // ADICIONAL con reintento propio (`reintentarCapacidad('titulares_ambito')`): si se deniega, su
+  // ficha propia, sus inmuebles y el resto del Portal siguen disponibles y el aviso es específico.
+  const intentoTitularesAmbito = intentoDeCapacidad('titulares_ambito');
+  const titularesAmbito = useTitularesAmbito(currentUser, intentoTitularesAmbito, subscribeTitularesAmbito);
+
   const inmuebleIdsParcialesGestionados = useMemo(
     () => currentUser ? inmueblesParcialesActivosDe(gestionesCarteraGestor, currentUser.id) : [],
     [currentUser?.id, gestionesCarteraGestor]
@@ -730,6 +744,25 @@ export default function App() {
     }
     return [];
   }, [currentUser, propietarios]);
+
+  // «Propietarios / Titulares»: SOLO esta lista (más el alta de inmuebles y el Portal para elegir
+  // titulares) incorpora las fichas de titular del ámbito. `scopedPropietarios` no se toca: Tesorería,
+  // Facturación y el resto siguen leyendo `propietarios[0]` como ficha propia.
+  //  · PROPIETARIO: su ficha (primera) + TODAS las fichas de su ámbito, sin tope. La unión de la
+  //    lista local (altas de esta sesión) y de la escucha por ámbito se deduplica por id; nunca
+  //    entra una ficha que no sea suya ni esté en su ámbito.
+  //  · ADMINISTRADOR: todas las fichas, como siempre.
+  const titularesVisibles = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.tipoPerfil === 'ADMINISTRADOR') return propietarios;
+    if (currentUser.tipoPerfil === 'PROPIETARIO') {
+      const porId = new Map<string, Propietario>();
+      for (const ficha of propietarios) porId.set(ficha.id, ficha);
+      for (const ficha of titularesAmbito) porId.set(ficha.id, ficha);
+      return fichasVisiblesDelPropietario([...porId.values()], currentUser);
+    }
+    return [];
+  }, [currentUser, propietarios, titularesAmbito]);
 
   const scopedContratos = useMemo(() => {
     if (!currentUser) return [];
@@ -2072,7 +2105,9 @@ export default function App() {
       await asignarTitularesAlta({
         inmuebleId: newInmueble.id,
         titularesIds: titulares.titularesIds,
-        nombres: Object.fromEntries(propietarios.map((p) => [p.id, p.nombre])),
+        // Nombres de TODOS los titulares que la persona ve (también los de su ámbito, que llegan por su
+        // propia escucha y pueden no estar en `propietarios`): la titularidad guarda el nombre como instantánea.
+        nombres: Object.fromEntries([...propietarios, ...titularesVisibles].map((p) => [p.id, p.nombre])),
         actor: { id: currentUser?.id, nombre: currentUser?.nombre },
         guardar: guardarTitularidad,
       });
@@ -3108,6 +3143,35 @@ export default function App() {
     throw new Error('No se puede eliminar una ficha jurídica con historial.');
   };
 
+  // PROPIETARIOS / TITULARES: UNA sola pantalla (`PropietariosSection`) para el ADMINISTRADOR
+  // (`propietarios`) y para el PROPIETARIO (`titulares`). Qué ofrece lo decide el espejo de las
+  // Rules (`permisosTitulares`): el master crea y edita todas las fichas; el PROPIETARIO crea y
+  // mantiene TANTAS fichas de titular como necesite dentro de su ámbito (sin tope) y la suya;
+  // cualquier otro perfil queda en consulta. Nunca se ofrece una acción que Firestore vaya a denegar.
+  const renderPropietariosTitulares = () => {
+    if (!currentUser) return null;
+    const permisos = permisosTitulares(currentUser, titularesVisibles, ADMIN_MASTER_EMAIL);
+    return (
+      <PropietariosSection
+        propietarios={titularesVisibles}
+        inmuebles={inmueblesCarteraOperativa}
+        puedeGestionar={permisos.puedeGestionar}
+        puedeCrear={permisos.puedeCrear}
+        puedeCrearFichaPropia={permisos.puedeCrearFichaPropia}
+        ambitoPropietarioId={permisos.ambitoPropietarioId}
+        fichasEditablesIds={permisos.fichasEditablesIds}
+        idFichaPropia={permisos.idFichaPropia}
+        onSavePropietario={handleSavePropietario}
+        onDeletePropietario={handleDeletePropietario}
+        onSelectInmueble={() => setActiveSection('inmuebles')}
+        onCrearInmueble={(propietarioId) => {
+          setAltaInmuebleDesdePropietarioId(propietarioId);
+          setActiveSection('inmuebles');
+        }}
+      />
+    );
+  };
+
   // Handlers for Seguro de Impago
   const handleOpenCrearSeguroModal = (candidato?: Candidato, inmueble?: Inmueble) => {
     setCandidateForCrearSeguro(candidato || null);
@@ -3974,6 +4038,7 @@ export default function App() {
                   contratos={scopedContratos}
                   especialidades={especialidades}
                   propietarios={scopedPropietarios}
+                  titularesDisponibles={titularesVisibles}
                   liquidaciones={scopedLiquidaciones}
                   resumenMorosidad={morosidadResumenPropietario}
                   gastos={scopedGastos}
@@ -3996,24 +4061,7 @@ export default function App() {
                   }}
                 />
               ) : (
-                <PropietariosSection
-                  propietarios={scopedPropietarios}
-                  inmuebles={inmueblesCarteraOperativa}
-                  // Espejo de las Rules: el master administra todas las fichas y
-                  // cada PROPIETARIO puede crear/editar la suya; el gestor no crea
-                  // propietarios (S3). Con `false` la sección queda en consulta.
-                  puedeGestionar={
-                    (currentUser.email || '').trim().toLowerCase() === ADMIN_MASTER_EMAIL.trim().toLowerCase() ||
-                    currentUser.tipoPerfil === 'PROPIETARIO'
-                  }
-                  onSavePropietario={handleSavePropietario}
-                  onDeletePropietario={handleDeletePropietario}
-                  onSelectInmueble={() => setActiveSection('inmuebles')}
-                  onCrearInmueble={(propietarioId) => {
-                    setAltaInmuebleDesdePropietarioId(propietarioId);
-                    setActiveSection('inmuebles');
-                  }}
-                />
+                renderPropietariosTitulares()
               )}
               {/* INC-06 — fichas patrimoniales persistentes e importación
                   controlada (destino explícito, preview dry-run, auditoría). */}
@@ -4024,6 +4072,12 @@ export default function App() {
               />
             </>
           )}
+
+          {/* PROPIETARIOS / TITULARES para el PROPIETARIO: misma pantalla. Crea y mantiene la SUYA y
+              TANTAS fichas de titular como necesite dentro de su ámbito (sin tope; las Rules
+              comprueban el ámbito, no la cantidad). El ADMINISTRADOR llega a la misma pantalla por
+              `propietarios`. */}
+          {activeSection === 'titulares' && renderPropietariosTitulares()}
 
           {activeSection === 'preseleccionados' && (
             <PreseleccionadosSection
@@ -4143,6 +4197,7 @@ export default function App() {
                 contratos={scopedContratos}
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
+                titularesDisponibles={titularesVisibles}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
                 gastos={scopedGastos}
@@ -4311,7 +4366,7 @@ export default function App() {
             <InmueblesSection
               inmuebles={scopedInmuebles}
               candidatos={scopedCandidatos}
-              propietarios={scopedPropietarios}
+              propietarios={titularesVisibles}
               slots={slots}
               invitaciones={invitaciones}
               onSelectCandidate={(cand) => setSelectedCandidateForModal(cand)}
@@ -4332,7 +4387,11 @@ export default function App() {
               onDeleteSlot={handleDeleteSlot}
               onDeleteSlotsBatch={handleDeleteSlotsBatch}
               onUpdateSlot={handleUpdateSlot}
-              onNavigateToPropietarios={() => setActiveSection('propietarios')}
+              // «Propietarios/Titulares» del alta de inmueble: el ADMINISTRADOR va a `propietarios`; el
+              // PROPIETARIO a `titulares` (su `propietarios` es el portal y no tiene ninguna alta).
+              onNavigateToPropietarios={() =>
+                setActiveSection(currentUser.tipoPerfil === 'PROPIETARIO' ? 'titulares' : 'propietarios')
+              }
               onAbrirSeccionGlobal={(seccion, inmuebleId) => {
                 if (seccion === 'polizas') setFiltroPolizasInmuebleId(inmuebleId);
                 setActiveSection(seccion as SectionType);
@@ -4454,6 +4513,7 @@ export default function App() {
                 contratos={scopedContratos}
                 especialidades={especialidades}
                 propietarios={scopedPropietarios}
+                titularesDisponibles={titularesVisibles}
                 liquidaciones={scopedLiquidaciones}
                 resumenMorosidad={morosidadResumenPropietario}
                 onOpenCrearProfesionalModal={(prof) => {

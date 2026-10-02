@@ -1,8 +1,13 @@
 # Sección «Propietarios / Titulares» — modelo y siguiente trabajo
 
-> **Estado: SOLO DISEÑO. La sección NO está construida.** Esta intervención únicamente
-> prepara el modelo y desacopla el alta de inmueble (ver §5). No se ha rediseñado la
-> pantalla de Propietarios ni se ha tocado `firestore.rules`.
+> **Estado actual:** la sección se construyó en ORDEN 4 (PR #18, `PropietariosSection`), su **acceso** se corrigió el
+> 2026-10-01 (`docs/auditoria/CARTERAS_Y_TITULARES_INTERVENCION_2026-10-01.md`) y el **punto abierto de §4 está RESUELTO**
+> (PR #19): un PROPIETARIO crea y mantiene **cualquier número** de fichas de titular dentro de su ámbito
+> (`Propietario.ambitoPropietarioId`), sin pasar por el master y sin límite; el ámbito es la única frontera. El texto de
+> abajo conserva el diseño original y marca lo que ha cambiado.
+>
+> *Estado original de este documento: SOLO DISEÑO. Esta intervención únicamente preparaba el modelo y desacoplaba el
+> alta de inmueble (ver §5), sin rediseñar la pantalla de Propietarios ni tocar `firestore.rules`.*
 
 Fecha: 2026-10-01 · Base: `origin/main` = `21afea4d45271070bee29f93aa9f1c6237834c10`.
 
@@ -74,19 +79,26 @@ Propuesta para la sección, a validar antes de construir:
 5. **Después de crear**, la ficha queda disponible en el selector del alta de inmueble y en el
    panel de titularidades.
 
-### Punto de diseño abierto: ¿quién puede crear la ficha de un tercero?
+### Decisión (resuelta el 2026-10-01, PR #19): ¿quién puede crear la ficha de un tercero?
+
+**El propio PROPIETARIO, dentro de su ámbito y sin límite de cantidad.** El modelo funcional real es: PROPIETARIO →
+Propietarios/Titulares → «Crear titular» → tantos como necesite (cónyuge, copropietario, familiar, sociedad u otro titular
+patrimonial, no necesariamente él mismo) → cada ficha completa e independiente → luego asignable a sus inmuebles. No hace
+falta un master/administrador y no hay «1, 2, 3, 10, 50»: la cantidad no es parte de ninguna condición.
 
 Con las Rules actuales (`match /propietarios/{propietarioId}`):
 
-- `create`: **master** (con auditoría) o el propio PROPIETARIO **sólo para su ficha**
-  (`propietarioId == myPropId()`); el gestor no crea propietarios.
-- `list`: sólo master. `get`: master, la propia ficha o cartera gestionada. `delete`: nunca.
+- `create`: **master** (con auditoría); el PROPIETARIO para **su ficha** (`propietarioId == myPropId()`, sin ámbito); y el
+  PROPIETARIO para **cualquier número de fichas de titular de su ámbito** (`ambitoPropietarioId == myPropId()`, id reservado
+  `tit_<token>`, sin `personaId` ni campos de cuenta/cartera/auditoría). El gestor no crea propietarios.
+- `update`: master; el PROPIETARIO sobre su ficha y sobre las fichas **que ya están en su ámbito** (ámbito e id inmutables); el
+  gestor con cartera de escritura solo sobre `fichaPatrimonial`.
+- `get`/`list`: master; el PROPIETARIO, su ficha y las de su ámbito (`list` solo como consulta `where('ambitoPropietarioId','==', su id)`);
+  el gestor, la ficha de las carteras que gestiona. `delete`: nunca.
 
-Por tanto un PROPIETARIO **no puede** dar de alta hoy la ficha de otro titular (p. ej. un
-cotitular). La sección debe decidir explícitamente, con revisión de seguridad y **sin abrir
-`list`/`create` globales**, si la creación de terceros es: (a) sólo master/administración;
-(b) un endpoint de servidor auditado; o (c) una petición que aprueba la administración. Esta
-decisión **no** se toma en esta intervención.
+**Ilimitado ≠ global.** Lo único que acota es la autorización/ámbito: no hay acceso a titulares de carteras ajenas, ni
+`allow list: if true`, ni lectura general de `propietarios`. La búsqueda de servidor F3 tampoco revela nombres de titulares de
+otro ámbito. La decisión, su prueba y lo pendiente de verificar en el motor real están en el informe del PR #19.
 
 ## 5. Contrato con el alta de inmueble (ya aplicado)
 
@@ -97,9 +109,11 @@ decisión **no** se toma en esta intervención.
 - Se persiste primero el inmueble y **después** cada titularidad (lote atómico titularidad +
   índice `titularesIds`), porque las Rules de `titularidades` comprueban el ámbito sobre el
   inmueble ya guardado. Las titularidades nacen con porcentaje pendiente.
-- Un PROPIETARIO sólo ve su propia ficha en el selector (aislamiento): los cotitulares se añaden
-  después desde «Titulares / Titularidades», con la búsqueda de servidor que sólo devuelve
-  `{ id, nombre }`.
+- Un PROPIETARIO ve en el selector su ficha **y todas las fichas de titular de su ámbito** (nunca las de otros). Su titular
+  principal es siempre su ficha propia (las Rules de `inmuebles` exigen su `propietarioId`); los demás titulares se marcan como
+  «Otros titulares del inmueble» (sin límite de número) o se añaden después desde «Titulares / Titularidades», eligiendo
+  directamente entre los suyos o con la búsqueda de servidor, que sólo devuelve `{ id, nombre }` y excluye los titulares de
+  otro ámbito.
 - Los campos binarios heredados (`propietarioSecundarioId`, `datosFiscales.segundoPropietario`)
   se **derivan del primer titular adicional**, a partir de la ficha existente (nunca tecleados).
 
@@ -120,11 +134,15 @@ decisión **no** se toma en esta intervención.
 3. A → 1, 2, 3 y B → 1, 4 funciona sin duplicar personas y con aislamiento: B no ve 2 ni 3.
 4. Liquidaciones, informes, exportaciones, documentos y fiscalidad leen los datos fiscales de la
    ficha del titular, no del inmueble.
-5. La creación de fichas de terceros está decidida y protegida por Rules sin permisos globales.
+5. La creación de fichas de terceros está decidida (PROPIETARIO, en su ámbito, sin límite) y protegida por Rules sin permisos globales.
 6. No se borra histórico: cerrar una titularidad o dar de baja un inmueble conserva todo.
 7. Ninguna vista cuenta inmuebles dados de baja como cartera operativa (`inmueblesOperativos`).
 
-## 8. Fuera de alcance de esta intervención
+## 8. Alcance de las intervenciones
 
-No se construye la sección, no se cambian Rules, no se modifican porcentajes de titularidad, no se
-ejecuta ningún backfill y no se borran datos históricos.
+*Intervención original (ORDEN 4, PR #18):* no se construyó la sección, no se cambiaron Rules, no se modificaron
+porcentajes de titularidad, no se ejecutó ningún backfill y no se borraron datos históricos.
+
+*PR #19 (2026-10-01):* se construyó el acceso a la sección, se resolvió §4 (titulares en el ámbito del propietario, con cambio
+acotado de Rules en `match /propietarios`) y se mantiene intacto lo demás: porcentajes de titularidad, N-TITULARES, `titularesIds`,
+`titularidades`, histórico, sin backfill y sin borrar datos.

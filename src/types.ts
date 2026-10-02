@@ -3,6 +3,9 @@ export type SectionType =
   | 'inicio'
   | 'inmuebles'
   | 'propietarios'
+  // Propietarios / Titulares para el perfil PROPIETARIO (crea y mantiene tantas fichas de titular como
+  // necesite en su ámbito). El ADMINISTRADOR llega a la misma pantalla por `propietarios`.
+  | 'titulares'
   | 'cobros'
   // BLOQUE B (integración canónica 2026-09-20): tesorería y liquidaciones de propietarios
   | 'tesoreria'
@@ -431,6 +434,13 @@ export interface Propietario {
   id: string;
   /** Vínculo opcional con la persona; solo lo establece el master. No autoriza acceso. */
   personaId?: string;
+  /**
+   * Ámbito del PROPIETARIO que mantiene esta ficha = su `propietarioId`. Solo lo llevan las fichas de
+   * titular que un PROPIETARIO crea dentro de su ámbito (cónyuge, copropietario, familiar, sociedad…);
+   * la ficha propia y las demás no lo tienen. Las Firestore Rules lo usan como ÚNICA frontera de
+   * autorización (lectura, alta y edición): ilimitado no significa global. Inmutable tras el alta.
+   */
+  ambitoPropietarioId?: string;
   nombre: string; // Nombre y apellidos o Razón Social
   nifCif: string; // NIF / CIF / NIE
   tipoPropietario: TipoPropietario;

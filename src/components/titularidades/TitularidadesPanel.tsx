@@ -13,6 +13,10 @@
  *    acceso (eso es otra cosa y se gestiona en otro sitio).
  *  · La búsqueda se hace contra el endpoint de servidor (F3): el cliente no
  *    tiene credenciales ni lista propietarios por su cuenta.
+ *  · SIN LÍMITE de titulares por inmueble (1, 2, 3, 10…): el panel no cuenta ni
+ *    tope ningún número de relaciones. Los titulares que el propio usuario ya
+ *    tiene en su ámbito (`candidatosLocales`) se eligen directamente, sin pasar
+ *    por la búsqueda de servidor, con el MISMO flujo de porcentaje/PENDIENTE.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, BadgeCheck, Clock, History, Plus, Search, ShieldAlert, X } from 'lucide-react';
@@ -43,6 +47,13 @@ export interface TitularidadesPanelProps {
   onCerrarTitularidad?: (titularidadId: string, motivo: MotivoCierreTitularidad, detalle?: string) => Promise<void>;
   /** Búsqueda servidor (F3): mínimo 3 caracteres, máximo 10 resultados. */
   onBuscarTitulares?: (inmuebleId: string, termino: string) => Promise<CandidatoTitular[]>;
+  /**
+   * Titulares que la persona YA tiene a mano (las fichas de su ámbito: las que creó). Se listan
+   * COMPLETOS —sin tope—, se filtran con el mismo cuadro de búsqueda y se eligen igual que un
+   * resultado del servidor (después, porcentaje conocido o PENDIENTE). No sustituyen la búsqueda:
+   * la complementan, para no depender del endpoint a la hora de asignar un titular propio.
+   */
+  candidatosLocales?: readonly CandidatoTitular[];
   /**
    * Cambiar el TITULAR FISCAL PRINCIPAL del inmueble. No transmite la
    * titularidad canónica: sólo declara quién actúa como principal. La capa de
@@ -76,6 +87,7 @@ export const TitularidadesPanel: React.FC<TitularidadesPanelProps> = ({
   onAnadirTitular,
   onCerrarTitularidad,
   onBuscarTitulares,
+  candidatosLocales,
   onCambiarPrincipal,
   onActualizarPorcentaje,
   puedeCambiarPrincipal,
@@ -145,6 +157,14 @@ export const TitularidadesPanel: React.FC<TitularidadesPanelProps> = ({
   };
 
   const yaEsTitular = (id: string) => vigentes.some((t) => t.propietarioId === id);
+
+  // Titulares propios elegibles sin servidor. El mismo término de búsqueda los filtra por nombre
+  // (sin término se muestran todos); no hay máximo de elementos.
+  const locales = useMemo(() => {
+    const q = termino.trim().toLowerCase();
+    const base = candidatosLocales ?? [];
+    return q ? base.filter((c) => (c.nombre || '').toLowerCase().includes(q)) : [...base];
+  }, [candidatosLocales, termino]);
 
   const confirmarAlta = async () => {
     if (!seleccionado || !onAnadirTitular) return;
@@ -332,6 +352,37 @@ export const TitularidadesPanel: React.FC<TitularidadesPanelProps> = ({
               La búsqueda se realiza en servidor: sólo se devuelven nombre e identificador.
             </p>
           </div>
+
+          {locales.length > 0 && (
+            <div data-testid="titulares-locales">
+              <p className="text-xs font-bold text-slate-700 mb-1">Tus titulares ({locales.length})</p>
+              <ul className="max-h-48 overflow-y-auto divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+                {locales.map((c) => {
+                  const titular = yaEsTitular(c.id);
+                  return (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        data-testid={`titular-local-${c.id}`}
+                        onClick={() => !titular && setSeleccionado(c)}
+                        disabled={titular}
+                        className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 ${
+                          seleccionado?.id === c.id ? 'bg-blue-50 text-blue-800' : 'hover:bg-slate-50'
+                        } ${titular ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <span>{c.nombre}</span>
+                        {titular ? (
+                          <span className="text-[11px] text-slate-500">Ya es titular</span>
+                        ) : (
+                          <BadgeCheck className={`w-4 h-4 ${seleccionado?.id === c.id ? 'text-blue-600' : 'text-slate-300'}`} />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           {buscando && <p className="text-xs text-slate-500">Buscando…</p>}
           {errorBusqueda && !buscando && <p className="text-xs text-rose-700">{errorBusqueda}</p>}

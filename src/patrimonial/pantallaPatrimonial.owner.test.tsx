@@ -2,11 +2,14 @@
  * @vitest-environment jsdom
  *
  * AUDITORÍA UX PROPIETARIO (2026-09-29) — «Mis titulares» (pantalla patrimonial):
- * GAP DE PERMISOS documentado — las Firestore Rules solo permiten crear
- * titulares patrimoniales al ADMINISTRADOR. Antes, el propietario VEÍA la
- * pestaña «Nuevo propietario» y el guardado fallaba con permission-denied.
- * Ahora la vista se oculta con explicación honesta y la guardia de
- * `guardarAlta` rechaza el intento sin tocar el backend (el test F5 lo fija).
+ * el alta PATRIMONIAL de otro propietario (esta pantalla) es del ámbito administrativo.
+ * Antes, el propietario VEÍA la pestaña «Nuevo propietario» y el guardado fallaba con
+ * permission-denied. Ahora la vista se oculta con una explicación honesta.
+ *
+ * PR #19 (2026-10-01): el PROPIETARIO sí crea y mantiene TANTOS titulares como necesite, pero
+ * en «Propietarios / Titulares» (ficha completa e independiente por titular, en su ámbito).
+ * Por eso a él esta pantalla NO le dice que acuda a la administración: le indica dónde crear
+ * titulares. Un perfil que no es ni administrador ni propietario conserva el texto anterior.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -65,10 +68,14 @@ describe('pantalla patrimonial — honestidad de permisos por perfil (auditoría
     expect(screen.queryByRole('button', { name: /Nuevo propietario/i })).toBeNull();
     expect(screen.getByRole('button', { name: /Propietarios/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Importación/i })).toBeTruthy();
-    // Aviso honesto (rol note): explica el GAP DE PERMISOS y desvía el cotitular a la ficha del inmueble
+    // Aviso honesto (rol note): dice DÓNDE crear titulares (sin remitir a la administración) y desvía
+    // el cotitular fiscal a la titularidad de la ficha del inmueble
     const nota = screen.getByRole('note');
-    expect(nota.textContent).toMatch(/titulares patrimoniales corresponde a la administración/);
-    expect(nota.textContent).toMatch(/titularidad desde la ficha del inmueble/);
+    expect(nota.textContent).toMatch(/Propietarios \/ Titulares/);
+    expect(nota.textContent).toMatch(/tantos como necesites/);
+    expect(nota.textContent).toMatch(/titularidad en la ficha del inmueble/);
+    expect(nota.textContent).not.toMatch(/administraci[oó]n/i);
+    expect(nota.textContent).not.toMatch(/administrador/i);
     // No se ha eliminado funcionalidad: la ficha y la importación siguen ahí.
     expect(screen.getByText(/Ana Propietaria/)).toBeTruthy();
   });

@@ -127,6 +127,29 @@ export function inmueblesParcialesEscrituraDe(
 }
 
 /**
+ * Ids de las gestiones que el espejo propio (`usuarios_auth/{uid}.gestionesPorPropietario`)
+ * indexa para esta persona: `{ [propietarioId]: gestionId }` → los `gestionId`, sin
+ * duplicados y descartando cualquier valor que no pueda ser id de documento.
+ *
+ * Es el MISMO índice con el que las Rules autorizan los inmuebles delegados
+ * (`gestionActivaCompletaIndexada` / `inmuebleParcialIndexado`), de modo que leer las
+ * gestiones por estos ids no ve ni más ni menos que lo que las reglas ya consideran
+ * «mis relaciones». Con él la capa de datos lee cada relación con un `get` (evaluado
+ * sobre el documento real) en lugar de depender de que el motor demuestre una consulta
+ * de colección (`where gestorUsuarioId ==`). No autoriza nada: cada `get` lo decide la
+ * regla de `gestiones_cartera`.
+ */
+export function idsGestionesIndexadas(indice: unknown): string[] {
+  if (!indice || typeof indice !== 'object' || Array.isArray(indice)) return [];
+  const ids = new Set<string>();
+  for (const valor of Object.values(indice as Record<string, unknown>)) {
+    // Mismo criterio que `isValidId` de las reglas (1–128) y un id de documento no lleva «/».
+    if (typeof valor === 'string' && valor.length > 0 && valor.length <= 128 && !valor.includes('/')) ids.add(valor);
+  }
+  return Array.from(ids);
+}
+
+/**
  * Índice de resolución de gestiones vigentes por titular. A diferencia de
  * carterasL/E, incluye delegaciones parciales: el índice solo permite a Rules
  * localizar la relación canónica; inmuebleIds y el estado se revalidan en

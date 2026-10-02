@@ -489,13 +489,61 @@ describe('cableado real (App.tsx / firebase.ts)', () => {
   });
 
   it('la capa de datos reporta la denegación como CAPACIDAD (registro conservado, sin error fatal)', () => {
-    expect(FIREBASE).toMatch(/reportarErrorLectura\(\s*'gestiones_cartera',[\s\S]{0,300}\{ alcance: 'CAPACIDAD' \}/);
-    expect(FIREBASE).toContain("{ alcance: 'CAPACIDAD' }");
+    expect(FIREBASE).toMatch(/reportarErrorLectura\(\s*'gestiones_cartera',[\s\S]{0,400}alcance: 'CAPACIDAD'/);
     // Sigue existiendo diagnóstico técnico tras la denegación (no se oculta el fallo).
-    expect(FIREBASE).toContain('diagnosticarDenegacionCarteras');
-    // Y el manejador de error NO traduce el fallo a una lista vacía (no se disfraza).
-    const marcaAlcance = FIREBASE.indexOf("{ alcance: 'CAPACIDAD' }");
-    expect(marcaAlcance).toBeGreaterThan(0);
-    expect(FIREBASE.slice(marcaAlcance - 300, marcaAlcance + 300)).not.toContain('callback([])');
+    expect(FIREBASE).toContain('investigarDenegacionCarteras');
+    expect(FIREBASE).toContain('registrarInformeCarteras');
+    // La lectura por relación solo se abre cuando el veredicto puro lo decide (regla del gestor cumplida).
+    expect(FIREBASE).toMatch(/inv\.accion === 'LEER_POR_RELACION'[\s\S]{0,80}abrirLecturaPorRelacion\(inv\)/);
+    // El aviso REAL no se disfraza: ni el helper que reporta ni la rama de aviso entregan una lista inventada.
+    const ini = FIREBASE.indexOf('const reportar = (err: unknown, detalle?: string) => {');
+    expect(ini).toBeGreaterThan(0);
+    expect(FIREBASE.slice(ini, FIREBASE.indexOf('};', ini))).not.toContain('callback(');
+    const resolver = FIREBASE.indexOf('const resolverDenegacion = async (err: unknown) => {');
+    const cuerpoResolver = FIREBASE.slice(resolver, FIREBASE.indexOf('const abrirConsulta = () => {', resolver));
+    expect(cuerpoResolver).toContain('reportar(err, detalleDeCausa(inv));');
+    expect(cuerpoResolver).not.toContain('callback(');
+  });
+});
+
+// ===========================================================================
+// 10 · El aviso REAL dice qué falló (y no aparece nada cuando no hay causa que decir)
+// ===========================================================================
+describe('10 · el aviso específico muestra la causa de una denegación real', () => {
+  const incidencia = (detalle?: string) => ({
+    id: 'inc-x', origen: 'gestiones_cartera', tipo: 'LECTURA' as const, alcance: 'CAPACIDAD' as const,
+    codigo: 'permission-denied', etiqueta: 'Carteras',
+    mensaje: 'No tienes permisos para consultar estos datos. Si crees que es un error, avisa a un administrador.',
+    ocurridoEn: 1, ...(detalle ? { detalle } : {}),
+  });
+
+  it('con detalle: lo muestra junto al título específico, sin tocar el aviso global', () => {
+    render(
+      <AvisoIncidenciasDatos
+        incidencias={[incidencia('Tu perfil y tu sesión no están sincronizados. Código de diagnóstico: ESPEJO_AUSENTE.')]}
+        onDescartar={() => undefined}
+        onDescartarTodas={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Carteras: no se han podido leer tus carteras ni delegaciones')).toBeTruthy();
+    expect(screen.getByTestId('aviso-capacidad-causa').textContent).toContain('Código de diagnóstico: ESPEJO_AUSENTE.');
+    expect(screen.queryByTestId('aviso-incidencias-datos')).toBeNull();
+  });
+
+  it('sin detalle: el aviso queda exactamente como antes (sin párrafo de causa)', () => {
+    render(
+      <AvisoIncidenciasDatos incidencias={[incidencia()]} onDescartar={() => undefined} onDescartarTodas={() => undefined} />,
+    );
+    expect(screen.getByTestId('aviso-capacidad-adicional')).toBeTruthy();
+    expect(screen.queryByTestId('aviso-capacidad-causa')).toBeNull();
+  });
+
+  it('el canal conserva el detalle en la incidencia y lo sustituye con ella (una sola por origen)', () => {
+    reiniciarCanalIncidencias();
+    reportarErrorLectura('gestiones_cartera', { code: 'permission-denied' }, 'x', { alcance: 'CAPACIDAD', detalle: 'Detalle A' });
+    reportarErrorLectura('gestiones_cartera', { code: 'permission-denied' }, 'x', { alcance: 'CAPACIDAD' });
+    const lista = incidenciasDatos().filter((i) => i.origen === 'gestiones_cartera');
+    expect(lista).toHaveLength(1);
+    expect(lista[0].detalle).toBeUndefined();
   });
 });

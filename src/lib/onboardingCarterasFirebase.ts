@@ -8,6 +8,8 @@ import { auth, db, sanitizeObjectForFirestore } from './firebase';
 import type { EnlaceRegistro, Propietario, UsuarioApp } from '../types';
 import { crearPersona, vincularPropietario, vincularUsuario, type Persona } from './personas';
 import { crearGestion, registrarEvento, type GestionCartera, type PermisoGestion } from './gestionesCartera';
+import { idsGestionesIndexadas } from './carterasGestion';
+import { codigoDeError } from '../estadoDatos/canalIncidencias';
 import { buildInvitacionNominalPropietario } from './accesoPropietarios';
 
 function id(value: string) {
@@ -283,6 +285,29 @@ export async function aceptarOnboardingConCredenciales(enlaceId: string, email: 
   return usuario;
 }
 
+/**
+ * Gestiones de este gestor. Primero la consulta de colección por la identidad del espejo; si
+ * Firestore la DENIEGA aunque esa identidad es la suya (reglas publicadas distintas en `list` o
+ * consulta que el motor no demuestra: ninguna comprobable fuera de Firebase), se leen POR RELACIÓN:
+ * un `get` de cada gestión que indexa el espejo propio —el mismo índice con que las Rules autorizan
+ * los inmuebles delegados—. `get` comparte predicado con `list` y se evalúa sobre el documento real.
+ * Si cualquier `get` se deniega, se relanza la denegación ORIGINAL: nada se disfraza ni se amplía.
+ * (Mismo criterio que `subscribeGestionesCarteraGestor`, la lectura del Portal.)
+ */
+async function gestionesDelGestor(espejo: Record<string, unknown>) {
+  try {
+    const snap = await getDocs(query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', espejo.usuarioId)));
+    return snap.docs;
+  } catch (denegada) {
+    if (codigoDeError(denegada) !== 'permission-denied') throw denegada;
+    const ids = idsGestionesIndexadas(espejo.gestionesPorPropietario);
+    const lecturas = await Promise.all(
+      ids.map((gestionId) => getDoc(doc(db, 'gestiones_cartera', gestionId)).catch(() => { throw denegada; }))
+    );
+    return lecturas.filter((lectura) => lectura.exists());
+  }
+}
+
 /** Direct reads for partial delegation; never query the entire owner portfolio
  * for a partial relation. Rules recheck each returned property at read time. */
 export async function cargarCarterasOnboarding(usuario: UsuarioApp) {
@@ -290,8 +315,8 @@ export async function cargarCarterasOnboarding(usuario: UsuarioApp) {
   const mirror = await getDoc(doc(db, 'usuarios_auth', a.uid));
   if (!mirror.exists() || mirror.data().usuarioId !== usuario.id || mirror.data().estado !== 'ACTIVO')
     throw new Error('Identidad de cartera no sincronizada');
-  const snap = await getDocs(query(collection(db, 'gestiones_cartera'), where('gestorUsuarioId', '==', mirror.data().usuarioId)));
-  return Promise.all(snap.docs.map(async gs => {
+  const gestiones = await gestionesDelGestor(mirror.data());
+  return Promise.all(gestiones.map(async gs => {
     const gestion = datos<GestionCartera>(gs);
     if (gestion.estado !== 'ACTIVA') return { gestion, inmuebles: [] };
     const documentos = gestion.inmuebleIds.length

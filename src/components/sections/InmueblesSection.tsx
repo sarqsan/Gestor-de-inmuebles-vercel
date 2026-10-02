@@ -2887,6 +2887,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     <PanelTitularidadesInmueble
                       inmueble={inmuebleToEdit}
                       titulares={propietarios}
+                      // El PROPIETARIO elige directamente entre SUS titulares (los de su ámbito), todos, sin
+                      // depender de la búsqueda de servidor; la administración mantiene la búsqueda de siempre.
+                      candidatosLocales={currentUser?.tipoPerfil === 'PROPIETARIO' ? propietarios : undefined}
                       puedeLeer={puedoLeerTitularidadesDe(inmuebleToEdit)}
                       puedeGestionar={puedoEscribirTitularidadesDe(inmuebleToEdit)}
                       puedeCambiarPrincipal={puedoEscribirTitularidadesDe(inmuebleToEdit)}
@@ -3265,6 +3268,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                           className="text-[11px] font-semibold text-blue-700 hover:text-blue-900 underline flex items-center gap-1"
                         >
                           <Plus className="w-3 h-3" />
+                          {/* Mismo texto para todos los perfiles que pueden crear titulares (también el PROPIETARIO:
+                              crea los suyos, sin tope, en su ámbito). Nunca remite a nadie más. */}
                           <span>Crear titular en Propietarios/Titulares</span>
                         </button>
                       )}
@@ -3292,7 +3297,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       >
                         <option value="">-- Selecciona un titular existente --</option>
                         {(() => {
-                          const visibles = filtrarTitularesLocales(propietarios, newBusquedaTitular);
+                          // El titular principal de un PROPIETARIO es SIEMPRE su ficha propia (las Rules de
+                          // `inmuebles` exigen su propietarioId): ofrecerle como principal a un titular de su
+                          // ámbito sería una opción que siempre se rechaza. Esos titulares se asignan como
+                          // «Otros titulares del inmueble» (sin límite de número), justo debajo.
+                          const candidatosPrincipal =
+                            currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId
+                              ? propietarios.filter((p) => p.id === currentUser.propietarioId)
+                              : propietarios;
+                          const visibles = filtrarTitularesLocales(candidatosPrincipal, newBusquedaTitular);
                           const seleccionado = propietarios.find((p) => p.id === newSelectedPropId);
                           const opciones = seleccionado && !visibles.some((p) => p.id === seleccionado.id)
                             ? [seleccionado, ...visibles]
@@ -3400,6 +3413,19 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-[11px] text-amber-900" role="note">
                         <strong className="block">¿No encuentras al titular?</strong>
                         <p data-testid="aviso-titular-inexistente">{MENSAJE_TITULAR_INEXISTENTE}</p>
+                        {onNavigateToPropietarios && (
+                          <button
+                            type="button"
+                            data-testid="ir-a-titulares-desde-aviso"
+                            onClick={() => {
+                              setShowAddModal(false);
+                              onNavigateToPropietarios();
+                            }}
+                            className="mt-1.5 inline-flex items-center gap-1 font-semibold text-blue-700 hover:text-blue-900 underline"
+                          >
+                            Abrir Propietarios/Titulares
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

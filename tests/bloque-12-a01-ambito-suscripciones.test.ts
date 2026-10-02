@@ -205,6 +205,12 @@ const DOCS: Record<string, Array<Record<string, unknown>>> = {
     { id: 'me_a', contratoId: 'ct_A', inmuebleId: INM_A, createdAt: '2026-01-01' },
     { id: 'me_b', contratoId: 'ct_B', inmuebleId: INM_B, createdAt: '2026-01-01' },
   ],
+  // D3 (§9): `list` exige `'inmuebleId' in resource.data && ambitoPorInmuebleLectura(...)`.
+  // La suscripción tiene que ir acotada por `inmuebleId` o se deniega.
+  solicitudes_seguro_impago: [
+    { id: 'sg_a', inmuebleId: INM_A },
+    { id: 'sg_b', inmuebleId: INM_B },
+  ],
 };
 
 const USUARIO = (perfil: keyof typeof PERFILES): any => ({
@@ -259,6 +265,7 @@ describe('A-01 · las consultas acotadas son autorizables y las globales no', ()
     ['gastos', 'subscribeGastosSeguros', (m, cb, s) => m.subscribeGastosSeguros(cb, s)],
     ['valoraciones_profesionales', 'subscribeValoracionesProfesionales', (m, cb, s) => m.subscribeValoracionesProfesionales(cb, s)],
     ['suministros', 'subscribeSuministros', (m, cb, s) => m.subscribeSuministros(cb, s)],
+    ['solicitudes_seguro_impago', 'subscribeSolicitudesSeguro', (m, cb, s) => m.subscribeSolicitudesSeguro(cb, s)],
   ];
 
   for (const [coleccion, nombre, invocar] of CASOS) {
@@ -277,7 +284,7 @@ describe('A-01 · las consultas acotadas son autorizables y las globales no', ()
       // notifican antes de tiempo: el estado final es el del titular)
       expect(ids.length).toBeGreaterThan(0);
       // Ningún documento del OTRO titular
-      const ajenos = new Set(['p_b', 's_b', 'i_b', 't_b', 'g_b', 'w_b', 'q_b', 'n_b', 'r_b', 'x_b', 'v_b', 'su_b', 'le_b', 'ca_b', 'me_b']);
+      const ajenos = new Set(['p_b', 's_b', 'i_b', 't_b', 'g_b', 'w_b', 'q_b', 'n_b', 'r_b', 'x_b', 'v_b', 'su_b', 'le_b', 'ca_b', 'me_b', 'sg_b']);
       expect(ids.some((id) => ajenos.has(id))).toBe(false);
       // Todas las consultas abiertas están acotadas
       expect(salas.consultas.every((c) => c.filtros.length > 0)).toBe(true);
@@ -392,6 +399,56 @@ describe('A-01 · aislamiento patrimonial por perfil', () => {
     });
     expect(salas.consultas[0]).toMatchObject({ col: 'suministros', filtros: [{ campo: 'inmuebleId', valor: INM_A }] });
     expect(items.map((i) => i.id)).toEqual(['su_a']);
+  });
+
+  it('solicitudes_seguro_impago: el titular consulta inmueble a inmueble, nunca la colección', async () => {
+    escenario = 'propA';
+    const m = await cargar();
+    const items: any[] = [];
+    m.subscribeSolicitudesSeguro((x: any) => items.push(...x), m.scopeDeUsuario(USUARIO('propA')));
+    // Una única consulta, acotada por `inmuebleId`: es la única forma que las
+    // reglas (§9 `ambitoPorInmuebleLectura`) pueden autorizar.
+    expect(salas.consultas).toHaveLength(1);
+    expect(salas.consultas[0]).toMatchObject({
+      col: 'solicitudes_seguro_impago',
+      filtros: [{ campo: 'inmuebleId', valor: INM_A }],
+    });
+    expect(items.map((i) => i.id)).toEqual(['sg_a']);
+  });
+
+  it('solicitudes_seguro_impago: ADMINISTRADOR conserva la colección completa', async () => {
+    escenario = 'master';
+    const m = await cargar();
+    const errores = vi.spyOn(console, 'error').mockImplementation(() => {});
+    m.subscribeSolicitudesSeguro(() => {}, m.scopeDeUsuario(USUARIO('master')));
+    // Sin inmuebles en el ámbito, el perfil administrativo sigue abriendo la
+    // escucha completa: mismo comportamiento que antes del cambio. (El doble de
+    // Firestore deniega por diseño TODA consulta sin `where`, incluida la del
+    // master; lo que se fija aquí es que no se le acota ni se le cierra.)
+    expect(salas.consultas).toHaveLength(1);
+    expect(salas.consultas[0]).toMatchObject({ col: 'solicitudes_seguro_impago' });
+    expect(salas.consultas[0].filtros).toEqual([]);
+    errores.mockRestore();
+  });
+
+  it('solicitudes_seguro_impago: gestor con inmueble delegado ve SOLO ese inmueble', async () => {
+    escenario = 'gestor';
+    const m = await cargar();
+    const items: any[] = [];
+    const scope = { ...m.scopeDeUsuario(USUARIO('gestor')), inmueblesGestionadosParciales: [INM_B] };
+    m.subscribeSolicitudesSeguro((x: any) => items.push(...x), scope);
+    expect(salas.consultas).toHaveLength(1);
+    expect(salas.consultas[0]).toMatchObject({ filtros: [{ campo: 'inmuebleId', valor: INM_B }] });
+    expect(items.map((i) => i.id)).toEqual(['sg_b']);
+  });
+
+  it('solicitudes_seguro_impago: gestor sin inmueble delegado cierra en vacío, sin consulta global', async () => {
+    escenario = 'gestor';
+    const m = await cargar();
+    const items: any[] = [];
+    m.subscribeSolicitudesSeguro((x: any) => items.push(...x), m.scopeDeUsuario(USUARIO('gestor')));
+    expect(items).toEqual([]);
+    expect(salas.consultas).toEqual([]);
   });
 
   it('mensajes del portal se piden contrato a contrato', async () => {

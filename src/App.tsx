@@ -1418,12 +1418,15 @@ export default function App() {
       );
     }
 
+    // D3 (§9): la consulta va acotada por `inmuebleId` con el ámbito de la
+    // sesión (`dataScope`); sin él, PROPIETARIO/profesional pedirían la
+    // colección completa y las reglas la deniegan.
     const unsubscribeSolicitudesSeguro = subscribeSolicitudesSeguro(conDatos<SolicitudSeguroImpago[]>('solicitudes_seguro', (data) => {
       if (data && data.length > 0) {
         setSolicitudesSeguro(data);
         try { localStorage.setItem('rentselect_solicitudes_seguro', JSON.stringify(data)); } catch (e) {}
       }
-    }));
+    }), dataScope);
 
     let unsubscribeAseguradoras: (() => void) | undefined;
     let unsubscribeGmail: (() => void) | undefined;

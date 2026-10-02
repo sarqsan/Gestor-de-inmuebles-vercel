@@ -2576,20 +2576,28 @@ export async function deleteAseguradoraFirestore(aseguradoraId: string) {
 
 /**
  * Real-time listener for Solicitudes de Seguro de Impago (Fase 4 & 5)
+ *
+ * D3 (§9): las reglas de `solicitudes_seguro_impago` conceden `list` sólo con
+ * `'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId)`.
+ * Firestore NO usa las reglas como filtro, de modo que una escucha de la
+ * colección completa (`onSnapshot(SOLICITUDES_SEGURO_COL, …)`) se deniega en
+ * cualquier perfil no master: la consulta tiene que ir acotada por `inmuebleId`.
+ * Se reutiliza el helper canónico de ámbito (BLOQUE 12 · A-01), igual que
+ * `suministros`/`lecturas_suministro`/`cambios_titular` en
+ * `src/lib/suministrosFirestore.ts`. `conCarteras: true` deja constancia de que
+ * las reglas derivan inmueble → propietario y admiten carteras (L/E); el
+ * conjunto de `inmuebleIds` que se consulta lo entrega el llamante ya acotado.
  */
-export function subscribeSolicitudesSeguro(callback: (solicitudes: SolicitudSeguroImpago[]) => void) {
-  return onSnapshot(
+export function subscribeSolicitudesSeguro(
+  callback: (solicitudes: SolicitudSeguroImpago[]) => void,
+  scope?: DataAccessScope
+) {
+  return subscribeColeccionPorAmbito<SolicitudSeguroImpago>(
     SOLICITUDES_SEGURO_COL,
-    (snapshot) => {
-      const items: SolicitudSeguroImpago[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as SolicitudSeguroImpago);
-      });
-      callback(items);
-    },
-    (err) => {
-      reportarErrorLectura('solicitudes_seguro', err, 'Firestore solicitudes_seguro_impago snapshot error:');
-    }
+    callback,
+    scope,
+    'solicitudes_seguro',
+    { campo: 'inmuebleId', conCarteras: true }
   );
 }
 

@@ -944,6 +944,7 @@ service cloud.firestore {
       // (`where('propietarioId','==', pid)`) las carteras que gestiona.
       allow list: if esAdminInmuebles()
         || inmuebleEsMio(resource.data)
+        || (isPropietarioRole() && myPropId() in resource.data.titularesIds)
         || inmuebleEnCarteraGestionada(resource.data);
 
       allow create: if isMasterAdmin() || (

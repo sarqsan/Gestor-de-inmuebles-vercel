@@ -150,6 +150,24 @@ describe('D2a · A — Propietario', () => {
   it('A7 · conserva el acceso a su inmueble autorizado explícitamente', () => {
     expect(get('inm_B', AUTH.propAsig)).toBe(true);
   });
+  it('A8 · cotitularidad en list: where("titularesIds", "array-contains", myPropId()) autoriza al cotitular y deniega a terceros', () => {
+    const bloqueInmuebles = EVAL.bloqueDe('inmuebles');
+    expect(bloqueInmuebles).toContain('|| (isPropietarioRole() && myPropId() in resource.data.titularesIds)');
+
+    const inmCotitular = { id: 'inm_cot', propietarioId: 'prop_B', titularesIds: ['prop_B', 'prop_A'], address: 'Calle Cot 7' };
+    expect(permite('inmuebles', 'list', peticion({ auth: AUTH.propA, docId: 'inm_cot', resource: inmCotitular }))).toBe(true);
+    expect(permite('inmuebles', 'list', peticion({ auth: AUTH.propSin, docId: 'inm_cot', resource: inmCotitular }))).toBe(false);
+    expect(permite('inmuebles', 'list', peticion({ auth: AUTH.prof, docId: 'inm_cot', resource: inmCotitular }))).toBe(false);
+    expect(permite('inmuebles', 'list', peticion({ auth: AUTH.inq, docId: 'inm_cot', resource: inmCotitular }))).toBe(false);
+    expect(permite('inmuebles', 'list', peticion({ auth: AUTH.anon, docId: 'inm_cot', resource: inmCotitular }))).toBe(false);
+
+    // Aislando la rama de producción en allow list (sin inmuebleEsMio), sigue decidiendo por sí misma:
+    const reglasSoloRamaList = crearEvaluadorReglas(
+      RULES.replace('|| inmuebleEsMio(resource.data)\n        || (isPropietarioRole() && myPropId() in resource.data.titularesIds)', '|| (isPropietarioRole() && myPropId() in resource.data.titularesIds)')
+    );
+    expect(reglasSoloRamaList.permite('inmuebles', 'list', peticion({ auth: AUTH.propA, docId: 'inm_cot', resource: inmCotitular }))).toBe(true);
+    expect(reglasSoloRamaList.permite('inmuebles', 'list', peticion({ auth: AUTH.propSin, docId: 'inm_cot', resource: inmCotitular }))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

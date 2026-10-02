@@ -229,8 +229,10 @@ describe('F2 — reglas de Firestore', () => {
     expect(t).toContain('motivoCierre');
   });
 
-  it('la cotitularidad (titularesIds) da acceso al inmueble en las reglas', () => {
+  it('la cotitularidad (titularesIds) da acceso al inmueble en las reglas (get y list acotado por array-contains)', () => {
     expect(reglas).toContain("d.titularesIds.hasAny([myPropId()])");
+    const inmuebles = bloque('match /inmuebles/{inmuebleId}');
+    expect(inmuebles).toContain('|| (isPropietarioRole() && myPropId() in resource.data.titularesIds)');
   });
 
   it('el cliente consulta la cotitularidad con array-contains (demostrable)', () => {

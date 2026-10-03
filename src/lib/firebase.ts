@@ -100,6 +100,20 @@ import {
   type ResultadoReintento,
 } from './diagnosticoCarteras';
 import {
+  TRAZA_INMUEBLES,
+  construirInformeInmuebles,
+  registrarDiagnosticoInmuebles,
+  renderInformeInmuebles,
+  type ContextoLecturaInmuebles,
+  type OrigenLecturaInmuebles,
+} from './diagnosticoInmuebles';
+import {
+  documentoAuditoriaIncidencia,
+  registrarIncidenciaLecturaInmuebles,
+  type IncidenciaLecturaInmuebles,
+} from './observabilidadLecturaInmuebles';
+import { ENTORNO_EJECUCION } from './entornoEjecucion';
+import {
   INITIAL_CANDIDATOS,
   INITIAL_INMUEBLES,
   INITIAL_PROPIETARIOS,
@@ -371,7 +385,8 @@ export async function deletePropietarioFirestore(_propietarioId: string) {
  */
 function subscribeUnionInmuebles(
   callback: (inmuebles: Inmueble[]) => void,
-  opts: { propietarioId?: string; autorizadoIds: string[]; gestionadoIds: string[] }
+  opts: { propietarioId?: string; autorizadoIds: string[]; gestionadoIds: string[] },
+  scope?: DataAccessScope
 ): Unsubscribe {
   const porFuente = new Map<string, Map<string, Inmueble>>();
   const fuentes: Unsubscribe[] = [];
@@ -382,7 +397,11 @@ function subscribeUnionInmuebles(
     callback(Array.from(union.values()));
   };
 
-  const escucharPorPropietario = (clave: string, pid: string) => {
+  const escucharPorPropietario = (
+    clave: string,
+    pid: string,
+    diagnostico: { origen: OrigenLecturaInmuebles; consulta: string }
+  ) => {
     fuentes.push(
       onSnapshot(
         query(INMUEBLES_COL, where('propietarioId', '==', pid)),
@@ -394,12 +413,18 @@ function subscribeUnionInmuebles(
         },
         (err) => {
           reportarErrorLectura('inmuebles', err, `Firestore inmuebles (${clave}) snapshot error:`);
+          void diagnosticarErrorLecturaInmuebles({ ...diagnostico, pid, scope }, err);
         }
       )
     );
   };
 
-  if (opts.propietarioId) escucharPorPropietario('propios', opts.propietarioId);
+  if (opts.propietarioId) {
+    escucharPorPropietario('propios', opts.propietarioId, {
+      origen: 'INM-OWN',
+      consulta: "inmuebles where('propietarioId','==', pid)  [propios]",
+    });
+  }
 
   // N TITULARES (F2) — COTITULARIDAD: una ÚNICA consulta de igualdad por array
   // (`array-contains`), que SÍ es demostrable para el motor de reglas (al
@@ -421,6 +446,15 @@ function subscribeUnionInmuebles(
         },
         (err) => {
           reportarErrorLectura('inmuebles', err, 'Firestore inmuebles (cotitularidad) snapshot error:');
+          void diagnosticarErrorLecturaInmuebles(
+            {
+              origen: 'INM-COT',
+              consulta: "inmuebles where('titularesIds','array-contains', pid)  [cotitularidad]",
+              pid,
+              scope,
+            },
+            err
+          );
         }
       )
     );
@@ -430,7 +464,12 @@ function subscribeUnionInmuebles(
   // D2b: carteras gestionadas, un listener por propietario gestionado. Un
   // propietario que además gestiona carteras recibe la unión completa.
   for (const pid of opts.gestionadoIds) {
-    if (pid && pid !== opts.propietarioId) escucharPorPropietario(`gestion:${pid}`, pid);
+    if (pid && pid !== opts.propietarioId) {
+      escucharPorPropietario(`gestion:${pid}`, pid, {
+        origen: 'INM-GEST',
+        consulta: "inmuebles where('propietarioId','==', pid)  [cartera gestionada]",
+      });
+    }
   }
 
   for (const inmuebleId of opts.autorizadoIds) {
@@ -449,12 +488,127 @@ function subscribeUnionInmuebles(
         },
         (err) => {
           reportarErrorLectura('inmuebles', err, `Firestore inmueble autorizado ${inmuebleId} snapshot error:`);
+          void diagnosticarErrorLecturaInmuebles(
+            {
+              origen: 'INM-ID',
+              consulta: `get(inmuebles/${inmuebleId})  [autorizado explícito o delegación parcial]`,
+              pid: opts.propietarioId ?? null,
+              inmuebleId,
+              scope,
+            },
+            err
+          );
         }
       )
     );
   }
 
   return () => fuentes.forEach((unsub) => unsub());
+}
+
+/**
+ * OBSERVABILIDAD PERSISTENTE — transporte remoto de una incidencia de lectura de
+ * `inmuebles` hacia el libro de auditoría YA EXISTENTE (`audit_logs`).
+ *
+ * Por qué `audit_logs` y no una colección nueva (orden 2026-10-03, FASE 3-4):
+ *  · es el mecanismo de auditoría técnica que la aplicación YA usa;
+ *  · sus Rules ya están escritas y no necesitan ningún cambio:
+ *    `allow create: if isSignedIn()`, `allow read: if isMasterAdmin()`,
+ *    `allow update, delete: if false`;
+ *  · el aislamiento es el que exige la orden: cualquier sesión puede REGISTRAR y
+ *    solo el administrador principal puede CONSULTAR. Un propietario no puede leer
+ *    las incidencias de otro ni las suyas.
+ *
+ * Privacidad: `usuarioEmail` va VACÍO a propósito (nunca se guarda el correo) y el
+ * resto del registro ya viene minimizado (`prefijo + huella`). Si la escritura falla
+ * (reglas no publicadas, sin red, cuota), la promesa se rechaza y el módulo de
+ * observabilidad lo anota: NUNCA se llama aquí a `reportarErrorLectura`, así que este
+ * camino no puede producir otro aviso ni un bucle.
+ */
+async function enviarIncidenciaLecturaInmueblesAAuditoria(registro: IncidenciaLecturaInmuebles): Promise<void> {
+  const id = `audit_diag_inm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  // El sobre documental se define UNA vez, en el módulo de observabilidad.
+  const documento = documentoAuditoriaIncidencia(registro, id);
+  await setDoc(doc(AUDIT_LOGS_COL, id), sanitizeObjectForFirestore(documento));
+}
+
+/**
+ * DIAGNÓSTICO «Lectura · Inmuebles: No tienes permisos…» — SOLO INSTRUMENTACIÓN.
+ *
+ * `subscribeInmuebles` abre hasta cinco lecturas distintas y TODAS reportan al
+ * mismo origen del canal (`reportarErrorLectura('inmuebles', …)`), así que el
+ * aviso global no distingue cuál falló. Esta función, invocada ÚNICAMENTE desde
+ * los callbacks de error de esas cinco lecturas, observa los documentos PROPIOS
+ * que usan las reglas (espejo de identidad por UID, ficha de perfil del espejo y
+ * ficha de perfil por UID que mira `esAdminInmuebles()`) y escribe en la consola
+ * técnica `[DIAG-INMUEBLES]` el veredicto término a término de la regla.
+ *
+ * No cambia ninguna consulta ni la interfaz y nunca lanza: si el diagnóstico no
+ * puede completarse, lo deja dicho y sigue. Desde la orden de observabilidad
+ * (2026-10-03) entrega además el informe a `observabilidadLecturaInmuebles`, que lo
+ * persiste de forma best-effort en el libro de auditoría existente (`audit_logs`)
+ * con búfer local de respaldo; ese camino no reabre este ni produce nuevos avisos.
+ */
+async function diagnosticarErrorLecturaInmuebles(
+  analisis: {
+    origen: OrigenLecturaInmuebles;
+    consulta: string;
+    pid: string | null;
+    inmuebleId?: string | null;
+    scope?: DataAccessScope;
+  },
+  err: unknown
+): Promise<void> {
+  try {
+    const authUid = auth.currentUser?.uid ?? null;
+    const espejo = authUid ? await leerDocumentoPropio('usuarios_auth', authUid) : null;
+    const usuarioIdEspejo = espejo && espejo.estado === 'EXISTE' ? espejo.datos.usuarioId : undefined;
+    const perfil = esIdValido(usuarioIdEspejo) ? await leerDocumentoPropio('usuarios', usuarioIdEspejo) : null;
+    const perfilPorUid = authUid ? await leerDocumentoPropio('usuarios', authUid) : null;
+    const inmuebleIds = analisis.scope?.inmuebleIds ?? [];
+    const parciales = analisis.scope?.inmueblesGestionadosParciales ?? [];
+    const ctx: ContextoLecturaInmuebles = {
+      origen: analisis.origen,
+      consulta: analisis.consulta,
+      pid: analisis.pid,
+      inmuebleId: analisis.inmuebleId ?? null,
+      authUid,
+      tipoPerfil: analisis.scope?.tipoPerfil ?? null,
+      propietarioIdCliente: analisis.scope?.propietarioId ?? null,
+      numeroInmuebleIds: inmuebleIds.length,
+      numeroInmueblesParciales: parciales.length,
+      numeroCarterasGestionadas: (analisis.scope?.propietariosGestionados ?? []).length,
+      ...(analisis.inmuebleId
+        ? {
+            inmuebleIdEnEspejo: inmuebleIds.includes(analisis.inmuebleId),
+            inmuebleIdParcial: parciales.includes(analisis.inmuebleId),
+          }
+        : {}),
+      proyecto: FIREBASE_PROYECTO_ID,
+      baseDeDatos: FIREBASE_BASE_DATOS_ID,
+      codigoError: codigoDeError(err),
+      mensajeError: err instanceof Error ? err.message : String((err as { message?: unknown })?.message ?? err),
+    };
+    const informe = construirInformeInmuebles({
+      ctx,
+      observacion: { espejo, perfil, perfilPorUid },
+      momento: new Date().toISOString(),
+    });
+    // Salida visible (panel temporal de la vista previa). Es un observador pasivo:
+    // solo conserva en memoria el mismo contenido que ya se escribe en consola.
+    registrarDiagnosticoInmuebles(informe);
+    console.error(renderInformeInmuebles(informe), informe);
+
+    // OBSERVABILIDAD PERSISTENTE (orden 2026-10-03): única vía de registro duradero.
+    // Es `void` a propósito: no bloquea el callback de error, no altera la UX y, si
+    // falla, el propio módulo lo absorbe (búfer local) sin volver a avisar.
+    void registrarIncidenciaLecturaInmuebles(informe, {
+      entorno: ENTORNO_EJECUCION,
+      enviarRemoto: enviarIncidenciaLecturaInmueblesAAuditoria,
+    });
+  } catch (fallo) {
+    console.warn(TRAZA_INMUEBLES, 'el diagnóstico no pudo completarse', fallo);
+  }
 }
 
 /** Lectura puntual de un documento PROPIO para el diagnóstico (nunca alimenta la interfaz). */
@@ -813,7 +967,7 @@ export function subscribeInmuebles(
       callback([]);
       return () => {};
     }
-    return subscribeUnionInmuebles(callback, { propietarioId: pid, autorizadoIds: autorizados, gestionadoIds: gestionados });
+    return subscribeUnionInmuebles(callback, { propietarioId: pid, autorizadoIds: autorizados, gestionadoIds: gestionados }, scope);
   }
 
   // B) Cualquier otro perfil conocido no administrativo (PROFESIONAL,
@@ -824,7 +978,7 @@ export function subscribeInmuebles(
       callback([]);
       return () => {};
     }
-    return subscribeUnionInmuebles(callback, { autorizadoIds: autorizados, gestionadoIds: gestionados });
+    return subscribeUnionInmuebles(callback, { autorizadoIds: autorizados, gestionadoIds: gestionados }, scope);
   }
 
   // C) ADMINISTRADOR / sin ámbito — colección completa (comportamiento
@@ -840,6 +994,7 @@ export function subscribeInmuebles(
     },
     (err) => {
       reportarErrorLectura('inmuebles', err, 'Firestore inmuebles snapshot error:');
+      void diagnosticarErrorLecturaInmuebles({ origen: 'INM-ADMIN', consulta: 'inmuebles (colección completa, sin where): ámbito administrativo', pid: null, scope }, err);
     }
   );
 }

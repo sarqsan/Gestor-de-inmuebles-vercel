@@ -53,6 +53,8 @@ import {
 
 import { esUsuarioMaster } from '../../lib/adminUsuarios';
 import { DryRunFichasPublicasPanel } from './DryRunFichasPublicasPanel';
+// OBSERVABILIDAD (orden 2026-10-03): «¿qué lectura de Inmuebles falló?» con evidencia persistente.
+import { DiagnosticoLecturasInmueblesPanel } from './DiagnosticoLecturasInmueblesPanel';
 import { OnboardingCarterasAdmin } from './OnboardingCarterasAdmin';
 
 import type { Persona } from '../../lib/personas';
@@ -1473,6 +1475,14 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            {/* OBSERVABILIDAD DE LECTURAS DE INMUEBLES (orden 2026-10-03): registra qué
+                lectura concreta recibe el `permission-denied` y lo muestra aquí, con el
+                entorno etiquetado. Solo el administrador principal ve datos; las Rules
+                (`allow read: if isMasterAdmin()`) lo garantizan de todos modos. */}
+            <div className="bg-white rounded-2xl p-5">
+              <DiagnosticoLecturasInmueblesPanel auditLogs={auditLogs} currentUser={currentUser} />
             </div>
           </div>
         )}

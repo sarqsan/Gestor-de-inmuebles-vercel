@@ -19,8 +19,9 @@
     "test:patrimonial": "node --import tsx --test \"src/features/patrimonial/tests/*.test.mjs\"",
     "test:integracion": "npm run test:operaciones && npm run test:patrimonial",
     "test:emulador:operaciones": "node --import tsx --test src/features/operaciones/tests/emulator/operaciones.emulator.mjs",
-    "auditoria:repositorio": "tsx scripts/guardia-a04-repositorio.mts",
-    "auditoria:reglas:matriz": "tsx scripts/diagnostico-b12-list.mts",
+  "auditoria:repositorio": "tsx scripts/guardia-a04-repositorio.mts",
+  "auditoria:reglas:matriz": "tsx scripts/diagnostico-b12-list.mts",
+  "auditoria:reglas:list": "tsx scripts/auditoria-reglas-list.mts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

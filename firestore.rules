@@ -2072,7 +2072,17 @@ service cloud.firestore {
       // D3 (§9): `isStaff()` global ⇒ ámbito derivado inmueble → propietario
       // (+carteras, +admin). El borrado queda en el ámbito de escritura.
       allow get: if 'inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId);
-      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      // ORDEN DE GUARDAS (auditoría de permisos 2026-10-03): el short-circuit
+      // administrativo se evalúa PRIMERO. `ambitoPorInmuebleLectura()` ya empieza por
+      // `esAdminInmuebles()`, pero situada DETRÁS de `'inmuebleId' in resource.data`
+      // la consulta no era demostrable: las reglas NO son filtros, de modo que
+      // una consulta sin `where` sobre la colección (la que abre el cliente para
+      // el ámbito administrativo) se denegaba siempre, incluido el administrador.
+      // Reordenar no concede ningún permiso nuevo: el predicado es el mismo que
+      // la propia regla ya aplicaba y TODAS las ramas no administrativas
+      // (titular, carteras, tenant) quedan literalmente iguales.
+      allow list: if esAdminInmuebles()
+        || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
       allow create: if 'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId);
       allow update: if (('inmuebleId' in existing() && 'inmuebleId' in incoming())
         && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId));
@@ -2666,7 +2676,17 @@ service cloud.firestore {
       // Ramas tenant intactas.
       allow get: if ('contratoId' in existing() && ambitoPorContratoLectura(existing().contratoId)) || (isTenant() &&
         ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
-      allow list: if 'contratoId' in resource.data && ambitoPorContratoLectura(resource.data.contratoId);
+      // ORDEN DE GUARDAS (auditoría de permisos 2026-10-03): el short-circuit
+      // administrativo se evalúa PRIMERO. `ambitoPorContratoLectura()` ya empieza por
+      // `esAdminInmuebles()`, pero situada DETRÁS de `'contratoId' in resource.data`
+      // la consulta no era demostrable: las reglas NO son filtros, de modo que
+      // una consulta sin `where` sobre la colección (la que abre el cliente para
+      // el ámbito administrativo) se denegaba siempre, incluido el administrador.
+      // Reordenar no concede ningún permiso nuevo: el predicado es el mismo que
+      // la propia regla ya aplicaba y TODAS las ramas no administrativas
+      // (titular, carteras, tenant) quedan literalmente iguales.
+      allow list: if esAdminInmuebles()
+        || ('contratoId' in resource.data && ambitoPorContratoLectura(resource.data.contratoId));
       allow create: if ('contratoId' in incoming() && ambitoPorContratoEscritura(incoming().contratoId)) || (isTenant() &&
         incoming().contratoId is string &&
         tenantTieneContrato(incoming().contratoId) &&
@@ -2695,7 +2715,17 @@ service cloud.firestore {
       // inmueble cambia, ambos deben ser legítimos).
       allow get: if ('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() &&
         tenantVeContratos(campoListaActual('contratoIdsAutorizados')));
-      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      // ORDEN DE GUARDAS (auditoría de permisos 2026-10-03): el short-circuit
+      // administrativo se evalúa PRIMERO. `ambitoPorInmuebleLectura()` ya empieza por
+      // `esAdminInmuebles()`, pero situada DETRÁS de `'inmuebleId' in resource.data`
+      // la consulta no era demostrable: las reglas NO son filtros, de modo que
+      // una consulta sin `where` sobre la colección (la que abre el cliente para
+      // el ámbito administrativo) se denegaba siempre, incluido el administrador.
+      // Reordenar no concede ningún permiso nuevo: el predicado es el mismo que
+      // la propia regla ya aplicaba y TODAS las ramas no administrativas
+      // (titular, carteras, tenant) quedan literalmente iguales.
+      allow list: if esAdminInmuebles()
+        || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
       allow create: if 'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId);
       allow update: if (('inmuebleId' in existing() && 'inmuebleId' in incoming())
         && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() &&
@@ -2715,7 +2745,17 @@ service cloud.firestore {
       // Ramas tenant intactas; inmutabilidad intacta.
       allow get: if ('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() &&
         ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
-      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      // ORDEN DE GUARDAS (auditoría de permisos 2026-10-03): el short-circuit
+      // administrativo se evalúa PRIMERO. `ambitoPorInmuebleLectura()` ya empieza por
+      // `esAdminInmuebles()`, pero situada DETRÁS de `'inmuebleId' in resource.data`
+      // la consulta no era demostrable: las reglas NO son filtros, de modo que
+      // una consulta sin `where` sobre la colección (la que abre el cliente para
+      // el ámbito administrativo) se denegaba siempre, incluido el administrador.
+      // Reordenar no concede ningún permiso nuevo: el predicado es el mismo que
+      // la propia regla ya aplicaba y TODAS las ramas no administrativas
+      // (titular, carteras, tenant) quedan literalmente iguales.
+      allow list: if esAdminInmuebles()
+        || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
       allow create: if ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() &&
         incoming().contratoId is string &&
         tenantTieneContrato(incoming().contratoId) &&
@@ -2736,7 +2776,17 @@ service cloud.firestore {
       // Ramas tenant intactas.
       allow get: if ('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() &&
         ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId));
-      allow list: if 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId);
+      // ORDEN DE GUARDAS (auditoría de permisos 2026-10-03): el short-circuit
+      // administrativo se evalúa PRIMERO. `ambitoPorInmuebleLectura()` ya empieza por
+      // `esAdminInmuebles()`, pero situada DETRÁS de `'inmuebleId' in resource.data`
+      // la consulta no era demostrable: las reglas NO son filtros, de modo que
+      // una consulta sin `where` sobre la colección (la que abre el cliente para
+      // el ámbito administrativo) se denegaba siempre, incluido el administrador.
+      // Reordenar no concede ningún permiso nuevo: el predicado es el mismo que
+      // la propia regla ya aplicaba y TODAS las ramas no administrativas
+      // (titular, carteras, tenant) quedan literalmente iguales.
+      allow list: if esAdminInmuebles()
+        || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
       allow create: if ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() &&
         incoming().contratoId is string &&
         tenantTieneContrato(incoming().contratoId) &&

@@ -2,6 +2,36 @@
  * No provisiona usuarios, binding ni carteras. Las Rules son la autoridad.
  */
 export const MASTER_EMAIL_CANONICO = 'sarqsan2@gmail.com';
+/**
+ * Campos que forman la autorización operativa de un inmueble (H8).
+ *
+ * El tipo es deliberadamente estructural: el documento llega desde Firestore y
+ * esta frontera no debe convertir campos fiscales, históricos o legacy en
+ * permisos.
+ */
+export interface InmuebleTitularidadOperativa {
+  readonly propietarioId?: unknown;
+  readonly propietarioPrincipalId?: unknown;
+  readonly titularesIds?: unknown;
+}
+
+/**
+ * H8 — titularidad operativa vigente.
+ *
+ * La misma identidad puede autorizar por el titular canónico, el principal o
+ * el índice moderno de titulares. `propietarioSecundarioId` y cualquier otro
+ * dato patrimonial quedan fuera de este predicado por diseño.
+ */
+export function esTitularOperativo(
+  inmueble: InmuebleTitularidadOperativa | null | undefined,
+  usuarioActual: string,
+): boolean {
+  if (!inmueble || typeof usuarioActual !== 'string' || usuarioActual.length === 0) return false;
+  return inmueble.propietarioId === usuarioActual
+    || inmueble.propietarioPrincipalId === usuarioActual
+    || (Array.isArray(inmueble.titularesIds) && inmueble.titularesIds.includes(usuarioActual));
+}
+
 export interface IdentidadCanonica {
   readonly uid: string;
   readonly usuarioId: string;

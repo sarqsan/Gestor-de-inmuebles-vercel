@@ -74,6 +74,25 @@ for(const [nombre,atributos,l,e] of [
  const c=await fixture(nombre,atributos);const read=getDoc(doc(c.db,'operaciones',a.propietarioId));if(l)await read;else await denegado(read);
  if(e)await c.repo.ejecutar(a,cmd(c,0));else await denegado(c.repo.ejecutar(a,cmd(c,0)));
 });
+
+// H8 — prueba REAL contra el emulador: la autorización de la operación usa
+// únicamente propietarioId, propietarioPrincipalId o titularesIds. No basta con
+// que coincida el campo legacy, una ficha fiscal o una relación histórica.
+for(const [nombre,campos,permitido,historico] of [
+ ['propietarioId',{propietarioId:'prop-demo-a',propietarioPrincipalId:'prop-demo-b',titularesIds:['prop-demo-b']},true,null],
+ ['propietarioPrincipalId',{propietarioId:'prop-demo-b',propietarioPrincipalId:'prop-demo-a',titularesIds:['prop-demo-b']},true,null],
+ ['titularesIds',{propietarioId:'prop-demo-b',propietarioPrincipalId:'prop-demo-b',titularesIds:['prop-demo-b','prop-demo-a']},true,null],
+ ['solo propietarioSecundarioId',{propietarioId:'prop-demo-b',propietarioPrincipalId:'prop-demo-b',titularesIds:['prop-demo-b'],propietarioSecundarioId:'prop-demo-a'},false,null],
+ ['solo snapshot fiscal',{propietarioId:'prop-demo-b',propietarioPrincipalId:'prop-demo-b',titularesIds:['prop-demo-b'],datosFiscales:{propietarioPrincipal:{id:'prop-demo-a'}},snapshotFiscal:{propietarioId:'prop-demo-a'}},false,null],
+ ['solo relación histórica cerrada',{propietarioId:'prop-demo-b',propietarioPrincipalId:'prop-demo-b',titularesIds:['prop-demo-b']},false,{inmuebleId:'inm-demo-1',propietarioId:'prop-demo-a',estado:'CERRADA'}],
+ ['sin relación',{propietarioId:'prop-demo-b',propietarioPrincipalId:'prop-demo-b',titularesIds:['prop-demo-b']},false,null],
+])test(`REAL H8 ${nombre}`,async()=>{
+ const c=await fixture(`h8-${nombre}`,{propietarioId:'prop-demo-a'});
+ await admin('inmuebles/inm-demo-1',{direccion:'Inmueble H8 sintético',...campos});
+ if(historico)await admin('titularidades/inm-demo-1__prop-demo-a',historico);
+ const operacion=c.repo.ejecutar(a,cmd(c,0));
+ if(permitido)await operacion;else await denegadoRules(operacion);
+});
 test('REAL anónimo: expediente, entidad y auditoría denegados',async()=>{const c=await client('anon');for(const path of ['operaciones/prop-demo-a','operaciones/prop-demo-a/entidades/proveedor~proveedor-demo','audit_logs/inexistente'])await denegado(getDoc(doc(c.db,path)));await denegado(setDoc(doc(c.db,'audit_logs','anon'),{resultado:'EXITO'}));});
 test('REAL lectura histórica tras revocación; mismo usuario/token no conserva E',async()=>{
  const c=await fixture('historico',{tipoPerfil:'PROFESIONAL',carterasL:['prop-demo-a'],carterasE:['prop-demo-a']});await recorrido(c,9);const token=await c.auth.currentUser.getIdToken();

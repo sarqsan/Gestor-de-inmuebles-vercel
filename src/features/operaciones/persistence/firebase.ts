@@ -4,7 +4,7 @@ import type { Auth } from 'firebase/auth';
 import type { Candidato, ContratoFormalizacion, Inmueble, Propietario } from '../../../types.ts';
 import type { AmbitoOperacion, EntidadOperativa, EventoOperativo } from '../contracts.ts';
 import { crearRepositorioOperativo, type CabeceraOperativa, type TransporteOperativo } from './repository.ts';
-import { proyectarIdentidad } from './authorization.ts';
+import { esTitularOperativo, proyectarIdentidad } from './authorization.ts';
 import { reconstruirHistorial, versionDe, type FilaOperativa } from './versions.ts';
 
 export const COLECCION_OPERACIONES = 'operaciones';
@@ -86,7 +86,7 @@ export function crearTransporteFirebase(db: Firestore, auth: Auth, sdk: SDK = sd
         async leerCabecera() { const s = await tx.get(raiz(propietarioId)); return s.exists() ? s.data() as CabeceraOperativa : null; },
         async comprobarInmuebleActual(a) {
           const s = await tx.get(doc(db, 'inmuebles', a.inmuebleId));
-          if (!s.exists() || ![s.data().propietarioId, s.data().propietarioPrincipalId, s.data().propietarioSecundarioId].includes(a.propietarioId)) throw new Error('Sin titularidad actual: solo acceso histórico cuando esté autorizado.');
+          if (!s.exists() || !esTitularOperativo(s.data(), a.propietarioId)) throw new Error('Sin titularidad actual: solo acceso histórico cuando esté autorizado.');
         },
         guardarEntidad(evento, auditId) {
           const e = evento.despues;

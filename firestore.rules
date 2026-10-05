@@ -3347,10 +3347,13 @@ service cloud.firestore {
     function opEscritura(p) {
       return isMasterAdmin() || (isSignedIn() && opAcceso(p,me(),true));
     }
+    // H8 — autorización operativa por titularidad vigente. El campo legacy
+    // `propietarioSecundarioId` y cualquier dato fiscal/histórico quedan fuera.
     function opActual(p, i) {
       let inmueble = get(/databases/$(database)/documents/inmuebles/$(i)).data;
-      return inmueble.get('propietarioId', '') == p || inmueble.get('propietarioPrincipalId', '') == p
-        || inmueble.get('propietarioSecundarioId', '') == p;
+      return inmueble.get('propietarioId', '') == p
+        || inmueble.get('propietarioPrincipalId', '') == p
+        || (inmueble.get('titularesIds', []) is list && p in inmueble.get('titularesIds', []));
     }
     function opEntidad(p, tipo, id) {
       let key = tipo + '~' + id;

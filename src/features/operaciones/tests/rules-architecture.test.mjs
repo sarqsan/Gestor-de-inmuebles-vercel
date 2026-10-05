@@ -210,7 +210,7 @@ test('plan estático: máximo cuatro referencias de negocio por esquema de entid
 const PINNED = {
   opAbierta: '53472b2bcd0e269345feb84867008ea1b8b42cd1bc07411d9b419f975536721b',
   opAcceso: '60cc67a204e8063e748e2c30ccff9661bcb7ad2b0e92ccaec908bc634c607bba',
-  opActual: '6b077a5c851ff2948486f1c0add7d31ea52bac227b05e0c0a2d6550b46e91c49',
+  opActual: '2a242d2d7d7ee2ec9c17b7a6789377e44449202f82a7d335c361beb848d0fab3',
   opCabeceraEnlazada: '90b03f80742ee47bd7073eec6c1fe94a311ae154c44aa404b47e248588bddac2',
   opCabeceraValida: '4b66a9d9aace0c1e89dc280265dfde4771c5de93d57a72a9f78f92bb660f7862',
   opCambio: 'd717699e2eea386c938b614dcca2df76b3c2f85def60b6d8164a6f0107ba3358',

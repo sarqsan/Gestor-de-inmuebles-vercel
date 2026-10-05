@@ -106,6 +106,7 @@ import {
   Paperclip,
 } from 'lucide-react';
 import { confirmar } from '../../feedback/confirmacion';
+import type { PeticionTransmision, ResultadoTransmision } from '../../lib/transmisionPatrimonialFirestore';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFormulario';
 import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
@@ -145,6 +146,14 @@ interface InmueblesSectionProps {
   onOpenLinkModal?: (inmueble: Inmueble) => void;
   onOpenConfigurarAgenda?: (inmuebleId?: string) => void;
   onUpdateInmueble?: (inmueble: Inmueble) => void;
+  /**
+   * K.2-C — TRANSMISIÓN PATRIMONIAL (H1). Cambiar el titular ECONÓMICO de un
+   * inmueble no es una edición ordinaria: lo resuelve la operación atómica
+   * `transmitirInmuebleFirestore` (K.2-B2), que cierra la titularidad del
+   * transmitente, abre la del adquirente y sincroniza el índice. Sin esta
+   * propiedad la sección NO transmite (y tampoco cambia el canónico a medias).
+   */
+  onTransmitirInmueble?: (peticion: PeticionTransmision) => Promise<ResultadoTransmision>;
   onDeleteSlot?: (slotId: string) => void;
   onDeleteSlotsBatch?: (slotIds: string[]) => void;
   onUpdateSlot?: (slot: VisitSlot) => void;
@@ -198,6 +207,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   onOpenLinkModal,
   onOpenConfigurarAgenda,
   onUpdateInmueble,
+  onTransmitirInmueble,
   onDeleteSlot,
   onDeleteSlotsBatch,
   onUpdateSlot,
@@ -909,10 +919,28 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       return;
     }
 
-    // TITULARES: el inmueble sólo se relaciona con FICHAS EXISTENTES. Si hay una
-    // ficha seleccionada, su instantánea fiscal se LEE de ella; si no la hay (ficha
-    // heredada de un inmueble antiguo), los datos guardados se conservan intactos.
-    const titularPrincipalEdit = propietarios.find((p) => p.id === editSelectedPropId);
+    // K.2-C — EDICIÓN ORDINARIA vs TRANSMISIÓN PATRIMONIAL.
+    // El selector «Titular del inmueble» designa al titular ECONÓMICO
+    // (`propietarioId`). Elegir a otro distinto del canónico actual NO es una
+    // edición ordinaria: es una TRANSMISIÓN, y la resuelve la operación atómica
+    // de K.2-B2 (cierra la titularidad de A, abre la de B y sincroniza el
+    // índice). Aquí sólo se detecta; más abajo se exige confirmación explícita.
+    const canonicoActualId = (inmuebleToEdit.propietarioId || '').trim();
+    const seleccionadoId = (editSelectedPropId || '').trim();
+    const esTransmision = Boolean(canonicoActualId && seleccionadoId && seleccionadoId !== canonicoActualId);
+
+    // H2 — el titular FISCAL principal ya declarado NO se pisa en una edición
+    // ordinaria (K.2-B1: `propietarioPrincipalId` puede divergir legítimamente
+    // del canónico). Sólo cuando el inmueble no tiene ninguno se deriva del
+    // titular seleccionado, que es el comportamiento histórico respaldado por
+    // los tests. En una transmisión el principal lo fija la propia operación.
+    const principalDeclaradoId = (inmuebleToEdit.propietarioPrincipalId || '').trim();
+    const principalOrdinarioId = principalDeclaradoId || (esTransmision ? '' : seleccionadoId);
+
+    // TITULARES: el inmueble sólo se relaciona con FICHAS EXISTENTES. La
+    // instantánea fiscal se LEE de la ficha del principal EFECTIVO; si no hay
+    // ficha (inmueble heredado), los datos guardados se conservan intactos.
+    const titularPrincipalEdit = propietarios.find((p) => p.id === principalOrdinarioId);
     const propPrincipal: PropietarioFiscal = titularPrincipalEdit
       ? fiscalDesdePropietario(titularPrincipalEdit)
       : (inmuebleToEdit.datosFiscales?.propietarioPrincipal || {
@@ -969,8 +997,11 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       referenciaCatastral: editReferenciaCatastral.trim() || undefined,
       datosCatastrales,
       codigoPostal: editCodigoPostal.trim() || undefined,
-      propietarioId: editSelectedPropId || undefined,
-      propietarioPrincipalId: editSelectedPropId || undefined,
+      // K.2-C: una edición ordinaria NUNCA transmite. El canónico se conserva
+      // (sólo se fija si el inmueble heredado no tenía ninguno).
+      propietarioId: canonicoActualId || seleccionadoId || undefined,
+      // H2: se preserva el principal fiscal declarado; no se iguala al canónico.
+      propietarioPrincipalId: principalOrdinarioId || undefined,
       // Conservado tal cual: el modelo binario no se edita desde el inmueble.
       propietarioSecundarioId: inmuebleToEdit.propietarioSecundarioId,
       cuentaBancariaCobroId: editSelectedCuentaId && editSelectedCuentaId !== 'custom' ? editSelectedCuentaId : undefined,
@@ -990,13 +1021,78 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       return;
     }
 
-    void ejecutarOperacion({
-      accion: () => onUpdateInmueble(updated),
-      mensajeExito: 'Cambios guardados correctamente.',
-      mensajeError: 'No se han podido guardar los cambios.',
-      origenesDatos: ['inmuebles'],
-    });
-    setInmuebleToEdit(null);
+    const guardarCambios = onUpdateInmueble;
+    const transmitir = onTransmitirInmueble;
+
+    // --- EDICIÓN ORDINARIA ---------------------------------------------------
+    if (!esTransmision) {
+      void ejecutarOperacion({
+        accion: () => guardarCambios(updated),
+        mensajeExito: 'Cambios guardados correctamente.',
+        mensajeError: 'No se han podido guardar los cambios.',
+        origenesDatos: ['inmuebles'],
+      });
+      setInmuebleToEdit(null);
+      return;
+    }
+
+    // --- TRANSMISIÓN PATRIMONIAL --------------------------------------------
+    // Sin operación de transmisión disponible NO se cambia el canónico a medias:
+    // se rechaza el guardado y se explica por qué (nunca una transmisión silenciosa).
+    if (!transmitir) {
+      setErroresTitularidad([
+        'Cambiar el titular económico es una transmisión patrimonial y no puede hacerse desde esta pantalla. Vuelva a seleccionar el titular actual.',
+      ]);
+      setEditTab('fiscal');
+      return;
+    }
+
+    const nombreAdquirente = propietarios.find((p) => p.id === seleccionadoId)?.nombre || seleccionadoId;
+    const nombreTransmitente = propietarios.find((p) => p.id === canonicoActualId)?.nombre || canonicoActualId;
+
+    void (async () => {
+      const { confirmado, texto } = await confirmar({
+        titulo: 'Transmisión patrimonial',
+        mensaje: `Va a transmitir este inmueble de ${nombreTransmitente} a ${nombreAdquirente}.`,
+        detalle:
+          'Cambiar el titular económico NO es una edición ordinaria: cierra la titularidad del titular actual (que deja de tener acceso al inmueble, conservando su histórico) y abre la del adquirente con porcentaje pendiente. No se borra ningún dato.',
+        peligroso: true,
+        etiquetaConfirmar: 'Sí, transmitir',
+        entradaTexto: {
+          etiqueta: 'Motivo / detalle de la transmisión',
+          marcador: 'Ej.: Escritura de compraventa ante notario…',
+          obligatorio: true,
+          errorObligatorio: 'Indique el motivo de la transmisión para poder registrarla.',
+        },
+      });
+      if (!confirmado) return;
+
+      // 1) Datos ordinarios: no tocan la titularidad (va preservada en `updated`).
+      const guardado = await ejecutarOperacion({
+        accion: () => guardarCambios(updated),
+        mensajeExito: 'Datos del inmueble guardados.',
+        mensajeError: 'No se han podido guardar los cambios.',
+        origenesDatos: ['inmuebles'],
+        avisarExito: false,
+      });
+      if (!guardado.ok) return;
+
+      // 2) Titularidad: operación ATÓMICA de K.2-B2 (nunca un update suelto).
+      const resultado = await ejecutarOperacion({
+        accion: () =>
+          transmitir({
+            inmuebleId: inmuebleToEdit.id,
+            adquirenteId: seleccionadoId,
+            // El motivo tipificado no se infiere: se registra el detalle escrito.
+            motivo: 'OTRO',
+            detalle: texto?.trim() || undefined,
+          }),
+        mensajeExito: 'Transmisión registrada: el titular anterior pasa al histórico.',
+        mensajeError: 'No se ha podido completar la transmisión.',
+        origenesDatos: ['inmuebles', 'titularidades'],
+      });
+      if (resultado.ok && resultado.valor?.ok) setInmuebleToEdit(null);
+    })();
   };
 
   const df = selectedInmueble?.datosFiscales;
@@ -1252,9 +1348,15 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               </span>
             </div>
             {df?.tieneSegundoPropietario && df?.segundoPropietario && (
-              <span className="text-slate-600 flex items-center gap-1.5">
+              // H11 — dato DECLARATIVO de la ficha fiscal. No se presenta como
+              // cotitularidad patrimonial: la titularidad moderna vive en
+              // `titularidades` y se gestiona en «Titulares del inmueble».
+              <span
+                className="text-slate-600 flex items-center gap-1.5"
+                title="Segundo propietario declarado en los datos fiscales del inmueble. No acredita por sí solo una titularidad patrimonial registrada."
+              >
                 <Users className="w-3.5 h-3.5 text-indigo-500" />
-                Cotitular: <strong className="text-slate-900">{df.segundoPropietario.nombre}</strong>
+                Cotitular (datos fiscales): <strong className="text-slate-900">{df.segundoPropietario.nombre}</strong>
               </span>
             )}
             <button
@@ -2610,6 +2712,10 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
               ) : editTab === 'fiscal' ? (
                 /* FISCAL TAB */
                 <div className="space-y-4">
+                  {/* K.2-C: las guardias de titularidad de la EDICIÓN activan esta
+                      pestaña (igual que en el alta, más abajo), así que el aviso
+                      debe poder verse aquí; si no, el rechazo es invisible. */}
+                  {erroresTitularidad.length > 0 && <ResumenErrores mensaje={erroresTitularidad.join(' ')} />}
                   {/* Property Data */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>

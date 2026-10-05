@@ -99,6 +99,14 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
     (m) => m.remitenteRol === 'GESTION' && m.leidoPorInquilino !== true
   ).length;
 
+  // J.1 — nombre corto del inquilino para la portada sin contrato.
+  // No se introduce un nuevo modelo: se deriva del UsuarioApp ya disponible.
+  const nombreInquilino = useMemo(() => {
+    const n = (usuario?.nombre || '').trim();
+    if (!n) return 'inquilino';
+    return n.split(/\s+/)[0];
+  }, [usuario?.nombre]);
+
   const ir = (p: PantallaPortal) => {
     setPantalla(p);
     window.scrollTo({ top: 0 });
@@ -115,7 +123,10 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
             <div className="flex items-center gap-2">
               {esSubvista && (
                 <button
-                  onClick={() => ir('mas')}
+                  // J.1 — sin contrato, «Más opciones» no se renderiza: volver
+                  // debe llevar a la portada para no dejar al usuario en una
+                  // pantalla cuyo título no se corresponde con el contenido.
+                  onClick={() => ir(contratoActivo ? 'mas' : 'inicio')}
                   className="p-1.5 -ml-1 rounded-full hover:bg-white/10 cursor-pointer"
                   aria-label="Volver"
                 >
@@ -130,15 +141,21 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
               </div>
             </div>
             <div className="flex items-center gap-1">
-              {contratoActivo && (
+              {/* J.4 — la ayuda contextual también está disponible en «Mi cuenta»
+                  cuando todavía no hay contrato vinculado: `ayuda.portal.cuenta`
+                  no depende de ningún contrato y es justo la que explica que el
+                  acceso nace de una invitación de gestión. En el resto de
+                  pantallas sin contrato no se muestra, porque su contenido
+                  describe datos que el usuario aún no tiene. */}
+              {(contratoActivo || pantalla === 'cuenta') && (
                 <ContextualHelp
                   usuario={usuario}
                   host="PORTAL_INQUILINO"
                   section={pantalla}
-                  entityType="contrato"
-                  entityId={contratoActivo.id}
-                  state={contratoActivo.estado}
-                  onIniciarTutorial={iniciarRecorrido}
+                  entityType={contratoActivo ? 'contrato' : undefined}
+                  entityId={contratoActivo?.id}
+                  state={contratoActivo?.estado}
+                  onIniciarTutorial={contratoActivo ? iniciarRecorrido : undefined}
                   tema="oscuro"
                 />
               )}
@@ -311,7 +328,56 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
                 </nav>
               )}
             </>
-          ) : null}
+          ) : pantalla === 'cuenta' ? (
+            // J.1 — «Mi cuenta» no depende de ningún contrato (sólo del usuario),
+            // por lo que sigue siendo accesible aunque todavía no haya vivienda
+            // vinculada. Es el único destino real disponible en este estado.
+            <PortalCuenta usuario={usuario} onLogout={onLogout} />
+          ) : (
+            // J.1 — Portada del inquilino sin contrato activo.
+            // Sustituye el antiguo `null` (F-1 crítico de la auditoría) por una
+            // tarjeta informativa que explica la situación sin tecnicismos y
+            // orienta sobre el siguiente paso.
+            //
+            // IMPORTANTE: no se ofrece «Hablar con gestión» porque el envío de
+            // mensajes requiere un contrato (PortalMensajes exige `contrato`).
+            // Sería un botón que no puede cumplir lo que promete. En su lugar se
+            // da orientación segura + el único destino real: «Mi cuenta».
+            // No modifica el flujo de invitaciones, RegistroInquilinoView ni los
+            // hooks de datos. Sólo presentación del estado "sin contrato".
+            <section
+              className="mt-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 text-center space-y-4"
+              data-testid="portal-inquilino-sin-contrato"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center mx-auto">
+                <Home className="w-7 h-7" />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-base font-extrabold text-slate-900">
+                  Hola, {nombreInquilino}
+                </p>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Tu cuenta está activa, pero todavía no tienes una vivienda ni un contrato vinculados
+                  a este portal. En cuanto tu equipo de gestión complete la vinculación, aquí verás tu
+                  hogar, tus recibos, tus averías y tus mensajes.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3 text-left space-y-1.5">
+                <p className="text-xs font-bold text-slate-700">¿Qué puedes hacer ahora?</p>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Revisa que tus datos de acceso sean correctos. Si crees que ya deberías tener una
+                  vivienda asignada, ponte en contacto con la persona que te invitó a este portal.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => ir('cuenta')}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-700 hover:bg-indigo-800 text-white text-sm font-bold rounded-2xl cursor-pointer"
+              >
+                <User className="w-4 h-4" /> Ver mis datos de acceso
+              </button>
+            </section>
+          )}
         </main>
 
         {/* §6 F2: recorrido guiado (panel flotante; navega con `ir`, sin alterar el portal) */}

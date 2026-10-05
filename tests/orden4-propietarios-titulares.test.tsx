@@ -18,7 +18,7 @@
  */
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { InmueblesSection } from '../src/components/sections/InmueblesSection';
 import { PropietariosSection } from '../src/components/sections/PropietariosSection';
@@ -94,6 +94,7 @@ function renderEdicion(opts: {
   propietarios: Propietario[];
   onUpdate?: (inm: Inmueble) => void;
   puedeLeer?: () => boolean;
+  onTransmitir?: (peticion: unknown) => Promise<{ ok: boolean }>;
 }) {
   return render(
     <InmueblesSection
@@ -102,6 +103,7 @@ function renderEdicion(opts: {
       propietarios={opts.propietarios}
       onSelectCandidate={() => undefined}
       onUpdateInmueble={opts.onUpdate}
+      onTransmitirInmueble={opts.onTransmitir as never}
       puedeLeerTitularidades={opts.puedeLeer}
     />,
   );
@@ -285,12 +287,20 @@ describe('B · Inmuebles: sólo titulares existentes y panel N-TITULARES en la f
     expect(screen.queryByTestId('panel-titularidades')).toBeNull();
   });
 
-  it('editar el inmueble cambia la relación pero NO copia ni mutila la ficha del titular', () => {
+  // K.2-C: cambiar el titular ECONÓMICO dejó de ser una edición ordinaria y es
+  // una TRANSMISIÓN explícita delegada en la operación atómica. Lo que este
+  // caso protege —que la ficha del titular nunca se copie ni se mutile— sigue
+  // comprobándose igual; lo que cambia es la vía por la que viaja la relación.
+  it('editar el inmueble cambia la relación (vía transmisión) pero NO copia ni mutila la ficha del titular', async () => {
     const a = titular('A');
     const b = titular('B');
     const originalA = JSON.parse(JSON.stringify(a)) as Propietario;
     const onUpdate = vi.fn();
+    const onTransmitir = vi.fn(async (_peticion: unknown) => ({ ok: true }));
+    // Sin host de diálogo, `confirmar` degrada a window.prompt (documentado).
+    vi.stubGlobal('prompt', vi.fn(() => 'Compraventa'));
     renderEdicion({
+      onTransmitir,
       inmueble: inmueble({
         propietarioId: 'A',
         propietarioPrincipalId: 'A',
@@ -309,14 +319,17 @@ describe('B · Inmuebles: sólo titulares existentes y panel N-TITULARES en la f
     });
     guardarEdicion();
 
-    const guardado = onUpdate.mock.calls[0][0] as Inmueble;
-    expect(guardado.propietarioId).toBe('B');
-    expect(guardado.propietarioPrincipalId).toBe('B');
-    expect(guardado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('B');
-    // Los datos fiscales salen de la ficha de B (nunca tecleados en el inmueble).
-    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Titular B');
+    // La relación cambia por la operación patrimonial, no por un update suelto.
+    await waitFor(() => expect(onTransmitir).toHaveBeenCalledTimes(1));
+    const peticion = onTransmitir.mock.calls[0][0] as { inmuebleId: string; adquirenteId: string };
+    expect(peticion.adquirenteId).toBe('B');
+    // La pantalla no mueve el canónico por su cuenta.
+    for (const [arg] of onUpdate.mock.calls) {
+      expect((arg as Inmueble).propietarioId).toBe('A');
+    }
     // La ficha de A queda intacta: el inmueble no la edita ni la reescribe.
     expect(a).toEqual(originalA);
+    expect(b).toEqual(titular('B'));
   });
 
   it('el modelo binario heredado se muestra y se conserva sin cambios al guardar', () => {

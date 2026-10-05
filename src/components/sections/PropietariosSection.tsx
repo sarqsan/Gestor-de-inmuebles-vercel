@@ -4,7 +4,6 @@ import { hayErrores, resumenErrores, validarFormulario } from '../../formularios
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { Propietario, CuentaBancariaPropietario, TipoPropietario, Inmueble } from '../../types';
-import { clasificarVinculoInmueble, type DescriptorVinculo } from '../../lib/presentacionTitularidad';
 import {
   MENSAJE_TITULAR_NO_EXISTE_SECCION,
   generarIdTitularAmbito,
@@ -203,13 +202,20 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
     return raw.replace(/(.{4})/g, '$1 ').trim();
   };
 
-  // H11 — el vínculo persona↔inmueble se CLASIFICA (titular real vs. dato
-  // fiscal/heredado) en vez de colapsar seis relaciones distintas en una lista
-  // indistinguible. La clasificación vive en una función pura compartida.
   const getLinkedProperties = (propId: string, propNif: string) => {
-    return inmuebles
-      .map((inm) => ({ inmueble: inm, vinculo: clasificarVinculoInmueble(inm, { id: propId, nif: propNif }) }))
-      .filter((x): x is { inmueble: Inmueble; vinculo: DescriptorVinculo } => x.vinculo !== null);
+    return inmuebles.filter(
+      (inm) =>
+        inm.propietarioId === propId ||
+        inm.propietarioPrincipalId === propId ||
+        inm.propietarioSecundarioId === propId ||
+        // N-TITULARES: los titulares asignados (cónyuge, copropietario, sociedad…) figuran en el índice
+        // `titularesIds` del inmueble, no en el principal/secundario heredados.
+        (Array.isArray(inm.titularesIds) && inm.titularesIds.includes(propId)) ||
+        (inm.datosFiscales?.propietarioPrincipal?.nifDni &&
+          inm.datosFiscales.propietarioPrincipal.nifDni.toUpperCase() === propNif.toUpperCase()) ||
+        (inm.datosFiscales?.segundoPropietario?.nifDni &&
+          inm.datosFiscales.segundoPropietario.nifDni.toUpperCase() === propNif.toUpperCase())
+    );
   };
 
   const filteredPropietarios = useMemo(() => {
@@ -982,24 +988,13 @@ export const PropietariosSection: React.FC<PropietariosSectionProps> = ({
 
                     {linkedProps.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {linkedProps.map(({ inmueble: inm, vinculo }) => (
+                        {linkedProps.map((inm) => (
                           <button
                             key={inm.id}
                             onClick={() => onSelectInmueble && onSelectInmueble(inm.id)}
-                            title={vinculo.descripcion}
                             className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-slate-700 hover:text-blue-700 rounded-lg text-xs font-medium transition-all group"
                           >
                             <span className="truncate max-w-[180px]">{inm.direccion}</span>
-                            {/* H11: un vínculo meramente fiscal o heredado NO se presenta
-                                como titularidad; se nombra su fuente. */}
-                            {!vinculo.acreditaTitularidadActual && (
-                              <span
-                                data-testid={`vinculo-${inm.id}`}
-                                className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold"
-                              >
-                                {vinculo.etiqueta}
-                              </span>
-                            )}
                             <ExternalLink className="w-2.5 h-2.5 text-slate-400 group-hover:text-blue-600" />
                           </button>
                         ))}

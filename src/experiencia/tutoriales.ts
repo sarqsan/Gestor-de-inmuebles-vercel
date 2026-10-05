@@ -179,85 +179,62 @@ export const RECORRIDO_INVITAR_INQUILINO: Tutorial = {
 // ---------------------------------------------------------------------------
 // Recorrido real nº 4 — ERP · PROPIETARIO: primeros pasos (auditoría UX 2026-09-29)
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Recorrido nº 4 — J.5: primeros pasos del PROPIETARIO, dentro de su portal
-// ---------------------------------------------------------------------------
-// J.5 — Este recorrido era «global»: sus pasos llevaban a secciones del ERP
-// (`inmuebles`, `datos`, `ayuda`) y resaltaban elementos del Sidebar
-// (`nav-*`). En la práctica era inservible desde «Mi Portal Propietario»:
-// el botón aparecía deshabilitado (el portal no cableaba `onIniciarTutorial`)
-// y, de haberse lanzado, habría expulsado al propietario de su portal.
-//
-// Se ADAPTA la definición existente (no se crea un segundo recorrido ni un
-// segundo motor): se conservan los textos útiles y se reescriben rutas y
-// targets para que apunten a las sub-pestañas del propio portal.
-//
-// · `route` usa secciones REALES del ERP (claves de MODULO_POR_SECCION), que
-//   el portal traduce a sus sub-pestañas internas. Así `evaluarPaso` sigue
-//   validando rutas contra `SECCIONES_ERP` sin tocar el motor, y el host
-//   decide la navegación — que nunca sale del portal.
-// · `target` usa `data-tour` del propio portal (`portal-prop-*`), el mismo
-//   mecanismo que ya usa el portal del inquilino (`portal-tab-*`).
-//
-// `roles: ['PROPIETARIO']` se mantiene: ADMINISTRADOR y MASTER_ADMIN no ven
-// este recorrido, por lo que sus flujos no se ven afectados.
 export const RECORRIDO_PROPIETARIO_PRIMEROS_PASOS: Tutorial = {
   id: 'recorrido.propietario.primeros-pasos',
-  title: 'Primeros pasos como propietario',
+  title: 'Tus viviendas y tus datos, paso a paso',
   description:
-    'Un recorrido por tu portal: el resumen de tu patrimonio, dónde están tus viviendas y quién figura como titular, tus contratos, lo que cobras cada mes, el seguimiento de incidencias y tus datos.',
+    'Un recorrido práctico por lo esencial: dónde están tus viviendas, cómo dar de alta una, quién figura como titular, dónde consultar cobros y documentos y cómo importar o exportar tus datos.',
   module: 'propietarios',
   host: 'ERP',
   roles: ['PROPIETARIO'],
   minutes: 3,
   steps: [
     {
-      id: 'resumen',
-      title: 'Tu espacio patrimonial',
+      id: 'portal',
+      title: 'Tu portal de propietario',
       description:
-        'Esta es la portada de tu portal: de un vistazo tienes cuántas viviendas tienes, cuántas están alquiladas y qué requiere tu atención. Todo lo que verás a continuación son pestañas de este mismo portal; no necesitas salir de aquí.',
+        'En «Mi Portal Propietario» tienes el resumen de tu espacio: viviendas, cobros, gastos e incidencias. Desde la tarjeta de cada vivienda entras a su ficha, y con «Añadir vivienda» abres el alta con tu titularidad ya aplicada.',
       route: 'propietarios',
-      target: selectorTour('portal-prop-resumen'),
+      target: selectorTour('nav-propietarios'),
     },
     {
       id: 'viviendas',
-      title: 'Mis Viviendas',
+      title: 'Mis viviendas y el alta',
       description:
-        'Tu catálogo de viviendas. Desde la tarjeta de cada una entras a su ficha, y con «Añadir vivienda» abres el alta con tu titularidad ya aplicada. En «Titulares / Titularidades» ves quién figura como titular y cotitular de cada una.',
+        'En «Mis Viviendas» está tu catálogo. Con «Nuevo Inmueble» (o «Añadir vivienda» en tu portal) das de alta una vivienda: el titular queda preseleccionado con tu ficha, y en la pestaña fiscal puedes añadir un cotitular para contratos.',
       route: 'inmuebles',
-      target: selectorTour('portal-prop-tab-viviendas'),
+      target: selectorTour('nav-inmuebles'),
     },
     {
-      id: 'contratos',
-      title: 'Mis Contratos',
+      id: 'titularidad',
+      title: 'Quién figura como titular',
       description:
-        'Los contratos de alquiler de tus viviendas: quién vive en cada una, desde cuándo y en qué estado está cada contrato. Es la pestaña para saber qué está arrendado y hasta cuándo.',
-      route: 'formalizacion',
-      target: selectorTour('portal-prop-tab-contratos'),
+        'Abre la ficha de una vivienda: en la parte alta verás siempre la titularidad (titular y cotitular, si lo hay) y el botón «Editar titularidad». El cotitular fiscal aparece en contratos, pero no implica cuenta de acceso.',
+      route: 'inmuebles',
     },
     {
-      id: 'liquidaciones',
-      title: 'Mis Liquidaciones y Cobros',
+      id: 'dinero',
+      title: 'Cobros, gastos y documentos',
       description:
-        'En «Mis Liquidaciones» ves el neto que se te transfiere cada mes y su detalle. Al lado, «Cobros» y «Gastos» muestran lo cobrado a los inquilinos y lo imputado a cada vivienda. Aquí respondes a «¿cuánto me ha entrado este mes y por qué?».',
-      route: 'tesoreria',
-      target: selectorTour('portal-prop-tab-liquidaciones'),
+        '«Mis Cobros» y «Mis Gastos» te muestran lo cobrado y lo imputado cada mes; los documentos y seguros de cada vivienda están en su ficha (Centro operativo → Expediente y Seguros), y las pólizas en «Pólizas y Seguros». En «Mis Liquidaciones» ves el neto transferido cada mes.',
+      route: 'cobros',
+      target: selectorTour('nav-cobros'),
     },
     {
-      id: 'incidencias',
-      title: 'Seguimiento de incidencias',
+      id: 'datos',
+      title: 'Importar y exportar',
       description:
-        'Las averías e incidencias abiertas en tus viviendas, con su estado. Es tu pestaña de seguimiento: sirve para ver qué está en curso sin tener que preguntar.',
-      route: 'incidencias',
-      target: selectorTour('portal-prop-tab-incidencias'),
+        'En «Importar / Exportar» puedes cargar datos desde JSON, CSV o Excel: el sistema analiza el archivo y te muestra una vista previa (nuevos, duplicados, problemas) antes de escribir nada. También descargas tus datos por entidad, inmueble y ejercicio en el mismo formato.',
+      route: 'datos',
+      target: selectorTour('nav-datos'),
     },
     {
-      id: 'perfil',
-      title: 'Mi Perfil y dónde pedir ayuda',
+      id: 'ayuda',
+      title: 'Dónde pedir ayuda',
       description:
-        'En «Mi Perfil» consultas y actualizas tus datos de contacto. Y recuerda el botón «?» de la cabecera: abre la ayuda de la pestaña en la que estés y puede volver a lanzar este recorrido cuando quieras.',
-      route: 'mi_perfil',
-      target: selectorTour('portal-prop-tab-perfil'),
+        'El botón «?» junto al título de cada pantalla abre la ayuda contextual de esa sección, y el «Centro de Ayuda» reúne todas las explicaciones y recorridos guiados como este.',
+      route: 'ayuda',
+      target: selectorTour('nav-ayuda'),
     },
   ],
 };

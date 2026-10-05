@@ -4,9 +4,6 @@ import { Check, Copy, Download, FileText, KeyRound } from 'lucide-react';
 import type { ContratoFormalizacion, Inmueble } from '../../types';
 import { sanearContratoParaInquilino } from '../../inquilino/portalEngine';
 import { generarTextoActaEntrega, imprimirContratoPDF } from '../../utils/contratoEngine';
-// J.3 — el inquilino no debe leer constantes internas del ERP como
-// `FORMALIZADO_ACTIVO`: se traduce el estado a lenguaje natural (presentación).
-import { etiquetaEstadoContrato } from './estadoContrato';
 
 interface Props {
   contrato: ContratoFormalizacion;
@@ -82,7 +79,7 @@ export const PortalContrato: React.FC<Props> = ({ contrato }) => {
         <Fila etiqueta="Inicio" valor={fmtFecha(vm.fechaInicioContrato)} />
         <Fila etiqueta="Fin" valor={fmtFecha(vm.fechaFinContrato)} />
         <Fila etiqueta="Duración" valor={`${vm.duracionAnios} año(s)`} />
-        <Fila etiqueta="Estado" valor={etiquetaEstadoContrato(vm.estado)} />
+        <Fila etiqueta="Estado" valor={vm.estado} />
         {vm.modalidadAlquiler === 'habitaciones' && (
           <Fila etiqueta="Habitación" valor={vm.habitacionIdentificador || '—'} />
         )}

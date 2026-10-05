@@ -101,7 +101,6 @@ import {
   subscribeAuditLogs,
   subscribeModulosConfig,
   saveInmuebleFirestore,
-  saveInmuebleOrdinarioFirestore,
   registrarAuditoriaFirestore,
   saveCandidatoFirestore,
   deleteCandidatoFirestore,
@@ -154,11 +153,8 @@ import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
 import { detectarCambioTitularidad } from './lib/titularidadInmueble';
-import { fusionarEdicionOrdinaria } from './lib/edicionOrdinariaInmueble';
 import { asignarTitularesAlta, type TitularesAltaInmueble } from './lib/altaInmuebleTitulares';
 import { guardarTitularidad } from './lib/titularidadesFirestore';
-import { transmitirInmuebleFirestore } from './lib/transmisionPatrimonialFirestore';
-import type { PeticionTransmision, ResultadoTransmision } from './lib/transmisionPatrimonialFirestore';
 import { resolverTokensPublicos } from './lib/tokensPublicos';
 import {
   persistirMejorEsfuerzo,
@@ -2126,18 +2122,12 @@ export default function App() {
     // D2 (§2): los cambios sensibles de titularidad son auditables — el
     // registro se escribe SOLO si la escritura tuvo éxito (save→boolean).
     const previoTitularidad = inmuebles.find((i) => i.id === updatedInmueble.id);
-    // H7 — Esta es la ÚNICA vía de edición ordinaria del inmueble (modal de
-    // edición, ficha técnica, habitaciones e imágenes). El índice patrimonial
-    // `titularesIds[]` no le pertenece: ni se persiste (lo retira
-    // `saveInmuebleOrdinarioFirestore`) ni se pisa en el estado local, que
-    // conserva el valor vigente que mantienen las escuchas. Las altas, cierres
-    // (H9) y transmisiones (K.2) siguen escribiéndolo por sus vías atómicas.
     setInmuebles((prev) => {
-      const next = prev.map((i) => (i.id === updatedInmueble.id ? fusionarEdicionOrdinaria(i, updatedInmueble) : i));
+      const next = prev.map((i) => (i.id === updatedInmueble.id ? updatedInmueble : i));
       try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-    void saveInmuebleOrdinarioFirestore(updatedInmueble).then((ok) => {
+    void saveInmuebleFirestore(updatedInmueble).then((ok) => {
       if (!ok) reportarResultadoGuardado('inmuebles', false);
       if (!ok || !previoTitularidad) return;
       const diff = detectarCambioTitularidad(previoTitularidad, updatedInmueble);
@@ -2154,36 +2144,6 @@ export default function App() {
         detalles: { campos: diff.campos, antes: diff.antes, despues: diff.despues },
       });
     });
-  };
-
-  /**
-   * K.2-C — TRANSMISIÓN PATRIMONIAL (integración de K.2-B2).
-   *
-   * Delega ÍNTEGRAMENTE en la operación atómica: aquí no se reconstruye la
-   * titularidad ni se hace un `update` suelto del canónico. Sólo se refleja en
-   * memoria el resultado YA confirmado por Firestore. Las Rules reservan el
-   * cambio de `propietarioId` al master (`propietarioCanonicoInalterado`), por
-   * eso la acción se ofrece únicamente a ese perfil; la auditoría la registra
-   * la propia operación tras el commit.
-   */
-  const handleTransmitirInmueble = async (peticion: PeticionTransmision): Promise<ResultadoTransmision> => {
-    const autor = {
-      usuarioId: currentUser?.id,
-      usuarioEmail: currentUser?.email,
-      usuarioNombre: currentUser?.nombre || currentUser?.email,
-    };
-    const resultado = await transmitirInmuebleFirestore(
-      { ...peticion, actor: { id: currentUser?.id, nombre: currentUser?.nombre || currentUser?.email } },
-      autor,
-    );
-    if (!resultado.ok || !resultado.plan) return resultado;
-    const cambios = resultado.plan.cambiosInmueble;
-    setInmuebles((prev) => {
-      const next = prev.map((i) => (i.id === peticion.inmuebleId ? { ...i, ...cambios } : i));
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
-      return next;
-    });
-    return resultado;
   };
 
   // Slot Handlers
@@ -4414,7 +4374,6 @@ export default function App() {
               invitaciones={invitaciones}
               onSelectCandidate={(cand) => setSelectedCandidateForModal(cand)}
               onBajaInmueble={handleBajaInmueble}
-              onTransmitirInmueble={ambitoEscrituraInmuebles.esMaster ? handleTransmitirInmueble : undefined}
               puedeDarDeBaja={(inm) => puedeDarDeBajaInmueble(ambitoEscrituraInmuebles, inm)}
               puedeLeerTitularidades={(inm) => puedeLeerTitularidadesInmueble(ambitoEscrituraInmuebles, inm)}
               puedeEscribirTitularidades={(inm) => tieneEscrituraInmueble(ambitoEscrituraInmuebles, inm)}

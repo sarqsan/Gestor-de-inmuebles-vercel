@@ -46,74 +46,6 @@ import { puedeLeerTitularidadesDe } from '../../lib/titularidadInmueble';
 import { clavesTitularidadesIndexadas } from '../../utils/titularidadesEngine';
 import { TitularidadesPanel } from '../titularidades/TitularidadesPanel';
 import { buscarTitularesEnServidor } from '../../lib/busquedaTitularesServidor';
-// J.1 — Portada del portal del propietario: reutilizamos el `ContextualHelp` de
-// la capa transversal §6 para ofrecer un único acceso a la ayuda existente.
-// No añadimos AsistentePanel ni TutorialPlayer en este bloque (J.1 sólo
-// portada + orientación; J.2/J.3 cubren recorrido auto-disparado y asistente).
-import { ContextualHelp } from '../experiencia/ContextualHelp';
-// J.5 — Recorrido guiado DENTRO del portal. Se reutiliza el motor existente
-// (mismo `TutorialPlayer` y mismo registro de recorridos que el inquilino);
-// no se crea un segundo motor de tutoriales.
-import { TutorialPlayer } from '../experiencia/TutorialPlayer';
-import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial } from '../../experiencia';
-import type { SesionTutorial } from '../../experiencia';
-import { servicioProgresoTutoriales } from '../../lib/progresoTutorialesFirestore';
-
-/**
- * J.4 — Contexto de ayuda por área del portal.
- *
- * `ayudaParaContexto()` filtra el registro por coincidencia EXACTA de `section`.
- * Hasta J.3 el portal pasaba siempre `section: 'propietarios'`, así que el
- * propietario veía la misma ayuda («Titulares y sus fichas») estuviera donde
- * estuviera. Aquí se corrige la conexión: cada sub-pestaña apunta a la sección
- * de ayuda que YA existe en el registro y que es visible para el rol PROPIETARIO.
- *
- * No se inventa ningún identificador ni se crea contenido nuevo: todas las
- * claves de destino corresponden a entradas reales de `AYUDA_REGISTRO`.
- *
- * Las sub-pestañas ausentes del mapa (gastos, morosidad, profesionales, perfil)
- * caen en `'propietarios'`, la ayuda general del portal:
- *  - `gastos` y `profesionales` no tienen sección propia en el registro.
- *  - `morosidad` sí existe, pero sus entradas son `roles: ['ADMINISTRADOR']`,
- *    por lo que no son visibles para un PROPIETARIO (el filtro RBAC manda).
- */
-const SECCION_AYUDA_POR_SUBTAB: Record<string, string> = {
-  viviendas: 'inmuebles',
-  titularidades: 'titulares',
-  contratos: 'formalizacion',
-  liquidaciones: 'tesoreria',
-  cobros: 'cobros',
-  incidencias: 'incidencias',
-};
-const SECCION_AYUDA_POR_DEFECTO = 'propietarios';
-
-/**
- * J.5 — Vocabulario de RUTAS del recorrido guiado.
- *
- * El motor de tutoriales (`evaluarPaso`) valida `paso.route` contra las
- * secciones reales del ERP, y `TutorialPlayer` considera que estás «en la
- * pantalla del paso» cuando `paso.route === contexto.section`. Para que un
- * recorrido pueda vivir DENTRO de este portal sin tocar el motor ni la
- * navegación global, el portal traduce sus sub-pestañas a esas secciones y
- * viceversa. Navegar un paso = cambiar de sub-pestaña; nunca se sale del portal.
- *
- * Es un mapa distinto al de la ayuda (J.4) a propósito: `perfil` no tiene
- * entrada de ayuda propia y cae en 'propietarios', pero como RUTA necesita
- * identidad propia ('mi_perfil') para no colisionar con el paso de la portada.
- */
-const SECCION_TOUR_POR_SUBTAB: Record<string, string> = {
-  viviendas: 'inmuebles',
-  titularidades: 'titulares',
-  contratos: 'formalizacion',
-  liquidaciones: 'tesoreria',
-  cobros: 'cobros',
-  incidencias: 'incidencias',
-  perfil: 'mi_perfil',
-};
-/** Inverso del anterior: ruta de un paso → sub-pestaña que debe activarse. */
-const SUBTAB_POR_SECCION_TOUR: Record<string, string> = Object.fromEntries(
-  Object.entries(SECCION_TOUR_POR_SUBTAB).map(([sub, sec]) => [sec, sub]),
-);
 import { ejecutarMutacion } from '../../utils/mutacionFirestore';
 import type { LiquidacionPropietario } from '../../tesoreria/tipos';
 // PORTAL PROPIETARIO — Gastos/Cobros/Incidencias: se reutilizan los MISMOS motores
@@ -286,23 +218,6 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
   const misProfesionalesPrivados = profesionales.filter(
     (p) => p.creadoPorPropietarioId === currentUser.id || p.creadoPorPropietarioId === currentUser.propietarioId
   );
-
-  // J.6 — Lista realmente pintada en la pestaña «Mis Profesionales».
-  // Antes el filtro vivía dentro del JSX, así que cuando no quedaba ningún
-  // resultado (catálogo sin profesionales públicos, o búsqueda sin
-  // coincidencias) la rejilla se renderizaba vacía y parecía un fallo.
-  // Mismo dato y mismo filtro de siempre: sólo se extrae para poder
-  // detectar el caso vacío.
-  const profesionalesVisibles = (
-    profesionalTab === 'catalogo' ? profesionalesPublicos : misProfesionalesPrivados
-  ).filter((p) => {
-    const matchesSearch =
-      p.nombreComercial.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.especialidades.some((e) => e.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesEsp = selectedEspecialidad === 'TODAS' || p.especialidades.includes(selectedEspecialidad);
-    return matchesSearch && matchesEsp;
-  });
-  const hayFiltroProfesionales = searchTerm.trim() !== '' || selectedEspecialidad !== 'TODAS';
 
   // N TITULARES — suscripción a las titularidades del ámbito del propietario.
   // Se resuelve por el ÍNDICE `titularesIds` de cada vivienda y se leen las
@@ -490,330 +405,6 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
     (x) => !['RESUELTA', 'CERRADA', 'CANCELADA', 'RECHAZADA'].includes(x.estado),
   ).length;
 
-  // F4b — disponibilidad de sub-tabs del Portal Propietario (SOLO presentación).
-  // El objetivo es que el PROPIETARIO que aún no tiene cartera vea solo las
-  // funciones útiles para ese estado (viviendas, catálogo público de
-  // profesionales, perfil). Cuando exista cartera patrimonial se muestran las
-  // funciones restantes. NO es seguridad: las Rules y los hooks `canAccess*`
-  // siguen siendo los que autorizan cada escritura/lectura.
-  //  - `viviendas`:        siempre (estado vacío con CTA al alta propia).
-  //  - `profesionales`:    siempre (catálogo público disponible sin cartera).
-  //  - `perfil`:           siempre (datos fiscales del titular, no de cartera).
-  //  - `titularidades`:    requiere al menos una vivienda (sin vivienda no hay
-  //                        qué titularizar).
-  //  - `contratos`, `liquidaciones`, `cobros`, `gastos`, `incidencias`,
-  //    `morosidad`: requieren cartera patrimonial (viviendas, contratos,
-  //    profesionales propios o movimientos).
-  const tieneCarteraPatrimonial =
-    misViviendas.length > 0 ||
-    misContratos.length > 0 ||
-    misProfesionalesPrivados.length > 0;
-  // J.2 — agrupación conceptual de la navegación del portal (SOLO presentación).
-  // Las pestañas son las MISMAS de F4b: no se elimina ninguna capacidad, sólo se
-  // ordenan y se etiquetan por grupo para que el propietario navegue por áreas de
-  // su patrimonio en lugar de por módulos del ERP. No toca `navegacion.ts`,
-  // Sidebar ni Header: esta agrupación vive dentro del propio componente.
-  const subTabsDisponibles = useMemo(
-    () => {
-      type Id = typeof activeSubTab;
-      type Grupo = 'patrimonio' | 'gestion' | 'seguimiento' | 'cuenta';
-      const todos: { id: Id; label: string; icon: typeof Home; count?: number; grupo: Grupo }[] = [
-        // MI PATRIMONIO
-        { id: 'viviendas', label: 'Mis Viviendas', icon: Home, count: misViviendas.length, grupo: 'patrimonio' },
-        misViviendas.length > 0
-          ? { id: 'titularidades', label: 'Titulares / Titularidades', icon: Users, grupo: 'patrimonio' as Grupo }
-          : null,
-        // MI GESTIÓN
-        tieneCarteraPatrimonial && {
-            id: 'contratos',
-            label: 'Mis Contratos',
-            icon: FileCheck,
-            count: misContratos.length,
-            grupo: 'gestion' as Grupo,
-          },
-        tieneCarteraPatrimonial && {
-            id: 'liquidaciones',
-            label: 'Mis Liquidaciones',
-            icon: Wallet,
-            count: misLiquidaciones.length,
-            grupo: 'gestion' as Grupo,
-          },
-        tieneCarteraPatrimonial && {
-            id: 'cobros',
-            label: 'Cobros',
-            icon: DollarSign,
-            count: cobrosAtencion,
-            grupo: 'gestion' as Grupo,
-          },
-        tieneCarteraPatrimonial && {
-            id: 'gastos',
-            label: 'Gastos',
-            icon: TrendingDown,
-            count: misGastos.length,
-            grupo: 'gestion' as Grupo,
-          },
-        // SEGUIMIENTO
-        tieneCarteraPatrimonial && {
-            id: 'incidencias',
-            label: 'Incidencias',
-            icon: AlertTriangle,
-            count: incAbiertas,
-            grupo: 'seguimiento' as Grupo,
-          },
-        {
-          id: 'profesionales',
-          label: 'Mis Profesionales',
-          icon: Wrench,
-          count: misProfesionalesPrivados.length,
-          grupo: 'seguimiento' as Grupo,
-        },
-        tieneCarteraPatrimonial && {
-            id: 'morosidad',
-            label: 'Morosidad',
-            icon: AlertTriangle,
-            count: morosidadConSaldo.length,
-            grupo: 'seguimiento' as Grupo,
-          },
-        // MI CUENTA
-        { id: 'perfil', label: 'Mi Perfil', icon: User, grupo: 'cuenta' as Grupo },
-      ].filter(Boolean) as { id: Id; label: string; icon: typeof Home; count?: number; grupo: Grupo }[];
-      return todos;
-    },
-    [
-      misViviendas.length,
-      misProfesionalesPrivados.length,
-      misContratos.length,
-      misLiquidaciones.length,
-      morosidadConSaldo.length,
-      misGastos.length,
-      cobrosAtencion,
-      incAbiertas,
-      tieneCarteraPatrimonial,
-    ],
-  );
-  // Si el sub-tab activo deja de estar disponible (p. ej. tras una
-  // actualización que vacía la cartera), saltamos al primero de la lista.
-  useEffect(() => {
-    if (!subTabsDisponibles.some((t) => t.id === activeSubTab)) {
-      setActiveSubTab(subTabsDisponibles[0]?.id ?? 'viviendas');
-    }
-  }, [subTabsDisponibles, activeSubTab]);
-
-  // F4b — estado del propietario (presentación). Describe su situación
-  // patrimonial actual sin recurrir a tecnicismos ni a mensajes que parezcan
-  // errores. Es 100% derivado de los datos que ya están en el estado del
-  // componente.
-  const estadoPatrimonial = useMemo(() => {
-    if (tieneCarteraPatrimonial) {
-      return {
-        titulo: 'Tienes una cartera patrimonial activa',
-        // J.2 — corrección de redacción: antes decía «Vives N viviendas».
-        detalle: `Gestionas ${misViviendas.length} ${misViviendas.length === 1 ? 'vivienda' : 'viviendas'}, ${
-          misContratos.length
-        } ${misContratos.length === 1 ? 'contrato' : 'contratos'} y ${
-          misProfesionalesPrivados.length
-        } ${
-          misProfesionalesPrivados.length === 1 ? 'profesional propio' : 'profesionales propios'
-        } desde este portal.`,
-        icono: 'ok' as const,
-      };
-    }
-    return {
-      titulo: 'Aún no tienes viviendas ni cartera en este portal',
-      detalle:
-        'Cuando vincules tu primera vivienda verás aquí contratos, gastos, cobros, liquidaciones e incidencias.',
-      icono: 'vacio' as const,
-    };
-  }, [
-    tieneCarteraPatrimonial,
-    misViviendas.length,
-    misContratos.length,
-    misProfesionalesPrivados.length,
-  ]);
-
-  // J.5 — Recorrido guiado del propietario, SIEMPRE manual.
-  // No hay arranque automático: `sesionTutorial` nace en null y sólo se puebla
-  // cuando el usuario pulsa el tutorial desde la ayuda contextual.
-  const [sesionTutorial, setSesionTutorial] = useState<SesionTutorial | null>(null);
-  const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
-  const iniciarRecorrido = useCallback((id: string) => {
-    const t = obtenerTutorial(id);
-    if (t) setSesionTutorial(iniciarTutorial(t));
-  }, []);
-
-  // Ruta equivalente a la sub-pestaña activa, en el vocabulario del recorrido.
-  const seccionTourActiva = useMemo(
-    () => SECCION_TOUR_POR_SUBTAB[activeSubTab] ?? SECCION_AYUDA_POR_DEFECTO,
-    [activeSubTab],
-  );
-
-  // Secciones que el recorrido puede alcanzar AHORA MISMO. Se derivan de las
-  // sub-pestañas realmente disponibles (que dependen de la cartera), así que un
-  // paso cuya pestaña no existe se informa como no accesible en lugar de
-  // intentar navegar a un sitio inexistente.
-  const seccionesTourAccesibles = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          SECCION_AYUDA_POR_DEFECTO,
-          ...subTabsDisponibles.map((t) => SECCION_TOUR_POR_SUBTAB[t.id] ?? SECCION_AYUDA_POR_DEFECTO),
-        ]),
-      ),
-    [subTabsDisponibles],
-  );
-
-  // Navegación del recorrido: traduce la ruta del paso a una sub-pestaña de
-  // ESTE portal. Si la ruta no corresponde a ninguna sub-pestaña (portada),
-  // no se mueve nada. Nunca delega en la navegación global del ERP.
-  const navegarRecorrido = useCallback(
-    (route: string) => {
-      const destino = SUBTAB_POR_SECCION_TOUR[route];
-      if (destino && subTabsDisponibles.some((t) => t.id === destino)) {
-        setActiveSubTab(destino as any);
-      }
-    },
-    [subTabsDisponibles],
-  );
-
-  // J.4 — sección de ayuda que corresponde al área activa del portal.
-  // Presentación pura: no cambia permisos ni datos, sólo el contexto con el
-  // que se consulta el registro de ayuda ya existente.
-  const seccionAyudaActiva = useMemo(
-    () => SECCION_AYUDA_POR_SUBTAB[activeSubTab] ?? SECCION_AYUDA_POR_DEFECTO,
-    [activeSubTab],
-  );
-
-  // J.2 — RESUMEN DE MI PATRIMONIO (NIVEL 2 de la portada).
-  // Indicadores 100% derivados de datos YA cargados por el portal (props y
-  // motores puros que ya se ejecutan más arriba). No se añade ninguna consulta
-  // nueva a Firestore ni ningún cálculo financiero nuevo.
-  //
-  // Deliberadamente NO se muestra importe económico agregado: los totales de
-  // `resumenMisCobros`/`resumenMisGastos` no están acotados a un periodo en
-  // esta pantalla, así que un importe suelto podría inducir a error. Regla §8:
-  // si el dato no es fiable en este contexto, no se muestra.
-  const resumenPatrimonial = useMemo(
-    () => [
-      {
-        id: 'viviendas' as const,
-        etiqueta: misViviendas.length === 1 ? 'Vivienda' : 'Viviendas',
-        valor: misViviendas.length,
-        icono: Home,
-        destino: 'viviendas' as const,
-        aria: `Ir a viviendas (${misViviendas.length})`,
-      },
-      {
-        id: 'contratos' as const,
-        etiqueta: misContratos.length === 1 ? 'Contrato' : 'Contratos',
-        valor: misContratos.length,
-        icono: FileCheck,
-        destino: 'contratos' as const,
-        aria: `Ir a contratos (${misContratos.length})`,
-      },
-      {
-        id: 'cobros' as const,
-        etiqueta: cobrosAtencion === 1 ? 'Cobro por revisar' : 'Cobros por revisar',
-        valor: cobrosAtencion,
-        icono: DollarSign,
-        destino: 'cobros' as const,
-        aria: `Ir a cobros por revisar (${cobrosAtencion})`,
-      },
-      {
-        id: 'incidencias' as const,
-        etiqueta: incAbiertas === 1 ? 'Incidencia abierta' : 'Incidencias abiertas',
-        valor: incAbiertas,
-        icono: Wrench,
-        destino: 'incidencias' as const,
-        aria: `Ir a incidencias abiertas (${incAbiertas})`,
-      },
-    ],
-    [misViviendas.length, misContratos.length, cobrosAtencion, incAbiertas],
-  );
-
-  // J.2 — ¿TENGO ALGO PENDIENTE? (NIVEL 3 de la portada).
-  // Sólo se listan situaciones que REALMENTE requieren atención del propietario
-  // y que ya están calculadas por los motores existentes. Un cobro «PENDIENTE»
-  // (aún no vencido) no es una alerta: sólo se avisa de retrasos, incidencias de
-  // cobro, morosidad con saldo, incidencias abiertas y liquidaciones aprobadas
-  // pendientes de abono. Cada entrada dice QUÉ ocurre y A DÓNDE ir.
-  const liquidacionesPorCobrar = useMemo(
-    () => misLiquidaciones.filter((l) => l.estado === 'APROBADA').length,
-    [misLiquidaciones],
-  );
-  const pendientesPortada = useMemo(() => {
-    const lista: {
-      id: string;
-      titulo: string;
-      detalle: string;
-      destino: typeof activeSubTab;
-      tono: 'alerta' | 'aviso';
-    }[] = [];
-    if (morosidadConSaldo.length > 0) {
-      lista.push({
-        id: 'morosidad',
-        titulo:
-          morosidadConSaldo.length === 1
-            ? '1 expediente de impago con saldo pendiente'
-            : `${morosidadConSaldo.length} expedientes de impago con saldo pendiente`,
-        detalle: 'Consulta el estado y el importe reclamado de cada expediente.',
-        destino: 'morosidad',
-        tono: 'alerta',
-      });
-    }
-    if (resumenMisCobros.countRetrasados > 0) {
-      lista.push({
-        id: 'cobros-retrasados',
-        titulo:
-          resumenMisCobros.countRetrasados === 1
-            ? '1 cobro con retraso'
-            : `${resumenMisCobros.countRetrasados} cobros con retraso`,
-        detalle: 'Revisa qué mensualidades han vencido sin registrarse el cobro.',
-        destino: 'cobros',
-        tono: 'alerta',
-      });
-    }
-    if (resumenMisCobros.countIncidencias > 0) {
-      lista.push({
-        id: 'cobros-incidencia',
-        titulo:
-          resumenMisCobros.countIncidencias === 1
-            ? '1 cobro con incidencia'
-            : `${resumenMisCobros.countIncidencias} cobros con incidencia`,
-        detalle: 'Hay cobros marcados con una incidencia que conviene revisar.',
-        destino: 'cobros',
-        tono: 'aviso',
-      });
-    }
-    if (incAbiertas > 0) {
-      lista.push({
-        id: 'incidencias',
-        titulo: incAbiertas === 1 ? '1 incidencia abierta' : `${incAbiertas} incidencias abiertas`,
-        detalle: 'Sigue el estado de las averías y reparaciones de tus viviendas.',
-        destino: 'incidencias',
-        tono: 'aviso',
-      });
-    }
-    if (liquidacionesPorCobrar > 0) {
-      lista.push({
-        id: 'liquidaciones',
-        titulo:
-          liquidacionesPorCobrar === 1
-            ? '1 liquidación aprobada pendiente de abono'
-            : `${liquidacionesPorCobrar} liquidaciones aprobadas pendientes de abono`,
-        detalle: 'Ya están aprobadas; aquí puedes consultar su detalle.',
-        destino: 'liquidaciones',
-        tono: 'aviso',
-      });
-    }
-    return lista;
-  }, [
-    morosidadConSaldo.length,
-    resumenMisCobros.countRetrasados,
-    resumenMisCobros.countIncidencias,
-    incAbiertas,
-    liquidacionesPorCobrar,
-  ]);
-
   useEffect(() => {
     setFormFicha({
       nombre: miFichaPropietario?.nombre || `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim(),
@@ -960,14 +551,6 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             <p className="text-xs text-slate-500">
               Bienvenido, <span className="font-semibold text-slate-800">{currentUser.nombre}</span>. Gestiona tus viviendas, contratos y técnicos de confianza.
             </p>
-            {/* J.1 — identidad de portal reforzada (sin tecnicismos; no introduce
-                datos nuevos: usa los que ya están en el estado del componente). */}
-            <p
-              className="text-[11px] text-slate-400 mt-0.5"
-              data-testid="portal-portada-subtitulo"
-            >
-              Tu espacio patrimonial · {misViviendas.length} {misViviendas.length === 1 ? 'vivienda' : 'viviendas'} · {misContratos.length} {misContratos.length === 1 ? 'contrato' : 'contratos'}
-            </p>
           </div>
         </div>
 
@@ -976,271 +559,53 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
             <div className="text-xs text-slate-500">Viviendas en cartera</div>
             <div className="text-lg font-bold text-slate-900">{misViviendas.length}</div>
           </div>
-          {/* J.1 — acceso único a la ayuda contextual existente (capa §6).
-              No duplica componentes: reutiliza ContextualHelp con host='ERP'.
-              J.4 — la sección ya no es fija: sigue al área activa del portal,
-              de modo que la ayuda responde a «¿qué puedo hacer aquí?». Si no
-              hay ayuda registrada para el contexto, el componente se oculta. */}
-          <ContextualHelp
-            usuario={currentUser}
-            host="ERP"
-            section={seccionAyudaActiva}
-            variante="icono"
-            tema="claro"
-            className="shrink-0"
-            // J.5 — el recorrido deja de estar inerte: la ayuda ya puede
-            // lanzarlo y el portal lo reproduce sin salir de sí mismo.
-            onIniciarTutorial={iniciarRecorrido}
-          />
         </div>
       </div>
-
-      {/* F4b — estado del propietario (panel breve, sin tecnicismos, sobre los
-          datos que ya existen). NO es un mensaje de error: describe qué hay en
-          su cartera ahora mismo y qué verá cuando exista cartera. */}
-      <div
-        className={`rounded-2xl border p-4 sm:p-5 flex items-start gap-3 ${
-          estadoPatrimonial.icono === 'ok'
-            ? 'bg-emerald-50/60 border-emerald-200 text-emerald-900'
-            : 'bg-slate-50 border-slate-200 text-slate-700'
-        }`}
-        data-testid="portal-estado-patrimonial"
-        data-tour="portal-prop-resumen"
-      >
-        {estadoPatrimonial.icono === 'ok' ? (
-          <ShieldCheck className="w-5 h-5 mt-0.5 shrink-0 text-emerald-700" />
-        ) : (
-          <Home className="w-5 h-5 mt-0.5 shrink-0 text-slate-500" />
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold leading-tight">{estadoPatrimonial.titulo}</p>
-          <p className="text-xs text-slate-600 mt-0.5">{estadoPatrimonial.detalle}</p>
-        </div>
-        {estadoPatrimonial.icono === 'vacio' && onCrearInmueble && (
-          <button
-            type="button"
-            onClick={onCrearInmueble}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0"
-            data-testid="portal-estado-vacio-cta"
-          >
-            <Plus className="w-4 h-4" />
-            Vincular mi primera vivienda
-          </button>
-        )}
-      </div>
-
-      {/* ================================================================
-          J.2 — PORTADA PATRIMONIAL
-          Sólo se muestra cuando el propietario ya tiene cartera. Sin cartera,
-          el panel F4b de arriba («Aún no tienes viviendas…» + CTA «Vincular mi
-          primera vivienda») sigue siendo la única llamada a la acción, para no
-          llenar la pantalla de contadores a cero.
-          ================================================================ */}
-      {tieneCarteraPatrimonial && (
-        <div className="space-y-4" data-testid="portal-portada-patrimonial">
-          {/* NIVEL 2 — Resumen de mi patrimonio */}
-          <section aria-labelledby="portada-resumen-titulo" className="space-y-2">
-            <h2
-              id="portada-resumen-titulo"
-              className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1"
-            >
-              Mi patrimonio de un vistazo
-            </h2>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {resumenPatrimonial.map((ind) => {
-                const Icono = ind.icono;
-                const destacado = ind.valor > 0 && (ind.id === 'cobros' || ind.id === 'incidencias');
-                return (
-                  <button
-                    key={ind.id}
-                    type="button"
-                    onClick={() => setActiveSubTab(ind.destino as any)}
-                    aria-label={ind.aria}
-                    data-testid={`portada-indicador-${ind.id}`}
-                    className={`text-left rounded-2xl border p-4 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                      destacado
-                        ? 'bg-amber-50 border-amber-200 hover:bg-amber-100/70'
-                        : 'bg-white border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Icono
-                      className={`w-5 h-5 mb-2 ${destacado ? 'text-amber-600' : 'text-slate-400'}`}
-                    />
-                    <p
-                      className={`text-2xl font-extrabold leading-none ${
-                        destacado ? 'text-amber-900' : 'text-slate-900'
-                      }`}
-                    >
-                      {ind.valor}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1 leading-tight">{ind.etiqueta}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          {/* NIVEL 3 — ¿Tengo algo pendiente? */}
-          <section aria-labelledby="portada-pendientes-titulo" className="space-y-2">
-            <h2
-              id="portada-pendientes-titulo"
-              className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1"
-            >
-              Qué necesita tu atención
-            </h2>
-            {pendientesPortada.length === 0 ? (
-              <div
-                className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 flex items-start gap-3"
-                data-testid="portada-sin-pendientes"
-              >
-                <ShieldCheck className="w-5 h-5 mt-0.5 shrink-0 text-emerald-700" />
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-emerald-900 leading-tight">Todo al día</p>
-                  <p className="text-xs text-emerald-800/80 mt-0.5">
-                    No tienes cobros retrasados, incidencias abiertas ni impagos pendientes de revisar.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <ul className="space-y-2" data-testid="portada-pendientes">
-                {pendientesPortada.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab(p.destino as any)}
-                      data-testid={`portada-pendiente-${p.id}`}
-                      className={`w-full text-left rounded-2xl border p-4 flex items-start gap-3 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                        p.tono === 'alerta'
-                          ? 'bg-red-50/70 border-red-200 hover:bg-red-100/60'
-                          : 'bg-amber-50/70 border-amber-200 hover:bg-amber-100/60'
-                      }`}
-                    >
-                      <AlertTriangle
-                        className={`w-5 h-5 mt-0.5 shrink-0 ${
-                          p.tono === 'alerta' ? 'text-red-600' : 'text-amber-600'
-                        }`}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={`block text-sm font-bold leading-tight ${
-                            p.tono === 'alerta' ? 'text-red-900' : 'text-amber-900'
-                          }`}
-                        >
-                          {p.titulo}
-                        </span>
-                        <span className="block text-xs text-slate-600 mt-0.5">{p.detalle}</span>
-                      </span>
-                      <ArrowRight className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          {/* NIVEL 4 — Acciones principales (pocas y claras; el resto siguen
-              accesibles desde la navegación por áreas de más abajo). */}
-          <section aria-labelledby="portada-acciones-titulo" className="space-y-2">
-            <h2
-              id="portada-acciones-titulo"
-              className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1"
-            >
-              Acciones rápidas
-            </h2>
-            <div className="flex flex-wrap gap-2" data-testid="portada-acciones">
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('viviendas' as any)}
-                className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-              >
-                <Home className="w-4 h-4 text-slate-400" /> Ver viviendas
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('contratos' as any)}
-                className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-              >
-                <FileCheck className="w-4 h-4 text-slate-400" /> Consultar contratos
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('liquidaciones' as any)}
-                className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-              >
-                <Wallet className="w-4 h-4 text-slate-400" /> Revisar liquidaciones
-              </button>
-              {onCrearInmueble && (
-                <button
-                  type="button"
-                  onClick={onCrearInmueble}
-                  className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" /> Añadir otra vivienda
-                </button>
-              )}
-            </div>
-          </section>
-        </div>
-      )}
 
       {/* Tabs */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-        {/* J.2 — navegación agrupada por áreas del propietario (no por módulos
-            del ERP). Mismas pestañas de F4b, sólo reordenadas y etiquetadas. */}
-        <div className="border-b border-slate-200 px-4 py-2.5 space-y-2">
-          {(
-            [
-              { grupo: 'patrimonio', titulo: 'Mi patrimonio' },
-              { grupo: 'gestion', titulo: 'Mi gestión' },
-              { grupo: 'seguimiento', titulo: 'Seguimiento' },
-              { grupo: 'cuenta', titulo: 'Mi cuenta' },
-            ] as const
-          ).map(({ grupo, titulo }) => {
-            const tabsGrupo = subTabsDisponibles.filter((t) => t.grupo === grupo);
-            if (tabsGrupo.length === 0) return null;
+        <div className="flex overflow-x-auto border-b border-slate-200 scrollbar-none px-4">
+          {[
+            { id: 'viviendas', label: 'Mis Viviendas', icon: Home, count: misViviendas.length },
+            { id: 'titularidades', label: 'Titulares / Titularidades', icon: Users },
+            {
+              id: 'profesionales',
+              label: 'Mis Profesionales',
+              icon: Wrench,
+              count: misProfesionalesPrivados.length,
+            },
+            { id: 'contratos', label: 'Mis Contratos', icon: FileCheck, count: misContratos.length },
+            { id: 'liquidaciones', label: 'Mis Liquidaciones', icon: Wallet, count: misLiquidaciones.length },
+            { id: 'morosidad', label: 'Morosidad', icon: AlertTriangle, count: morosidadConSaldo.length },
+            { id: 'gastos', label: 'Gastos', icon: TrendingDown, count: misGastos.length },
+            { id: 'cobros', label: 'Cobros', icon: DollarSign, count: cobrosAtencion },
+            { id: 'incidencias', label: 'Incidencias', icon: AlertTriangle, count: incAbiertas },
+            { id: 'perfil', label: 'Mi Perfil', icon: User },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeSubTab === tab.id;
             return (
-              <div key={grupo} className="flex items-center gap-2">
-                <span
-                  className="hidden sm:block w-28 shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400"
-                  data-testid={`portal-grupo-${grupo}`}
-                >
-                  {titulo}
-                </span>
-                <div className="flex gap-1.5 overflow-x-auto scrollbar-none py-0.5 min-w-0">
-                  {tabsGrupo.map((tab) => {
-                    const Icon = tab.icon;
-                    const isActive = activeSubTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        // J.5 — ancla del recorrido guiado. Mismo mecanismo que
-                        // ya usa el portal del inquilino (`portal-tab-*`): no se
-                        // introduce un sistema paralelo de selectores.
-                        data-tour={`portal-prop-tab-${tab.id}`}
-                        onClick={() => setActiveSubTab(tab.id as any)}
-                        aria-current={isActive ? 'page' : undefined}
-                        className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center space-x-2 whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
-                          isActive
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                        }`}
-                      >
-                        <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                        <span>{tab.label}</span>
-                        {tab.count !== undefined && (
-                          <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                              isActive ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
-                            }`}
-                          >
-                            {tab.count}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <button
+                key={tab.id}
+                onClick={() => setActiveSubTab(tab.id as any)}
+                className={`py-3.5 px-4 text-xs font-bold border-b-2 flex items-center space-x-2 whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  isActive
+                    ? 'border-blue-600 text-blue-700 bg-blue-50/40'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
+                <span>{tab.label}</span>
+                {tab.count !== undefined && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                      isActive ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
             );
           })}
         </div>
@@ -1328,21 +693,16 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                             </div>
                           </div>
 
-                          {/* H11 — quién figura en la FICHA FISCAL del inmueble. Se nombra la
-                              fuente: es un dato declarativo y no acredita por sí solo una
-                              titularidad patrimonial ni un porcentaje. */}
-                          <div
-                            className="text-[11px] text-slate-500 flex items-center gap-1.5"
-                            title="Datos declarados en la ficha fiscal del inmueble. La titularidad registrada y su porcentaje se consultan en el detalle del inmueble."
-                          >
+                          {/* Titularidad visible también en la tarjeta (quién figura como titular) */}
+                          <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                             <span className="truncate">
-                              Titular (datos fiscales):{' '}
+                              Titular:{' '}
                               <strong className="text-slate-700">
                                 {inm.datosFiscales?.propietarioPrincipal?.nombre || 'Sin configurar'}
                               </strong>
                               {inm.datosFiscales?.tieneSegundoPropietario && inm.datosFiscales?.segundoPropietario?.nombre && (
-                                <span className="text-slate-500"> (+1 en datos fiscales)</span>
+                                <span className="text-slate-500"> (+1 cotitular)</span>
                               )}
                             </span>
                           </div>
@@ -1525,29 +885,18 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
                     <span>Añadir Profesional Ahora</span>
                   </button>
                 </div>
-              ) : profesionalesVisibles.length === 0 ? (
-                // J.6 — La rejilla ya no se queda en blanco: se explica si no
-                // hay nada que mostrar por los filtros o porque el catálogo
-                // todavía no tiene profesionales dados de alta.
-                <div
-                  className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1"
-                  data-testid="portal-vacio-profesionales"
-                >
-                  <Wrench className="w-8 h-8 text-slate-400 mx-auto" />
-                  <div className="text-xs font-bold text-slate-700">
-                    {hayFiltroProfesionales
-                      ? 'Ningún profesional coincide con tu búsqueda'
-                      : 'Todavía no hay profesionales en el catálogo'}
-                  </div>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    {hayFiltroProfesionales
-                      ? 'Prueba con otro término o cambia la especialidad seleccionada.'
-                      : 'Aquí aparecerán los profesionales registrados en la plataforma a los que puedas recurrir. También puedes añadir los tuyos de confianza en «Mis privados».'}
-                  </p>
-                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {profesionalesVisibles
+                  {(profesionalTab === 'catalogo' ? profesionalesPublicos : misProfesionalesPrivados)
+                    .filter((p) => {
+                      const matchesSearch =
+                        p.nombreComercial.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        p.especialidades.some((e) => e.toLowerCase().includes(searchTerm.toLowerCase()));
+                      const matchesEsp =
+                        selectedEspecialidad === 'TODAS' ||
+                        p.especialidades.includes(selectedEspecialidad);
+                      return matchesSearch && matchesEsp;
+                    })
                     .map((prof) => {
                       const isCopied = copiedLinkProfId === prof.id;
                       const hasAccount = !!prof.usuarioId;
@@ -1669,33 +1018,12 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
               </div>
 
               {misContratos.length === 0 ? (
-                // J.6 — El título decía «No hay contratos activos», pero
-                // `misContratos` NO filtra por estado: son todos los contratos
-                // de mis viviendas. Si está vacío no es que no haya activos, es
-                // que no hay ninguno. Además se distingue la causa real: sin
-                // viviendas vinculadas no puede haber contratos todavía.
-                <div
-                  className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3"
-                  data-testid="portal-vacio-contratos"
-                >
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
                   <FileCheck className="w-8 h-8 text-slate-400 mx-auto" />
-                  <div className="text-xs font-bold text-slate-700">Todavía no tienes contratos</div>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    {misViviendas.length === 0
-                      ? 'Los contratos de alquiler aparecen aquí cuando tienes una vivienda vinculada y se formaliza el arrendamiento.'
-                      : 'Aún no se ha formalizado ningún contrato de arrendamiento sobre tus viviendas. Cuando se firme uno, lo verás aquí con su estado y sus fechas.'}
+                  <div className="text-xs font-bold text-slate-700">No hay contratos activos</div>
+                  <p className="text-xs text-slate-500">
+                    Aún no se ha formalizado ningún contrato de arrendamiento sobre tus viviendas.
                   </p>
-                  {misViviendas.length === 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('viviendas' as any)}
-                      data-testid="portal-vacio-contratos-cta"
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <Home className="w-4 h-4" />
-                      Ver mis viviendas
-                    </button>
-                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1815,40 +1143,15 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
               </div>
 
               {miMorosidad.length === 0 ? (
-                // J.6 — Este estado es «no hay NINGÚN caso registrado». El texto
-                // anterior hablaba de «pendientes de cobro», que es el otro
-                // estado (hay casos, pero todos saldados) y se atiende abajo.
-                <div
-                  className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1"
-                  data-testid="portal-vacio-morosidad"
-                >
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-1">
                   <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
-                  <div className="text-xs font-bold text-slate-700">Sin impagos registrados</div>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    No consta ningún caso de impago en tus contratos. Si en algún momento se acumulan
-                    rentas vencidas sin cobrar, aparecerán aquí.
+                  <div className="text-xs font-bold text-slate-700">Sin incidencias de impago registradas</div>
+                  <p className="text-xs text-slate-500">
+                    No hay ningún contrato tuyo con rentas vencidas pendientes de cobro.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {/* J.6 — Hay casos registrados pero ninguno con saldo vivo.
-                      Sin este aviso el panel muestra «0,00 €» y una lista, y
-                      parece un error. Ambos datos ya existen (`miMorosidad` y
-                      `morosidadConSaldo`): no se añade ninguna consulta. */}
-                  {morosidadConSaldo.length === 0 && (
-                    <div
-                      className="p-4 rounded-xl border border-emerald-200 bg-emerald-50 flex items-start gap-2"
-                      data-testid="portal-morosidad-al-corriente"
-                    >
-                      <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-emerald-900">No tienes impagos pendientes</div>
-                        <p className="text-xs text-emerald-800">
-                          Hubo impagos en el pasado, pero ya están saldados. Abajo tienes el histórico.
-                        </p>
-                      </div>
-                    </div>
-                  )}
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-wrap gap-x-8 gap-y-2 text-xs">
                     <div>
                       <span className="text-slate-500 block">Pendiente de cobro</span>
@@ -2617,28 +1920,6 @@ export const PropietarioPortalSection: React.FC<PropietarioPortalSectionProps> =
           )}
         </div>
       </div>
-
-      {/* J.5 — Reproductor del recorrido guiado del propietario.
-          Sólo se monta cuando el usuario lo ha iniciado a mano (no hay
-          autoarranque). Es un panel flotante: no bloquea la pantalla, el
-          portal sigue siendo usable y se puede cerrar en cualquier momento.
-          `onNavegar` traduce la ruta del paso a una sub-pestaña de ESTE
-          portal, de modo que el recorrido nunca sale de él. */}
-      {sesionTutorial && tutorialActivo && (
-        <TutorialPlayer
-          tutorial={tutorialActivo}
-          sesion={sesionTutorial}
-          contexto={contextoDesdeUsuario(currentUser, seccionTourActiva, {
-            host: 'ERP',
-            accessibleSections: seccionesTourAccesibles,
-          })}
-          onCambio={setSesionTutorial}
-          onNavegar={navegarRecorrido}
-          onCerrar={() => setSesionTutorial(null)}
-          posicion="abajo-derecha"
-          servicio={servicioProgresoTutoriales}
-        />
-      )}
     </div>
   );
 };

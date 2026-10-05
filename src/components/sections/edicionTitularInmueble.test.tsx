@@ -163,11 +163,7 @@ describe('edición: carga del titular principal', () => {
     expect(selectorTitular().value).toBe('A');
   });
 
-  // K.2-C (H2): el caso crítico original protegía el CANÓNICO frente a B, y lo
-  // sigue haciendo. Lo que cambia es que ya NO se iguala el principal fiscal al
-  // canónico: `propietarioPrincipalId` puede divergir legítimamente (K.2-B1) y
-  // una edición ordinaria debe conservarlo.
-  it('el caso crítico: abrir y guardar sin tocar el selector no sustituye A por B ni pisa el principal declarado', () => {
+  it('el caso crítico: abrir y guardar sin tocar el selector no sustituye A por B', () => {
     const onUpdate = vi.fn();
     renderEdicion({
       propietarios: [a, b],
@@ -183,13 +179,10 @@ describe('edición: carga del titular principal', () => {
     expect(resumenTitular()).toContain('Nombre A');
     guardar();
     const guardado = onUpdate.mock.calls[0][0] as Inmueble;
-    // El canónico sigue siendo A: B no se lo queda (intención original intacta).
     expect(guardado.propietarioId).toBe('A');
-    // H2: el principal fiscal declarado (B) se PRESERVA, no se convierte en A.
-    expect(guardado.propietarioPrincipalId).toBe('B');
-    // Y su instantánea fiscal acompaña al principal efectivo, no al canónico.
-    expect(guardado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('B');
-    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Nombre B');
+    expect(guardado.propietarioPrincipalId).toBe('A');
+    expect(guardado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('A');
+    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Nombre A');
   });
 
   it('5. sin propietarioId, el principal es el fallback', () => {
@@ -237,10 +230,7 @@ describe('edición: carga del titular principal', () => {
     expect(selectorTitular().value).toBe('');
   });
 
-  // K.2-C: cambiar a mano el titular ECONÓMICO ya no es una edición ordinaria,
-  // es una TRANSMISIÓN. Sin operación de transmisión disponible, el guardado se
-  // rechaza por completo en vez de mover el canónico a medias.
-  it('9 y 10. el cambio manual A → B NO se guarda como edición ordinaria (es transmisión) y no toca al segundo', () => {
+  it('9 y 10. el cambio manual A → B actualiza las tres referencias y no toca al segundo', () => {
     const onUpdate = vi.fn();
     renderEdicion({
       propietarios: [a, b, c],
@@ -262,8 +252,14 @@ describe('edición: carga del titular principal', () => {
     expect(resumenTitular()).toContain('Nombre B');
     expect(resumenTitular()).toContain('NIF-B');
     guardar();
-    // Ninguna escritura ordinaria: la transmisión no se improvisa desde aquí.
-    expect(onUpdate).not.toHaveBeenCalled();
-    expect(screen.getByText(/transmisión patrimonial/i)).toBeTruthy();
+    const guardado = onUpdate.mock.calls[0][0] as Inmueble;
+    expect(guardado.propietarioId).toBe('B');
+    expect(guardado.propietarioPrincipalId).toBe('B');
+    expect(guardado.datosFiscales?.propietarioPrincipal.propietarioId).toBe('B');
+    expect(guardado.datosFiscales?.propietarioPrincipal.nombre).toBe('Nombre B');
+    expect(guardado.propietarioSecundarioId).toBe('C');
+    expect(guardado.datosFiscales?.tieneSegundoPropietario).toBe(true);
+    expect(guardado.datosFiscales?.segundoPropietario?.propietarioId).toBe('C');
+    expect(guardado.datosFiscales?.segundoPropietario?.nombre).toBe('Segundo C');
   });
 });

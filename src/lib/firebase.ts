@@ -1093,29 +1093,11 @@ export async function saveInmuebleFirestore(inmueble: Inmueble): Promise<boolean
   }
 }
 
-/**
- * H7 — Guardado de una EDICIÓN ORDINARIA del inmueble.
- *
- * Idéntico a `saveInmuebleFirestore` salvo en un punto: el índice patrimonial
- * `titularesIds[]` se retira del payload (ver `edicionOrdinariaInmueble.ts`).
- * Así una instantánea antigua del formulario no puede reintroducir un titular
- * cerrado, borrar un cotitular añadido después ni revertir una transmisión.
- * `merge: true` hace el resto: el valor almacenado permanece intacto.
- *
- * `saveInmuebleFirestore` se mantiene sin cambios porque lo usan flujos que sí
- * escriben la ficha completa (alta, importación, operaciones internas) y que
- * no son ediciones ordinarias.
- */
-export async function saveInmuebleOrdinarioFirestore(inmueble: Inmueble): Promise<boolean> {
-  return saveInmuebleFirestore(payloadOrdinarioInmueble(inmueble));
-}
-
 // El borrado físico de inmuebles NO existe: la operación de usuario es la BAJA
 // PATRIMONIAL (`src/lib/bajaPatrimonialInmuebleFirestore.ts`), que hace `update`
 // del estado y CONSERVA el inmueble, sus titularidades y su histórico. El
 // documento sólo puede borrarlo la administración por otras vías auditadas.
 
-import { payloadOrdinarioInmueble } from './edicionOrdinariaInmueble';
 import { compressImageForUpload } from '../utils/fileCompressor';
 import { buildFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
 

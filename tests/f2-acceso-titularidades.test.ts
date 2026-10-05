@@ -20,10 +20,6 @@ type Oyente = { ref: { col: string; id: string }; ok: (snap: unknown) => void; e
 let oyentes: Oyente[] = [];
 let lote: { operaciones: Array<{ ref: unknown; datos: unknown; opciones?: unknown }>; commit: () => Promise<void> };
 let setDocLlamadas: Array<{ ref: unknown; datos: unknown }> = [];
-// H9: el cierre es TRANSACCIONAL. Doble mínimo de `runTransaction` con un
-// almacén que los tests siembran, para poder observar lecturas y escrituras.
-let almacen: Map<string, Record<string, unknown>> = new Map();
-let txEscrituras: Array<{ ref: { col: string; id: string }; datos: unknown }> = [];
 
 vi.mock('firebase/firestore', () => ({
   doc: (_db: unknown, col: string, id: string) => ({ col, id }),
@@ -49,16 +45,6 @@ vi.mock('firebase/firestore', () => ({
   setDoc: vi.fn(async (ref: unknown, datos: unknown) => {
     setDocLlamadas.push({ ref, datos });
   }),
-  runTransaction: async (_db: unknown, fn: (tx: unknown) => Promise<unknown>) =>
-    fn({
-      get: async (ref: { col: string; id: string }) => {
-        const datos = almacen.get(`${ref.col}/${ref.id}`);
-        return { exists: () => datos !== undefined, id: ref.id, data: () => datos };
-      },
-      set: (ref: { col: string; id: string }, datos: unknown) => {
-        txEscrituras.push({ ref, datos });
-      },
-    }),
 }));
 
 vi.mock('../src/lib/firebase', () => ({ db: { __db: true } }));
@@ -81,8 +67,6 @@ const reglas = readFileSync(root('firestore.rules'), 'utf8');
 beforeEach(() => {
   oyentes = [];
   setDocLlamadas = [];
-  almacen = new Map();
-  txEscrituras = [];
 });
 
 describe('F2 — índice y claves deterministas', () => {
@@ -188,31 +172,18 @@ describe('F2 — escritura atómica del índice', () => {
     expect((lote.operaciones[0].datos as { porcentajeTitularidad: unknown }).porcentajeTitularidad).toBeNull();
   });
 
-  // H9: el cierre sigue sin borrar, pero ahora es TRANSACCIONAL y además retira
-  // al titular del índice (una relación cerrada no puede seguir dando acceso
-  // actual). Los demás cotitulares se conservan.
-  it('el CIERRE no borra: escribe estado CERRADA con fecha y motivo, y retira del índice', async () => {
+  it('el CIERRE no borra: escribe estado CERRADA con fecha y motivo', async () => {
     const titularidad: Titularidad = {
       id: 'A__p2', inmuebleId: 'A', propietarioId: 'p2', porcentajeTitularidad: 30,
       estado: 'VIGENTE', fechaInicio: '2026-01-01', createdAt: '2026-01-01', updatedAt: '2026-01-01',
     };
-    almacen.set('titularidades/A__p2', { ...titularidad });
-    almacen.set('inmuebles/A', { titularesIds: ['p2', 'p3'] });
-
     const ok = await cerrarTitularidad({ titularidad, motivo: 'VENTA', detalle: 'Escritura' });
     expect(ok).toBe(true);
-    expect(setDocLlamadas).toHaveLength(0); // todo dentro de la transacción
-    expect(txEscrituras).toHaveLength(2); // sólo escrituras: nunca deleteDoc
-
-    const escrituraTit = txEscrituras.find((e) => e.ref.col === 'titularidades');
-    const datos = escrituraTit?.datos as { estado: string; motivoCierre: string; fechaCierre?: string; porcentajeTitularidad: number };
+    expect(setDocLlamadas).toHaveLength(1); // sólo escritura: nunca deleteDoc
+    const datos = setDocLlamadas[0].datos as { estado: string; motivoCierre: string; fechaCierre?: string };
     expect(datos.estado).toBe('CERRADA');
     expect(datos.motivoCierre).toBe('VENTA');
     expect(datos.fechaCierre).toBeTruthy();
-    expect(datos.porcentajeTitularidad).toBe(30); // histórico intacto
-
-    const escrituraInm = txEscrituras.find((e) => e.ref.col === 'inmuebles');
-    expect(escrituraInm?.datos).toEqual({ titularesIds: ['p3'] }); // p2 fuera, p3 conservado
   });
 });
 

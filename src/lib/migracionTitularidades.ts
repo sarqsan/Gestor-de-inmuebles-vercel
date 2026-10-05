@@ -9,21 +9,10 @@
  * Reglas:
  *  · idempotente: si la titularidad ya existe (y coincide en propietarioId y
  *    porcentaje), NO se propone nada (`sustancialmenteIgual`);
- *  · conservador: si no hay porcentaje ACREDITADO, se propone `null`
- *    (PENDIENTE). Nunca inventa un 50/50, un 33/33/34… ni un 100.
- *
- * H10 — IDENTIDAD ≠ PORCENTAJE.
- * Saber QUIÉN es titular no dice CUÁNTO posee. El planificador deduce
- * identidad de los campos de titularidad del inmueble, pero el porcentaje sólo
- * puede salir de una fuente explícita. En este modelo la ÚNICA fuente explícita
- * es `titularidades/{inmuebleId}__{propietarioId}.porcentajeTitularidad`:
- * ni `propietarioId`, ni `propietarioPrincipalId`, ni `propietarioSecundarioId`,
- * ni `titularesIds`, ni la ficha fiscal (`PropietarioFiscal` no tiene ningún
- * campo de cuota) acreditan participación alguna.
- *
- * En particular, que sólo se conozca UN titular NO acredita que posea el 100 %:
- * puede haber cotitulares aún no registrados. La cardinalidad del índice no es
- * evidencia patrimonial, y por descarte no se fabrica un 100.
+ *  · conservador: si no hay porcentaje fiable, se propone `null` (PENDIENTE).
+ *    Nunca inventa un 50/50 ni un 33/33/34;
+ *  · con un ÚNICO titular conocido, el porcentaje es 100 (es el único valor
+ *    que no requiere suposición).
  */
 import type { Inmueble, Titularidad } from '../types';
 import { idTitularidad, titularidadesVigentes } from '../utils/titularidadesEngine';
@@ -62,38 +51,6 @@ export interface InformeMigracion {
   altasPropuestas: number;
   /** Avisos: nunca bloquean, pero hay que revisarlos antes de ejecutar. */
   advertencias: string[];
-}
-
-/**
- * H10 §15 — ¿es un porcentaje EXPLÍCITO y utilizable? Sólo un número finito
- * dentro de [0, 100]. Rechaza `null`/`undefined` (pendiente), `NaN`,
- * `Infinity`, negativos, mayores de 100 y cualquier valor no numérico
- * (p. ej. la cadena `'100'` llegada de un documento antiguo). No normaliza:
- * un dato ilegible es un dato ausente.
- */
-export function porcentajeExplicitoValido(valor: unknown): valor is number {
-  return typeof valor === 'number' && Number.isFinite(valor) && valor >= 0 && valor <= 100;
-}
-
-/** Evidencia admisible para resolver un porcentaje de titularidad. */
-export interface EvidenciaPorcentaje {
-  /** Titularidad ya registrada para ese par (inmueble, propietario), si existe. */
-  existente?: Titularidad | null;
-}
-
-/**
- * H10 §14 — Resuelve el porcentaje a partir de la EVIDENCIA, nunca del número
- * de titulares. Función pura: sin Firestore, sin red, sin efectos.
- *
- *   porcentaje explícito y válido → ese porcentaje
- *   ausencia, pendiente o dato inválido → null
- *
- * No completa el reparto restante: si A = 60 y de B no consta nada, B sigue
- * siendo `null` (no se deduce 40).
- */
-export function resolverPorcentajeTitularidad(evidencia: EvidenciaPorcentaje): number | null {
-  const declarado = evidencia.existente?.porcentajeTitularidad;
-  return porcentajeExplicitoValido(declarado) ? declarado : null;
 }
 
 /** ¿La titularidad existente cubre ya esta propuesta? (idempotencia real). */
@@ -148,23 +105,19 @@ export function planificarMigracion(entrada: {
     const existentesPorId = new Map(existentes.map((t) => [t.propietarioId, t]));
 
     const titularesIds = new Set<string>([...deducidos.map((d) => d.propietarioId), ...existentes.map((t) => t.propietarioId)]);
+    // Un único titular conocido ⇒ 100 % sin suponer nada. Con más de uno, el
+    // porcentaje queda PENDIENTE salvo que ya conste en la titularidad.
+    const porcentajePorDefecto = titularesIds.size === 1 ? 100 : null;
 
     const altas: AltaTitularidadPropuesta[] = [];
     for (const d of deducidos) {
       const existente = existentesPorId.get(d.propietarioId);
-      // H10 — el porcentaje se RESUELVE por evidencia, no por cardinalidad.
-      // Si la titularidad ya existe, manda su porcentaje acreditado; si no
-      // existe, no hay evidencia posible y queda PENDIENTE (`null`).
-      const declarado = existente?.porcentajeTitularidad;
-      if (declarado !== undefined && declarado !== null && !porcentajeExplicitoValido(declarado)) {
-        advertencias.push(
-          `${inmueble.id}: la titularidad de ${d.propietarioId} guarda un porcentaje inválido (${String(declarado)}); se deja PENDIENTE y requiere revisión manual.`,
-        );
-      }
+      // El porcentaje propuesto es siempre el DEDUCIDO (nunca el existente):
+      // así se detecta la divergencia en vez de aceptarla en silencio.
       const propuesta: AltaTitularidadPropuesta = {
         inmuebleId: inmueble.id,
         propietarioId: d.propietarioId,
-        porcentaje: resolverPorcentajeTitularidad({ existente }),
+        porcentaje: porcentajePorDefecto,
         origen: existente ? 'yaExistente' : d.origen,
         clave: idTitularidad(inmueble.id, d.propietarioId),
       };
@@ -178,12 +131,9 @@ export function planificarMigracion(entrada: {
       altas.push(propuesta);
     }
 
-    // H10 — se avisa SIEMPRE que un alta quede sin porcentaje acreditado,
-    // también con un único titular: la identidad no acredita la cuota.
-    const sinAcreditar = altas.filter((a) => a.porcentaje === null).length;
-    if (sinAcreditar > 0) {
+    if (titularesIds.size > 1 && altas.length > 0) {
       advertencias.push(
-        `${inmueble.id}: ${sinAcreditar} titularidad(es) sin porcentaje acreditado → quedan PENDIENTES (no se inventa el reparto).`,
+        `${inmueble.id}: ${titularesIds.size} titulares y sin porcentaje fiable → quedan PENDIENTES (no se inventa el reparto).`,
       );
     }
 

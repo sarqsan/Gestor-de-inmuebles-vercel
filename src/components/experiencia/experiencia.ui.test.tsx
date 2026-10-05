@@ -110,10 +110,7 @@ describe('§6 · Centro de Ayuda', () => {
     expect(screen.queryByRole('button', { name: 'Portal de inquilinos' })).toBeNull();
     // AUDITORÍA 2026-09-29: el propietario ya SÍ tiene recorrido propio (antes mensaje vacío).
     expect(screen.queryByText(/No hay tutoriales disponibles para tu perfil/)).toBeNull();
-    // J.5: el recorrido del propietario pasó a ser portal-native y se renombró
-    // («Tus viviendas y tus datos, paso a paso» → «Primeros pasos como
-    // propietario»), al dejar de incluir el paso de importar/exportar del ERP.
-    expect(screen.getByText(/Primeros pasos como propietario/)).toBeTruthy();
+    expect(screen.getByText(/Tus viviendas y tus datos, paso a paso/)).toBeTruthy();
   });
 
   it('lista de tutoriales: admin total sin bloqueos; gestor ve el aviso de pasos que requieren otro permiso; «Iniciar» delega en el host', () => {

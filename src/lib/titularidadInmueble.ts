@@ -1,26 +1,14 @@
 /**
  * D2 (ORDEN 3 §2/§6) — Titularidad jurídica del inmueble.
  *
- * El inmueble porta tres identificadores de titularidad con semántica distinta
- * y SIN equivalencia entre sí (`firestore.rules`: «conviven TRES campos sin
- * equivalencia entre sí»). Ninguno es intercambiable con otro:
+ * El inmueble porta tres identificadores de titularidad con semántica
+ * distinta, y SOLO el primero autoriza económicamente:
  * - `propietarioId`: identificador CANÓNICO del ámbito (el que comparan las
- *   Rules con `myPropId()`) y frontera de cartera. Inmutable salvo master
- *   (firestore.rules E1). Cambiarlo ES UNA TRANSMISIÓN PATRIMONIAL.
- * - `propietarioPrincipalId`: titular FISCAL principal declarado. Puede divergir
- *   legítimamente del canónico (`marcarTitularPrincipal` existe para declararlo)
- *   y el titular puede editarlo mientras siga siendo titular. Cambiarlo NO
- *   transmite el inmueble. ATENCIÓN: sí es una de las vías que las Rules
- *   consideran para autorizar sobre `/inmuebles` —`inmuebleEsMio()`,
- *   `soyTitularActual()`, `sigoSiendoTitular()` y la rama `create`—, de modo que
- *   no es un campo meramente informativo. Lo que NO concede es acceso a
- *   `/titularidades`, que sólo atiende al canónico y al índice `titularesIds`
- *   (ver `puedeLeerTitularidadesDe`, cuyo contrato es exacto).
+ *   Rules con `myPropId()`). Inmutable salvo master (firestore.rules E1).
+ * - `propietarioPrincipalId`: titular fiscal principal. El titular puede
+ *   editarlo mientras siga siendo titular; NUNCA autoriza por sí solo.
  * - `propietarioSecundarioId`: cotitular fiscal/conviviente. Informativo y
  *   fiscal: NUNCA autoriza acceso (ni lectura ni escritura).
- * - `titularesIds[]` + `titularidades/{inmuebleId}__{propietarioId}` (fuera de
- *   este módulo): modelo MODERNO de la relación patrimonial N-TITULARES y su
- *   porcentaje. El índice `titularesIds` SÍ autoriza sobre ambas colecciones.
  *
  * Este módulo es puro (sin Firebase) para que la semántica sea unit-testeable:
  * - `detectarCambioTitularidad`: diff de titularidad para la auditoría de

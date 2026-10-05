@@ -56,14 +56,10 @@ describe('deducción de titulares desde el inmueble', () => {
 });
 
 describe('planificador (sin escritura)', () => {
-  // H10 — este test afirmaba lo contrario («un único titular ⇒ 100 %»). Era
-  // precisamente el defecto: conocer a un titular no acredita cuánto posee,
-  // porque pueden existir cotitulares todavía no registrados.
-  it('un único titular NO acredita el 100 %: el porcentaje queda PENDIENTE', () => {
+  it('un único titular ⇒ 100 % (sin suponer nada)', () => {
     const informe = planificarMigracion({ inmuebles: [inmueble({ id: 'A', propietarioId: 'p1' })] });
     expect(informe.altasPropuestas).toBe(1);
-    expect(informe.propuestas[0].altas[0]).toMatchObject({ propietarioId: 'p1', porcentaje: null });
-    expect(informe.advertencias.some((a) => a.includes('PENDIENTES'))).toBe(true);
+    expect(informe.propuestas[0].altas[0]).toMatchObject({ propietarioId: 'p1', porcentaje: 100 });
   });
 
   it('dos titulares sin dato fiable ⇒ porcentaje PENDIENTE y advertencia', () => {
@@ -98,11 +94,7 @@ describe('planificador (sin escritura)', () => {
     expect(informe.propuestas[0].indiceActualizado).toBe(true);
   });
 
-  // H10 — antes se esperaba una advertencia de «porcentaje distinto» porque el
-  // planificador proponía un 100 inventado que chocaba con el 60 acreditado.
-  // Retirada la invención, no hay divergencia que avisar: el porcentaje
-  // acreditado se respeta tal cual y nada se repropone.
-  it('respeta el porcentaje acreditado y no lo pisa ni lo repropone', () => {
+  it('avisa cuando la titularidad existe con otro porcentaje (no la pisa)', () => {
     const existentes: Titularidad[] = [
       construirTitularidad({ inmuebleId: 'A', propietarioId: 'p1', porcentaje: 60 }),
     ];
@@ -111,22 +103,7 @@ describe('planificador (sin escritura)', () => {
       titularidades: existentes,
     });
     expect(informe.altasPropuestas).toBe(0);
-    expect(informe.advertencias).toEqual([]);
-    expect(existentes[0].porcentajeTitularidad).toBe(60);
-  });
-
-  // H10 §15 — el mecanismo de incidencias pasa a servir para lo que de verdad
-  // lo necesita: un porcentaje almacenado ilegible.
-  it('avisa cuando la titularidad guarda un porcentaje inválido', () => {
-    const corrupta = {
-      ...construirTitularidad({ inmuebleId: 'A', propietarioId: 'p1', porcentaje: 50 }),
-      porcentajeTitularidad: 140 as number,
-    };
-    const informe = planificarMigracion({
-      inmuebles: [inmueble({ id: 'A', propietarioId: 'p1', titularesIds: ['p1'] })],
-      titularidades: [corrupta],
-    });
-    expect(informe.advertencias.some((a) => a.includes('porcentaje inválido'))).toBe(true);
+    expect(informe.advertencias.some((a) => a.includes('porcentaje distinto'))).toBe(true);
   });
 
   it('propone actualizar el índice si falta un titular en titularesIds', () => {

@@ -28,7 +28,7 @@
  * Escritura: ATÓMICA. La titularidad y el índice del inmueble se escriben en el
  * mismo `writeBatch` (o se queda todo como estaba).
  */
-import { doc, getDoc, onSnapshot, setDoc, writeBatch, arrayUnion, type Unsubscribe } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, writeBatch, arrayUnion, runTransaction, type Unsubscribe } from 'firebase/firestore';
 import { db } from './firebase';
 import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import type { Inmueble, Titularidad } from '../types';
@@ -37,6 +37,7 @@ import {
   clavesTitularidadesIndexadas,
   construirTitularidad,
   redondear2,
+  sePuedeCerrar,
 } from '../utils/titularidadesEngine';
 import type { AltaTitularidad, CierreTitularidad, ClaveTitularidad } from '../utils/titularidadesEngine';
 
@@ -199,26 +200,59 @@ export async function marcarTitularPrincipal(
 /**
  * Cierre de titularidad: NUNCA borra. Pasa a `CERRADA` con fecha, motivo y
  * quién lo registró; el documento sigue existiendo como histórico consultable.
- * `retirarDelIndice` (por defecto `false`) mantiene el id en `titularesIds`
- * para que el histórico siga siendo localizable por el índice del inmueble.
+ *
+ * H9 — El índice `inmuebles.titularesIds[]` representa a los titulares
+ * VIGENTES y es una vía de acceso (`inmuebleEsMio`, `opActual`). Por eso el
+ * cierre retira al titular del índice en la MISMA transacción: una relación
+ * cerrada no puede seguir concediendo acceso actual. El histórico no viaja por
+ * el índice, sino por la clave determinista `{inmuebleId}__{propietarioId}`,
+ * que las Rules dejan leer a su propio titular.
+ *
+ * Como la clave es determinista hay EXACTAMENTE un documento por
+ * (inmueble, propietario): al cerrarlo no puede quedar ninguna otra relación
+ * vigente de esa persona sobre ese inmueble.
+ *
+ * Atomicidad: `runTransaction` con todas las lecturas antes de las escrituras.
+ * El índice se recompone a partir del estado leído DENTRO de la transacción,
+ * nunca de una instantánea previa, de modo que un cotitular añadido en
+ * paralelo no se pierde.
+ *
+ * NO toca `propietarioId` ni `propietarioPrincipalId`: retirar al titular
+ * canónico es una TRANSMISIÓN (K.2), no un cierre.
  */
-export async function cerrarTitularidad(
-  cierre: CierreTitularidad,
-  opciones: { retirarDelIndice?: boolean } = {},
-): Promise<boolean> {
+export async function cerrarTitularidad(cierre: CierreTitularidad): Promise<boolean> {
   try {
-    const cerrada = cerrarTitularidadEnMemoria(cierre);
-    await setDoc(doc(db, COLECCION_TITULARIDADES, cerrada.id), limpiarParaFirestore(cerrada), { merge: true });
-    if (opciones.retirarDelIndice) {
-      const refInmueble = doc(db, 'inmuebles', cerrada.inmuebleId);
-      const snap = await getDoc(refInmueble);
-      const actuales: string[] = (snap.exists() && (snap.data() as Inmueble).titularesIds) || [];
-      await setDoc(
-        refInmueble,
-        { titularesIds: actuales.filter((id) => id !== cerrada.propietarioId) },
-        { merge: true },
-      );
-    }
+    const refTitularidad = doc(db, COLECCION_TITULARIDADES, cierre.titularidad.id);
+    const refInmueble = doc(db, 'inmuebles', cierre.titularidad.inmuebleId);
+    await runTransaction(db, async (tx) => {
+      // 1) LECTURAS (todas antes de cualquier escritura).
+      const snapTitularidad = await tx.get(refTitularidad);
+      const snapInmueble = await tx.get(refInmueble);
+
+      // El cierre se compone sobre el documento ALMACENADO cuando existe: así
+      // el porcentaje, la fecha de alta y el resto del histórico no se pisan
+      // con una copia obsoleta traída por la interfaz.
+      const almacenada = snapTitularidad.exists()
+        ? ({ ...(snapTitularidad.data() as Titularidad), id: snapTitularidad.id })
+        : null;
+      const base = almacenada || cierre.titularidad;
+      const cerrada = cerrarTitularidadEnMemoria({ ...cierre, titularidad: base });
+
+      // 2) ESCRITURAS. Idempotente: una titularidad ya CERRADA no se reescribe
+      // (no se duplica ni se altera su trazabilidad), pero el índice sí se
+      // reconcilia si quedó incoherente.
+      if (sePuedeCerrar(almacenada) || !almacenada) {
+        tx.set(refTitularidad, limpiarParaFirestore(cerrada), { merge: true });
+      }
+      const indice: string[] = (snapInmueble.exists() && (snapInmueble.data() as Inmueble).titularesIds) || [];
+      if (snapInmueble.exists() && indice.includes(cerrada.propietarioId)) {
+        tx.set(
+          refInmueble,
+          { titularesIds: indice.filter((id) => id !== cerrada.propietarioId) },
+          { merge: true },
+        );
+      }
+    });
     return true;
   } catch (err) {
     reportarErrorGuardado('titularidades', err, 'Error cerrando titularidad:');

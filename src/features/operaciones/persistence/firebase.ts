@@ -84,10 +84,20 @@ export function crearTransporteFirebase(db: Firestore, auth: Auth, sdk: SDK = sd
         const anteriores = new Map(rows.docs.map((d)=>[d.id, d.data() as FilaOperativa]));
         return trabajo({
         async leerCabecera() { const s = await tx.get(raiz(propietarioId)); return s.exists() ? s.data() as CabeceraOperativa : null; },
-        async comprobarInmuebleActual(a) {
-          const s = await tx.get(doc(db, 'inmuebles', a.inmuebleId));
-          if (!s.exists() || ![s.data().propietarioId, s.data().propietarioPrincipalId, s.data().propietarioSecundarioId].includes(a.propietarioId)) throw new Error('Sin titularidad actual: solo acceso histórico cuando esté autorizado.');
-        },
+          // H8 — TITULARIDAD ACTUAL según el modelo moderno, espejo literal de
+          // `opActual` en las Rules (mismas tres vías que `inmuebleEsMio`):
+          // canónico, principal declarado o índice de cotitulares. El campo
+          // LEGADO `propietarioSecundarioId` NO concede por sí solo capacidad
+          // operativa: un ex-titular que permanezca ahí tras una transmisión
+          // (K.2 no toca ese campo) no la recupera, y un cotitular moderno ya
+          // no queda fuera por no figurar en él.
+          async comprobarInmuebleActual(a) {
+            const s = await tx.get(doc(db, 'inmuebles', a.inmuebleId));
+            const d = s.exists() ? s.data() : null;
+            const indice = d && Array.isArray(d.titularesIds) ? d.titularesIds : [];
+            const esTitularActual = !!d && ([d.propietarioId, d.propietarioPrincipalId].includes(a.propietarioId) || indice.includes(a.propietarioId));
+            if (!esTitularActual) throw new Error('Sin titularidad actual: solo acceso histórico cuando esté autorizado.');
+          },
         guardarEntidad(evento, auditId) {
           const e = evento.despues;
           if ((e.tipo === 'presupuesto' || e.tipo === 'factura') && e.conceptos.length > 10) throw new Error('Límite de transporte Firestore: máximo 10 conceptos por registro. No se truncan ni reagrupan datos; conserva el documento original.');

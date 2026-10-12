@@ -405,3 +405,24 @@ describe('J · desglose del resultado: creados, actualizados, omitidos y fallido
     expect(res.informe).toContain('creados: 1; actualizados (relaciones añadidas a inmueble existente): 0; omitidos (ya existían sin cambios): 0; fallidos: 1');
   });
 });
+
+describe('K · fallo de una relación DESPUÉS de crear el inmueble', () => {
+  it('el inmueble queda CREADO y la relación fallida queda PENDIENTE con su motivo (no se marca como no escrito)', async () => {
+    const real = crearPuertoFirebase({ usuarioId: 'usuario_sesion', usuarioEmail: 'sesion@test.local', usuarioNombre: 'Sesión sintética' });
+    const conFallo: PuertoPersistenciaImport = {
+      ...real,
+      crearTitularidad: async () => { throw new Error('relación rechazada (prueba)'); },
+    };
+    const { res, run } = await promocionar(sim, SESION_TITULAR, 'prop_T', AMBITO_TITULAR, 1, conFallo);
+    expect(res.creados).toBe(1);
+    expect(res.fallidos).toBe(0);
+    expect(res.detalle[0]?.resultado).toBe('CREADO');
+    expect(db[`inmuebles/${run.registros[0]!.destinationId}`]).toBeDefined();
+    // Puede haber otras relaciones declaradas y pendientes: se busca la que falló.
+    const fallida = res.relacionesPendientes.filter((x) => x.motivo.includes('no creada'));
+    expect(fallida).toHaveLength(1);
+    expect(fallida[0]!.motivo).toContain('relación con el titular prop_T no creada');
+    expect(fallida[0]!.motivo).toContain('relación rechazada (prueba)');
+    expect(res.informe).not.toContain('escritura rechazada');
+  });
+});

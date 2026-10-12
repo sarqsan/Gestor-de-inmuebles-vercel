@@ -610,22 +610,34 @@ export async function ejecutarPromocion(p: {
         await p.puerto.crearInmueble(construirInmueblePatrimonialDestino(r, { fechaHora: p.fechaHora, actor: p.actor }));
         // RELACIONES RESUELTAS: se crean después del inmueble (las Rules exigen
         // que exista) y sólo las que una persona asignó a un titular existente.
+        // Un fallo en una relación NO deshace el inmueble ya creado: el registro
+        // sigue CREADO y la relación queda PENDIENTE con su motivo real (reimportar
+        // el archivo la completa, porque el inmueble ya existe).
         for (const t of op.titularidades ?? []) {
-          const yaExiste = await p.puerto.existeTitularidad(op.destinoId, t.propietarioId);
-          if (yaExiste) {
-            titularidadesOmitidas.push({ fingerprint: op.fingerprint, motivo: `titularidad ya existente (${t.propietarioId}); no se reescribe` });
-            continue;
+          try {
+            const yaExiste = await p.puerto.existeTitularidad(op.destinoId, t.propietarioId);
+            if (yaExiste) {
+              titularidadesOmitidas.push({ fingerprint: op.fingerprint, motivo: `titularidad ya existente (${t.propietarioId}); no se reescribe` });
+              continue;
+            }
+            await p.puerto.crearTitularidad({
+              inmuebleId: op.destinoId,
+              propietarioId: t.propietarioId,
+              porcentajeTitularidad: t.porcentaje,
+              campoOrigen: t.campoOrigen,
+              valorOriginal: t.valorOriginal,
+              importRunId: p.plan.importRunId,
+              migrationRunId: p.plan.migrationRunId,
+            });
+            titularidadesCreadas.push({ fingerprint: op.fingerprint, propietarioId: t.propietarioId, porcentaje: t.porcentaje });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            pendientesPersistidos.push({
+              fingerprint: op.fingerprint,
+              campoOrigen: t.campoOrigen,
+              motivo: `relación con el titular ${t.propietarioId} no creada; el inmueble sí se creó (reimportar completa la relación): ${msg}`,
+            });
           }
-          await p.puerto.crearTitularidad({
-            inmuebleId: op.destinoId,
-            propietarioId: t.propietarioId,
-            porcentajeTitularidad: t.porcentaje,
-            campoOrigen: t.campoOrigen,
-            valorOriginal: t.valorOriginal,
-            importRunId: p.plan.importRunId,
-            migrationRunId: p.plan.migrationRunId,
-          });
-          titularidadesCreadas.push({ fingerprint: op.fingerprint, propietarioId: t.propietarioId, porcentaje: t.porcentaje });
         }
         await escribirPendientes(r, op, p, pendientesPersistidos);
       } else {

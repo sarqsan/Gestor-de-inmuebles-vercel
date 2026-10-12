@@ -677,30 +677,37 @@ service cloud.firestore {
             && n.estado == e.estado && n.eventos == e.eventos
             && n.diff(e).affectedKeys().hasOnly(['resolucionInvitacion','roadmap01AuditId'])));
     }
+    // Gestión indexada del espejo: UNA lectura de `gestiones_cartera/{id}` por función y el
+    // mismo predicado que antes (titular, gestor, ACTIVA, sin delegación parcial, ACEPTADA).
+    // Repetir el get en cada condición agotaba el presupuesto de 1000 expresiones por petición.
+    function gestionIndexadaActivaCompleta(pid, g) {
+      return g.propietarioId == pid && g.gestorUsuarioId == me().usuarioId
+        && g.estado == 'ACTIVA' && g.inmuebleIds.size() == 0 && g.resolucionInvitacion == 'ACEPTADA';
+    }
+    function gestionIndexadaEscritura(pid, g) {
+      return gestionIndexadaActivaCompleta(pid, g) && g.permiso == 'LECTURA_ESCRITURA'
+        && g.responsableActual == 'GESTOR';
+    }
     function gestionActivaCompletaIndexada(pid) {
       return activeUser() && 'gestionesPorPropietario' in me()
         && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.propietarioId == pid
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.gestorUsuarioId == me().usuarioId
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.estado == 'ACTIVA'
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.inmuebleIds.size() == 0
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.resolucionInvitacion == 'ACEPTADA';
+        && gestionIndexadaActivaCompleta(pid, get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data);
     }
     function gestionCompletaEscrituraIndexada(pid) {
-      let g = get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data;
-      return gestionActivaCompletaIndexada(pid) && g.permiso == 'LECTURA_ESCRITURA'
-        && g.responsableActual == 'GESTOR';
+      return activeUser() && 'gestionesPorPropietario' in me()
+        && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
+        && gestionIndexadaEscritura(pid, get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data);
+    }
+    function inmuebleParcialIndexadoG(pid, inmId, escritura, g) {
+      return g.propietarioId == pid && g.gestorUsuarioId == me().usuarioId
+        && g.estado == 'ACTIVA' && g.resolucionInvitacion == 'ACEPTADA'
+        && inmId in g.inmuebleIds
+        && (!escritura || (g.permiso == 'LECTURA_ESCRITURA' && g.responsableActual == 'GESTOR'));
     }
     function inmuebleParcialIndexado(pid, inmId, escritura) {
       return activeUser() && 'gestionesPorPropietario' in me()
         && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.propietarioId == pid
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.gestorUsuarioId == me().usuarioId
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.estado == 'ACTIVA'
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.resolucionInvitacion == 'ACEPTADA'
-        && inmId in get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.inmuebleIds
-        && (!escritura || (get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.permiso == 'LECTURA_ESCRITURA'
-          && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.responsableActual == 'GESTOR'));
+        && inmuebleParcialIndexadoG(pid, inmId, escritura, get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data);
     }
 
     // La cuenta INQUILINO solo nace de una invitación activa vinculada a su contrato.

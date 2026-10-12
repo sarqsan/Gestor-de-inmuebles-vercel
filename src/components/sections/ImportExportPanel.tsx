@@ -454,8 +454,12 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
     : (ambito.propietarioIdsEscribibles ?? []).map((id) => ({ id, nombre: id }));
   const faltaElegirDestino = registrosSinTitular.length > 0 && destinoTitular === '' && titularesElegibles.length > 0;
   const sinCarteraEscribible = registrosSinTitular.length > 0 && titularesElegibles.length === 0;
+  // Sólo informativo y acotado: por encima de 2 MB no se re-parsea el archivo
+  // entero en cada render (el análisis real ya lo hace el parser con cotas).
   const estructuraJson = useMemo(
-    () => (fichero && formato === 'JSON' ? (() => { try { return analizarEstructuraJson(JSON.parse(new TextDecoder('utf-8').decode(fichero.bytes))); } catch { return null; } })() : null),
+    () => (fichero && formato === 'JSON' && fichero.bytes.length <= 2_000_000
+      ? (() => { try { return analizarEstructuraJson(JSON.parse(new TextDecoder('utf-8').decode(fichero.bytes))); } catch { return null; } })()
+      : null),
     [fichero, formato],
   );
   const hayInmuebles = (run?.registros ?? []).some((r) => r.entityType === 'INMUEBLE');

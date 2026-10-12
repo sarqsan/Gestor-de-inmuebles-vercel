@@ -21,11 +21,15 @@ import { dependenciasGestionesCarteraFirestore } from '../../lib/gestionesCarter
 import { propietariosGestionadosDe, proyectarCarterasGestionadas } from '../../lib/carterasGestion';
 import type { ModalidadUsoB4 } from '../../lib/migracion/tipos';
 import {
+  ACEPTAR_IMPORTACION,
   FUENTE_EXTERNA_SIN_VERSION,
   SOPORTE_ENTIDADES,
+  analizarEstructuraJson,
+  detectarFormatoEntrada,
   ejecutarExportacion,
   ejecutarImportDryRun,
   extraerMarcaExportPropio,
+  motivoJsonSinRegistros,
   parseCsv,
   parseJson,
   parseXlsx,
@@ -110,6 +114,16 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   const [promocionando, setPromocionando] = useState(false);
   const [resultadoPromo, setResultadoPromo] = useState<ResultadoPromocion | null>(null);
   const [verProblemas, setVerProblemas] = useState(false);
+  /** Detalle de TODOS los registros del run (no sólo los promocionables). */
+  const [verRegistros, setVerRegistros] = useState(false);
+  /**
+   * INCIDENCIA (cartera/titular destino): la persona elige EXPLÍCITAMENTE a qué
+   * titular va la importación. Nunca se asigna «el titular principal del
+   * perfil» por defecto ni se deduce de la columna de titularidad.
+   */
+  const [destinoTitular, setDestinoTitular] = useState('');
+  /** Titulares que el ámbito del actor permite escribir (id + nombre). */
+  const [titularesDisponibles, setTitularesDisponibles] = useState<{ id: string; nombre: string }[]>([]);
 
   // ---- exportar ----
   const [expEntidad, setExpEntidad] = useState('GASTO');
@@ -190,17 +204,23 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
     const buf = new Uint8Array(await f.arrayBuffer());
     const hash = sha256Hex(buf);
     setFichero({ nombre: f.name, bytes: buf, hash });
-    const ext = f.name.toLowerCase().split('.').pop();
-    if (ext === 'json') setFormato('JSON');
-    else if (ext === 'csv') setFormato('CSV');
-    else if (ext === 'xlsx' || ext === 'xls') setFormato('XLSX');
-    else {
-      const inicio = new TextDecoder('utf-8').decode(buf.slice(0, 2000)).trimStart();
-      setFormato(inicio.startsWith('{') || inicio.startsWith('[') ? 'JSON' : 'CSV');
+    // INCIDENCIA (Android): el formato se decide por FIRMA, no sólo por la
+    // extensión. Un archivo elegido desde Drive/Gmail puede llegar sin
+    // extensión o con nombre genérico; antes eso convertía un .xlsx en CSV y
+    // el análisis fallaba sin motivo comprensible.
+    const detectado = detectarFormatoEntrada(f.name, buf);
+    if (!detectado) {
+      setFormato(null);
+      setErrorImport(
+        `No se reconoce el formato de «${f.name}» (${buf.length} bytes): no es JSON, ni CSV, ni un libro XLSX válido. `
+        + 'Exporta el archivo como .json, .csv o .xlsx e inténtalo de nuevo.',
+      );
+      return;
     }
+    setFormato(detectado);
   };
 
-  const onAnalizar = async (): Promise<void> => {
+  const onAnalizar = async (destino?: string): Promise<void> => {
     if (!fichero || !formato || !identidadLista) return;
     setAnalizando(true); setErrorImport(null);
     try {
@@ -211,22 +231,34 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         // del perfil (antes: 'PROPIETARIO' fijo incluso para master/gestor).
         importador: identidad ? { uid: identidad.usuarioId, modalidad } : undefined,
       });
+      // Titulares que este actor puede escribir: la lista del selector de
+      // destino. No se usa para elegir nada por defecto.
+      const permitidos = new Set(ambito.propietarioIdsEscribibles ?? []);
+      setTitularesDisponibles(
+        fuentes.propietarios
+          .filter((p) => p.id && permitidos.has(p.id))
+          .map((p) => ({ id: p.id, nombre: p.nombre ?? p.id })),
+      );
       // Marca de exportación propia (solo JSON): versión + entidad + records anidados.
       let tipoFuente: 'ERP_EXPORT' | 'EXTERNAL' = 'EXTERNAL';
       let versionFuente = FUENTE_EXTERNA_SIN_VERSION;
       let entidadEfectiva = entidad;
       let rutaAnidada: readonly string[] | undefined;
+      let raizJson: unknown = null;
       if (formato === 'JSON') {
         try {
-          const raiz = JSON.parse(new TextDecoder('utf-8').decode(fichero.bytes));
-          const marca = extraerMarcaExportPropio(raiz);
-          if (marca) {
-            tipoFuente = 'ERP_EXPORT';
-            versionFuente = marca.schemaVersion;
-            if (entidadEfectiva === 'AUTO') entidadEfectiva = marca.entityType;
-            rutaAnidada = ['records'];
-          }
-        } catch { /* el parseo principal ya informa del error */ }
+          raizJson = JSON.parse(new TextDecoder('utf-8').decode(fichero.bytes));
+        } catch (e) {
+          setErrorImport(`JSON inválido: ${e instanceof Error ? e.message : String(e)}. No se importa nada.`);
+          return;
+        }
+        const marca = extraerMarcaExportPropio(raizJson);
+        if (marca) {
+          tipoFuente = 'ERP_EXPORT';
+          versionFuente = marca.schemaVersion;
+          if (entidadEfectiva === 'AUTO') entidadEfectiva = marca.entityType;
+          rutaAnidada = ['records'];
+        }
       }
       // Un solo contrato: mismo pipeline para JSON/CSV/XLSX (BLOQUE 7 añade el
       // adaptador XLSX real, sin lógica distinta por pantalla).
@@ -240,7 +272,18 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         setErrorImport(parseo.errores.join(' | '));
         return;
       }
+      // INCIDENCIA: un JSON compatible pero sin registros NO se convierte en
+      // una importación vacía; se dice exactamente qué estructura se encontró.
+      if (formato === 'JSON' && parseo.registros.length === 0) {
+        setErrorImport(
+          `El archivo es un JSON válido pero no aporta ningún registro: ${motivoJsonSinRegistros(raizJson)}. `
+          + 'No se importa nada y no se crean registros vacíos.',
+        );
+        return;
+      }
       const crudos = (parseo.registros as Record<string, unknown>[]).map((r) => ({ ...r }));
+      const destinoEfectivo = destino ?? destinoTitular;
+      const parchesDestino = crudos.map(() => (destinoEfectivo ? { propietarioDestinoId: destinoEfectivo } : null));
       const dry = ejecutarImportDryRun({
         registrosCrudos: crudos,
         localizaciones: parseo.localizaciones,
@@ -254,6 +297,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         catalogos,
         fechaHora: new Date().toISOString(),
         actor: identidad?.usuarioId ?? null,
+        parches: parchesDestino,
       });
       setRun(dry);
       // Insumos para el re-dry-run de Autorizar (auditoría 3ac21a5/D1: este
@@ -281,11 +325,14 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
 
   const onAutorizar = (): void => {
     if (!run || !fichero || !insumos || !formato) return;
-    // Re-dry-run con parches de decisión (deducible confirmado) + autorización O7.
+    // Re-dry-run con parches de decisión (deducible confirmado + destino
+    // declarado) + autorización O7.
     const parches = insumos.crudos.map((_, i) => {
       const rec = run.registros.find((r) => r.indiceOrigen === i);
       const ded = rec ? decisiones[rec.fingerprint]?.deducible : undefined;
-      return ded === undefined ? null : { deducible: ded };
+      const destino = destinoTitular ? { propietarioDestinoId: destinoTitular } : null;
+      if (ded === undefined) return destino;
+      return { ...(destino ?? {}), deducible: ded };
     });
     const run2 = ejecutarImportDryRun({
       registrosCrudos: insumos.crudos,
@@ -398,6 +445,24 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
 
   const pendientes = run?.registros.filter((r) => r.decision !== 'AUTO') ?? [];
   const autos = run?.registros.filter((r) => r.decision === 'AUTO') ?? [];
+  // INCIDENCIA (cartera destino): registros que aún no tienen titular resuelto.
+  // Con más de una cartera escribible, la importación se DETIENE hasta que la
+  // persona elija (nunca se asigna el titular principal por defecto).
+  const registrosSinTitular = (run?.registros ?? []).filter((r) => !r.propietarioDestinoId && r.decision !== 'NO_MIGRABLE');
+  const titularesElegibles = titularesDisponibles.length > 0
+    ? titularesDisponibles
+    : (ambito.propietarioIdsEscribibles ?? []).map((id) => ({ id, nombre: id }));
+  const faltaElegirDestino = registrosSinTitular.length > 0 && destinoTitular === '' && titularesElegibles.length > 0;
+  const sinCarteraEscribible = registrosSinTitular.length > 0 && titularesElegibles.length === 0;
+  // Sólo informativo y acotado: por encima de 2 MB no se re-parsea el archivo
+  // entero en cada render (el análisis real ya lo hace el parser con cotas).
+  const estructuraJson = useMemo(
+    () => (fichero && formato === 'JSON' && fichero.bytes.length <= 2_000_000
+      ? (() => { try { return analizarEstructuraJson(JSON.parse(new TextDecoder('utf-8').decode(fichero.bytes))); } catch { return null; } })()
+      : null),
+    [fichero, formato],
+  );
+  const hayInmuebles = (run?.registros ?? []).some((r) => r.entityType === 'INMUEBLE');
 
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs space-y-4">
@@ -441,7 +506,9 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl font-bold flex items-center gap-2">
               <Upload className="w-4 h-4" /> {fichero ? fichero.nombre : 'Seleccionar archivo'}
             </button>
-            <input ref={fileRef} type="file" accept=".json,.csv,.xlsx,.xls" className="hidden"
+            {/* INCIDENCIA (Android): MIME + extensión. Sólo extensiones dejaba
+                fuera .json/.xlsx en el selector de archivos de Android. */}
+            <input ref={fileRef} type="file" accept={ACEPTAR_IMPORTACION} className="hidden"
               onChange={(e) => void onElegirFichero(e.target.files?.[0])} />
             <span className="text-slate-500">Formato: <strong>{formato ?? '—'}</strong></span>
             {formato === 'XLSX' && (
@@ -484,8 +551,62 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
                   </div>
                 ))}
               </div>
+              {estructuraJson && (
+                <p className="text-slate-500 font-mono text-[11px]">
+                  estructura JSON detectada: {estructuraJson.descripcion}
+                </p>
+              )}
               {run.camposDesconocidos.length > 0 && (
                 <p className="text-slate-600">Campos desconocidos (ignorados, no fatales): {run.camposDesconocidos.map((c) => `${c.campo}×${c.registros}`).join(', ')}</p>
+              )}
+              {run.camposSinDestino.length > 0 && (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                  <p className="font-bold text-slate-800">Columnas reconocidas SIN destino (no se importan, con motivo):</p>
+                  <ul className="space-y-0.5">
+                    {run.camposSinDestino.map((c) => (
+                      <li key={`${c.campo}-${c.motivo}`} className="font-mono text-[11px] text-slate-600">
+                        · {c.campo} ×{c.registros} → {c.motivo}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {/* INCIDENCIA: titular/cartera de destino. Sin elección explícita
+                  no se autoriza ni se promociona (nunca el titular principal
+                  por defecto). */}
+              {registrosSinTitular.length > 0 && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-2">
+                  <p className="font-bold text-amber-900">
+                    {registrosSinTitular.length} registro(s) sin titular destino determinado
+                  </p>
+                  {sinCarteraEscribible ? (
+                    <p className="text-amber-800">
+                      Tu perfil no tiene ninguna cartera escribible: elige el titular destino desde una sesión con permisos
+                      de escritura sobre esa cartera (titular, gestor con cartera E o administración). No se asigna nada
+                      por defecto.
+                    </p>
+                  ) : (
+                    <>
+                      <label className="text-amber-900 font-semibold block">
+                        Titular destino de la importación:
+                        <select value={destinoTitular} onChange={(e) => setDestinoTitular(e.target.value)}
+                          className="ml-2 border border-amber-300 rounded-lg px-2 py-1 bg-white font-semibold text-slate-700">
+                          <option value="">(selecciona un titular)</option>
+                          {titularesElegibles.map((t) => <option key={t.id} value={t.id}>{t.nombre} · {t.id}</option>)}
+                        </select>
+                      </label>
+                      <p className="text-amber-800">
+                        {titularesElegibles.length > 1
+                          ? 'Hay más de una cartera escribible: la importación se detiene hasta que elijas destino (no se reparte ni se deduce).'
+                          : 'Confirma el destino para continuar (no se asigna automáticamente).'}
+                      </p>
+                      <button type="button" onClick={() => void onAnalizar(destinoTitular)} disabled={analizando || destinoTitular === ''}
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl font-bold">
+                        Aplicar destino y reanalizar (dry-run)
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
               <button type="button" onClick={() => setVerProblemas(!verProblemas)}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-slate-700">
@@ -501,17 +622,45 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
                   ))}
                 </ul>
               )}
+              <button type="button" onClick={() => setVerRegistros(!verRegistros)}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-slate-700">
+                {verRegistros ? 'Ocultar' : 'Ver'} registros ({run.registros.length})
+              </button>
+              {verRegistros && (
+                <ul className="max-h-64 overflow-auto space-y-1 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  {run.registros.map((p) => (
+                    <li key={p.fingerprint} className="font-mono text-[11px] text-slate-700">
+                      {p.sourcePath} [{p.entityType}] id={p.sourceRecordId} → {p.decision}
+                      {p.propietarioDestinoId ? ` · titular ${p.propietarioDestinoId}` : ' · sin titular'}
+                      {p.duplicado !== 'NUEVO' ? ` · ${p.duplicado}` : ''}
+                      {p.destinationId ? ` · destino ${p.destinationId}` : ''}
+                      {p.decision === 'AUTO' ? '' : `: ${p.motivo}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {hayInmuebles && (
+                <p className="text-slate-600">
+                  Inmuebles: el análisis es completo y sin escrituras. Los inmuebles que YA existen se VINCULAN (AUTO)
+                  y <strong>nunca se sobrescriben</strong>. Las filas NUEVAS se dan de alta como inmuebles
+                  patrimoniales con los datos que declara el archivo: se escribe sólo lo declarado (dirección, CP,
+                  ciudad, referencia catastral, valor/fecha de adquisición, superficie, habitaciones, tipo) y no se
+                  inventa nada. Los datos de alquiler o publicación que traiga la fila (renta, estado, inquilino) no se
+                  escriben en el alta —cada uno se avisa con su motivo y se completa en el panel del inmueble—. Los
+                  porcentajes y la cotitularidad no se importan: se declaran después en el panel de titularidad.
+                </p>
+              )}
               {autos.length > 0 && (
                 <div className="space-y-2">
                   <p className="font-bold text-slate-900">Decisiones de promoción (B1 G-13: sin decisión no se promociona)</p>
                   <ul className="max-h-48 overflow-auto space-y-2">
-                    {autos.filter((a) => a.entityType === 'GASTO' || a.entityType === 'COBRO').map((a) => (
+                    {autos.filter((a) => a.entityType === 'GASTO' || a.entityType === 'COBRO' || a.entityType === 'INMUEBLE').map((a) => (
                       <li key={a.fingerprint} className="flex flex-wrap items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
                         <label className="flex items-center gap-1 font-semibold text-slate-700">
                           <input type="checkbox" className="w-4 h-4"
                             checked={seleccion === null || seleccion.includes(a.fingerprint)}
                             onChange={(e) => {
-                              const pool = autos.filter((x) => x.entityType === 'GASTO' || x.entityType === 'COBRO').map((x) => x.fingerprint);
+                              const pool = autos.filter((x) => x.entityType === 'GASTO' || x.entityType === 'COBRO' || x.entityType === 'INMUEBLE').map((x) => x.fingerprint);
                               const actual = seleccion === null ? pool : seleccion;
                               setSeleccion(e.target.checked ? [...actual, a.fingerprint] : actual.filter((f) => f !== a.fingerprint));
                             }} />
@@ -563,10 +712,15 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
                     ))}
                   </ul>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={onAutorizar}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-2">
+                    <button type="button" onClick={onAutorizar} disabled={faltaElegirDestino}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-bold flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4" /> Autorizar (O7)
                     </button>
+                    {faltaElegirDestino && (
+                      <span className="px-3 py-2 rounded-xl font-bold bg-amber-100 text-amber-800">
+                        Destino pendiente: selecciona el titular y reanaliza antes de autorizar.
+                      </span>
+                    )}
                     {autorizacion && (
                       <span className="px-3 py-2 rounded-xl font-bold bg-slate-100 text-slate-700">
                         {autorizacion.decision}: {autorizacion.motivo}
@@ -576,7 +730,7 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
                   {autorizables && <p className="text-slate-600">Elegibles O7 (pre-decisión fiscal): {autorizables.elegibles.length} · excluidos: {autorizables.excluidos.length}</p>}
                   {autorizacion && <p className="text-slate-600">Incluidos O7: {autorizacion.incluidos.length} · excluidos: {autorizacion.excluidos.length}</p>}
                   <button type="button" onClick={() => void onPromocionar()}
-                    disabled={!autorizacion || autorizacion.decision !== 'CONCEDIDA' || !identidad || promocionando}
+                    disabled={!autorizacion || autorizacion.decision !== 'CONCEDIDA' || !identidad || promocionando || faltaElegirDestino}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold">
                     {promocionando ? 'Promocionando…' : 'Promocionar selección'}
                   </button>

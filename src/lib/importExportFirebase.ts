@@ -15,7 +15,7 @@
  * Sin cambios en Rules: las escrituras cursan por colecciones existentes con
  * las reglas existentes (master/titular/carterasE). Sin bypass admin.
  */
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import type {
   CobroPeriodo,
   ContratoFormalizacion,
@@ -25,6 +25,7 @@ import type {
 } from '../types';
 import {
   db,
+  deepCleanForFirestore,
   registrarAuditoriaFirestore,
   saveContratoFirestore,
   saveGastoFirestore,
@@ -38,6 +39,7 @@ import { ambitoAutorizadoDesdeUsuario } from './importExport/ambito';
 import type { CatalogosMigracion, ExistenteDestino } from './migracion/tipos';
 import type {
   EventoAuditoriaImport,
+  InmueblePatrimonialNuevo,
   PuertoPersistenciaImport,
 } from './importExport/ejecucion';
 
@@ -137,8 +139,10 @@ export function crearPuertoFirebase(
 ): PuertoPersistenciaImport {
   return {
     async existeDestino(coleccion: string, destinoId: string): Promise<boolean> {
-      if (coleccion !== 'gastos') throw new Error(`colección no escribible por importación: '${coleccion}'`);
-      const snap = await getDoc(doc(db, 'gastos', destinoId));
+      if (coleccion !== 'gastos' && coleccion !== 'inmuebles') {
+        throw new Error(`colección no escribible por importación: '${coleccion}'`);
+      }
+      const snap = await getDoc(doc(db, coleccion, destinoId));
       return snap.exists();
     },
     async existeCobro(contratoId: string, cobroId: string): Promise<boolean> {
@@ -158,6 +162,31 @@ export function crearPuertoFirebase(
         throw new Error(`escritura no verificada en 'gastos/${gasto.id}' (posible denegación de Rules o fallo de red; no se informa CREADO)`);
       }
     },
+    /**
+     * ALTA DE INMUEBLE PATRIMONIAL (importación).
+     *
+     * Escribe SÓLO `inmuebles/{id}` y SÓLO los campos declarados. Deliberadamente
+     * NO se reutiliza `saveInmuebleFirestore`: ese camino escribe además el
+     * espejo público `fichas_publicas_inmueble` (R3) y el builder no exige
+     * estado de publicación, así que daría de ALTA un inmueble sin datos de
+     * alquiler a la vez que lo PUBLICARÍA (la ficha es de lectura abierta). Un
+     * alta patrimonial no es una publicación: aquí no se publica nada. La
+     * publicación sigue siendo un acto explícito del panel de inmuebles.
+     *
+     * Verificación post-escritura (mismo criterio que `crearGasto`): `setDoc`
+     * puede fallar por Rules y hay que demostrar que el documento existe antes
+     * de informar CREADO. Un id ya ocupado se detecta antes (existeDestino) y
+     * jamás se sobrescribe: aquí no se usa `merge`.
+     */
+    async crearInmueble(inmueble: InmueblePatrimonialNuevo): Promise<void> {
+      const { id, ...campos } = inmueble;
+      await setDoc(doc(db, 'inmuebles', id), { id, ...deepCleanForFirestore(campos) });
+      const verif = await getDoc(doc(db, 'inmuebles', id));
+      if (!verif.exists()) {
+        throw new Error(`escritura no verificada en 'inmuebles/${id}' (posible denegación de Rules o fallo de red; no se informa CREADO)`);
+      }
+    },
+
     async anexarCobro(contratoId: string, cobro: CobroPeriodo): Promise<void> {
       const ref = doc(db, 'contratos_formalizacion', contratoId);
       const snap = await getDoc(ref);

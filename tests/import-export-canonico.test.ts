@@ -103,6 +103,7 @@ function puertoFake(fallaEn?: string): PuertoPersistenciaImport & {
       if (fallaEn === g.id) throw new Error('fallo inyectado');
       gastos.set(g.id, g);
     },
+    async crearInmueble() { throw new Error('no usado en estas pruebas'); },
     async anexarCobro(c, cb) {
       if (fallaEn === cb.id) throw new Error('fallo inyectado');
       cobros.set(`${c}/${cb.id}`, cb);

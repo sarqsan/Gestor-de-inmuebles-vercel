@@ -47,6 +47,11 @@ import {
   verificarBarrera,
   type AutorizacionMigracion,
 } from './promocion';
+import { construirInmueblePatrimonialDestino } from './altaInmueble';
+import type { InmueblePatrimonialNuevo } from './altaInmueble';
+
+// El puerto y su payload se consumen juntos: se reexporta el tipo del alta.
+export type { InmueblePatrimonialNuevo } from './altaInmueble';
 
 /** Decisiones humanas de promoción por fingerprint (fase DECISION). */
 export interface DecisionPromocion {
@@ -66,7 +71,7 @@ export interface OperacionPromocion {
   fingerprint: string;
   sourceRecordId: string;
   indiceOrigen: number;
-  entidad: 'GASTO' | 'COBRO';
+  entidad: 'GASTO' | 'COBRO' | 'INMUEBLE';
   coleccion: string;
   destinoId: string;
   propietarioDestinoId: string;
@@ -88,7 +93,7 @@ export interface PlanPromocion {
   condicionesAborto: readonly string[];
 }
 
-const ESCRIBIBLES = new Set(['GASTO', 'COBRO']);
+const ESCRIBIBLES = new Set(['GASTO', 'COBRO', 'INMUEBLE']);
 
 /**
  * Contrato destino de un cobro, derivado del destinoId determinista
@@ -172,8 +177,18 @@ export function planificarPromocion(p: {
         ? 'documento standalone sin colección canónica en v1: referencia conservada en informe; binario solo por flujo documental'
         : r.entityType === 'LEGACY_STORAGE'
           ? 'legacy Storage: migración física fuera del importador'
-          : 'sin destino CREAR computable (requiere confirmación con id asignado)';
+          : r.entityType === 'INMUEBLE'
+            ? 'inmueble sin id interno asignable ni match existente: requiere revisión humana (no se crea a ciegas)'
+            : 'sin destino CREAR computable (requiere confirmación con id asignado)';
       excluidas.push({ fingerprint: r.fingerprint, sourceRecordId: r.sourceRecordId, motivo });
+      continue;
+    }
+    // El alta de inmueble exige titular destino: las Rules de `inmuebles`
+    // autorizan a un PROPIETARIO sólo si `propietarioId == myPropId()`. Sin
+    // titular resuelto no hay escritura legítima posible: se excluye con
+    // motivo (nunca se elige el principal por defecto).
+    if (r.entityType === 'INMUEBLE' && !r.propietarioDestinoId) {
+      excluidas.push({ fingerprint: r.fingerprint, sourceRecordId: r.sourceRecordId, motivo: 'alta de inmueble sin titular destino resuelto (las Rules exigen propietarioId del propio titular): declara el titular en el panel' });
       continue;
     }
     // B1 G-13: decisiones humanas obligatorias.
@@ -194,7 +209,7 @@ export function planificarPromocion(p: {
       fingerprint: r.fingerprint,
       sourceRecordId: r.sourceRecordId,
       indiceOrigen: r.indiceOrigen,
-      entidad: r.entityType as 'GASTO' | 'COBRO',
+      entidad: r.entityType as 'GASTO' | 'COBRO' | 'INMUEBLE',
       coleccion: r.destinoColeccion ?? '',
       destinoId: r.destinationId,
       propietarioDestinoId: r.propietarioDestinoId ?? '',
@@ -344,6 +359,13 @@ export interface PuertoPersistenciaImport {
   existeCobro(contratoId: string, cobroId: string): Promise<boolean>;
   crearGasto(gasto: Gasto): Promise<void>;
   anexarCobro(contratoId: string, cobro: CobroPeriodo): Promise<void>;
+  /**
+   * Alta de un inmueble patrimonial. Escribe SÓLO el documento `inmuebles/{id}`
+   * con los campos declarados (ver `InmueblePatrimonialNuevo`): no publica
+   * ficha pública ni rellena campos de alquiler. Las Rules siguen siendo la
+   * autorización efectiva (`propietarioId == myPropId()` para un PROPIETARIO).
+   */
+  crearInmueble(inmueble: InmueblePatrimonialNuevo): Promise<void>;
   auditar(evento: EventoAuditoriaImport): Promise<void>;
 }
 
@@ -376,7 +398,11 @@ export async function ejecutarPromocion(p: {
   for (const op of p.plan.operaciones) {
     const r = porFp.get(op.fingerprint);
     const decision = p.decisiones[op.fingerprint];
-    if (!r || !decision) {
+    // B1 G-13: sólo GASTO y COBRO exigen decisión humana (aCargoDe/estado); el
+    // alta de inmueble no tiene campos que decidir, así que su ausencia no es
+    // una incoherencia plan/run.
+    const exigeDecision = op.entidad === 'GASTO' || op.entidad === 'COBRO';
+    if (!r || (exigeDecision && !decision)) {
       detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo: 'registro o decisión ausente en ejecución (incoherencia plan/run)' });
       continue;
     }
@@ -388,7 +414,9 @@ export async function ejecutarPromocion(p: {
       }
       const existe = op.entidad === 'GASTO'
         ? await p.puerto.existeDestino('gastos', op.destinoId)
-        : await p.puerto.existeCobro(contratoId as string, op.destinoId);
+        : op.entidad === 'INMUEBLE'
+          ? await p.puerto.existeDestino('inmuebles', op.destinoId)
+          : await p.puerto.existeCobro(contratoId as string, op.destinoId);
       if (existe) {
         detalle.push({ fingerprint: op.fingerprint, resultado: 'YA_EXISTENTE' });
         // Best-effort (auditoría 3ac21a5/D3): si auditar falla, el resultado
@@ -405,9 +433,11 @@ export async function ejecutarPromocion(p: {
         continue;
       }
       if (op.entidad === 'GASTO') {
-        await p.puerto.crearGasto(construirGastoDestino(r, decision, { fechaHora: p.fechaHora, actor: p.actor }));
+        await p.puerto.crearGasto(construirGastoDestino(r, decision as DecisionPromocion, { fechaHora: p.fechaHora, actor: p.actor }));
+      } else if (op.entidad === 'INMUEBLE') {
+        await p.puerto.crearInmueble(construirInmueblePatrimonialDestino(r, { fechaHora: p.fechaHora }));
       } else {
-        await p.puerto.anexarCobro(contratoId as string, construirCobroDestino(r, decision, { fechaHora: p.fechaHora, actor: p.actor, migrationRunId: p.plan.migrationRunId }));
+        await p.puerto.anexarCobro(contratoId as string, construirCobroDestino(r, decision as DecisionPromocion, { fechaHora: p.fechaHora, actor: p.actor, migrationRunId: p.plan.migrationRunId }));
       }
       detalle.push({ fingerprint: op.fingerprint, resultado: 'CREADO' });
       // Best-effort (auditoría 3ac21a5/D3): la escritura YA ocurrió; un fallo

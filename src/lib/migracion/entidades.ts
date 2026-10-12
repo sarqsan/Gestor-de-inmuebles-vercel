@@ -99,6 +99,18 @@ export function chequearCompletitud(entidad: string, lectura: Record<string, unk
 // Destinos deterministas (§16/§18)
 // ---------------------------------------------------------------------------
 
+/**
+ * Campo de `normalizado.destino` por el que un llamante aporta el id de una
+ * creación que NO puede derivar su id del origen (hoy: INMUEBLE, cuyo id no
+ * existe hasta el alta y que el contrato reserva a «la confirmación humana»).
+ *
+ * B4 nunca lo inventa ni lo propone por su cuenta: sólo lo usa si el llamante
+ * lo aporta de forma explícita y trazable (el importador general, al asignar un
+ * id determinista al confirmar la promoción). La migración histórica no lo
+ * emite, así que su comportamiento permanece intacto.
+ */
+export const CAMPO_ID_ASIGNADO_CREACION = 'idAsignadoCreacion';
+
 export interface ContextoDestino {
   entidad: string;
   lectura: Record<string, unknown>;
@@ -109,6 +121,12 @@ export interface ContextoDestino {
   origenId: string | null;
   /** Id existente cuando la resolución fue por match (VINCULAR). */
   matchExistenteId: string | null;
+  /**
+   * Id asignado POR LA CONFIRMACIÓN HUMANA para una creación sin id derivable
+   * (ver `CAMPO_ID_ASIGNADO_CREACION`). Null/ausente = sin asignar: el destino
+   * sigue siendo «CREAR sin id» y B4 lo mantiene en REVISIÓN, como siempre.
+   */
+  idAsignadoCreacion?: string | null;
 }
 
 /** Propone destino computable. null = sin destino proponible. */
@@ -131,7 +149,13 @@ export function proponerDestino(c: ContextoDestino): DestinoPropuesto | null {
       if (c.matchExistenteId) {
         return { coleccion: 'inmuebles', destinoId: c.matchExistenteId, operacion: 'VINCULAR' };
       }
-      // Sin match: la creación futura la decide un humano (ID lo asigna la confirmación).
+      // Sin match: la creación la decide un humano. Si la confirmación ya ha
+      // asignado el id (importador general), el destino CREAR es computable y
+      // el resto de puertas de B4 deciden por sí mismas. Sin id asignado se
+      // mantiene el comportamiento histórico: CREAR sin id ⇒ REVISIÓN.
+      if (textoPlano(c.idAsignadoCreacion)) {
+        return { coleccion: 'inmuebles', destinoId: textoPlano(c.idAsignadoCreacion) as string, operacion: 'CREAR' };
+      }
       return { coleccion: 'inmuebles', destinoId: null, operacion: 'CREAR' };
     case 'PROPIETARIO':
       if (c.matchExistenteId) {

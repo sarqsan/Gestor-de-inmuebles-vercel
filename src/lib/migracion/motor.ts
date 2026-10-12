@@ -38,6 +38,7 @@ import {
   type HuellasLinea,
 } from './duplicados';
 import {
+  CAMPO_ID_ASIGNADO_CREACION,
   chequearCompletitud,
   clasificarFiscal,
   proponerDestino,
@@ -208,6 +209,9 @@ function decidirLinea(
     contratoId: l.contrato?.id ?? null,
     origenId: l.origenId,
     matchExistenteId: matchExistente(l),
+    // Id asignado por la confirmación humana (ver `CAMPO_ID_ASIGNADO_CREACION`).
+    // Sólo lo aporta el importador general; sin él, comportamiento intacto.
+    idAsignadoCreacion: textoPlano(l.lectura[CAMPO_ID_ASIGNADO_CREACION]),
   });
   l.destino = destino;
   if (!destino) {

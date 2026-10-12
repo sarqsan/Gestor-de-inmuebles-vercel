@@ -1,3 +1,4 @@
+import { valorConsta } from '../../lib/inmuebleCompletitud';
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React from 'react';
 import { Candidato, Inmueble, SectionType } from '../../types';
@@ -233,7 +234,7 @@ export const InicioSection: React.FC<InicioSectionProps> = ({
                     <p className="text-[11px] text-slate-500">{inm.ciudad}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs font-bold text-slate-900">{formatEuro(inm.precio)}/m</p>
+                    <p className="text-xs font-bold text-slate-900">{valorConsta(inm.precio) ? `${formatEuro(inm.precio)}/m` : 'Precio pendiente'}</p>
                     <span className="text-[10px] text-blue-600 font-medium">
                       {inm.candidatosCount} candidatos
                     </span>

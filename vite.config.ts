@@ -35,6 +35,9 @@ export default defineConfig(() => {
         //   node --import tsx --test src/features/operaciones/tests/*.test.mjs
         // Vitest no debe capturarlos: usan node:test/node:assert directamente.
         'src/features/operaciones/tests/**',
+        // Pruebas de reglas contra el EMULADOR OFICIAL (requieren Java y firebase emulators:exec):
+        //   npm run test:emulador:reglas  (vitest.emulador.config.ts)
+        'tests/emulador/**',
       ],
     },
   };

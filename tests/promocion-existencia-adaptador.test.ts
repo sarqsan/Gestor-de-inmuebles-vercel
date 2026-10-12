@@ -373,3 +373,35 @@ describe('I · existencia NO_VERIFICABLE (bloque A): etiqueta honesta, sin escri
     expect(sim.escrituras.some((e) => e === `set inmuebles/${id}`)).toBe(false);
   });
 });
+
+describe('J · desglose del resultado: creados, actualizados, omitidos y fallidos', () => {
+  it('reejecución sin cambios: 0 creados, 0 actualizados, 7 omitidos, 0 fallidos', async () => {
+    await promocionar(sim, SESION_TITULAR, 'prop_T', AMBITO_TITULAR, 7);
+    const segunda = await promocionar(sim, SESION_TITULAR, 'prop_T', AMBITO_TITULAR, 7);
+    expect(segunda.res.creados).toBe(0);
+    expect(segunda.res.actualizados).toBe(0);
+    expect(segunda.res.omitidos).toBe(7);
+    expect(segunda.res.fallidos).toBe(0);
+    expect(segunda.res.yaExistentes).toBe(segunda.res.actualizados + segunda.res.omitidos);
+  });
+
+  it('inmueble existente al que se añade la relación pendiente cuenta como ACTUALIZADO, no como omitido', async () => {
+    const id = dryRun(1, 'prop_T').registros[0]!.destinationId;
+    db[`inmuebles/${id}`] = { id, propietarioId: 'prop_T', direccion: 'Calle Sintética 1, 03001 Alicante', titularesIds: [] };
+    const { res } = await promocionar(sim, SESION_TITULAR, 'prop_T', AMBITO_TITULAR, 1);
+    expect(res.actualizados).toBe(1);
+    expect(res.omitidos).toBe(0);
+    expect(res.creados).toBe(0);
+    expect(res.informe).toContain('actualizados (relaciones añadidas a inmueble existente): 1');
+  });
+
+  it('éxito parcial: un registro bloqueado por Rules no impide crear los demás y queda FALLIDO con su motivo', async () => {
+    const idColision = dryRun(2, 'prop_X').registros[0]!.destinationId;
+    db[`inmuebles/${idColision}`] = { id: idColision, propietarioId: 'prop_T', direccion: 'AJENO', propietarioPrincipalId: 'prop_T' };
+    const { res } = await promocionar(sim, SESION_GESTOR, 'prop_X', AMBITO_GESTOR, 2);
+    expect(res.creados).toBe(1);
+    expect(res.fallidos).toBe(1);
+    expect(res.actualizados + res.omitidos).toBe(0);
+    expect(res.informe).toContain('creados: 1; actualizados (relaciones añadidas a inmueble existente): 0; omitidos (ya existían sin cambios): 0; fallidos: 1');
+  });
+});

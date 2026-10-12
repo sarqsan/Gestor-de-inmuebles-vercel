@@ -112,6 +112,8 @@ import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFo
 import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import type { ErroresFormulario } from '../../formularios/validacion';
+import { DatosPendientesInmueble } from './DatosPendientesInmueble';
+import { estadoInmuebleEtiqueta, precioMensualTexto, valorConsta, valorNumericoEditable } from '../../lib/inmuebleCompletitud';
 import { avisarOperacion } from '../../feedback/canalFeedback';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
 
@@ -286,12 +288,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
   const [editTab, setEditTab] = useState<'general' | 'fiscal' | 'titulares'>('general');
   const [editDireccion, setEditDireccion] = useState('');
   const [editCiudad, setEditCiudad] = useState('');
-  const [editPrecio, setEditPrecio] = useState<number>(850);
-  const [editFianza, setEditFianza] = useState<number>(1);
-  const [editHabitaciones, setEditHabitaciones] = useState<number>(2);
-  const [editBanos, setEditBanos] = useState<number>(1);
-  const [editSuperficie, setEditSuperficie] = useState<number>(75);
-  const [editEstado, setEditEstado] = useState<'disponible' | 'alquilado'>('disponible');
+  // Valores «undefined» = no indicado (inmueble importado incompleto). Nunca se
+  // rellenan con 0 ni con un valor por defecto: al guardar se conserva lo existente.
+  const [editPrecio, setEditPrecio] = useState<number | undefined>(undefined);
+  const [editFianza, setEditFianza] = useState<number | undefined>(undefined);
+  const [editHabitaciones, setEditHabitaciones] = useState<number | undefined>(undefined);
+  const [editBanos, setEditBanos] = useState<number | undefined>(undefined);
+  const [editSuperficie, setEditSuperficie] = useState<number | undefined>(undefined);
+  const [editEstado, setEditEstado] = useState<'disponible' | 'alquilado' | undefined>(undefined);
   const [editDescripcion, setEditDescripcion] = useState('');
   const [editImagenUrl, setEditImagenUrl] = useState('');
 
@@ -816,9 +820,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setInmuebleToEdit(inm);
     setEditTab(defaultTab);
     setEditDireccion(inm.direccion);
-    setEditCiudad(inm.ciudad);
+    setEditCiudad(inm.ciudad ?? '');
     setEditPrecio(inm.precio);
-    setEditFianza(inm.fianzaMeses || 1);
+    setEditFianza(inm.fianzaMeses);
     setEditHabitaciones(inm.habitaciones);
     setEditBanos(inm.banos);
     setEditSuperficie(inm.superficie);
@@ -907,7 +911,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
       { direccion: editDireccion, ciudad: editCiudad },
       {
         direccion: { etiqueta: 'Dirección del Inmueble', obligatorio: true },
-        ciudad: { etiqueta: 'Ciudad', obligatorio: true },
+        // Información pendiente admisible: la ciudad se puede completar después.
+        ciudad: { etiqueta: 'Ciudad', obligatorio: false },
       }
     );
     if (hayErrores(validos) || !inmuebleToEdit || !onUpdateInmueble) {
@@ -984,13 +989,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     const updated: Inmueble = {
       ...inmuebleToEdit,
       direccion: editDireccion,
-      ciudad: editCiudad,
-      precio: editPrecio,
-      fianzaMeses: editFianza,
-      habitaciones: editHabitaciones,
-      banos: editBanos,
-      superficie: editSuperficie,
-      estado: editEstado,
+      // Vacía = no indicada: conserva la ciudad existente (nunca escribe una cadena vacía).
+      ciudad: editCiudad.trim() || inmuebleToEdit.ciudad,
+      precio: editPrecio ?? inmuebleToEdit.precio,
+      fianzaMeses: editFianza ?? inmuebleToEdit.fianzaMeses,
+      habitaciones: editHabitaciones ?? inmuebleToEdit.habitaciones,
+      banos: editBanos ?? inmuebleToEdit.banos,
+      superficie: editSuperficie ?? inmuebleToEdit.superficie,
+      estado: editEstado ?? inmuebleToEdit.estado,
       modalidadAlquiler: editModalidadAlquiler,
       descripcion: editDescripcion.trim() || undefined,
       imagenUrl: editImagenUrl.trim() || inmuebleToEdit.imagenUrl,
@@ -1163,17 +1169,20 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
             </button>
           </div>
 
+          <DatosPendientesInmueble inmueble={selectedInmueble} />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
             <div>
               <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                    selectedInmueble.estado === 'disponible'
+                    estadoInmuebleEtiqueta(selectedInmueble) === 'Disponible'
                       ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                      : 'bg-purple-100 text-purple-800 border border-purple-200'
+                      : estadoInmuebleEtiqueta(selectedInmueble) === 'Alquilado'
+                        ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                        : 'bg-amber-100 text-amber-900 border border-amber-200'
                   }`}
                 >
-                  {selectedInmueble.estado === 'disponible' ? 'Disponible' : 'Alquilado'}
+                  {estadoInmuebleEtiqueta(selectedInmueble)}
                 </span>
                 <span className="font-mono text-xs font-bold px-2.5 py-0.5 bg-slate-100 text-slate-800 rounded-lg border border-slate-200 flex items-center gap-1.5 shadow-2xs">
                   <span>ID Físico: {selectedInmueble.id}</span>
@@ -1227,8 +1236,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
             <div className="flex items-center gap-2 sm:gap-3 text-left sm:text-right flex-wrap">
               <div>
-                <p className="text-2xl font-extrabold text-blue-600">{formatEuro(selectedInmueble.precio)} <span className="text-sm font-normal text-slate-500">/ mes</span></p>
-                <p className="text-xs text-slate-500 mt-0.5">Fianza: {selectedInmueble.fianzaMeses} mes(es)</p>
+                <p className="text-2xl font-extrabold text-blue-600">{precioMensualTexto(selectedInmueble, formatEuro)}</p>
+                <p className="text-xs text-slate-500 mt-0.5">Fianza: {valorConsta(selectedInmueble.fianzaMeses) ? `${selectedInmueble.fianzaMeses} mes(es)` : 'pendiente'}</p>
               </div>
 
               {/* Edit Property Button */}
@@ -2249,12 +2258,14 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                   <div className="absolute top-3 left-3 flex flex-col items-start gap-1.5">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-semibold shadow-sm ${
-                        inm.estado === 'disponible'
+                        estadoInmuebleEtiqueta(inm) === 'Disponible'
                           ? 'bg-emerald-500 text-white'
-                          : 'bg-slate-800/80 backdrop-blur-xs text-slate-200'
+                          : estadoInmuebleEtiqueta(inm) === 'Alquilado'
+                            ? 'bg-slate-800/80 backdrop-blur-xs text-slate-200'
+                            : 'bg-amber-400/90 text-slate-900'
                       }`}
                     >
-                      {inm.estado === 'disponible' ? 'Disponible' : 'Alquilado'}
+                      {estadoInmuebleEtiqueta(inm)}
                     </span>
 
                     {inm.imagenIa && (
@@ -2293,7 +2304,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                   </div>
 
                   <div className="absolute bottom-3 right-3 bg-slate-900/80 backdrop-blur-xs text-white px-3 py-1 rounded-xl font-bold text-sm">
-                    {formatEuro(inm.precio)} / mes
+                    {valorConsta(inm.precio) ? `${formatEuro(inm.precio)} / mes` : 'Precio pendiente'}
                   </div>
                 </div>
 
@@ -2589,11 +2600,9 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label htmlFor="campo-ciudad" className="block font-semibold text-slate-700 mb-1">Ciudad *</label>
+                      <label htmlFor="campo-ciudad" className="block font-semibold text-slate-700 mb-1">Ciudad</label>
                       <input
                         type="text"
-                        required
-                        aria-required
                         aria-invalid={Boolean(erroresEdicion.ciudad)}
                         value={editCiudad}
                         onChange={(e) => setEditCiudad(e.target.value)}
@@ -2604,13 +2613,13 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <ErrorCampo id="error-ciudad" mensaje={erroresEdicion.ciudad} />
                     </div>
                     <div>
-                      <label htmlFor="campo-precio-alquiler-mes" className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes) *</label>
+                      <label htmlFor="campo-precio-alquiler-mes" className="block font-semibold text-slate-700 mb-1">Precio Alquiler (€/mes)</label>
                       <input
                         type="number"
-                        required
-                        min="100"
-                        value={editPrecio}
-                        onChange={(e) => setEditPrecio(Number(e.target.value))}
+                        min="0"
+                        placeholder="Pendiente"
+                        value={editPrecio ?? ''}
+                        onChange={(e) => setEditPrecio(valorNumericoEditable(e.target.value))}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-extrabold text-sm text-blue-700"
 
                         inputMode="decimal"
@@ -2636,8 +2645,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <input
                         type="number"
                         min="1"
-                        value={editHabitaciones}
-                        onChange={(e) => setEditHabitaciones(Number(e.target.value))}
+                        value={editHabitaciones ?? ''}
+                        onChange={(e) => setEditHabitaciones(valorNumericoEditable(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
 
                         inputMode="decimal"
@@ -2648,8 +2657,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <input
                         type="number"
                         min="1"
-                        value={editBanos}
-                        onChange={(e) => setEditBanos(Number(e.target.value))}
+                        value={editBanos ?? ''}
+                        onChange={(e) => setEditBanos(valorNumericoEditable(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
 
                         inputMode="decimal"
@@ -2660,8 +2669,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                       <input
                         type="number"
                         min="10"
-                        value={editSuperficie}
-                        onChange={(e) => setEditSuperficie(Number(e.target.value))}
+                        value={editSuperficie ?? ''}
+                        onChange={(e) => setEditSuperficie(valorNumericoEditable(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
 
                         inputMode="decimal"
@@ -2676,8 +2685,8 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                         type="number"
                         min="0"
                         max="6"
-                        value={editFianza}
-                        onChange={(e) => setEditFianza(Number(e.target.value))}
+                        value={editFianza ?? ''}
+                        onChange={(e) => setEditFianza(valorNumericoEditable(e.target.value))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
 
                         inputMode="decimal"
@@ -2686,11 +2695,12 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
                     <div>
                       <label htmlFor="campo-estado" className="block font-semibold text-slate-700 mb-1">Estado</label>
                       <select
-                        value={editEstado}
-                        onChange={(e) => setEditEstado(e.target.value as 'disponible' | 'alquilado')}
+                        value={editEstado ?? ''}
+                        onChange={(e) => setEditEstado(e.target.value === '' ? undefined : (e.target.value as 'disponible' | 'alquilado'))}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
 
                          id="campo-estado">
+                        <option value="">Pendiente de indicar</option>
                         <option value="disponible">Disponible</option>
                         <option value="alquilado">Alquilado</option>
                       </select>

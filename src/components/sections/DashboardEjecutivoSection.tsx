@@ -1,3 +1,4 @@
+import { estadoInmuebleEtiqueta, valorConsta } from '../../lib/inmuebleCompletitud';
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 /**
  * CENTRO DE CONTROL EJECUTIVO DEL ERP — DASHBOARD PRINCIPAL
@@ -977,12 +978,12 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
                     <div key={inm.id} className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 hover:border-slate-200 bg-slate-50/60">
                       <div className="min-w-0">
                         <p className="text-sm font-bold text-slate-900 truncate">{inm.direccion}</p>
-                        <p className="text-[11px] text-slate-500 truncate">{inm.ciudad} · {inm.modalidadAlquiler || 'completo'} · {inm.estado}</p>
+                        <p className="text-[11px] text-slate-500 truncate">{inm.ciudad} · {inm.modalidadAlquiler || 'completo'} · {estadoInmuebleEtiqueta(inm)}</p>
                       </div>
                       <div className="text-right shrink-0 ml-3">
-                        <p className="text-xs font-bold text-slate-900">{formatEuro(inm.precio)}/mes</p>
+                        <p className="text-xs font-bold text-slate-900">{valorConsta(inm.precio) ? `${formatEuro(inm.precio)}/mes` : 'Precio pendiente'}</p>
                         <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${inm.estado === 'alquilado' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
-                          {inm.estado}
+                          {estadoInmuebleEtiqueta(inm)}
                         </span>
                       </div>
                     </div>

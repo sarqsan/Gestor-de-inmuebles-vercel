@@ -495,6 +495,11 @@ export interface ResultadoPromocion {
   importRunId: string;
   migrationRunId: string;
   creados: number;
+  /** Desglose de `yaExistentes`: destino existente al que se AÑADIERON relaciones pendientes resueltas. */
+  actualizados: number;
+  /** Desglose de `yaExistentes`: destino existente sin cambios (no se reescribe nada). */
+  omitidos: number;
+  /** Total de destinos ya existentes (= actualizados + omitidos). Se conserva por compatibilidad. */
   yaExistentes: number;
   fallidos: number;
   /** Titularidades creadas por resolución humana explícita (ranura → titular). */
@@ -661,10 +666,15 @@ export async function ejecutarPromocion(p: {
   const creados = detalle.filter((d) => d.resultado === 'CREADO').length;
   const yaExistentes = detalle.filter((d) => d.resultado === 'YA_EXISTENTE').length;
   const fallidos = detalle.filter((d) => d.resultado === 'FALLIDO').length;
+  // Un destino ya existente es «actualizado» sólo si se le añadió alguna relación
+  // pendiente resuelta; si no, queda «omitido» (idempotencia: nada que escribir).
+  const conRelacionAnadida = new Set(titularidadesCreadas.map((t) => t.fingerprint));
+  const actualizados = detalle.filter((d) => d.resultado === 'YA_EXISTENTE' && conRelacionAnadida.has(d.fingerprint)).length;
+  const omitidos = yaExistentes - actualizados;
   const L = [
     `INFORME DE PROMOCIÓN — run ${p.plan.importRunId} / ejecución ${p.plan.migrationRunId}`,
     `operaciones planificadas: ${p.plan.operaciones.length} (excluidas: ${p.plan.excluidas.length}; vinculadas sin escritura: ${p.plan.vinculadasSinEscritura.length})`,
-    `creados: ${creados}; ya existentes (omitidos): ${yaExistentes}; fallidos: ${fallidos}`,
+    `creados: ${creados}; actualizados (relaciones añadidas a inmueble existente): ${actualizados}; omitidos (ya existían sin cambios): ${omitidos}; fallidos: ${fallidos}`,
     `titularidades creadas: ${titularidadesCreadas.length}; ya existentes (omitidas): ${titularidadesOmitidas.length}`,
     `relaciones declaradas PENDIENTES (conservadas en el inmueble, sin inventar): ${pendientesPersistidos.length}`,
   ];
@@ -676,7 +686,7 @@ export async function ejecutarPromocion(p: {
   return {
     importRunId: p.plan.importRunId,
     migrationRunId: p.plan.migrationRunId,
-    creados, yaExistentes, fallidos,
+    creados, actualizados, omitidos, yaExistentes, fallidos,
     titularidadesCreadas, titularidadesOmitidas,
     relacionesPendientes: pendientesPersistidos,
     detalle,

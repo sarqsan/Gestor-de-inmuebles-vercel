@@ -10,6 +10,7 @@
 export * from './contrato';
 export * from './jsonParser';
 export * from './csvParser';
+export * from './formato';
 export * from './xlsxStub';
 export * from './mappingRegistry';
 export * from './normalizar';

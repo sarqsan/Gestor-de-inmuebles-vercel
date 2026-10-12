@@ -43,8 +43,11 @@ import {
   IMPORTADOR_CANONICO_VERSION,
   MARCA_EXPORT_PROPIO,
 } from './contrato';
-import { aplicarMapping, detectarEntidadRentasync, type ResultadoNormalizacion } from './normalizar';
+import { aplicarMapping, detectarEntidadRentasync, detectarEntidadPorCabeceras, type ResultadoNormalizacion } from './normalizar';
 import { generarInformeImportacion } from './informe';
+
+/** Marcador de trazabilidad del destino elegido por la persona (no viene del archivo). */
+export const DESTINO_DECLARADO_ORIGEN = '(destino declarado)';
 
 export interface EntradaImportDryRun {
   registrosCrudos: readonly Record<string, unknown>[];
@@ -73,11 +76,16 @@ export interface EntradaImportDryRun {
    */
   normalizadosB1?: ReadonlyArray<RegistroHistorico['normalizado'] | null>;
   /**
-   * Parches de decisión humana por índice (fase DECISION): hoy solo
-   * `deducible` confirmado (booleano explícito). Sin parche y sin
-   * deducible en fuente, la puerta fiscal O7 excluye (honesto).
+   * Parches de decisión humana por índice (fase DECISION):
+   *  · `deducible` confirmado (booleano explícito). Sin parche y sin
+   *    deducible en fuente, la puerta fiscal O7 excluye (honesto).
+   *  · `propietarioDestinoId`: titular/cartera destino ELEGIDO POR LA PERSONA
+   *    (o por una columna de ID de propietario). No es una inferencia: sólo se
+   *    aplica cuando el registro NO trae propietario explícito y se registra
+   *    como decisión humana en el mapping. Si el id no está permitido o no
+   *    existe en el catálogo, B4 lo bloquea con su motivo (no se sustituye).
    */
-  parches?: ReadonlyArray<{ deducible?: boolean } | null>;
+  parches?: ReadonlyArray<{ deducible?: boolean; propietarioDestinoId?: string } | null>;
 }
 
 /** Normalizado general desde el mapping (uniforme para toda fuente). */
@@ -161,14 +169,32 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
     const localizacion = entrada.localizaciones[indice] ?? `registro ${indice}`;
     try {
       const entidad = entrada.entityType === 'AUTO'
-        ? (detectarEntidadRentasync(crudo) ?? 'DESCONOCIDA')
+        ? (detectarEntidadRentasync(crudo) ?? detectarEntidadPorCabeceras(crudo) ?? 'DESCONOCIDA')
         : entrada.entityType;
       const mapping = aplicarMapping(entidad, crudo);
+      // Identidad de origen: 'id' manda (contrato v1) y, si no viene, la
+      // columna declarada como identificador ('ID Inmueble'). Sin esto, 7
+      // inmuebles distintos compartían `__ID_NO_RECUPERADO_IE_n` y la
+      // detección de duplicados por origen era imposible.
       const idCrudo = crudo['id'];
       const sourceRecordId = typeof idCrudo === 'string' && idCrudo.trim() !== ''
         ? idCrudo.trim()
-        : `__ID_NO_RECUPERADO_IE_${indice}`;
+        : mapping.identidadOrigen ?? `__ID_NO_RECUPERADO_IE_${indice}`;
       const parche = entrada.parches?.[indice] ?? null;
+      // DESTINO DECLARADO (decisión humana): sólo cuando el registro no trae
+      // propietario explícito ni por columna ni por canonización.
+      if (parche?.propietarioDestinoId && mapping.canonico['propietarioId'] === undefined) {
+        const explicitoEnOrigen = typeof crudo['propietarioId'] === 'string' && crudo['propietarioId'].trim() !== '';
+        if (!explicitoEnOrigen) {
+          mapping.canonico['propietarioId'] = parche.propietarioDestinoId;
+          mapping.mapeos.push({
+            campoOrigen: DESTINO_DECLARADO_ORIGEN,
+            campoCanonico: 'propietarioId',
+            regla: 'decision_humana:destino_declarado',
+          });
+          mapping.warnings.push(`destino declarado por selección explícita: propietarioId='${parche.propietarioDestinoId}' (no inferido; se valida contra el catálogo y el ámbito)`);
+        }
+      }
       const baseB1 = entrada.normalizadosB1?.[indice] ?? null;
       const general = construirNormalizadoGeneral(entidad, mapping, parche);
       const normalizado = baseB1
@@ -227,6 +253,7 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
         propietarioDestinoId: null,
         inmuebleDestinoId: null,
         camposDesconocidos: Object.keys(crudo),
+        camposSinDestino: [],
         warnings: [],
         conflictos: [`error de mapping: ${detalle}`],
       });
@@ -289,6 +316,7 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
       propietarioDestinoId: linea.propietarioDestinoId,
       inmuebleDestinoId: linea.inmuebleDestinoId,
       camposDesconocidos: [...(mapping?.desconocidos ?? [])],
+      camposSinDestino: [...(mapping?.sinDestino ?? [])],
       warnings,
       conflictos: linea.decision === 'BLOQUEADO' ? [linea.motivo] : [],
     } satisfies ImportRecord;
@@ -301,6 +329,17 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
   const desconocidos = new Map<string, number>();
   for (const r of registros) {
     for (const c of r.camposDesconocidos) desconocidos.set(c, (desconocidos.get(c) ?? 0) + 1);
+  }
+  // Campos conocidos SIN destino: agregado por (campo, motivo). Se publican
+  // para que «no importado» sea verificable y no se confunda con «no leído».
+  const sinDestinoAgregado = new Map<string, { campo: string; motivo: string; registros: number }>();
+  for (const r of registros) {
+    for (const s of r.camposSinDestino) {
+      const clave = `${s.campo}␟${s.motivo}`;
+      const actual = sinDestinoAgregado.get(clave) ?? { campo: s.campo, motivo: s.motivo, registros: 0 };
+      actual.registros += 1;
+      sinDestinoAgregado.set(clave, actual);
+    }
   }
   const runSinInforme: ImportRun = {
     importRunId,
@@ -325,6 +364,8 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
     registros,
     camposDesconocidos: [...desconocidos.entries()]
       .map(([campo, n]) => ({ campo, registros: n }))
+      .sort((a, b) => b.registros - a.registros || (a.campo < b.campo ? -1 : 1)),
+    camposSinDestino: [...sinDestinoAgregado.values()]
       .sort((a, b) => b.registros - a.registros || (a.campo < b.campo ? -1 : 1)),
     dryRun,
     informe: '',

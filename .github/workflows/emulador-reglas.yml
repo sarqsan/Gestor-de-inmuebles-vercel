@@ -54,7 +54,10 @@ jobs:
             try {
               const r = JSON.parse(fs.readFileSync("emulador-resultados.json", "utf8"));
               cuerpo += `\nPruebas: ${r.numTotalTests} · correctas: ${r.numPassedTests} · fallidas: ${r.numFailedTests}\n`;
-              const fallidas = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status !== "passed").map((a) => `- ${a.fullName} (${a.status})`));
+              const fallidas = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status !== "passed").map((a) => {
+                const msg = (a.failureMessages || []).join(" ").replace(/\s+/g, " ").slice(0, 280);
+                return `- ${a.fullName} (${a.status})${msg ? `\n  > ${msg}` : ""}`;
+              }));
               if (fallidas.length) cuerpo += `\nFallidas:\n${fallidas.join("\n")}\n`;
             } catch (e) {
               cuerpo += "\nNo se generó resultado de pruebas (revisar la ejecución del job).\n";
@@ -80,8 +83,11 @@ jobs:
       - name: Tipos (tsc)
         run: npx tsc --noEmit -p .
 
-      - name: Suite completa (vitest)
-        run: npx vitest run
+      # La guardia A-04 (tests/guardia-a04-rama-sesion.test.ts) verifica la custodia del
+      # checkout de la SESIÓN DE SANDBOX (refs locales `main` y rama). Un checkout limpio de
+      # CI no tiene esas refs, así que esa prueba se ejecuta sólo en local (guardia del sandbox).
+      - name: Suite completa (vitest, sin la guardia A-04 de sandbox)
+        run: npx vitest run --exclude tests/guardia-a04-rama-sesion.test.ts
 
       - name: Build
         run: npm run build

@@ -264,6 +264,11 @@ async function promocionar(
   return { res, run };
 }
 
+/** Resultado por registro con su motivo real (para diagnosticar sin ambigüedad). */
+function resumenDetalle(res: ResultadoPromocion): string[] {
+  return res.detalle.map((d) => (d.resultado === 'FALLIDO' ? `FALLIDO: ${d.motivo}` : d.resultado));
+}
+
 const AMBITO_T: AmbitoAutorizado = { propietarioIdsLegibles: ['prop_t'], propietarioIdsEscribibles: ['prop_t'], esMaster: false };
 const AMBITO_G: AmbitoAutorizado = { propietarioIdsLegibles: ['prop_x'], propietarioIdsEscribibles: ['prop_x'], esMaster: false };
 
@@ -312,6 +317,7 @@ describe('éxito parcial y aislamiento entre registros', () => {
     const ajeno: Doc = { id: idAjeno, propietarioId: 'prop_t', propietarioPrincipalId: 'prop_t', direccion: 'AJENO ORIGINAL' };
     await escribirAdmin({ [`inmuebles/${idAjeno}`]: ajeno });
     const { res, run } = await promocionar('gestorG', 'prop_x', AMBITO_G, filas);
+    expect(resumenDetalle(res).sort()).toEqual(['CREADO', expect.stringMatching(/^FALLIDO: /)]);
     expect(res.creados).toBe(1);
     expect(res.fallidos).toBe(1);
     expect(await leerAdmin(`inmuebles/${idAjeno}`)).toEqual(ajeno);
@@ -323,6 +329,7 @@ describe('éxito parcial y aislamiento entre registros', () => {
 describe('cartera delegada y revocación', () => {
   it('el gestor con LECTURA_ESCRITURA crea en su cartera', async () => {
     const { res, run } = await promocionar('gestorG', 'prop_x', AMBITO_G, [fila(1)]);
+    expect(resumenDetalle(res)).toEqual(['CREADO']);
     expect(res.creados).toBe(1);
     expect(await leerAdmin(`inmuebles/${run.registros[0]!.destinationId}`)).toMatchObject({ propietarioId: 'prop_x' });
   });

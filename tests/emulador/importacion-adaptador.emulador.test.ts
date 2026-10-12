@@ -161,8 +161,11 @@ function baseIdentidades(): Record<string, Doc> {
 }
 
 beforeAll(async () => {
-  if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_HOST) {
-    throw new Error('Faltan FIRESTORE_EMULATOR_HOST / FIREBASE_AUTH_EMULATOR_HOST: esta suite exige el emulador oficial (no se omite).');
+  // `emulators:exec` exporta FIRESTORE_EMULATOR_HOST. El Auth emulator usa su puerto por
+  // defecto (9099) salvo que el entorno lo indique; si no está levantado, la creación de
+  // usuarios falla en la propia prueba (nunca se omite en silencio).
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error('Falta FIRESTORE_EMULATOR_HOST: esta suite exige el emulador oficial de Firestore (no se omite).');
   }
   env = await initializeTestEnvironment({
     projectId: PROYECTO,

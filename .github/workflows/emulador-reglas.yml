@@ -54,6 +54,8 @@ jobs:
             try {
               const r = JSON.parse(fs.readFileSync("emulador-resultados.json", "utf8"));
               cuerpo += `\nPruebas: ${r.numTotalTests} · correctas: ${r.numPassedTests} · fallidas: ${r.numFailedTests}\n`;
+              const porArchivo = r.testResults.filter((f) => f.status !== "passed" && f.assertionResults.every((a) => a.status !== "failed")).map((f) => `- ARCHIVO ${f.name.split("/").slice(-1)[0]}: ${(f.message || "").replace(/\s+/g, " ").slice(0, 600)}`);
+              if (porArchivo.length) cuerpo += `\nErrores de archivo (preparación):\n${porArchivo.join("\n")}\n`;
               const fallidas = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status !== "passed").map((a) => {
                 const msg = (a.failureMessages || []).join(" ").replace(/\s+/g, " ").slice(0, 600);
                 return `- ${a.fullName} (${a.status})${msg ? `\n  > ${msg}` : ""}`;

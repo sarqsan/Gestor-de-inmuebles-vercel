@@ -947,11 +947,28 @@ service cloud.firestore {
         || (isPropietarioRole() && myPropId() in resource.data.titularesIds)
         || inmuebleEnCarteraGestionada(resource.data);
 
+      // CREACIÓN (importación / alta). Tres vías, ninguna por el selector de la UI:
+      //  1. master;
+      //  2. titular o copropietario principal propio (PROPIETARIO);
+      //  3. CARTERA DELEGADA con escritura (PROMOCIÓN, prueba en
+      //     tests/promocion-creacion-inmueble-reglas.test.ts): el mismo predicado
+      //     que el `update` (`inmuebleEnCarteraEscritura`: gestión ACTIVA +
+      //     LECTURA_ESCRITURA + responsable GESTOR, o `carterasE` del espejo).
+      //     Restricciones: una sola cartera (propietarioId), sin segundo titular
+      //     (propietarioPrincipalId, si existe, igual a propietarioId) y sin
+      //     declarar cotitulares (titularesIds). Ni lectura, ni delegación parcial,
+      //     ni administración amplían la creación.
       allow create: if isMasterAdmin() || (
         isPropietarioRole() && (
           ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
           ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
         )
+      ) || (
+        activeUser()
+        && 'propietarioId' in incoming() && incoming().propietarioId is string
+        && inmuebleEnCarteraEscritura(incoming())
+        && (!('propietarioPrincipalId' in incoming()) || incoming().propietarioPrincipalId == incoming().propietarioId)
+        && !('titularesIds' in incoming())
       );
       // DELTA-C (titularidad, FASE 8A): defensa adaptada de C (que congela
       // propietarioPrincipalId/propietarioSecundarioId en todo update no-master).

@@ -48,12 +48,14 @@ import {
   verificarBarrera,
 } from '../../lib/importExport/promocion';
 import { ejecutarPromocion, planificarPromocion } from '../../lib/importExport/ejecucion';
+import { evaluarPreflightIdentidadImport } from '../../lib/importExport/preflight';
 import type { ResolucionTitularImport } from '../../lib/importExport/titularidadImportacion';
 import {
   ambitoAutorizadoDesdeUsuario,
   cargarFuentesCatalogo,
   catalogosDesdeFuentes,
   crearPuertoFirebase,
+  leerIdentidadCanonicaImport,
   type FuentesCatalogo,
 } from '../../lib/importExportFirebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
@@ -430,6 +432,18 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         autorizacion, run, canonicalBatchSha256: fichero.hash, explicitExecutionToken: token,
         seleccionFingerprints: seleccion, decisiones, ambito,
       });
+      // PREFLIGHT DE IDENTIDAD (antes de escribir nada): espejo canónico de la sesión
+      // frente a la ficha y a los titulares de destino. El selector de titular NO
+      // concede permisos: sólo cuentan el titular propio, `carterasE` o master.
+      const identidadCanonica = auth.currentUser ? await leerIdentidadCanonicaImport() : null;
+      const preflight = evaluarPreflightIdentidadImport({
+        identidad: identidadCanonica,
+        ficha: usuarioEf,
+        destinos: plan.operaciones.map((o) => o.propietarioDestinoId),
+      });
+      if (!preflight.pasa) {
+        throw new Error(`preflight de identidad (no se ha escrito nada): ${preflight.motivos.join(' | ')}`);
+      }
       const puerto = crearPuertoFirebase(identidad);
       const res = await ejecutarPromocion({
         plan, run, decisiones, puerto, actor: identidad.usuarioId, fechaHora: new Date().toISOString(),

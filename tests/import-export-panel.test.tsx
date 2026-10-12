@@ -14,7 +14,7 @@
  * @vitest-environment jsdom
  */
 import React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mem = vi.hoisted(() => ({
@@ -30,6 +30,8 @@ const mem = vi.hoisted(() => ({
   scopesVistos: [] as unknown[],
   /** Gestiones de cartera que el servicio mockeado devuelve para la autocarga. */
   gestiones: [] as unknown[],
+  /** Identidad CANÓNICA simulada para el preflight (null = sin espejo verificable). */
+  identidadCanonica: null as null | Record<string, unknown>,
 }));
 
 vi.mock('../src/lib/firebase', () => ({
@@ -53,6 +55,7 @@ vi.mock('../src/lib/importExportFirebase', async (importOriginal) => {
   return {
     ...(await (importOriginal() as Promise<Record<string, unknown>>)),
     ambitoAutorizadoDesdeUsuario: ambitoReal.ambitoAutorizadoDesdeUsuario,
+    leerIdentidadCanonicaImport: async () => mem.identidadCanonica,
     cargarFuentesCatalogo: async (scope?: unknown) => {
       mem.scopesVistos.push(scope);
       return mem.fuentes ?? ({ propietarios: [], inmuebles: [], contratos: [], gastos: [] });
@@ -109,6 +112,7 @@ afterEach(() => {
   mem.descargado = null;
   mem.scopesVistos = [];
   mem.gestiones = [];
+  mem.identidadCanonica = null;
 });
 
 const MASTER = {
@@ -133,6 +137,36 @@ async function subirFichero(container: HTMLElement) {
 }
 
 describe('D1: flujo completo analizar → decidir → autorizar → promocionar', () => {
+  // Sesión del master: espejo canónico SIMULADO (la proyección real exige el correo
+  // canónico del master; el preflight exige master para un ADMINISTRADOR).
+  const SESION_MASTER = { uid: 'u_master', email: 'master@t.es' };
+  const IDENTIDAD_MASTER = {
+    uid: 'u_master', usuarioId: 'u_master', usuarioEmail: 'master@t.es',
+    usuarioNombre: 'Master', master: true, carterasL: [], carterasE: [],
+  };
+  beforeEach(() => {
+    mem.currentUser = { ...SESION_MASTER };
+    mem.identidadCanonica = { ...IDENTIDAD_MASTER };
+  });
+
+  it('sin identidad canónica verificable, Promocionar bloquea por preflight y no escribe', async () => {
+    mem.identidadCanonica = null;
+    const { container } = render(<ImportExportPanel inmuebles={[]} usuario={MASTER} gestiones={[]} />);
+    await subirFichero(container);
+    fireEvent.click(screen.getByText('Analizar (dry-run)'));
+    await screen.findByText('Decisiones de promoción (B1 G-13: sin decisión no se promociona)');
+    const selects = container.querySelectorAll('li select');
+    fireEvent.change(selects[0], { target: { value: 'arrendador' } });
+    fireEvent.change(selects[1], { target: { value: 'PENDIENTE' } });
+    fireEvent.change(selects[2], { target: { value: 'true' } });
+    fireEvent.click(screen.getByText('Autorizar (O7)'));
+    await screen.findByText(/CONCEDIDA/);
+    fireEvent.click(screen.getByText('Promocionar selección'));
+    await screen.findByText(/preflight de identidad \(no se ha escrito nada\)/);
+    expect(mem.gastosCreados).toHaveLength(0);
+    expect(screen.queryByText(/INFORME DE PROMOCIÓN/)).toBeNull();
+  });
+
   it('Autorizar responde CONCEDIDA y Promocionar escribe por el puerto', async () => {
     const { container } = render(<ImportExportPanel inmuebles={[]} usuario={MASTER} gestiones={[]} />);
     await subirFichero(container);

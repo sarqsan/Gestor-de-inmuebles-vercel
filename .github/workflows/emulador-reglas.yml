@@ -111,7 +111,7 @@ jobs:
             let cuerpo = `### Tipos, suite completa: ${process.env.RESULTADO === "success" ? "CORRECTO" : "FALLIDO"}\n\nCommit: \`${process.env.SHA}\`\n`;
             try {
               const r = JSON.parse(fs.readFileSync("vitest-resultados.json", "utf8"));
-              cuerpo += `\nArchivos: ${r.numPassedTestSuites}/${r.numTotalTestSuites} · pruebas: ${r.numTotalTests} · correctas: ${r.numPassedTests} · fallidas: ${r.numFailedTests}\n`;
+              cuerpo += `\nArchivos correctos: ${r.testResults.filter((f) => f.status === "passed").length}/${r.testResults.length} · pruebas: ${r.numTotalTests} · correctas: ${r.numPassedTests} · fallidas: ${r.numFailedTests}\n`;
               const porArchivo = r.testResults.filter((f) => f.status !== "passed" && f.assertionResults.every((a) => a.status !== "failed")).map((f) => `- ARCHIVO ${f.name.split("/").slice(-2).join("/")}: ${(f.message || "").replace(/\s+/g, " ").slice(0, 400)}`);
               if (porArchivo.length) cuerpo += `\nErrores de archivo:\n${porArchivo.join("\n")}\n`;
               const fallidas = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status === "failed").map((a) => `- ${f.name.split("/").slice(-2).join("/")} > ${a.fullName}\n  > ${(a.failureMessages || []).join(" ").replace(/\s+/g, " ").slice(0, 400)}`));

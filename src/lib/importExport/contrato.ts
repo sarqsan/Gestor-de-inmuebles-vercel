@@ -33,6 +33,14 @@ export const FUENTE_EXTERNA_SIN_VERSION = 'external/unknown';
 /** Campo presente en origen pero sin mapping: se ignora SIN romper la importación. */
 export const IGNORADO_NO_MAPEADO = 'IGNORADO_NO_MAPEADO';
 
+/**
+ * Destino «virtual» de una columna que IDENTIFICA el registro en origen
+ * (p. ej. 'ID Inmueble'). No es un campo del modelo: va a
+ * `proveniencia.sourceRecordId`, que es lo que alimenta la detección de
+ * duplicados y la trazabilidad del registro.
+ */
+export const CAMPO_IDENTIDAD_ORIGEN = 'sourceRecordId';
+
 /** Marcador de cabecera de archivos generados por el exportador propio. */
 export const MARCA_EXPORT_PROPIO = '__erpExport';
 
@@ -123,6 +131,12 @@ export interface ImportRecord {
   inmuebleDestinoId: string | null;
   /** Campos presentes en origen sin mapping (IGNORADO_NO_MAPEADO, no fatal). */
   camposDesconocidos: readonly string[];
+  /**
+   * Campos CONOCIDOS sin destino en el modelo: no son desconocidos, no se
+   * importan y cada uno lleva su motivo visible (titularidad, porcentajes,
+   * agregados anuales…). Nunca se ocultan.
+   */
+  camposSinDestino: ReadonlyArray<{ campo: string; motivo: string }>;
   warnings: readonly string[];
   conflictos: readonly string[];
 }
@@ -155,6 +169,11 @@ export interface ImportRun {
   registros: readonly ImportRecord[];
   /** Agregado de campos desconocidos: campo → nº de registros afectados. */
   camposDesconocidos: ReadonlyArray<{ campo: string; registros: number }>;
+  /**
+   * Agregado de campos CONOCIDOS SIN destino: campo → motivo + nº de registros.
+   * Se muestran porque «no importado» no puede confundirse con «no leído».
+   */
+  camposSinDestino: ReadonlyArray<{ campo: string; motivo: string; registros: number }>;
   /** Resultado B4 íntegro (motor reutilizado; base de O7). */
   dryRun: DryRunResult;
   informe: string;

@@ -32,6 +32,13 @@ export function generarInformeImportacion(run: ImportRun): string {
     L.push(`    · '${c.campo}' en ${c.registros} registro(s) → ${IGNORADO_NO_MAPEADO}`);
   }
   if (run.camposDesconocidos.length > 20) L.push(`    · …y ${run.camposDesconocidos.length - 20} más`);
+  // 12b. Campos CONOCIDOS sin destino: no se importan, con motivo. Se listan
+  // para que «no importado» sea verificable y no se confunda con «no leído».
+  L.push(`12b. campos conocidos SIN destino (no importados, con motivo): ${run.camposSinDestino.length} distinto(s)`);
+  for (const c of run.camposSinDestino.slice(0, 20)) {
+    L.push(`    · '${c.campo}' en ${c.registros} registro(s) → NO IMPORTADO: ${c.motivo}`);
+  }
+  if (run.camposSinDestino.length > 20) L.push(`    · …y ${run.camposSinDestino.length - 20} más`);
   L.push(`13. errores estructurales: ${run.errorRecords}`);
   for (const e of run.registros.filter((x) => x.sourceRecordId.startsWith('__ERROR_IE_'))) {
     L.push(`    · ${lineaRegistro(e)}`);

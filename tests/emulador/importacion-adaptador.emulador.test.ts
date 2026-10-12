@@ -264,9 +264,17 @@ async function promocionar(
   return { res, run };
 }
 
-/** Resultado por registro con su motivo real (para diagnosticar sin ambigüedad). */
+/** Resultado por registro con su motivo real. */
 function resumenDetalle(res: ResultadoPromocion): string[] {
   return res.detalle.map((d) => (d.resultado === 'FALLIDO' ? `FALLIDO: ${d.motivo}` : d.resultado));
+}
+
+/** Falla con el texto completo de cada registro (los mensajes de expect se truncan). */
+function exigirCreadoTodo(res: ResultadoPromocion, esperado: string[]): void {
+  const real = resumenDetalle(res);
+  if (JSON.stringify([...real].sort()) !== JSON.stringify([...esperado].sort())) {
+    throw new Error(`resultado por registro distinto del esperado. Esperado: ${JSON.stringify(esperado)}. Real: ${JSON.stringify(real)}`);
+  }
 }
 
 const AMBITO_T: AmbitoAutorizado = { propietarioIdsLegibles: ['prop_t'], propietarioIdsEscribibles: ['prop_t'], esMaster: false };
@@ -317,7 +325,9 @@ describe('éxito parcial y aislamiento entre registros', () => {
     const ajeno: Doc = { id: idAjeno, propietarioId: 'prop_t', propietarioPrincipalId: 'prop_t', direccion: 'AJENO ORIGINAL' };
     await escribirAdmin({ [`inmuebles/${idAjeno}`]: ajeno });
     const { res, run } = await promocionar('gestorG', 'prop_x', AMBITO_G, filas);
-    expect(resumenDetalle(res).sort()).toEqual(['CREADO', expect.stringMatching(/^FALLIDO: /)]);
+    if (resumenDetalle(res).filter((m) => m === 'CREADO').length !== 1) {
+      throw new Error(`éxito parcial esperado (1 CREADO + 1 FALLIDO). Real: ${JSON.stringify(resumenDetalle(res))}`);
+    }
     expect(res.creados).toBe(1);
     expect(res.fallidos).toBe(1);
     expect(await leerAdmin(`inmuebles/${idAjeno}`)).toEqual(ajeno);
@@ -329,7 +339,7 @@ describe('éxito parcial y aislamiento entre registros', () => {
 describe('cartera delegada y revocación', () => {
   it('el gestor con LECTURA_ESCRITURA crea en su cartera', async () => {
     const { res, run } = await promocionar('gestorG', 'prop_x', AMBITO_G, [fila(1)]);
-    expect(resumenDetalle(res)).toEqual(['CREADO']);
+    exigirCreadoTodo(res, ['CREADO']);
     expect(res.creados).toBe(1);
     expect(await leerAdmin(`inmuebles/${run.registros[0]!.destinationId}`)).toMatchObject({ propietarioId: 'prop_x' });
   });

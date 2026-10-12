@@ -108,6 +108,8 @@ function puertoFake(fallaEn?: string): PuertoPersistenciaImport & {
       if (fallaEn === cb.id) throw new Error('fallo inyectado');
       cobros.set(`${c}/${cb.id}`, cb);
     },
+    async existeTitularidad(_i, _p) { return false; },
+    async crearTitularidad() {},
     async auditar(e) { auditoria.push(e); },
   };
 }
@@ -307,15 +309,31 @@ describe('mapping', () => {
     expect(m.desconocidos).toEqual(['campoDesconocido1']);
     expect(m.canonico['importe']).toBe(5);
   });
-  it('conocido sin destino (owner) → IGNORADO_NO_MAPEADO con motivo', () => {
+  it('conocido con destino declarado (owner) → se conserva, no se ignora', () => {
+    // `owner` (user1/user2/both) declara A QUÉ ranura pertenece la propiedad, no
+    // quién es el titular: se conserva como declaración pendiente de resolución
+    // en vez de descartarse (nada reconocido se pierde).
     const m = aplicarMapping('INMUEBLE', { owner: 'user1', direccion: 'C X' });
-    expect(m.mapeos.find((x) => x.campoOrigen === 'owner')?.campoCanonico).toBe(IGNORADO_NO_MAPEADO);
+    const mapeo = m.mapeos.find((x) => x.campoOrigen === 'owner');
+    expect(mapeo?.campoCanonico).toBe('titularidadDeclarada.texto');
     expect(m.desconocidos).not.toContain('owner');
+    expect(m.conservados.find((c) => c.clave === 'titularidadDeclarada.texto')?.valor).toBe('user1');
+    expect(m.conservados.find((c) => c.clave === 'titularidadDeclarada.texto')?.estado).toBe('PENDIENTE_RESOLUCION');
   });
-  it('monthlyRent 1→N (precio + rentaMensual)', () => {
+  it('monthlyRent de la fuente externa es 1→N (precio + rentaMensual + renta DECLARADA persistible)', () => {
     const m = aplicarMapping('INMUEBLE', { monthlyRent: 500 });
     expect(m.canonico['precio']).toBe(500);
     expect(m.canonico['rentaMensual']).toBe(500);
+    // La renta del respaldo se conserva ADEMÁS como declarada: es el único de los
+    // tres destinos que el alta patrimonial persiste (precio/rentaMensual son de
+    // publicación y explotación, y el alta no los escribe).
+    expect(m.canonico['rentaMensualDeclarada']).toBe(500);
+  });
+  it('la RENTA DECLARADA de la plantilla NO se escribe en precio/rentaMensual', () => {
+    const m = aplicarMapping('INMUEBLE', { 'Renta Mensual (€)': 500 });
+    expect(m.canonico['rentaMensualDeclarada']).toBe(500);
+    expect(m.canonico['precio']).toBeUndefined();
+    expect(m.canonico['rentaMensual']).toBeUndefined();
   });
   it('multi-inquilino → primero + aviso (B1 I-13)', () => {
     const m = aplicarMapping('INMUEBLE', { tenantName: 'Ana, Bruno' });

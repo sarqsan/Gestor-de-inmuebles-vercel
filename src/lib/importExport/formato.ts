@@ -28,8 +28,47 @@ const FIRMA_OLE2 = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] as const;
  * Se incluyen AMBOS (tipo MIME y extensión) porque en Android el selector
  * filtra por MIME y en escritorio por extensión.
  */
-export const ACEPTAR_IMPORTACION =
-  'application/json,.json,text/csv,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx,application/vnd.ms-excel,.xls';
+/** Extensiones admitidas por el importador (validadas tras la selección). */
+export const EXTENSIONES_IMPORTACION = ['.json', '.xlsx', '.xls', '.csv'] as const;
+
+/**
+ * MIME + extensiones declarados en el `<input type="file">`.
+ *
+ * Se incluyen AMBOS porque en Android el selector del sistema filtra por MIME
+ * y en escritorio por extensión. Los MIME genéricos son imprescindibles: un
+ * `.json` descargado de Drive/Gmail llega muy a menudo como `text/plain` o
+ * `application/octet-stream` y, si no se declaran, aparece en gris y no se
+ * puede elegir (es exactamente la implementación que ya funciona en el Gestor
+ * Patrimonial de referencia: IMPORT_ACCEPT).
+ */
+export const ACEPTAR_IMPORTACION = [
+  ...EXTENSIONES_IMPORTACION,
+  'application/json',
+  'text/json',
+  'text/plain',
+  'text/csv',
+  'application/octet-stream',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/excel',
+].join(',');
+
+/**
+ * Valida la EXTENSIÓN del fichero ya seleccionado (el filtro del selector no es
+ * fiable: en Android puede entregar documentos sin extensión o con nombre
+ * genérico). Devuelve un mensaje claro o `null` si la extensión es admisible.
+ *
+ * Nota: la extensión NO decide el formato (eso lo hace la firma); esta
+ * validación sólo evita intentar procesar formatos ajenos al importador y, si
+ * la firma identifica el formato, se acepta incluso sin extensión.
+ */
+export function validarNombreFicheroImportacion(nombre: string, bytes?: Uint8Array): string | null {
+  const extension = extensionDe(nombre);
+  if ((EXTENSIONES_IMPORTACION as readonly string[]).includes(`.${extension}`)) return null;
+  if (bytes && formatoPorFirma(bytes)) return null;
+  const mostrada = extension === '' ? 'sin extensión' : `.${extension}`;
+  return `Formato no admitido (${mostrada}). Selecciona un archivo JSON, XLSX, XLS o CSV.`;
+}
 
 export function esZip(bytes: Uint8Array): boolean {
   return bytes.length >= FIRMA_ZIP.length && FIRMA_ZIP.every((b, i) => bytes[i] === b);
@@ -98,7 +137,20 @@ export interface EstructuraJson {
   registros: number | null;
   /** Descripción legible para el mensaje de error. */
   descripcion: string;
+  /**
+   * Lista de MOVIMIENTOS (gastos/ingresos) del respaldo, si existe.
+   *
+   * Portado del Gestor Patrimonial de referencia: al elegir un archivo, si no
+   * hay lista de inmuebles pero sí de movimientos, el mensaje debe decir
+   * EXACTAMENTE qué contiene («lista de gastos/ingresos, no de inmuebles») en
+   * lugar de un «objeto sin lista» genérico; y al importar entidades GASTO/COBRO
+   * es ésta la lista que hay que leer.
+   */
+  listaMovimientos: { clave: string; ruta: readonly string[]; registros: number } | null;
 }
+
+/** Claves reales con listas de movimientos en respaldos (Gestor Patrimonial). */
+const CLAVES_MOVIMIENTOS = ['expenses', 'gastos', 'ingresos', 'movimientos', 'transacciones', 'payments'] as const;
 
 /**
  * Reconoce la estructura real de un JSON importable:
@@ -111,7 +163,7 @@ export interface EstructuraJson {
  */
 export function analizarEstructuraJson(raiz: unknown): EstructuraJson {
   const describir = (tipo: EstructuraJson['tipo'], descripcion: string, extra: Partial<EstructuraJson> = {}): EstructuraJson => ({
-    tipo, claves: [], rutaRegistros: null, registros: null, descripcion, ...extra,
+    tipo, claves: [], rutaRegistros: null, registros: null, descripcion, listaMovimientos: null, ...extra,
   });
   if (Array.isArray(raiz)) {
     const objetos = raiz.filter((x) => x !== null && typeof x === 'object' && !Array.isArray(x)).length;
@@ -122,7 +174,34 @@ export function analizarEstructuraJson(raiz: unknown): EstructuraJson {
   if (raiz !== null && typeof raiz === 'object') {
     const obj = raiz as Record<string, unknown>;
     const claves = Object.keys(obj);
-    const candidatas = ['records', 'registros', 'items', 'filas', 'data', 'datos', 'resultados'];
+    // Contenedores anidados habituales de un respaldo integral
+    // (`data` / `portfolio` / `state`): se desciende un nivel para reconocer la
+    // lista real en vez de declarar «objeto sin lista» (implementación portada
+    // del Gestor Patrimonial de referencia: detectImportStructure).
+    for (const contenedor of ['data', 'datos', 'portfolio', 'state', 'estado']) {
+      const anidado = obj[contenedor];
+      if (anidado !== null && typeof anidado === 'object' && !Array.isArray(anidado)) {
+        const interna = analizarEstructuraJson(anidado);
+        if (interna.registros !== null) {
+          return {
+            tipo: interna.tipo,
+            claves,
+            rutaRegistros: [contenedor, ...(interna.rutaRegistros ?? [])],
+            registros: interna.registros,
+            descripcion: `${interna.descripcion} (dentro de «${contenedor}»)`,
+            listaMovimientos: interna.listaMovimientos
+              ? { ...interna.listaMovimientos, ruta: [contenedor, ...interna.listaMovimientos.ruta] }
+              : null,
+          };
+        }
+      }
+      if (Array.isArray(anidado) && anidado.length > 0) {
+        return describir('objeto', `objeto con «${contenedor}» (${anidado.length} registro(s))`, {
+          claves, rutaRegistros: [contenedor], registros: anidado.length,
+        });
+      }
+    }
+    const candidatas = ['records', 'registros', 'items', 'filas', 'inmuebles', 'propiedades', 'properties', 'data', 'datos', 'resultados'];
     for (const c of candidatas) {
       const v = obj[c];
       if (Array.isArray(v)) {
@@ -145,6 +224,17 @@ export function analizarEstructuraJson(raiz: unknown): EstructuraJson {
         }
       }
     }
+    // Sin lista de inmuebles: ¿es un archivo de MOVIMIENTOS? (respaldo real).
+    for (const clave of CLAVES_MOVIMIENTOS) {
+      const v = obj[clave];
+      if (Array.isArray(v) && v.length > 0) {
+        return describir(
+          'objeto',
+          `objeto con «${clave}» (${v.length} movimiento(s)): es una lista de gastos/ingresos, no de inmuebles`,
+          { claves, listaMovimientos: { clave, ruta: [clave], registros: v.length } },
+        );
+      }
+    }
     return describir('objeto', `objeto sin lista de registros (claves: ${claves.slice(0, 8).join(', ') || 'ninguna'})`, { claves });
   }
   return describir('otro', `raíz de tipo ${raiz === null ? 'null' : typeof raiz} (se espera un array de objetos o un objeto con la lista)`);
@@ -158,6 +248,11 @@ export function motivoJsonSinRegistros(raiz: unknown): string {
   }
   if (e.tipo === 'array') {
     return 'el array raíz no contiene ningún objeto (sólo valores sueltos: se espera un array de objetos, uno por fila)';
+  }
+  if (e.listaMovimientos) {
+    // Mensaje concreto (portado del Gestor Patrimonial de referencia): el
+    // archivo sí trae datos, pero de OTRA entidad. No se importa como inmuebles.
+    return `el JSON contiene una lista de movimientos «${e.listaMovimientos.clave}» (${e.listaMovimientos.registros} registro(s)), no de inmuebles: importa ese archivo eligiendo la entidad GASTO/COBRO, o usa una plantilla de inmuebles`;
   }
   if (e.tipo === 'objeto' || e.tipo === 'sobre_propio') {
     return `no se encuentra la lista de registros (${e.descripcion}). Formatos admitidos: array de objetos, objeto con «records»/«registros»/«items»/«data», o un JSON exportado por la aplicación`;

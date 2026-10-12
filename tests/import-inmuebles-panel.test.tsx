@@ -20,6 +20,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 
 const mem = vi.hoisted(() => ({
   fuentes: null as null | { propietarios: unknown[]; inmuebles: unknown[]; contratos: unknown[]; gastos: unknown[] },
+  /** Escrituras realmente cursadas por el puerto falso (para verificar la persistencia). */
+  escrituras: null as null | {
+    inmuebles: Record<string, unknown>[];
+    titularidades: { inmuebleId: string; propietarioId: string; porcentajeTitularidad: number | null }[];
+  },
 }));
 
 vi.mock('../src/lib/firebase', () => ({
@@ -63,6 +68,11 @@ vi.mock('../src/lib/importExportFirebase', () => ({
     async existeCobro() { return false; },
     async crearGasto() {},
     async anexarCobro() {},
+    async crearInmueble(inm: Record<string, unknown>) { mem.escrituras?.inmuebles.push(inm); },
+    async existeTitularidad() { return false; },
+    async crearTitularidad(t: { inmuebleId: string; propietarioId: string; porcentajeTitularidad: number | null }) {
+      mem.escrituras?.titularidades.push(t);
+    },
     async auditar() {},
   }),
 }));
@@ -73,6 +83,7 @@ import { generarXlsx, type ColumnaXlsx } from '../src/lib/importExport';
 afterEach(() => {
   cleanup();
   mem.fuentes = null;
+  mem.escrituras = null;
 });
 
 const CABECERAS = [
@@ -163,9 +174,19 @@ describe('panel: titular destino en perfil PROPIETARIO', () => {
     // Sin destino: la importación se detiene y lo dice.
     await screen.findByText(/7 registro\(s\) sin titular destino determinado/, undefined, { timeout: 3000 });
     expect(screen.getByText(/Titular destino de la importación/)).toBeDefined();
-    // Ninguna cabecera desconocida: las 17 están reconocidas (mapeadas o sin destino).
+    // Ninguna cabecera desconocida y NINGUNA columna queda «reconocida y sin
+    // destino»: todas tienen destino real (modelo, declarado persistente o
+    // relación declarada pendiente de resolución).
     expect(screen.queryByText(/Campos desconocidos/)).toBeNull();
-    expect(screen.getByText(/Columnas reconocidas SIN destino/)).toBeDefined();
+    expect(screen.queryByText(/Columnas reconocidas SIN destino/)).toBeNull();
+    expect(screen.getByText(/Datos declarados CONSERVADOS con destino persistente/)).toBeDefined();
+    expect(screen.getByText(/Relaciones declaradas PENDIENTES de resolución/)).toBeDefined();
+    expect(screen.getByText(/Correspondencia columna → destino/)).toBeDefined();
+    expect(screen.getByText(/Resumen previo a la promoción/)).toBeDefined();
+    // La titularidad declarada se puede resolver a un titular existente (o dejar
+    // pendiente): el selector de ranura existe y no preselecciona nada.
+    const selectorRanura = screen.getByLabelText(/Titular para % Propietario 1 de INM-EXT-1/) as HTMLSelectElement;
+    expect(selectorRanura.value).toBe('');
 
     // Elegir destino + reanalizar: el bloqueo desaparece y el titular se resuelve.
     const selector = screen.getByLabelText(/Titular destino de la importación/) as HTMLSelectElement;
@@ -175,5 +196,108 @@ describe('panel: titular destino en perfil PROPIETARIO', () => {
       expect(screen.queryByText(/sin titular destino determinado/)).toBeNull();
     }, { timeout: 3000 });
     expect(screen.getByText('Ver registros (7)')).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recorrido REAL completo: respaldo del Gestor Patrimonial (JSON) → dry-run →
+// titularidad declarada resuelta por una persona → autorización → promoción.
+// ---------------------------------------------------------------------------
+
+describe('panel: respaldo del Gestor Patrimonial de punta a punta', () => {
+  const RESPALDO = {
+    user1: { name: 'Titular 1' },
+    user2: { name: 'Titular 2' },
+    properties: [{
+      id: 'gp_1',
+      address: 'Calle Referencia 7, Madrid',
+      owner: 'both',
+      ownershipPercentageUser1: 60,
+      ownershipPercentageUser2: 40,
+      tenantName: 'Ana Referencia',
+      tenantDni: '12345678A',
+      monthlyRent: 950,
+      purchasePrice: 180000,
+      landValuePercent: 25,
+      amortizationAmount: 3600,
+      expensesCommunity: 600,
+      expensesIBI: 450,
+      registrationDate: '2021-02-01',
+    }],
+    expenses: [{ id: 'exp_1', amount: 10 }],
+    contracts: [],
+    isOnboarded: true,
+  };
+
+  it('se importa fila a fila, exige titular destino, resuelve el 60 % declarado y lo persiste', async () => {
+    mem.fuentes = {
+      propietarios: [
+        { id: 'prop_A', nombre: 'Titular principal (sintético)' },
+        { id: 'prop_B', nombre: 'Segundo titular (sintético)' },
+      ],
+      inmuebles: [], contratos: [], gastos: [],
+    };
+    mem.escrituras = { inmuebles: [], titularidades: [] };
+
+    const { container } = render(<ImportExportPanel inmuebles={[]} />);
+    await subir(container, JSON.stringify(RESPALDO), 'respaldo_portfolio.json', 'application/json');
+    await waitFor(() => { expect(screen.getByText('Analizar (dry-run)')).toBeDefined(); });
+    fireEvent.click(screen.getByText('Analizar (dry-run)'));
+
+    // 1 fila (no el respaldo entero) y sin titular destino: se detiene y lo dice.
+    await screen.findByText(/1 registro\(s\) sin titular destino determinado/, undefined, { timeout: 3000 });
+    const selDestino = screen.getByLabelText(/Titular destino de la importación/) as HTMLSelectElement;
+    fireEvent.change(selDestino, { target: { value: 'prop_A' } });
+    fireEvent.click(screen.getByText('Aplicar destino y reanalizar (dry-run)'));
+    await waitFor(() => { expect(screen.queryByText(/sin titular destino determinado/)).toBeNull(); }, { timeout: 3000 });
+
+    // Nada declarado se oculta: datos conservados, relaciones pendientes y la
+    // correspondencia columna → destino están a la vista.
+    expect(screen.getByText(/Datos declarados CONSERVADOS con destino persistente/)).toBeDefined();
+    expect(screen.getByText(/Relaciones declaradas PENDIENTES de resolución/)).toBeDefined();
+    expect(screen.getByText(/Correspondencia columna → destino/)).toBeDefined();
+
+    // La persona asigna la ranura 1 (60 %) a un titular EXISTENTE: se persiste
+    // con el porcentaje DECLARADO (no se reparte el 40 % restante).
+    const selRanura = screen.getByLabelText(/Titular para % Propietario 1 de gp_1/) as HTMLSelectElement;
+    fireEvent.change(selRanura, { target: { value: 'prop_A' } });
+    fireEvent.click(screen.getByText('Aplicar titularidad y reanalizar (dry-run)'));
+    await waitFor(() => { expect(screen.getByText('Autorizar (O7)')).toBeDefined(); }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByText('Autorizar (O7)'));
+    await waitFor(() => { expect(screen.getByText(/Incluidos O7: 1/)).toBeDefined(); }, { timeout: 3000 });
+    fireEvent.click(screen.getByText('Promocionar selección'));
+    await screen.findByText(/INFORME DE PROMOCIÓN/, undefined, { timeout: 3000 });
+
+    // Persistencia verificada: un inmueble patrimonial con sus datos declarados
+    // y la titularidad resuelta con el porcentaje declarado.
+    expect(mem.escrituras!.inmuebles).toHaveLength(1);
+    const inm = mem.escrituras!.inmuebles[0]!;
+    expect(inm['direccion']).toBe('Calle Referencia 7, Madrid');
+    expect(inm['valorAdquisicion']).toBe(180000);
+    expect(inm['rentaMensualDeclarada']).toBe(950);
+    expect(inm['porcentajeSueloCatastral']).toBe(25);
+    expect(inm['amortizacionAnualDeclarada']).toBe(3600);
+    expect(inm['fechaRegistroPatrimonial']).toBe('2021-02-01');
+    expect(inm['gastosAnualesDeclarados']).toMatchObject({ comunidad: 600, ibi: 450 });
+    expect(inm['inquilinoDeclarado']).toMatchObject({ nombre: 'Ana Referencia', dni: '12345678A' });
+    expect(inm['titularidadDeclarada']).toMatchObject({ texto: 'both', porcentajePropietario1: 60, porcentajePropietario2: 40, resuelta: true });
+    // Nunca se publica ni se escribe renta vigente/precio desde el respaldo.
+    expect(inm['estado']).toBeUndefined();
+    expect(inm['precio']).toBeUndefined();
+    expect(inm['rentaMensual']).toBeUndefined();
+    expect(inm['inquilinoActualNombre']).toBeUndefined();
+    // Una sola relación, la de la ranura resuelta por la persona, con el
+    // porcentaje DECLARADO (60) y su campo de origen: el 40 % restante queda
+    // pendiente, nunca repartido.
+    expect(mem.escrituras!.titularidades).toHaveLength(1);
+    expect(mem.escrituras!.titularidades[0]).toMatchObject({
+      propietarioId: 'prop_A',
+      porcentajeTitularidad: 60,
+      // Queda trazado DE QUÉ columna del respaldo venía el porcentaje.
+      campoOrigen: 'ownershipPercentageUser1',
+      valorOriginal: 60,
+    });
+    expect(mem.escrituras!.titularidades[0]!.inmuebleId).toBe(String(inm['id']));
   });
 });

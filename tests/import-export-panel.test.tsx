@@ -72,6 +72,8 @@ vi.mock('../src/lib/importExportFirebase', async (importOriginal) => {
       async existeCobro() { return false; },
       async crearGasto(g: unknown) { mem.gastosCreados.push(g); },
       async anexarCobro() {},
+      async existeTitularidad() { return false; },
+      async crearTitularidad() {},
       async auditar(e: unknown) { mem.auditoria.push(e); },
     }),
   };

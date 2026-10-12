@@ -324,12 +324,22 @@ describe('3) Las 17 cabeceras: cada una se mapea o se declara no importable', ()
     expect(canonico['direccion']).toBe('Calle Sintética 1');
     expect(canonico['referenciaCatastral']).toBe('CAT-EXT-1');
     expect(canonico['valorAdquisicion']).toBe(121000);
-    expect(canonico['precio']).toBe(660);
-    expect(canonico['rentaMensual']).toBe(660);
-    expect(canonico['fechaAdquisicion']).toBe('2019-05-01');
-    // Fila 1 tiene inquilino; la fila 2 no (vacío ⇒ ausente, no se inventa).
-    expect(run.registros.find((r) => r.sourceRecordId === 'INM-EXT-1')?.canonicalData['inquilinoActualNombre']).toBeUndefined();
-    expect(run.registros.find((r) => r.sourceRecordId === 'INM-EXT-2')?.canonicalData['inquilinoActualNombre']).toBe('Inquilino Sintético');
+    // RENTA DECLARADA: campo propio. NO se escribe `precio` (alimenta la ficha
+    // pública) ni `rentaMensual` (renta vigente de explotación): la fila sólo
+    // declara una renta.
+    expect(canonico['rentaMensualDeclarada']).toBe(660);
+    expect(canonico['precio']).toBeUndefined();
+    expect(canonico['rentaMensual']).toBeUndefined();
+    // FECHA DE REGISTRO ≠ fecha de adquisición.
+    expect(canonico['fechaRegistroPatrimonial']).toBe('2019-05-01');
+    expect(canonico['fechaAdquisicion']).toBeUndefined();
+    // Datos declarados con campo propio (equivalen al Gestor Patrimonial).
+    expect(canonico['porcentajeSueloCatastral']).toBe(20);
+    expect(canonico['amortizacionAnualDeclarada']).toBe(3001);
+    expect(canonico['gastosAnualesDeclarados']).toEqual({ comunidad: 45, ibi: 320, reparaciones: 0, seguro: 180 });
+    // El inquilino declarado NO se escribe como inquilino actual: queda como
+    // declaración pendiente (no se inventa un arrendamiento).
+    expect(canonico['inquilinoActualNombre']).toBeUndefined();
   });
 
   it('«ID Inmueble» va a la identidad de origen (sourceRecordId), nunca a inmuebleId', () => {
@@ -338,21 +348,50 @@ describe('3) Las 17 cabeceras: cada una se mapea o se declara no importable', ()
     expect(run.registros.map((r) => r.sourceRecordId)).toEqual(['INM-EXT-1', 'INM-EXT-2']);
   });
 
-  it('cabeceras SIN destino: declaradas expresamente, con motivo y valor conservado', () => {
-    for (const campo of ['Titularidad', '% Propietario 1', '% Propietario 2', 'Amortización Anual (€)', 'Gastos Comunidad (€)', 'Gastos IBI (€)', 'Gastos Reparaciones (€)', 'Gastos Seguro (€)', '% Suelo Catastral', 'DNI Inquilino']) {
-      expect(sinDestino.has(campo), `falta declarar sin destino: ${campo}`).toBe(true);
-      expect(sinDestino.get(campo)?.length ?? 0).toBeGreaterThan(20);
+  it('relaciones declaradas: conservadas con destino persistente (ya NO quedan sin destino)', () => {
+    // Ninguna columna de la plantilla queda «reconocida y sin destino»: las
+    // relaciones se conservan como declaradas y las demás tienen campo propio.
+    for (const campo of ['Titularidad', '% Propietario 1', '% Propietario 2', 'Amortización Anual (€)', 'Gastos Comunidad (€)', 'Gastos IBI (€)', 'Gastos Reparaciones (€)', 'Gastos Seguro (€)', '% Suelo Catastral', 'DNI Inquilino', 'Fecha Registro', 'Renta Mensual (€)']) {
+      expect(sinDestino.has(campo), `sigue declarada sin destino: ${campo}`).toBe(false);
     }
-    // El valor original sigue en la evidencia (no se pierde, no se importa).
+    const porClave = new Map(registro.declarados!.map((d) => [d.clave, d]));
+    expect(porClave.get('titularidadDeclarada.texto')?.valorOriginal).toBe('Propietario único');
+    expect(porClave.get('titularidadDeclarada.texto')?.estado).toBe('PENDIENTE_RESOLUCION');
+    expect(porClave.get('titularidadDeclarada.propietario1')?.valorOriginal).toBe(100);
+    expect(porClave.get('titularidadDeclarada.propietario1')?.estado).toBe('PENDIENTE_RESOLUCION');
+    // Fila 2 (INM-EXT-2) sí declara inquilino y DNI; la fila 1 los deja vacíos.
+    const fila2 = run.registros.find((r) => r.sourceRecordId === 'INM-EXT-2')!;
+    const claves2 = new Map((fila2.declarados ?? []).map((d) => [d.clave, d]));
+    expect(claves2.get('inquilinoDeclarado.nombre')?.valor).toBe('Inquilino Sintético');
+    expect(claves2.get('inquilinoDeclarado.dni')?.valor).toBe('33333333C');
+    // El valor original sigue en la evidencia del dry-run (nada se pierde).
     const original = run.dryRun.lineas.find((l) => l.proveniencia.sourceId === 'INM-EXT-1')?.datoOriginal;
     expect(original?.['% Propietario 1']).toBe(100);
     expect(original?.['Titularidad']).toBe('Propietario único');
+  });
+
+  it('las relaciones declaradas quedan PENDIENTES con el dato exacto que falta', () => {
+    const pendientes = registro.relacionesPendientes ?? [];
+    const texto = pendientes.map((x) => `${x.campoOrigen}: ${x.motivo}`).join(' | ').toLowerCase();
+    expect(texto).toContain('titularidad');
+    expect(texto).toContain('sin titular identificado');
+    // El inquilino declarado (fila 2) también queda pendiente, sin crear contrato.
+    const fila2 = run.registros.find((r) => r.sourceRecordId === 'INM-EXT-2')!;
+    const pendientes2 = (fila2.relacionesPendientes ?? []).map((x) => `${x.campoOrigen}: ${x.motivo}`).join(' | ').toLowerCase();
+    expect(pendientes2).toContain('inquilino');
+    expect(fila2.vinculosInquilinoCandidatos ?? []).toEqual([]);
+    // El dato que falta se dice explícitamente: el titular al que asignar el %.
+    expect(texto).toContain('requiere resolución explícita');
+    // Ninguna relación se resuelve sin asignación humana explícita.
+    expect(registro.titularidadResuelta ?? []).toEqual([]);
+    expect(registro.canonicalData['titularesIds']).toBeUndefined();
   });
 
   it('las 17 cabeceras están cubiertas: ninguna desconocida y ninguna silenciosa', () => {
     const cubiertas = new Set([
       ...run.registros.flatMap((r) => r.fieldMappings.map((m) => m.campoOrigen)),
       ...run.camposSinDestino.map((c) => c.campo),
+      ...run.registros.flatMap((r) => (r.declarados ?? []).map((d) => d.campoOrigen)),
     ]);
     for (const cabecera of CABECERAS_17) {
       expect(cubiertas.has(cabecera), `cabecera sin tratar: ${cabecera}`).toBe(true);
@@ -386,22 +425,27 @@ describe('4) Porcentajes y cotitularidad: sin inferencias ni repartos', () => {
   });
   const registro = run.registros[0]!;
 
-  it('no se escribe ningún porcentaje ni titularidad inferida', () => {
-    const claves = Object.keys(registro.canonicalData);
-    expect(claves.filter((c) => /porcentaje|propietario.?\d|cotitular|titularidad/i.test(c))).toEqual([]);
+  it('no se crea ninguna titularidad ni relación por los porcentajes declarados', () => {
+    expect(Object.keys(registro.canonicalData).filter((c) => /titularidad|propietario.?\d|cotitular/i.test(c))).toEqual([]);
     expect(registro.canonicalData['titularesIds']).toBeUndefined();
     expect(registro.canonicalData['propietarioSecundarioId']).toBeUndefined();
     expect(registro.canonicalData['propietarioPrincipalId']).toBeUndefined();
+    expect(registro.titularidadResuelta ?? []).toEqual([]);
   });
 
-  it('el 60/40 original se conserva en la evidencia y se declara no importable', () => {
+  it('el 60/40 original se conserva como declaración pendiente, sin reparto', () => {
     const original = run.dryRun.lineas[0]!.datoOriginal;
     expect(original['% Propietario 1']).toBe(60);
     expect(original['% Propietario 2']).toBe(40);
     expect(original['Titularidad']).toBe('Cotitularidad');
-    const motivos = run.camposSinDestino.map((c) => c.motivo).join(' | ');
-    expect(motivos).toContain('no reparte porcentajes');
-    expect(motivos).toContain('TITULARIDAD');
+    const porClave = new Map(registro.declarados!.map((d) => [d.clave, d]));
+    expect(porClave.get('titularidadDeclarada.propietario1')?.valor).toBe(60);
+    expect(porClave.get('titularidadDeclarada.propietario2')?.valor).toBe(40);
+    // Pendientes: sin asignación humana NO se completa el reparto (ni 40, ni
+    // 50/50, ni 100 %).
+    const motivos = (registro.relacionesPendientes ?? []).map((x) => x.motivo).join(' | ').toLowerCase();
+    expect(motivos).toContain('sin titular identificado');
+    expect(motivos).toContain('no se reparte');
   });
 
   it('una fila con un solo titular al 100 % tampoco genera reparto automático', () => {
@@ -414,7 +458,11 @@ describe('4) Porcentajes y cotitularidad: sin inferencias ni repartos', () => {
     });
     expect(r.registros[0]!.canonicalData['titularesIds']).toBeUndefined();
     expect(r.dryRun.lineas[0]!.datoOriginal['% Propietario 1']).toBe(100);
-    expect(r.camposSinDestino.some((c) => c.campo === '% Propietario 2')).toBe(true);
+    // La ranura 2 vacía no inventa un 0 % ni un 50 %: simplemente no consta.
+    const claves = (r.registros[0]!.declarados ?? []).map((d) => d.clave);
+    expect(claves).toContain('titularidadDeclarada.propietario1');
+    expect(claves).not.toContain('titularidadDeclarada.propietario2');
+    expect(r.registros[0]!.titularidadResuelta ?? []).toEqual([]);
   });
 });
 

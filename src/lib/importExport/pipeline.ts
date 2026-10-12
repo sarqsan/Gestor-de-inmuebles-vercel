@@ -32,11 +32,18 @@ import type {
 } from '../migracion/tipos';
 import type {
   ClasificacionDuplicadoImport,
+  DatoConservadoImport,
   FormatoEntrada,
   ImportRecord,
   ImportRun,
+  RelacionPendienteImport,
   TipoFuente,
 } from './contrato';
+import {
+  candidatosVinculoInquilino,
+  resolverTitularidadDeclarada,
+  type ResolucionTitularImport,
+} from './titularidadImportacion';
 import {
   ESQUEMA_IMPORT_EXPORT_VERSION,
   FUENTE_EXTERNA_SIN_VERSION,
@@ -106,7 +113,18 @@ export interface EntradaImportDryRun {
    *    como decisión humana en el mapping. Si el id no está permitido o no
    *    existe en el catálogo, B4 lo bloquea con su motivo (no se sustituye).
    */
-  parches?: ReadonlyArray<{ deducible?: boolean; propietarioDestinoId?: string } | null>;
+  parches?: ReadonlyArray<{
+    deducible?: boolean;
+    propietarioDestinoId?: string;
+    /** Resolución humana de las ranuras de titularidad declaradas (nunca inferida). */
+    resolucionTitularidad?: readonly ResolucionTitularImport[];
+  } | null>;
+  /**
+   * Contratos candidatos para un vínculo de inquilino INEQUÍVOCO por DNI en el
+   * mismo inmueble. Sólo se OFRECEN para confirmación humana: el importador no
+   * crea contratos ni vínculos ambiguos.
+   */
+  contratosParaVinculoInquilino?: ReadonlyArray<{ id: string; inmuebleId: string; candidatoDni?: string; candidatoNombre?: string }>;
 }
 
 /** Normalizado general desde el mapping (uniforme para toda fuente). */
@@ -174,6 +192,46 @@ interface RegistroPreparado {
   mapping: ResultadoNormalizacion;
   indice: number;
   localizacion: string;
+  /** Resolución (humana) de la titularidad declarada + lo que queda pendiente. */
+  titularidad: ReturnType<typeof resolverTitularidadDeclarada>;
+  /**
+   * DNI de inquilino DECLARADO por la fila (sin normalizar) y `inmuebleId`
+   * explícito del origen, si lo hubiera. Los vínculos inequívocos se calculan
+   * DESPUÉS del dry-run, con el inmueble DESTINO que B4 ha resuelto (id,
+   * catastral o mapeo): un inmueble de la plantilla no declara `inmuebleId` y
+   * antes de esta corrección el vínculo por DNI no podía encontrarse nunca.
+   */
+  dniInquilinoDeclarado: string | null;
+  inmuebleIdDeclarado: string | null;
+}
+
+
+/**
+ * Relaciones declaradas que exigen resolución humana: la titularidad no resuelta
+ * (con el dato exacto que falta) y el inquilino declarado (que nunca se convierte
+ * en arrendamiento). Se publican en el run para que el panel las muestre.
+ */
+function relacionesPendientesDe(p: RegistroPreparado | undefined): RelacionPendienteImport[] {
+  if (!p) return [];
+  const pendientes: RelacionPendienteImport[] = p.titularidad.pendientes.map((x) => ({
+    ranura: x.ranura,
+    clave: x.clave,
+    campoOrigen: x.campoOrigen,
+    valorOriginal: x.valorOriginal,
+    motivo: x.motivo,
+  }));
+  for (const c of p.mapping.conservados) {
+    if (c.clase !== 'RELACION_PENDIENTE') continue;
+    if (!c.clave.startsWith('inquilinoDeclarado.')) continue;
+    pendientes.push({
+      ranura: null,
+      clave: c.clave,
+      campoOrigen: c.campoOrigen,
+      valorOriginal: c.valorOriginal,
+      motivo: c.motivo,
+    });
+  }
+  return pendientes;
 }
 
 export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
@@ -202,6 +260,23 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
         ? idCrudo.trim()
         : mapping.identidadOrigen ?? `__ID_NO_RECUPERADO_IE_${indice}`;
       const parche = entrada.parches?.[indice] ?? null;
+      // TITULARIDAD DECLARADA: se resuelve SÓLO con asignaciones humanas
+      // explícitas de ranura → titular existente. Sin asignación, cada porcentaje
+      // declarado queda pendiente con su valor original intacto (no se reparte).
+      const titularidad = resolverTitularidadDeclarada({
+        declarada: mapping.titularidadDeclarada,
+        resolucion: parche?.resolucionTitularidad ?? [],
+        catalogo: {
+          propietarios: entrada.catalogos.propietarios,
+          propietariosPermitidosIds: entrada.catalogos.propietariosPermitidosIds ?? null,
+        },
+      });
+      // INQUILINO declarado: sólo se ofrecen coincidencias inequívocas por DNI en
+      // el MISMO inmueble (contrato existente) para que una persona lo confirme.
+      const dniDeclarado = mapping.conservados
+        .find((c) => c.clave === 'inquilinoDeclarado.dni')?.valor;
+      const dniInquilinoDeclarado = typeof dniDeclarado === 'string' && dniDeclarado.trim() !== '' ? dniDeclarado : null;
+      const inmuebleIdDeclarado = typeof mapping.canonico['inmuebleId'] === 'string' ? mapping.canonico['inmuebleId'] as string : null;
       // DESTINO DECLARADO (decisión humana): sólo cuando el registro no trae
       // propietario explícito ni por columna ni por canonización.
       if (parche?.propietarioDestinoId && mapping.canonico['propietarioId'] === undefined) {
@@ -258,6 +333,9 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
       // conserva los campos desconocidos como evidencia.
       const datos = { ...crudo, ...mapping.canonico };
       preparados.push({
+        titularidad,
+        dniInquilinoDeclarado,
+        inmuebleIdDeclarado,
         historico: {
           entidad,
           proveniencia: {
@@ -323,6 +401,13 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
   const dryRun = ejecutarDryRun({
     registros: preparados.map((p) => p.historico),
     catalogos: entrada.catalogos,
+    // El importador general sí puede promocionar una ficha a la que le falta un
+    // campo RECOMENDADO (opcional en el modelo destino: `ciudad`,
+    // `referenciaCatastral`, `inquilinoId`, `candidatoId`): sus propias puertas
+    // humanas lo revisan antes (dry-run + decisiones + autorización O7) y el
+    // dato ausente queda evidenciado. Sin esto, un respaldo real sin ciudad no
+    // era importable en absoluto.
+    tolerarRecomendadosAusentes: true,
     ...(fechaHora ? { fechaHora } : {}),
     ...(actor ? { actor } : {}),
     esquemaVersion: ESQUEMA_IMPORT_EXPORT_VERSION,
@@ -335,6 +420,9 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
     const mapping = prep?.mapping;
     const dedup = clasificarDuplicadoImport(linea);
     const warnings = [...(mapping?.warnings ?? [])];
+    for (const ev of linea.evidencias) {
+      if (ev.startsWith('campos recomendados ausentes')) warnings.push(ev);
+    }
     for (const inc of mapping?.incidencias ?? []) {
       warnings.push(`[${inc.severidad}] ${inc.campo}: ${inc.detalle}`);
     }
@@ -365,6 +453,19 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
       inmuebleDestinoId: linea.inmuebleDestinoId,
       camposDesconocidos: [...(mapping?.desconocidos ?? [])],
       camposSinDestino: [...(mapping?.sinDestino ?? [])],
+      declarados: (mapping?.conservados ?? []) as DatoConservadoImport[],
+      relacionesPendientes: relacionesPendientesDe(prep),
+      titularidadResuelta: prep?.titularidad.resueltas ?? [],
+      // El vínculo por DNI se busca en el inmueble DESTINO resuelto por el motor
+      // (id/catastral/mapeo): es el único vínculo inequívoco admisible. Nunca se
+      // crea nada aquí: sólo se ofrecen candidatos para confirmación humana.
+      vinculosInquilinoCandidatos: prep
+        ? candidatosVinculoInquilino({
+            dniDeclarado: prep.dniInquilinoDeclarado,
+            inmuebleId: linea.inmuebleDestinoId ?? prep.inmuebleIdDeclarado,
+            contratos: entrada.contratosParaVinculoInquilino ?? [],
+          })
+        : [],
       warnings,
       conflictos: linea.decision === 'BLOQUEADO' ? [linea.motivo] : [],
     } satisfies ImportRecord;

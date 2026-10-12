@@ -25,7 +25,21 @@ export const ENTIDADES_EXPORTABLES: ReadonlyArray<string> = [
 export const COLUMNAS_CSV: Record<string, readonly string[]> = {
   GASTO: ['id', 'inmuebleId', 'propietarioId', 'contratoId', 'tipo', 'categoria', 'concepto', 'proveedor', 'importe', 'estado', 'fechaDevengo', 'fechaPago', 'periodoMesAnio', 'aCargoDe', 'deducible', 'ejercicioFiscal', 'metodoPago', 'origen', 'origenId', 'createdAt', 'updatedAt'],
   COBRO: ['id', 'inmuebleId', 'contratoId', 'inquilinoId', 'propietarioId', 'mes', 'anio', 'periodoMesAnio', 'nombreMes', 'importePrevisto', 'importeRecibido', 'fechaVencimiento', 'fechaPago', 'estado', 'metodoPago', 'observaciones'],
-  INMUEBLE: ['id', 'direccion', 'ciudad', 'referenciaCatastral', 'propietarioId', 'propietarioPrincipalId', 'estado', 'tipoInmueble', 'precio', 'rentaMensual', 'superficie', 'habitaciones', 'codigoPostal'],
+  INMUEBLE: [
+    'id', 'direccion', 'ciudad', 'referenciaCatastral', 'propietarioId', 'propietarioPrincipalId', 'estado', 'tipoInmueble',
+    'precio', 'rentaMensual', 'superficie', 'habitaciones', 'codigoPostal',
+    // Datos PATRIMONIALES DECLARADOS: sin ellos, el archivo exportado perdía lo
+    // que el inmueble había importado (agregados anuales, % de suelo,
+    // amortización y renta declaradas, fecha de registro, ejercicio, titularidad
+    // e inquilino declarados). Cada columna vuelve a su campo declarado al
+    // reimportar (ida y vuelta verificada) y nunca alimenta precio/renta
+    // vigentes, publicaciones ni cálculos fiscales.
+    'porcentajeSueloCatastral', 'amortizacionAnualDeclarada', 'rentaMensualDeclarada', 'fechaRegistroPatrimonial',
+    'ejercicioDeclarado', 'gastosAnualesDeclarados.comunidad', 'gastosAnualesDeclarados.ibi',
+    'gastosAnualesDeclarados.reparaciones', 'gastosAnualesDeclarados.seguro',
+    'titularidadDeclarada.texto', 'titularidadDeclarada.propietario1', 'titularidadDeclarada.propietario2',
+    'inquilinoDeclarado.nombre', 'inquilinoDeclarado.dni',
+  ],
   PROPIETARIO: ['id', 'nombre', 'nifCif', 'email', 'telefono', 'direccion', 'ciudad', 'codigoPostal'],
   CONTRATO: ['id', 'inmuebleId', 'propietarioId', 'candidatoId', 'candidatoNombre', 'fechaInicio', 'fechaFin', 'rentaMensual', 'estado', 'inmuebleDireccion'],
 };
@@ -51,7 +65,14 @@ export const TIPOS_COLUMNAS_XLSX: Readonly<Record<string, Readonly<Record<string
     mes: 'numero', anio: 'numero', importePrevisto: 'numero', importeRecibido: 'numero',
     fechaVencimiento: 'fecha', fechaPago: 'fecha',
   },
-  INMUEBLE: { precio: 'numero', rentaMensual: 'numero', superficie: 'numero', habitaciones: 'numero' },
+  INMUEBLE: {
+    precio: 'numero', rentaMensual: 'numero', superficie: 'numero', habitaciones: 'numero',
+    porcentajeSueloCatastral: 'numero', amortizacionAnualDeclarada: 'numero', rentaMensualDeclarada: 'numero',
+    fechaRegistroPatrimonial: 'fecha', ejercicioDeclarado: 'numero',
+    'gastosAnualesDeclarados.comunidad': 'numero', 'gastosAnualesDeclarados.ibi': 'numero',
+    'gastosAnualesDeclarados.reparaciones': 'numero', 'gastosAnualesDeclarados.seguro': 'numero',
+    'titularidadDeclarada.propietario1': 'numero', 'titularidadDeclarada.propietario2': 'numero',
+  },
   PROPIETARIO: {},
   CONTRATO: { rentaMensual: 'numero', fechaInicio: 'fecha', fechaFin: 'fecha' },
 };

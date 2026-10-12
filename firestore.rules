@@ -501,14 +501,22 @@ service cloud.firestore {
     // E: la ausencia de perfil NO convierte a un Auth recién creado en staff.
     // El espejo apunta a la ficha autoritativa, cuyo UID/estado/tipo deben
     // concordar. El inquilino puede tener usuarioId distinto del Auth UID.
+    // Mismas condiciones que la versión anterior (espejo ACTIVO, perfil ACTIVO con el
+    // mismo UID y tipo). Cada documento se lee UNA vez y se pasa como parámetro: el motor
+    // limita las expresiones evaluadas por petición (1000), y repetir `me()`/`get()` en
+    // cada llamada agotaba ese presupuesto y denegaba operaciones legítimas.
     function perfilActualVeraz() {
       return isSignedIn() && exists(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid))
-        && isValidId(me().usuarioId)
-        && exists(/databases/$(database)/documents/usuarios/$(me().usuarioId))
-        && me().estado == 'ACTIVO'
-        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.authUid == request.auth.uid
-        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.estado == 'ACTIVO'
-        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.tipoPerfil == me().tipoPerfil;
+        && perfilVerazDesde(get(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid)).data);
+    }
+    function perfilVerazDesde(m) {
+      return isValidId(m.usuarioId)
+        && exists(/databases/$(database)/documents/usuarios/$(m.usuarioId))
+        && m.estado == 'ACTIVO'
+        && perfilUsuarioCoincide(get(/databases/$(database)/documents/usuarios/$(m.usuarioId)).data, m);
+    }
+    function perfilUsuarioCoincide(u, m) {
+      return u.authUid == request.auth.uid && u.estado == 'ACTIVO' && u.tipoPerfil == m.tipoPerfil;
     }
     function isTenant() {
       return isSignedIn() && !isMasterAdmin() &&

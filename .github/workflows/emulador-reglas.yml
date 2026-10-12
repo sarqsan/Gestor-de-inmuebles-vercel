@@ -55,7 +55,7 @@ jobs:
               const r = JSON.parse(fs.readFileSync("emulador-resultados.json", "utf8"));
               cuerpo += `\nPruebas: ${r.numTotalTests} · correctas: ${r.numPassedTests} · fallidas: ${r.numFailedTests}\n`;
               const fallidas = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status !== "passed").map((a) => {
-                const msg = (a.failureMessages || []).join(" ").replace(/\s+/g, " ").slice(0, 280);
+                const msg = (a.failureMessages || []).join(" ").replace(/\s+/g, " ").slice(0, 600);
                 return `- ${a.fullName} (${a.status})${msg ? `\n  > ${msg}` : ""}`;
               }));
               if (fallidas.length) cuerpo += `\nFallidas:\n${fallidas.join("\n")}\n`;

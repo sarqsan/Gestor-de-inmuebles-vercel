@@ -36,6 +36,6 @@ describe('diagnóstico', () => {
     out.A_get_created = await r(() => db(TITULAR_A).doc('inmuebles/inm-min-9').get());
     out.A_update_created = await r(() => db(TITULAR_A).doc('inmuebles/inm-min-9').update({ ciudad: 'X' }));
     out.A_get_titularidad = await r(() => db(TITULAR_A).doc('titularidades/inm-a1__prop-a').get());
-    expect(JSON.stringify(out, null, 1)).toBe('{}');
+    expect(JSON.stringify(out)).toBe('{}');
   });
 });

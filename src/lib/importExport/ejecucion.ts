@@ -373,9 +373,26 @@ export interface EventoAuditoriaImport {
   motivo?: string;
 }
 
+/**
+ * Estado TRI-STATE de la existencia de un destino (bloque A):
+ *  · EXISTE         — el documento es legible para esta sesión y está ocupado.
+ *  · NO_EXISTE      — la lectura fue autorizada y el documento no está.
+ *  · NO_VERIFICABLE — la lectura fue DENEGADA: no se puede afirmar ni que existe
+ *                     ni que no existe. Las reglas deniegan la lectura de un
+ *                     documento inexistente a quien no es master, así que una
+ *                     denegación NO equivale a «existe» ni a «es ajeno».
+ */
+export type EstadoExistencia = 'EXISTE' | 'NO_EXISTE' | 'NO_VERIFICABLE';
+
 /** Puerto inyectado: el núcleo no conoce Firebase (testeable con fake). */
 export interface PuertoPersistenciaImport {
   existeDestino(coleccion: string, destinoId: string): Promise<boolean>;
+  /**
+   * Versión tri-state de `existeDestino` (opcional por compatibilidad con los
+   * fakes existentes). Si el puerto NO la implementa, el ejecutor usa
+   * `existeDestino` y sólo distingue EXISTE/NO_EXISTE.
+   */
+  estadoDestino?(coleccion: string, destinoId: string): Promise<EstadoExistencia>;
   /** ¿Existe ya el cobro embebido en el contrato? (idempotencia de cobros). */
   existeCobro(contratoId: string, cobroId: string): Promise<boolean>;
   crearGasto(gasto: Gasto): Promise<void>;
@@ -540,18 +557,27 @@ export async function ejecutarPromocion(p: {
       detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo: 'registro o decisión ausente en ejecución (incoherencia plan/run)' });
       continue;
     }
+    let estadoPrevio: EstadoExistencia = 'NO_EXISTE';
     try {
       const contratoId = op.entidad === 'COBRO' ? contratoIdDeDestinoCobro(op.destinoId) : null;
       if (op.entidad === 'COBRO' && !contratoId) {
         detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo: `destino de cobro no determinista: '${op.destinoId}'` });
         continue;
       }
-      const existe = op.entidad === 'GASTO'
-        ? await p.puerto.existeDestino('gastos', op.destinoId)
-        : op.entidad === 'INMUEBLE'
-          ? await p.puerto.existeDestino('inmuebles', op.destinoId)
-          : await p.puerto.existeCobro(contratoId as string, op.destinoId);
-      if (existe) {
+      const coleccionDestino = op.entidad === 'GASTO' ? 'gastos' : op.entidad === 'INMUEBLE' ? 'inmuebles' : null;
+      if (coleccionDestino) {
+        estadoPrevio = p.puerto.estadoDestino
+          ? await p.puerto.estadoDestino(coleccionDestino, op.destinoId)
+          : (await p.puerto.existeDestino(coleccionDestino, op.destinoId)) ? 'EXISTE' : 'NO_EXISTE';
+      } else {
+        estadoPrevio = (await p.puerto.existeCobro(contratoId as string, op.destinoId)) ? 'EXISTE' : 'NO_EXISTE';
+      }
+      // EXISTE → no se escribe el destino (idempotencia). NO_EXISTE y NO_VERIFICABLE
+      // → la REGLA DE CREACIÓN decide: si el documento no existe se crea; si existe
+      // y no es legible, la escritura (que Firestore evalúa como update, y update ⊆
+      // get en `inmuebles`) se rechaza y el motivo queda etiquetado como
+      // NO_VERIFICABLE. Ninguna rama afirma inexistencia con una lectura denegada.
+      if (estadoPrevio === 'EXISTE') {
         if (op.entidad === 'INMUEBLE') {
           const fallo = await completarRelacionesDeExistente(op, p, titularidadesCreadas, titularidadesOmitidas);
           if (fallo) {
@@ -614,7 +640,13 @@ export async function ejecutarPromocion(p: {
         });
       } catch { /* auditoría best-effort */ }
     } catch (e) {
-      const motivo = e instanceof Error ? e.message : String(e);
+      const mensaje = e instanceof Error ? e.message : String(e);
+      // Se conserva el MENSAJE REAL de Firestore. Si la existencia era NO_VERIFICABLE
+      // y la escritura también se rechazó, se etiqueta para que el informe no lo
+      // presente como «inexistente» ni como «sobrescrito»: no hubo escritura.
+      const motivo = estadoPrevio === 'NO_VERIFICABLE'
+        ? `NO_VERIFICABLE (lectura denegada y escritura rechazada; no se sobrescribió): ${mensaje}`
+        : mensaje;
       detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo });
       try {
         await p.puerto.auditar({

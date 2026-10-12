@@ -690,6 +690,8 @@ export function crearEvaluadorReglas(RULES: string) {
         if (op === '+' || op === '-') {
           if (typeof lv === 'number' && typeof rv === 'number') return op === '+' ? lv + rv : lv - rv;
           if (op === '+' && typeof lv === 'string' && typeof rv === 'string') return lv + rv;
+          // Firestore: `lista + lista` concatena (ej. `carterasE + [myPropId()]`).
+          if (op === '+' && Array.isArray(lv) && Array.isArray(rv)) return [...lv, ...rv];
           throw new Error(`HARNESS NO CUBRE: ${op} sobre ${typeof lv}/${typeof rv}`);
         }
         // D3: `storage.rules` expresa los límites de tamaño como

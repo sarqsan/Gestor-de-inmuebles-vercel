@@ -356,3 +356,20 @@ describe('H · no se reintentan escrituras rechazadas', () => {
     expect(new Set(creaciones).size).toBe(3);
   });
 });
+
+describe('I · existencia NO_VERIFICABLE (bloque A): etiqueta honesta, sin escritura', () => {
+  it('destino ajeno no legible: FALLIDO etiquetado NO_VERIFICABLE con el error real; ninguna escritura sobre él', async () => {
+    const id = dryRun(1, 'prop_T').registros[0]!.destinationId;
+    db[`inmuebles/${id}`] = { id, propietarioId: 'prop_X', direccion: 'Calle Sintética 3', titularesIds: ['prop_X'] };
+    const antes = JSON.stringify(db[`inmuebles/${id}`]);
+    const { res } = await promocionar(sim, SESION_TITULAR, 'prop_T', AMBITO_TITULAR, 1);
+    const d = res.detalle[0];
+    expect(d?.resultado).toBe('FALLIDO');
+    const motivo = d && 'motivo' in d ? d.motivo : '';
+    expect(motivo).toContain('NO_VERIFICABLE');
+    expect(motivo).toContain('no se sobrescribió');
+    expect(motivo).toContain(MENSAJE_PERMISOS);
+    expect(JSON.stringify(db[`inmuebles/${id}`])).toBe(antes);
+    expect(sim.escrituras.some((e) => e === `set inmuebles/${id}`)).toBe(false);
+  });
+});

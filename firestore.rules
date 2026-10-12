@@ -958,12 +958,19 @@ service cloud.firestore {
       //     (propietarioPrincipalId, si existe, igual a propietarioId) y sin
       //     declarar cotitulares (titularesIds). Ni lectura, ni delegación parcial,
       //     ni administración amplían la creación.
-      allow create: if isMasterAdmin() || (
-        isPropietarioRole() && (
-          ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
-          ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
-        )
-      ) || (
+      // POLÍTICA DE COPROPIEDAD (B): un titular sólo CREA inmuebles de los que es
+      // titular canónico (`propietarioId == myPropId()`). Principal, secundario y
+      // cotitulares deben estar en su ámbito de escritura (él mismo o carteras E).
+      // Ya NO se admite crear con `propietarioPrincipalId` propio sobre un
+      // `propietarioId` ajeno (asignarse principal de un inmueble ajeno).
+      // ÍNDICE `titularesIds`: APLAZADO (decisión del titular). Se mantiene el
+      // comportamiento de HEAD: la UI escribe titulares de ámbito (tit_…) en el
+      // índice. Lo que sí se restringe aquí es el principal (ámbito propio).
+      function altaPropietarioPropia() {
+        return isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+          && (!('propietarioPrincipalId' in incoming()) || pidEnAmbitoEscritura(incoming().propietarioPrincipalId));
+      }
+      allow create: if isMasterAdmin() || altaPropietarioPropia() || (
         activeUser()
         && 'propietarioId' in incoming() && incoming().propietarioId is string
         && inmuebleEnCarteraEscritura(incoming())
@@ -985,13 +992,32 @@ service cloud.firestore {
           && (('propietarioPrincipalId' in existing() ? existing().propietarioPrincipalId : '') == ('propietarioPrincipalId' in incoming() ? incoming().propietarioPrincipalId : ''))
           && (('propietarioSecundarioId' in existing() ? existing().propietarioSecundarioId : '') == ('propietarioSecundarioId' in incoming() ? incoming().propietarioSecundarioId : ''));
       }
+      // Principal no canónico: puede seguir siéndolo (o mover datos fiscales), nunca
+      // fijar el canónico ni transmitir. (Rama HEAD restringida a no canónicos.)
+      function sigoSiendoTitular() {
+        return ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+          || ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId());
+      }
       function soyTitularActual() {
         return ('propietarioId' in existing() && existing().propietarioId == myPropId())
           || ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId());
       }
-      function sigoSiendoTitular() {
-        return ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
-          || ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId());
+      // Sólo el titular CANÓNICO puede ampliar o redefinir la titularidad. El
+      // principal no canónico NO la altera (antes podía fijarse a sí mismo y
+      // abrir la puerta a terceros).
+      function soyCanonicoActual() {
+        return 'propietarioId' in existing() && existing().propietarioId == myPropId();
+      }
+      // Cotitulares/principal nuevos: sólo titulares de mi ámbito de escritura
+      // (carteras E o yo mismo). Quitar titulares siempre es posible. El
+      // `propietarioSecundarioId` es dato fiscal que NO concede acceso (ver
+      // DELTA-C): no se restringe aquí.
+      // Principal nuevo: sólo uno de mi ámbito de escritura (o el que ya tenía).
+      // El índice `titularesIds` queda APLAZADO (ver altaPropietarioPropia).
+      function titularesNuevosEnAmbito() {
+        return !('propietarioPrincipalId' in incoming())
+          || incoming().propietarioPrincipalId == ('propietarioPrincipalId' in existing() ? existing().propietarioPrincipalId : '')
+          || pidEnAmbitoEscritura(incoming().propietarioPrincipalId);
       }
       // D2 (§2 — titularidad jurídica ≠ gestión): el propietarioId económico
       // es el identificador canónico del ámbito. Ninguna rama no-master puede
@@ -1013,7 +1039,8 @@ service cloud.firestore {
           && (!('gestionesPorPropietario' in me()) || mismoCampoOpcional('contratoActivoId')))
         || (inmuebleParcialIndexado(existing().propietarioId, inmuebleId, true) && titularidadInalterada()
           && (('contratoActivoId' in existing() ? existing().contratoActivoId : '') == ('contratoActivoId' in incoming() ? incoming().contratoActivoId : '')))
-        || (isPropietarioRole() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))
+        || (isPropietarioRole() && !soyCanonicoActual() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))
+        || (isPropietarioRole() && soyCanonicoActual() && propietarioCanonicoInalterado() && titularesNuevosEnAmbito())
         || (isPropietarioRole() && canReachInmuebleId(inmuebleId) && titularidadInalterada());
       allow delete: if isMasterAdmin();
 
@@ -1226,8 +1253,23 @@ service cloud.firestore {
       // por el índice `titularesIds` de cada inmueble y se leen una a una.
       allow list: if false;
 
+      // Asignar un titular exige que esté en el ámbito de escritura de quien
+      // escribe (o que lo haga el master/administración). Sin esto, cualquier
+      // titular con un inmueble propio podía registrar a un tercero.
+      // Titular de ÁMBITO (ficha `propietarios/tit_…` con `ambitoPropietarioId` = yo):
+      // la autoridad es por DOCUMENTO (get de una ruta fija por titularidad). Sin ficha
+      // propia no hay titularidad asignable.
+      function titularDeAmbitoPropio(pid) {
+        return isPropietarioRole() && pid is string && pid.matches('^tit_[a-z0-9]{8,48}$')
+          && exists(/databases/$(database)/documents/propietarios/$(pid))
+          && get(/databases/$(database)/documents/propietarios/$(pid)).data.ambitoPropietarioId == myPropId();
+      }
+      function titularAsignableEnAmbito(pid) {
+        return esAdminInmuebles() || (pid is string && (pidEnAmbitoEscritura(pid) || titularDeAmbitoPropio(pid)));
+      }
       allow create: if puedoEscribirTitularidadDe(incoming().inmuebleId)
         && claveCoherente(incoming()) && estadoValido(incoming())
+        && titularAsignableEnAmbito(incoming().propietarioId)
         && porcentajeValido(incoming()) && cierreBienFormado(incoming());
 
       allow update: if puedoEscribirTitularidadDe(existing().inmuebleId)

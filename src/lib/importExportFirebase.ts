@@ -45,6 +45,7 @@ import type {
   InmueblePatrimonialNuevo,
   PuertoPersistenciaImport,
 } from './importExport/ejecucion';
+import type { EstadoExistencia } from './importExport/ejecucion';
 
 /** Cota anti-cuelgue de lecturas únicas (los suscriptores tragan el error de Rules). */
 export const LECTURA_UNICA_TIMEOUT_MS = 25_000;
@@ -174,14 +175,20 @@ export function esPermisoDenegado(e: unknown): boolean {
  *
  * Cualquier error que NO sea de permisos se propaga (red, cuota, etc.).
  */
-export async function existeVisible(referencia: DocumentReference): Promise<boolean> {
+export async function consultarExistencia(referencia: DocumentReference): Promise<EstadoExistencia> {
   try {
     const snap = await getDoc(referencia);
-    return snap.exists();
+    return snap.exists() ? 'EXISTE' : 'NO_EXISTE';
   } catch (e) {
-    if (esPermisoDenegado(e)) return false;
+    // Denegación de LECTURA ≠ inexistencia: no se puede afirmar ninguna de las dos.
+    if (esPermisoDenegado(e)) return 'NO_VERIFICABLE';
     throw e;
   }
+}
+
+/** Compatibilidad booleana: sólo `true` cuando el documento es legible y existe. */
+export async function existeVisible(referencia: DocumentReference): Promise<boolean> {
+  return (await consultarExistencia(referencia)) === 'EXISTE';
 }
 
 /**
@@ -204,17 +211,23 @@ export async function conContextoEscritura<T>(
   }
 }
 
+/** Existencia tri-state de un destino escribible por importación (gastos/inmuebles). */
+async function estadoDestinoImport(coleccion: string, destinoId: string): Promise<EstadoExistencia> {
+  if (coleccion !== 'gastos' && coleccion !== 'inmuebles') {
+    throw new Error(`colección no escribible por importación: '${coleccion}'`);
+  }
+  return consultarExistencia(doc(db, coleccion, destinoId));
+}
+
 /** Puerto real: escrituras por funciones existentes + auditoría best-effort. */
 export function crearPuertoFirebase(
   identidad: { usuarioId: string; usuarioEmail: string; usuarioNombre: string },
 ): PuertoPersistenciaImport {
   return {
     async existeDestino(coleccion: string, destinoId: string): Promise<boolean> {
-      if (coleccion !== 'gastos' && coleccion !== 'inmuebles') {
-        throw new Error(`colección no escribible por importación: '${coleccion}'`);
-      }
-      return existeVisible(doc(db, coleccion, destinoId));
+      return (await estadoDestinoImport(coleccion, destinoId)) === 'EXISTE';
     },
+    estadoDestino: estadoDestinoImport,
     async existeCobro(contratoId: string, cobroId: string): Promise<boolean> {
       const snap = await getDoc(doc(db, 'contratos_formalizacion', contratoId));
       if (!snap.exists()) return false;

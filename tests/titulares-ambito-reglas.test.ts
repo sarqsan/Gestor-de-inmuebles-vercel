@@ -237,6 +237,9 @@ describe('Titulares de ámbito · 6-7 — se asignan a inmuebles autorizados (N 
   });
 
   it('7 · una titularidad `{inmuebleId}__{propietarioId}` por cada titular, con porcentaje conocido o PENDIENTE (null)', () => {
+    // Autoridad por DOCUMENTO: el titular de ámbito debe existir como ficha propia
+    // (`propietarios/tit_…` con `ambitoPropietarioId` = owner_A). Sin ficha, no.
+    for (let i = 1; i <= 15; i++) DB[`propietarios/${idTitular(i)}`] = titular(idTitular(i), 'owner_A');
     for (let i = 1; i <= 15; i++) {
       const pid = idTitular(i);
       const titularidad = {
@@ -451,11 +454,17 @@ describe('Titulares de ámbito · 11 — el alta y la edición de inmuebles no s
 
   it('11c · el bloque de `inmuebles` y el de `titularidades` del fichero real no han cambiado', () => {
     const inmuebles = RULES.slice(RULES.indexOf('    match /inmuebles/{inmuebleId} {'), RULES.indexOf('match /documentos_patrimoniales'));
-    expect(inmuebles).toContain("allow create: if isMasterAdmin() || (");
-    expect(inmuebles).toContain('(isPropietarioRole() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))');
+    // COPROPIEDAD (B, decisiones revisadas): create por `altaPropietarioPropia()`;
+    // el principal no canónico queda acotado (!soyCanonicoActual()); el índice
+    // titularesIds sigue el comportamiento de HEAD (APLAZADO por decisión).
+    expect(inmuebles).toContain("allow create: if isMasterAdmin() || altaPropietarioPropia() || (");
+    expect(inmuebles).toContain('(isPropietarioRole() && !soyCanonicoActual() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))');
     expect(inmuebles).not.toContain('ambitoPropietarioId');
     const titularidades = RULES.slice(RULES.indexOf('    match /titularidades/{titularidadId} {'), RULES.indexOf('    match /gestiones_cartera/{gestionId} {'));
-    expect(titularidades).not.toContain('ambitoPropietarioId');
+    // Titular de ámbito: autoridad por documento (ficha propia), única mención permitida.
+    expect(titularidades).toContain('titularDeAmbitoPropio(pid)');
+    // La expresión real (no los comentarios) aparece una sola vez: en titularDeAmbitoPropio.
+    expect(titularidades.split('.data.ambitoPropietarioId == myPropId()').length - 1).toBe(1);
     expect(titularidades).toContain("titularidadId == d.inmuebleId + '__' + d.propietarioId");
   });
 });

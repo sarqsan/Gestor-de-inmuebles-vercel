@@ -53,6 +53,22 @@ export interface EntradaDryRun {
   actor?: string;
   esquemaVersion?: string;
   importadorVersion?: string;
+  /**
+   * ¿Los CAMPOS RECOMENDADOS ausentes dejan de topar la línea a REVISIÓN?
+   *
+   * Falso por defecto (la migración histórica B4 mantiene su tope intacto: el
+   * histórico se revisa antes de crear la ficha). El IMPORTADOR GENERAL, en
+   * cambio, ya tiene sus propias puertas humanas —dry-run visible + decisiones
+   * por registro + autorización explícita O7— y los campos «recomendados» son
+   * OPCIONALES en el modelo destino (`Inmueble.ciudad?`). Sin esta opción, un
+   * respaldo real sin ciudad (o sin referencia catastral) no podía importarse:
+   * la fila quedaba en REVISIÓN y no era autorizable, aunque el dato ausente no
+   * es obligatorio y el propio modelo lo trata como «no consta».
+   *
+   * Lo ausente NO se oculta: se registra en las evidencias de la línea y el
+   * importador lo publica como aviso del registro.
+   */
+  tolerarRecomendadosAusentes?: boolean;
 }
 
 /** JSON estable: claves ordenadas recursivamente (base de hashes). */
@@ -109,6 +125,8 @@ function decidirLinea(
   comp: ReturnType<typeof chequearCompletitud>,
   esConflictoDedup: boolean,
   catalogos: CatalogosMigracion,
+  /** Ver `EntradaDryRun.tolerarRecomendadosAusentes` (importador general). */
+  tolerarRecomendadosAusentes = false,
 ): void {
   const n = l.registro.normalizado;
   const incidenciasBloqueantes = (n?.incidencias ?? []).filter((i) => i.severidad === 'BLOQUEANTE');
@@ -199,7 +217,15 @@ function decidirLinea(
   // (VINCULAR: el destino existe; los recomendados del histórico no topan.)
   const esVincularDestino = matchExistente(l) !== null;
   if (!esVincularDestino) {
-    for (const c of comp.recomendadosAusentes) revisiones.push(`recomendado ausente: ${c}`);
+    if (tolerarRecomendadosAusentes) {
+      // Opcionales en el modelo destino: se declaran como ausentes (evidencia),
+      // nunca se inventan ni se convierten en un bloqueo.
+      if (comp.recomendadosAusentes.length > 0) {
+        l.evidencias.push(`campos recomendados ausentes (opcionales en el modelo destino; no bloquean el alta): ${comp.recomendadosAusentes.join(', ')}`);
+      }
+    } else {
+      for (const c of comp.recomendadosAusentes) revisiones.push(`recomendado ausente: ${c}`);
+    }
   }
   const destino = proponerDestino({
     entidad: l.registro.entidad,
@@ -372,7 +398,22 @@ export function ejecutarDryRun(entrada: EntradaDryRun): DryRunResult {
     const datosResolucion: Record<string, unknown> = { ...registro.datos };
     const idPropio = textoPlano(lectura['id']);
     if (idPropio) {
-      if (registro.entidad === 'INMUEBLE' && !textoPlano(datosResolucion['inmuebleId'])) datosResolucion['inmuebleId'] = idPropio;
+      // CANDIDATO, no referencia: el `id` propio de una fila de inmueble es su
+      // IDENTIDAD DE ORIGEN (ver `CAMPOS_SIN_DESTINO` del importador general).
+      // Sólo se trata como id canónico destino si ese inmueble EXISTE — entonces
+      // el VINCULAR es legítimo —. Si no existe, la fila se resuelve por
+      // mapeo/idsOrigen/catastral/dirección y, sin match, el alta la crea con el
+      // id que asigna la confirmación humana. Antes, un id de origen
+      // desconocido la bloqueaba con «inmueble inexistente en catálogo» y ningún
+      // archivo externo con ids propios (respaldo de un Gestor Patrimonial o el
+      // propio export del ERP reimportado en otra instalación) podía importarse.
+      if (
+        registro.entidad === 'INMUEBLE'
+        && !textoPlano(datosResolucion['inmuebleId'])
+        && catalogos.inmuebles.some((i) => i.id === idPropio)
+      ) {
+        datosResolucion['inmuebleId'] = idPropio;
+      }
       if (registro.entidad === 'CONTRATO' && !textoPlano(datosResolucion['contratoId'])) datosResolucion['contratoId'] = idPropio;
       if (registro.entidad === 'PROPIETARIO' && !textoPlano(datosResolucion['propietarioId'])) datosResolucion['propietarioId'] = idPropio;
     }
@@ -425,7 +466,7 @@ export function ejecutarDryRun(entrada: EntradaDryRun): DryRunResult {
       l.duplicado = { tipo: 'NINGUNO', con: [], motivo: 'sin huellas computables (entidad no gasto/cobro o datos insuficientes)' };
     }
 
-    decidirLinea(l, rel, comp, esConflictoDedup, catalogos);
+    decidirLinea(l, rel, comp, esConflictoDedup, catalogos, entrada.tolerarRecomendadosAusentes === true);
 
     // §10 intra-lote (autocorrección B4): sourceId repetido ⇒ BLOQUEADO;
     // mismo destino VINCULAR desde 2 orígenes ⇒ REVISIÓN. Solo se baja, nunca se sube.

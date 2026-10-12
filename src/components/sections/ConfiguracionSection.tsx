@@ -3,6 +3,7 @@ import { FIREBASE_PROYECTO_ID } from '../../lib/entornoFirebase';
 import React, { useState, useRef } from 'react';
 import { UserProfile, Candidato, Inmueble } from '../../types';
 import { ImportExportPanel } from './ImportExportPanel';
+import { ACEPTAR_IMPORTACION, validarNombreFicheroImportacion } from '../../lib/importExport/formato';
 import {
   User,
   Settings,
@@ -46,6 +47,15 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
   const [jsonPaste, setJsonPaste] = useState('');
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * Fichero entregado al panel canónico cuando el JSON no trae la forma legacy.
+   * Antes, un JSON que no fuera `{inmuebles| candidatos}` se rechazaba aquí con
+   * «El archivo JSON debe contener un array de "inmuebles" o "candidatos"»: era
+   * la causa real de que «no se pudiera cargar el JSON» (el export del propio
+   * ERP usa `records`). Ahora ese mismo botón continúa en el importador
+   * canónico, que acepta JSON/XLSX/CSV de las dos aplicaciones.
+   */
+  const [ficheroCanonico, setFicheroCanonico] = useState<{ nombre: string; bytes: Uint8Array } | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,17 +101,42 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        handleProcessImport(content);
-      }
-    };
-    reader.readAsText(file);
+    setImportStatus(null);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // La extensión no decide nada (Android entrega documentos sin extensión o
+    // con nombre genérico): si el contenido es legible, se procesa.
+    const errorNombre = validarNombreFicheroImportacion(file.name, bytes);
+    const texto = new TextDecoder('utf-8').decode(bytes);
+    // 1) Forma LEGACY (interoperabilidad con la otra app de AI Studio):
+    //    `{ inmuebles: [...], candidatos: [...] }`.
+    let legacy: unknown = null;
+    try {
+      legacy = JSON.parse(texto);
+    } catch {
+      legacy = null;
+    }
+    if (legacy !== null && typeof legacy === 'object'
+      && (Array.isArray((legacy as { inmuebles?: unknown }).inmuebles)
+        || Array.isArray((legacy as { candidatos?: unknown }).candidatos))) {
+      handleProcessImport(texto);
+      return;
+    }
+    // 2) Cualquier otro formato (export del propio ERP, JSON del Gestor
+    //    Patrimonial, XLSX, CSV): lo procesa el importador canónico del panel,
+    //    por el MISMO camino que su selector de archivos.
+    if (errorNombre && !texto.trim().startsWith('{') && !texto.trim().startsWith('[')) {
+      setImportStatus(errorNombre);
+      return;
+    }
+    setFicheroCanonico({ nombre: file.name, bytes });
+    setImportStatus(
+      'Este archivo no tiene la forma de sincronización {inmuebles|candidatos}: se procesa con el importador '
+      + 'canónico (JSON/CSV/XLSX) que está justo debajo, con previsualización y sin escribir nada hasta que lo '
+      + 'autorices.',
+    );
   };
 
   return (
@@ -253,8 +288,8 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
             <input
               type="file"
               ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept=".json"
+              onChange={(e) => void handleFileUpload(e)}
+              accept={ACEPTAR_IMPORTACION}
               className="hidden"
             />
           </div>
@@ -280,7 +315,11 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
 
         {/* Importación / Exportación canónica (erp-import-export-v1). El bloque
             legacy de sincronización superior se conserva intacto. */}
-        <ImportExportPanel inmuebles={inmuebles} />
+        <ImportExportPanel
+          inmuebles={inmuebles}
+          ficheroExterno={ficheroCanonico}
+          onFicheroExternoConsumido={() => setFicheroCanonico(null)}
+        />
 
         {/* Módulo de Aseguradoras de Impago */}
         {onOpenConfigAseguradoras && (

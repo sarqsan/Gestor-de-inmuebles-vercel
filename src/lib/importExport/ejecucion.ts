@@ -49,6 +49,7 @@ import {
 } from './promocion';
 import { construirInmueblePatrimonialDestino } from './altaInmueble';
 import type { InmueblePatrimonialNuevo } from './altaInmueble';
+import type { TitularidadResueltaImport } from './contrato';
 
 // El puerto y su payload se consumen juntos: se reexporta el tipo del alta.
 export type { InmueblePatrimonialNuevo } from './altaInmueble';
@@ -65,6 +66,13 @@ export interface DecisionPromocion {
    * autorización lo embebe vía `parches` para que O7 lo vea.
    */
   deducible?: boolean;
+  /**
+   * TITULARIDAD DECLARADA: asignación humana de cada ranura (`% Propietario 1`,
+   * `% Propietario 2`) a un titular EXISTENTE del ámbito escribible. Se embebe en
+   * el dry-run (parches) para que el run lleve la resolución validada; lo que no
+   * se resuelva queda declarado y pendiente en el inmueble, sin bloquear el alta.
+   */
+  titularidad?: readonly TitularidadResueltaImport[];
 }
 
 export interface OperacionPromocion {
@@ -75,6 +83,13 @@ export interface OperacionPromocion {
   coleccion: string;
   destinoId: string;
   propietarioDestinoId: string;
+  /**
+   * Titularidades RESUELTAS por una persona para esta fila (ranura → titular
+   * existente + porcentaje declarado). Sólo se persisten éstas: lo que no se
+   * resolvió queda declarado y pendiente en el inmueble, nunca inventado.
+   * Se crean DESPUÉS del alta del inmueble (las Rules exigen que exista).
+   */
+  titularidades?: readonly TitularidadResueltaImport[];
 }
 
 export interface ExclusionPromocion {
@@ -205,6 +220,11 @@ export function planificarPromocion(p: {
       excluidas.push({ fingerprint: r.fingerprint, sourceRecordId: r.sourceRecordId, motivo: `fechaVencimiento '${d.fechaVencimiento}' no es fecha válida (YYYY-MM-DD de calendario)` });
       continue;
     }
+    // TITULARIDAD DECLARADA: se persiste sólo lo que una persona resolvió a
+    // titulares existentes. Cada titularidad resuelta viaja como parte de la
+    // operación (idempotente: si ya existe, no se reescribe) y NUNCA bloquea el
+    // alta del inmueble: lo no resuelto queda declarado y pendiente.
+    const titularidades = r.entityType === 'INMUEBLE' ? (r.titularidadResuelta ?? []) : [];
     operaciones.push({
       fingerprint: r.fingerprint,
       sourceRecordId: r.sourceRecordId,
@@ -213,6 +233,7 @@ export function planificarPromocion(p: {
       coleccion: r.destinoColeccion ?? '',
       destinoId: r.destinationId,
       propietarioDestinoId: r.propietarioDestinoId ?? '',
+      ...(titularidades.length > 0 ? { titularidades } : {}),
     });
   }
   operaciones.sort((a, b) => (a.fingerprint < b.fingerprint ? -1 : 1));
@@ -366,6 +387,28 @@ export interface PuertoPersistenciaImport {
    * autorización efectiva (`propietarioId == myPropId()` para un PROPIETARIO).
    */
   crearInmueble(inmueble: InmueblePatrimonialNuevo): Promise<void>;
+  /**
+   * ¿Existe ya la titularidad `{inmuebleId}__{propietarioId}`? (idempotencia:
+   * reimportar no duplica relaciones ni reescribe porcentajes ya resueltos).
+   */
+  existeTitularidad(inmuebleId: string, propietarioId: string): Promise<boolean>;
+  /**
+   * Crea la RELACIÓN de titularidad por el flujo autorizado: documento
+   * `titularidades/{inmuebleId}__{propietarioId}` + índice
+   * `inmuebles/{inmuebleId}.titularesIds` en el MISMO lote atómico. Sólo se
+   * llama con una ranura resuelta por una persona y después de existir el
+   * inmueble (las Rules lo exigen). Nunca crea propietarios.
+   */
+  crearTitularidad(t: {
+    inmuebleId: string;
+    propietarioId: string;
+    propietarioNombre?: string;
+    porcentajeTitularidad: number | null;
+    campoOrigen: string;
+    valorOriginal: unknown;
+    importRunId: string;
+    migrationRunId: string;
+  }): Promise<void>;
   auditar(evento: EventoAuditoriaImport): Promise<void>;
 }
 
@@ -380,8 +423,39 @@ export interface ResultadoPromocion {
   creados: number;
   yaExistentes: number;
   fallidos: number;
+  /** Titularidades creadas por resolución humana explícita (ranura → titular). */
+  titularidadesCreadas: readonly { fingerprint: string; propietarioId: string; porcentaje: number | null }[];
+  /** Titularidades ya existentes: omitidas sin reescribir (idempotencia). */
+  titularidadesOmitidas: readonly { fingerprint: string; motivo: string }[];
+  /** Relaciones declaradas que quedan PENDIENTES con el dato exacto que falta. */
+  relacionesPendientes: readonly { fingerprint: string; campoOrigen: string; motivo: string }[];
   detalle: readonly ResultadoOperacion[];
   informe: string;
+}
+
+/**
+ * Registra en el informe las relaciones declaradas que quedan PENDIENTES. No se
+ * escribe nada nuevo: su conservación ya viaja en el propio documento del
+ * inmueble (`titularidadDeclarada` / `inquilinoDeclarado` /
+ * `datosImportadosHistoricos`), que es lo que hace verificable qué falta.
+ */
+async function escribirPendientes(
+  r: ImportRecord,
+  op: OperacionPromocion,
+  p: { fechaHora: string; actor: string | null; plan: PlanPromocion },
+  destino: Array<{ fingerprint: string; campoOrigen: string; motivo: string }>,
+): Promise<void> {
+  for (const rel of r.relacionesPendientes ?? []) {
+    destino.push({ fingerprint: op.fingerprint, campoOrigen: rel.campoOrigen, motivo: rel.motivo });
+  }
+  for (const v of r.vinculosInquilinoCandidatos ?? []) {
+    destino.push({
+      fingerprint: op.fingerprint,
+      campoOrigen: 'DNI Inquilino',
+      motivo: `posible vínculo inequívoco por DNI con el contrato ${v.contratoId}${v.candidatoNombre ? ` (${v.candidatoNombre})` : ''}: requiere confirmación humana (no se crea ningún contrato)`,
+    });
+  }
+  void p;
 }
 
 export async function ejecutarPromocion(p: {
@@ -395,6 +469,9 @@ export async function ejecutarPromocion(p: {
   if (!p.plan.ejecutable) throw new Error('plan no ejecutable (barrera O7 no superada)');
   const porFp = new Map(p.run.registros.map((r) => [r.fingerprint, r]));
   const detalle: ResultadoOperacion[] = [];
+  const titularidadesCreadas: Array<{ fingerprint: string; propietarioId: string; porcentaje: number | null }> = [];
+  const titularidadesOmitidas: Array<{ fingerprint: string; motivo: string }> = [];
+  const pendientesPersistidos: Array<{ fingerprint: string; campoOrigen: string; motivo: string }> = [];
   for (const op of p.plan.operaciones) {
     const r = porFp.get(op.fingerprint);
     const decision = p.decisiones[op.fingerprint];
@@ -435,7 +512,27 @@ export async function ejecutarPromocion(p: {
       if (op.entidad === 'GASTO') {
         await p.puerto.crearGasto(construirGastoDestino(r, decision as DecisionPromocion, { fechaHora: p.fechaHora, actor: p.actor }));
       } else if (op.entidad === 'INMUEBLE') {
-        await p.puerto.crearInmueble(construirInmueblePatrimonialDestino(r, { fechaHora: p.fechaHora }));
+        await p.puerto.crearInmueble(construirInmueblePatrimonialDestino(r, { fechaHora: p.fechaHora, actor: p.actor }));
+        // RELACIONES RESUELTAS: se crean después del inmueble (las Rules exigen
+        // que exista) y sólo las que una persona asignó a un titular existente.
+        for (const t of op.titularidades ?? []) {
+          const yaExiste = await p.puerto.existeTitularidad(op.destinoId, t.propietarioId);
+          if (yaExiste) {
+            titularidadesOmitidas.push({ fingerprint: op.fingerprint, motivo: `titularidad ya existente (${t.propietarioId}); no se reescribe` });
+            continue;
+          }
+          await p.puerto.crearTitularidad({
+            inmuebleId: op.destinoId,
+            propietarioId: t.propietarioId,
+            porcentajeTitularidad: t.porcentaje,
+            campoOrigen: t.campoOrigen,
+            valorOriginal: t.valorOriginal,
+            importRunId: p.plan.importRunId,
+            migrationRunId: p.plan.migrationRunId,
+          });
+          titularidadesCreadas.push({ fingerprint: op.fingerprint, propietarioId: t.propietarioId, porcentaje: t.porcentaje });
+        }
+        await escribirPendientes(r, op, p, pendientesPersistidos);
       } else {
         await p.puerto.anexarCobro(contratoId as string, construirCobroDestino(r, decision as DecisionPromocion, { fechaHora: p.fechaHora, actor: p.actor, migrationRunId: p.plan.migrationRunId }));
       }
@@ -472,10 +569,21 @@ export async function ejecutarPromocion(p: {
     `INFORME DE PROMOCIÓN — run ${p.plan.importRunId} / ejecución ${p.plan.migrationRunId}`,
     `operaciones planificadas: ${p.plan.operaciones.length} (excluidas: ${p.plan.excluidas.length}; vinculadas sin escritura: ${p.plan.vinculadasSinEscritura.length})`,
     `creados: ${creados}; ya existentes (omitidos): ${yaExistentes}; fallidos: ${fallidos}`,
+    `titularidades creadas: ${titularidadesCreadas.length}; ya existentes (omitidas): ${titularidadesOmitidas.length}`,
+    `relaciones declaradas PENDIENTES (conservadas en el inmueble, sin inventar): ${pendientesPersistidos.length}`,
   ];
+  for (const q of pendientesPersistidos) L.push(`  · pendiente ${q.fingerprint.slice(0, 12)} «${q.campoOrigen}»: ${q.motivo}`);
   for (const d of detalle.filter((x) => x.resultado !== 'CREADO')) {
     L.push(`  · ${d.fingerprint.slice(0, 12)}: ${d.resultado}${d.resultado === 'FALLIDO' ? ` (${d.motivo})` : ''}`);
   }
   for (const e of p.plan.excluidas) L.push(`  · excluida ${e.fingerprint.slice(0, 12)}: ${e.motivo}`);
-  return { importRunId: p.plan.importRunId, migrationRunId: p.plan.migrationRunId, creados, yaExistentes, fallidos, detalle, informe: L.join('\n') };
+  return {
+    importRunId: p.plan.importRunId,
+    migrationRunId: p.plan.migrationRunId,
+    creados, yaExistentes, fallidos,
+    titularidadesCreadas, titularidadesOmitidas,
+    relacionesPendientes: pendientesPersistidos,
+    detalle,
+    informe: L.join('\n'),
+  };
 }

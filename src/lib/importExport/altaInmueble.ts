@@ -37,6 +37,13 @@
  * con su motivo (`avisosAlquilerNoEscritosEnAlta`), para que «no escrito en el
  * alta» nunca se confunda con «no leído».
  */
+import type {
+  DatoImportadoDeclarado,
+  DatosImportadosHistoricosInmueble,
+  GastosAnualesDeclaradosInmueble,
+  InquilinoDeclaradoInmueble,
+  TitularidadDeclaradaInmueble,
+} from '../../types';
 import type { ImportRecord } from './contrato';
 
 /** Documento patrimonial mínimo que el alta escribe. Sólo campos declarados. */
@@ -54,16 +61,35 @@ export interface InmueblePatrimonialNuevo {
   superficie?: number;
   habitaciones?: number;
   propietarioPrincipalId?: string;
+  // Datos DECLARADOS por el archivo con campo propio verificable (equivalen a
+  // landValuePercent / amortizationAmount / expenses* / registrationDate /
+  // monthlyRent / tenant* del Gestor Patrimonial de referencia).
+  porcentajeSueloCatastral?: number;
+  fechaRegistroPatrimonial?: string;
+  amortizacionAnualDeclarada?: number;
+  rentaMensualDeclarada?: number;
+  gastosAnualesDeclarados?: GastosAnualesDeclaradosInmueble;
+  inquilinoDeclarado?: InquilinoDeclaradoInmueble;
+  titularidadDeclarada?: TitularidadDeclaradaInmueble;
+  datosImportadosHistoricos?: DatosImportadosHistoricosInmueble;
   notasInternas?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
-/** Campos patrimoniales que se copian tal cual cuando la fila los declara. */
+/**
+ * Campos patrimoniales que se copian tal cual cuando la fila los declara. El
+ * bloque declarado refleja 1:1 las columnas de la plantilla de referencia.
+ */
 export const CAMPOS_PATRIMONIALES_ALTA = [
   'ciudad', 'codigoPostal', 'referenciaCatastral', 'tipoInmueble',
   'valorAdquisicion', 'valoracionEstimada', 'fechaAdquisicion',
   'superficie', 'habitaciones',
+] as const;
+
+/** Campos DECLARADOS (número) que se escriben sólo si la fila los declara. */
+export const CAMPOS_DECLARADOS_NUMERICOS_ALTA = [
+  'porcentajeSueloCatastral', 'amortizacionAnualDeclarada', 'rentaMensualDeclarada',
 ] as const;
 
 const CAMPOS_NUMERICOS_PATRIMONIALES = new Set(['valorAdquisicion', 'valoracionEstimada', 'superficie', 'habitaciones']);
@@ -91,7 +117,7 @@ function esNumeroPatrimonialDeclarado(campo: string, v: unknown): boolean {
  */
 export function construirInmueblePatrimonialDestino(
   r: ImportRecord,
-  ctx: { fechaHora: string },
+  ctx: { fechaHora: string; actor?: string | null },
 ): InmueblePatrimonialNuevo {
   const c = r.canonicalData;
   const id = r.destinationId;
@@ -112,6 +138,39 @@ export function construirInmueblePatrimonialDestino(
     }
     if (esNumeroPatrimonialDeclarado(campo, v)) destino[campo] = v;
   }
+  // ---- Datos DECLARADOS por el archivo: campo propio, persistente y releible.
+  for (const campo of CAMPOS_DECLARADOS_NUMERICOS_ALTA) {
+    const v = c[campo];
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+      // Validación del porcentaje de suelo: fuera de rango nunca se escribe
+      // (el original queda en el bloque histórico con su motivo).
+      if (campo === 'porcentajeSueloCatastral' && v > 100) continue;
+      destino[campo] = v;
+    }
+  }
+  if (typeof c['fechaRegistroPatrimonial'] === 'string' && c['fechaRegistroPatrimonial'].trim() !== '') {
+    destino['fechaRegistroPatrimonial'] = c['fechaRegistroPatrimonial'].trim();
+  }
+  const anual = c['gastosAnualesDeclarados'];
+  if (anual !== null && typeof anual === 'object' && !Array.isArray(anual)) {
+    const limpio: GastosAnualesDeclaradosInmueble = {};
+    for (const k of ['comunidad', 'ibi', 'reparaciones', 'seguro'] as const) {
+      const v = (anual as Record<string, unknown>)[k];
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) limpio[k] = v;
+    }
+    const ejercicio = (anual as Record<string, unknown>)['ejercicio'];
+    if (typeof ejercicio === 'number' && Number.isInteger(ejercicio)) limpio.ejercicio = ejercicio;
+    else limpio.ejercicio = null;
+    if (Object.keys(limpio).some((k) => k !== 'ejercicio')) destino['gastosAnualesDeclarados'] = limpio;
+  }
+  // Titularidad e inquilino DECLARADOS: se persisten como declaración (nunca
+  // como titularidad real ni como arrendamiento), con marca de resolución.
+  const titularidad = construirTitularidadDeclarada(r);
+  if (titularidad) destino['titularidadDeclarada'] = titularidad;
+  const inquilino = construirInquilinoDeclarado(r);
+  if (inquilino) destino['inquilinoDeclarado'] = inquilino;
+  const historicos = construirDatosImportadosHistoricos(r, ctx);
+  if (historicos) destino['datosImportadosHistoricos'] = historicos;
   // Titular fiscal principal: se copia SÓLO si es el mismo titular validado
   // como destino (nunca introduce un segundo titular sin resolver).
   if (typeof c['propietarioPrincipalId'] === 'string' && c['propietarioPrincipalId'].trim() === propietarioId) {
@@ -139,4 +198,119 @@ export function avisosAlquilerNoEscritosEnAlta(canonicalData: Record<string, unk
     avisos.push(`alta patrimonial: '${campo}' = «${legible}» NO se escribe en el inmueble nuevo — ${motivo}`);
   }
   return avisos;
+}
+
+/**
+ * Titularidad DECLARADA por la fila: texto y porcentajes tal cual vienen, más
+ * la marca (y el detalle) de si una persona los resolvió a titulares existentes.
+ *
+ * Nunca se deriva nada: un porcentaje que el archivo no declara queda ausente
+ * (no se asume 100 % ni 50/50) y un porcentaje ilegible se guarda en
+ * `porcentajesNoInterpretables` con su motivo. La titularidad REAL del inmueble
+ * vive en `titularesIds` + `titularidades` (se crea por el flujo autorizado).
+ */
+export function construirTitularidadDeclarada(r: ImportRecord): TitularidadDeclaradaInmueble | null {
+  const texto = (r.declarados ?? [])
+    .filter((d) => d.clave === 'titularidadDeclarada.texto')
+    .map((d) => (typeof d.valor === 'string' ? d.valor.trim() : ''))
+    .find((v) => v !== '');
+  const porRanura = new Map<1 | 2, { porcentaje: number | null; valorOriginal: unknown; motivo?: string }>();
+  for (const d of r.declarados ?? []) {
+    if (d.clase !== 'RELACION_PENDIENTE' || d.ranura === undefined) continue;
+    if (d.clave !== 'titularidadDeclarada.propietario1' && d.clave !== 'titularidadDeclarada.propietario2') continue;
+    porRanura.set(d.ranura, {
+      porcentaje: typeof d.valor === 'number' ? d.valor : null,
+      valorOriginal: d.valorOriginal,
+      ...(typeof d.valor === 'number' ? {} : { motivo: d.motivo }),
+    });
+  }
+  const resueltas = r.titularidadResuelta ?? [];
+  if (!texto && porRanura.size === 0 && resueltas.length === 0) return null;
+  const declarada: TitularidadDeclaradaInmueble = {};
+  if (texto) declarada.texto = texto;
+  const p1 = porRanura.get(1);
+  const p2 = porRanura.get(2);
+  if (p1?.porcentaje !== null && p1 !== undefined) declarada.porcentajePropietario1 = p1.porcentaje;
+  if (p2?.porcentaje !== null && p2 !== undefined) declarada.porcentajePropietario2 = p2.porcentaje;
+  const noInterpretables: Array<{ ranura: 1 | 2; valorOriginal: unknown; motivo: string }> = [];
+  for (const [ranura, v] of porRanura) {
+    if (v.porcentaje === null) noInterpretables.push({ ranura, valorOriginal: v.valorOriginal, motivo: v.motivo ?? 'porcentaje declarado no interpretable' });
+  }
+  if (noInterpretables.length > 0) declarada.porcentajesNoInterpretables = noInterpretables;
+  if (resueltas.length > 0) {
+    declarada.resuelta = true;
+    declarada.titularidadResuelta = resueltas.map((x) => ({ ranura: x.ranura, propietarioId: x.propietarioId }));
+  } else {
+    declarada.resuelta = false;
+  }
+  return declarada;
+}
+
+/** Inquilino DECLARADO por la fila (nombre y/o DNI). No acredita arrendamiento. */
+export function construirInquilinoDeclarado(r: ImportRecord): InquilinoDeclaradoInmueble | null {
+  const buscar = (clave: string): string | undefined => {
+    const v = (r.declarados ?? []).find((d) => d.clave === clave)?.valor;
+    return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+  };
+  const nombre = buscar('inquilinoDeclarado.nombre');
+  const dni = buscar('inquilinoDeclarado.dni');
+  if (!nombre && !dni) return null;
+  return { ...(nombre ? { nombre } : {}), ...(dni ? { dni } : {}) };
+}
+
+/**
+ * Evidencia persistida de la importación: TODOS los datos declarados con su
+ * valor original, su estado y su motivo, más la procedencia exacta. Es lo que
+ * hace verificable que ninguna columna reconocida se pierde y que todo lo que
+ * queda pendiente dice exactamente qué falta.
+ */
+export function construirDatosImportadosHistoricos(
+  r: ImportRecord,
+  ctx: { fechaHora: string; actor?: string | null },
+): DatosImportadosHistoricosInmueble | null {
+  const declarados = r.declarados ?? [];
+  const pendientes = r.relacionesPendientes ?? [];
+  if (declarados.length === 0 && pendientes.length === 0) return null;
+  const datosDeclarados: DatoImportadoDeclarado[] = declarados.map((d) => ({
+    campoOrigen: d.campoOrigen,
+    clave: d.clave,
+    clase: d.clase,
+    valor: d.valor,
+    valorOriginal: d.valorOriginal,
+    ejercicio: d.ejercicio,
+    ...(d.categoria ? { categoria: d.categoria } : {}),
+    estado: d.estado,
+    motivo: d.motivo,
+  }));
+  for (const p of pendientes) {
+    datosDeclarados.push({
+      campoOrigen: p.campoOrigen,
+      clave: p.clave,
+      clase: 'RELACION_PENDIENTE',
+      valor: null,
+      valorOriginal: p.valorOriginal,
+      ejercicio: null,
+      estado: 'PENDIENTE_RESOLUCION',
+      motivo: p.motivo,
+    });
+  }
+  const agregados = datosDeclarados.filter((d) => d.clase === 'AGREGADO_ANUAL');
+  const ejercicios = new Set(agregados.map((d) => d.ejercicio).filter((x): x is number => typeof x === 'number'));
+  const total = agregados.length > 0 && ejercicios.size <= 1
+    ? agregados.reduce((acc, d) => acc + (typeof d.valor === 'number' ? d.valor : 0), 0)
+    : undefined;
+  return {
+    schemaVersion: 1,
+    importRunId: r.provenance.importRunId,
+    sourceFile: r.provenance.sourceFile,
+    sourceRecordId: r.sourceRecordId,
+    importadoEn: ctx.fechaHora,
+    importadoPor: ctx.actor ?? null,
+    datosDeclarados,
+    ...(total !== undefined ? { totalAgregadosAnualesDeclarados: redondear2Import(total) } : {}),
+  };
+}
+
+function redondear2Import(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
 }

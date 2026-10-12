@@ -101,6 +101,8 @@ function puertoFake(): PuertoPersistenciaImport & { gastos: Map<string, unknown>
     async crearGasto(g) { gastos.set(g.id, g); },
     async crearInmueble() { throw new Error('no usado en estas pruebas'); },
     async anexarCobro() {},
+    async existeTitularidad() { return false; },
+    async crearTitularidad() {},
     async auditar() {},
   };
 }

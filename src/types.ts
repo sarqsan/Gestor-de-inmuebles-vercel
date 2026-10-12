@@ -585,6 +585,134 @@ export interface Inmueble {
   fechaVenta?: string;
   /** Bajas anteriores del inmueble: el histórico patrimonial NUNCA se borra. */
   historialBajas?: BajaPatrimonial[];
+
+  // ---------------------------------------------------------------------------
+  // IMPORTACIÓN PATRIMONIAL — datos DECLARADOS por el archivo de origen
+  // ---------------------------------------------------------------------------
+  // Equivalencia con el Gestor Patrimonial de referencia (que ya los importa):
+  //   porcentajeSueloCatastral    ↔ landValuePercent        («% Suelo Catastral»)
+  //   amortizacionAnualDeclarada  ↔ amortizationAmount      («Amortización Anual (€)»)
+  //   rentaMensualDeclarada       ↔ monthlyRent             («Renta Mensual (€)»)
+  //   gastosAnualesDeclarados     ↔ expensesCommunity/IBI/Insurance/Repairs
+  //   fechaRegistroPatrimonial    ↔ registrationDate        («Fecha Registro»)
+  //   inquilinoDeclarado          ↔ tenantName / tenantDni
+  //   titularidadDeclarada        ↔ ownershipPercentageUser1/2 + owner
+  //
+  // El sufijo «Declarad*» es deliberado: son datos del ARCHIVO, no cálculos ni
+  // estados del ERP. Concretamente:
+  //  · `amortizacionAnualDeclarada` NO es la amortización fiscal (el ERP la
+  //    calcula; este valor no la sobrescribe ni la duplica);
+  //  · `rentaMensualDeclarada` NO es la renta vigente (la fija el contrato) y
+  //    NUNCA se escribe en `precio` (el precio de la ficha pública);
+  //  · `fechaRegistroPatrimonial` NO es `fechaAdquisicion` (hecho distinto);
+  //  · `gastosAnualesDeclarados` son AGREGADOS anuales: no se convierten en
+  //    gastos individuales ni se suman a los movimientos detallados;
+  //  · `titularidadDeclarada` NO crea titularidades: los porcentajes quedan
+  //    declarados y PENDIENTES hasta que se asignen a un titular existente.
+  /** Porcentaje de suelo catastral declarado (0–100]. No se deduce ni se reparte. */
+  porcentajeSueloCatastral?: number;
+  /** Fecha de registro patrimonial declarada (≠ `fechaAdquisicion`). */
+  fechaRegistroPatrimonial?: string;
+  /** Amortización anual declarada por el origen (dato histórico, ≠ cálculo fiscal). */
+  amortizacionAnualDeclarada?: number;
+  /** Renta mensual declarada por el origen (≠ renta vigente del contrato ≠ `precio`). */
+  rentaMensualDeclarada?: number;
+  /** Agregados anuales de gasto declarados (no generan movimientos detallados). */
+  gastosAnualesDeclarados?: GastosAnualesDeclaradosInmueble;
+  /** Inquilino declarado en el archivo (no acredita ningún arrendamiento). */
+  inquilinoDeclarado?: InquilinoDeclaradoInmueble;
+  /** Titularidad declarada en el archivo, pendiente de resolución explícita. */
+  titularidadDeclarada?: TitularidadDeclaradaInmueble;
+  /** Evidencia completa de la importación (valores originales y motivos). */
+  datosImportadosHistoricos?: DatosImportadosHistoricosInmueble;
+}
+
+/**
+ * Agregados ANUALES de gasto declarados en el origen. Se conservan como
+ * agregados (nunca como movimientos individuales: no traen fecha ni devengo) y
+ * con su categoría, para que sean verificables sin re-sumar el detalle.
+ */
+export interface GastosAnualesDeclaradosInmueble {
+  comunidad?: number;
+  ibi?: number;
+  reparaciones?: number;
+  seguro?: number;
+  /** Ejercicio declarado; `null` = no consta (jamás se inventa un año). */
+  ejercicio?: number | null;
+}
+
+/** Inquilino tal cual lo declara el archivo (evidencia, no relación creada). */
+export interface InquilinoDeclaradoInmueble {
+  nombre?: string;
+  dni?: string;
+}
+
+/**
+ * Titularidad declarada por el archivo. Los porcentajes son DATOS DEL ARCHIVO:
+ * mientras no se resuelvan a un titular existente (asignación humana explícita)
+ * no se crea ninguna `titularidad` ni se reparte nada.
+ */
+export interface TitularidadDeclaradaInmueble {
+  /** Texto libre de la columna «Titularidad» (evidencia; no identifica a nadie). */
+  texto?: string;
+  porcentajePropietario1?: number;
+  porcentajePropietario2?: number;
+  /** Valores originales ilegibles (fuera de rango / no numéricos). */
+  porcentajesNoInterpretables?: Array<{ ranura: 1 | 2; valorOriginal: unknown; motivo: string }>;
+  /** `true` sólo si una persona asignó los porcentajes a titulares existentes. */
+  resuelta?: boolean;
+  /** Titulares a los que se resolvió cada ranura, si se resolvió. */
+  titularidadResuelta?: Array<{ ranura: 1 | 2; propietarioId: string }>;
+}
+
+/** Naturaleza de un dato declarado en el origen que NO es un campo del modelo. */
+export type ClaseDatoImportado =
+  /** Importe anual agregado (comunidad, IBI, reparaciones, seguro…). */
+  | 'AGREGADO_ANUAL'
+  /** Dato histórico declarado (amortización anual, fecha de registro, renta…). */
+  | 'HISTORICO_DECLARADO'
+  /** Relación (titularidad, inquilino) que exige resolución humana explícita. */
+  | 'RELACION_PENDIENTE';
+
+/** Estado de un dato declarado importado. */
+export type EstadoDatoImportado = 'CONSERVADO' | 'PENDIENTE_RESOLUCION';
+
+/** Un dato declarado en el origen, conservado con su trazabilidad completa. */
+export interface DatoImportadoDeclarado {
+  /** Cabecera/columna exacta de la que procede (p. ej. «Gastos IBI (€)»). */
+  campoOrigen: string;
+  /** Clave estable de conservación (p. ej. `gastoAnual.ibi`). */
+  clave: string;
+  clase: ClaseDatoImportado;
+  /** Valor normalizado cuando es interpretable (número/fecha/texto). */
+  valor: unknown;
+  /** Valor tal cual venía en el archivo (evidencia; nunca se reescribe). */
+  valorOriginal: unknown;
+  /** Ejercicio declarado; `null` = no consta (jamás se inventa). */
+  ejercicio: number | null;
+  /** Categoría cuando el propio campo la determina. */
+  categoria?: string;
+  estado: EstadoDatoImportado;
+  /** Por qué se conserva y en qué estado queda. */
+  motivo: string;
+}
+
+/** Bloque persistido en `inmuebles/{id}.datosImportadosHistoricos`. */
+export interface DatosImportadosHistoricosInmueble {
+  schemaVersion: number;
+  importRunId: string;
+  migrationRunId?: string;
+  sourceFile: string;
+  sourceRecordId: string;
+  importadoEn: string;
+  importadoPor: string | null;
+  /** Todos los datos declarados conservados (con su valor original). */
+  datosDeclarados: DatoImportadoDeclarado[];
+  /**
+   * Suma INFORMATIVA de los agregados anuales declarados del MISMO ejercicio
+   * cuando consta. NUNCA se añade a los movimientos detallados (no se duplica).
+   */
+  totalAgregadosAnualesDeclarados?: number;
 }
 
 export type CategoriaInventario =

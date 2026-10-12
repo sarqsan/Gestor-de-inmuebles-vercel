@@ -99,7 +99,7 @@ function correr(entrada: {
   registrosCrudos: Record<string, unknown>[];
   localizaciones?: string[];
   entityType?: string;
-  parches?: ReadonlyArray<{ propietarioDestinoId?: string } | null>;
+  parches?: ReadonlyArray<{ propietarioDestinoId?: string; resolucionTitularidad?: readonly { ranura: 1 | 2; propietarioId: string }[] } | null>;
   catalogos?: CatalogosMigracion;
   sourceName?: string;
 }): ImportRun {
@@ -123,9 +123,10 @@ function correr(entrada: {
 /** Puerto fake en memoria: registra las escrituras que el ejecutor intenta. */
 function puertoFake(existentes: string[] = []) {
   const inmuebles = new Map<string, InmueblePatrimonialNuevo>();
+  const titularidades = new Map<string, { porcentajeTitularidad: number | null; estado: string; campoOrigen: string; valorOriginal: unknown }>();
   const auditoria: EventoAuditoriaImport[] = [];
   for (const id of existentes) inmuebles.set(id, { id, direccion: '(pre-existente)', propietarioId: PROP_ACTOR });
-  const llamadas = { crearInmueble: 0, existeDestino: 0 };
+  const llamadas = { crearInmueble: 0, existeDestino: 0, crearTitularidad: 0 };
   const puerto: PuertoPersistenciaImport = {
     async existeDestino(coleccion, destinoId) {
       llamadas.existeDestino += 1;
@@ -140,9 +141,25 @@ function puertoFake(existentes: string[] = []) {
       inmuebles.set(inm.id, inm);
     },
     async anexarCobro() { throw new Error('no usado'); },
+    async existeTitularidad(inmuebleId, propietarioId) {
+      return titularidades.has(`${inmuebleId}__${propietarioId}`);
+    },
+    async crearTitularidad(x) {
+      const clave = `${x.inmuebleId}__${x.propietarioId}`;
+      if (titularidades.has(clave)) throw new Error('titularidad duplicada');
+      // La relación exige el inmueble existente (Rules) y el porcentaje declarado.
+      if (!inmuebles.has(x.inmuebleId)) throw new Error('titularidad sin inmueble');
+      llamadas.crearTitularidad += 1;
+      titularidades.set(clave, {
+        porcentajeTitularidad: x.porcentajeTitularidad,
+        estado: 'VIGENTE',
+        campoOrigen: x.campoOrigen,
+        valorOriginal: x.valorOriginal,
+      });
+    },
     async auditar(e) { auditoria.push(e); },
   };
-  return { puerto, inmuebles, auditoria, llamadas };
+  return { puerto, inmuebles, titularidades, auditoria, llamadas };
 }
 
 function autorizarYPlanificar(run: ImportRun, ambito = AMBITO_ACTOR) {
@@ -211,7 +228,17 @@ describe('alta 1) la fila nueva es elegible y computable (ya no queda en REVISI�
 // ---------------------------------------------------------------------------
 describe('alta 2) el inmueble se crea con los datos disponibles y sin inventar nada', () => {
   it('escribe los campos patrimoniales declarados y OMITE los ausentes (ni 0 ni 1)', async () => {
-    const p = parseXlsx(libroPlantilla([filaSintetica(1)]));
+    // Fila que declara ADEMÁS los datos declarados con campo propio (% suelo,
+    // amortización, agregados anuales, DNI): todos deben persistir.
+    const p = parseXlsx(libroPlantilla([filaSintetica(1, {
+      'Amortización Anual (€)': 3001,
+      'Gastos Comunidad (€)': 45,
+      'Gastos IBI (€)': 320,
+      'Gastos Reparaciones (€)': 0,
+      'Gastos Seguro (€)': 180,
+      '% Suelo Catastral': 20,
+      'DNI Inquilino': '33333333C',
+    })]));
     const run = correr({ registrosCrudos: p.registros as Record<string, unknown>[], parches: [{ propietarioDestinoId: PROP_ACTOR }] });
     const { plan } = autorizarYPlanificar(run);
     const fake = puertoFake();
@@ -228,8 +255,24 @@ describe('alta 2) el inmueble se crea con los datos disponibles y sin inventar n
     expect(inm.codigoPostal).toBe('03001');
     expect(inm.referenciaCatastral).toBe('CAT-SYN-1');
     expect(inm.valorAdquisicion).toBe(101000);
-    expect(inm.fechaAdquisicion).toBe('2019-05-01');
+    // Fecha REGISTRO ≠ fecha de adquisición: la fila declara registro.
+    expect(inm.fechaRegistroPatrimonial).toBe('2019-05-01');
+    expect(inm.fechaAdquisicion).toBeUndefined();
     expect(inm.propietarioId).toBe(PROP_ACTOR);
+    // Datos declarados con campo propio persistente (equivalen a los del Gestor
+    // Patrimonial y son releíbles desde el documento del inmueble).
+    expect(inm.porcentajeSueloCatastral).toBe(20);
+    expect(inm.amortizacionAnualDeclarada).toBe(3001);
+    expect(inm.rentaMensualDeclarada).toBe(601);
+    expect(inm.gastosAnualesDeclarados).toEqual({ comunidad: 45, ibi: 320, reparaciones: 0, seguro: 180, ejercicio: null });
+    expect(inm.inquilinoDeclarado).toEqual({ nombre: 'Inquilino Sintético', dni: '33333333C' });
+    expect(inm.titularidadDeclarada?.porcentajePropietario1).toBe(100);
+    expect(inm.titularidadDeclarada?.resuelta).toBe(false);
+    // Evidencia completa: valor original de cada columna declarada.
+    const claves = (inm.datosImportadosHistoricos?.datosDeclarados ?? []).map((d) => d.clave);
+    expect(claves).toContain('titularidadDeclarada.texto');
+    expect(claves).toContain('inquilinoDeclarado.dni');
+    expect(inm.datosImportadosHistoricos?.sourceRecordId).toBe('SYNTH-1');
 
     // NO declarado en la fila ⇒ AUSENTE (jamás 0, 1, '' ni un valor por defecto).
     for (const campo of ['precio', 'rentaMensual', 'estado', 'banos', 'fianzaMeses', 'candidatosCount', 'superficie', 'habitaciones', 'modalidadAlquiler', 'descripcion', 'imagenUrl', 'inquilinoActualNombre']) {
@@ -279,32 +322,86 @@ describe('alta 2) el inmueble se crea con los datos disponibles y sin inventar n
 // 3) Lo que NO se escribe se declara (no hay pérdidas silenciosas)
 // ---------------------------------------------------------------------------
 describe('alta 3) los datos de alquiler/publicación declarados se avisan con su motivo', () => {
-  it('renta, estado e inquilino declarados ⇒ aviso explícito por campo y valor conservado', () => {
+  it('renta declarada se persiste como tal y los datos operativos que no se escriben se avisan', () => {
     const p = parseXlsx(libroPlantilla([filaSintetica(1)]));
     const run = correr({ registrosCrudos: p.registros as Record<string, unknown>[], parches: [{ propietarioDestinoId: PROP_ACTOR }] });
     const r = run.registros[0]!;
-    const avisos = r.warnings.join('\n');
+    // RENTA: ya NO se queda sin destino — se persiste como declarada
+    // (`rentaMensualDeclarada`) y NO se escribe en los campos operativos.
+    expect(r.canonicalData['rentaMensualDeclarada']).toBe(601);
+    expect(r.warnings.join('\n')).not.toContain("'rentaMensual'");
 
-    expect(avisos).toContain("'precio'");
-    expect(avisos).toContain('«601»');                 // el valor declarado, visible
-    expect(avisos).toContain('RENTA');
-    expect(avisos).toContain("'rentaMensual'");
-    expect(avisos).toContain("'inquilinoActualNombre'");
-    expect(avisos).toContain('«Inquilino Sintético»');
-    // El aviso nunca se confunde con «no leído»: dice que no se escribe y por qué.
+    // Una fila de fuente externa que SÍ declara campos operativos: se avisa uno a
+    // uno con su valor, sin inventar nada (no se escribe estado ni inquilino).
+    const p2 = parseXlsx(generarXlsx([{
+      nombre: 'Inmuebles',
+      columnas: [...CABECERAS_17, 'Inquilino Actual', 'estado', 'precio'].map((nombre) => ({ nombre, tipo: NUMERICAS.has(nombre) || nombre === 'precio' ? 'numero' : 'texto' })),
+      filas: [filaSintetica(1, { 'Inquilino Actual': 'Inquilino Sintético', 'estado': 'alquilado', 'precio': 601 })],
+    }]));
+    const run2 = correr({ registrosCrudos: p2.registros as Record<string, unknown>[], parches: [{ propietarioDestinoId: PROP_ACTOR }] });
+    const r2 = run2.registros[0]!;
+    const avisos = r2.warnings.join('\n');
     expect(avisos).toContain('NO se escribe en el inmueble nuevo');
+    expect(avisos).toContain('«Inquilino Sintético»');
   });
 
-  it('las columnas sin destino siguen declaradas (porcentajes y agregados) junto al alta', () => {
+  it('ninguna columna de la plantilla queda sin destino; las relaciones se declaran pendientes', () => {
     const p = parseXlsx(libroPlantilla([filaSintetica(1)]));
     const run = correr({ registrosCrudos: p.registros as Record<string, unknown>[], parches: [{ propietarioDestinoId: PROP_ACTOR }] });
-    const campos = run.registros[0]!.camposSinDestino.map((c) => c.campo);
-    for (const c of ['Titularidad', '% Propietario 1', '% Propietario 2', 'Gastos IBI (€)', '% Suelo Catastral']) {
-      expect(campos).toContain(c);
+    const r = run.registros[0]!;
+    for (const c of ['Titularidad', '% Propietario 1', '% Propietario 2', 'Gastos IBI (€)', '% Suelo Catastral', 'Fecha Registro', 'Renta Mensual (€)', 'Amortización Anual (€)']) {
+      expect(r.camposSinDestino.map((x) => x.campo)).not.toContain(c);
     }
-    // Ningún porcentaje se reparte ni se escribe en el inmueble.
-    expect(run.registros[0]!.canonicalData['porcentaje']).toBeUndefined();
-    expect(run.registros[0]!.canonicalData['titularesIds']).toBeUndefined();
+    // Relación pendiente declarada con su motivo (sin inventar titularidad).
+    expect((r.relacionesPendientes ?? []).length).toBeGreaterThan(0);
+    expect(r.canonicalData['titularesIds']).toBeUndefined();
+    expect(r.titularidadResuelta ?? []).toEqual([]);
+  });
+
+  it('la titularidad declarada resuelta por una persona SÍ crea la relación (por el flujo autorizado)', async () => {
+    const p = parseXlsx(libroPlantilla([filaSintetica(1, { 'Titularidad': 'Cotitularidad', '% Propietario 1': 60, '% Propietario 2': 40 })]));
+    // 1) Sin resolución: nada se escribe en titularidades.
+    const runSin = correr({ registrosCrudos: p.registros as Record<string, unknown>[], parches: [{ propietarioDestinoId: PROP_ACTOR }] });
+    const planSin = autorizarYPlanificar(runSin).plan;
+    const fakeSin = puertoFake();
+    await ejecutarPromocion({ plan: planSin, run: runSin, decisiones: {}, puerto: fakeSin.puerto, actor: 'u_sintetico', fechaHora: '2026-10-12T00:00:00.000Z' });
+    expect(fakeSin.titularidades.size).toBe(0);
+    expect(planSin.operaciones[0]!.titularidades ?? []).toEqual([]);
+
+    // 2) Con asignación humana explícita de cada ranura a un titular existente:
+    //    se persiste la relación con el porcentaje DECLARADO (60/40), no inferido.
+    const runCon = correr({
+      registrosCrudos: p.registros as Record<string, unknown>[],
+      parches: [{ propietarioDestinoId: PROP_ACTOR, resolucionTitularidad: [{ ranura: 1, propietarioId: PROP_ACTOR }, { ranura: 2, propietarioId: PROP_OTRO }] }],
+    });
+    const r = runCon.registros[0]!;
+    // Ranura 1 (titular escribible) se resuelve con su porcentaje declarado;
+    // ranura 2 apunta a un titular FUERA del ámbito escribible del actor ⇒ se
+    // descarta la asignación y queda PENDIENTE (no se escribe fuera de ámbito).
+    expect(r.titularidadResuelta?.map((x) => `${x.ranura}:${x.propietarioId}:${x.porcentaje}`)).toEqual([`1:${PROP_ACTOR}:60`]);
+    expect((r.relacionesPendientes ?? []).map((x) => x.motivo).join(' | ')).toMatch(/no está en el ámbito escribible/);
+
+    const plan = autorizarYPlanificar(runCon).plan;
+    const fake = puertoFake();
+    const res = await ejecutarPromocion({ plan, run: runCon, decisiones: {}, puerto: fake.puerto, actor: 'u_sintetico', fechaHora: '2026-10-12T00:00:00.000Z' });
+    expect(res.titularidadesCreadas).toHaveLength(1);
+    expect(fake.titularidades.get(`${r.destinationId}__${PROP_ACTOR}`)).toMatchObject({ porcentajeTitularidad: 60, estado: 'VIGENTE' });
+    expect(fake.titularidades.has(`${r.destinationId}__${PROP_OTRO}`)).toBe(false);
+    // El inmueble guarda la resolución (trazabilidad) y el resto DECLARADO.
+    expect(fake.inmuebles.get(r.destinationId!)?.titularidadDeclarada).toMatchObject({
+      resuelta: true,
+      titularidadResuelta: [{ ranura: 1, propietarioId: PROP_ACTOR }],
+      porcentajePropietario2: 40,
+    });
+    // La relación pendiente queda registrada en el informe (con su motivo).
+    expect(res.relacionesPendientes.some((x) => x.campoOrigen.startsWith('% Propietario'))).toBe(true);
+
+    // 3) Reimportar el MISMO archivo: la relación ya existe ⇒ se omite sin reescribir.
+    const fake2 = puertoFake();
+    fake2.titularidades.set(`${r.destinationId}__${PROP_ACTOR}`, { porcentajeTitularidad: 60, estado: 'VIGENTE', campoOrigen: '% Propietario 1', valorOriginal: 60 });
+    const res2 = await ejecutarPromocion({ plan, run: runCon, decisiones: {}, puerto: fake2.puerto, actor: 'u_sintetico', fechaHora: '2026-10-12T00:00:00.000Z' });
+    expect(res2.titularidadesCreadas).toHaveLength(0);
+    expect(res2.titularidadesOmitidas).toHaveLength(1);
   });
 });
 

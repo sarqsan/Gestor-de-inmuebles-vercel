@@ -11,7 +11,7 @@
  *  · Conciliación (`src/utils/conciliacion/csvParser.ts`): parseImporteCSV
  *    (formatos ES/EN de importes en texto, p. ej. desde CSV).
  */
-import type { CategoriaGasto } from '../../types';
+import type { CategoriaGasto, ClaseDatoImportado, EstadoDatoImportado } from '../../types';
 import {
   fechaUtil,
   mapaCategoriaGasto,
@@ -23,15 +23,57 @@ import type { MapeoCampo } from './contrato';
 import { CAMPO_IDENTIDAD_ORIGEN, IGNORADO_NO_MAPEADO } from './contrato';
 import { buscarMapeo, claveCabecera, type TipoMapeo } from './mappingRegistry';
 
+/** Un dato declarado en el origen, normalizado y listo para conservarse. */
+export interface DatoConservadoNormalizado {
+  campoOrigen: string;
+  clave: string;
+  clase: ClaseDatoImportado;
+  valor: unknown;
+  valorOriginal: unknown;
+  ejercicio: number | null;
+  categoria?: string;
+  estado: EstadoDatoImportado;
+  motivo: string;
+  /** Ranura de titularidad (1|2) cuando el dato es un porcentaje declarado. */
+  ranura?: number;
+}
+
+/**
+ * Titularidad declarada por el archivo, SIN resolver: el texto y los
+ * porcentajes originales. Ninguna ranura lleva titular asignado aquí (eso exige
+ * una resolución humana explícita: `titularidadResuelta`).
+ */
+export interface TitularidadDeclaradaNormalizada {
+  /** Texto libre de la columna «Titularidad» (evidencia). */
+  texto: string | null;
+  /** Porcentajes declarados por ranura, con su valor original intacto. */
+  porcentajes: Array<{
+    ranura: 1 | 2;
+    porcentaje: number | null;
+    campoOrigen: string;
+    valorOriginal: unknown;
+    /** Motivo cuando el valor declarado no es un porcentaje utilizable. */
+    motivoInvalido?: string;
+  }>;
+}
+
 export interface ResultadoNormalizacion {
   canonico: Record<string, unknown>;
   mapeos: MapeoCampo[];
   /** Campos sin mapping (IGNORADO_NO_MAPEADO en el informe). */
   desconocidos: string[];
   /**
+   * Datos declarados que se CONSERVAN con destino persistente propio (destino
+   * histórico importado del inmueble): agregados anuales, amortización
+   * declarada, fecha de registro, renta, titularidad/inquilino pendientes…
+   */
+  conservados: DatoConservadoNormalizado[];
+  /** Vista estructurada de la titularidad declarada (para resolverla). */
+  titularidadDeclarada: TitularidadDeclaradaNormalizada | null;
+  /**
    * Campos CONOCIDOS sin destino en el modelo: no son desconocidos, no se
-   * importan y el motivo se muestra tal cual (INCIDENCIA: titularidad,
-   * porcentajes y agregados anuales de la plantilla de inmuebles).
+   * importan y el motivo se muestra tal cual (residuales de fuentes externas
+   * sin adaptador seguro; ya NO incluye las columnas conservadas).
    */
   sinDestino: Array<{ campo: string; motivo: string }>;
   /**
@@ -180,9 +222,91 @@ export function aplicarMapping(
   const mapeos: MapeoCampo[] = [];
   const desconocidos: string[] = [];
   const sinDestino: Array<{ campo: string; motivo: string }> = [];
+  const conservados: DatoConservadoNormalizado[] = [];
+  let titularidadDeclarada: TitularidadDeclaradaNormalizada | null = null;
   let identidadOrigen: string | null = null;
   const warnings: string[] = [];
   const incidencias: ResultadoNormalizacion['incidencias'] = [];
+
+  /** Conserva un dato declarado con su valor original intacto. */
+  const conservar = (
+    campoOrigen: string,
+    entrada: NonNullable<ReturnType<typeof buscarMapeo>>['conservar'],
+    valor: unknown,
+  ): void => {
+    if (!entrada) return;
+    const valorOriginal = valor;
+    let normalizado: unknown = valor;
+    if (entrada.tipo === 'number' || entrada.tipo === 'porcentaje') {
+      const n = aNumero(valor);
+      if (n === null) {
+        normalizado = null;
+        warnings.push(`${campoOrigen}: valor no numérico ('${String(valor)}'); se conserva el original y no se interpreta`);
+      } else if (entrada.tipo === 'porcentaje' && (n < 0 || n > 100)) {
+        normalizado = null;
+        warnings.push(`${campoOrigen}: porcentaje ${n} fuera de rango (0–100]; se conserva el valor original y no se interpreta`);
+      } else {
+        normalizado = redondear2(n);
+      }
+    } else if (typeof valor === 'string') {
+      normalizado = valor.trim();
+    }
+    conservados.push({
+      campoOrigen,
+      clave: entrada.clave,
+      clase: entrada.clase,
+      valor: normalizado,
+      valorOriginal,
+      ejercicio: null,
+      ...(entrada.categoria ? { categoria: entrada.categoria } : {}),
+      estado: entrada.estado,
+      motivo: entrada.motivo,
+      ...(entrada.ranura ? { ranura: entrada.ranura as 1 | 2 } : {}),
+    });
+    mapeos.push({
+      campoOrigen,
+      campoCanonico: entrada.clave,
+      regla: `conservado_historico:${entrada.clase}${entrada.estado === 'PENDIENTE_RESOLUCION' ? ';pendiente_resolucion' : ''}`,
+      valorOriginal,
+    });
+  };
+
+  /**
+   * Un valor declarado que NO se puede escribir en el modelo (fuera de rango,
+   * no numérico, fecha irreconocible) NUNCA se descarta: se conserva en el
+   * bloque histórico del inmueble con su valor original y el motivo exacto.
+   */
+  const conservarInvalido = (campoOrigen: string, campoCanonico: string, valor: unknown, motivo: string): void => {
+    conservados.push({
+      campoOrigen,
+      clave: `declarado.noInterpretable.${campoCanonico}`,
+      clase: 'HISTORICO_DECLARADO',
+      valor: null,
+      valorOriginal: valor,
+      ejercicio: null,
+      estado: 'PENDIENTE_RESOLUCION',
+      motivo,
+    });
+  };
+
+  /** Añade el porcentaje declarado a la vista estructurada de titularidad. */
+  const registrarPorcentajeTitularidad = (
+    campoOrigen: string,
+    ranura: 1 | 2,
+    valorOriginal: unknown,
+  ): void => {
+    const base: TitularidadDeclaradaNormalizada = titularidadDeclarada ?? { texto: null, porcentajes: [] };
+    const n = aNumero(valorOriginal);
+    const valido = n !== null && n >= 0 && n <= 100;
+    base.porcentajes.push({
+      ranura,
+      porcentaje: valido ? redondear2(n as number) : null,
+      campoOrigen,
+      valorOriginal,
+      ...(valido ? {} : { motivoInvalido: `porcentaje declarado '${String(valorOriginal)}' no utilizable (se requiere número en 0–100)` }),
+    });
+    titularidadDeclarada = base;
+  };
 
   // Concepto provisional para la tabla B1 de categorías (description/concepto en crudo).
   const conceptoCrudo = typeof registro['description'] === 'string'
@@ -230,9 +354,25 @@ export function aplicarMapping(
       continue;
     }
     if (esVacio(valor)) {
-      // Campo mapeado pero vacío: no se importa, no se inventa.
-      mapeos.push({ campoOrigen, campoCanonico: hallado.canonicos[0], regla: `${hallado.regla};vacio:ausente` });
+      // Campo mapeado pero vacío: no se importa, no se inventa. Una columna
+      // conservada vacía tampoco produce dato declarado (no consta).
+      const destinoVacio = hallado.canonicos[0] ?? hallado.conservar?.clave;
+      mapeos.push({ campoOrigen, campoCanonico: destinoVacio, regla: `${hallado.regla};vacio:ausente` });
       continue;
+    }
+    // Dato declarado CONSERVADO: el valor original se conserva SIEMPRE (tenga o
+    // no además un campo del modelo), para que ninguna columna reconocida
+    // desaparezca. La titularidad declarada se recoge además resuelta como
+    // relación pendiente (ranura + porcentaje), sin asignar titulares.
+    if (hallado.conservar) {
+      conservar(campoOrigen, hallado.conservar, valor);
+      if (hallado.conservar.relacion === 'TITULARIDAD_TEXTO' && typeof valor === 'string') {
+        titularidadDeclarada = { ...(titularidadDeclarada ?? { texto: null, porcentajes: [] }), texto: valor.trim() };
+      }
+      if (hallado.conservar.relacion === 'TITULARIDAD_PORCENTAJE' && hallado.conservar.ranura) {
+        registrarPorcentajeTitularidad(campoOrigen, hallado.conservar.ranura as 1 | 2, valor);
+      }
+      if (hallado.canonicos.length === 0) continue;
     }
     const tipo: TipoMapeo = hallado.tipo ?? 'string';
     let transformado: unknown = null;
@@ -276,12 +416,35 @@ export function aplicarMapping(
     } else if (tipo === 'number') {
       const n = aNumero(valor);
       if (n === null) {
-        warnings.push(`${campoOrigen}: importe no numérico ('${String(valor)}'); se deja ausente`);
+        warnings.push(`${campoOrigen}: importe no numérico ('${String(valor)}'); se deja ausente y se conserva el original`);
+        conservarInvalido(campoOrigen, hallado.canonicos[0], valor, `importe declarado no numérico ('${String(valor)}'): no se escribe en el modelo y el original queda conservado`);
         mapeos.push({ campoOrigen, campoCanonico: hallado.canonicos[0], regla: `${hallado.regla};no_numerico:ausente`, valorOriginal: valor });
         continue;
       }
+      // Validación de porcentaje (0–100]: un valor fuera de rango NO se
+      // «corrige» ni se recorta; no se escribe en el modelo y el original queda
+      // conservado con su motivo en el bloque histórico del inmueble.
+      if (hallado.transformacion === 'porcentaje0a100' && (n < 0 || n > 100)) {
+        warnings.push(`${campoOrigen}: porcentaje ${n} fuera de rango (0–100]; NO se escribe en el modelo y se conserva el valor original`);
+        conservarInvalido(campoOrigen, hallado.canonicos[0], valor, `valor declarado fuera de rango (0–100]: ${n}; se conserva el original y no se escribe en el modelo`);
+        mapeos.push({ campoOrigen, campoCanonico: hallado.canonicos[0], regla: `${hallado.regla};porcentaje_fuera_de_rango:ausente`, valorOriginal: valor });
+        continue;
+      }
+      // AGREGADOS ANUALES: varias columnas (comunidad, IBI, reparaciones,
+      // seguro) se FUSIONAN en un mismo objeto declarado; ninguna sobrescribe a
+      // las demás y ninguna se convierte en movimientos individuales.
+      if (hallado.transformacion?.startsWith('agregadoAnual:')) {
+        const sub = hallado.transformacion.slice('agregadoAnual:'.length);
+        const previo = (canonico['gastosAnualesDeclarados'] as Record<string, unknown> | undefined) ?? {};
+        canonico['gastosAnualesDeclarados'] = { ...previo, [sub]: redondear2(n) };
+        mapeos.push({
+          campoOrigen, campoCanonico: `gastosAnualesDeclarados.${sub}`,
+          regla: `${hallado.regla};transformacion:agregadoAnual(${sub})`, valorOriginal: valor,
+        });
+        continue;
+      }
       transformado = redondear2(n);
-      regla += ';transformacion:redondeo2';
+      regla += hallado.transformacion === 'porcentaje0a100' ? ';transformacion:porcentaje0a100' : ';transformacion:redondeo2';
     } else if (tipo === 'entero') {
       const n = aEntero(valor);
       if (n === null) {
@@ -293,6 +456,8 @@ export function aplicarMapping(
     } else if (tipo === 'fecha') {
       const f = aFecha(valor, hallado.transformacion, warnings, campoOrigen);
       if (f === null) {
+        warnings.push(`${campoOrigen}: fecha no reconocida ('${String(valor)}'); se deja ausente y se conserva el original`);
+        conservarInvalido(campoOrigen, hallado.canonicos[0], valor, `fecha declarada irreconocible ('${String(valor)}'): no se escribe en el modelo y el original queda conservado (no se inventa una fecha)`);
         mapeos.push({ campoOrigen, campoCanonico: hallado.canonicos[0], regla: `${hallado.regla};fecha_no_reconocida:ausente`, valorOriginal: valor });
         continue;
       }
@@ -332,7 +497,19 @@ export function aplicarMapping(
       mapeos.push(mapeo);
     }
   }
-  return { canonico, mapeos, desconocidos, sinDestino, identidadOrigen, warnings, incidencias };
+  // El ejercicio declarado en la fila (si consta) identifica a qué año
+  // corresponden los agregados anuales conservados. Cuando NO consta, cada
+  // agregado conserva `ejercicio: null`: nunca se inventa un año.
+  const ejercicioFila = typeof canonico['ejercicioDeclarado'] === 'number' ? canonico['ejercicioDeclarado'] as number : null;
+  if (ejercicioFila !== null) {
+    for (const c of conservados) {
+      if (c.clase === 'AGREGADO_ANUAL' || c.clave === 'amortizacionAnualDeclarada') c.ejercicio = ejercicioFila;
+    }
+  }
+  return {
+    canonico, mapeos, desconocidos, conservados, titularidadDeclarada,
+    sinDestino, identidadOrigen, warnings, incidencias,
+  };
 }
 
 /**
@@ -357,7 +534,23 @@ export function detectarEntidadPorCabeceras(registro: Record<string, unknown>): 
   }
   const cuenta = (señales: readonly string[]): number =>
     señales.filter((s) => claves.has(s) || claves.has(s.replace(/ /g, ''))).length;
-  const INMUEBLE = ['direccion completa', 'direccion', 'referencia catastral', 'renta mensual', 'precio adquisicion', 'titularidad', 'inquilino', 'superficie'];
+  // Señales de fila de inmueble: cabeceras de la plantilla en español Y los
+  // nombres de campo del Gestor Patrimonial de referencia (export JSON propio:
+  // address / cadastralReference / owner / monthlyRent / purchasePrice /
+  // landValuePercent / amortizationAmount / expenses* / registrationDate /
+  // tenantName / tenantDni). Sin éstos, un JSON exportado por el Gestor
+  // Patrimonial quedaba 'DESCONOCIDA' y no se podía importar.
+  const INMUEBLE = [
+    'direccion completa', 'direccion', 'referencia catastral', 'renta mensual', 'precio adquisicion',
+    'titularidad', 'inquilino', 'superficie',
+    'address', 'cadastral reference', 'cadastralreference', 'owner', 'monthly rent', 'monthlyrent',
+    'purchase price', 'purchaseprice', 'current value', 'currentvalue',
+    'land value percent', 'landvaluepercent', 'amortization amount', 'amortizationamount',
+    'expenses community', 'expensescommunity', 'expenses ibi', 'expensesibi',
+    'expenses insurance', 'expensesinsurance', 'expenses repairs', 'expensesrepairs',
+    'registration date', 'registrationdate', 'tenant name', 'tenantname', 'tenant dni', 'tenantdni',
+    '% propietario 1', '% propietario 2',
+  ];
   const PROPIETARIO = ['nombre', 'nif', 'nif cif', 'cif', 'dni', 'telefono', 'email'];
   if (cuenta(INMUEBLE) >= 2) return 'INMUEBLE';
   // PROPIETARIO: exige nombre + documento de identidad (solo con 'nombre' no

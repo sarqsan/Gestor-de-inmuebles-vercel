@@ -15,7 +15,7 @@
  * Sin cambios en Rules: las escrituras cursan por colecciones existentes con
  * las reglas existentes (master/titular/carterasE). Sin bypass admin.
  */
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { arrayUnion, doc, getDoc, setDoc, writeBatch } from 'firebase/firestore';
 import type {
   CobroPeriodo,
   ContratoFormalizacion,
@@ -184,6 +184,68 @@ export function crearPuertoFirebase(
       const verif = await getDoc(doc(db, 'inmuebles', id));
       if (!verif.exists()) {
         throw new Error(`escritura no verificada en 'inmuebles/${id}' (posible denegación de Rules o fallo de red; no se informa CREADO)`);
+      }
+    },
+
+    /**
+     * ¿Existe ya la titularidad `{inmuebleId}__{propietarioId}`? Idempotencia de
+     * las relaciones: reimportar el mismo archivo no duplica ni reescribe nada.
+     */
+    async existeTitularidad(inmuebleId: string, propietarioId: string): Promise<boolean> {
+      const clave = `${inmuebleId}__${propietarioId}`;
+      const snap = await getDoc(doc(db, 'titularidades', clave));
+      return snap.exists();
+    },
+
+    /**
+     * Crea la RELACIÓN de titularidad por el flujo autorizado, en un único lote
+     * atómico: documento `titularidades/{inmuebleId}__{propietarioId}` + índice
+     * `inmuebles/{inmuebleId}.titularesIds` (misma escritura que la app).
+     *
+     * · Sólo se invoca con una ranura RESUELTA por una persona a un titular
+     *   existente del ámbito escribible (el plan lo valida antes).
+     * · El inmueble debe existir ya (las Rules lo comprueban).
+     * · `porcentajeTitularidad` es el DECLARADO por el archivo o `null` cuando no
+     *   consta: nunca se calcula, se reparte ni se completa un 100 %.
+     * · NO crea propietarios ni contratos.
+     */
+    async crearTitularidad(t: {
+      inmuebleId: string;
+      propietarioId: string;
+      propietarioNombre?: string;
+      porcentajeTitularidad: number | null;
+      campoOrigen: string;
+      valorOriginal: unknown;
+      importRunId: string;
+      migrationRunId: string;
+    }): Promise<void> {
+      const clave = `${t.inmuebleId}__${t.propietarioId}`;
+      const ahora = new Date().toISOString();
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'titularidades', clave), deepCleanForFirestore({
+        id: clave,
+        inmuebleId: t.inmuebleId,
+        propietarioId: t.propietarioId,
+        ...(t.propietarioNombre ? { propietarioNombre: t.propietarioNombre } : {}),
+        porcentajeTitularidad: t.porcentajeTitularidad,
+        estado: 'VIGENTE',
+        fechaInicio: ahora,
+        createdAt: ahora,
+        updatedAt: ahora,
+        // Trazabilidad de la importación (qué columna lo declaró y con qué valor).
+        origenImportacion: {
+          tipo: 'IMPORTACION',
+          importRunId: t.importRunId,
+          migrationRunId: t.migrationRunId,
+          campoOrigen: t.campoOrigen,
+          valorOriginal: t.valorOriginal,
+        },
+      }));
+      batch.update(doc(db, 'inmuebles', t.inmuebleId), { titularesIds: arrayUnion(t.propietarioId), updatedAt: ahora });
+      await batch.commit();
+      const verif = await getDoc(doc(db, 'titularidades', clave));
+      if (!verif.exists()) {
+        throw new Error(`escritura no verificada en 'titularidades/${clave}' (posible denegación de Rules; no se informa CREADO)`);
       }
     },
 

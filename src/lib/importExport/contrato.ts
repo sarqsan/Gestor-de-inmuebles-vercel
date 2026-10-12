@@ -133,12 +133,60 @@ export interface ImportRecord {
   camposDesconocidos: readonly string[];
   /**
    * Campos CONOCIDOS sin destino en el modelo: no son desconocidos, no se
-   * importan y cada uno lleva su motivo visible (titularidad, porcentajes,
-   * agregados anuales…). Nunca se ocultan.
+   * importan y cada uno lleva su motivo visible (residuales de fuentes externas
+   * sin adaptador seguro). Nunca se ocultan.
    */
   camposSinDestino: ReadonlyArray<{ campo: string; motivo: string }>;
+  /**
+   * Datos DECLARADOS conservados con destino persistente propio (agregados
+   * anuales, amortización/renta declaradas, fecha de registro, titularidad e
+   * inquilino pendientes…), con su valor original y su estado. Se persisten en
+   * el inmueble (`datosImportadosHistoricos`) cuando hay alta.
+   */
+  declarados?: readonly DatoConservadoImport[];
+  /** Relaciones declaradas que exigen resolución humana, con el dato que falta. */
+  relacionesPendientes?: readonly RelacionPendienteImport[];
+  /** Ranuras de titularidad resueltas por una persona (asignación explícita). */
+  titularidadResuelta?: readonly TitularidadResueltaImport[];
+  /**
+   * Vínculos de inquilino inequívocos encontrados por DNI en el mismo inmueble.
+   * NUNCA se crean contratos: se ofrecen para confirmación explícita.
+   */
+  vinculosInquilinoCandidatos?: readonly { contratoId: string; candidatoNombre?: string }[];
   warnings: readonly string[];
   conflictos: readonly string[];
+}
+
+/** Dato declarado conservado (forma persistible en el inmueble). */
+export interface DatoConservadoImport {
+  campoOrigen: string;
+  clave: string;
+  clase: 'AGREGADO_ANUAL' | 'HISTORICO_DECLARADO' | 'RELACION_PENDIENTE';
+  valor: unknown;
+  valorOriginal: unknown;
+  ejercicio: number | null;
+  categoria?: string;
+  estado: 'CONSERVADO' | 'PENDIENTE_RESOLUCION';
+  motivo: string;
+  ranura?: 1 | 2;
+}
+
+/** Relación declarada pendiente de resolución, con el dato exacto que falta. */
+export interface RelacionPendienteImport {
+  ranura: 1 | 2 | null;
+  clave: string;
+  campoOrigen: string;
+  valorOriginal: unknown;
+  motivo: string;
+}
+
+/** Ranura → titular resuelta por una persona (nunca inferida). */
+export interface TitularidadResueltaImport {
+  ranura: 1 | 2;
+  propietarioId: string;
+  porcentaje: number | null;
+  valorOriginal: unknown;
+  campoOrigen: string;
 }
 
 export type EstadoImportRun = 'DRY_RUN_COMPLETADO' | 'AUTORIZADO' | 'PROMOCIONADO' | 'PROMOCIONADO_PARCIAL';

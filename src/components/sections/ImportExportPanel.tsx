@@ -22,6 +22,7 @@ import { propietariosGestionadosDe, proyectarCarterasGestionadas } from '../../l
 import type { ModalidadUsoB4 } from '../../lib/migracion/tipos';
 import {
   ACEPTAR_IMPORTACION,
+  validarNombreFicheroImportacion,
   FUENTE_EXTERNA_SIN_VERSION,
   SOPORTE_ENTIDADES,
   analizarEstructuraJson,
@@ -47,6 +48,7 @@ import {
   verificarBarrera,
 } from '../../lib/importExport/promocion';
 import { ejecutarPromocion, planificarPromocion } from '../../lib/importExport/ejecucion';
+import type { ResolucionTitularImport } from '../../lib/importExport/titularidadImportacion';
 import {
   ambitoAutorizadoDesdeUsuario,
   cargarFuentesCatalogo,
@@ -61,6 +63,13 @@ interface Props {
   usuario?: UsuarioApp | null;
   gestiones?: GestionCartera[];
   scope?: DataAccessScope;
+  /**
+   * Fichero entregado por OTRO botón de la aplicación (el importador legacy de
+   * Configuración). Permite que ese mismo botón procese JSON/XLSX/CSV por el
+   * pipeline canónico en vez de rechazarlos por su estructura.
+   */
+  ficheroExterno?: { nombre: string; bytes: Uint8Array } | null;
+  onFicheroExternoConsumido?: () => void;
 }
 
 const ENTIDADES = ['AUTO', 'GASTO', 'COBRO', 'INMUEBLE', 'PROPIETARIO', 'CONTRATO', 'DOCUMENTO'] as const;
@@ -85,7 +94,7 @@ function descargarBlob(nombre: string, blob: Blob): void {
   URL.revokeObjectURL(url);
 }
 
-export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, gestiones = [], scope }) => {
+export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, gestiones = [], scope, ficheroExterno = null, onFicheroExternoConsumido }) => {
   const [pestana, setPestana] = useState<'importar' | 'exportar'>('importar');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -198,6 +207,20 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   const ambito = useMemo(() => ambitoAutorizadoDesdeUsuario(usuarioEf, gestionesEf), [usuarioEf, gestionesEf]);
   const identidad = usuarioEf ? { usuarioId: usuarioEf.id, usuarioEmail: usuarioEf.email, usuarioNombre: usuarioEf.nombre } : null;
 
+  // Fichero entregado por el botón legacy de Configuración: se procesa por el
+  // MISMO camino que el selector (no hay una segunda importación paralela).
+  useEffect(() => {
+    if (!ficheroExterno) return;
+    const consumido = onFicheroExternoConsumido;
+    void (async () => {
+      const bytes = ficheroExterno.bytes;
+      const pseudo = new File([bytes.slice().buffer as ArrayBuffer], ficheroExterno.nombre);
+      await onElegirFichero(pseudo);
+      consumido?.();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ficheroExterno]);
+
   const onElegirFichero = async (f: File | undefined): Promise<void> => {
     setErrorImport(null); setRun(null); setInsumos(null); setAutorizacion(null); setResultadoPromo(null); setDecisiones({}); setSeleccion(null); setAvisosParseo([]);
     if (!f) return;
@@ -208,16 +231,22 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
     // extensión. Un archivo elegido desde Drive/Gmail puede llegar sin
     // extensión o con nombre genérico; antes eso convertía un .xlsx en CSV y
     // el análisis fallaba sin motivo comprensible.
+    // La validación de la extensión se hace SIEMPRE tras la selección (el filtro
+    // del selector de Android no es fiable) y la FIRMA manda: un libro sin
+    // extensión se acepta si sus bytes lo identifican.
+    const errorNombre = validarNombreFicheroImportacion(f.name, buf);
     const detectado = detectarFormatoEntrada(f.name, buf);
     if (!detectado) {
       setFormato(null);
       setErrorImport(
-        `No se reconoce el formato de «${f.name}» (${buf.length} bytes): no es JSON, ni CSV, ni un libro XLSX válido. `
-        + 'Exporta el archivo como .json, .csv o .xlsx e inténtalo de nuevo.',
+        errorNombre
+        ?? `No se reconoce el formato de «${f.name}» (${buf.length} bytes): no es JSON, ni CSV, ni un libro XLSX válido. `
+          + 'Exporta el archivo como .json, .csv o .xlsx e inténtalo de nuevo.',
       );
       return;
     }
     setFormato(detectado);
+    if (errorNombre) setErrorImport(`aviso: ${errorNombre} (se procesa por su contenido, no por el nombre)`);
   };
 
   const onAnalizar = async (destino?: string): Promise<void> => {
@@ -258,6 +287,20 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
           versionFuente = marca.schemaVersion;
           if (entidadEfectiva === 'AUTO') entidadEfectiva = marca.entityType;
           rutaAnidada = ['records'];
+        } else {
+          // JSON de OTRA aplicación (p. ej. el Gestor Patrimonial del usuario):
+          // se usa la lista que la propia estructura declare (raíz, `records`,
+          // `inmuebles`, `data.properties`…). Sin esto, un respaldo integral se
+          // importaba como UN registro (el objeto entero) en vez de sus filas.
+          const estructura = analizarEstructuraJson(raizJson);
+          if (estructura.rutaRegistros && estructura.rutaRegistros.length > 0) {
+            rutaAnidada = estructura.rutaRegistros;
+          } else if ((entidadEfectiva === 'GASTO' || entidadEfectiva === 'COBRO') && estructura.listaMovimientos) {
+            // Respaldo con movimientos y sin inmuebles: al importar GASTO/COBRO
+            // se lee ESA lista (el mensaje de error diría exactamente qué es si
+            // no se hubiera pedido esa entidad).
+            rutaAnidada = estructura.listaMovimientos.ruta;
+          }
         }
       }
       // Un solo contrato: mismo pipeline para JSON/CSV/XLSX (BLOQUE 7 añade el
@@ -284,6 +327,11 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
       const crudos = (parseo.registros as Record<string, unknown>[]).map((r) => ({ ...r }));
       const destinoEfectivo = destino ?? destinoTitular;
       const parchesDestino = crudos.map(() => (destinoEfectivo ? { propietarioDestinoId: destinoEfectivo } : null));
+      const parchesTitularidad = crudos.map((_, i) => {
+        const rec = run?.registros.find((r) => r.indiceOrigen === i);
+        const res = rec ? decisiones[rec.fingerprint]?.titularidad : undefined;
+        return res && res.length > 0 ? { resolucionTitularidad: res } : null;
+      });
       const dry = ejecutarImportDryRun({
         registrosCrudos: crudos,
         localizaciones: parseo.localizaciones,
@@ -297,7 +345,15 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         catalogos,
         fechaHora: new Date().toISOString(),
         actor: identidad?.usuarioId ?? null,
-        parches: parchesDestino,
+        parches: parchesDestino.map((p, i) => {
+          const extra = parchesTitularidad[i];
+          return p === null && extra === null ? null : { ...(p ?? {}), ...(extra ?? {}) };
+        }),
+        contratosParaVinculoInquilino: fuentes.contratos.map((c) => ({
+          id: c.id, inmuebleId: c.inmuebleId,
+          ...(c.candidatoDni ? { candidatoDni: c.candidatoDni } : {}),
+          ...(c.candidatoNombre ? { candidatoNombre: c.candidatoNombre } : {}),
+        })),
       });
       setRun(dry);
       // Insumos para el re-dry-run de Autorizar (auditoría 3ac21a5/D1: este
@@ -329,10 +385,12 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
     // declarado) + autorización O7.
     const parches = insumos.crudos.map((_, i) => {
       const rec = run.registros.find((r) => r.indiceOrigen === i);
-      const ded = rec ? decisiones[rec.fingerprint]?.deducible : undefined;
-      const destino = destinoTitular ? { propietarioDestinoId: destinoTitular } : null;
-      if (ded === undefined) return destino;
-      return { ...(destino ?? {}), deducible: ded };
+      const dec = rec ? decisiones[rec.fingerprint] : undefined;
+      const partes: { deducible?: boolean; propietarioDestinoId?: string; resolucionTitularidad?: readonly ResolucionTitularImport[] } = {};
+      if (destinoTitular) partes.propietarioDestinoId = destinoTitular;
+      if (dec?.deducible !== undefined) partes.deducible = dec.deducible;
+      if (dec?.titularidad && dec.titularidad.length > 0) partes.resolucionTitularidad = dec.titularidad;
+      return Object.keys(partes).length > 0 ? partes : null;
     });
     const run2 = ejecutarImportDryRun({
       registrosCrudos: insumos.crudos,
@@ -464,6 +522,78 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   );
   const hayInmuebles = (run?.registros ?? []).some((r) => r.entityType === 'INMUEBLE');
 
+  // ---- Correspondencia columna → destino (verificable, no «reconocida y ya») ----
+  const correspondencia = useMemo(() => {
+    const mapa = new Map<string, { destino: string; clase: string }>();
+    for (const r of run?.registros ?? []) {
+      for (const m of r.fieldMappings) {
+        const regla = m.regla ?? '';
+        const clase = regla.includes('conservado_historico')
+          ? 'declarado (persistente)'
+          : regla.includes('identidad_origen') ? 'identidad de origen'
+            : regla.includes('conocido_sin_destino') ? 'SIN destino (declarado)' : 'modelo';
+        mapa.set(m.campoOrigen, { destino: m.campoCanonico, clase });
+      }
+    }
+    return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [run]);
+
+  // ---- Datos declarados conservados (agregado por clave) ----
+  const declaradosAgregados = useMemo(() => {
+    const mapa = new Map<string, { campoOrigen: string; clave: string; clase: string; estado: string; valores: string[]; motivo: string }>();
+    for (const r of run?.registros ?? []) {
+      for (const d of r.declarados ?? []) {
+        const actual = mapa.get(d.clave) ?? {
+          campoOrigen: d.campoOrigen, clave: d.clave, clase: d.clase, estado: d.estado,
+          valores: [], motivo: d.motivo,
+        };
+        const valor = typeof d.valorOriginal === 'string' ? d.valorOriginal.trim() : String(d.valorOriginal ?? '');
+        if (valor !== '' && !actual.valores.includes(valor)) actual.valores.push(valor);
+        mapa.set(d.clave, actual);
+      }
+    }
+    return [...mapa.values()];
+  }, [run]);
+
+  // ---- Relaciones declaradas PENDIENTES de resolución ----
+  const pendientesRelaciones = useMemo(() => {
+    const vistos = new Set<string>();
+    const lista: Array<{ campoOrigen: string; clave: string; motivo: string; valor: string }> = [];
+    for (const r of run?.registros ?? []) {
+      for (const rel of r.relacionesPendientes ?? []) {
+        const k = `${rel.clave}␟${rel.motivo}`;
+        if (vistos.has(k)) continue;
+        vistos.add(k);
+        const valor = typeof rel.valorOriginal === 'string' ? rel.valorOriginal.trim() : String(rel.valorOriginal ?? '');
+        lista.push({ campoOrigen: rel.campoOrigen, clave: rel.clave, motivo: rel.motivo, valor });
+      }
+    }
+    return lista;
+  }, [run]);
+
+  // ---- Resumen previo a la promoción ----
+  const resumenPromocion = useMemo(() => {
+    const registros = run?.registros ?? [];
+    return {
+      altas: registros.filter((r) => r.entityType === 'INMUEBLE' && r.operacion === 'CREAR' && r.destinationId).length,
+      vinculaciones: registros.filter((r) => r.operacion === 'VINCULAR').length,
+      datosConservados: registros.reduce((acc, r) => acc + (r.declarados?.length ?? 0), 0),
+      relacionesPendientes: registros.reduce((acc, r) => acc + (r.relacionesPendientes?.length ?? 0), 0),
+      bloqueos: registros.filter((r) => r.decision === 'BLOQUEADO').length,
+      titularidadesResueltas: registros.reduce((acc, r) => acc + (r.titularidadResuelta?.length ?? 0), 0),
+    };
+  }, [run]);
+
+  /** Ranuras de titularidad declaradas por un registro (para resolverlas). */
+  const ranurasDeclaradasDe = (rec: NonNullable<typeof run>['registros'][number]) =>
+    (rec.declarados ?? [])
+      .filter((d) => d.clave === 'titularidadDeclarada.propietario1' || d.clave === 'titularidadDeclarada.propietario2')
+      .map((d) => ({
+        ranura: (d.clave.endsWith('propietario1') ? 1 : 2) as 1 | 2,
+        valor: typeof d.valor === 'number' ? d.valor : null,
+        valorOriginal: d.valorOriginal,
+      }));
+
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs space-y-4">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -571,6 +701,124 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
                   </ul>
                 </div>
               )}
+              {correspondencia.length > 0 && (
+                <details className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <summary className="font-bold text-slate-800 cursor-pointer">
+                    Correspondencia columna → destino ({correspondencia.length})
+                  </summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {correspondencia.map(([campo, d]) => (
+                      <li key={campo} className="font-mono text-[11px] text-slate-600">
+                        · {campo} → {d.destino} [{d.clase}]
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {declaradosAgregados.length > 0 && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-1">
+                  <p className="font-bold text-emerald-900">
+                    Datos declarados CONSERVADOS con destino persistente ({declaradosAgregados.length} tipo(s)):
+                  </p>
+                  <ul className="space-y-0.5">
+                    {declaradosAgregados.map((d) => (
+                      <li key={d.clave} className="font-mono text-[11px] text-emerald-900">
+                        · {d.campoOrigen} → {d.clave} [{d.clase}{d.estado === 'PENDIENTE_RESOLUCION' ? ' · PENDIENTE' : ''}]
+                        {d.valores.length > 0 ? ` = ${d.valores.slice(0, 3).join(', ')}${d.valores.length > 3 ? '…' : ''}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-emerald-800 text-[11px]">
+                    Se persisten en el inmueble (campos declarados + evidencia) y son releíbles. Los agregados
+                    anuales se guardan como tales: <strong>no</strong> se convierten en gastos individuales ni se
+                    suman al detalle; la amortización declarada no sustituye al cálculo fiscal.
+                  </p>
+                </div>
+              )}
+              {pendientesRelaciones.length > 0 && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-1">
+                  <p className="font-bold text-amber-900">
+                    Relaciones declaradas PENDIENTES de resolución ({pendientesRelaciones.length}) — no se inventan:
+                  </p>
+                  <ul className="space-y-0.5">
+                    {pendientesRelaciones.map((r) => (
+                      <li key={`${r.clave}-${r.motivo}`} className="font-mono text-[11px] text-amber-900">
+                        · {r.campoOrigen}{r.valor ? ` = ${r.valor}` : ''}: {r.motivo}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-amber-800 text-[11px]">
+                    El dato original queda guardado en el inmueble; la importación del resto NO se bloquea.
+                  </p>
+                </div>
+              )}
+              {run.registros.some((r) => r.entityType === 'INMUEBLE' && ranurasDeclaradasDe(r).length > 0) && (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <p className="font-bold text-slate-800">
+                    Titularidad declarada: asigna cada porcentaje a un titular existente (o déjalo pendiente)
+                  </p>
+                  <p className="text-slate-600">
+                    Sólo se creará la relación de las ranuras que asignes aquí. Sin asignación, el porcentaje queda
+                    declarado y PENDIENTE con su valor original (nunca se reparte, ni 50/50 ni 100 %).
+                  </p>
+                  <ul className="space-y-2">
+                    {run.registros.filter((r) => r.entityType === 'INMUEBLE').map((r) => {
+                      const ranuras = ranurasDeclaradasDe(r);
+                      if (ranuras.length === 0) return null;
+                      return (
+                        <li key={r.fingerprint} className="bg-white p-2 rounded-xl border border-slate-200 space-y-1">
+                          <p className="font-mono text-[11px] text-slate-600">{r.sourcePath} · {r.sourceRecordId}</p>
+                          {ranuras.map((ra) => {
+                            const actual = decisiones[r.fingerprint]?.titularidad?.find((x) => x.ranura === ra.ranura)?.propietarioId ?? '';
+                            return (
+                              <label key={ra.ranura} className="flex flex-wrap items-center gap-2 text-slate-700">
+                                <span className="font-semibold">
+                                  % Propietario {ra.ranura} ({ra.valor ?? String(ra.valorOriginal)})
+                                </span>
+                                <select
+                                  aria-label={`Titular para % Propietario ${ra.ranura} de ${r.sourceRecordId}`}
+                                  value={actual}
+                                  onChange={(e) => {
+                                    const valor = e.target.value;
+                                    const previas = (decisiones[r.fingerprint]?.titularidad ?? []).filter((x) => x.ranura !== ra.ranura);
+                                    const siguiente: ResolucionTitularImport[] = valor === ''
+                                      ? previas
+                                      : [...previas, { ranura: ra.ranura, propietarioId: valor }];
+                                    setDecisiones({
+                                      ...decisiones,
+                                      [r.fingerprint]: { ...decisiones[r.fingerprint], titularidad: siguiente },
+                                    });
+                                  }}
+                                  className="border border-slate-200 rounded-lg px-2 py-1 bg-white font-semibold text-slate-700">
+                                  <option value="">(pendiente: no se crea relación)</option>
+                                  {titularesElegibles.map((tt) => (
+                                    <option key={tt.id} value={tt.id}>{tt.nombre} · {tt.id}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            );
+                          })}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <button type="button" onClick={() => void onAnalizar()} disabled={analizando}
+                    className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 disabled:opacity-50 text-slate-800 rounded-xl font-bold">
+                    Aplicar titularidad y reanalizar (dry-run)
+                  </button>
+                </div>
+              )}
+              <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 space-y-1">
+                <p className="font-bold text-indigo-900">Resumen previo a la promoción</p>
+                <ul className="text-indigo-900 text-[11px] font-mono">
+                  <li>· altas de inmuebles nuevas: {resumenPromocion.altas}</li>
+                  <li>· inmuebles existentes que se VINCULAN (sin sobrescribir): {resumenPromocion.vinculaciones}</li>
+                  <li>· relaciones de titularidad resueltas a titular existente: {resumenPromocion.titularidadesResueltas}</li>
+                  <li>· datos declarados conservados: {resumenPromocion.datosConservados}</li>
+                  <li>· relaciones declaradas pendientes (no se inventan): {resumenPromocion.relacionesPendientes}</li>
+                  <li>· registros bloqueados: {resumenPromocion.bloqueos}</li>
+                </ul>
+              </div>
               {/* INCIDENCIA: titular/cartera de destino. Sin elección explícita
                   no se autoriza ni se promociona (nunca el titular principal
                   por defecto). */}
@@ -642,12 +890,14 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
               {hayInmuebles && (
                 <p className="text-slate-600">
                   Inmuebles: el análisis es completo y sin escrituras. Los inmuebles que YA existen se VINCULAN (AUTO)
-                  y <strong>nunca se sobrescriben</strong>. Las filas NUEVAS se dan de alta como inmuebles
-                  patrimoniales con los datos que declara el archivo: se escribe sólo lo declarado (dirección, CP,
-                  ciudad, referencia catastral, valor/fecha de adquisición, superficie, habitaciones, tipo) y no se
-                  inventa nada. Los datos de alquiler o publicación que traiga la fila (renta, estado, inquilino) no se
-                  escriben en el alta —cada uno se avisa con su motivo y se completa en el panel del inmueble—. Los
-                  porcentajes y la cotitularidad no se importan: se declaran después en el panel de titularidad.
+                  y <strong>nunca se sobrescriben</strong>: reimportar el mismo archivo no duplica ni pisa nada. Las filas
+                  NUEVAS se dan de alta como inmuebles patrimoniales con los datos declarados del archivo (dirección,
+                  CP, ciudad, referencia catastral, valor y fecha de adquisición, superficie, habitaciones, tipo) y
+                  además se persisten con campo propio los datos declarados que el modelo patrimonial distingue:
+                  % de suelo catastral (validado 0–100), amortización anual declarada, renta mensual declarada,
+                  agregados anuales de gastos (comunidad, IBI, reparaciones, seguro) y fecha de registro. Los
+                  porcentajes de titularidad, el inquilino y su DNI se conservan como declaración pendiente de
+                  resolución: no se inventan relaciones ni se crean contratos. El alta no publica ficha pública.
                 </p>
               )}
               {autos.length > 0 && (

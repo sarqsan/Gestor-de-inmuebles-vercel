@@ -36,6 +36,7 @@
  * reparten ni se infieren (ni 50/50 ni 100 %).
  */
 import { ESQUEMA_IMPORT_EXPORT_VERSION } from './contrato';
+import type { ClaseDatoImportado, EstadoDatoImportado } from '../../types';
 
 export type TipoMapeo = 'string' | 'number' | 'entero' | 'fecha' | 'boolean' | 'categoriaGasto';
 
@@ -54,6 +55,44 @@ export interface EntradaMapping {
   obligatorio: boolean;
   version: string;
   alias: readonly AliasMapeo[];
+}
+
+/**
+ * Dato declarado en el origen que se CONSERVA con destino persistente propio
+ * (no es un campo del modelo, pero tampoco se descarta).
+ *
+ * INCIDENCIA (columnas «reconocidas pero no incorporadas»): la plantilla de
+ * inmuebles trae 17 columnas y 10 de ellas quedaban en «sin destino» (no se
+ * importaban). Cada una tiene aquí un destino real:
+ *  · `AGREGADO_ANUAL` → importe anual agregado conservado con categoría y
+ *    ejercicio cuando constan; NUNCA se convierte en gastos individuales ni se
+ *    suma otra vez a los movimientos detallados.
+ *  · `HISTORICO_DECLARADO` → dato histórico declarado (amortización anual,
+ *    fecha de registro, renta, % de suelo): se identifica como importado y no
+ *    pisa ningún cálculo derivado (p. ej. la amortización fiscal del ERP).
+ *  · `RELACION_PENDIENTE` → relación (titularidad, inquilino) cuya identidad
+ *    exige resolución humana explícita: el valor original se conserva y queda
+ *    PENDIENTE_RESOLUCION; no se infiere ni se reparte nada.
+ */
+export interface EntradaConservacion {
+  entidad: string;
+  /** Cabecera/alias tal cual aparece en el archivo. */
+  campo: string;
+  /** Clave estable de conservación (la usa el registro patrimonial importado). */
+  clave: string;
+  clase: ClaseDatoImportado;
+  /** Tipo de normalización del valor conservado. */
+  tipo: 'string' | 'number' | 'porcentaje';
+  /** Categoría cuando el propio campo la determina (agregados de gasto). */
+  categoria?: string;
+  /** Relación declarada que exige resolución humana. */
+  relacion?: 'TITULARIDAD_TEXTO' | 'TITULARIDAD_PORCENTAJE' | 'INQUILINO_NOMBRE' | 'INQUILINO_DNI';
+  /** Ranura de titularidad (1|2) cuando el campo es un porcentaje declarado. */
+  ranura?: number;
+  /** Estado con el que nace el dato conservado. */
+  estado: EstadoDatoImportado;
+  procedencia: string;
+  motivo: string;
 }
 
 const V = ESQUEMA_IMPORT_EXPORT_VERSION;
@@ -191,19 +230,34 @@ export const REGISTRO_MAPPINGS: readonly EntradaMapping[] = [
     ],
   },
   {
+    // INCIDENCIA (semántica verificada): la columna «Renta Mensual (€)» NO se mapea a
+    // `precio` ni a `rentaMensual`. `precio` alimenta la ficha pública (publicar
+    // la renta declarada sería publicar un anuncio) y `rentaMensual` es la renta
+    // vigente de explotación; la fila sólo DECLARA una renta, que se conserva en
+    // `rentaMensualDeclarada` (campo propio, verificable). El alias `monthlyRent`
+    // de Rentasync (fuente externa con adaptador propio) se mantiene.
     entidad: 'INMUEBLE', canonico: 'precio', tipo: 'number', obligatorio: false, version: V,
-    alias: [
-      { nombre: 'monthlyRent', procedencia: RENTASYNC, transformacion: 'redondeo2' },
-      { nombre: 'Renta Mensual (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'redondeo2' },
-      { nombre: 'Renta Mensual', procedencia: ES, transformacion: 'redondeo2' },
-    ],
+    alias: [{ nombre: 'monthlyRent', procedencia: RENTASYNC, transformacion: 'redondeo2' }],
   },
   {
     entidad: 'INMUEBLE', canonico: 'rentaMensual', tipo: 'number', obligatorio: false, version: V,
+    alias: [{ nombre: 'monthlyRent', procedencia: RENTASYNC, transformacion: 'redondeo2' }],
+  },
+  {
+    // Renta DECLARADA por el archivo (equivalente a `monthlyRent` del Gestor
+    // Patrimonial de referencia). Se persiste y se puede releer; no se mezcla
+    // con la renta vigente ni con el precio de publicación.
+    entidad: 'INMUEBLE', canonico: 'rentaMensualDeclarada', tipo: 'number', obligatorio: false, version: V,
     alias: [
-      { nombre: 'monthlyRent', procedencia: RENTASYNC, transformacion: 'redondeo2' },
       { nombre: 'Renta Mensual (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'redondeo2' },
-      { nombre: 'Renta Mensual', procedencia: ES, transformacion: 'redondeo2' },
+      { nombre: 'Renta Mensual', procedencia: PLANTILLA_INMUEBLES, transformacion: 'redondeo2' },
+      // `monthlyRent` del Gestor Patrimonial de referencia es la renta DECLARADA
+      // del activo (`Property.monthlyRent`): se conserva y se persiste como tal.
+      // Además mantiene su 1→N histórico hacia `precio`/`rentaMensual`, pero el
+      // alta patrimonial NO escribe esos dos (publicación/explotación): sin este
+      // alias, la renta de un respaldo real quedaba sólo en la evidencia del
+      // dry-run y se perdía en la ficha importada.
+      { nombre: 'monthlyRent', procedencia: RENTASYNC, transformacion: 'redondeo2' },
     ],
   },
   {
@@ -225,21 +279,113 @@ export const REGISTRO_MAPPINGS: readonly EntradaMapping[] = [
   {
     entidad: 'INMUEBLE', canonico: 'fechaAdquisicion', tipo: 'fecha', obligatorio: false, version: V,
     alias: [
-      { nombre: 'registrationDate', procedencia: RENTASYNC, transformacion: 'fechaDMYdiaPrimer' },
-      // En la plantilla del usuario, 'Fecha Registro' es la fecha de
-      // inscripción/adquisición declarada en la hoja patrimonial (mismo
-      // significado que `registrationDate` en Rentasync). Se documenta la
-      // equivalencia; no se interpreta ningún otro significado.
-      { nombre: 'Fecha Registro', procedencia: PLANTILLA_INMUEBLES, transformacion: 'fechaISOoDMY' },
+      // NOTA (verificación semántica): la fuente externa documentó
+      // `registrationDate` como fecha de adquisición en su día (FASE 2 I-04,
+      // clasificación B). Sin embargo, el Gestor Patrimonial de referencia —que
+      // importa sus propios archivos— lo trata como FECHA DE REGISTRO, y la
+      // plantilla en español lo confirma: son dos hechos distintos. Por eso el
+      // alias homónimo va a `fechaRegistroPatrimonial` y la adquisición sólo se
+      // escribe cuando la fuente la declara con su nombre (`Fecha Adquisición`,
+      // `purchaseDate`). Cualquier fecha de registro NO se convierte en
+      // adquisición: cada una tiene su campo.
+      { nombre: 'purchaseDate', procedencia: RENTASYNC, transformacion: 'fechaISOoDMY' },
+      { nombre: 'fechaCompra', procedencia: ES, transformacion: 'fechaISOoDMY' },
       { nombre: 'Fecha Adquisición', procedencia: ES, transformacion: 'fechaISOoDMY' },
       { nombre: 'Fecha de Adquisición', procedencia: ES, transformacion: 'fechaISOoDMY' },
     ],
   },
   {
+    // INCIDENCIA (verificación semántica): «Fecha Registro» de la plantilla NO
+    // es la fecha de adquisición. Son dos hechos distintos (registro
+    // patrimonial vs. adquisición) y equipararlos falseaba `fechaAdquisicion`
+    // (dato del que dependen valoraciones e informes). Tiene campo propio.
+    entidad: 'INMUEBLE', canonico: 'fechaRegistroPatrimonial', tipo: 'fecha', obligatorio: false, version: V,
+    alias: [
+      { nombre: 'Fecha Registro', procedencia: PLANTILLA_INMUEBLES, transformacion: 'fechaISOoDMY' },
+      { nombre: 'Fecha de Registro', procedencia: PLANTILLA_INMUEBLES, transformacion: 'fechaISOoDMY' },
+      { nombre: 'registrationDate', procedencia: RENTASYNC, transformacion: 'fechaDMYdiaPrimer' },
+      { nombre: 'fechaRegistro', procedencia: ES, transformacion: 'fechaISOoDMY' },
+    ],
+  },
+  {
+    // INCIDENCIA (verificación semántica): el porcentaje de suelo catastral
+    // tenía destino declarado inexistente. Campo patrimonial propio, validado
+    // (0–100]; un valor fuera de rango no se corrige: no se escribe y el
+    // original queda conservado con su motivo. Equivale a `landValuePercent` del
+    // Gestor Patrimonial de referencia.
+    entidad: 'INMUEBLE', canonico: 'porcentajeSueloCatastral', tipo: 'number', obligatorio: false, version: V,
+    alias: [
+      { nombre: '% Suelo Catastral', procedencia: PLANTILLA_INMUEBLES, transformacion: 'porcentaje0a100' },
+      { nombre: 'Porcentaje Suelo Catastral', procedencia: PLANTILLA_INMUEBLES, transformacion: 'porcentaje0a100' },
+      { nombre: 'landValuePercent', procedencia: RENTASYNC, transformacion: 'porcentaje0a100' },
+    ],
+  },
+  {
+    // Amortización ANUAL DECLARADA por el origen (equivalente a
+    // `amortizationAmount` del Gestor Patrimonial). Se identifica como importada:
+    // NO se escribe en ningún cálculo fiscal derivado (el ERP calcula el suyo) ni
+    // se duplica en movimientos.
+    entidad: 'INMUEBLE', canonico: 'amortizacionAnualDeclarada', tipo: 'number', obligatorio: false, version: V,
+    alias: [
+      { nombre: 'Amortización Anual (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'redondeo2' },
+      { nombre: 'Amortizacion Anual (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'redondeo2' },
+      { nombre: 'Amortización Anual', procedencia: PLANTILLA_INMUEBLES, transformacion: 'redondeo2' },
+      { nombre: 'amortizationAmount', procedencia: RENTASYNC, transformacion: 'redondeo2' },
+    ],
+  },
+  {
+    // AGREGADOS ANUALES de gasto declarados. Cada columna se fusiona en el
+    // objeto `gastosAnualesDeclarados` (no se sobrescriben entre sí) y NUNCA se
+    // convierte en gastos individuales (no tienen fecha ni devengo) ni se suma
+    // al detalle. Equivalen a expensesCommunity/IBI/Insurance/Repairs del
+    // Gestor Patrimonial de referencia.
+    entidad: 'INMUEBLE', canonico: 'gastosAnualesDeclarados', tipo: 'number', obligatorio: false, version: V,
+    alias: [
+      { nombre: 'Gastos Comunidad (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:comunidad' },
+      { nombre: 'Gastos Comunidad', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:comunidad' },
+      { nombre: 'expensesCommunity', procedencia: RENTASYNC, transformacion: 'agregadoAnual:comunidad' },
+      { nombre: 'Gastos IBI (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:ibi' },
+      { nombre: 'Gastos IBI', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:ibi' },
+      { nombre: 'expensesIBI', procedencia: RENTASYNC, transformacion: 'agregadoAnual:ibi' },
+      { nombre: 'Gastos Reparaciones (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:reparaciones' },
+      { nombre: 'Gastos Reparaciones', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:reparaciones' },
+      { nombre: 'expensesRepairs', procedencia: RENTASYNC, transformacion: 'agregadoAnual:reparaciones' },
+      { nombre: 'Gastos Seguro (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:seguro' },
+      { nombre: 'Gastos Seguros (€)', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:seguro' },
+      { nombre: 'Gastos Seguro', procedencia: PLANTILLA_INMUEBLES, transformacion: 'agregadoAnual:seguro' },
+      { nombre: 'expensesInsurance', procedencia: RENTASYNC, transformacion: 'agregadoAnual:seguro' },
+      // Nombres que emite NUESTRO exportador para cada agregado: el archivo
+      // exportado se puede reimportar sin perder los agregados anuales
+      // (ida y vuelta real, ver `exportador.ts`).
+      { nombre: 'gastosAnualesDeclarados.comunidad', procedencia: ES, transformacion: 'agregadoAnual:comunidad' },
+      { nombre: 'gastosAnualesDeclarados.ibi', procedencia: ES, transformacion: 'agregadoAnual:ibi' },
+      { nombre: 'gastosAnualesDeclarados.reparaciones', procedencia: ES, transformacion: 'agregadoAnual:reparaciones' },
+      { nombre: 'gastosAnualesDeclarados.seguro', procedencia: ES, transformacion: 'agregadoAnual:seguro' },
+    ],
+  },
+  {
+    // Ejercicio declarado de la fila: identifica el año de los agregados
+    // anuales conservados. Si no consta, el ejercicio queda `null` (jamás se
+    // inventa un año).
+    entidad: 'INMUEBLE', canonico: 'ejercicioDeclarado', tipo: 'entero', obligatorio: false, version: V,
+    alias: [
+      { nombre: 'Ejercicio', procedencia: PLANTILLA_INMUEBLES },
+      { nombre: 'Año', procedencia: PLANTILLA_INMUEBLES },
+      { nombre: 'Anio', procedencia: PLANTILLA_INMUEBLES },
+      { nombre: 'Ejercicio Fiscal', procedencia: PLANTILLA_INMUEBLES },
+      { nombre: 'year', procedencia: ES },
+    ],
+  },
+  {
+    // INCIDENCIA (verificación semántica): «Inquilino» de la plantilla es un
+    // NOMBRE DECLARADO en texto libre, no el inquilino actual de la vivienda.
+    // Escribirlo como `inquilinoActualNombre` afirmaba un arrendamiento que el
+    // archivo no acredita; ahora se conserva como relación pendiente de
+    // resolución (ver CAMPOS_CONSERVADOS). Los alias que sí afirman el estado
+    // actual («Inquilino Actual», y `tenantName` de Rentasync) se mantienen.
     entidad: 'INMUEBLE', canonico: 'inquilinoActualNombre', tipo: 'string', obligatorio: false, version: V,
     alias: [
       { nombre: 'tenantName', procedencia: RENTASYNC, transformacion: 'primerInquilino' },
-      { nombre: 'Inquilino', procedencia: PLANTILLA_INMUEBLES, transformacion: 'primerInquilino' },
       { nombre: 'Inquilino Actual', procedencia: ES, transformacion: 'primerInquilino' },
     ],
   },
@@ -354,14 +500,9 @@ export const REGISTRO_MAPPINGS: readonly EntradaMapping[] = [
  */
 export const CAMPOS_SIN_DESTINO: ReadonlyArray<{ entidad: string; campo: string; motivo: string; procedencia: string }> = [
   { entidad: 'INMUEBLE', campo: 'owner', motivo: 'user1/user2 exige mapeo documentado user→propietarioId (nunca asumido); la resolución va por catálogos/mapeos B4', procedencia: RENTASYNC },
-  { entidad: 'INMUEBLE', campo: 'ownershipPercentageUser1', motivo: 'titularidad pendiente de mapeo documentado (B1: DEPENDENCIA_PERMISOS)', procedencia: RENTASYNC },
-  { entidad: 'INMUEBLE', campo: 'ownershipPercentageUser2', motivo: 'titularidad pendiente de mapeo documentado (B1: DEPENDENCIA_PERMISOS)', procedencia: RENTASYNC },
-  { entidad: 'INMUEBLE', campo: 'landValuePercent', motivo: 'sin destino en el ERP (B1: camposSinDestino)', procedencia: RENTASYNC },
-  { entidad: 'INMUEBLE', campo: 'amortizationAmount', motivo: 'derivado fiscal: el ERP lo recalcula; no se importa (B1)', procedencia: RENTASYNC },
-  { entidad: 'INMUEBLE', campo: 'expenses', motivo: 'AGREGADO anual: importarlo duplicaría el detalle (B1 clase D)', procedencia: RENTASYNC },
+  { entidad: 'INMUEBLE', campo: 'expenses', motivo: 'AGREGADO anual: se conserva como dato declarado importado (ver CAMPOS_CONSERVADOS), nunca como detalle duplicado', procedencia: RENTASYNC },
   { entidad: 'INMUEBLE', campo: 'yearlyFinancials', motivo: 'resumen anual derivado; el ERP lo recalcula (B1 clase D)', procedencia: RENTASYNC },
   { entidad: 'INMUEBLE', campo: 'tenantHistory', motivo: 'sin entidad de histórico de inquilinos en el ERP (B1 clase D, INC-11)', procedencia: RENTASYNC },
-  { entidad: 'INMUEBLE', campo: 'tenantDni', motivo: 'sin destino directo (B1: REQUIERE_MAPEO con contrato/candidato)', procedencia: RENTASYNC },
   { entidad: 'INMUEBLE', campo: 'contract', motivo: 'subcampos REQUIERE_MAPEO hacia CONTRATO (B1 I-13); no se aplana automáticamente', procedencia: RENTASYNC },
   { entidad: 'INMUEBLE', campo: 'mortgage*', motivo: 'prefijo mortgage* → PRESTAMO, sin adaptador seguro en v1 (B1 I-16)', procedencia: RENTASYNC },
   { entidad: 'GASTO', campo: 'type', motivo: 'discriminante de entidad (gasto/ingreso), no dato canónico', procedencia: RENTASYNC },
@@ -369,20 +510,107 @@ export const CAMPOS_SIN_DESTINO: ReadonlyArray<{ entidad: string; campo: string;
   { entidad: 'GASTO', campo: 'id', motivo: 'identidad de origen: va a sourceRecordId/proveniencia, no a datos', procedencia: RENTASYNC },
   { entidad: 'COBRO', campo: 'id', motivo: 'identidad de origen: va a sourceRecordId/proveniencia, no a datos', procedencia: RENTASYNC },
   { entidad: 'INMUEBLE', campo: 'id', motivo: 'identidad de origen: va a sourceRecordId/proveniencia, no a datos', procedencia: RENTASYNC },
-  // ---- Plantilla Excel de inmuebles (INCIDENCIA) ----
-  // Conocidas SIN destino: no son desconocidas, no se importan y el motivo
-  // queda a la vista. Ninguna admite inferencia (ni 50/50 ni 100 %).
-  { entidad: 'INMUEBLE', campo: '% Propietario 1', motivo: 'TITULARIDAD: el importador no reparte porcentajes ni crea titularidades; se declaran en el panel N-TITULARES (no se infiere 100 %)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: '% Propietario 2', motivo: 'TITULARIDAD: el importador no reparte porcentajes ni crea titularidades; se declaran en el panel N-TITULARES (no se infiere 50/50)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: 'Titularidad', motivo: 'TITULARIDAD en texto libre: sin destino; la relación de titulares se declara en el panel N-TITULARES (no se separa por intuición)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: 'Amortización Anual (€)', motivo: 'derivado fiscal anual: el ERP lo recalcula; importarlo duplicaría el cálculo (no se importa)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: 'Gastos Comunidad (€)', motivo: 'AGREGADO anual de gastos: importarlo duplicaría el detalle; cada gasto exige fecha y categoría (entidad GASTO)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: 'Gastos IBI (€)', motivo: 'AGREGADO anual de gastos: importarlo duplicaría el detalle; cada gasto exige fecha y categoría (entidad GASTO)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: 'Gastos Reparaciones (€)', motivo: 'AGREGADO anual de gastos: importarlo duplicaría el detalle; cada gasto exige fecha y categoría (entidad GASTO)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: 'Gastos Seguro (€)', motivo: 'AGREGADO anual de gastos: importarlo duplicaría el detalle; cada gasto exige fecha y categoría (entidad GASTO)', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: '% Suelo Catastral', motivo: 'sin destino en el ERP: `datosCatastrales` no modela el porcentaje de suelo', procedencia: PLANTILLA_INMUEBLES },
-  { entidad: 'INMUEBLE', campo: 'DNI Inquilino', motivo: 'sin destino directo: requiere mapeo documentado a candidato/contrato (B1: REQUIERE_MAPEO)', procedencia: PLANTILLA_INMUEBLES },
 ];
+
+/**
+ * Columnas CONOCIDAS que se CONSERVAN con destino persistente (no se pierden ni
+ * se inventan). Sustituyen a las antiguas entradas «sin destino» de la
+ * plantilla de inmuebles (INCIDENCIA: 10 de 17 columnas quedaban reconocidas
+ * pero sin incorporar).
+ *
+ * Reglas que esta tabla materializa, sin excepción:
+ *  · los porcentajes de titularidad NO se reparten ni se asumen (ni 50/50 ni
+ *    100 %): sin titular identificado quedan PENDIENTE_RESOLUCION;
+ *  · los agregados anuales de gasto NO se convierten en gastos individuales
+ *    (no tienen fecha ni devengo) ni se suman a los movimientos;
+ *  · la amortización anual declarada NO sobrescribe el cálculo fiscal del ERP:
+ *    se conserva identificada como importada;
+ *  · el DNI del inquilino NO crea contratos ni vínculos ambiguos.
+ */
+export const CAMPOS_CONSERVADOS: ReadonlyArray<EntradaConservacion> = [
+  {
+    entidad: 'INMUEBLE', campo: 'Titularidad', clave: 'titularidadDeclarada.texto', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'TITULARIDAD_TEXTO', estado: 'PENDIENTE_RESOLUCION', procedencia: PLANTILLA_INMUEBLES,
+    motivo: 'TITULARIDAD declarada en texto libre: se conserva como evidencia y queda PENDIENTE_RESOLUCION hasta que la persona resuelva quién es cada titular (el texto no identifica a nadie)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: '% Propietario 1', clave: 'titularidadDeclarada.propietario1', clase: 'RELACION_PENDIENTE',
+    tipo: 'porcentaje', relacion: 'TITULARIDAD_PORCENTAJE', ranura: 1, estado: 'PENDIENTE_RESOLUCION', procedencia: PLANTILLA_INMUEBLES,
+    motivo: 'PORCENTAJE declarado sin titular identificado: se conserva el valor original (nunca se reparte ni se asume el 100 %) y queda PENDIENTE_RESOLUCION hasta que se asigne a un titular existente',
+  },
+  {
+    entidad: 'INMUEBLE', campo: '% Propietario 2', clave: 'titularidadDeclarada.propietario2', clase: 'RELACION_PENDIENTE',
+    tipo: 'porcentaje', relacion: 'TITULARIDAD_PORCENTAJE', ranura: 2, estado: 'PENDIENTE_RESOLUCION', procedencia: PLANTILLA_INMUEBLES,
+    motivo: 'PORCENTAJE declarado sin titular identificado: se conserva el valor original (nunca se reparte 50/50) y queda PENDIENTE_RESOLUCION hasta que se asigne a un titular existente',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'ownershipPercentageUser1', clave: 'titularidadDeclarada.propietario1', clase: 'RELACION_PENDIENTE',
+    tipo: 'porcentaje', relacion: 'TITULARIDAD_PORCENTAJE', ranura: 1, estado: 'PENDIENTE_RESOLUCION', procedencia: RENTASYNC,
+    motivo: 'PORCENTAJE declarado sin titular identificado (user1/user2 exige mapeo documentado): se conserva y queda PENDIENTE_RESOLUCION',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'ownershipPercentageUser2', clave: 'titularidadDeclarada.propietario2', clase: 'RELACION_PENDIENTE',
+    tipo: 'porcentaje', relacion: 'TITULARIDAD_PORCENTAJE', ranura: 2, estado: 'PENDIENTE_RESOLUCION', procedencia: RENTASYNC,
+    motivo: 'PORCENTAJE declarado sin titular identificado (user1/user2 exige mapeo documentado): se conserva y queda PENDIENTE_RESOLUCION',
+  },
+  {
+    // `owner` de Rentasync (user1/user2/both) declara a QUÉ ranura pertenece la
+    // propiedad, no quién es el titular: se conserva como evidencia textual.
+    entidad: 'INMUEBLE', campo: 'owner', clave: 'titularidadDeclarada.texto', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'TITULARIDAD_TEXTO', estado: 'PENDIENTE_RESOLUCION', procedencia: RENTASYNC,
+    motivo: 'titularidad declarada como user1/user2/both: se conserva como evidencia y queda PENDIENTE_RESOLUCION (exige mapeo documentado a un titular real)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'Inquilino', clave: 'inquilinoDeclarado.nombre', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'INQUILINO_NOMBRE', estado: 'PENDIENTE_RESOLUCION', procedencia: PLANTILLA_INMUEBLES,
+    motivo: 'INQUILINO declarado en texto libre: se conserva y queda PENDIENTE_RESOLUCION; NO se escribe como inquilino actual (no se inventa un arrendamiento)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'tenantName', clave: 'inquilinoDeclarado.nombre', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'INQUILINO_NOMBRE', estado: 'PENDIENTE_RESOLUCION', procedencia: RENTASYNC,
+    motivo: 'INQUILINO declarado por la fuente externa: se conserva y queda PENDIENTE_RESOLUCION (la relación real se crea con contrato/candidato documentado)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'DNI Inquilino', clave: 'inquilinoDeclarado.dni', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'INQUILINO_DNI', estado: 'PENDIENTE_RESOLUCION', procedencia: PLANTILLA_INMUEBLES,
+    motivo: 'DNI DE INQUILINO declarado: se conserva y queda PENDIENTE_RESOLUCION; sólo se vincula con un contrato/inquilino existente cuando la coincidencia es inequívoca y la confirma una persona (nunca se crean contratos ni vínculos ambiguos)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'tenantDni', clave: 'inquilinoDeclarado.dni', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'INQUILINO_DNI', estado: 'PENDIENTE_RESOLUCION', procedencia: RENTASYNC,
+    motivo: 'DNI de inquilino de la fuente externa: se conserva y queda PENDIENTE_RESOLUCION (vínculo inequívoco + confirmación humana)',
+  },
+  // ── Nombres que emite NUESTRO exportador ────────────────────────────────
+  // El archivo exportado se reimporta SIN perder lo declarado: cada dato vuelve
+  // a quedar declarado (y pendiente lo que exige resolución humana). No se
+  // inventa nada: se recupera exactamente lo que el inmueble ya declaraba.
+  {
+    entidad: 'INMUEBLE', campo: 'titularidadDeclarada.texto', clave: 'titularidadDeclarada.texto', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'TITULARIDAD_TEXTO', estado: 'PENDIENTE_RESOLUCION', procedencia: ES,
+    motivo: 'titularidad declarada exportada por el propio ERP: se recupera como evidencia y sigue PENDIENTE_RESOLUCION (el texto no identifica a nadie)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'titularidadDeclarada.propietario1', clave: 'titularidadDeclarada.propietario1', clase: 'RELACION_PENDIENTE',
+    tipo: 'porcentaje', relacion: 'TITULARIDAD_PORCENTAJE', ranura: 1, estado: 'PENDIENTE_RESOLUCION', procedencia: ES,
+    motivo: 'porcentaje declarado exportado por el propio ERP: se recupera tal cual y queda PENDIENTE_RESOLUCION (nunca se reparte)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'titularidadDeclarada.propietario2', clave: 'titularidadDeclarada.propietario2', clase: 'RELACION_PENDIENTE',
+    tipo: 'porcentaje', relacion: 'TITULARIDAD_PORCENTAJE', ranura: 2, estado: 'PENDIENTE_RESOLUCION', procedencia: ES,
+    motivo: 'porcentaje declarado exportado por el propio ERP: se recupera tal cual y queda PENDIENTE_RESOLUCION (nunca se reparte)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'inquilinoDeclarado.nombre', clave: 'inquilinoDeclarado.nombre', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'INQUILINO_NOMBRE', estado: 'PENDIENTE_RESOLUCION', procedencia: ES,
+    motivo: 'inquilino declarado exportado por el propio ERP: se recupera y sigue PENDIENTE_RESOLUCION (no se crea arrendamiento)',
+  },
+  {
+    entidad: 'INMUEBLE', campo: 'inquilinoDeclarado.dni', clave: 'inquilinoDeclarado.dni', clase: 'RELACION_PENDIENTE',
+    tipo: 'string', relacion: 'INQUILINO_DNI', estado: 'PENDIENTE_RESOLUCION', procedencia: ES,
+    motivo: 'DNI de inquilino exportado por el propio ERP: se recupera y sigue PENDIENTE_RESOLUCION (vínculo inequívoco + confirmación humana)',
+  },
+];
+
 
 /**
  * Cabeceras que IDENTIFICAN EL REGISTRO DE ORIGEN (no son datos del modelo).
@@ -430,6 +658,14 @@ export interface ResultadoBusquedaMapeo {
   sinDestino?: { motivo: string };
   /** La cabecera es la identidad de origen del registro (no un dato). */
   identidadOrigen?: { procedencia: string };
+  /**
+   * El campo se CONSERVA con destino persistente propio (dato declarado
+   * importado). Puede coexistir con un mapeo canónico (p. ej. la renta declarada
+   * se mapea al modelo de alquiler y además se conserva como histórico).
+   */
+  conservar?: EntradaConservacion;
+  /** Tipo de normalización del valor conservado cuando no hay mapeo canónico. */
+  tipoConservado?: 'string' | 'number' | 'porcentaje';
 }
 
 const INDICE: Map<string, EntradaMapping[]> = new Map();
@@ -478,12 +714,39 @@ function indiceSinDestinoDe(entidad: string): Map<string, (typeof CAMPOS_SIN_DES
   return indice;
 }
 
+/** Índice normalizado de CAMPOS_CONSERVADOS (mismo criterio de comparación). */
+const INDICE_CONSERVADOS: Map<string, Map<string, EntradaConservacion>> = new Map();
+function indiceConservadosDe(entidad: string): Map<string, EntradaConservacion> {
+  let indice = INDICE_CONSERVADOS.get(entidad);
+  if (!indice) {
+    indice = new Map();
+    for (const c of CAMPOS_CONSERVADOS) {
+      if (c.entidad !== entidad) continue;
+      indice.set(claveCabecera(c.campo), c);
+    }
+    INDICE_CONSERVADOS.set(entidad, indice);
+  }
+  return indice;
+}
+
+/** Entrada de conservación declarada para (entidad, campo), si existe. */
+export function buscarConservacion(entidad: string, campoOrigen: string): EntradaConservacion | null {
+  return indiceConservadosDe(entidad).get(claveCabecera(campoOrigen)) ?? null;
+}
+
 /**
  * Busca mapping para (entidad, campoOrigen). Canónico directo incluido y
  * comparación por clave normalizada (acentos, espacios duros, símbolos).
+ * Un campo puede tener mapeo canónico Y conservación declarada: en ese caso se
+ * devuelven ambos (el valor se escribe en el modelo y además se conserva).
  */
 export function buscarMapeo(entidad: string, campoOrigen: string): ResultadoBusquedaMapeo | null {
   const entradas = INDICE.get(entidad) ?? [];
+  const conservacion = buscarConservacion(entidad, campoOrigen);
+  const conConservacion = (r: ResultadoBusquedaMapeo): ResultadoBusquedaMapeo =>
+    conservacion
+      ? { ...r, conservar: conservacion, ...(r.canonicos.length === 0 ? { tipoConservado: conservacion.tipo } : {}) }
+      : r;
   // 0) Identidad de origen: NO es un dato del modelo, va a proveniencia.
   const identidad = esIdentidadOrigen(entidad, campoOrigen);
   if (identidad) {
@@ -492,7 +755,7 @@ export function buscarMapeo(entidad: string, campoOrigen: string): ResultadoBusq
   // 1) Canónico directo (literal y normalizado).
   const directa = entradas.find((e) => e.canonico === campoOrigen);
   if (directa) {
-    return { canonicos: [directa.canonico], regla: 'canonico', tipo: directa.tipo };
+    return conConservacion({ canonicos: [directa.canonico], regla: 'canonico', tipo: directa.tipo });
   }
   // 2) Alias / canónico por clave normalizada (puede ser 1→N).
   const porClave = indiceClavesDe(entidad).get(claveCabecera(campoOrigen)) ?? [];
@@ -512,7 +775,17 @@ export function buscarMapeo(entidad: string, campoOrigen: string): ResultadoBusq
       transformacion = a?.transformacion;
       tipo = e.tipo;
     }
-    return { canonicos: destinos, regla, transformacion, tipo };
+    return conConservacion({ canonicos: destinos, regla, transformacion, tipo });
+  }
+  // 2b) Dato declarado conservado (destino persistente propio, no campo del modelo).
+  if (conservacion) {
+    return {
+      canonicos: [],
+      regla: `conservado:${conservacion.clase}`,
+      conservar: conservacion,
+      tipoConservado: conservacion.tipo,
+      transformacion: conservacion.tipo === 'porcentaje' ? 'porcentaje0a100' : undefined,
+    };
   }
   // 3) Conocido sin destino (incluye prefijo mortgage*).
   const sinDestino = indiceSinDestinoDe(entidad);
@@ -526,6 +799,30 @@ export function buscarMapeo(entidad: string, campoOrigen: string): ResultadoBusq
 /** Campos conocidos sin destino declarados para una entidad (para la UI). */
 export function camposSinDestinoDeclarados(entidad: string): ReadonlyArray<{ campo: string; motivo: string }> {
   return CAMPOS_SIN_DESTINO.filter((s) => s.entidad === entidad).map((s) => ({ campo: s.campo, motivo: s.motivo }));
+}
+
+/**
+ * Destinos declarados de las columnas conservadas de una entidad (para la UI de
+ * correspondencia): cada columna reconocida tiene aquí su destino (clave de
+ * conservación) y su clase. Es la prueba visible de que «reconocida» ya no
+ * significa «no incorporada».
+ */
+export function camposConservadosDeclarados(entidad: string): ReadonlyArray<{
+  campo: string;
+  clave: string;
+  clase: ClaseDatoImportado;
+  estado: EstadoDatoImportado;
+  categoria?: string;
+  ranura?: number;
+  motivo: string;
+  procedencia: string;
+}> {
+  return CAMPOS_CONSERVADOS.filter((c) => c.entidad === entidad).map((c) => ({
+    campo: c.campo, clave: c.clave, clase: c.clase, estado: c.estado,
+    ...(c.categoria ? { categoria: c.categoria } : {}),
+    ...(c.ranura ? { ranura: c.ranura } : {}),
+    motivo: c.motivo, procedencia: c.procedencia,
+  }));
 }
 
 /** Campos canónicos obligatorios de una entidad (≡ B4). */

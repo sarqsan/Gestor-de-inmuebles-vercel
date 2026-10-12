@@ -1,0 +1,12 @@
+name: Sondeo de entorno (temporal)
+on:
+  push:
+    branches:
+      - arena/b18a36de-gestor-de-inmuebles-vercel
+permissions:
+  contents: read
+jobs:
+  sondeo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: java -version 2>&1 | head -1 ; node -v ; curl -sI https://storage.googleapis.com | head -1

@@ -17,6 +17,7 @@ export * from './normalizar';
 export * from './pipeline';
 export * from './informe';
 export * from './promocion';
+export * from './altaInmueble';
 export * from './ejecucion';
 export * from './exportador';
 export * from './ambito';

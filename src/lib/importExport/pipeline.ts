@@ -45,9 +45,30 @@ import {
 } from './contrato';
 import { aplicarMapping, detectarEntidadRentasync, detectarEntidadPorCabeceras, type ResultadoNormalizacion } from './normalizar';
 import { generarInformeImportacion } from './informe';
+import { CAMPO_ID_ASIGNADO_CREACION } from '../migracion/entidades';
+import { avisosAlquilerNoEscritosEnAlta } from './altaInmueble';
 
 /** Marcador de trazabilidad del destino elegido por la persona (no viene del archivo). */
 export const DESTINO_DECLARADO_ORIGEN = '(destino declarado)';
+
+/**
+ * ID interno determinista para un inmueble NUEVO (alta por importación).
+ *
+ * B4 no puede derivar el id de un inmueble de su origen —el contrato reserva
+ * ese id a «la confirmación humana»— y por eso las filas nuevas quedaban
+ * permanentemente en REVISIÓN («sin id asignable»). El importador SÍ puede
+ * asignarlo: la promoción es la confirmación humana y el id se deriva de
+ * (fichero, registro de origen), nunca del «ID Inmueble» del archivo, que es
+ * identidad de origen y no un id interno.
+ *
+ * Determinista ⇒ idempotente: reimportar el mismo fichero produce el mismo id,
+ * `existeDestino` lo detecta y se omite la escritura (nunca se sobrescribe).
+ * El prefijo lo separa de cualquier id del ERP y el catálogo se consulta antes
+ * de escribir (un id ya ocupado ⇒ YA_EXISTENTE, jamás una sobrescritura).
+ */
+export function idInmuebleNuevoImport(sourceHash: string, sourceRecordId: string): string {
+  return `inm_imp_${sha256Hex(`IE:ALTA:INMUEBLE:${sourceHash}:${sourceRecordId}`).slice(0, 20)}`;
+}
 
 export interface EntradaImportDryRun {
   registrosCrudos: readonly Record<string, unknown>[];
@@ -197,7 +218,7 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
       }
       const baseB1 = entrada.normalizadosB1?.[indice] ?? null;
       const general = construirNormalizadoGeneral(entidad, mapping, parche);
-      const normalizado = baseB1
+      const normalizadoBase = baseB1
         ? {
             ...baseB1,
             destino: {
@@ -206,6 +227,33 @@ export function ejecutarImportDryRun(entrada: EntradaImportDryRun): ImportRun {
             },
           }
         : general;
+      // ALTA DE INMUEBLE: el id interno lo asigna el importador (confirmación
+      // explícita) y viaja SÓLO en el normalizado —nunca en `canonicalData` ni
+      // en el original, que son evidencia—. B4 lo usa únicamente cuando NO hay
+      // match existente: si el inmueble ya existe (id/catastral/mapeo) resuelve
+      // VINCULAR y este id se ignora; si la resolución es ambigua, está
+      // BLOQUEADO antes de llegar aquí. Sólo abre alta de inmuebles NUEVOS.
+      const idInmuebleNuevo = entidad === 'INMUEBLE'
+        ? idInmuebleNuevoImport(entrada.sourceHash, sourceRecordId)
+        : null;
+      if (idInmuebleNuevo) {
+        mapping.warnings.push(
+          `inmueble nuevo: id interno '${idInmuebleNuevo}' asignado por la confirmación (derivado del fichero + identity de origen '${sourceRecordId}', no del «ID Inmueble» del archivo); si el inmueble ya existe se vincula y no se usa`,
+        );
+        // El alta escribe la proyección PATRIMONIAL: los datos de alquiler o
+        // publicación que la fila traiga no se escriben, pero se declaran uno a
+        // uno con su motivo para que «no escrito» nunca parezca «no leído».
+        mapping.warnings.push(...avisosAlquilerNoEscritosEnAlta(mapping.canonico));
+      }
+      const normalizado = idInmuebleNuevo
+        ? {
+            ...normalizadoBase,
+            destino: {
+              ...(normalizadoBase.destino as Record<string, unknown>),
+              [CAMPO_ID_ASIGNADO_CREACION]: idInmuebleNuevo,
+            },
+          }
+        : normalizadoBase;
       // B4 lee la fusión crudo+canónico (el canónico manda); el clon íntegro
       // conserva los campos desconocidos como evidencia.
       const datos = { ...crudo, ...mapping.canonico };

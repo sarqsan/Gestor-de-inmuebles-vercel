@@ -641,24 +641,26 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
               )}
               {hayInmuebles && (
                 <p className="text-slate-600">
-                  Inmuebles: el análisis es completo y sin escrituras. El ALTA de inmuebles NUEVOS no la ejecuta el
-                  importador (v1 sólo escribe GASTO y COBRO): aparecen como REVISIÓN con el motivo
-                  «destino CREAR en ‘inmuebles’ sin id asignable» y hay que darlos de alta desde Inmuebles. Los
-                  inmuebles que YA existen se VINCULAN (AUTO) y nunca se sobrescriben. Los porcentajes y la
-                  cotitularidad no se importan: se declaran después en el panel de titularidad.
+                  Inmuebles: el análisis es completo y sin escrituras. Los inmuebles que YA existen se VINCULAN (AUTO)
+                  y <strong>nunca se sobrescriben</strong>. Las filas NUEVAS se dan de alta como inmuebles
+                  patrimoniales con los datos que declara el archivo: se escribe sólo lo declarado (dirección, CP,
+                  ciudad, referencia catastral, valor/fecha de adquisición, superficie, habitaciones, tipo) y no se
+                  inventa nada. Los datos de alquiler o publicación que traiga la fila (renta, estado, inquilino) no se
+                  escriben en el alta —cada uno se avisa con su motivo y se completa en el panel del inmueble—. Los
+                  porcentajes y la cotitularidad no se importan: se declaran después en el panel de titularidad.
                 </p>
               )}
               {autos.length > 0 && (
                 <div className="space-y-2">
                   <p className="font-bold text-slate-900">Decisiones de promoción (B1 G-13: sin decisión no se promociona)</p>
                   <ul className="max-h-48 overflow-auto space-y-2">
-                    {autos.filter((a) => a.entityType === 'GASTO' || a.entityType === 'COBRO').map((a) => (
+                    {autos.filter((a) => a.entityType === 'GASTO' || a.entityType === 'COBRO' || a.entityType === 'INMUEBLE').map((a) => (
                       <li key={a.fingerprint} className="flex flex-wrap items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
                         <label className="flex items-center gap-1 font-semibold text-slate-700">
                           <input type="checkbox" className="w-4 h-4"
                             checked={seleccion === null || seleccion.includes(a.fingerprint)}
                             onChange={(e) => {
-                              const pool = autos.filter((x) => x.entityType === 'GASTO' || x.entityType === 'COBRO').map((x) => x.fingerprint);
+                              const pool = autos.filter((x) => x.entityType === 'GASTO' || x.entityType === 'COBRO' || x.entityType === 'INMUEBLE').map((x) => x.fingerprint);
                               const actual = seleccion === null ? pool : seleccion;
                               setSeleccion(e.target.checked ? [...actual, a.fingerprint] : actual.filter((f) => f !== a.fingerprint));
                             }} />

@@ -47,6 +47,7 @@ import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 import { confirmar } from '../feedback/confirmacion';
 import { ejecutarOperacion } from '../feedback/operaciones';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
+import { solicitarIA } from '../lib/clienteIA';
 
 interface FormalizarContratoModalProps {
   isOpen: boolean;
@@ -144,14 +145,10 @@ export const FormalizarContratoModal: React.FC<FormalizarContratoModalProps> = (
     setIaResult(null);
 
     try {
-      const res = await fetch('/api/redactar-clausula', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: iaPrompt.trim(),
-          tipoInmueble: 'Vivienda habitual',
-          renta: contrato.rentaMensual,
-        }),
+      const res = await solicitarIA('/api/redactar-clausula', {
+        prompt: iaPrompt.trim(),
+        tipoInmueble: 'Vivienda habitual',
+        renta: contrato.rentaMensual,
       });
 
       if (!res.ok) {

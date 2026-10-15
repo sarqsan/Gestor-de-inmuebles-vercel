@@ -35,6 +35,7 @@ import { TutorialPlayer } from '../experiencia/TutorialPlayer';
 import { AsistentePanel } from '../experiencia/AsistentePanel';
 import { servicioProgresoTutoriales } from '../../lib/progresoTutorialesFirestore';
 import { contextoDesdeUsuario, iniciarTutorial, obtenerTutorial, PANTALLAS_PORTAL, crearProveedorGeminiRemoto } from '../../experiencia';
+import { fetchIA } from '../../lib/clienteIA';
 import type { AccionHost, SesionTutorial } from '../../experiencia';
 
 type PantallaPortal =
@@ -79,7 +80,8 @@ export const InquilinoPortalShell: React.FC<Props> = ({ usuario, onLogout }) => 
     if (t) setSesionTutorial(iniciarTutorial(t));
   };
   // §6 F4: asistente del portal (host PORTAL_INQUILINO; solo capacidades del portal). Ejecuta con `ir()`.
-  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  // IA · Fase 1: el asistente llama al servidor con identidad (ID token) e idempotencia.
+  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(fetchIA), []);
   const ejecutarAccionAsistente = (accion: Exclude<AccionHost, { tipo: 'NINGUNA' }>) => {
     if (accion.tipo === 'NAVEGAR' || (accion.tipo === 'EXPLICAR' && accion.route)) ir(accion.route as PantallaPortal);
     else if (accion.tipo === 'TUTORIAL') iniciarRecorrido(accion.tutorialId);

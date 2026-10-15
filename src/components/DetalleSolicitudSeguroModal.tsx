@@ -42,6 +42,7 @@ import {
 import { avisarOperacion } from '../feedback/canalFeedback';
 import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
+import { solicitarIA } from '../lib/clienteIA';
 
 interface DetalleSolicitudSeguroModalProps {
   solicitud: SolicitudSeguroImpago;
@@ -117,13 +118,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   const handleGenerateAiEmail = async () => {
     setIsGeneratingEmail(true);
     try {
-      const res = await fetch('/api/generar-correo-aseguradora', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          solicitudSeguro: sol,
-          aseguradora: aseguradora,
-        }),
+      const res = await solicitarIA('/api/generar-correo-aseguradora', {
+        solicitudSeguro: sol,
+        aseguradora: aseguradora,
       });
       if (res.ok) {
         const data = await res.json();
@@ -282,15 +279,11 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
     setIsAnalyzingResponse(true);
 
     try {
-      const res = await fetch('/api/analizar-respuesta-aseguradora', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          emailTexto: textToAnalyze,
-          emailAsunto: `Re: [${sol.referenciaUnica}]`,
-          aseguradoraNombre: sol.aseguradoraNombre,
-          rentaMensual: sol.rentaMensual,
-        }),
+      const res = await solicitarIA('/api/analizar-respuesta-aseguradora', {
+        emailTexto: textToAnalyze,
+        emailAsunto: `Re: [${sol.referenciaUnica}]`,
+        aseguradoraNombre: sol.aseguradoraNombre,
+        rentaMensual: sol.rentaMensual,
       });
 
       let parsedAI = {

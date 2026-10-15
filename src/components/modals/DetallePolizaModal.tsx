@@ -49,6 +49,7 @@ import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
+import { solicitarIA } from '../../lib/clienteIA';
 
 interface DetallePolizaModalProps {
   isOpen: boolean;
@@ -273,19 +274,15 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
       }
 
       // Llamar a API de análisis documental si existe
-      const resp = await fetch('/api/analizar-documento', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentBase64: base64Data,
-          mimeType,
-          filename: doc.nombre,
-          tipoHint: 'otro',
-          candidatoManualData: {
-            nombre: poliza.aseguradora,
-            ingresosNetos: poliza.primaAnual || 0,
-          },
-        }),
+      const resp = await solicitarIA('/api/analizar-documento', {
+        documentBase64: base64Data,
+        mimeType,
+        filename: doc.nombre,
+        tipoHint: 'otro',
+        candidatoManualData: {
+          nombre: poliza.aseguradora,
+          ingresosNetos: poliza.primaAnual || 0,
+        },
       });
 
       if (!resp.ok) throw new Error('Error en análisis IA');

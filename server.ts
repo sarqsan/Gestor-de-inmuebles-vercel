@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
-import { GoogleGenAI, Type } from '@google/genai';
 
 // GAP 1 — Sistema transaccional de notificaciones (dispatcher + canales + resolver auth)
 import { DispatcherNotificaciones } from './src/notificaciones/dispatcher';
@@ -25,6 +24,10 @@ import { idempotenciaDeEvento } from './src/types/notificaciones';
 import { construirPromptAsistente, normalizarCuerpoInterpretar, parsearRespuestaModelo } from './src/experiencia/proveedorGemini';
 import { crearLimitadorVentana } from './src/experiencia/limites';
 import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorBuscarTitulares';
+// IA · FASE 1 — núcleo de IA centralizado: autenticación por token verificado en
+// servidor, idempotencia y registro por usuario de cada operación de IA.
+import { clienteIA, crearNucleoIA, generateGeminiWithRetry } from './server/ia/nucleoIA';
+import { crearDependenciasNucleoIA } from './server/ia/configuracionIA';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -190,50 +193,19 @@ app.get('/api/documents/:fileId', (req, res) => {
   res.send(item.buffer);
 });
 
-// Initialize Gemini client on server
-const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-};
+// ---------------------------------------------------------------------------
+// IA · FASE 1 — NÚCLEO DE IA CENTRALIZADO (server/ia/nucleoIA.ts)
+// Todos los endpoints de IA del catálogo (src/ia/catalogoOperacionesIA.ts) se
+// montan con `nucleoIA.operacion('<ID>')`: exige usuario autenticado (ID token
+// verificado en servidor), clave de idempotencia (duplicados → 409 sin
+// re-ejecutar) y registra cada operación por usuario en `ia_operaciones` antes de
+// responder. El cliente del proveedor se obtiene SOLO con `clienteIA(res)`,
+// instrumentado por petición (sustituye a la antigua función local que creaba el
+// cliente de Gemini); `generateGeminiWithRetry` se ha trasladado sin cambios al núcleo.
+// ---------------------------------------------------------------------------
+const nucleoIA = crearNucleoIA(crearDependenciasNucleoIA());
 
-// Helper function to call Gemini with retry for transient errors (503 High Demand, 429 Rate Limit)
-async function generateGeminiWithRetry(ai: any, params: any, maxRetries = 1) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await ai.models.generateContent(params);
-    } catch (err: any) {
-      const errStr = String(err?.message || err);
-      const isTransient =
-        err?.status === 503 ||
-        err?.code === 503 ||
-        err?.status === 429 ||
-        err?.code === 429 ||
-        errStr.includes('503') ||
-        errStr.includes('429') ||
-        errStr.includes('UNAVAILABLE') ||
-        errStr.includes('high demand') ||
-        errStr.includes('RESOURCE_EXHAUSTED');
-
-      if (isTransient && attempt < maxRetries) {
-        // Short pause before retrying
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-app.post('/api/analizar-documento', async (req, res) => {
+app.post('/api/analizar-documento', nucleoIA.operacion('ANALIZAR_DOCUMENTO'), async (req, res) => {
   try {
     const { documentBase64, documentUrl, mimeType, filename, tipoHint, candidatoManualData } = req.body;
 
@@ -266,7 +238,7 @@ app.post('/api/analizar-documento', async (req, res) => {
       return res.status(400).json({ error: 'No se proporcionó el contenido del documento.' });
     }
 
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
 
     if (!ai) {
       // Fallback simulated response if no API key is set yet
@@ -618,7 +590,7 @@ function generateFallbackAnalysis(filename: string, mimeType: string, tipoHint?:
 // ======================================================================
 
 // Generar borrador de correo formal para solicitud a aseguradora con código de seguimiento único
-app.post('/api/generar-correo-aseguradora', async (req, res) => {
+app.post('/api/generar-correo-aseguradora', nucleoIA.operacion('GENERAR_CORREO_ASEGURADORA'), async (req, res) => {
   try {
     const { solicitudSeguro, aseguradora } = req.body;
 
@@ -626,7 +598,7 @@ app.post('/api/generar-correo-aseguradora', async (req, res) => {
       return res.status(400).json({ error: 'Faltan datos de la solicitud o de la aseguradora.' });
     }
 
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
     const referencia = solicitudSeguro.referenciaUnica || `REF-IMPAGO-${Date.now().toString().slice(-6)}`;
     const titular = solicitudSeguro.titular1;
     const titular2 = solicitudSeguro.titular2;
@@ -732,7 +704,7 @@ Devuelve ÚNICAMENTE un JSON con:
 });
 
 // Analizar la respuesta por correo recibida de una aseguradora mediante Gemini
-app.post('/api/analizar-respuesta-aseguradora', async (req, res) => {
+app.post('/api/analizar-respuesta-aseguradora', nucleoIA.operacion('ANALIZAR_RESPUESTA_ASEGURADORA'), async (req, res) => {
   try {
     const { emailTexto, emailAsunto, aseguradoraNombre, rentaMensual } = req.body;
 
@@ -740,7 +712,7 @@ app.post('/api/analizar-respuesta-aseguradora', async (req, res) => {
       return res.status(400).json({ error: 'No se proporcionó el texto de la respuesta de la aseguradora.' });
     }
 
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
 
     if (!ai) {
       // Fallback response simulator
@@ -827,15 +799,16 @@ Responde ÚNICAMENTE en JSON válido con este formato:
 
 // ---------------------------------------------------------------------------
 // CAPA TRANSVERSAL §6 — FASE 4 · Asistente: interpretación de intención con Gemini.
-// Reutiliza el cliente y el modelo canónicos (getGeminiClient / gemini-3.7-flash).
+// Reutiliza el cliente y el modelo canónicos (clienteIA del núcleo / gemini-3.7-flash).
 // El servidor NO conoce permisos ni ejecuta nada: recibe la lista de capacidades YA
 // filtradas por el cliente y devuelve una propuesta que el cliente valida
 // deterministamente (validarResolucionIA). Sin clave → { disponible: false } y el
-// cliente usa el resolutor local. Sin escrituras en Firestore ni auditoría.
+// cliente usa el resolutor local. El manejador no escribe en Firestore; el núcleo
+// de IA (Fase 1) registra los metadatos de la operación por usuario.
 // ---------------------------------------------------------------------------
 const MODELO_ASISTENTE = 'gemini-3.7-flash';
 const limiteAsistente = crearLimitadorVentana(30, 60_000);
-app.post('/api/asistente/interpretar', async (req, res) => {
+app.post('/api/asistente/interpretar', nucleoIA.operacion('ASISTENTE_INTERPRETAR'), async (req, res) => {
   try {
     const limite = limiteAsistente.consumir(req.ip || req.socket.remoteAddress || 'desconocido');
     if (!limite.permitido) {
@@ -844,7 +817,7 @@ app.post('/api/asistente/interpretar', async (req, res) => {
     }
     const cuerpo = normalizarCuerpoInterpretar(req.body);
     if (!cuerpo) return res.status(400).json({ disponible: true, error: 'Petición inválida o demasiado grande.' });
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
     if (!ai) {
       return res.json({ disponible: false, proveedor: 'gemini', modelo: MODELO_ASISTENTE });
     }
@@ -874,7 +847,7 @@ app.post('/api/asistente/interpretar', async (req, res) => {
 });
 
 // API Endpoint for Questionnaire Incident Analysis with Gemini
-app.post('/api/analizar-cuestionario', async (req, res) => {
+app.post('/api/analizar-cuestionario', nucleoIA.operacion('ANALIZAR_CUESTIONARIO'), async (req, res) => {
   try {
     const { candidatoNombre, respuestas, informacionAdicional } = req.body;
 
@@ -882,7 +855,7 @@ app.post('/api/analizar-cuestionario', async (req, res) => {
       return res.status(400).json({ error: 'No se proporcionaron las respuestas del cuestionario.' });
     }
 
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
 
     if (!ai) {
       console.log('No GEMINI_API_KEY available, returning fallback questionnaire analysis.');
@@ -1169,7 +1142,7 @@ function generateFallbackQuestionnaireAnalysis(candidatoNombre: string, respuest
 }
 
 // Endpoint para redactar cláusulas de contrato con IA jurídica especializada en LAU
-app.post('/api/redactar-clausula', async (req, res) => {
+app.post('/api/redactar-clausula', nucleoIA.operacion('REDACTAR_CLAUSULA'), async (req, res) => {
   try {
     const { promptUsuario, tipoInmueble, renta, categoriaDeseada, contextoInmueble } = req.body;
 
@@ -1177,7 +1150,7 @@ app.post('/api/redactar-clausula', async (req, res) => {
       return res.status(400).json({ error: 'Debe proporcionar una descripción o petición para la cláusula.' });
     }
 
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
 
     if (!ai) {
       console.log('No GEMINI_API_KEY available, usando generador jurídico experto de respaldo.');
@@ -1440,7 +1413,7 @@ async function resolverImagenFoto(item: any): Promise<{ data: string; mimeType: 
   return null;
 }
 
-app.post('/api/analizar-inspeccion', async (req, res) => {
+app.post('/api/analizar-inspeccion', nucleoIA.operacion('ANALIZAR_INSPECCION'), async (req, res) => {
   try {
     const fotos: any[] = Array.isArray(req.body?.fotos) ? req.body.fotos : [];
     const contexto = req.body?.contexto || {};
@@ -1448,7 +1421,7 @@ app.post('/api/analizar-inspeccion', async (req, res) => {
       return res.status(400).json({ error: 'No se proporcionaron fotografías para analizar.' });
     }
     const lote = fotos.slice(0, MAX_FOTOS_POR_LOTE_INSPECCION);
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
 
     const promptBase = (estancia: string) => {
       const nombre = ESTANCIA_NOMBRE[estancia] || ESTANCIA_NOMBRE.otro;
@@ -1713,7 +1686,7 @@ function normalizarMejoraIA(m: any) {
   };
 }
 
-app.post('/api/proponer-mejoras', async (req, res) => {
+app.post('/api/proponer-mejoras', nucleoIA.operacion('PROPONER_MEJORAS'), async (req, res) => {
   try {
     const { rentaAnterior, destino, ciudad, codigoPostal, fotos, sugerencias } = req.body || {};
 
@@ -1740,7 +1713,7 @@ app.post('/api/proponer-mejoras', async (req, res) => {
       extraSug,
     ].join('\n');
 
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
     if (!ai) {
       console.log('No GEMINI_API_KEY: catálogo heurístico de mejoras.');
       return res.json({ mejoras: generarMejorasHeuristicas(textoHeuristico), motorGlobal: 'heuristico' });
@@ -1826,11 +1799,11 @@ const num = (v: any) => {
   return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
 };
 
-app.post('/api/estimar-pricing', async (req, res) => {
+app.post('/api/estimar-pricing', nucleoIA.operacion('ESTIMAR_PRICING'), async (req, res) => {
   try {
     const b = req.body || {};
     const base = b.base || {};
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
 
     if (!ai) {
       console.log('No GEMINI_API_KEY: pricing = base de calculadora.');
@@ -2026,10 +1999,10 @@ function kitHeuristico(b: any) {
   };
 }
 
-app.post('/api/generar-kit-publicacion', async (req, res) => {
+app.post('/api/generar-kit-publicacion', nucleoIA.operacion('GENERAR_KIT_PUBLICACION'), async (req, res) => {
   try {
     const b = req.body || {};
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
     const heuristico = kitHeuristico(b);
 
     if (!ai) {
@@ -2508,7 +2481,7 @@ function generateFallbackAnalisisIncidencia(
   });
 }
 
-app.post('/api/analizar-incidencia-ia', async (req, res) => {
+app.post('/api/analizar-incidencia-ia', nucleoIA.operacion('ANALIZAR_INCIDENCIA'), async (req, res) => {
   try {
     const entrada = parsearEntradaAnalisisIncidencia(req.body);
     if (!entrada) {
@@ -2517,7 +2490,7 @@ app.post('/api/analizar-incidencia-ia', async (req, res) => {
 
     const { titulo, descripcion, categoria, prioridad, inmuebleDireccion, contratoContexto, polizas } = entrada;
 
-    const ai = getGeminiClient();
+    const ai = clienteIA(res);
 
     if (!ai) {
       console.log('No GEMINI_API_KEY available, usando generador pericial de respaldo para incidencia.');
@@ -2614,7 +2587,7 @@ app.post('/api/titulares/buscar', crearManejadorBuscarTitulares());
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY });
+  res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY, ia: nucleoIA.estado() });
 });
 
 // ---------------------------------------------------------------------------

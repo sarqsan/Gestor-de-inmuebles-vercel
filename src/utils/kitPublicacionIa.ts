@@ -5,6 +5,7 @@
 
 import type { ExpedienteRecomercializacion, Inmueble, KitPublicacion } from '../types';
 import { DESTINO_INMUEBLE_LABEL } from './recomercializacionEngine';
+import { solicitarIA } from '../lib/clienteIA';
 
 export async function generarKitPublicacion(args: {
   expediente: ExpedienteRecomercializacion;
@@ -13,25 +14,21 @@ export async function generarKitPublicacion(args: {
   hechosAdicionales?: string[];
 }): Promise<KitPublicacion> {
   const { expediente, inmueble } = args;
-  const resp = await fetch('/api/generar-kit-publicacion', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tipoInmueble: inmueble?.tipoInmueble,
-      ciudad: inmueble?.ciudad,
-      codigoPostal: inmueble?.codigoPostal,
-      superficie: inmueble?.superficie,
-      habitaciones: inmueble?.habitaciones,
-      banos: inmueble?.banos,
-      destino: DESTINO_INMUEBLE_LABEL[expediente.destinoPrevisto],
-      precioRecomendado: expediente.pricing?.escenarioRecomendado,
-      precioVenta: expediente.pricing?.precioSalidaRecomendado ?? expediente.pricing?.valoracionVentaEstimada,
-      mejoras: (expediente.mejorasPropuestas ?? [])
-        .filter((m) => m.confirmadaPorPropietario)
-        .map((m) => m.actuacion),
-      anioConstruccion: inmueble?.datosCatastrales?.anioConstruccion,
-      hechosAdicionales: args.hechosAdicionales ?? [],
-    }),
+  const resp = await solicitarIA('/api/generar-kit-publicacion', {
+    tipoInmueble: inmueble?.tipoInmueble,
+    ciudad: inmueble?.ciudad,
+    codigoPostal: inmueble?.codigoPostal,
+    superficie: inmueble?.superficie,
+    habitaciones: inmueble?.habitaciones,
+    banos: inmueble?.banos,
+    destino: DESTINO_INMUEBLE_LABEL[expediente.destinoPrevisto],
+    precioRecomendado: expediente.pricing?.escenarioRecomendado,
+    precioVenta: expediente.pricing?.precioSalidaRecomendado ?? expediente.pricing?.valoracionVentaEstimada,
+    mejoras: (expediente.mejorasPropuestas ?? [])
+      .filter((m) => m.confirmadaPorPropietario)
+      .map((m) => m.actuacion),
+    anioConstruccion: inmueble?.datosCatastrales?.anioConstruccion,
+    hechosAdicionales: args.hechosAdicionales ?? [],
   });
   if (!resp.ok) throw new Error(`El kit de publicación respondió ${resp.status}.`);
   const json = await resp.json();

@@ -22,7 +22,8 @@ import type { Request, Response } from 'express';
 import { buscarTitulares } from './backendTitulares';
 import type { DependenciasBackendTitulares } from './backendTitulares';
 
-function tokenDe(req: Request): string {
+/** Token `Bearer` de la cabecera Authorization ('' si no hay). Reutilizado por el núcleo de IA. */
+export function tokenDe(req: Request): string {
   const cabecera = req.headers?.authorization;
   if (typeof cabecera !== 'string') return '';
   return cabecera.replace(/^Bearer\s+/i, '').trim();

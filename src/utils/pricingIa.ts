@@ -5,6 +5,7 @@
 // ============================================================
 
 import type { Inmueble, PricingRecomercializacion } from '../types';
+import { solicitarIA } from '../lib/clienteIA';
 
 export async function estimarPricingConIA(args: {
   base: PricingRecomercializacion;
@@ -17,25 +18,21 @@ export async function estimarPricingConIA(args: {
   destino?: string;
 }): Promise<{ pricing: PricingRecomercializacion; confianza?: 'alta' | 'media' | 'baja' }> {
   const { base, inmueble } = args;
-  const resp = await fetch('/api/estimar-pricing', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      base,
-      rentaAnterior: args.rentaAnterior,
-      ipcAcumuladoPct: args.ipcAcumuladoPct,
-      ajusteMercadoPct: args.ajusteMercadoPct,
-      mejoraRenta: args.mejoraRenta,
-      comparables: base.comparables ?? [],
-      superficie: inmueble?.superficie,
-      habitaciones: inmueble?.habitaciones,
-      banos: inmueble?.banos,
-      tipoInmueble: inmueble?.tipoInmueble,
-      catastro: inmueble?.datosCatastrales,
-      ciudad: inmueble?.ciudad,
-      codigoPostal: inmueble?.codigoPostal,
-      destino: args.destino,
-    }),
+  const resp = await solicitarIA('/api/estimar-pricing', {
+    base,
+    rentaAnterior: args.rentaAnterior,
+    ipcAcumuladoPct: args.ipcAcumuladoPct,
+    ajusteMercadoPct: args.ajusteMercadoPct,
+    mejoraRenta: args.mejoraRenta,
+    comparables: base.comparables ?? [],
+    superficie: inmueble?.superficie,
+    habitaciones: inmueble?.habitaciones,
+    banos: inmueble?.banos,
+    tipoInmueble: inmueble?.tipoInmueble,
+    catastro: inmueble?.datosCatastrales,
+    ciudad: inmueble?.ciudad,
+    codigoPostal: inmueble?.codigoPostal,
+    destino: args.destino,
   });
   if (!resp.ok) throw new Error(`La estimación de precio respondió ${resp.status}.`);
   const json = await resp.json();

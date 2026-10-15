@@ -72,6 +72,7 @@ import {
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
+import { solicitarIA } from '../../lib/clienteIA';
 
 interface DetalleIncidenciaModalProps {
   isOpen: boolean;
@@ -253,13 +254,9 @@ export const DetalleIncidenciaModal: React.FC<DetalleIncidenciaModalProps> = ({
     setIaError('');
 
     try {
-      const resp = await fetch('/api/analizar-incidencia-ia', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          incidencia,
-          polizas,
-        }),
+      const resp = await solicitarIA('/api/analizar-incidencia-ia', {
+        incidencia,
+        polizas,
       });
 
       if (!resp.ok) {

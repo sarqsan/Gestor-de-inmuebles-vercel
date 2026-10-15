@@ -18,6 +18,7 @@ import {
   Download,
   ExternalLink,
 } from 'lucide-react';
+import { solicitarIA } from '../lib/clienteIA';
 
 interface DocumentosListSectionProps {
   candidato: Candidato;
@@ -75,22 +76,18 @@ export const DocumentosListSection: React.FC<DocumentosListSectionProps> = ({
 
     for (const doc of targetDocs) {
       try {
-        const response = await fetch('/api/analizar-documento', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            documentBase64: doc.base64Data,
-            documentUrl: doc.url,
-            mimeType: doc.mimeType,
-            filename: doc.nombreArchivo,
-            tipoHint: doc.tipoDocumento,
-            candidatoManualData: {
-              nombre: candidato.nombre,
-              ingresosNetos: candidato.ingresosNetos,
-              tipoEmpleo: candidato.tipoEmpleo,
-              tipoContrato: candidato.tipoContrato,
-            },
-          }),
+        const response = await solicitarIA('/api/analizar-documento', {
+          documentBase64: doc.base64Data,
+          documentUrl: doc.url,
+          mimeType: doc.mimeType,
+          filename: doc.nombreArchivo,
+          tipoHint: doc.tipoDocumento,
+          candidatoManualData: {
+            nombre: candidato.nombre,
+            ingresosNetos: candidato.ingresosNetos,
+            tipoEmpleo: candidato.tipoEmpleo,
+            tipoContrato: candidato.tipoContrato,
+          },
         });
 
         const result = await response.json();

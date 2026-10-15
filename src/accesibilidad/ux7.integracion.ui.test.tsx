@@ -185,10 +185,10 @@ describe('UX-7 · guardas sobre el árbol real', () => {
     // 105: incluye la capa de `BajaInmuebleModal` (baja patrimonial), cubierta con el hook.
     expect(total).toBe(105);
     expect(pendientes.sort()).toEqual([
-      'components/DetalleSolicitudDocModal.tsx:920',
+      'components/DetalleSolicitudDocModal.tsx:917',
       'components/PublicPropertyGallery.tsx:150',
       'components/feedback/DialogoConfirmacion.tsx:46',
-      'components/modals/DetalleIncidenciaModal.tsx:2106',
+      'components/modals/DetalleIncidenciaModal.tsx:2103',
       'components/modals/InspeccionFotograficaModal.tsx:601',
       'components/sections/ProfesionalPortalSection.tsx:1103',
     ]);

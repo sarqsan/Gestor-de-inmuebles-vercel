@@ -359,6 +359,7 @@ export type ValorFirestore =
   | { doubleValue: number }
   | { booleanValue: boolean }
   | { nullValue: null }
+  | { timestampValue: string }
   | { arrayValue: { values?: ValorFirestore[] } }
   | { mapValue: { fields?: Record<string, ValorFirestore> } };
 
@@ -377,6 +378,10 @@ export function codificarValor(valor: unknown): ValorFirestore {
     return Number.isInteger(valor) ? { integerValue: String(valor) } : { doubleValue: valor };
   }
   if (Array.isArray(valor)) return { arrayValue: { values: valor.map(codificarValor) } };
+  // Fechas como `timestamp` nativo de Firestore (ordenables y consultables por rango).
+  if (valor instanceof Date) {
+    return Number.isNaN(valor.getTime()) ? { nullValue: null } : { timestampValue: valor.toISOString() };
+  }
   if (typeof valor === 'object') {
     const fields: Record<string, ValorFirestore> = {};
     for (const [k, v] of Object.entries(valor as Record<string, unknown>)) {
@@ -395,6 +400,7 @@ export function decodificarValor(valor: ValorFirestore | undefined): unknown {
   if ('doubleValue' in valor) return valor.doubleValue;
   if ('booleanValue' in valor) return valor.booleanValue;
   if ('nullValue' in valor) return null;
+  if ('timestampValue' in valor) return valor.timestampValue;
   if ('arrayValue' in valor) return (valor.arrayValue.values || []).map(decodificarValor);
   if ('mapValue' in valor) return decodificarCampos(valor.mapValue.fields || {});
   return null;
@@ -415,17 +421,34 @@ export interface ClienteFirestoreOpciones {
   cuenta: CuentaServicio;
   fetchImpl?: ImplementacionFetch;
   ahora?: Date;
+  /**
+   * Base de datos Firestore. Por defecto `(default)` (comportamiento histórico,
+   * el que usa la búsqueda de titulares). El núcleo de IA pasa la base con
+   * nombre en la que vive la aplicación (`firebase-applet-config.json`).
+   */
+  baseDatosId?: string;
+}
+
+/** Ruta de campo para `updateMask`: identificadores simples tal cual; el resto, entre comillas invertidas. */
+function rutaCampo(campo: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(campo)) return campo;
+  return '`' + campo.replace(/\\/g, '\\\\').replace(/`/g, '\\`') + '`';
 }
 
 export class ClienteFirestoreRest {
   private readonly base: string;
 
   constructor(private readonly opciones: ClienteFirestoreOpciones) {
-    this.base = `https://firestore.googleapis.com/v1/projects/${opciones.cuenta.project_id}/databases/(default)/documents`;
+    const baseDatos = encodeURIComponent(opciones.baseDatosId || '(default)');
+    this.base = `https://firestore.googleapis.com/v1/projects/${opciones.cuenta.project_id}/databases/${baseDatos}/documents`;
   }
 
   get projectId(): string {
     return this.opciones.cuenta.project_id;
+  }
+
+  get baseDatosId(): string {
+    return this.opciones.baseDatosId || '(default)';
   }
 
   private async cabeceras(): Promise<Record<string, string>> {
@@ -460,6 +483,58 @@ export class ClienteFirestoreRest {
 
   async leer(coleccion: string, id: string): Promise<DocumentoLeido | null> {
     return this.leerDocumento(`${coleccion}/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * CREA un documento con id fijo (`createDocument` + `documentId`). Si ya
+   * existe, Firestore responde 409 y se devuelve `YA_EXISTE` SIN modificarlo:
+   * es la primitiva atómica de idempotencia (dos peticiones simultáneas con el
+   * mismo id → sólo una crea).
+   */
+  async crearDocumento(coleccion: string, id: string, datos: Record<string, unknown>): Promise<'CREADO' | 'YA_EXISTE'> {
+    const ejecutar = this.opciones.fetchImpl || fetchPorDefecto();
+    const campos = (codificarValor(datos) as { mapValue: { fields?: Record<string, ValorFirestore> } }).mapValue.fields || {};
+    const respuesta = await withTimeout(async (signal) =>
+      ejecutar(`${this.base}/${coleccion}?documentId=${encodeURIComponent(id)}`, {
+        method: 'POST',
+        headers: await this.cabeceras(),
+        body: JSON.stringify({ fields: campos }),
+        signal,
+      }) as Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> }>,
+    );
+    if (respuesta.status === 409) return 'YA_EXISTE';
+    if (!respuesta.ok) {
+      const detalle = await respuesta.text().catch(() => '');
+      throw new Error(`Firestore ha rechazado la creación en ${coleccion} (HTTP ${respuesta.status}). ${detalle}`.trim());
+    }
+    return 'CREADO';
+  }
+
+  /**
+   * Actualiza SOLO los campos indicados (`updateMask`) de un documento que debe
+   * existir (`currentDocument.exists=true`): nunca crea documentos por la puerta
+   * de atrás ni borra campos no enviados.
+   */
+  async actualizarCampos(coleccion: string, id: string, datos: Record<string, unknown>): Promise<void> {
+    const ejecutar = this.opciones.fetchImpl || fetchPorDefecto();
+    const campos = (codificarValor(datos) as { mapValue: { fields?: Record<string, ValorFirestore> } }).mapValue.fields || {};
+    const nombres = Object.keys(campos);
+    if (nombres.length === 0) return;
+    const parametros = new URLSearchParams();
+    for (const nombre of nombres) parametros.append('updateMask.fieldPaths', rutaCampo(nombre));
+    parametros.append('currentDocument.exists', 'true');
+    const respuesta = await withTimeout(async (signal) =>
+      ejecutar(`${this.base}/${coleccion}/${encodeURIComponent(id)}?${parametros.toString()}`, {
+        method: 'PATCH',
+        headers: await this.cabeceras(),
+        body: JSON.stringify({ fields: campos }),
+        signal,
+      }) as Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> }>,
+    );
+    if (!respuesta.ok) {
+      const detalle = await respuesta.text().catch(() => '');
+      throw new Error(`Firestore ha rechazado la actualización de ${coleccion}/${id} (HTTP ${respuesta.status}). ${detalle}`.trim());
+    }
   }
 
   /**

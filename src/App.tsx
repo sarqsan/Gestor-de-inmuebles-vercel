@@ -339,6 +339,7 @@ import { ejecutarOperacion } from './feedback/operaciones';
 import { incidenciasNoCerradas } from './utils/operacionesEngine';
 import { permisosTitulares } from './utils/permisosTitulares';
 import { fichasVisiblesDelPropietario } from './lib/titularesModelo';
+import { fetchIA, solicitarIA } from './lib/clienteIA';
 
 // Route guard por perfil (fuente única; la reutiliza la capa de ayuda/tutoriales §6 sin duplicarla)
 const SECCIONES_PROPIETARIO: SectionType[] = [
@@ -1000,7 +1001,8 @@ export default function App() {
   const tutorialActivo = sesionTutorial ? obtenerTutorial(sesionTutorial.tutorialId) : undefined;
   // §6 F4: proveedor IA (Gemini vía servidor; sin clave → el motor cae al resolutor local) y
   // ejecución de acciones validadas del asistente con los medios del host (route guard intacto).
-  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(), []);
+  // IA · Fase 1: el asistente llama al servidor con identidad (ID token) e idempotencia.
+  const proveedorIA = useMemo(() => crearProveedorGeminiRemoto(fetchIA), []);
   const mainRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (activeSection !== 'inmuebles') setInmuebleContextualIA(null);
@@ -2399,14 +2401,10 @@ export default function App() {
         : candidate?.cuestionarioIncidencias?.informacionAdicional || '';
 
     try {
-      const response = await fetch('/api/analizar-cuestionario', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candidatoNombre,
-          respuestas: respuestasToAnalyze,
-          informacionAdicional,
-        }),
+      const response = await solicitarIA('/api/analizar-cuestionario', {
+        candidatoNombre,
+        respuestas: respuestasToAnalyze,
+        informacionAdicional,
       });
 
       if (!response.ok) {
@@ -2549,14 +2547,10 @@ export default function App() {
   const handleAiAnalysisSolicitud = async (sol: SolicitudAlquiler) => {
     try {
       const respuestasToAnalyze = sol.cuestionarioData?.respuestas || [];
-      const response = await fetch('/api/analizar-cuestionario', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candidatoNombre: sol.candidatoNombre,
-          respuestas: respuestasToAnalyze,
-          informacionAdicional: '',
-        }),
+      const response = await solicitarIA('/api/analizar-cuestionario', {
+        candidatoNombre: sol.candidatoNombre,
+        respuestas: respuestasToAnalyze,
+        informacionAdicional: '',
       });
 
       if (!response.ok) throw new Error('Error al analizar solicitud con IA');

@@ -6,6 +6,7 @@
 // ============================================================
 
 import type { FotoInspeccion } from '../types';
+import { solicitarIA } from '../lib/clienteIA';
 
 export type ResultadoAnalisisFoto = NonNullable<FotoInspeccion['analisisIa']>;
 
@@ -59,11 +60,7 @@ async function postLote(
   const payload = fotosPayload.filter(Boolean);
   if (payload.length === 0) return { resultados: [], motorGlobal: 'heuristico' };
 
-  const resp = await fetch('/api/analizar-inspeccion', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fotos: payload, contexto }),
-  });
+  const resp = await solicitarIA('/api/analizar-inspeccion', { fotos: payload, contexto });
   if (!resp.ok) {
     throw new Error(`El análisis de inspección respondió ${resp.status}.`);
   }

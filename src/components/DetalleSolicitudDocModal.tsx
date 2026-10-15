@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { confirmar } from '../feedback/confirmacion';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
+import { solicitarIA } from '../lib/clienteIA';
 
 interface DetalleSolicitudDocModalProps {
   solicitud: SolicitudDocumentacion;
@@ -131,22 +132,18 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
     setAnalyzingDocIds((prev) => [...prev, item.id]);
 
     try {
-      const response = await fetch('/api/analizar-documento', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentBase64: file.base64Data,
-          documentUrl: file.url,
-          mimeType: file.mimeType || 'application/pdf',
-          filename: file.nombreArchivo,
-          tipoHint: item.tipo,
-          candidatoManualData: {
-            nombre: candidato?.nombre || solState.candidatoNombre,
-            ingresosNetos: candidato?.ingresosNetos,
-            tipoEmpleo: candidato?.tipoEmpleo,
-            tipoContrato: candidato?.tipoContrato,
-          },
-        }),
+      const response = await solicitarIA('/api/analizar-documento', {
+        documentBase64: file.base64Data,
+        documentUrl: file.url,
+        mimeType: file.mimeType || 'application/pdf',
+        filename: file.nombreArchivo,
+        tipoHint: item.tipo,
+        candidatoManualData: {
+          nombre: candidato?.nombre || solState.candidatoNombre,
+          ingresosNetos: candidato?.ingresosNetos,
+          tipoEmpleo: candidato?.tipoEmpleo,
+          tipoContrato: candidato?.tipoContrato,
+        },
       });
 
       const result = await response.json();

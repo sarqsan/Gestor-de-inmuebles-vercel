@@ -17,6 +17,7 @@ import {
   sugerenciasDesdeFotos,
 } from './recomercializacionEngine';
 import { DESTINO_INMUEBLE_LABEL } from './recomercializacionEngine';
+import { solicitarIA } from '../lib/clienteIA';
 
 interface MejoraRemota {
   actuacion: string;
@@ -52,17 +53,13 @@ export async function proponerMejorasROI(args: {
       sugerenciasMejora: f.analisisIa?.sugerenciasMejora ?? [],
     }));
 
-  const resp = await fetch('/api/proponer-mejoras', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      rentaAnterior,
-      destino: DESTINO_INMUEBLE_LABEL[expediente.destinoPrevisto],
-      ciudad: inmueble?.ciudad,
-      codigoPostal: inmueble?.codigoPostal,
-      fotos,
-      sugerencias: sugerenciasDesdeFotos(expediente),
-    }),
+  const resp = await solicitarIA('/api/proponer-mejoras', {
+    rentaAnterior,
+    destino: DESTINO_INMUEBLE_LABEL[expediente.destinoPrevisto],
+    ciudad: inmueble?.ciudad,
+    codigoPostal: inmueble?.codigoPostal,
+    fotos,
+    sugerencias: sugerenciasDesdeFotos(expediente),
   });
   if (!resp.ok) {
     throw new Error(`El generador de mejoras respondió ${resp.status}.`);

@@ -44,9 +44,17 @@ Con clave configurada pero sin red, responde HTTP 502 `{"error":"PROVEEDOR_ERROR
 Confirma que la clave llega al servidor y que Gemini responde con el esquema. Cuerpo
 idéntico al que envía el cliente (`cuerpoDesdeRequest`): sin permisos, solo catálogo.
 
+> **Desde la IA · Fase 1** (`docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md`) el endpoint exige
+> sesión: `Authorization: Bearer <ID token>` de un usuario con sesión iniciada (cópialo
+> de la cabecera de una petición `/api/...` de la app en las herramientas de red del
+> navegador) y una `Idempotency-Key` nueva por llamada. Sin token responde 401. Para
+> que llegue a Gemini, el registro debe estar en modo `FIRESTORE` (credencial de
+> servicio) o `MEMORIA` (desarrollo local): compruébalo en `GET /api/health` → `ia.registro`.
+
 ```bash
 curl -s -X POST http://localhost:3000/api/asistente/interpretar \
-  -H 'content-type: application/json' -d '{
+  -H 'content-type: application/json' \
+  -H "Authorization: Bearer $ID_TOKEN" -H "Idempotency-Key: $(uuidgen)" -d '{
   "input": "Quiero ir a Tesorería.",
   "host": "ERP", "module": "inicio", "section": "inicio", "role": "ADMINISTRADOR",
   "capabilities": [

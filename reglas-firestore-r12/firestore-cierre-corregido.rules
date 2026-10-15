@@ -3640,7 +3640,8 @@ service cloud.firestore {
         && (!(e.tipo in ['averia','reparacion'] && opAbierta(e,true) == 1) || !(r.incidencia.estado in ['CERRADA','CANCELADA']))
         && (!(e.tipo == 'reparacion' && e.estado == 'FINALIZADA') || (e.fechaInicio is string && e.fechaFin is string && e.fechaFin >= e.fechaInicio && e.resultado is string && e.resultado.size()>0 && e.costeCentimos is int && e.costeCentimos >= 0));
     }
-    function opCambio(p, e, b, existeB, cmd, i, cambios, r) {
+    function opCambio(p, e, b, existeB, cmd, i, r) {
+      let cambios = e.diff(b).affectedKeys();
       return !existeB ? cmd.accion == 'CREAR' && e.version == 1 && opInicial(e) && e.get('documentoIds',[]) == []
         : cmd.accion != 'CREAR' && e.id == b.id && e.tipo == b.tipo && e.creadoEn == b.creadoEn && e.version == b.version + 1
         && e.get('ambito',null) == b.get('ambito',null) && e.get('propietarioId',null) == b.get('propietarioId',null)
@@ -3714,16 +3715,18 @@ service cloud.firestore {
       return h.revision is int && h.revision == (existeAnterior ? anterior.revision : 0) + 1
         // El audit debe nacer en el mismo commit, no reutilizar uno autenticado previo.
         && !exists(auditPath)
-        && opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,existeVieja,vieja,usuarioId);
+        && opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,{'existe':existeVieja,'vieja':vieja},usuarioId);
     }
-    function opEventoValido(p, id, data, h, fila, existeVieja, vieja, usuarioId) {
+    function opEventoValido(p, id, data, h, fila, prev, usuarioId) {
+      let existeVieja = prev.existe;
+      let vieja = prev.vieja;
       let e = fila.registro;
       let version = fila.versiones[fila.versiones.size()-1];
       let cmd = version.comando;
       let antes = existeVieja ? vieja.registro : {};
       let d = data.detalles;
       let campos = opCampos(e.tipo);
-      let cambios = existeVieja ? e.diff(antes).affectedKeys() : [];
+      let cambios = e.diff(antes).affectedKeys();
       return data.keys().hasOnly(['id','usuarioId','usuarioEmail','usuarioNombre','accion','descripcion','fechaHora','entidadAfectada','idAfectado','resultado','detalles','registradoEn'])
         && e.tipo in ['incidencia','averia','reparacion','proveedor','equipo','garantia','presupuesto','factura','documento'] && e.version is int
         && cmd.accion in ['CREAR','MODIFICAR','CAMBIAR_ESTADO','ANOTAR','VINCULAR_DOCUMENTO','ASOCIAR_FACTURA']
@@ -3743,13 +3746,13 @@ service cloud.firestore {
         && (e.tipo == 'proveedor' ? e.propietarioId == p : e.ambito == version.ambito)
         && opActual(p,data.idAfectado)
         && opEsquema(e,campos) && opComando(e,antes,cmd,campos,cambios)
-        && opDominio(p,e,antes,existeVieja,cmd,data.idAfectado,cambios,h);
+        && opDominio(p,e,antes,existeVieja,cmd,data.idAfectado,h);
     }
     // Solo después de autorización, envelope, esquema y comando: cargar una vez, validar sin I/O.
-    function opDominio(p, e, antes, existeAntes, cmd, i, cambios, h) {
+    function opDominio(p, e, antes, existeAntes, cmd, i, h) {
       let r = opReferencias(p,e,cmd);
       return (cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'] || opRelaciones(p,e,i,r))
-        && opCambio(p,e,antes,existeAntes,cmd,i,cambios,r)
+        && opCambio(p,e,antes,existeAntes,cmd,i,r)
         && (cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'] || (opInvariantes(e,h,r) && opEconomia(e,r)));
     }
     // El match /audit_logs canónico de este archivo ya codifica el contrato B literal:

@@ -58,7 +58,7 @@ describe('app real: un proyecto incompatible no derriba HTTP ni permite operacio
     const json = await respuesta.json();
     expect(json).toEqual({
       status: 'ok', geminiKeyConfigured: false,
-      ia: { registro: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 11, errorConfiguracion: 'FIREBASE_PROYECTO_INCOMPATIBLE' },
+      ia: { registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 11, errorConfiguracion: 'FIREBASE_PROYECTO_INCOMPATIBLE' },
     });
     for (const secreto of secretos) expect(JSON.stringify(json)).not.toContain(secreto);
   });
@@ -143,7 +143,7 @@ describe('defensa del middleware y configuración válida', () => {
       const deps = crearDependenciasNucleoIA({ VERCEL: '1' });
       expect(deps.errorConfiguracion).toBeUndefined();
       expect(deps.configuracion).toMatchObject({ proyectoId: config.projectId, baseDatosId: config.firestoreDatabaseId, modoRegistro: 'FIRESTORE' });
-      expect(crearNucleoIA(deps).estado()).toEqual({ registro: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 });
+      expect(crearNucleoIA(deps).estado()).toEqual({ registro: 'FIRESTORE', gobierno: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 });
     } finally {
       spy.mockRestore();
     }

@@ -164,7 +164,7 @@ describe('B · app REAL de server.ts: sin credencial bloquea antes de autenticar
     const r = await fetch(`${base}/api/health`);
     expect(r.status).toBe(200);
     const salud = await r.json();
-    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 11, errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
+    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 11, errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
     expect(JSON.stringify(salud)).not.toMatch(/private_key|client_email|apiKey|BEGIN/i);
   });
 });
@@ -245,7 +245,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     return `${firmable}.${b64url(firma)}`;
   }
 
-  const documentosFirestore = new Map<string, { fields: Record<string, unknown> }>();
+  const documentosFirestore = new Map<string, { fields: Record<string, unknown>; updateTime?: string }>();
+    let relojDocumentos = 0;
+    const updateTimeNuevo = () => `2026-10-15T10:00:${String(++relojDocumentos).padStart(2, '0')}.000000Z`;
   let falloFirestoreRest = false;
   let tmpDir = '';
   let servidorVercel: Server;
@@ -304,24 +306,32 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
         }
         const u = new URL(url);
         const metodo = (init?.method || 'GET').toUpperCase();
-        // POST .../documents/ia_operaciones?documentId=...
-        if (metodo === 'POST' && u.pathname.endsWith('/documents/ia_operaciones')) {
-          const docId = u.searchParams.get('documentId') || '';
-          const clave = `ia_operaciones/${docId}`;
+        // Mini-Firestore genérico (Fase 2): documentos REST-codificados en `documentosFirestore`
+        // con `updateTime` monotónico; POST ?documentId= atómico; PATCH con precondición CAS
+        // `currentDocument.updateTime` (409 ABORTED) o `currentDocument.exists` (Fase 1).
+        const mDocumento = /\/documents\/([^/?]+)\/([^/?]+)$/.exec(u.pathname);
+        const mColeccion = /\/documents\/([^/?]+)$/.exec(u.pathname);
+        // POST .../documents/<coleccion>?documentId=<id>
+        if (metodo === 'POST' && mColeccion && u.searchParams.has('documentId')) {
+          const clave = `${mColeccion[1]}/${decodeURIComponent(u.searchParams.get('documentId') || '')}`;
           if (documentosFirestore.has(clave)) {
             return new Response(JSON.stringify({ error: { status: 'ALREADY_EXISTS' } }), { status: 409 });
           }
           const body = JSON.parse(String(init?.body || '{}')) as { fields?: Record<string, unknown> };
-          documentosFirestore.set(clave, { fields: { ...(body.fields || {}) } });
-          return new Response(JSON.stringify({ name: clave, fields: body.fields || {} }), { status: 200 });
+          const updateTime = updateTimeNuevo();
+          documentosFirestore.set(clave, { fields: { ...(body.fields || {}) }, updateTime });
+          return new Response(JSON.stringify({ name: clave, fields: body.fields || {}, updateTime }), { status: 200 });
         }
-        // PATCH .../documents/ia_operaciones/<id>
-        const mPatch = /\/documents\/(ia_operaciones\/[^/?]+)$/.exec(u.pathname);
-        if (metodo === 'PATCH' && mPatch) {
-          const clave = decodeURIComponent(mPatch[1]);
+        // PATCH .../documents/<coleccion>/<id>
+        if (metodo === 'PATCH' && mDocumento) {
+          const clave = decodeURIComponent(mDocumento[0].split('/documents/')[1]);
           const actual = documentosFirestore.get(clave);
           if (!actual) {
             return new Response(JSON.stringify({ error: { status: 'NOT_FOUND' } }), { status: 404 });
+          }
+          const casEsperado = u.searchParams.get('currentDocument.updateTime');
+          if (casEsperado && casEsperado !== actual.updateTime) {
+            return new Response(JSON.stringify({ error: { code: 409, status: 'ABORTED' } }), { status: 409 });
           }
           const body = JSON.parse(String(init?.body || '{}')) as { fields?: Record<string, unknown> };
           const mascaras = u.searchParams.getAll('updateMask.fieldPaths');
@@ -329,18 +339,31 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
           for (const campo of mascaras) {
             if (campo in nuevos) actual.fields[campo] = nuevos[campo];
           }
-          return new Response(JSON.stringify({ name: clave, fields: actual.fields }), { status: 200 });
+          actual.updateTime = updateTimeNuevo();
+          return new Response(JSON.stringify({ name: clave, fields: actual.fields, updateTime: actual.updateTime }), { status: 200 });
         }
-        // GET .../documents/ia_operaciones/<id>
-        if (metodo === 'GET' && mPatch) {
-          const clave = decodeURIComponent(mPatch[1]);
+        // GET .../documents/<coleccion>/<id>
+        if (metodo === 'GET' && mDocumento) {
+          const clave = decodeURIComponent(mDocumento[0].split('/documents/')[1]);
           const actual = documentosFirestore.get(clave);
           if (!actual) return new Response(JSON.stringify({ error: { status: 'NOT_FOUND' } }), { status: 404 });
-          return new Response(JSON.stringify({ name: clave, fields: actual.fields }), { status: 200 });
+          return new Response(JSON.stringify({ name: clave, fields: actual.fields, updateTime: actual.updateTime }), { status: 200 });
         }
       }
       return fetchReal(input, init);
     }) as typeof fetch;
+
+    // FASE 2 · espejos de identidad veraces de los usuarios de prueba (uid-ana, uid-luis),
+    // tal como los mantiene la sincronización `usuarios_auth` ↔ `usuarios`.
+    const { codificarValor } = await import('../server/titularidades/googleBackend');
+    const sembrarVeraz = (uid: string, usuarioId: string, tipoPerfil: string) => {
+      const campos = (datos: Record<string, unknown>) =>
+        (codificarValor(datos) as { mapValue: { fields: Record<string, unknown> } }).mapValue.fields;
+      documentosFirestore.set(`usuarios_auth/${uid}`, { fields: campos({ usuarioId, estado: 'ACTIVO', tipoPerfil }) });
+      documentosFirestore.set(`usuarios/${usuarioId}`, { fields: campos({ authUid: uid, estado: 'ACTIVO', tipoPerfil }) });
+    };
+    sembrarVeraz('uid-ana', 'usuario-ana', 'PROPIETARIO');
+    sembrarVeraz('uid-luis', 'usuario-luis', 'PROPIETARIO');
 
     // Compila cada fichero TS de servidor a ESM suelto (sin bundler), igual que @vercel/node
     const cfg = ts.readConfigFile(join(RAIZ, 'tsconfig.json'), ts.sys.readFile).config;
@@ -371,7 +394,10 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/ia/nucleoIA.ts',
       'server/ia/configuracionIA.ts',
       'server/ia/registroOperacionesIA.ts',
+      'server/ia/gobiernoIA.ts',
+      'server/ia/adminIA.ts',
       'src/ia/catalogoOperacionesIA.ts',
+      'src/ia/gobiernoIAContrato.ts',
     ];
 
     for (const rel of archivosServidor) {
@@ -544,7 +570,7 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     expect(body).toEqual({
       status: 'ok',
       geminiKeyConfigured: false,
-      ia: { registro: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 },
+      ia: { registro: 'FIRESTORE', gobierno: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 },
     });
   });
 
@@ -703,7 +729,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
           body: JSON.stringify(cuerpoBase),
         });
         expect(rFalloReg.status).toBe(503);
-        expect(await rFalloReg.json()).toMatchObject({ codigo: 'REGISTRO_NO_DISPONIBLE' });
+        // FASE 2 · con Firestore caído, la PRIMERA puerta en fallar es el gobierno de uso
+        // (perfilVeraz precede al registro): sigue siendo fallo cerrado 503 y no se ejecuta.
+        expect(await rFalloReg.json()).toMatchObject({ codigo: 'GOBIERNO_NO_DISPONIBLE' });
       } finally {
         falloFirestoreRest = false;
       }

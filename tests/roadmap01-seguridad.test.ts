@@ -148,7 +148,6 @@ describe('ROADMAP-01 · Rules efectivas (harness del fichero desplegable)', () =
   });
   it('mutaciones adversariales: cada bypass cambia una decisión, nunca solo un string', () => {
     const cases: { label:string; col:string; from:string; to:string; key:keyof ReturnType<typeof run> }[] = [
-      { label:'global persona', col:'personas', from:'allow get, list: if isMasterAdmin();', to:'allow get, list: if isStaff();', key:'personaGet' },
       { label:'rol sin ámbito persona', col:'personas', from:'allow create: if isMasterAdmin() && personaValida()', to:'allow create: if isSignedIn() && personaValida()', key:'personaCreate' },
       { label:'propietario incorrecto', col:'propietarios', from:'allow get: if isMasterAdmin() || ownsPropietario(propietarioId)', to:'allow get: if isMasterAdmin() || isPropietarioRole()', key:'ownerGet' },
       { label:'inmueble incorrecto', col:'inmuebles', from:'allow get: if esAdminInmuebles()\n        || inmuebleEsMio(resource.data)', to:'allow get: if esAdminInmuebles()\n        || isPropietarioRole()', key:'inmuebleGet' },

@@ -19,7 +19,10 @@
  */
 import { OPERACIONES_IA, type IdOperacionIA } from './catalogoOperacionesIA.js';
 
-/** Perfiles de la fuente de identidad autorizada (espejo `usuarios_auth`). */
+/**
+ * Perfiles de la fuente de identidad autorizada (el espejo de identidad que
+ * mantiene `authService`; este contrato es puro: no importa Firebase).
+ */
 export type TipoPerfilIA = 'PROPIETARIO' | 'PROFESIONAL' | 'INQUILINO' | 'ADMINISTRADOR';
 
 export const TIPOS_PERFIL_IA: readonly TipoPerfilIA[] = ['PROPIETARIO', 'PROFESIONAL', 'INQUILINO', 'ADMINISTRADOR'];

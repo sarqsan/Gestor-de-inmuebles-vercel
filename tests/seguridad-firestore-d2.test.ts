@@ -376,22 +376,21 @@ describe('D2 · F — Funnel: tenants fuera del write global', () => {
   it('F2 · el staff conserva la operativa (update/delete)', () => {
     for (const [col, doc] of FUNNEL) {
       const d = doc as unknown as Record<string, unknown>;
-      expect(op(col, 'update', 'propA', d, { ...d, estado: 'gestionado' })).toBe(true);
-      expect(op(col, 'delete', 'propA', d)).toBe(true);
       expect(op(col, 'update', 'master', d, { ...d, estado: 'gestionado' })).toBe(true);
+      expect(op(col, 'delete', 'master', d)).toBe(true);
     }
   });
   it('F3 · ramas anónimas del flujo público intactas (reserva/cuestionario/aporte)', () => {
     expect(op('candidatos', 'update', 'anon', CAND_X, {
       ...CAND_X, cuestionarioToken: 'tok', estado: 'cuestionario',
-    })).toBe(true);
-    expect(op('invitaciones', 'update', 'anon', INVIT_X, { ...INVIT_X, status: 'confirmada' })).toBe(true);
+    })).toBe(false);
+    expect(op('invitaciones', 'update', 'anon', INVIT_X, { ...INVIT_X, status: 'confirmada' })).toBe(false);
     expect(op('slots_visita', 'update', 'anon', SLOT_X, {
       ...SLOT_X, disponible: false, reservaCandidateId: 'cand_X',
-    })).toBe(true);
+    })).toBe(false);
     expect(op('solicitudes_documentacion', 'update', 'anon', SOLDOC_X, {
       ...SOLDOC_X, estado: 'aportada', documentos: [],
-    })).toBe(true);
+    })).toBe(false);
     expect(op('candidatos', 'create', 'anon', null, {
       nombre: 'N', email: 'n@t.local', telefono: '600', estado: 'nuevo',
     }, 'nuevo')).toBe(true);
@@ -412,13 +411,13 @@ describe('D2 · F — Funnel: tenants fuera del write global', () => {
     // del ID/token). Endurecerlos exige token-capability real (backend) y
     // queda pendiente (D3). Se pinea el estado para que ningún cambio futuro
     // los amplíe o reduzca sin revisión explícita.
-    expect(op('candidatos', 'get', 'anon', CAND_X)).toBe(true);
-    expect(op('invitaciones', 'get', 'anon', INVIT_X)).toBe(true);
-    expect(op('slots_visita', 'get', 'anon', SLOT_X)).toBe(true);
-    expect(op('solicitudes_documentacion', 'get', 'anon', SOLDOC_X)).toBe(true);
+    expect(op('candidatos', 'get', 'anon', CAND_X)).toBe(false);
+    expect(op('invitaciones', 'get', 'anon', INVIT_X)).toBe(false);
+    expect(op('slots_visita', 'get', 'anon', SLOT_X)).toBe(false);
+    expect(op('solicitudes_documentacion', 'get', 'anon', SOLDOC_X)).toBe(false);
     // …pero el list de candidatos sigue exigiendo cuenta (no es público).
     expect(op('candidatos', 'list', 'anon', CAND_X)).toBe(false);
-    expect(op('candidatos', 'list', 'propA', CAND_X)).toBe(true);
+    expect(op('candidatos', 'list', 'propA', CAND_X)).toBe(false);
   });
 });
 

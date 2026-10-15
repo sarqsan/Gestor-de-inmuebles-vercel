@@ -4,7 +4,7 @@ import {describe,expect,it} from 'vitest';
 import {crearEvaluadorReglas} from './harness/firestoreRulesEval';
 const ev=crearEvaluadorReglas(readFileSync(resolve(__dirname,'../firestore.rules'),'utf8'));
 const base={docId:'x',resource:null,requestResource:{},db:{} as Record<string,Record<string,unknown>>};
-const auth=(uid:string)=>({uid,token:{email:`${uid}@test.local`}});
+const auth=(uid:string)=>({uid,token:{email:`${uid}@test.local`,email_verified:true}});
 const test=(col:string,verb:'create'|'delete'|'get'|'list',uid:string,db=base.db,resource:Record<string,unknown>|null=null)=>
  ev.permite(col,verb,{...base,auth:auth(uid),db,resource,requestResource:{id:'x'}});
 describe('ROADMAP-01 · isStaff/isTenant no depende solo de Auth',()=>{

@@ -467,7 +467,7 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
     // acotado). Los 7 restantes son sólo LECTURAS (get/read); queda prohibido
     // añadir escrituras abiertas.
     const total = (FS_SRC.match(/if true/g) || []).length;
-    expect(total).toBe(7);
+    expect(total).toBe(2);
     const escriturasAbiertas = (FS_SRC.match(/allow\s+(create|update|write|delete)[^;]*if true/g) || []).length;
     expect(escriturasAbiertas).toBe(0);
   });

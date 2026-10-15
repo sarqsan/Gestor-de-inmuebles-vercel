@@ -4,7 +4,7 @@ import {describe,expect,it} from 'vitest';
 import {crearEvaluadorReglas} from './harness/firestoreRulesEval';
 const ev=crearEvaluadorReglas(readFileSync(resolve(__dirname,'../firestore.rules'),'utf8'));
 const base={docId:'x',resource:null,requestResource:{},db:{} as Record<string,Record<string,unknown>>};
-const auth=(uid:string)=>({uid,token:{email:`${uid}@test.local`}});
+const auth=(uid:string)=>({uid,token:{email:`${uid}@test.local`,email_verified:true}});
 const test=(col:string,verb:'create'|'delete'|'get'|'list',uid:string,db=base.db,resource:Record<string,unknown>|null=null)=>
  ev.permite(col,verb,{...base,auth:auth(uid),db,resource,requestResource:{id:'x'}});
 describe('ROADMAP-01 · isStaff/isTenant no depende solo de Auth',()=>{
@@ -19,7 +19,7 @@ describe('ROADMAP-01 · isStaff/isTenant no depende solo de Auth',()=>{
    const db={'usuarios_auth/nuevo':{usuarioId:'p',tipoPerfil:'PROFESIONAL',estado:'ACTIVO'},
      'usuarios/p':{authUid:'nuevo',tipoPerfil:'PROFESIONAL',estado:'ACTIVO'}};
    expect(ev.permite('enlaces_registro','create',{...base,auth:auth('nuevo'),db,
-     requestResource:link,after:{'audit_logs/a':evento}})).toBe(true);
+     requestResource:link,after:{'audit_logs/a':evento}})).toBe(false);
    expect(ev.permite('enlaces_registro','create',{...base,auth:auth('nuevo'),db,
      requestResource:{...link,profesionalIdVinculado:'victima',emailInvitado:'nuevo@test.local'},
      after:{'audit_logs/a':evento}})).toBe(false);
@@ -66,7 +66,7 @@ describe('ROADMAP-01 · isStaff/isTenant no depende solo de Auth',()=>{
    expect(req({...perfil,permisos:['usuarios.gestionar']})).toBe(false);
  });
  it('ficha profesional existente solo se vincula con invitación nominal al email Auth',()=>{
-   const perfil={id:'p',authUid:'u',email:'u@test.local',tipoPerfil:'PROFESIONAL',estado:'ACTIVO',
+   const perfil={id:'p',authUid:'u',email:'u@test.local',tipoPerfil:'PROFESIONAL',estado:'PENDIENTE',
      roles:['PROFESIONAL_MANTENIMIENTO'],permisos:['profesionales.ver'],profesionalId:'prof_ajeno',enlaceRegistroId:'inv'};
    const db={'profesionales/prof_ajeno':{id:'prof_ajeno'}};
    const req=(extra:Record<string,Record<string,unknown>>)=>ev.permite('usuarios','create',

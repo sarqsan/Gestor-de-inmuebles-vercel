@@ -206,23 +206,23 @@ describe('deltas-C · A — inmuebles: titularidad', () => {
 // ---------------------------------------------------------------------------
 describe('deltas-C · B — invitaciones', () => {
   it('B1 · lectura pública y borrado intactos', () => {
-    expect(permite('invitaciones', 'get', peticion({ auth: AUTH.anon, docId: 'inv-1', resource: INV }))).toBe(true);
+    expect(permite('invitaciones', 'get', peticion({ auth: AUTH.anon, docId: 'inv-1', resource: INV }))).toBe(false);
     expect(permite('invitaciones', 'delete', peticion({ auth: AUTH.anon, docId: 'inv-1', resource: INV }))).toBe(false);
-    expect(permite('invitaciones', 'delete', peticion({ auth: AUTH.firmado, docId: 'inv-1', resource: INV }))).toBe(true);
+    expect(permite('invitaciones', 'delete', peticion({ auth: AUTH.firmado, docId: 'inv-1', resource: INV }))).toBe(false);
   });
 
   it('B2 · autenticado conserva create/update libres', () => {
-    expect(create('invitaciones', AUTH.firmado, 'inv-x', { cualquier: 'cosa' })).toBe(true);
-    expect(update('invitaciones', AUTH.firmado, 'inv-1', INV, { ...INV, inmueblePrecio: 1 })).toBe(true);
+    expect(create('invitaciones', AUTH.firmado, 'inv-x', { cualquier: 'cosa' })).toBe(false);
+    expect(update('invitaciones', AUTH.firmado, 'inv-1', INV, { ...INV, inmueblePrecio: 1 })).toBe(false);
   });
 
   it('B3 · anónimo crea la forma válida (reserva/captación mínima)', () => {
     expect(
       create('invitaciones', AUTH.anon, 'inv-x', { inmuebleId: 'inm_A', status: 'ENVIADO', candidateId: 'c-1' })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       create('invitaciones', AUTH.anon, 'inv-x', { inmuebleId: 'inm_A', status: 'ENVIADO', candidatoId: 'c-1' })
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('B4 · anónimo NO crea formas inválidas', () => {
@@ -241,8 +241,8 @@ describe('deltas-C · B — invitaciones', () => {
         bookedAt: '2026-09-27T12:00:00.000Z',
         reserva: { slotId: 'slot-1' },
       })
-    ).toBe(true);
-    expect(update('invitaciones', AUTH.anon, 'inv-1', INV, { ...INV, status: 'ABIERTO', openedAt: '2026-09-27' })).toBe(true);
+    ).toBe(false);
+    expect(update('invitaciones', AUTH.anon, 'inv-1', INV, { ...INV, status: 'ABIERTO', openedAt: '2026-09-27' })).toBe(false);
   });
 
   it('B6 · anónimo NO toca campos ajenos ni rompe tipos', () => {
@@ -251,8 +251,8 @@ describe('deltas-C · B — invitaciones', () => {
     expect(update('invitaciones', AUTH.anon, 'inv-1', INV, { ...INV, status: 'X', reserva: 'no-map' })).toBe(false);
   });
 
-  it('B7 · LÍMITE: la forma válida anónima vale para CUALQUIER documento (no es aislamiento)', () => {
-    expect(update('invitaciones', AUTH.anon, 'inv-1', INV, { ...INV, status: 'ABIERTO' })).toBe(true);
+  it('B7 · LÍMITE: la forma válida anónima NO vale (sin acceso anónimo)', () => {
+    expect(update('invitaciones', AUTH.anon, 'inv-1', INV, { ...INV, status: 'ABIERTO' })).toBe(false);
   });
 });
 
@@ -261,20 +261,20 @@ describe('deltas-C · B — invitaciones', () => {
 // ---------------------------------------------------------------------------
 describe('deltas-C · C — slots_visita', () => {
   it('C1 · lectura pública y borrado intactos', () => {
-    expect(permite('slots_visita', 'get', peticion({ auth: AUTH.anon, docId: 'slot-1', resource: SLOT }))).toBe(true);
+    expect(permite('slots_visita', 'get', peticion({ auth: AUTH.anon, docId: 'slot-1', resource: SLOT }))).toBe(false);
     expect(permite('slots_visita', 'delete', peticion({ auth: AUTH.anon, docId: 'slot-1', resource: SLOT }))).toBe(false);
-    expect(permite('slots_visita', 'delete', peticion({ auth: AUTH.firmado, docId: 'slot-1', resource: SLOT }))).toBe(true);
+    expect(permite('slots_visita', 'delete', peticion({ auth: AUTH.firmado, docId: 'slot-1', resource: SLOT }))).toBe(false);
   });
 
   it('C2 · autenticado conserva create/update libres', () => {
-    expect(create('slots_visita', AUTH.firmado, 'slot-x', { cualquier: 'cosa' })).toBe(true);
-    expect(update('slots_visita', AUTH.firmado, 'slot-1', SLOT, { ...SLOT, fecha: '2026-10-01' })).toBe(true);
+    expect(create('slots_visita', AUTH.firmado, 'slot-x', { cualquier: 'cosa' })).toBe(false);
+    expect(update('slots_visita', AUTH.firmado, 'slot-1', SLOT, { ...SLOT, fecha: '2026-10-01' })).toBe(false);
   });
 
   it('C3 · anónimo crea la agenda mínima y NO formas inválidas', () => {
     expect(
       create('slots_visita', AUTH.anon, 'slot-x', { inmuebleId: 'inm_A', fecha: '2026-10-01', horaInicio: '10:00', horaFin: '10:30' })
-    ).toBe(true);
+    ).toBe(false);
     expect(create('slots_visita', AUTH.anon, 'slot-x', { inmuebleId: 'inm_A', fecha: '2026-10-01' })).toBe(false);
     expect(
       create('slots_visita', AUTH.anon, 'slot-x', { inmuebleId: 'inm_A', fecha: 20261001, horaInicio: '10:00', horaFin: '10:30' })
@@ -290,8 +290,8 @@ describe('deltas-C · C — slots_visita', () => {
         reservaCandidateNombre: 'N',
         reservaInvitationId: 'inv-1',
       })
-    ).toBe(true);
-    expect(update('slots_visita', AUTH.anon, 'slot-1', { ...SLOT, disponible: false }, { ...SLOT, disponible: true })).toBe(true);
+    ).toBe(false);
+    expect(update('slots_visita', AUTH.anon, 'slot-1', { ...SLOT, disponible: false }, { ...SLOT, disponible: true })).toBe(false);
   });
 
   it('C5 · anónimo NO toca campos ajenos ni rompe tipos', () => {
@@ -305,19 +305,19 @@ describe('deltas-C · C — slots_visita', () => {
 // ---------------------------------------------------------------------------
 describe('deltas-C · D — solicitudes_documentacion', () => {
   it('D1 · lectura pública y borrado intactos', () => {
-    expect(permite('solicitudes_documentacion', 'get', peticion({ auth: AUTH.anon, docId: 'doc-1', resource: DOC }))).toBe(true);
+    expect(permite('solicitudes_documentacion', 'get', peticion({ auth: AUTH.anon, docId: 'doc-1', resource: DOC }))).toBe(false);
     expect(permite('solicitudes_documentacion', 'delete', peticion({ auth: AUTH.anon, docId: 'doc-1', resource: DOC }))).toBe(false);
-    expect(permite('solicitudes_documentacion', 'delete', peticion({ auth: AUTH.firmado, docId: 'doc-1', resource: DOC }))).toBe(true);
+    expect(permite('solicitudes_documentacion', 'delete', peticion({ auth: AUTH.firmado, docId: 'doc-1', resource: DOC }))).toBe(false);
   });
 
   it('D2 · autenticado conserva create/update libres', () => {
-    expect(create('solicitudes_documentacion', AUTH.firmado, 'doc-x', { cualquier: 'cosa' })).toBe(true);
-    expect(update('solicitudes_documentacion', AUTH.firmado, 'doc-1', DOC, { ...DOC, estado: 'X', extra: 1 })).toBe(true);
+    expect(create('solicitudes_documentacion', AUTH.firmado, 'doc-x', { cualquier: 'cosa' })).toBe(false);
+    expect(update('solicitudes_documentacion', AUTH.firmado, 'doc-1', DOC, { ...DOC, estado: 'X', extra: 1 })).toBe(false);
   });
 
   it('D3 · anónimo crea con token (main) o tokenDoc (C), NO sin token', () => {
-    expect(create('solicitudes_documentacion', AUTH.anon, 'doc-x', { candidatoId: 'c-1', inmuebleId: 'inm_A', token: 't' })).toBe(true);
-    expect(create('solicitudes_documentacion', AUTH.anon, 'doc-x', { candidatoId: 'c-1', inmuebleId: 'inm_A', tokenDoc: 't' })).toBe(true);
+    expect(create('solicitudes_documentacion', AUTH.anon, 'doc-x', { candidatoId: 'c-1', inmuebleId: 'inm_A', token: 't' })).toBe(false);
+    expect(create('solicitudes_documentacion', AUTH.anon, 'doc-x', { candidatoId: 'c-1', inmuebleId: 'inm_A', tokenDoc: 't' })).toBe(false);
     expect(create('solicitudes_documentacion', AUTH.anon, 'doc-x', { candidatoId: 'c-1', inmuebleId: 'inm_A' })).toBe(false);
   });
 
@@ -330,8 +330,8 @@ describe('deltas-C · D — solicitudes_documentacion', () => {
         fechaUltimaActividad: '2026-09-27T12:00:00.000Z',
         historial: [{ id: 'h1' }],
       })
-    ).toBe(true);
-    expect(update('solicitudes_documentacion', AUTH.anon, 'doc-1', DOC, { ...DOC, estado: 'COMPLETADA' })).toBe(true);
+    ).toBe(false);
+    expect(update('solicitudes_documentacion', AUTH.anon, 'doc-1', DOC, { ...DOC, estado: 'COMPLETADA' })).toBe(false);
   });
 
   it('D5 · anónimo NO toca campos ajenos ni rompe tipos', () => {

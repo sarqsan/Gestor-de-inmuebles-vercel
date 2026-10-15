@@ -39,6 +39,7 @@
  * Reservado a fases posteriores: créditos y saldo, límites/cuotas por usuario,
  * permisos por rol y operación, y paneles de consumo/administración.
  */
+import type { CodigoErrorConfiguracionFirebase } from '../titularidades/configuracionFirebase.js';
 import { createHash } from 'node:crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
@@ -70,7 +71,8 @@ export type CodigoRechazoIA =
   | 'IDEMPOTENCIA_REQUERIDA'
   | 'OPERACION_DUPLICADA'
   | 'REGISTRO_NO_DISPONIBLE'
-  | 'ERROR_NUCLEO_IA';
+  | 'ERROR_NUCLEO_IA'
+  | CodigoErrorConfiguracionFirebase;
 
 /** Evento de log estructurado (sin token, email, prompts ni cuerpos). */
 export interface EventoNucleoIA {
@@ -83,6 +85,8 @@ export interface EventoNucleoIA {
 }
 
 export interface DependenciasNucleoIA {
+  /** Bloqueo explícito: no confundir con ausencia de credencial ni usar respaldo. */
+  errorConfiguracion?: CodigoErrorConfiguracionFirebase;
   /** Verificación del ID token. `null` ⇒ no autenticado. */
   verificarToken: (token: string) => Promise<IdentidadVerificada | null>;
   /** Registro de operaciones; `null` ⇒ modo NO_CONFIGURADO (sin proveedor). */
@@ -95,6 +99,7 @@ export interface DependenciasNucleoIA {
 
 export interface EstadoNucleoIA {
   registro: ModoRegistroIA;
+  errorConfiguracion?: CodigoErrorConfiguracionFirebase;
   autenticacion: 'TOKEN_FIREBASE';
   operaciones: number;
 }
@@ -256,10 +261,11 @@ function logPorDefecto(evento: EventoNucleoIA): void {
 export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
   const ahora = deps.ahora ?? (() => new Date());
   const log = deps.log ?? logPorDefecto;
-  const modo: ModoRegistroIA = deps.registro ? deps.registro.tipo : 'NO_CONFIGURADO';
+  const modo: ModoRegistroIA = deps.errorConfiguracion ? 'NO_CONFIGURADO' : deps.registro ? deps.registro.tipo : 'NO_CONFIGURADO';
 
   return {
-    estado: () => ({ registro: modo, autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length }),
+    estado: () => ({ registro: modo, autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length,
+      ...(deps.errorConfiguracion ? { errorConfiguracion: deps.errorConfiguracion } : {}) }),
 
     operacion(id: IdOperacionIA): RequestHandler {
       const definicion = operacionIAPorId(id);
@@ -279,6 +285,10 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
 
         let contexto: ContextoOperacionIA;
         try {
+          if (deps.errorConfiguracion) {
+            rechazar(503, deps.errorConfiguracion, 'Configuración Firebase no disponible o inválida. Operación no ejecutada.');
+            return;
+          }
           const inicio = ahora();
 
           // 1) Identidad: SOLO la del token verificado en servidor.

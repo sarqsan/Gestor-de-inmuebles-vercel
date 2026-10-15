@@ -5,7 +5,7 @@
  *     `nucleoIA.operacion('<ID>')`, ningún manejador usa IA sin el núcleo y el
  *     SDK del proveedor sólo se instancia/llama dentro de `server/ia/`.
  *  B. App REAL de server.ts (importada como en Vercel, sin `listen` propio):
- *     sin token o con token inválido, los 11 endpoints responden 401 sin
+ *     sin credencial de producción, los 11 endpoints responden 503 sin
  *     ejecutar nada; `/api/health` expone el estado del núcleo sin secretos.
  *  C. Configuración: proyecto/base de datos de la aplicación y modos del
  *     registro (FIRESTORE / MEMORIA / NO_CONFIGURADO) según el entorno.
@@ -116,7 +116,7 @@ describe('A · cableado estático del núcleo de IA', () => {
   });
 });
 
-describe('B · app REAL de server.ts: los 11 endpoints exigen usuario autenticado', () => {
+describe('B · app REAL de server.ts: sin credencial bloquea antes de autenticar', () => {
   const VARIABLES = ['VERCEL', 'FIREBASE_SERVICE_ACCOUNT', 'FIREBASE_SERVICE_ACCOUNT_B64', 'FIREBASE_SERVICE_ACCOUNT_PATH', 'GOOGLE_APPLICATION_CREDENTIALS', 'GEMINI_API_KEY'] as const;
   const previas: Record<string, string | undefined> = {};
   let servidor: Server;
@@ -142,19 +142,19 @@ describe('B · app REAL de server.ts: los 11 endpoints exigen usuario autenticad
   });
 
   for (const { id, ruta } of OPERACIONES_IA) {
-    it(`${ruta} (${id}) → 401 sin token y con token inválido`, async () => {
+    it(`${ruta} (${id}) → 503 antes de autenticar cuando falta la credencial de producción`, async () => {
       const cuerpo = JSON.stringify({ prompt: 'x', input: 'ir a tesorería', capabilities: [], uid: 'uid-suplantado' });
       const sinToken = await fetch(`${base}${ruta}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'clave-0001-aaaa' }, body: cuerpo });
-      expect(sinToken.status).toBe(401);
-      expect(await sinToken.json()).toMatchObject({ codigo: 'NO_AUTENTICADO' });
-      // Tokens mal formados: el verificador real los rechaza sin salir a la red.
+      expect(sinToken.status).toBe(503);
+      expect(await sinToken.json()).toMatchObject({ codigo: 'FIREBASE_CREDENCIAL_AUSENTE' });
+      // La configuración incompleta bloquea antes de verificar cualquier token.
       for (const token of ['abc', 'a.b.c']) {
         const invalido = await fetch(`${base}${ruta}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'Idempotency-Key': 'clave-0001-aaaa' },
           body: cuerpo,
         });
-        expect(invalido.status, token).toBe(401);
+        expect(invalido.status, token).toBe(503);
         expect(invalido.headers.get('x-ia-operacion-id')).toBeNull();
       }
     });
@@ -164,7 +164,7 @@ describe('B · app REAL de server.ts: los 11 endpoints exigen usuario autenticad
     const r = await fetch(`${base}/api/health`);
     expect(r.status).toBe(200);
     const salud = await r.json();
-    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 });
+    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 11, errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
     expect(JSON.stringify(salud)).not.toMatch(/private_key|client_email|apiKey|BEGIN/i);
   });
 });
@@ -178,19 +178,19 @@ describe('C · configuración del núcleo según el entorno', () => {
     private_key: par.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
   });
 
-  it('sin credencial: autentica contra el proyecto de la aplicación; producción → NO_CONFIGURADO, desarrollo → MEMORIA', () => {
+  it('sin credencial: producción bloqueada; solo desarrollo explícito permite MEMORIA', () => {
     const prod = resolverConfiguracionIA({ VERCEL: '1' }, null);
-    expect(prod).toEqual({ proyectoId: aplicacion.projectId, baseDatosId: aplicacion.firestoreDatabaseId, produccion: true, modoRegistro: 'NO_CONFIGURADO' });
+    expect(prod).toEqual({ proyectoId: aplicacion.projectId, baseDatosId: aplicacion.firestoreDatabaseId, produccion: true, modoRegistro: 'NO_CONFIGURADO', errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
     expect(resolverConfiguracionIA({ NODE_ENV: 'production' }, null).modoRegistro).toBe('NO_CONFIGURADO');
     expect(resolverConfiguracionIA({ NODE_ENV: 'development' }, null).modoRegistro).toBe('MEMORIA');
   });
 
-  it('con credencial: registro FIRESTORE en la base de datos con nombre de la aplicación (o la indicada por entorno)', () => {
+  it('con credencial: registro FIRESTORE canónico; overrides contradictorios bloquean', () => {
     const deps = crearDependenciasNucleoIA({ VERCEL: '1', FIREBASE_SERVICE_ACCOUNT: cuentaJson });
     expect(deps.registro?.tipo).toBe('FIRESTORE');
     expect(deps.configuracion).toMatchObject({ modoRegistro: 'FIRESTORE', baseDatosId: aplicacion.firestoreDatabaseId, proyectoId: aplicacion.projectId });
     const otra = resolverConfiguracionIA({ FIREBASE_PROJECT_ID: 'otro-proyecto', FIRESTORE_DATABASE_ID: 'otra-bd' }, null);
-    expect(otra).toMatchObject({ proyectoId: 'otro-proyecto', baseDatosId: 'otra-bd' });
+    expect(otra).toMatchObject({ proyectoId: null, baseDatosId: null, errorConfiguracion: 'FIREBASE_OVERRIDE_INCOMPATIBLE' });
   });
 
   it('producción sin credencial: dependencias sin registro (el núcleo no llamará al proveedor) y sin cliente sin clave', () => {
@@ -365,6 +365,7 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'src/types.ts',
       'server/titularidades/manejadorBuscarTitulares.ts',
       'server/titularidades/backendTitulares.ts',
+      'server/titularidades/configuracionFirebase.ts',
       'server/titularidades/googleBackend.ts',
       'src/titularidades/busquedaTitulares.ts',
       'server/ia/nucleoIA.ts',
@@ -381,6 +382,8 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       writeFileSync(destino, js);
     }
 
+    // El runtime de prueba debe llevar la misma configuración explícita que el ERP.
+    writeFileSync(join(tmpDir, 'firebase-applet-config.json'), readFileSync(join(RAIZ, 'firebase-applet-config.json')));
     const moduloApi = (await import(pathToFileURL(join(tmpDir, 'api/index.js')).href)) as {
       default: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => unknown;
     };

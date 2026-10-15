@@ -122,7 +122,8 @@ describe('credencial de servicio', () => {
 
   it('sin credencial ⇒ null (y por tanto 503 accionable, nunca degradación)', () => {
     expect(leerCuentaServicio({})).toBeNull();
-    expect(leerCuentaServicio({ FIREBASE_SERVICE_ACCOUNT: '{no es json' })).toBeNull();
+    // Contrato autorizado: la configuración malformada ya no equivale a ausencia.
+    expect(() => leerCuentaServicio({ FIREBASE_SERVICE_ACCOUNT: '{no es json' })).toThrow('FIREBASE_CREDENCIAL_MALFORMADA');
   });
 
   it('parsearCuentaServicio exige project_id, client_email y private_key', () => {

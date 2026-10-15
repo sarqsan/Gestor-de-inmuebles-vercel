@@ -27,6 +27,7 @@
  * configuración; nunca se degrada en silencio hacia "sin autenticar".
  */
 import {
+  createPrivateKey,
   createSign,
   createVerify,
   randomUUID,
@@ -91,35 +92,43 @@ function normalizarClavePrivada(clave: string): string {
   return (clave || '').replace(/\\n/g, '\n').trim();
 }
 
-/** Lee la credencial de servicio del entorno. `null` si no está configurada. */
-export function leerCuentaServicio(entorno: NodeJS.ProcessEnv = process.env): CuentaServicio | null {
-  const candidatos: string[] = [];
-  if (entorno.FIREBASE_SERVICE_ACCOUNT) candidatos.push(entorno.FIREBASE_SERVICE_ACCOUNT);
-  if (entorno.FIREBASE_SERVICE_ACCOUNT_B64) {
-    try {
-      candidatos.push(Buffer.from(entorno.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8'));
-    } catch {
-      // Base64 corrupto: se ignora y se prueba la siguiente fuente.
-    }
-  }
-  if (entorno.FIREBASE_SERVICE_ACCOUNT_PATH) candidatos.push(leerArchivoSeguro(entorno.FIREBASE_SERVICE_ACCOUNT_PATH));
-  if (entorno.GOOGLE_APPLICATION_CREDENTIALS) {
-    candidatos.push(leerArchivoSeguro(entorno.GOOGLE_APPLICATION_CREDENTIALS));
-  }
+export type CodigoErrorCredencial = 'FIREBASE_CREDENCIAL_MALFORMADA' | 'FIREBASE_CREDENCIAL_ILEGIBLE' | 'FIREBASE_CREDENCIAL_CONTRADICTORIA';
 
-  for (const crudo of candidatos) {
-    const cuenta = parsearCuentaServicio(crudo);
-    if (cuenta) return cuenta;
-  }
-  return null;
+/** Solo códigos seguros: nunca adjuntar el JSON, la ruta o el error de OpenSSL. */
+export class ErrorCredencialServicio extends Error {
+  constructor(readonly codigo: CodigoErrorCredencial) { super(codigo); }
 }
 
-function leerArchivoSeguro(ruta: string): string {
-  try {
-    return readFileSync(ruta, 'utf8');
-  } catch {
-    return '';
+/** null significa AUSENCIA real. Una fuente explícita inválida nunca se ignora. */
+export function leerCuentaServicio(entorno: NodeJS.ProcessEnv = process.env): CuentaServicio | null {
+  const fuentes = ['FIREBASE_SERVICE_ACCOUNT', 'FIREBASE_SERVICE_ACCOUNT_B64',
+    'FIREBASE_SERVICE_ACCOUNT_PATH', 'GOOGLE_APPLICATION_CREDENTIALS'] as const;
+  let elegida: CuentaServicio | null = null;
+  for (const fuente of fuentes) {
+    const valor = entorno[fuente];
+    if (valor === undefined) continue;
+    if (!valor.trim()) throw new ErrorCredencialServicio('FIREBASE_CREDENCIAL_MALFORMADA');
+    let crudo = valor;
+    if (fuente === 'FIREBASE_SERVICE_ACCOUNT_B64') {
+      const b64 = valor.replace(/\s/g, '');
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64) || b64.length % 4 === 1
+        || Buffer.from(b64, 'base64').toString('base64').replace(/=+$/, '') !== b64.replace(/=+$/, '')) {
+        throw new ErrorCredencialServicio('FIREBASE_CREDENCIAL_MALFORMADA');
+      }
+      crudo = Buffer.from(b64, 'base64').toString('utf8');
+    } else if (fuente.endsWith('_PATH') || fuente === 'GOOGLE_APPLICATION_CREDENTIALS') {
+      try { crudo = readFileSync(valor, 'utf8'); }
+      catch { throw new ErrorCredencialServicio('FIREBASE_CREDENCIAL_ILEGIBLE'); }
+    }
+    const cuenta = parsearCuentaServicio(crudo);
+    if (!cuenta) throw new ErrorCredencialServicio('FIREBASE_CREDENCIAL_MALFORMADA');
+    if (elegida && (elegida.project_id !== cuenta.project_id || elegida.client_email !== cuenta.client_email
+      || elegida.private_key !== cuenta.private_key || elegida.private_key_id !== cuenta.private_key_id)) {
+      throw new ErrorCredencialServicio('FIREBASE_CREDENCIAL_CONTRADICTORIA');
+    }
+    elegida = cuenta;
   }
+  return elegida;
 }
 
 export function parsearCuentaServicio(crudo: string): CuentaServicio | null {
@@ -130,10 +139,17 @@ export function parsearCuentaServicio(crudo: string): CuentaServicio | null {
   } catch {
     return null;
   }
+  if (!datos || typeof datos !== 'object' || Array.isArray(datos)) return null;
   const projectId = typeof datos.project_id === 'string' ? datos.project_id : '';
   const clientEmail = typeof datos.client_email === 'string' ? datos.client_email : '';
   const privateKey = typeof datos.private_key === 'string' ? normalizarClavePrivada(datos.private_key) : '';
-  if (!projectId || !clientEmail || !privateKey) return null;
+  if (!projectId || !clientEmail || !privateKey || !/^[a-z][a-z0-9-]+$/.test(projectId)
+    || !/^[^\s@]+@[^\s@]+$/.test(clientEmail)) return null;
+  if (datos.token_uri !== undefined && datos.token_uri !== TOKEN_URI_DEFECTO) return null;
+  try {
+    if (createPrivateKey(privateKey).asymmetricKeyType !== 'rsa') return null;
+  } catch { return null; }
+
   return {
     project_id: projectId,
     client_email: clientEmail,

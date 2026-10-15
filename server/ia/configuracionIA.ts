@@ -7,98 +7,65 @@
  *
  *   · Proyecto para verificar el ID token: `FIREBASE_PROJECT_ID` o, por
  *     defecto, el `projectId` con el que la app inicializa Firebase
- *     (`firebase-applet-config.json`, el mismo que lee `src/lib/entornoFirebase.ts`)
- *     o, en último lugar, el de la credencial de servicio. No necesita
- *     credencial: la autenticación funciona siempre.
+ *     (`firebase-applet-config.json`, el mismo que lee `src/lib/entornoFirebase.ts`).
+ *     La audiencia nunca se deriva de una credencial de otro proyecto.
+ *     Sin credencial en producción se bloquea antes de autenticar.
  *   · Registro: con credencial de servicio (`FIREBASE_SERVICE_ACCOUNT`,
  *     `_B64`, `_PATH` o `GOOGLE_APPLICATION_CREDENTIALS`, las mismas variables
  *     que la búsqueda de titulares) → Firestore REST en la base de datos de la
  *     aplicación (`FIRESTORE_DATABASE_ID` o la de la configuración). Sin
- *     credencial: memoria en desarrollo; NO_CONFIGURADO en producción.
+ *     credencial: memoria solo en desarrollo explícito; bloqueo en producción.
  *   · Proveedor: `GEMINI_API_KEY` (la misma clave de siempre).
  *
+ * Una credencial de otro proyecto bloquea las operaciones, no el arranque HTTP.
  * No escribe ni modifica secretos: sólo los lee.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import {
-  ClienteFirestoreRest,
-  leerCuentaServicio,
-  verificarIdToken,
-  type CuentaServicio,
-} from '../titularidades/googleBackend.js';
+import { resolverAccesoFirebase, type CodigoErrorConfiguracionFirebase } from '../titularidades/configuracionFirebase.js';
+import { ClienteFirestoreRest, verificarIdToken, type CuentaServicio } from '../titularidades/googleBackend.js';
 import { crearClienteGemini, type DependenciasNucleoIA, type ModoRegistroIA } from './nucleoIA.js';
 import { crearRegistroFirestore, crearRegistroMemoria } from './registroOperacionesIA.js';
 
-const CONFIGURACION_APLICACION_POR_DEFECTO = {
-  projectId: 'gestor-inmuebles-produccion',
-  firestoreDatabaseId: 'ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51',
-} as const;
-
-function leerConfiguracionAplicacion(): { projectId?: string; firestoreDatabaseId?: string } {
-  try {
-    const crudo = readFileSync(resolve(process.cwd(), 'firebase-applet-config.json'), 'utf8');
-    return JSON.parse(crudo) as { projectId?: string; firestoreDatabaseId?: string };
-  } catch {
-    return CONFIGURACION_APLICACION_POR_DEFECTO;
-  }
-}
-
-const configuracionAplicacion = leerConfiguracionAplicacion();
-
 export interface ConfiguracionNucleoIA {
   proyectoId: string | null;
-  baseDatosId: string;
+  baseDatosId: string | null;
   produccion: boolean;
   modoRegistro: ModoRegistroIA;
+  errorConfiguracion?: CodigoErrorConfiguracionFirebase;
 }
 
-function limpio(valor: string | undefined): string {
-  return (valor ?? '').trim();
+function configurar(acceso: ReturnType<typeof resolverAccesoFirebase>, entorno: NodeJS.ProcessEnv): ConfiguracionNucleoIA {
+  const produccion = Boolean(entorno.VERCEL?.trim()) || entorno.NODE_ENV === 'production';
+  // Única excepción: desarrollo explícito SIN ninguna credencial (no inválida).
+  const memoria = !produccion && entorno.NODE_ENV === 'development'
+    && acceso.errorConfiguracion === 'FIREBASE_CREDENCIAL_AUSENTE';
+  const errorConfiguracion = memoria ? undefined : acceso.errorConfiguracion;
+  const modoRegistro: ModoRegistroIA = errorConfiguracion ? 'NO_CONFIGURADO' : memoria ? 'MEMORIA' : 'FIRESTORE';
+  return { proyectoId: acceso.proyectoId, baseDatosId: acceso.baseDatosId, produccion, modoRegistro,
+    ...(errorConfiguracion ? { errorConfiguracion } : {}) };
 }
 
-/** Resuelve la configuración (pura; sin red). */
-export function resolverConfiguracionIA(
-  entorno: NodeJS.ProcessEnv = process.env,
-  cuenta: CuentaServicio | null = leerCuentaServicio(entorno),
-): ConfiguracionNucleoIA {
-  const aplicacion = configuracionAplicacion as { projectId?: string; firestoreDatabaseId?: string };
-  const proyectoId = limpio(entorno.FIREBASE_PROJECT_ID) || limpio(aplicacion.projectId) || cuenta?.project_id || null;
-  const baseDatosId = limpio(entorno.FIRESTORE_DATABASE_ID) || limpio(aplicacion.firestoreDatabaseId) || '(default)';
-  const produccion = Boolean(limpio(entorno.VERCEL)) || entorno.NODE_ENV === 'production';
-  const modoRegistro: ModoRegistroIA = cuenta ? 'FIRESTORE' : produccion ? 'NO_CONFIGURADO' : 'MEMORIA';
-  return { proyectoId, baseDatosId, produccion, modoRegistro };
+/** Solo lectura local; nunca prueba permisos ni conectividad de Google. */
+export function resolverConfiguracionIA(entorno: NodeJS.ProcessEnv = process.env, cuenta?: CuentaServicio | null): ConfiguracionNucleoIA {
+  return configurar(resolverAccesoFirebase(entorno, cuenta), entorno);
 }
 
-/** Dependencias reales del núcleo de IA a partir del entorno del servidor. */
-export function crearDependenciasNucleoIA(
-  entorno: NodeJS.ProcessEnv = process.env,
-): DependenciasNucleoIA & { configuracion: ConfiguracionNucleoIA } {
-  const cuenta = leerCuentaServicio(entorno);
-  const configuracion = resolverConfiguracionIA(entorno, cuenta);
-
+export function crearDependenciasNucleoIA(entorno: NodeJS.ProcessEnv = process.env): DependenciasNucleoIA & { configuracion: ConfiguracionNucleoIA } {
+  const acceso = resolverAccesoFirebase(entorno);
+  const configuracion = configurar(acceso, entorno);
   let registro: DependenciasNucleoIA['registro'] = null;
-  if (cuenta && configuracion.modoRegistro === 'FIRESTORE') {
-    if (configuracion.proyectoId && cuenta.project_id !== configuracion.proyectoId) {
-      console.warn(
-        `[ia] La credencial de servicio es del proyecto ${cuenta.project_id} y la aplicación usa ${configuracion.proyectoId}: el registro se escribe en el proyecto de la credencial.`,
-      );
-    }
-    registro = crearRegistroFirestore(new ClienteFirestoreRest({ cuenta, baseDatosId: configuracion.baseDatosId }));
+  if (acceso.cuenta && configuracion.modoRegistro === 'FIRESTORE') {
+    registro = crearRegistroFirestore(new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId! }));
   } else if (configuracion.modoRegistro === 'MEMORIA') {
-    console.warn('[ia] Registro de operaciones de IA EN MEMORIA (sólo desarrollo): no es duradero. Configura FIREBASE_SERVICE_ACCOUNT para persistirlo en Firestore.');
+    console.warn('[ia] Registro EN MEMORIA: solo desarrollo explícito sin credencial.');
     registro = crearRegistroMemoria();
   } else {
-    console.warn(
-      '[ia] Registro de operaciones de IA NO CONFIGURADO en producción: se exige sesión, pero los endpoints de IA responden con su respaldo heurístico (sin llamadas al proveedor) hasta configurar FIREBASE_SERVICE_ACCOUNT con permiso de escritura en Firestore.',
-    );
+    console.warn(`[ia] ${configuracion.errorConfiguracion}: operaciones bloqueadas.`);
   }
-
-  const proyectoId = configuracion.proyectoId;
+  const { proyectoId, errorConfiguracion } = configuracion;
   return {
-    configuracion,
-    verificarToken: (token: string) => (proyectoId ? verificarIdToken(token, proyectoId) : Promise.resolve(null)),
-    registro,
-    crearClienteProveedor: () => crearClienteGemini(entorno.GEMINI_API_KEY),
+    configuracion, registro,
+    ...(errorConfiguracion ? { errorConfiguracion } : {}),
+    verificarToken: (token: string) => proyectoId && !errorConfiguracion ? verificarIdToken(token, proyectoId) : Promise.resolve(null),
+    crearClienteProveedor: () => errorConfiguracion ? null : crearClienteGemini(entorno.GEMINI_API_KEY),
   };
 }

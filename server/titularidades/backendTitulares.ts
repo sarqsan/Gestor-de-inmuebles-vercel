@@ -25,6 +25,7 @@
  * servidor deriva el derecho del espejo de identidad (`usuarios_auth` +
  * `usuarios`), replicando `perfilActualVeraz()` de las reglas.
  */
+import { resolverAccesoFirebase, type CodigoErrorConfiguracionFirebase } from './configuracionFirebase.js';
 import type { CuentaServicio, IdentidadVerificada } from './googleBackend';
 import {
   ClienteFirestoreRest,
@@ -52,6 +53,8 @@ export type MotivoDenegacion =
   | 'no_autenticado'
   | 'sin_autorizacion'
   | 'servidor_sin_configurar'
+  | 'configuracion_proyecto_incompatible'
+  | 'configuracion_firebase_invalida'
   | 'error_interno';
 
 export interface ResultadoBusquedaTitulares {
@@ -60,6 +63,7 @@ export interface ResultadoBusquedaTitulares {
   motivo?: MotivoDenegacion;
   /** Detalle ACCIONABLE para quien integra/despliega; nunca un volcado técnico. */
   detalle?: string;
+  codigoConfiguracion?: CodigoErrorConfiguracionFirebase;
   resultados?: CandidatoTitular[];
 }
 
@@ -97,6 +101,7 @@ export interface EventoAuditoria {
 }
 
 export interface DependenciasBackendTitulares {
+  errorConfiguracion?: () => CodigoErrorConfiguracionFirebase | undefined;
   /** Credencial de servicio; `null` ⇒ el servidor no está configurado (503). */
   leerCredencial?: () => CuentaServicio | null;
   /** Verificación del ID token. `null` ⇒ no autenticado (401). */
@@ -129,37 +134,35 @@ function ahoraIso(deps: DependenciasBackendTitulares): string {
 export function crearDependenciasReales(
   cuenta?: CuentaServicio | null,
   forzarNuevo = false,
+  entorno: NodeJS.ProcessEnv = process.env,
 ): DependenciasBackendTitulares {
-  let cacheada: CuentaServicio | null | undefined = cuenta === undefined ? undefined : cuenta;
+  let acceso: ReturnType<typeof resolverAccesoFirebase> | undefined;
   let cliente: ClienteFirestoreRest | null = null;
-
+  const obtenerAcceso = () => {
+    if (!acceso || forzarNuevo) acceso = resolverAccesoFirebase(entorno, cuenta);
+    return acceso;
+  };
   const obtenerCliente = (): ClienteFirestoreRest | null => {
-    if (cacheada === undefined || forzarNuevo) cacheada = cuenta !== undefined ? cuenta : leerCuentaServicio();
-    if (!cacheada) return null;
-    if (!cliente) cliente = new ClienteFirestoreRest({ cuenta: cacheada });
+    const actual = obtenerAcceso();
+    if (actual.errorConfiguracion || !actual.cuenta) return null;
+    if (!cliente || forzarNuevo) cliente = new ClienteFirestoreRest({ cuenta: actual.cuenta, baseDatosId: actual.baseDatosId! });
     return cliente;
   };
-
   return {
-    leerCredencial: () => {
-      if (cacheada === undefined || forzarNuevo) cacheada = cuenta !== undefined ? cuenta : leerCuentaServicio();
-      return cacheada;
-    },
+    errorConfiguracion: () => obtenerAcceso().errorConfiguracion,
+    leerCredencial: () => obtenerAcceso().cuenta,
     verificarToken: (token: string) => {
-      const c = cacheada ?? (cuenta !== undefined ? cuenta : leerCuentaServicio());
-      if (!c) return Promise.resolve(null);
-      return verificarIdToken(token, c.project_id);
+      const actual = obtenerAcceso();
+      return !actual.errorConfiguracion && actual.proyectoId
+        ? verificarIdToken(token, actual.proyectoId) : Promise.resolve(null);
     },
     leerDocumento: async (ruta: string) => {
       const c = obtenerCliente();
-      if (!c) return null;
-      const doc = await c.leerDocumento(ruta);
-      return doc?.datos ?? null;
+      return c ? (await c.leerDocumento(ruta))?.datos ?? null : null;
     },
     consultarPrefijo: async (coleccion, campo, prefijo, limite) => {
       const c = obtenerCliente();
-      if (!c) return [];
-      return c.consultarPrefijo(coleccion, campo, prefijo, limite);
+      return c ? c.consultarPrefijo(coleccion, campo, prefijo, limite) : [];
     },
   };
 }
@@ -220,8 +223,10 @@ const DENEGACION: Record<MotivoDenegacion, { codigo: 400 | 401 | 403 | 500 | 503
   servidor_sin_configurar: {
     codigo: 503,
     detalle:
-      'El servidor no tiene credencial de servicio configurada. Defina FIREBASE_SERVICE_ACCOUNT (JSON de la cuenta de servicio), FIREBASE_SERVICE_ACCOUNT_B64 (el mismo JSON en base64) o GOOGLE_APPLICATION_CREDENTIALS (ruta al fichero) en el entorno del servidor.',
+      'El servidor no tiene una credencial de servicio compatible con el proyecto configurado. Defina FIREBASE_SERVICE_ACCOUNT (JSON de la cuenta de servicio), FIREBASE_SERVICE_ACCOUNT_B64 (el mismo JSON en base64) o GOOGLE_APPLICATION_CREDENTIALS (ruta al fichero) en el entorno del servidor.',
   },
+  configuracion_firebase_invalida: { codigo: 503, detalle: 'Configuración Firebase no disponible o inválida. Operación no ejecutada.' },
+  configuracion_proyecto_incompatible: { codigo: 503, detalle: 'Configuración Firebase incompatible. Operación no ejecutada.' },
   error_interno: { codigo: 500, detalle: 'Error interno del servidor.' },
 };
 
@@ -244,6 +249,9 @@ export async function buscarTitulares(
   entrada: EntradaBusquedaTitulares,
   deps: DependenciasBackendTitulares = {},
 ): Promise<ResultadoBusquedaTitulares> {
+  // El manejador HTTP se monta sin inyección: debe utilizar también estas
+  // dependencias reales; los dobles explícitos de pruebas conservan prioridad.
+  deps = deps.leerCredencial ? deps : { ...crearDependenciasReales(), ...deps };
   const inmuebleId = typeof entrada?.inmuebleId === 'string' ? entrada.inmuebleId.trim() : '';
   const termino = typeof entrada?.termino === 'string' ? entrada.termino : '';
 
@@ -253,6 +261,12 @@ export async function buscarTitulares(
   const terminoNormalizado = normalizarTermino(termino);
 
   // 1) Configuración del servidor (la credencial NUNCA viaja al cliente).
+  const errorConfiguracion = deps.errorConfiguracion?.();
+  if (errorConfiguracion) {
+    const motivo = errorConfiguracion === 'FIREBASE_PROYECTO_INCOMPATIBLE' ? 'configuracion_proyecto_incompatible'
+      : errorConfiguracion === 'FIREBASE_CREDENCIAL_AUSENTE' ? 'servidor_sin_configurar' : 'configuracion_firebase_invalida';
+    return { ...denegar(motivo, deps), codigoConfiguracion: errorConfiguracion };
+  }
   const cuenta = deps.leerCredencial ? deps.leerCredencial() : leerCuentaServicio();
   if (!cuenta) return denegar('servidor_sin_configurar', deps, { inmuebleId, terminoNormalizado });
 

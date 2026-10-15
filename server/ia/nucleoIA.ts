@@ -48,9 +48,9 @@ import {
   PATRON_CLAVE_IDEMPOTENCIA_IA,
   operacionIAPorId,
   type IdOperacionIA,
-} from '../../src/ia/catalogoOperacionesIA';
+} from '../../src/ia/catalogoOperacionesIA.js';
 import type { IdentidadVerificada } from '../titularidades/googleBackend';
-import { tokenDe } from '../titularidades/manejadorBuscarTitulares';
+import { tokenDe } from '../titularidades/manejadorBuscarTitulares.js';
 import type { CierreOperacionIA, RegistroOperacionesIA } from './registroOperacionesIA';
 
 export const CABECERA_ID_OPERACION_IA = 'X-IA-Operacion-Id';

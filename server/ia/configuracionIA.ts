@@ -19,18 +19,32 @@
  *
  * No escribe ni modifica secretos: sólo los lee.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   ClienteFirestoreRest,
   leerCuentaServicio,
   verificarIdToken,
   type CuentaServicio,
-} from '../titularidades/googleBackend';
-// Mismo fichero con el que la app inicializa Firebase (no es una segunda configuración).
-// Con atributo de importación: la función de Vercel se ejecuta como ESM nativo
-// (`"type": "module"`), donde un JSON sin `with { type: 'json' }` no se puede importar.
-import configuracionAplicacion from '../../firebase-applet-config.json' with { type: 'json' };
-import { crearClienteGemini, type DependenciasNucleoIA, type ModoRegistroIA } from './nucleoIA';
-import { crearRegistroFirestore, crearRegistroMemoria } from './registroOperacionesIA';
+} from '../titularidades/googleBackend.js';
+import { crearClienteGemini, type DependenciasNucleoIA, type ModoRegistroIA } from './nucleoIA.js';
+import { crearRegistroFirestore, crearRegistroMemoria } from './registroOperacionesIA.js';
+
+const CONFIGURACION_APLICACION_POR_DEFECTO = {
+  projectId: 'gestor-inmuebles-produccion',
+  firestoreDatabaseId: 'ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51',
+} as const;
+
+function leerConfiguracionAplicacion(): { projectId?: string; firestoreDatabaseId?: string } {
+  try {
+    const crudo = readFileSync(resolve(process.cwd(), 'firebase-applet-config.json'), 'utf8');
+    return JSON.parse(crudo) as { projectId?: string; firestoreDatabaseId?: string };
+  } catch {
+    return CONFIGURACION_APLICACION_POR_DEFECTO;
+  }
+}
+
+const configuracionAplicacion = leerConfiguracionAplicacion();
 
 export interface ConfiguracionNucleoIA {
   proyectoId: string | null;

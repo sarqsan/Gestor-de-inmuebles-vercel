@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import app from '../server';
+import app from '../server.js';
 
 /**
  * Punto de entrada serverless para Vercel.

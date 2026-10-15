@@ -196,16 +196,17 @@ existente en `App.tsx`, que analiza los cuestionarios completados sin
   `FIRESTORE`.
 - No hacen falta índices: solo se escribe y se lee por id. Tampoco hace falta
   publicar reglas.
-- **Observación previa, ajena a esta fase.** `@vercel/node` compila cada `.ts`
-  a ESM nativo y no hace bundling, porque `package.json` tiene
+- **Arranque ESM nativo en Vercel (`api/index.ts`).** `@vercel/node` compila
+  cada `.ts` a ESM nativo sin hacer bundling, porque `package.json` tiene
   `"type": "module"`.
-  - En una simulación local de ese modo, `api/index.js` falla ya en
-    `import app from '../server'` (`ERR_UNSUPPORTED_DIR_IMPORT`) por las
-    importaciones relativas sin extensión que existían antes de esta fase. No
-    se ha podido comprobar el despliegue real desde el entorno de trabajo.
-  - El núcleo importa `firebase-applet-config.json` con
-    `with { type: 'json' }`, de modo que funciona en ESM nativo, en CJS y en el
-    bundle de `npm run build`.
+  - Todas las importaciones relativas de ejecución del grafo de `api/index.ts`
+    (`api/index.ts`, `server.ts`, `server/ia/*`, `server/titularidades/*` y
+    `src/notificaciones/dispatcher.ts`) llevan sufijo `.js` explícito, y
+    `server/ia/configuracionIA.ts` lee `firebase-applet-config.json` con
+    respaldo seguro sin depender de atributos de importación JSON.
+  - Una prueba estática y otra en proceso Node ESM nativo real en
+    `tests/ia-fase1-integracion-server.test.ts` verifican que `api/index.js`
+    arranca sin bundler y responde en `/api/health` y en los 11 endpoints.
 
 ## 4. Pruebas
 

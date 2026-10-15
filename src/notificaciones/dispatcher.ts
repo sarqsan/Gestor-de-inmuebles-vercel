@@ -26,9 +26,9 @@ import {
   seleccionarCanal,
   seleccionarPlantilla,
   validarPayload,
-} from './resolucion';
-import { PLANTILLAS } from './plantillas';
-import { idDeNotificacion, idempotenciaDeEvento } from '../types/notificaciones';
+} from './resolucion.js';
+import { PLANTILLAS } from './plantillas.js';
+import { idDeNotificacion, idempotenciaDeEvento } from '../types/notificaciones.js';
 
 export const MAX_REINTENTOS = 3;
 // ---------------------------------------------------------------------------

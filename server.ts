@@ -3,11 +3,11 @@ import path from 'path';
 import dotenv from 'dotenv';
 
 // GAP 1 — Sistema transaccional de notificaciones (dispatcher + canales + resolver auth)
-import { DispatcherNotificaciones } from './src/notificaciones/dispatcher';
+import { DispatcherNotificaciones } from './src/notificaciones/dispatcher.js';
 import type { EnviadorCanal, RepositorioNotificaciones } from './src/notificaciones/dispatcher';
-import { CanalEmail, CanalInApp, CanalWebhook, EmailProviderSafeMode } from './src/notificaciones/canales';
+import { CanalEmail, CanalInApp, CanalWebhook, EmailProviderSafeMode } from './src/notificaciones/canales.js';
 import type { TransporteWebhook } from './src/notificaciones/canales';
-import { resolverAutorizacion } from './src/notificaciones/autorizacion';
+import { resolverAutorizacion } from './src/notificaciones/autorizacion.js';
 // Auditoría de acceso a documentos (2026-09-22): id inenumerable, tipos de
 // contenido seguros, cabeceras anti-caché y almacén acotado para los documentos
 // que sirve este propio servidor (fuera del alcance de las reglas de Storage).
@@ -19,15 +19,15 @@ import {
   idDeDocumentoValido,
   nombreMostrable,
   normalizarTipoContenido,
-} from './src/lib/documentosServidor';
-import { idempotenciaDeEvento } from './src/types/notificaciones';
-import { construirPromptAsistente, normalizarCuerpoInterpretar, parsearRespuestaModelo } from './src/experiencia/proveedorGemini';
-import { crearLimitadorVentana } from './src/experiencia/limites';
-import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorBuscarTitulares';
+} from './src/lib/documentosServidor.js';
+import { idempotenciaDeEvento } from './src/types/notificaciones.js';
+import { construirPromptAsistente, normalizarCuerpoInterpretar, parsearRespuestaModelo } from './src/experiencia/proveedorGemini.js';
+import { crearLimitadorVentana } from './src/experiencia/limites.js';
+import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorBuscarTitulares.js';
 // IA · FASE 1 — núcleo de IA centralizado: autenticación por token verificado en
 // servidor, idempotencia y registro por usuario de cada operación de IA.
-import { clienteIA, crearNucleoIA, generateGeminiWithRetry } from './server/ia/nucleoIA';
-import { crearDependenciasNucleoIA } from './server/ia/configuracionIA';
+import { clienteIA, crearNucleoIA, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
+import { crearDependenciasNucleoIA } from './server/ia/configuracionIA.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,

@@ -20,6 +20,7 @@ import {
   nombreMostrable,
   normalizarTipoContenido,
 } from './src/lib/documentosServidor.js';
+import type { DocumentoAlmacenado } from './src/lib/documentosServidor';
 import { idempotenciaDeEvento } from './src/types/notificaciones.js';
 import { construirPromptAsistente, normalizarCuerpoInterpretar, parsearRespuestaModelo } from './src/experiencia/proveedorGemini.js';
 import { crearLimitadorVentana } from './src/experiencia/limites.js';

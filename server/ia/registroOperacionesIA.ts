@@ -20,8 +20,11 @@
  * false; }`) impide cualquier lectura o escritura desde clientes; sólo escribe
  * el servidor con su credencial de servicio (REST, sin SDK de administración).
  *
- * Fuera de alcance (fases posteriores): créditos y saldo, límites o cuotas por
- * usuario, permisos por rol y operación, y paneles de consumo.
+ * Fuera de alcance (fases posteriores): política de retención del registro.
+ *
+ * FASE 2 (`server/ia/gobiernoIA.ts`): el cierre puede llevar `costeCreditos` y
+ * `creditosReembolsados`, metadatos de uso del gobierno de créditos. Sin
+ * gobierno activo esos campos no se escriben (el registro es idéntico a Fase 1).
  */
 import type { IdOperacionIA } from '../../src/ia/catalogoOperacionesIA';
 
@@ -57,6 +60,10 @@ export interface CierreOperacionIA {
   tokensTotales: number;
   /** Código normalizado del último error del proveedor (nunca el mensaje crudo). */
   errorProveedor?: string;
+  /** FASE 2 · créditos reservados por el gobierno de uso (0 si no hay gobierno). */
+  costeCreditos?: number;
+  /** FASE 2 · créditos devueltos porque la operación no llegó a consumir el proveedor. */
+  creditosReembolsados?: number;
 }
 
 /** Documento completo tal y como queda en el registro. */
@@ -88,6 +95,7 @@ export const CAMPOS_REGISTRO_IA = [
   'codigoHttp', 'finalizadaEn', 'duracionMs', 'origenRespuesta',
   'llamadasProveedor', 'llamadasProveedorFallidas', 'modelos',
   'tokensEntrada', 'tokensSalida', 'tokensRazonamiento', 'tokensTotales', 'errorProveedor',
+  'costeCreditos', 'creditosReembolsados',
 ] as const;
 
 function documentoApertura(apertura: AperturaOperacionIA): RegistroOperacionIA {
@@ -118,6 +126,8 @@ function camposCierre(cierre: CierreOperacionIA): CierreOperacionIA {
     tokensTotales: cierre.tokensTotales,
   };
   if (cierre.errorProveedor) campos.errorProveedor = cierre.errorProveedor;
+  if (cierre.costeCreditos !== undefined) campos.costeCreditos = cierre.costeCreditos;
+  if (cierre.creditosReembolsados !== undefined) campos.creditosReembolsados = cierre.creditosReembolsados;
   return campos;
 }
 

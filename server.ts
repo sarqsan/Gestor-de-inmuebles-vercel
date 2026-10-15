@@ -27,8 +27,11 @@ import { crearLimitadorVentana } from './src/experiencia/limites.js';
 import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorBuscarTitulares.js';
 // IA · FASE 1 — núcleo de IA centralizado: autenticación por token verificado en
 // servidor, idempotencia y registro por usuario de cada operación de IA.
+// IA · FASE 2 — gobierno de uso: permisos por rol/operación, cuotas, créditos y
+// panel de administración (server/ia/gobiernoIA.ts y server/ia/adminIA.ts).
 import { clienteIA, crearNucleoIA, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
 import { crearDependenciasNucleoIA } from './server/ia/configuracionIA.js';
+import { montarRutasAdminIA } from './server/ia/adminIA.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -204,7 +207,8 @@ app.get('/api/documents/:fileId', (req, res) => {
 // instrumentado por petición (sustituye a la antigua función local que creaba el
 // cliente de Gemini); `generateGeminiWithRetry` se ha trasladado sin cambios al núcleo.
 // ---------------------------------------------------------------------------
-const nucleoIA = crearNucleoIA(crearDependenciasNucleoIA());
+const dependenciasIA = crearDependenciasNucleoIA();
+const nucleoIA = crearNucleoIA(dependenciasIA);
 
 app.post('/api/analizar-documento', nucleoIA.operacion('ANALIZAR_DOCUMENTO'), async (req, res) => {
   try {
@@ -2589,6 +2593,19 @@ app.post('/api/titulares/buscar', crearManejadorBuscarTitulares());
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY, ia: nucleoIA.estado() });
+});
+
+// ---------------------------------------------------------------------------
+// IA · FASE 2 — PANEL DE ADMINISTRACIÓN DEL GOBIERNO DE USO (server/ia/adminIA.ts)
+// Consulta de política, consumo por usuario y bloqueos; acciones explícitas de
+// administrador (bloqueo/desbloqueo y movimiento de saldo con importe explícito).
+// Autorización SIEMPRE en servidor: token verificado + perfil veraz ADMINISTRADOR.
+// ---------------------------------------------------------------------------
+montarRutasAdminIA(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  gobierno: dependenciasIA.gobierno,
+  politica: dependenciasIA.politica,
+  ...(dependenciasIA.errorPolitica ? { errorPolitica: dependenciasIA.errorPolitica } : {}),
 });
 
 // ---------------------------------------------------------------------------

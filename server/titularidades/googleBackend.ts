@@ -431,6 +431,8 @@ export function decodificarCampos(fields: Record<string, ValorFirestore>): Recor
 export interface DocumentoLeido {
   id: string;
   datos: Record<string, unknown>;
+  /** Versión del documento (updateTime de Firestore). Ausente en documentos recién creados sin lectura posterior. */
+  updateTime?: string;
 }
 
 export interface ClienteFirestoreOpciones {
@@ -494,6 +496,7 @@ export class ClienteFirestoreRest {
     return {
       id: String(documento.name || ruta).split('/').pop() || ruta,
       datos: decodificarCampos(documento.fields || {}),
+      ...(documento.updateTime ? { updateTime: documento.updateTime } : {}),
     };
   }
 
@@ -551,6 +554,102 @@ export class ClienteFirestoreRest {
       const detalle = await respuesta.text().catch(() => '');
       throw new Error(`Firestore ha rechazado la actualización de ${coleccion}/${id} (HTTP ${respuesta.status}). ${detalle}`.trim());
     }
+  }
+
+  /**
+   * Actualiza SOLO los campos indicados si el documento sigue en la versión
+   * (`updateTime`) que leyó el llamador (compare-and-swap). Devuelve `false`
+   * si otro escritor ganó la carrera (409): el llamador debe releer y
+   * reintentar. Nunca crea documentos (`currentDocument.exists=true`).
+   */
+  async actualizarCamposSiVersion(
+    coleccion: string,
+    id: string,
+    datos: Record<string, unknown>,
+    updateTimeEsperado: string,
+  ): Promise<boolean> {
+    const ejecutar = this.opciones.fetchImpl || fetchPorDefecto();
+    const campos = (codificarValor(datos) as { mapValue: { fields?: Record<string, ValorFirestore> } }).mapValue.fields || {};
+    const nombres = Object.keys(campos);
+    if (nombres.length === 0) return true;
+    const parametros = new URLSearchParams();
+    for (const nombre of nombres) parametros.append('updateMask.fieldPaths', rutaCampo(nombre));
+    parametros.append('currentDocument.exists', 'true');
+    parametros.append('currentDocument.updateTime', updateTimeEsperado);
+    const respuesta = await withTimeout(async (signal) =>
+      ejecutar(`${this.base}/${coleccion}/${encodeURIComponent(id)}?${parametros.toString()}`, {
+        method: 'PATCH',
+        headers: await this.cabeceras(),
+        body: JSON.stringify({ fields: campos }),
+        signal,
+      }) as Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> }>,
+    );
+    if (respuesta.status === 409 || respuesta.status === 400) {
+      // Precondición no satisfecha (versión cambiada) o documento en estado distinto:
+      // no es un error del llamador, es una carrera perdida.
+      const detalle = await respuesta.text().catch(() => '');
+      if (respuesta.status === 409 || /PRECONDITION|ABORTED/i.test(detalle)) return false;
+    }
+    if (!respuesta.ok) {
+      const detalle = await respuesta.text().catch(() => '');
+      throw new Error(`Firestore ha rechazado la actualización condicional de ${coleccion}/${id} (HTTP ${respuesta.status}). ${detalle}`.trim());
+    }
+    return true;
+  }
+
+  /**
+   * Consulta ACOTADA por igualdades (AND) con orden por un campo y límite duro
+   * (1..100). Es la única forma de consulta que necesita el gobierno de IA
+   * (operaciones de un uid, ajustes de un uid, últimas operaciones globales):
+   * sin enumeraciones sin filtro.
+   */
+  async consultarIgualdadesOrden(
+    coleccion: string,
+    consulta: {
+      igualdades?: Array<[campo: string, valor: string]>;
+      orden?: { campo: string; direccion: 'ASCENDING' | 'DESCENDING' };
+      limite: number;
+    },
+  ): Promise<DocumentoLeido[]> {
+    const ejecutar = this.opciones.fetchImpl || fetchPorDefecto();
+    const filtros = (consulta.igualdades || []).map(([campo, valor]) => ({
+      fieldFilter: { field: { fieldPath: campo }, op: 'EQUAL', value: { stringValue: valor } },
+    }));
+    const cuerpo = {
+      structuredQuery: {
+        from: [{ collectionId: coleccion }],
+        ...(filtros.length
+          ? { where: filtros.length === 1 ? filtros[0] : { compositeFilter: { op: 'AND', filters: filtros } } }
+          : {}),
+        ...(consulta.orden ? { orderBy: [{ field: { fieldPath: consulta.orden.campo }, direction: consulta.orden.direccion }] } : {}),
+        limit: Math.max(1, Math.min(100, consulta.limite)),
+      },
+    };
+    const respuesta = await withTimeout(async (signal) =>
+      ejecutar(`${this.base}:runQuery`, {
+        method: 'POST',
+        headers: await this.cabeceras(),
+        body: JSON.stringify(cuerpo),
+        signal,
+      }) as Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> }>,
+    );
+    if (!respuesta.ok) {
+      const detalle = await respuesta.text().catch(() => '');
+      throw new Error(`Firestore ha rechazado la consulta sobre ${coleccion} (HTTP ${respuesta.status}). ${detalle}`.trim());
+    }
+    const crudo = (await respuesta.json()) as unknown;
+    const filas: unknown[] = Array.isArray(crudo) ? crudo : [];
+    const salida: DocumentoLeido[] = [];
+    for (const fila of filas) {
+      const documento = (fila as { document?: DocumentoFirestore }).document;
+      if (!documento?.fields) continue;
+      salida.push({
+        id: String(documento.name || '').split('/').pop() || '',
+        datos: decodificarCampos(documento.fields),
+        ...(documento.updateTime ? { updateTime: documento.updateTime } : {}),
+      });
+    }
+    return salida;
   }
 
   /**

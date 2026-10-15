@@ -1,6 +1,6 @@
 /**
- * IA · FASE 1 — DEPENDENCIAS REALES DEL NÚCLEO DE IA
- * ==================================================
+ * IA · FASE 1 + 2 — DEPENDENCIAS REALES DEL NÚCLEO DE IA
+ * =====================================================
  * Construye, a partir del entorno del servidor, las dependencias del núcleo
  * (`server/ia/nucleoIA.ts`) reutilizando la integración Google ya existente
  * (`server/titularidades/googleBackend.ts`, sin SDK de administración):
@@ -15,6 +15,10 @@
  *     que la búsqueda de titulares) → Firestore REST en la base de datos de la
  *     aplicación (`FIRESTORE_DATABASE_ID` o la de la configuración). Sin
  *     credencial: memoria solo en desarrollo explícito; bloqueo en producción.
+ *   · Gobierno de uso (FASE 2): sigue al registro — Firestore en producción,
+ *     memoria en desarrollo. La política viene de `src/ia/gobiernoIAContrato.ts`
+ *     (por defecto conserva Fase 1) o de `IA_POLITICA_JSON`; si la variable
+ *     existe y no es válida, se bloquean las operaciones (fallo cerrado).
  *   · Proveedor: `GEMINI_API_KEY` (la misma clave de siempre).
  *
  * Una credencial de otro proyecto bloquea las operaciones, no el arranque HTTP.
@@ -24,6 +28,16 @@ import { resolverAccesoFirebase, type CodigoErrorConfiguracionFirebase } from '.
 import { ClienteFirestoreRest, verificarIdToken, type CuentaServicio } from '../titularidades/googleBackend.js';
 import { crearClienteGemini, type DependenciasNucleoIA, type ModoRegistroIA } from './nucleoIA.js';
 import { crearRegistroFirestore, crearRegistroMemoria } from './registroOperacionesIA.js';
+import {
+  crearGobiernoFirestore,
+  crearGobiernoMemoria,
+  type GobiernoIA,
+} from './gobiernoIA.js';
+import {
+  VARIABLE_ENTORNO_POLITICA_IA,
+  politicaGobiernoIADesdeEntorno,
+  type PoliticaGobiernoIA,
+} from '../../src/ia/gobiernoIAContrato.js';
 
 export interface ConfiguracionNucleoIA {
   proyectoId: string | null;
@@ -49,23 +63,43 @@ export function resolverConfiguracionIA(entorno: NodeJS.ProcessEnv = process.env
   return configurar(resolverAccesoFirebase(entorno, cuenta), entorno);
 }
 
-export function crearDependenciasNucleoIA(entorno: NodeJS.ProcessEnv = process.env): DependenciasNucleoIA & { configuracion: ConfiguracionNucleoIA } {
+export function crearDependenciasNucleoIA(
+  entorno: NodeJS.ProcessEnv = process.env,
+): DependenciasNucleoIA & { configuracion: ConfiguracionNucleoIA; politica: PoliticaGobiernoIA | null; errorPolitica?: string } {
   const acceso = resolverAccesoFirebase(entorno);
   const configuracion = configurar(acceso, entorno);
+  const politicaResultado = politicaGobiernoIADesdeEntorno(entorno);
+  const politica = politicaResultado.estado === 'VALIDA' ? politicaResultado.politica : null;
+  const errorPolitica = politicaResultado.estado === 'INVALIDA' ? politicaResultado.error : undefined;
+
   let registro: DependenciasNucleoIA['registro'] = null;
-  if (acceso.cuenta && configuracion.modoRegistro === 'FIRESTORE') {
-    registro = crearRegistroFirestore(new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId! }));
+  let gobierno: GobiernoIA | null = null;
+  if (acceso.cuenta && configuracion.modoRegistro === 'FIRESTORE' && configuracion.baseDatosId) {
+    const firestore = new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId });
+    registro = crearRegistroFirestore(firestore);
+    if (politica) gobierno = crearGobiernoFirestore(firestore, politica);
   } else if (configuracion.modoRegistro === 'MEMORIA') {
     console.warn('[ia] Registro EN MEMORIA: solo desarrollo explícito sin credencial.');
-    registro = crearRegistroMemoria();
+    const memoria = crearRegistroMemoria();
+    registro = memoria;
+    if (politica) gobierno = crearGobiernoMemoria(politica, { listarOperaciones: () => memoria.listar() });
   } else {
     console.warn(`[ia] ${configuracion.errorConfiguracion}: operaciones bloqueadas.`);
   }
+  if (politicaResultado.estado === 'INVALIDA') {
+    console.warn(`[ia] ${VARIABLE_ENTORNO_POLITICA_IA} inválida: ${politicaResultado.error}. Operaciones bloqueadas.`);
+  }
+
   const { proyectoId, errorConfiguracion } = configuracion;
   return {
-    configuracion, registro,
+    configuracion,
+    politica,
+    ...(errorPolitica ? { errorPolitica } : {}),
+    registro,
+    gobierno,
     ...(errorConfiguracion ? { errorConfiguracion } : {}),
+    ...(errorPolitica ? { errorGobierno: 'POLITICA_IA_INVALIDA' as const } : {}),
     verificarToken: (token: string) => proyectoId && !errorConfiguracion ? verificarIdToken(token, proyectoId) : Promise.resolve(null),
-    crearClienteProveedor: () => errorConfiguracion ? null : crearClienteGemini(entorno.GEMINI_API_KEY),
+    crearClienteProveedor: () => (errorConfiguracion || errorPolitica ? null : crearClienteGemini(entorno.GEMINI_API_KEY)),
   };
 }

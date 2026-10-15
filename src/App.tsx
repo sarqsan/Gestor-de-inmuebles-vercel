@@ -309,6 +309,7 @@ import { LoginView } from './components/LoginView';
 import { RegistroAutonomoView } from './components/RegistroAutonomoView';
 import { getEnlaceById } from './lib/suministrosFirestore';
 import { AdminControlCenter } from './components/admin/AdminControlCenter';
+import { PanelGobiernoIA } from './components/ia/PanelGobiernoIA';
 import { esInvitacionNominalPropietario } from './lib/accesoPropietarios';
 import { emitirInvitacionNominalFirestore, resolverInvitacionNominalFirestore } from './lib/accesoPropietariosFirebase';
 import {
@@ -4500,6 +4501,9 @@ export default function App() {
 
           {activeSection === 'administracion' && (
             currentUser.tipoPerfil === 'ADMINISTRADOR' ? (
+              <div className="space-y-6">
+              {/* IA · FASE 2 — gobierno de uso: consumo, cuotas, créditos y bloqueos. */}
+              <PanelGobiernoIA />
               <AdminControlCenter
                 currentUser={currentUser}
                 usuarios={usuarios}
@@ -4535,6 +4539,7 @@ export default function App() {
                   setShowCrearEnlaceModal(true);
                 }}
               />
+              </div>
             ) : currentUser.tipoPerfil === 'PROFESIONAL' ? (
               <ProfesionalPortalSection
                 currentUser={currentUser}

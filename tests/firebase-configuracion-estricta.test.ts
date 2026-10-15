@@ -174,6 +174,11 @@ describe('matriz HTTP: servidor real con lectores reales, sin red externa', () =
     vi.stubEnv('VERCEL', '1');
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('GEMINI_API_KEY', '');
+    // Esta suite prueba la STRICTUD de la configuración Firebase (503 por credencial
+    // inválida; 401 con credencial válida y sin sesión), no la política comercial:
+    // se fija una política APROBADA para que el bloqueo preventivo de aprobación
+    // pendiente no enmascare el 401 esperado en los casos válidos.
+    vi.stubEnv('IA_POLITICA_JSON', JSON.stringify({ costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } }));
     vi.stubEnv('FIREBASE_SERVICE_ACCOUNT', raw);
     for (const [k, v] of Object.entries(caso.env ?? {})) vi.stubEnv(k, v);
     // Intercepta solo el archivo de configuración. El lector de credenciales es real.

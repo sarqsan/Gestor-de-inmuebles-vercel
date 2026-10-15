@@ -307,6 +307,13 @@ service cloud.firestore {
         && (pidEnAmbitoEscritura(pidDelInmuebleAmbito(inmuebleId))
           || inmuebleParcialIndexado(pidDelInmuebleAmbito(inmuebleId), inmuebleId, true)));
     }
+    // R-2/R-3 — `propietarioId` denormalizado en candidatos y solicitudes_documentacion: sirve para
+    // listar por titular (`where('propietarioId','==', pid)`). Solo puede valer el titular REAL del
+    // inmueble al que pertenece el documento: impide reasignarlo a la cartera de otro titular.
+    function propietarioCoherenteConInmueble(d) {
+      return !('propietarioId' in d) || ('inmuebleId' in d && d.inmuebleId is string
+        && pidDelInmuebleAmbito(d.inmuebleId) == d.propietarioId);
+    }
     function pidDelContratoAmbito(contratoId) {
       return get(/databases/$(database)/documents/contratos_formalizacion/$(contratoId)).data.propietarioId;
     }
@@ -526,9 +533,23 @@ service cloud.firestore {
           && getUsuarioActual().authUid == request.auth.uid));
     }
 
+    // PERSONAL INTERNO (cierre de seguridad IA): administración, profesionales y master.
+    // El perfil PROPIETARIO ya NO forma parte de esta función: un titular no adquiere
+    // privilegios de personal interno por su perfil. Sus permisos sobre datos de su
+    // cartera se conceden con `ambitoPorInmuebleLectura/Escritura` (o equivalentes),
+    // nunca con `isStaff()`.
+    // PROFESIONAL solo cuenta como personal con una ficha profesional EXISTENTE
+    // vinculada en el espejo (usuarios_auth.profesionalId). Un perfil PROFESIONAL
+    // sin ficha real (cuentas creadas antes de esta corrección) no obtiene acceso
+    // de personal, aunque su perfil esté ACTIVO.
+    // El espejo se lee UNA vez y se pasa como parámetro (mismo criterio que perfilActualVeraz).
+    function personalDesdeEspejo(m) {
+      return m.tipoPerfil == 'ADMINISTRADOR'
+        || (m.tipoPerfil == 'PROFESIONAL' && 'profesionalId' in m && isValidId(m.profesionalId)
+            && exists(/databases/$(database)/documents/profesionales/$(m.profesionalId)));
+    }
     function isStaff() {
-      return isMasterAdmin() || (perfilActualVeraz() &&
-        me().tipoPerfil in ['ADMINISTRADOR', 'PROPIETARIO', 'PROFESIONAL']);
+      return isMasterAdmin() || (perfilActualVeraz() && personalDesdeEspejo(me()));
     }
 
     function tenantContratoIds() {
@@ -722,17 +743,24 @@ service cloud.firestore {
           getEnlaceE(enlaceId).usosActuales < getEnlaceE(enlaceId).usosMaximos);
     }
 
-    // Un perfil profesional nuevo no puede apropiarse de una ficha ya
-    // existente por conocer su ID. La invitación a esa ficha ha de ser
-    // nominal para el email Auth y seguir activa; legacy sin email se reemite.
-    function profesionalExistenteInvitado(d) {
-      return !('profesionalId' in d) || !exists(/databases/$(database)/documents/profesionales/$(d.profesionalId))
-        || ('enlaceRegistroId' in d && isValidId(d.enlaceRegistroId)
-          && exists(/databases/$(database)/documents/enlaces_registro/$(d.enlaceRegistroId))
-          && getEnlaceE(d.enlaceRegistroId).activo == true
-          && getEnlaceE(d.enlaceRegistroId).tipoPerfil == 'PROFESIONAL'
-          && getEnlaceE(d.enlaceRegistroId).profesionalIdVinculado == d.profesionalId
-          && getEnlaceE(d.enlaceRegistroId).emailInvitado == authEmail());
+    // Alta de PROFESIONAL desde el cliente: exige (a) email Auth verificado,
+    // (b) una ficha profesionales/{id} EXISTENTE y (c) una invitación de
+    // profesional ACTIVA, nominal para ese email y vinculada a esa misma ficha.
+    // Sin fallback: no hay caso en que la ausencia de profesionalId o de ficha
+    // conceda el alta (corrección R-124, perfil PROFESIONAL).
+    function enlaceProfesionalNominalValido(e, profesionalId) {
+      return e.activo == true
+        && e.tipoPerfil == 'PROFESIONAL'
+        && e.profesionalIdVinculado == profesionalId
+        && e.emailInvitado == authEmail();
+    }
+    function profesionalVinculadoNominal(d) {
+      return request.auth.token.email_verified == true
+        && 'profesionalId' in d && isValidId(d.profesionalId)
+        && 'enlaceRegistroId' in d && isValidId(d.enlaceRegistroId)
+        && exists(/databases/$(database)/documents/profesionales/$(d.profesionalId))
+        && exists(/databases/$(database)/documents/enlaces_registro/$(d.enlaceRegistroId))
+        && enlaceProfesionalNominalValido(getEnlaceE(d.enlaceRegistroId), d.profesionalId);
     }
 
     // La activación nominal exige invitación vigente por ruta fija y un
@@ -2017,36 +2045,32 @@ service cloud.firestore {
     // puede tocar un conjunto acotado de campos.
     // =========================================================================
     match /candidatos/{candidatoId} {
-      // get permanece accesible por el enlace de cuestionario por token.
-      allow get: if true;
-      allow list: if isSignedIn();
+      // R-2 (cierre 2026-10-14): ya NO hay lectura pública por id. El enlace del cuestionario lo sirve
+      // el servidor (`/api/cuestionario/:token`) con el token guardado en el propio candidato.
+      allow get: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
+      // Listado: personal interno, o titular/gestor de cartera por `where('propietarioId','==', pid)`.
+      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
+        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
 
-      allow create: if isSignedIn() || (
+      // Alta pública de captación (sin sesión, campos mínimos) y alta interna.
+      allow create: if isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)
+        && propietarioCoherenteConInmueble(incoming())) || (
         incoming().keys().hasAll(['nombre', 'email', 'telefono', 'estado'])
         && incoming().nombre is string
         && incoming().nombre.size() > 0
+        && !('propietarioId' in incoming())
       );
-      // D2 (§7.4): el update/delete global ya no es `isSignedIn()` (cualquier
-      // cuenta, incluido un inquilino, modificaba PII ajena) sino `isStaff()`.
-      // La rama anónima del cuestionario/documentación queda intacta.
+      // R-1 (cierre 2026-10-14): la rama anónima del cuestionario se RETIRA. Un candidato responde
+      // mediante el servidor, que valida el token y escribe por lista blanca. Un titular solo modifica
+      // candidatos de SU cartera, sin reasignarlos a otro inmueble ni a otro titular.
       allow update: if isStaff() || (
-        // Candidato respondiendo su cuestionario / aportando documentación
-        incoming().diff(existing()).affectedKeys().hasAny([
-          'cuestionarioIncidencias',
-          'cuestionarioToken',
-          'fechaCuestionario',
-          'estado',
-          'documentosAnalizados',
-          'notasAdicionales',
-          'ingresosMensuales',
-          'antiguedadAnos',
-          'tipoContrato',
-          'empresa',
-          'numInquilinos',
-          'tieneMascotas'
-        ])
+        'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
+        && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId
+        && propietarioCoherenteConInmueble(incoming())
       );
-      allow delete: if isStaff();
+      allow delete: if isStaff() || (
+        'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
+      );
     }
 
     // =========================================================================
@@ -2054,79 +2078,103 @@ service cloud.firestore {
     // =========================================================================
     match /solicitudes/{solicitudId} {
       // BLOQUE E (reconciliado): el inquilino no lee solicitudes (el alta sigue siendo pública).
-      allow read: if isStaff();
+      // Lectura por cartera (titular o gestor con L del inmueble); listado global solo interno.
+      allow get: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
+      allow list: if isStaff();
       allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado'])
         && incoming().nombre is string
         && incoming().email is string;
       // D2 (§7.4): `isSignedIn()` → `isStaff()` (ver candidatos).
-      allow update, delete: if isStaff();
+      allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId));
+      allow delete: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId));
     }
 
     // =========================================================================
     // 5. INVITACIONES DE VISITA (confirmación/reserva pública por token)
-    // DELTA-C (FASE 8B): validación de forma adaptada de C. El personal
-    // autenticado conserva el acceso; el anónimo queda acotado a las formas
-    // del flujo público (reserva/apertura: status, bookedAt, reserva,
-    // confirmado, openedAt). Validación de campos ≠ aislamiento completo.
+    // CIERRE VISITAS (2026-10-14): el anónimo queda DENEGADO en todas las operaciones (el
+    // flujo público de visita pasa por el servidor). El personal y el titular/gestor de cartera
+    // conservan su ámbito.
     // =========================================================================
     match /invitaciones/{invitacionId} {
-      allow read: if true;
-      allow create: if isSignedIn() || (
-        incoming().keys().hasAll(['inmuebleId', 'status'])
-        && incoming().keys().hasAny(['candidatoId', 'candidateId'])
-        && incoming().status is string
+      // CIERRE VISITAS (2026-10-14): sin lectura ni escritura anónima. El candidato usa el
+      // servidor (/api/visita/:token), que resuelve SU invitación por token.
+      // Personal: todo. Titular o gestor: solo las invitaciones de SU cartera, por `propietarioId`
+      // estampado en el documento (consulta por igualdad que las reglas sí pueden demostrar).
+      allow get: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
+        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
+        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow create: if isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)
+        && propietarioCoherenteConInmueble(incoming()));
+      allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
+        && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId
+        && propietarioCoherenteConInmueble(incoming()));
+      allow delete: if isStaff() || (
+        'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
       );
-      // D2 (§7.4): `isSignedIn()` → `isStaff()`; la rama anónima de reserva
-      // (status/bookedAt/reserva/confirmado/openedAt) queda intacta.
-      allow update: if isStaff() || (
-        incoming().diff(existing()).affectedKeys().hasAny(['status', 'bookedAt', 'reserva', 'confirmado', 'openedAt'])
-        && (!('status' in incoming()) || incoming().status is string)
-        && (!('reserva' in incoming()) || incoming().reserva is map)
-      );
-      allow delete: if isStaff();
     }
 
     // =========================================================================
-    // 6. TURNOS / SLOTS DE VISITA (reserva atómica pública)
-    // DELTA-C (FASE 8C): validación de forma adaptada de C (reserva atómica:
-    // disponible + vínculo de reserva). Autenticado intacto; anónimo acotado.
+    // 6. TURNOS / SLOTS DE VISITA
+    // CIERRE VISITAS (2026-10-14): sin lectura ni escritura anónima (antes lectura pública y
+    // reserva anónima directa). La reserva pública se hace en el servidor, con escrituras
+    // atómicas y precondiciones de versión. Personal y titular/gestor de cartera: su ámbito.
     // =========================================================================
     match /slots_visita/{slotId} {
-      allow read: if true;
-      allow create: if isSignedIn() || (
-        incoming().keys().hasAll(['inmuebleId', 'fecha', 'horaInicio', 'horaFin'])
-        && incoming().fecha is string && incoming().horaInicio is string && incoming().horaFin is string
+      allow get: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
+        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
+        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow create: if isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)
+        && propietarioCoherenteConInmueble(incoming()));
+      allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
+        && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId
+        && propietarioCoherenteConInmueble(incoming()));
+      allow delete: if isStaff() || (
+        'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
       );
-      // D2 (§7.4): `isSignedIn()` → `isStaff()`; la rama anónima de reserva
-      // atómica (disponible/reserva*) queda intacta.
-      allow update: if isStaff() || (
-        incoming().diff(existing()).affectedKeys().hasAny(['disponible', 'reservaCandidateId', 'reservaCandidateNombre', 'reservaInvitationId'])
-        && (!('disponible' in incoming()) || incoming().disponible is bool)
-      );
-      allow delete: if isStaff();
     }
 
     // =========================================================================
     // 7. SOLICITUDES DE DOCUMENTACIÓN POST-VISITA (portal público por token)
-    // DELTA-C (FASE 8D): validación de forma adaptada de C, extendida con los
-    // campos que el portal anónimo de main escribe realmente
-    // (`fechaUltimaActividad`, `historial`) y con `token` (nombre del campo en
-    // el modelo de main) además de `tokenDoc` (nombre en C). Autenticado
-    // intacto; anónimo acotado a la aportación documental.
+    // Historial: DELTA-C (FASE 8D) permitía escritura anónima acotada a la aportación
+    // documental. Retirado en el cierre de seguridad IA: la aportación pasa por el
+    // servidor (token verificado) y la subida de ficheros por Storage (token en
+    // `firestore.get`). Ver bloque siguiente.
+    // =========================================================================
+    // CIERRE DE SEGURIDAD IA (2026-10-14): sin lectura pública, sin escritura anónima.
+    //  · Personal interno (`isStaff()`): gestión completa.
+    //  · Titular o gestor con cartera: solo las solicitudes de SUS inmuebles, mediante
+    //    `ambitoPorInmuebleLectura/Escritura` sobre `inmuebleId`. Una solicitud de otra
+    //    cartera queda denegada en get, create, update y delete.
+    //  · Anónimo: ninguna operación. El portal público no lee esta colección desde el
+    //    cliente: lo hace el SERVIDOR con el token de la solicitud
+    //    (server/ia/portalDocumentacion.ts, cuenta de servicio). Las reglas NO verifican
+    //    el token: esa verificación es del servidor y de la subida a Storage (ver storage.rules).
+    //  · `list` (listado global) solo para personal interno. Un titular no lista todas
+    //    las solicitudes; un listado filtrado por cartera requiere validación en emulador.
+    //  · Sin `inmuebleId` no hay ámbito: se deniega (fail closed).
+    //  · `update` no puede reasignar la solicitud a otro inmueble.
     // =========================================================================
     match /solicitudes_documentacion/{solicitudDocId} {
-      allow read: if true;
-      allow create: if isSignedIn() || (
-        incoming().keys().hasAll(['candidatoId', 'inmuebleId'])
-        && incoming().keys().hasAny(['tokenDoc', 'token'])
+      allow get: if isStaff() || (
+        'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId)
       );
-      // D2 (§7.4): `isSignedIn()` → `isStaff()`; la rama anónima de
-      // aportación documental queda intacta.
+      // R-3: listado global solo personal; el titular lista SU cartera por `propietarioId` (consulta demostrable).
+      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
+        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow create: if isStaff() || (
+        'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)
+        && propietarioCoherenteConInmueble(incoming())
+      );
       allow update: if isStaff() || (
-        incoming().diff(existing()).affectedKeys().hasAny(['documentos', 'estado', 'fechaAportacion', 'comentariosCandidato', 'todosAportados', 'fechaUltimaActividad', 'historial'])
-        && (!('estado' in incoming()) || incoming().estado is string)
+        'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
+        && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId
+        && propietarioCoherenteConInmueble(incoming())
       );
-      allow delete: if isStaff();
+      allow delete: if isStaff() || (
+        'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
+      );
     }
 
     // =========================================================================
@@ -2134,7 +2182,8 @@ service cloud.firestore {
     // =========================================================================
     match /configuracion_aseguradoras/{aseguradoraId} {
       // BLOQUE E (reconciliado): configuración interna, oculta al inquilino.
-      allow read: if isStaff();
+      // R-3: el titular la lee para contratar seguro (catálogo de aseguradoras, sin datos por titular).
+      allow read: if isStaff() || isPropietarioRole();
       allow write: if isMasterAdmin();
     }
 
@@ -2219,7 +2268,12 @@ service cloud.firestore {
           // se validan arriba; los permisos por ámbito siguen gobernados
           // exclusivamente por las reglas D2/D3 y no por roles descriptivos.
           (incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL']
-            && (incoming().tipoPerfil != 'PROFESIONAL' || profesionalExistenteInvitado(incoming()))
+            // PROFESIONAL: el alta nace PENDIENTE (la activación es solo administrativa),
+            // sin propietario asociado y con invitación nominal vigente a su ficha.
+            && (incoming().tipoPerfil != 'PROFESIONAL' || (
+              incoming().estado == 'PENDIENTE'
+              && !('propietarioId' in incoming())
+              && profesionalVinculadoNominal(incoming())))
             && (
               incoming().tipoPerfil == 'PROFESIONAL'
               || !('propietarioId' in incoming())
@@ -2335,13 +2389,27 @@ service cloud.firestore {
     // Catálogo legible durante el registro público; la escritura es interna.
     // =========================================================================
     match /profesionales/{profesionalId} {
-      allow read: if true;
+      // R-2/R-3 (cierre 2026-10-14): lectura ACOTADA (ya no pública).
+      //  · Personal interno: catálogo completo.
+      //  · Propietario: el catálogo público (`esPrivado == false`) y SUS privados
+      //    (`creadoPorPropietarioId` = su titularidad). Sin lectura anónima ni de inquilinos.
+      // Las consultas del propietario deben filtrar por igualdad (`esPrivado == false` o
+      // `creadoPorPropietarioId == pid`). Los documentos sin `esPrivado` booleano se corrigen con
+      // scripts/migrar-cierre-seguridad-ia.mts antes de publicar esta regla.
+      allow get: if isStaff() || (isPropietarioRole()
+        && (resource.data.creadoPorPropietarioId == myPropId() || resource.data.esPrivado == false));
+      allow list: if isStaff()
+        || (isPropietarioRole() && resource.data.esPrivado == false)
+        || (isPropietarioRole() && resource.data.creadoPorPropietarioId == myPropId());
       // BLOQUE E (reconciliado): el inquilino no escribe en el catálogo.
       // INTEGRACIÓN PR4 (2026-09-25): se conserva la escritura staff
       // canónica (el propietario/gestor gestiona sus profesionales via
       // handleSaveProfesional; restringir update a master+ficha propia
       // rompería ese flujo). Re-endurecer exige una vía de delegación.
-      allow create, update: if isStaff();
+      // R-3: el titular crea y edita SOLO sus profesionales (`creadoPorPropietarioId` = su titularidad).
+      allow create: if isStaff() || (isPropietarioRole() && incoming().creadoPorPropietarioId == myPropId());
+      allow update: if isStaff() || (isPropietarioRole()
+        && resource.data.creadoPorPropietarioId == myPropId() && incoming().creadoPorPropietarioId == myPropId());
       allow delete: if isMasterAdmin();
     }
 
@@ -2407,7 +2475,11 @@ service cloud.firestore {
     match /especialidades/{especialidadId} {
       allow read: if true;
       // BLOQUE E (reconciliado): el inquilino no escribe en el catálogo.
-      allow write: if isStaff();
+      // R-3: el titular crea y edita SOLO las especialidades que él creó (`creadoPorUid`).
+      allow create: if isStaff() || (isPropietarioRole() && incoming().creadoPorUid == request.auth.uid);
+      allow update: if isStaff() || (isPropietarioRole()
+        && resource.data.creadoPorUid == request.auth.uid && incoming().creadoPorUid == request.auth.uid);
+      allow delete: if isStaff() || (isPropietarioRole() && resource.data.creadoPorUid == request.auth.uid);
     }
 
     // =========================================================================
@@ -2437,7 +2509,8 @@ service cloud.firestore {
       }
       allow get: if isSignedIn() && (isMasterAdmin() || notifDelUsuario());
       // BLOQUE E (reconciliado): el inquilino no lista notificaciones GAP 1.
-      allow list: if isStaff();
+      // R-3: el titular lista SUS notificaciones (`propietarioId` propio) por consulta demostrable.
+      allow list: if isStaff() || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
       allow create: if isSignedIn() && (isMasterAdmin() || notifDelUsuarioIncoming());
       allow update: if isSignedIn() && (isMasterAdmin() || (
         notifDelUsuario() &&
@@ -3524,7 +3597,7 @@ service cloud.firestore {
         && (cmd.accion != 'ANOTAR' || (opTexto(cmd.texto) && cmd.clase in ['DIAGNOSTICO','ACTUACION','COMUNICACION','NOTA']))
         && (cmd.accion != 'ASOCIAR_FACTURA' || e.get('presupuestoId',null) == cmd.get('presupuestoId',b.get('presupuestoId',null)));
     }
-    function opEconomia(p,e,r) {
+    function opEconomia(e,r) {
       return (!(e.tipo in ['presupuesto','factura']) || (e.moneda == 'EUR' && e.importeCentimos is int && e.importeCentimos >= 0 && e.conceptos is list && e.conceptos.size()>0
         && 'proveedorId' in e
         && (e.vinculo == null ? e.tipo == 'factura' : !('reparacionId' in e.vinculo) || r.reparacion.proveedorId == e.proveedorId)))
@@ -3543,10 +3616,10 @@ service cloud.firestore {
         : tipo == 'factura' ? {'REGISTRADA': ['ANULADA'], 'ANULADA': []}[estado]
         : [];
     }
-    function opAbierta(e) {
-      return e != null && ((e.tipo == 'averia' && !(e.estado in ['RESUELTA','CANCELADA'])) || (e.tipo == 'reparacion' && !(e.estado in ['FINALIZADA','CANCELADA']))) ? 1 : 0;
+    function opAbierta(e, existe) {
+      return existe && ((e.tipo == 'averia' && !(e.estado in ['RESUELTA','CANCELADA'])) || (e.tipo == 'reparacion' && !(e.estado in ['FINALIZADA','CANCELADA']))) ? 1 : 0;
     }
-    function opUso(e) { return e != null && e.tipo == 'reparacion' && e.estado in ['EN_CURSO','FINALIZADA'] ? 1 : 0; }
+    function opUso(e, existe) { return existe && e.tipo == 'reparacion' && e.estado in ['EN_CURSO','FINALIZADA'] ? 1 : 0; }
     function opContador(antes, despues, clave, delta) {
       return clave == '' ? despues == antes : despues.diff(antes).affectedKeys().hasOnly([clave])
         && despues.get(clave,0) == antes.get(clave,0) + delta && despues.get(clave,0) >= 0;
@@ -3554,20 +3627,22 @@ service cloud.firestore {
     function opContadores(a, n, v) {
       let e = v.despues;
       let b = v.antes;
-      let delta = opAbierta(e)-opAbierta(b);
+      let existeAntes = v.existeAntes;
+      let delta = opAbierta(e,true)-opAbierta(b,existeAntes);
       return opContador(a.get('abiertasPorIncidencia',{}),n.abiertasPorIncidencia,e.get('incidenciaId',''),delta)
         && opContador(a.get('abiertasPorAveria',{}),n.abiertasPorAveria,e.tipo == 'reparacion' ? e.get('averiaId','') : '',delta)
-        && opContador(a.get('presupuestosEnUso',{}),n.presupuestosEnUso,e.tipo == 'reparacion' ? e.get('presupuestoId','') : '',opUso(e)-opUso(b));
+        && opContador(a.get('presupuestosEnUso',{}),n.presupuestosEnUso,e.tipo == 'reparacion' ? e.get('presupuestoId','') : '',opUso(e,true)-opUso(b,existeAntes));
     }
-    function opInvariantes(p, e, h, r) {
+    function opInvariantes(e, h, r) {
       return (!(e.tipo == 'incidencia' && e.estado in ['RESUELTA','CERRADA','CANCELADA']) || h.abiertasPorIncidencia.get(e.id,0) == 0)
         && (!(e.tipo == 'averia' && e.estado in ['RESUELTA','CANCELADA']) || h.abiertasPorAveria.get(e.id,0) == 0)
         && (!(e.tipo == 'presupuesto' && e.estado == 'CANCELADO') || h.presupuestosEnUso.get(e.id,0) == 0)
-        && (!(e.tipo in ['averia','reparacion'] && opAbierta(e) == 1) || !(r.incidencia.estado in ['CERRADA','CANCELADA']))
+        && (!(e.tipo in ['averia','reparacion'] && opAbierta(e,true) == 1) || !(r.incidencia.estado in ['CERRADA','CANCELADA']))
         && (!(e.tipo == 'reparacion' && e.estado == 'FINALIZADA') || (e.fechaInicio is string && e.fechaFin is string && e.fechaFin >= e.fechaInicio && e.resultado is string && e.resultado.size()>0 && e.costeCentimos is int && e.costeCentimos >= 0));
     }
-    function opCambio(p, e, b, cmd, i, cambios, r) {
-      return b == null ? cmd.accion == 'CREAR' && e.version == 1 && opInicial(e) && e.get('documentoIds',[]) == []
+    function opCambio(p, e, b, existeB, cmd, i, r) {
+      let cambios = e.diff(b).affectedKeys();
+      return !existeB ? cmd.accion == 'CREAR' && e.version == 1 && opInicial(e) && e.get('documentoIds',[]) == []
         : cmd.accion != 'CREAR' && e.id == b.id && e.tipo == b.tipo && e.creadoEn == b.creadoEn && e.version == b.version + 1
         && e.get('ambito',null) == b.get('ambito',null) && e.get('propietarioId',null) == b.get('propietarioId',null)
         && e.get('incidenciaId',null) == b.get('incidenciaId',null) && e.get('averiaId',null) == b.get('averiaId',null)
@@ -3590,20 +3665,21 @@ service cloud.firestore {
     // Acoplamiento bidireccional: un incremento observable obliga a escribir el otro
     // documento en este commit. Su allow se evalúa entonces; getAfter solo no bastaría.
     // La cabecera valida CAS/contadores; la entidad valida UNA vez el evento completo.
-    function opCabeceraValida(p, a, n) {
+    function opCabeceraValida(p, existeA, a, n) {
       return n.keys().hasOnly(['propietarioId','revision','ultimoEventoId','abiertasPorIncidencia','abiertasPorAveria','presupuestosEnUso'])
         && n.propietarioId == p && n.revision is int
-        && n.revision == (a == null ? 0 : a.revision) + 1
+        && n.revision == (existeA ? a.revision : 0) + 1
         && opCabeceraEnlazada(p,a,n);
     }
     function opCabeceraEnlazada(p, a, n) {
       let audit = getAfter(/databases/$(database)/documents/audit_logs/$(n.ultimoEventoId)).data;
       let path = opEntidad(p,audit.detalles.tipo,audit.detalles.entidadId);
-      let vieja = exists(path) ? get(path).data : null;
+      let existeVieja = exists(path);
+      let vieja = existeVieja ? get(path).data : {};
       let fila = getAfter(path).data;
       return fila.auditId == n.ultimoEventoId && fila.registro.version is int
-        && fila.registro.version == (vieja == null ? 0 : vieja.registro.version) + 1
-        && opContadores(a == null ? {} : a,n,{'antes':vieja == null ? null : vieja.registro,'despues':fila.registro})
+        && fila.registro.version == (existeVieja ? vieja.registro.version : 0) + 1
+        && opContadores(a,n,{'antes':existeVieja ? vieja.registro : {},'existeAntes':existeVieja,'despues':fila.registro})
         && (audit.accion in ['OPERACIONES_ANOTAR','OPERACIONES_VINCULAR_DOCUMENTO'] || !('presupuestoId' in fila.registro)
           || opPresupuestoEnlazado(p,fila.registro,audit.detalles.inmuebleId));
     }
@@ -3624,30 +3700,33 @@ service cloud.firestore {
             && q.vinculo.get('reparacionId',e.id) == e.id))
         && (e.tipo != 'reparacion' || !(e.estado in ['EN_CURSO','FINALIZADA']) || q.estado == 'APROBADO');
     }
-    function opFilaAutorizada(p, key, fila, vieja) {
+    function opFilaAutorizada(p, key, fila, existeVieja, vieja) {
       let c = me();
       return (isMasterAdmin() || opAcceso(p,c,true))
         && fila.keys().hasOnly(['registro','auditId','versiones']) && key == fila.registro.tipo + '~' + fila.registro.id
-        && opFilaValida(p,fila,vieja,c.usuarioId);
+        && opFilaValida(p,fila,existeVieja,vieja,c.usuarioId);
     }
-    function opFilaValida(p, fila, vieja, usuarioId) {
+    function opFilaValida(p, fila, existeVieja, vieja, usuarioId) {
       let path = /databases/$(database)/documents/operaciones/$(p);
-      let anterior = exists(path) ? get(path).data : null;
+      let existeAnterior = exists(path);
+      let anterior = existeAnterior ? get(path).data : {};
       let h = getAfter(path).data;
       let auditPath = /databases/$(database)/documents/audit_logs/$(fila.auditId);
-      return h.revision is int && h.revision == (anterior == null ? 0 : anterior.revision) + 1
+      return h.revision is int && h.revision == (existeAnterior ? anterior.revision : 0) + 1
         // El audit debe nacer en el mismo commit, no reutilizar uno autenticado previo.
         && !exists(auditPath)
-        && opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,vieja,usuarioId);
+        && opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,{'existe':existeVieja,'vieja':vieja},usuarioId);
     }
-    function opEventoValido(p, id, data, h, fila, vieja, usuarioId) {
+    function opEventoValido(p, id, data, h, fila, prev, usuarioId) {
+      let existeVieja = prev.existe;
+      let vieja = prev.vieja;
       let e = fila.registro;
       let version = fila.versiones[fila.versiones.size()-1];
       let cmd = version.comando;
-      let antes = vieja == null ? null : vieja.registro;
+      let antes = existeVieja ? vieja.registro : {};
       let d = data.detalles;
       let campos = opCampos(e.tipo);
-      let cambios = antes == null ? null : e.diff(antes).affectedKeys();
+      let cambios = e.diff(antes).affectedKeys();
       return data.keys().hasOnly(['id','usuarioId','usuarioEmail','usuarioNombre','accion','descripcion','fechaHora','entidadAfectada','idAfectado','resultado','detalles','registradoEn'])
         && e.tipo in ['incidencia','averia','reparacion','proveedor','equipo','garantia','presupuesto','factura','documento'] && e.version is int
         && cmd.accion in ['CREAR','MODIFICAR','CAMBIAR_ESTADO','ANOTAR','VINCULAR_DOCUMENTO','ASOCIAR_FACTURA']
@@ -3662,31 +3741,31 @@ service cloud.firestore {
         && h.ultimoEventoId == id && cmd.revisionEsperada == h.revision - 1
         && fila.auditId == id && version.registro == e && version.ambito == {'propietarioId':p,'inmuebleId':data.idAfectado}
         && version.keys().hasOnly(['ambito','comando','registro'])
-        && fila.versiones == (vieja == null ? [] : vieja.versiones).concat([version])
-        && e.actualizadoEn == cmd.fecha && (antes != null || e.creadoEn == cmd.fecha)
+        && fila.versiones == (existeVieja ? vieja.versiones : []).concat([version])
+        && e.actualizadoEn == cmd.fecha && (existeVieja || e.creadoEn == cmd.fecha)
         && (e.tipo == 'proveedor' ? e.propietarioId == p : e.ambito == version.ambito)
         && opActual(p,data.idAfectado)
         && opEsquema(e,campos) && opComando(e,antes,cmd,campos,cambios)
-        && opDominio(p,e,antes,cmd,data.idAfectado,cambios,h);
+        && opDominio(p,e,antes,existeVieja,cmd,data.idAfectado,h);
     }
     // Solo después de autorización, envelope, esquema y comando: cargar una vez, validar sin I/O.
-    function opDominio(p, e, antes, cmd, i, cambios, h) {
+    function opDominio(p, e, antes, existeAntes, cmd, i, h) {
       let r = opReferencias(p,e,cmd);
       return (cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'] || opRelaciones(p,e,i,r))
-        && opCambio(p,e,antes,cmd,i,cambios,r)
-        && (cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'] || (opInvariantes(p,e,h,r) && opEconomia(p,e,r)));
+        && opCambio(p,e,antes,existeAntes,cmd,i,r)
+        && (cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'] || (opInvariantes(e,h,r) && opEconomia(e,r)));
     }
     // El match /audit_logs canónico de este archivo ya codifica el contrato B literal:
     // create autenticado, read solo master, update/delete false (append-only).
     match /operaciones/{propietarioId} {
       allow read: if opLectura(propietarioId);
       allow create, update: if opEscritura(propietarioId)
-        && opCabeceraValida(propietarioId,resource == null ? null : resource.data,incoming());
+        && opCabeceraValida(propietarioId,resource != null,resource == null ? {} : resource.data,incoming());
       allow delete: if false;
       match /entidades/{entidadKey} {
         allow read: if opLectura(propietarioId);
         allow create, update: if isSignedIn()
-          && opFilaAutorizada(propietarioId,entidadKey,incoming(),resource == null ? null : resource.data);
+          && opFilaAutorizada(propietarioId,entidadKey,incoming(),resource != null,resource == null ? {} : resource.data);
         allow delete: if false;
       }
     }

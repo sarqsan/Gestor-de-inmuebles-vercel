@@ -377,7 +377,7 @@ describe('IA Fase 1 · registro trazable por usuario', () => {
   });
 });
 
-describe('IA Fase 1 · modo NO_CONFIGURADO (producción sin credencial de registro)', () => {
+describe('IA Fase 1 · dependencias inyectadas sin registro (no configuración real de producción)', () => {
   it('exige sesión igualmente, pero NUNCA llama al proveedor: responde el respaldo y lo indica en cabecera', async () => {
     const { cliente, llamadas } = proveedorFalso();
     const m = await montar({ registro: null, proveedor: cliente });

@@ -50,6 +50,7 @@ export function crearManejadorBuscarTitulares(deps: DependenciasBackendTitulares
       ok: false,
       error: resultado.motivo,
       detalle: resultado.detalle,
+      ...(resultado.codigoConfiguracion ? { codigoConfiguracion: resultado.codigoConfiguracion } : {}),
     });
   };
 }

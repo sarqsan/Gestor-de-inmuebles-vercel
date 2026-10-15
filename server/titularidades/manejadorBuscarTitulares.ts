@@ -19,7 +19,7 @@
  * Las dependencias son inyectables para poder probar los códigos reales.
  */
 import type { Request, Response } from 'express';
-import { buscarTitulares } from './backendTitulares';
+import { buscarTitulares } from './backendTitulares.js';
 import type { DependenciasBackendTitulares } from './backendTitulares';
 
 /** Token `Bearer` de la cabecera Authorization ('' si no hay). Reutilizado por el núcleo de IA. */

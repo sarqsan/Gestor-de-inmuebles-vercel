@@ -30,7 +30,7 @@ import {
   ClienteFirestoreRest,
   leerCuentaServicio,
   verificarIdToken,
-} from './googleBackend';
+} from './googleBackend.js';
 import {
   LIMITE_LECTURA,
   MAXIMO_RESULTADOS,
@@ -40,7 +40,7 @@ import {
   proyectarResultados,
   seleccionarCoincidencias,
   terminoValido,
-} from '../../src/titularidades/busquedaTitulares';
+} from '../../src/titularidades/busquedaTitulares.js';
 import type { CandidatoTitular } from '../../src/types';
 
 /** Correo del master (paridad con `isMasterAdmin()` de firestore.rules). */

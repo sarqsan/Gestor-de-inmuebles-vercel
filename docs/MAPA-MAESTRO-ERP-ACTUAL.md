@@ -55,7 +55,7 @@
 | Deploy | Vercel (`vercel.json`: build → `dist`, función serverless `api/index.ts` → Express, rewrites SPA) |
 | Firebase | **Proyecto `gestor-inmuebles-produccion`** (el de `firebase-applet-config.json`, al que hablan la app y el preview de Vercel) · Firestore `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` · Storage `gestor-inmuebles-produccion.firebasestorage.app`. Las reglas se publican en ESTE proyecto (`.firebaserc` fija el destino por defecto). `startup-sanctuary-sln7n` NO es producción |
 | Base de datos | Firestore (~45 colecciones, ver §2.2) + Storage (rutas declaradas en `storage.rules`) |
-| IA | Gemini (`@google/genai`) vía endpoints Express de `server.ts` |
+| IA | Gemini (`@google/genai`) vía endpoints Express de `server.ts`, todos a través del núcleo `server/ia` (IA · Fase 1: sesión obligatoria con token verificado en servidor, idempotencia y registro por usuario en `ia_operaciones`; ver `docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md`) |
 | Secretos | `GEMINI_API_KEY` y `APP_URL` por secretos de entorno (`.env.example`). **Nunca** en código ni Firestore |
 
 ### Stack (según `package.json` canónico)
@@ -1036,7 +1036,9 @@ firme, apruebe, envíe SEPA o modifique reglas).
 
 **Proveedor IA — qué es real y qué no**:
 - **Adaptador servidor** `POST /api/asistente/interpretar` (`server.ts`):
-  reutiliza `getGeminiClient()` / `generateGeminiWithRetry()` y el modelo
+  reutiliza el cliente del núcleo de IA (`clienteIA(res)` /
+  `generateGeminiWithRetry()` en `server/ia/nucleoIA.ts`; desde la IA · Fase 1,
+  con sesión obligatoria y registro por usuario) y el modelo
   canónico `gemini-3.7-flash`, la misma `GEMINI_API_KEY`, **sin segunda
   configuración ni secretos nuevos**. Recibe solo el `AIIntentRequest` (sin
   permisos, sin datos de negocio), devuelve una `PropuestaIA` en JSON; sin

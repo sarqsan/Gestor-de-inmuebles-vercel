@@ -9,3 +9,9 @@ coverage/
 
 # artefactos de vitest (reporter json)
 .vitest/
+
+# Resultado JSON de las pruebas del emulador (generado por CI/local; no versionar)
+emulador-resultados.json
+resumen-emulador.md
+vitest-resultados.json
+resumen-verificacion.md

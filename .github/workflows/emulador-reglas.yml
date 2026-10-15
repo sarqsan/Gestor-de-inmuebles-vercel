@@ -1,0 +1,127 @@
+# Verificación de reglas Firestore con el EMULADOR OFICIAL y de la base del repositorio.
+# Sin secretos ni despliegue: sólo ejecuta pruebas y, en pull requests, publica un resumen.
+name: Emulador de reglas y verificación
+
+on:
+  pull_request:
+  push:
+    branches:
+      - arena/b18a36de-gestor-de-inmuebles-vercel
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reglas-emulador:
+    name: Reglas Firestore (emulador oficial)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Suite de reglas contra el emulador oficial de Firestore
+        id: emulador
+        run: npm run test:emulador:reglas
+
+      - name: Resumen para la pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMERO: ${{ github.event.pull_request.number }}
+          RESULTADO: ${{ steps.emulador.outcome }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const cab = `### Emulador oficial de Firestore: ${process.env.RESULTADO === "success" ? "CORRECTO" : "FALLIDO"}\n\nCommit: \`${process.env.SHA}\`\n`;
+            let cuerpo = cab;
+            try {
+              const r = JSON.parse(fs.readFileSync("emulador-resultados.json", "utf8"));
+              cuerpo += `\nPruebas: ${r.numTotalTests} · correctas: ${r.numPassedTests} · fallidas: ${r.numFailedTests}\n`;
+              const porArchivo = r.testResults.filter((f) => f.status !== "passed" && f.assertionResults.every((a) => a.status !== "failed")).map((f) => `- ARCHIVO ${f.name.split("/").slice(-1)[0]}: ${(f.message || "").replace(/\s+/g, " ").slice(0, 600)}`);
+              if (porArchivo.length) cuerpo += `\nErrores de archivo (preparación):\n${porArchivo.join("\n")}\n`;
+              const fallidas = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status !== "passed").map((a) => {
+                const msg = (a.failureMessages || []).join(" ").replace(/\s+/g, " ").slice(0, 600);
+                return `- ${a.fullName} (${a.status})${msg ? `\n  > ${msg}` : ""}`;
+              }));
+              if (fallidas.length) cuerpo += `\nFallidas:\n${fallidas.join("\n")}\n`;
+            } catch (e) {
+              cuerpo += "\nNo se generó resultado de pruebas (revisar la ejecución del job).\n";
+            }
+            fs.writeFileSync("resumen-emulador.md", cuerpo);
+          '
+          gh pr comment "$PR_NUMERO" --body-file resumen-emulador.md
+
+  verificacion:
+    name: Tipos, suite completa y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Historial completo: algunas pruebas comparan con commits anteriores de las reglas.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tipos (tsc)
+        run: npx tsc --noEmit -p .
+
+      # La guardia A-04 (tests/guardia-a04-rama-sesion.test.ts) verifica la custodia del
+      # checkout de la SESIÓN DE SANDBOX (refs locales `main` y rama). Un checkout limpio de
+      # CI no tiene esas refs, así que esa prueba se ejecuta sólo en local (guardia del sandbox).
+      - name: Suite completa (vitest, sin la guardia A-04 de sandbox)
+        id: suite
+        run: npx vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=default --reporter=json --outputFile.json=vitest-resultados.json
+
+      - name: Resumen de la suite para la pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMERO: ${{ github.event.pull_request.number }}
+          RESULTADO: ${{ steps.suite.outcome }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            let cuerpo = `### Tipos, suite completa: ${process.env.RESULTADO === "success" ? "CORRECTO" : "FALLIDO"}\n\nCommit: \`${process.env.SHA}\`\n`;
+            try {
+              const r = JSON.parse(fs.readFileSync("vitest-resultados.json", "utf8"));
+              cuerpo += `\nArchivos correctos: ${r.testResults.filter((f) => f.status === "passed").length}/${r.testResults.length} · pruebas: ${r.numTotalTests} · correctas: ${r.numPassedTests} · fallidas: ${r.numFailedTests}\n`;
+              const porArchivo = r.testResults.filter((f) => f.status !== "passed" && f.assertionResults.every((a) => a.status !== "failed")).map((f) => `- ARCHIVO ${f.name.split("/").slice(-2).join("/")}: ${(f.message || "").replace(/\s+/g, " ").slice(0, 400)}`);
+              if (porArchivo.length) cuerpo += `\nErrores de archivo:\n${porArchivo.join("\n")}\n`;
+              const fallidas = r.testResults.flatMap((f) => f.assertionResults.filter((a) => a.status === "failed").map((a) => `- ${f.name.split("/").slice(-2).join("/")} > ${a.fullName}\n  > ${(a.failureMessages || []).join(" ").replace(/\s+/g, " ").slice(0, 400)}`));
+              if (fallidas.length) cuerpo += `\nFallidas:\n${fallidas.join("\n")}\n`;
+            } catch (e) {
+              cuerpo += "\nNo se generó resultado de pruebas (revisar la ejecución del job).\n";
+            }
+            fs.writeFileSync("resumen-verificacion.md", cuerpo);
+          '
+          gh pr comment "$PR_NUMERO" --body-file resumen-verificacion.md
+
+      - name: Build
+        run: npm run build

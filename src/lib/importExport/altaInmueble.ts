@@ -99,8 +99,6 @@ const CAMPOS_NUMERICOS_PATRIMONIALES = new Set(['valorAdquisicion', 'valoracionE
  * Se declaran con motivo (nunca en silencio) cuando la fila los trae.
  */
 export const CAMPOS_ALQUILER_NO_ESCRITOS_EN_ALTA: ReadonlyArray<{ campo: string; motivo: string }> = [
-  { campo: 'precio', motivo: 'RENTA (dato de explotación, no del activo): el alta crea el inmueble patrimonial sin precio; se declara en el panel del inmueble (no se inventa una renta)' },
-  { campo: 'rentaMensual', motivo: 'RENTA (dato de explotación, no del activo): el alta crea el inmueble patrimonial sin renta; se declara en el panel del inmueble (no se inventa una renta)' },
   { campo: 'estado', motivo: "ESTADO DE PUBLICACIÓN ('disponible'/'alquilado'): no se deduce del archivo; el alta no publica el inmueble (no se inventa un estado)" },
   { campo: 'inquilinoActualNombre', motivo: 'INQUILINO: exige contrato/candidato documentado; el alta no crea arrendamiento (no se inventa un inquilino)' },
 ];
@@ -146,6 +144,21 @@ export function construirInmueblePatrimonialDestino(
       // (el original queda en el bloque histórico con su motivo).
       if (campo === 'porcentajeSueloCatastral' && v > 100) continue;
       destino[campo] = v;
+    }
+  }
+  // CUOTA DE ALQUILER DECLARADA. Si el archivo trae una cuota con su nombre de
+  // plantilla (`rentaMensualDeclarada`) se usa ésta; si sólo trae la clave del
+  // modelo (`precio`, p. ej. una exportación propia) o `rentaMensual`, esa cifra
+  // se guarda TAMBIÉN como renta declarada. Nunca se escribe `precio` ni
+  // `rentaMensual`: alimentan la ficha pública y la renta vigente (explotación),
+  // y la cuota del archivo no es una publicación ni un contrato.
+  if (destino['rentaMensualDeclarada'] === undefined) {
+    for (const origen of ['precio', 'rentaMensual'] as const) {
+      const v = c[origen];
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+        destino['rentaMensualDeclarada'] = v;
+        break;
+      }
     }
   }
   if (typeof c['fechaRegistroPatrimonial'] === 'string' && c['fechaRegistroPatrimonial'].trim() !== '') {

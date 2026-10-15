@@ -373,9 +373,26 @@ export interface EventoAuditoriaImport {
   motivo?: string;
 }
 
+/**
+ * Estado TRI-STATE de la existencia de un destino (bloque A):
+ *  · EXISTE         — el documento es legible para esta sesión y está ocupado.
+ *  · NO_EXISTE      — la lectura fue autorizada y el documento no está.
+ *  · NO_VERIFICABLE — la lectura fue DENEGADA: no se puede afirmar ni que existe
+ *                     ni que no existe. Las reglas deniegan la lectura de un
+ *                     documento inexistente a quien no es master, así que una
+ *                     denegación NO equivale a «existe» ni a «es ajeno».
+ */
+export type EstadoExistencia = 'EXISTE' | 'NO_EXISTE' | 'NO_VERIFICABLE';
+
 /** Puerto inyectado: el núcleo no conoce Firebase (testeable con fake). */
 export interface PuertoPersistenciaImport {
   existeDestino(coleccion: string, destinoId: string): Promise<boolean>;
+  /**
+   * Versión tri-state de `existeDestino` (opcional por compatibilidad con los
+   * fakes existentes). Si el puerto NO la implementa, el ejecutor usa
+   * `existeDestino` y sólo distingue EXISTE/NO_EXISTE.
+   */
+  estadoDestino?(coleccion: string, destinoId: string): Promise<EstadoExistencia>;
   /** ¿Existe ya el cobro embebido en el contrato? (idempotencia de cobros). */
   existeCobro(contratoId: string, cobroId: string): Promise<boolean>;
   crearGasto(gasto: Gasto): Promise<void>;
@@ -409,7 +426,64 @@ export interface PuertoPersistenciaImport {
     importRunId: string;
     migrationRunId: string;
   }): Promise<void>;
+  /**
+   * Titular (`propietarioId`) del inmueble EXISTENTE, o `null` si no consta o no es
+   * legible para esta sesión. Necesario para completar relaciones pendientes de un
+   * inmueble ya creado: sin este método, esas relaciones NO se escriben (se informan).
+   */
+  propietarioDeInmueble?(inmuebleId: string): Promise<string | null>;
   auditar(evento: EventoAuditoriaImport): Promise<void>;
+}
+
+/**
+ * Completa las titularidades resueltas de un inmueble que YA EXISTE (idempotente).
+ * Sólo escribe si el inmueble existente pertenece al titular de destino del registro:
+ * un inmueble ajeno o no verificable NO se modifica. Devuelve un motivo de FALLIDO
+ * si una relación no pudo completarse (el inmueble existente se conserva intacto).
+ */
+async function completarRelacionesDeExistente(
+  op: { destinoId: string; fingerprint: string; propietarioDestinoId: string; titularidades?: readonly TitularidadResueltaImport[] },
+  p: { puerto: PuertoPersistenciaImport; plan: PlanPromocion },
+  creadas: Array<{ fingerprint: string; propietarioId: string; porcentaje: number | null }>,
+  omitidas: Array<{ fingerprint: string; motivo: string }>,
+): Promise<string | null> {
+  const titulares = op.titularidades ?? [];
+  if (titulares.length === 0) return null;
+  const sinVerificar = 'inmueble ya existente sin verificación de titular; relación no completada';
+  if (!p.puerto.propietarioDeInmueble) {
+    for (const t of titulares) omitidas.push({ fingerprint: op.fingerprint, motivo: `${sinVerificar} (${t.propietarioId})` });
+    return null;
+  }
+  const actual = await p.puerto.propietarioDeInmueble(op.destinoId);
+  if (actual !== op.propietarioDestinoId) {
+    const motivo = actual === null
+      ? sinVerificar
+      : 'inmueble ya existente de otro titular; relación no completada (no se modifica)';
+    for (const t of titulares) omitidas.push({ fingerprint: op.fingerprint, motivo: `${motivo} (${t.propietarioId})` });
+    return null;
+  }
+  for (const t of titulares) {
+    try {
+      if (await p.puerto.existeTitularidad(op.destinoId, t.propietarioId)) {
+        omitidas.push({ fingerprint: op.fingerprint, motivo: `titularidad ya existente (${t.propietarioId}); no se reescribe` });
+        continue;
+      }
+      await p.puerto.crearTitularidad({
+        inmuebleId: op.destinoId,
+        propietarioId: t.propietarioId,
+        porcentajeTitularidad: t.porcentaje,
+        campoOrigen: t.campoOrigen,
+        valorOriginal: t.valorOriginal,
+        importRunId: p.plan.importRunId,
+        migrationRunId: p.plan.migrationRunId,
+      });
+      creadas.push({ fingerprint: op.fingerprint, propietarioId: t.propietarioId, porcentaje: t.porcentaje });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return `inmueble ya existente; relación pendiente no completada (${t.propietarioId}): ${msg}`;
+    }
+  }
+  return null;
 }
 
 export type ResultadoOperacion =
@@ -421,6 +495,11 @@ export interface ResultadoPromocion {
   importRunId: string;
   migrationRunId: string;
   creados: number;
+  /** Desglose de `yaExistentes`: destino existente al que se AÑADIERON relaciones pendientes resueltas. */
+  actualizados: number;
+  /** Desglose de `yaExistentes`: destino existente sin cambios (no se reescribe nada). */
+  omitidos: number;
+  /** Total de destinos ya existentes (= actualizados + omitidos). Se conserva por compatibilidad. */
   yaExistentes: number;
   fallidos: number;
   /** Titularidades creadas por resolución humana explícita (ranura → titular). */
@@ -483,18 +562,34 @@ export async function ejecutarPromocion(p: {
       detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo: 'registro o decisión ausente en ejecución (incoherencia plan/run)' });
       continue;
     }
+    let estadoPrevio: EstadoExistencia = 'NO_EXISTE';
     try {
       const contratoId = op.entidad === 'COBRO' ? contratoIdDeDestinoCobro(op.destinoId) : null;
       if (op.entidad === 'COBRO' && !contratoId) {
         detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo: `destino de cobro no determinista: '${op.destinoId}'` });
         continue;
       }
-      const existe = op.entidad === 'GASTO'
-        ? await p.puerto.existeDestino('gastos', op.destinoId)
-        : op.entidad === 'INMUEBLE'
-          ? await p.puerto.existeDestino('inmuebles', op.destinoId)
-          : await p.puerto.existeCobro(contratoId as string, op.destinoId);
-      if (existe) {
+      const coleccionDestino = op.entidad === 'GASTO' ? 'gastos' : op.entidad === 'INMUEBLE' ? 'inmuebles' : null;
+      if (coleccionDestino) {
+        estadoPrevio = p.puerto.estadoDestino
+          ? await p.puerto.estadoDestino(coleccionDestino, op.destinoId)
+          : (await p.puerto.existeDestino(coleccionDestino, op.destinoId)) ? 'EXISTE' : 'NO_EXISTE';
+      } else {
+        estadoPrevio = (await p.puerto.existeCobro(contratoId as string, op.destinoId)) ? 'EXISTE' : 'NO_EXISTE';
+      }
+      // EXISTE → no se escribe el destino (idempotencia). NO_EXISTE y NO_VERIFICABLE
+      // → la REGLA DE CREACIÓN decide: si el documento no existe se crea; si existe
+      // y no es legible, la escritura (que Firestore evalúa como update, y update ⊆
+      // get en `inmuebles`) se rechaza y el motivo queda etiquetado como
+      // NO_VERIFICABLE. Ninguna rama afirma inexistencia con una lectura denegada.
+      if (estadoPrevio === 'EXISTE') {
+        if (op.entidad === 'INMUEBLE') {
+          const fallo = await completarRelacionesDeExistente(op, p, titularidadesCreadas, titularidadesOmitidas);
+          if (fallo) {
+            detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo: fallo });
+            continue;
+          }
+        }
         detalle.push({ fingerprint: op.fingerprint, resultado: 'YA_EXISTENTE' });
         // Best-effort (auditoría 3ac21a5/D3): si auditar falla, el resultado
         // sobre DATOS sigue siendo YA_EXISTENTE; no se añade un FALLIDO
@@ -515,22 +610,34 @@ export async function ejecutarPromocion(p: {
         await p.puerto.crearInmueble(construirInmueblePatrimonialDestino(r, { fechaHora: p.fechaHora, actor: p.actor }));
         // RELACIONES RESUELTAS: se crean después del inmueble (las Rules exigen
         // que exista) y sólo las que una persona asignó a un titular existente.
+        // Un fallo en una relación NO deshace el inmueble ya creado: el registro
+        // sigue CREADO y la relación queda PENDIENTE con su motivo real (reimportar
+        // el archivo la completa, porque el inmueble ya existe).
         for (const t of op.titularidades ?? []) {
-          const yaExiste = await p.puerto.existeTitularidad(op.destinoId, t.propietarioId);
-          if (yaExiste) {
-            titularidadesOmitidas.push({ fingerprint: op.fingerprint, motivo: `titularidad ya existente (${t.propietarioId}); no se reescribe` });
-            continue;
+          try {
+            const yaExiste = await p.puerto.existeTitularidad(op.destinoId, t.propietarioId);
+            if (yaExiste) {
+              titularidadesOmitidas.push({ fingerprint: op.fingerprint, motivo: `titularidad ya existente (${t.propietarioId}); no se reescribe` });
+              continue;
+            }
+            await p.puerto.crearTitularidad({
+              inmuebleId: op.destinoId,
+              propietarioId: t.propietarioId,
+              porcentajeTitularidad: t.porcentaje,
+              campoOrigen: t.campoOrigen,
+              valorOriginal: t.valorOriginal,
+              importRunId: p.plan.importRunId,
+              migrationRunId: p.plan.migrationRunId,
+            });
+            titularidadesCreadas.push({ fingerprint: op.fingerprint, propietarioId: t.propietarioId, porcentaje: t.porcentaje });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            pendientesPersistidos.push({
+              fingerprint: op.fingerprint,
+              campoOrigen: t.campoOrigen,
+              motivo: `relación con el titular ${t.propietarioId} no creada; el inmueble sí se creó (reimportar completa la relación): ${msg}`,
+            });
           }
-          await p.puerto.crearTitularidad({
-            inmuebleId: op.destinoId,
-            propietarioId: t.propietarioId,
-            porcentajeTitularidad: t.porcentaje,
-            campoOrigen: t.campoOrigen,
-            valorOriginal: t.valorOriginal,
-            importRunId: p.plan.importRunId,
-            migrationRunId: p.plan.migrationRunId,
-          });
-          titularidadesCreadas.push({ fingerprint: op.fingerprint, propietarioId: t.propietarioId, porcentaje: t.porcentaje });
         }
         await escribirPendientes(r, op, p, pendientesPersistidos);
       } else {
@@ -550,7 +657,13 @@ export async function ejecutarPromocion(p: {
         });
       } catch { /* auditoría best-effort */ }
     } catch (e) {
-      const motivo = e instanceof Error ? e.message : String(e);
+      const mensaje = e instanceof Error ? e.message : String(e);
+      // Se conserva el MENSAJE REAL de Firestore. Si la existencia era NO_VERIFICABLE
+      // y la escritura también se rechazó, se etiqueta para que el informe no lo
+      // presente como «inexistente» ni como «sobrescrito»: no hubo escritura.
+      const motivo = estadoPrevio === 'NO_VERIFICABLE'
+        ? `NO_VERIFICABLE (lectura denegada y escritura rechazada; no se sobrescribió): ${mensaje}`
+        : mensaje;
       detalle.push({ fingerprint: op.fingerprint, resultado: 'FALLIDO', motivo });
       try {
         await p.puerto.auditar({
@@ -565,10 +678,15 @@ export async function ejecutarPromocion(p: {
   const creados = detalle.filter((d) => d.resultado === 'CREADO').length;
   const yaExistentes = detalle.filter((d) => d.resultado === 'YA_EXISTENTE').length;
   const fallidos = detalle.filter((d) => d.resultado === 'FALLIDO').length;
+  // Un destino ya existente es «actualizado» sólo si se le añadió alguna relación
+  // pendiente resuelta; si no, queda «omitido» (idempotencia: nada que escribir).
+  const conRelacionAnadida = new Set(titularidadesCreadas.map((t) => t.fingerprint));
+  const actualizados = detalle.filter((d) => d.resultado === 'YA_EXISTENTE' && conRelacionAnadida.has(d.fingerprint)).length;
+  const omitidos = yaExistentes - actualizados;
   const L = [
     `INFORME DE PROMOCIÓN — run ${p.plan.importRunId} / ejecución ${p.plan.migrationRunId}`,
     `operaciones planificadas: ${p.plan.operaciones.length} (excluidas: ${p.plan.excluidas.length}; vinculadas sin escritura: ${p.plan.vinculadasSinEscritura.length})`,
-    `creados: ${creados}; ya existentes (omitidos): ${yaExistentes}; fallidos: ${fallidos}`,
+    `creados: ${creados}; actualizados (relaciones añadidas a inmueble existente): ${actualizados}; omitidos (ya existían sin cambios): ${omitidos}; fallidos: ${fallidos}`,
     `titularidades creadas: ${titularidadesCreadas.length}; ya existentes (omitidas): ${titularidadesOmitidas.length}`,
     `relaciones declaradas PENDIENTES (conservadas en el inmueble, sin inventar): ${pendientesPersistidos.length}`,
   ];
@@ -580,7 +698,7 @@ export async function ejecutarPromocion(p: {
   return {
     importRunId: p.plan.importRunId,
     migrationRunId: p.plan.migrationRunId,
-    creados, yaExistentes, fallidos,
+    creados, actualizados, omitidos, yaExistentes, fallidos,
     titularidadesCreadas, titularidadesOmitidas,
     relacionesPendientes: pendientesPersistidos,
     detalle,

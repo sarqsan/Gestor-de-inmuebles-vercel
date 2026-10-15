@@ -48,6 +48,12 @@ vi.mock('../src/lib/gestionesCarteraServicioFirebase', () => ({
 }));
 
 vi.mock('../src/lib/importExportFirebase', () => ({
+  // Preflight de identidad: espejo canónico coherente con la ficha de sesión (PROPIETARIO prop_A).
+  leerIdentidadCanonicaImport: async () => ({
+    uid: 'uid_sintetico', usuarioId: 'u_sintetico', usuarioEmail: 'sintetico@test.local',
+    usuarioNombre: 'Sintético', master: false, propietarioId: 'prop_A',
+    carterasL: ['prop_A'], carterasE: ['prop_A'],
+  }),
   ambitoAutorizadoDesdeUsuario: () => ({
     propietarioIdsLegibles: ['prop_A'], propietarioIdsEscribibles: ['prop_A'], esMaster: false,
   }),

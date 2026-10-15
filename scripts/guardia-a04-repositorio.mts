@@ -10,8 +10,12 @@
  * (código de salida 0 / 1 / 2 respectivamente).
  *
  * Uso:
- *   npx tsx scripts/guardia-a04-repositorio.mts
- *   npx tsx scripts/guardia-a04-repositorio.mts --rama arena/01a0e939-gestor-de-inmuebles-vercel
+ *   npx tsx scripts/guardia-a04-repositorio.mts                       # rama esperada = sesión
+ *   npx tsx scripts/guardia-a04-repositorio.mts --rama arena/<rama>   # rama esperada explícita
+ *
+ * Rama esperada (sin `--rama`): variable `ARENA_SESSION_BRANCH` si existe; si no,
+ * la rama actual. NUNCA una rama fija: una rama codificada de otra sesión provocaba
+ * BLOCKED falso (incidente A-04 de la sesión b18a36de).
  *
  * NO recupera nada automáticamente: si detecta una anomalía imprime el protocolo
  * manual (docs/BLOQUE-12-REPARACION-INTEGRAL-CIERRE.md §D) y termina sin tocar
@@ -22,7 +26,16 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const RAMA_POR_DEFECTO = 'arena/01a0e939-gestor-de-inmuebles-vercel';
+/** Rama actual del checkout (sólo lectura). */
+const RAMA_ACTUAL = (() => {
+  try {
+    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: RAIZ, encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+})();
+/** Rama esperada por defecto: la de la sesión, o la actual si la sesión no la declara. */
+const RAMA_POR_DEFECTO = (process.env.ARENA_SESSION_BRANCH || '').trim() || RAMA_ACTUAL;
 
 /**
  * Commit histórico de `main` en el momento de la auditoría (sólo se usa si no hay

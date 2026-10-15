@@ -15,7 +15,7 @@
  * Sin cambios en Rules: las escrituras cursan por colecciones existentes con
  * las reglas existentes (master/titular/carterasE). Sin bypass admin.
  */
-import { arrayUnion, doc, getDoc, setDoc, writeBatch } from 'firebase/firestore';
+import { arrayUnion, doc, getDoc, setDoc, writeBatch, type DocumentReference } from 'firebase/firestore';
 import type {
   CobroPeriodo,
   ContratoFormalizacion,
@@ -24,6 +24,7 @@ import type {
   Propietario,
 } from '../types';
 import {
+  auth,
   db,
   deepCleanForFirestore,
   registrarAuditoriaFirestore,
@@ -36,12 +37,15 @@ import {
   type DataAccessScope,
 } from './firebase';
 import { ambitoAutorizadoDesdeUsuario } from './importExport/ambito';
+import type { IdentidadCanonica } from '../features/operaciones/persistence/authorization';
+import { crearTransporteFirebase } from '../features/operaciones/persistence/firebase';
 import type { CatalogosMigracion, ExistenteDestino } from './migracion/tipos';
 import type {
   EventoAuditoriaImport,
   InmueblePatrimonialNuevo,
   PuertoPersistenciaImport,
 } from './importExport/ejecucion';
+import type { EstadoExistencia } from './importExport/ejecucion';
 
 /** Cota anti-cuelgue de lecturas únicas (los suscriptores tragan el error de Rules). */
 export const LECTURA_UNICA_TIMEOUT_MS = 25_000;
@@ -133,18 +137,97 @@ export function catalogosDesdeFuentes(
 /** Reexportado del núcleo puro (D2/D3 intactos; Rules = autorización efectiva). */
 export { ambitoAutorizadoDesdeUsuario };
 
+/**
+ * Identidad CANÓNICA de la sesión para el preflight. Reutiliza el lector canónico
+ * ya existente (`transporte.identidad()` de operaciones: espejo `usuarios_auth/{uid}`
+ * + perfil, proyectados con `proyectarIdentidad`). No añade ningún lector nuevo del
+ * espejo: la lista cerrada de lectores de identidad (fase14) sigue intacta.
+ * Devuelve `null` si no hay espejo (fail-closed: no se escribe).
+ */
+export async function leerIdentidadCanonicaImport(): Promise<IdentidadCanonica | null> {
+  return crearTransporteFirebase(db, auth).identidad();
+}
+
+/** ¿Es un error de permisos de Firestore (SDK o motor)? */
+export function esPermisoDenegado(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  const mensaje = e instanceof Error ? e.message : String(e);
+  return code === 'permission-denied' || /permission-denied|Missing or insufficient permissions/i.test(mensaje);
+}
+
+/**
+ * ¿Existe ya el documento PARA ESTA SESIÓN? (comprobación previa a la escritura).
+ *
+ * CONDICIÓN DEL INCIDENTE «Missing or insufficient permissions.»: las reglas de
+ * `inmuebles`, `gastos` y `titularidades` evalúan `resource.data` en su `get`. Sobre
+ * un documento que NO existe, `resource` es `null` y la evaluación falla: el motor
+ * deniega la lectura incluso a un PROPIETARIO titular del alta. Antes, esa denegación
+ * abortaba el registro antes de intentar la creación legítima.
+ *
+ * Tratamiento: una denegación de lectura significa «no visible para esta sesión»,
+ * NO «existe». La decisión la toma la regla de CREACIÓN, que es la autoridad.
+ *
+ * Por qué no permite sobrescribir un documento existente que no se puede leer:
+ * para `inmuebles`, toda autorización de `update` implica autorización de `get`
+ * (invariante probado en tests/promocion-creacion-inmueble-reglas.test.ts). Si la lectura se deniega,
+ * el `setDoc` posterior sobre un documento existente (que Firestore evalúa como
+ * `update`) también se deniega: el error real queda registrado y nada se sobrescribe.
+ *
+ * Cualquier error que NO sea de permisos se propaga (red, cuota, etc.).
+ */
+export async function consultarExistencia(referencia: DocumentReference): Promise<EstadoExistencia> {
+  try {
+    const snap = await getDoc(referencia);
+    return snap.exists() ? 'EXISTE' : 'NO_EXISTE';
+  } catch (e) {
+    // Denegación de LECTURA ≠ inexistencia: no se puede afirmar ninguna de las dos.
+    if (esPermisoDenegado(e)) return 'NO_VERIFICABLE';
+    throw e;
+  }
+}
+
+/** Compatibilidad booleana: sólo `true` cuando el documento es legible y existe. */
+export async function existeVisible(referencia: DocumentReference): Promise<boolean> {
+  return (await consultarExistencia(referencia)) === 'EXISTE';
+}
+
+/**
+ * Añade `colección/id` al error de una escritura conservando el MENSAJE REAL de
+ * Firestore (sin ocultar la causa). El código de error original se mantiene.
+ */
+export async function conContextoEscritura<T>(
+  coleccion: string,
+  id: string,
+  operacion: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operacion();
+  } catch (e) {
+    const original = e instanceof Error ? e.message : String(e);
+    const nuevo = new Error(`${coleccion}/${id}: ${original}`);
+    const code = (e as { code?: unknown } | null)?.code;
+    if (code !== undefined) Object.assign(nuevo, { code });
+    throw nuevo;
+  }
+}
+
+/** Existencia tri-state de un destino escribible por importación (gastos/inmuebles). */
+async function estadoDestinoImport(coleccion: string, destinoId: string): Promise<EstadoExistencia> {
+  if (coleccion !== 'gastos' && coleccion !== 'inmuebles') {
+    throw new Error(`colección no escribible por importación: '${coleccion}'`);
+  }
+  return consultarExistencia(doc(db, coleccion, destinoId));
+}
+
 /** Puerto real: escrituras por funciones existentes + auditoría best-effort. */
 export function crearPuertoFirebase(
   identidad: { usuarioId: string; usuarioEmail: string; usuarioNombre: string },
 ): PuertoPersistenciaImport {
   return {
     async existeDestino(coleccion: string, destinoId: string): Promise<boolean> {
-      if (coleccion !== 'gastos' && coleccion !== 'inmuebles') {
-        throw new Error(`colección no escribible por importación: '${coleccion}'`);
-      }
-      const snap = await getDoc(doc(db, coleccion, destinoId));
-      return snap.exists();
+      return (await estadoDestinoImport(coleccion, destinoId)) === 'EXISTE';
     },
+    estadoDestino: estadoDestinoImport,
     async existeCobro(contratoId: string, cobroId: string): Promise<boolean> {
       const snap = await getDoc(doc(db, 'contratos_formalizacion', contratoId));
       if (!snap.exists()) return false;
@@ -180,8 +263,10 @@ export function crearPuertoFirebase(
      */
     async crearInmueble(inmueble: InmueblePatrimonialNuevo): Promise<void> {
       const { id, ...campos } = inmueble;
-      await setDoc(doc(db, 'inmuebles', id), { id, ...deepCleanForFirestore(campos) });
-      const verif = await getDoc(doc(db, 'inmuebles', id));
+      await conContextoEscritura('inmuebles', id, () =>
+        setDoc(doc(db, 'inmuebles', id), { id, ...deepCleanForFirestore(campos) }),
+      );
+      const verif = await conContextoEscritura('inmuebles', id, () => getDoc(doc(db, 'inmuebles', id)));
       if (!verif.exists()) {
         throw new Error(`escritura no verificada en 'inmuebles/${id}' (posible denegación de Rules o fallo de red; no se informa CREADO)`);
       }
@@ -191,10 +276,26 @@ export function crearPuertoFirebase(
      * ¿Existe ya la titularidad `{inmuebleId}__{propietarioId}`? Idempotencia de
      * las relaciones: reimportar el mismo archivo no duplica ni reescribe nada.
      */
+    /**
+     * Titular del inmueble existente (`propietarioId`), o `null` si no existe, no
+     * consta o no es legible para esta sesión (denegación = no verificable, nunca
+     * «es mío»). Sólo sirve para decidir si se completan relaciones pendientes.
+     */
+    async propietarioDeInmueble(inmuebleId: string): Promise<string | null> {
+      try {
+        const snap = await getDoc(doc(db, 'inmuebles', inmuebleId));
+        if (!snap.exists()) return null;
+        const propietario = (snap.data() as { propietarioId?: unknown }).propietarioId;
+        return typeof propietario === 'string' && propietario ? propietario : null;
+      } catch (e) {
+        if (esPermisoDenegado(e)) return null;
+        throw e;
+      }
+    },
+
     async existeTitularidad(inmuebleId: string, propietarioId: string): Promise<boolean> {
       const clave = `${inmuebleId}__${propietarioId}`;
-      const snap = await getDoc(doc(db, 'titularidades', clave));
-      return snap.exists();
+      return existeVisible(doc(db, 'titularidades', clave));
     },
 
     /**
@@ -242,8 +343,8 @@ export function crearPuertoFirebase(
         },
       }));
       batch.update(doc(db, 'inmuebles', t.inmuebleId), { titularesIds: arrayUnion(t.propietarioId), updatedAt: ahora });
-      await batch.commit();
-      const verif = await getDoc(doc(db, 'titularidades', clave));
+      await conContextoEscritura('titularidades', clave, () => batch.commit());
+      const verif = await conContextoEscritura('titularidades', clave, () => getDoc(doc(db, 'titularidades', clave)));
       if (!verif.exists()) {
         throw new Error(`escritura no verificada en 'titularidades/${clave}' (posible denegación de Rules; no se informa CREADO)`);
       }

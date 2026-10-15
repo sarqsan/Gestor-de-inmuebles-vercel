@@ -247,8 +247,10 @@ describe('FASE 1.4 · B. El circuito de ownership resuelve contra el espejo (con
     }
     const funciones = funcionesDe(raiz);
     expect(funciones.get('activeUser')!.cuerpo).toContain('perfilActualVeraz()');
-    expect(funciones.get('perfilActualVeraz')!.cuerpo).toContain("me().estado == 'ACTIVO'");
-    expect(funciones.get('perfilActualVeraz')!.cuerpo).toContain('.data.authUid == request.auth.uid');
+    // Tras reducir el coste de evaluación (límite de 1000 expresiones por petición), las
+    // condiciones viven en los helpers que reciben el espejo y el perfil ya leídos.
+    expect(funciones.get('perfilVerazDesde')!.cuerpo).toContain("m.estado == 'ACTIVO'");
+    expect(funciones.get('perfilUsuarioCoincide')!.cuerpo).toContain('u.authUid == request.auth.uid');
     expect(funciones.get('isPropietarioRole')!.cuerpo).toContain('activeUser()');
     expect(funciones.get('myPropId')!.cuerpo).toContain('me().propietarioId');
     expect(funciones.get('myInmuebleIds')!.cuerpo).toContain('me().inmuebleIds');

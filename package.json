@@ -19,6 +19,7 @@
     "test:patrimonial": "node --import tsx --test \"src/features/patrimonial/tests/*.test.mjs\"",
     "test:integracion": "npm run test:operaciones && npm run test:patrimonial",
     "test:emulador:operaciones": "node --import tsx --test src/features/operaciones/tests/emulator/operaciones.emulator.mjs",
+  "test:emulador:reglas": "npx --yes firebase-tools@15.33.0 emulators:exec --only auth,firestore --project demo-gestor-reglas \"npx vitest run --config vitest.emulador.config.ts --reporter=default --reporter=json --outputFile.json=emulador-resultados.json\"",
   "auditoria:repositorio": "tsx scripts/guardia-a04-repositorio.mts",
   "auditoria:reglas:matriz": "tsx scripts/diagnostico-b12-list.mts",
   "auditoria:reglas:list": "tsx scripts/auditoria-reglas-list.mts",
@@ -40,6 +41,7 @@
     "vite": "^6.2.3"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/express": "^4.17.21",

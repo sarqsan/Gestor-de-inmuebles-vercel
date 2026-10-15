@@ -408,8 +408,17 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
 
   it('§1 escrituras INTACTAS (create/update/delete sin cambios R3)', () => {
     const b = bloqueFs(INM);
-    expect(b).toContain('allow create: if isMasterAdmin() || (');
-    expect(b).toContain("'propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId()");
+    // COPROPIEDAD (B, decisión revisada): el alta de titular ya no es la vía
+    // «principal propio sobre un propietarioId ajeno» (revocada). El create
+    // exige que el principal esté en el ámbito de escritura. Se acota al bloque
+    // `create` para no confundirlo con la función homónima del `update`.
+    // Sólo la sentencia `allow create` (hasta su `);`): las funciones del bloque van después.
+    const inicioCreate = b.indexOf('allow create');
+    const create = b.slice(inicioCreate, b.indexOf(');', inicioCreate) + 2);
+    expect(b).toContain('allow create: if isMasterAdmin() || altaPropietarioPropia() || (');
+    expect(create).not.toContain("'propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId()");
+    expect(b).toContain('function altaPropietarioPropia()');
+    expect(b).toContain('pidEnAmbitoEscritura(incoming().propietarioPrincipalId)');
     // D2b: la escritura sólo añade carterasE (S7); titularidad y
     // canReachInmuebleId intactos, delete sigue siendo sólo master.
     // FASE 8A (delta-C titularidad, cambio ordenado y probado en

@@ -48,12 +48,14 @@ import {
   verificarBarrera,
 } from '../../lib/importExport/promocion';
 import { ejecutarPromocion, planificarPromocion } from '../../lib/importExport/ejecucion';
+import { evaluarPreflightIdentidadImport } from '../../lib/importExport/preflight';
 import type { ResolucionTitularImport } from '../../lib/importExport/titularidadImportacion';
 import {
   ambitoAutorizadoDesdeUsuario,
   cargarFuentesCatalogo,
   catalogosDesdeFuentes,
   crearPuertoFirebase,
+  leerIdentidadCanonicaImport,
   type FuentesCatalogo,
 } from '../../lib/importExportFirebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
@@ -430,6 +432,18 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
         autorizacion, run, canonicalBatchSha256: fichero.hash, explicitExecutionToken: token,
         seleccionFingerprints: seleccion, decisiones, ambito,
       });
+      // PREFLIGHT DE IDENTIDAD (antes de escribir nada): espejo canónico de la sesión
+      // frente a la ficha y a los titulares de destino. El selector de titular NO
+      // concede permisos: sólo cuentan el titular propio, `carterasE` o master.
+      const identidadCanonica = auth.currentUser ? await leerIdentidadCanonicaImport() : null;
+      const preflight = evaluarPreflightIdentidadImport({
+        identidad: identidadCanonica,
+        ficha: usuarioEf,
+        destinos: plan.operaciones.map((o) => o.propietarioDestinoId),
+      });
+      if (!preflight.pasa) {
+        throw new Error(`preflight de identidad (no se ha escrito nada): ${preflight.motivos.join(' | ')}`);
+      }
       const puerto = crearPuertoFirebase(identidad);
       const res = await ejecutarPromocion({
         plan, run, decisiones, puerto, actor: identidad.usuarioId, fechaHora: new Date().toISOString(),
@@ -986,7 +1000,16 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
                   </button>
                   {!identidad && <p className="text-amber-700 font-semibold">Promoción desactivada: sin identidad de actor (falta `usuario`). El dry-run sí está disponible.</p>}
                   {resultadoPromo && (
-                    <pre className="whitespace-pre-wrap max-h-48 overflow-auto bg-slate-900 text-emerald-200 p-3 rounded-xl text-[11px] font-mono">{resultadoPromo.informe}</pre>
+                    <div className="space-y-2" data-testid="resumen-promocion">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                        <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-2"><p className="text-[11px] font-bold uppercase text-emerald-700">Creados</p><p className="text-lg font-black text-emerald-800">{resultadoPromo.creados}</p></div>
+                        <div className="rounded-xl bg-sky-50 border border-sky-200 p-2"><p className="text-[11px] font-bold uppercase text-sky-700">Actualizados</p><p className="text-lg font-black text-sky-800">{resultadoPromo.actualizados}</p></div>
+                        <div className="rounded-xl bg-slate-50 border border-slate-200 p-2"><p className="text-[11px] font-bold uppercase text-slate-600">Omitidos</p><p className="text-lg font-black text-slate-800">{resultadoPromo.omitidos}</p></div>
+                        <div className="rounded-xl bg-rose-50 border border-rose-200 p-2"><p className="text-[11px] font-bold uppercase text-rose-700">Fallidos</p><p className="text-lg font-black text-rose-800">{resultadoPromo.fallidos}</p></div>
+                      </div>
+                      <p className="text-[11px] text-slate-600">Creados: registros nuevos. Actualizados: inmuebles ya existentes a los que se añadieron relaciones pendientes. Omitidos: ya existían sin cambios (no se sobrescribe nada). Fallidos: no escritos; el motivo figura en el informe.</p>
+                      <pre className="whitespace-pre-wrap max-h-48 overflow-auto bg-slate-900 text-emerald-200 p-3 rounded-xl text-[11px] font-mono">{resultadoPromo.informe}</pre>
+                    </div>
                   )}
                 </div>
               )}

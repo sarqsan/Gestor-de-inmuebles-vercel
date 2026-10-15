@@ -501,14 +501,22 @@ service cloud.firestore {
     // E: la ausencia de perfil NO convierte a un Auth recién creado en staff.
     // El espejo apunta a la ficha autoritativa, cuyo UID/estado/tipo deben
     // concordar. El inquilino puede tener usuarioId distinto del Auth UID.
+    // Mismas condiciones que la versión anterior (espejo ACTIVO, perfil ACTIVO con el
+    // mismo UID y tipo). Cada documento se lee UNA vez y se pasa como parámetro: el motor
+    // limita las expresiones evaluadas por petición (1000), y repetir `me()`/`get()` en
+    // cada llamada agotaba ese presupuesto y denegaba operaciones legítimas.
     function perfilActualVeraz() {
       return isSignedIn() && exists(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid))
-        && isValidId(me().usuarioId)
-        && exists(/databases/$(database)/documents/usuarios/$(me().usuarioId))
-        && me().estado == 'ACTIVO'
-        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.authUid == request.auth.uid
-        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.estado == 'ACTIVO'
-        && get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.tipoPerfil == me().tipoPerfil;
+        && perfilVerazDesde(get(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid)).data);
+    }
+    function perfilVerazDesde(m) {
+      return isValidId(m.usuarioId)
+        && exists(/databases/$(database)/documents/usuarios/$(m.usuarioId))
+        && m.estado == 'ACTIVO'
+        && perfilUsuarioCoincide(get(/databases/$(database)/documents/usuarios/$(m.usuarioId)).data, m);
+    }
+    function perfilUsuarioCoincide(u, m) {
+      return u.authUid == request.auth.uid && u.estado == 'ACTIVO' && u.tipoPerfil == m.tipoPerfil;
     }
     function isTenant() {
       return isSignedIn() && !isMasterAdmin() &&
@@ -669,30 +677,37 @@ service cloud.firestore {
             && n.estado == e.estado && n.eventos == e.eventos
             && n.diff(e).affectedKeys().hasOnly(['resolucionInvitacion','roadmap01AuditId'])));
     }
+    // Gestión indexada del espejo: UNA lectura de `gestiones_cartera/{id}` por función y el
+    // mismo predicado que antes (titular, gestor, ACTIVA, sin delegación parcial, ACEPTADA).
+    // Repetir el get en cada condición agotaba el presupuesto de 1000 expresiones por petición.
+    function gestionIndexadaActivaCompleta(pid, g) {
+      return g.propietarioId == pid && g.gestorUsuarioId == me().usuarioId
+        && g.estado == 'ACTIVA' && g.inmuebleIds.size() == 0 && g.resolucionInvitacion == 'ACEPTADA';
+    }
+    function gestionIndexadaEscritura(pid, g) {
+      return gestionIndexadaActivaCompleta(pid, g) && g.permiso == 'LECTURA_ESCRITURA'
+        && g.responsableActual == 'GESTOR';
+    }
     function gestionActivaCompletaIndexada(pid) {
       return activeUser() && 'gestionesPorPropietario' in me()
         && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.propietarioId == pid
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.gestorUsuarioId == me().usuarioId
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.estado == 'ACTIVA'
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.inmuebleIds.size() == 0
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.resolucionInvitacion == 'ACEPTADA';
+        && gestionIndexadaActivaCompleta(pid, get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data);
     }
     function gestionCompletaEscrituraIndexada(pid) {
-      let g = get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data;
-      return gestionActivaCompletaIndexada(pid) && g.permiso == 'LECTURA_ESCRITURA'
-        && g.responsableActual == 'GESTOR';
+      return activeUser() && 'gestionesPorPropietario' in me()
+        && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
+        && gestionIndexadaEscritura(pid, get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data);
+    }
+    function inmuebleParcialIndexadoG(pid, inmId, escritura, g) {
+      return g.propietarioId == pid && g.gestorUsuarioId == me().usuarioId
+        && g.estado == 'ACTIVA' && g.resolucionInvitacion == 'ACEPTADA'
+        && inmId in g.inmuebleIds
+        && (!escritura || (g.permiso == 'LECTURA_ESCRITURA' && g.responsableActual == 'GESTOR'));
     }
     function inmuebleParcialIndexado(pid, inmId, escritura) {
       return activeUser() && 'gestionesPorPropietario' in me()
         && me().gestionesPorPropietario is map && pid in me().gestionesPorPropietario
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.propietarioId == pid
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.gestorUsuarioId == me().usuarioId
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.estado == 'ACTIVA'
-        && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.resolucionInvitacion == 'ACEPTADA'
-        && inmId in get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.inmuebleIds
-        && (!escritura || (get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.permiso == 'LECTURA_ESCRITURA'
-          && get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data.responsableActual == 'GESTOR'));
+        && inmuebleParcialIndexadoG(pid, inmId, escritura, get(/databases/$(database)/documents/gestiones_cartera/$(me().gestionesPorPropietario[pid])).data);
     }
 
     // La cuenta INQUILINO solo nace de una invitación activa vinculada a su contrato.
@@ -947,11 +962,35 @@ service cloud.firestore {
         || (isPropietarioRole() && myPropId() in resource.data.titularesIds)
         || inmuebleEnCarteraGestionada(resource.data);
 
-      allow create: if isMasterAdmin() || (
-        isPropietarioRole() && (
-          ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ||
-          ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId())
-        )
+      // CREACIÓN (importación / alta). Tres vías, ninguna por el selector de la UI:
+      //  1. master;
+      //  2. titular o copropietario principal propio (PROPIETARIO);
+      //  3. CARTERA DELEGADA con escritura (PROMOCIÓN, prueba en
+      //     tests/promocion-creacion-inmueble-reglas.test.ts): el mismo predicado
+      //     que el `update` (`inmuebleEnCarteraEscritura`: gestión ACTIVA +
+      //     LECTURA_ESCRITURA + responsable GESTOR, o `carterasE` del espejo).
+      //     Restricciones: una sola cartera (propietarioId), sin segundo titular
+      //     (propietarioPrincipalId, si existe, igual a propietarioId) y sin
+      //     declarar cotitulares (titularesIds). Ni lectura, ni delegación parcial,
+      //     ni administración amplían la creación.
+      // POLÍTICA DE COPROPIEDAD (B): un titular sólo CREA inmuebles de los que es
+      // titular canónico (`propietarioId == myPropId()`). Principal, secundario y
+      // cotitulares deben estar en su ámbito de escritura (él mismo o carteras E).
+      // Ya NO se admite crear con `propietarioPrincipalId` propio sobre un
+      // `propietarioId` ajeno (asignarse principal de un inmueble ajeno).
+      // ÍNDICE `titularesIds`: APLAZADO (decisión del titular). Se mantiene el
+      // comportamiento de HEAD: la UI escribe titulares de ámbito (tit_…) en el
+      // índice. Lo que sí se restringe aquí es el principal (ámbito propio).
+      function altaPropietarioPropia() {
+        return isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
+          && (!('propietarioPrincipalId' in incoming()) || pidEnAmbitoEscritura(incoming().propietarioPrincipalId));
+      }
+      allow create: if isMasterAdmin() || altaPropietarioPropia() || (
+        activeUser()
+        && 'propietarioId' in incoming() && incoming().propietarioId is string
+        && inmuebleEnCarteraEscritura(incoming())
+        && (!('propietarioPrincipalId' in incoming()) || incoming().propietarioPrincipalId == incoming().propietarioId)
+        && !('titularesIds' in incoming())
       );
       // DELTA-C (titularidad, FASE 8A): defensa adaptada de C (que congela
       // propietarioPrincipalId/propietarioSecundarioId en todo update no-master).
@@ -968,13 +1007,32 @@ service cloud.firestore {
           && (('propietarioPrincipalId' in existing() ? existing().propietarioPrincipalId : '') == ('propietarioPrincipalId' in incoming() ? incoming().propietarioPrincipalId : ''))
           && (('propietarioSecundarioId' in existing() ? existing().propietarioSecundarioId : '') == ('propietarioSecundarioId' in incoming() ? incoming().propietarioSecundarioId : ''));
       }
+      // Principal no canónico: puede seguir siéndolo (o mover datos fiscales), nunca
+      // fijar el canónico ni transmitir. (Rama HEAD restringida a no canónicos.)
+      function sigoSiendoTitular() {
+        return ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
+          || ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId());
+      }
       function soyTitularActual() {
         return ('propietarioId' in existing() && existing().propietarioId == myPropId())
           || ('propietarioPrincipalId' in existing() && existing().propietarioPrincipalId == myPropId());
       }
-      function sigoSiendoTitular() {
-        return ('propietarioId' in incoming() && incoming().propietarioId == myPropId())
-          || ('propietarioPrincipalId' in incoming() && incoming().propietarioPrincipalId == myPropId());
+      // Sólo el titular CANÓNICO puede ampliar o redefinir la titularidad. El
+      // principal no canónico NO la altera (antes podía fijarse a sí mismo y
+      // abrir la puerta a terceros).
+      function soyCanonicoActual() {
+        return 'propietarioId' in existing() && existing().propietarioId == myPropId();
+      }
+      // Cotitulares/principal nuevos: sólo titulares de mi ámbito de escritura
+      // (carteras E o yo mismo). Quitar titulares siempre es posible. El
+      // `propietarioSecundarioId` es dato fiscal que NO concede acceso (ver
+      // DELTA-C): no se restringe aquí.
+      // Principal nuevo: sólo uno de mi ámbito de escritura (o el que ya tenía).
+      // El índice `titularesIds` queda APLAZADO (ver altaPropietarioPropia).
+      function titularesNuevosEnAmbito() {
+        return !('propietarioPrincipalId' in incoming())
+          || incoming().propietarioPrincipalId == ('propietarioPrincipalId' in existing() ? existing().propietarioPrincipalId : '')
+          || pidEnAmbitoEscritura(incoming().propietarioPrincipalId);
       }
       // D2 (§2 — titularidad jurídica ≠ gestión): el propietarioId económico
       // es el identificador canónico del ámbito. Ninguna rama no-master puede
@@ -996,7 +1054,8 @@ service cloud.firestore {
           && (!('gestionesPorPropietario' in me()) || mismoCampoOpcional('contratoActivoId')))
         || (inmuebleParcialIndexado(existing().propietarioId, inmuebleId, true) && titularidadInalterada()
           && (('contratoActivoId' in existing() ? existing().contratoActivoId : '') == ('contratoActivoId' in incoming() ? incoming().contratoActivoId : '')))
-        || (isPropietarioRole() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))
+        || (isPropietarioRole() && !soyCanonicoActual() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular()))
+        || (isPropietarioRole() && soyCanonicoActual() && propietarioCanonicoInalterado() && titularesNuevosEnAmbito())
         || (isPropietarioRole() && canReachInmuebleId(inmuebleId) && titularidadInalterada());
       allow delete: if isMasterAdmin();
 
@@ -1209,8 +1268,23 @@ service cloud.firestore {
       // por el índice `titularesIds` de cada inmueble y se leen una a una.
       allow list: if false;
 
+      // Asignar un titular exige que esté en el ámbito de escritura de quien
+      // escribe (o que lo haga el master/administración). Sin esto, cualquier
+      // titular con un inmueble propio podía registrar a un tercero.
+      // Titular de ÁMBITO (ficha `propietarios/tit_…` con `ambitoPropietarioId` = yo):
+      // la autoridad es por DOCUMENTO (get de una ruta fija por titularidad). Sin ficha
+      // propia no hay titularidad asignable.
+      function titularDeAmbitoPropio(pid) {
+        return isPropietarioRole() && pid is string && pid.matches('^tit_[a-z0-9]{8,48}$')
+          && exists(/databases/$(database)/documents/propietarios/$(pid))
+          && get(/databases/$(database)/documents/propietarios/$(pid)).data.ambitoPropietarioId == myPropId();
+      }
+      function titularAsignableEnAmbito(pid) {
+        return esAdminInmuebles() || (pid is string && (pidEnAmbitoEscritura(pid) || titularDeAmbitoPropio(pid)));
+      }
       allow create: if puedoEscribirTitularidadDe(incoming().inmuebleId)
         && claveCoherente(incoming()) && estadoValido(incoming())
+        && titularAsignableEnAmbito(incoming().propietarioId)
         && porcentajeValido(incoming()) && cierreBienFormado(incoming());
 
       allow update: if puedoEscribirTitularidadDe(existing().inmuebleId)

@@ -180,7 +180,12 @@ describe('D2 · A — Titularidad del inmueble', () => {
   });
   it('A7 · create/delete de inmuebles intactos (titular crea lo propio; solo master borra)', () => {
     expect(op('inmuebles', 'create', 'propA', null, { id: 'n', propietarioId: 'prop_A' }, 'n')).toBe(true);
-    expect(op('inmuebles', 'create', 'gestorE', null, { id: 'n', propietarioId: 'prop_A' }, 'n')).toBe(false);
+    // Promoción: el gestor con cartera de ESCRITURA crea sólo en esa cartera, sin
+    // segundo titular ni cotitulares (mismo predicado que su `update`).
+    expect(op('inmuebles', 'create', 'gestorE', null, { id: 'n', propietarioId: 'prop_A' }, 'n')).toBe(true);
+    expect(op('inmuebles', 'create', 'gestorE', null, { id: 'n', propietarioId: 'prop_B' }, 'n')).toBe(false);
+    expect(op('inmuebles', 'create', 'gestorE', null, { id: 'n', propietarioId: 'prop_A', titularesIds: ['prop_X'] }, 'n')).toBe(false);
+    expect(op('inmuebles', 'create', 'gestorE', null, { id: 'n', propietarioId: 'prop_A', propietarioPrincipalId: 'prop_X' }, 'n')).toBe(false);
     expect(op('inmuebles', 'delete', 'propA', INM_A, null, 'inm_A')).toBe(false);
     expect(op('inmuebles', 'delete', 'gestorE', INM_A, null, 'inm_A')).toBe(false);
     expect(op('inmuebles', 'delete', 'master', INM_A, null, 'inm_A')).toBe(true);

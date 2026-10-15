@@ -164,22 +164,26 @@ describe('Carteras · diagnóstico — pines sobre el texto de firestore.rules',
   const funciones = EVAL.funcionesDe(EVAL.cuerpoRaiz());
   const cuerpo = (nombre: string) => norm(funciones.get(nombre)?.cuerpo ?? '');
 
-  it('perfilActualVeraz() exige exactamente los términos que reproduce el diagnóstico', () => {
-    const c = cuerpo('perfilActualVeraz');
+  it('perfilActualVeraz() y sus helpers exigen exactamente los términos que reproduce el diagnóstico', () => {
+    // Tras reducir el coste de evaluación (límite de 1000 expresiones por petición), el espejo y
+    // el perfil se leen una vez y las mismas ocho comprobaciones se reparten entre los helpers.
+    const partes = [cuerpo('perfilActualVeraz'), cuerpo('perfilVerazDesde'), cuerpo('perfilUsuarioCoincide')];
+    const c = partes.join(' ');
     for (const termino of [
       'isSignedIn()',
       'exists(/databases/$(database)/documents/usuarios_auth/$(request.auth.uid))',
-      'isValidId(me().usuarioId)',
-      'exists(/databases/$(database)/documents/usuarios/$(me().usuarioId))',
-      "me().estado == 'ACTIVO'",
-      'get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.authUid == request.auth.uid',
-      "get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.estado == 'ACTIVO'",
-      'get(/databases/$(database)/documents/usuarios/$(me().usuarioId)).data.tipoPerfil == me().tipoPerfil',
+      'isValidId(m.usuarioId)',
+      'exists(/databases/$(database)/documents/usuarios/$(m.usuarioId))',
+      "m.estado == 'ACTIVO'",
+      'get(/databases/$(database)/documents/usuarios/$(m.usuarioId)).data',
+      'u.authUid == request.auth.uid',
+      "u.estado == 'ACTIVO'",
+      'u.tipoPerfil == m.tipoPerfil',
     ]) {
-      expect(c, `perfilActualVeraz ya no contiene: ${termino}`).toContain(termino);
+      expect(c, `perfil veraz ya no contiene: ${termino}`).toContain(termino);
     }
-    // Y nada más: ocho términos, ocho comprobaciones.
-    expect(c.split('&&').length).toBe(8);
+    // Y nada más: ocho términos, ocho comprobaciones (siete operadores «&&» en total).
+    expect(partes.map((p) => p.split('&&').length - 1).reduce((a, b) => a + b, 0)).toBe(7);
   });
 
   it("gestionInvolucraAMi() autoriza al gestor por `gestorUsuarioId == me().usuarioId` y al titular por `propietarioId`", () => {

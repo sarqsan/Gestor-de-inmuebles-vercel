@@ -143,7 +143,9 @@ describe('defensa del middleware y configuración válida', () => {
       const deps = crearDependenciasNucleoIA({ VERCEL: '1' });
       expect(deps.errorConfiguracion).toBeUndefined();
       expect(deps.configuracion).toMatchObject({ proyectoId: config.projectId, baseDatosId: config.firestoreDatabaseId, modoRegistro: 'FIRESTORE' });
-      expect(crearNucleoIA(deps).estado()).toEqual({ registro: 'FIRESTORE', gobierno: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 });
+      // Sin IA_POLITICA_JSON la política es POR_DEFECTO ⇒ aprobación comercial
+      // pendiente ⇒ el estado expone el bloqueo preventivo (503 en operaciones).
+      expect(crearNucleoIA(deps).estado()).toEqual({ registro: 'FIRESTORE', gobierno: 'FIRESTORE', bloqueoComercial: 'APROBACION_PENDIENTE', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 });
     } finally {
       spy.mockRestore();
     }

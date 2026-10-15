@@ -79,7 +79,12 @@ function perfilFijo(gobierno: GobiernoMemoriaIA, uid: string, tipoPerfil: string
 }
 
 async function montar(opciones: OpcionesMontaje = {}) {
-  const resultadoPolitica = politica(opciones.politica);
+  // Desde el bloqueo preventivo, operar exige política aprobada (ENTORNO con
+  // tarifas). El fixture por defecto define una tarifa en ESTIMAR_PRICING —una
+  // operación que estos tests no ejercen— para que REDACTAR_CLAUSULA siga
+  // costando 0 y los saldos de prueba no cambien. Los escenarios con aprobación
+  // PENDIENTE (bloqueo 503) se cubren en ia-fase2-bloqueo-consumo.test.ts.
+  const resultadoPolitica = politica(opciones.politica ?? { costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } });
   if (resultadoPolitica.estado !== 'VALIDA') throw new Error('política de prueba inválida');
   const registro = opciones.registro ?? crearRegistroMemoria();
   const gobierno = opciones.gobierno === undefined
@@ -175,7 +180,7 @@ describe('IA Fase 2 · perfil veraz (fuente de identidad autorizada)', () => {
 
 describe('IA Fase 2 · permisos por rol y operación', () => {
   it('perfil sin permiso para la operación → 403 OPERACION_NO_PERMITIDA antes del proveedor', async () => {
-    const m = await montar({ politica: { permisos: { INQUILINO: ['ANALIZAR_INCIDENCIA'] } } });
+    const m = await montar({ politica: { permisos: { INQUILINO: ['ANALIZAR_INCIDENCIA'] }, costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } } });
     perfilFijo(m.gobierno, 'uid-ana', 'INQUILINO');
     const r = await m.llamar(m.autenticado());
     expect(r.status).toBe(403);
@@ -186,7 +191,7 @@ describe('IA Fase 2 · permisos por rol y operación', () => {
   });
 
   it('perfil con permiso explícito → 200; la política por defecto permite todo (Fase 1)', async () => {
-    const m = await montar({ politica: { permisos: { PROPIETARIO: ['REDACTAR_CLAUSULA'] } } });
+    const m = await montar({ politica: { permisos: { PROPIETARIO: ['REDACTAR_CLAUSULA'] }, costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } } });
     perfilFijo(m.gobierno, 'uid-ana', 'PROPIETARIO');
     expect((await m.llamar(m.autenticado())).status).toBe(200);
     const m2 = await montar();
@@ -232,7 +237,7 @@ describe('IA Fase 2 · saldo, costes y consumo coherente', () => {
     expect(registro.creditosReembolsados).toBeUndefined();
   });
 
-  it('sin política comercial (coste 0 por defecto) NO hace falta saldo: Fase 1 intacta', async () => {
+  it('operación con coste 0 bajo política aprobada NO exige saldo', async () => {
     const m = await montar();
     perfilFijo(m.gobierno, 'uid-ana', 'PROPIETARIO');
     const r = await m.llamar(m.autenticado());
@@ -263,7 +268,7 @@ describe('IA Fase 2 · saldo, costes y consumo coherente', () => {
 
 describe('IA Fase 2 · cuotas por usuario (ventanas UTC)', () => {
   it('cuota diaria: la tercera operación del día se rechaza con 429 CUOTA_DIA_EXCEDIDA', async () => {
-    const m = await montar({ politica: { cuotas: { operacionesPorDia: 2 } } });
+    const m = await montar({ politica: { cuotas: { operacionesPorDia: 2 }, costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } } });
     perfilFijo(m.gobierno, 'uid-ana', 'PROPIETARIO');
     expect((await m.llamar(m.autenticado('token-ana', 'clave-dia-1'))).status).toBe(200);
     expect((await m.llamar(m.autenticado('token-ana', 'clave-dia-2'))).status).toBe(200);
@@ -277,7 +282,7 @@ describe('IA Fase 2 · cuotas por usuario (ventanas UTC)', () => {
   });
 
   it('cuota mensual: límite 1 ⇒ la segunda del mes se rechaza con 429 CUOTA_MES_EXCEDIDA', async () => {
-    const m = await montar({ politica: { cuotas: { operacionesPorMes: 1 } } });
+    const m = await montar({ politica: { cuotas: { operacionesPorMes: 1 }, costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } } });
     perfilFijo(m.gobierno, 'uid-ana', 'PROPIETARIO');
     expect((await m.llamar(m.autenticado('token-ana', 'clave-mes-1'))).status).toBe(200);
     const r = await m.llamar(m.autenticado('token-ana', 'clave-mes-2'));

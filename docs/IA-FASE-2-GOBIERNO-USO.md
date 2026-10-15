@@ -14,6 +14,15 @@ es, siempre que exista registro duradero de operaciones (credencial de
 servicio)— cada petición pasa por estas puertas, en este orden, antes de
 crearse el cliente del proveedor:
 
+0. **Bloqueo preventivo de aprobación comercial.** Si la política vigente
+   está PENDIENTE de aprobación (origen `POR_DEFECTO` —sin
+   `IA_POLITICA_JSON`— o sin ninguna tarifa definida), TODA operación se
+   rechaza con 503 `APROBACION_COMERCIAL_PENDIENTE` antes de autenticar,
+   reservar o crear el cliente del proveedor. Ni coste 0, ni saldo, ni
+   cuotas indefinidas, ni la presencia de `GEMINI_API_KEY` activan el
+   consumo: la aprobación sólo llega por una política válida con tarifas
+   configurada en servidor. Las rutas de administración siguen operativas
+   durante el bloqueo (consultan y gestionan sin tocar al proveedor).
 1. **Perfil veraz.** `gobierno.perfilVeraz(uid)` lee el espejo de identidad
    `usuarios_auth/{uid}` y la ficha `usuarios/{usuarioId}` (la misma fuente
    autorizada de la Fase 1). El uid sale del token verificado; el espejo y la
@@ -78,6 +87,11 @@ sustituye al por defecto):
   rechaza y todas las operaciones de IA responden 503
   `POLITICA_IA_INVALIDA`. Nunca hay respaldo permisivo con una política
   mal configurada.
+- **Bloqueo preventivo:** sin la variable (o sin tarifas definidas) la
+  política es `POR_DEFECTO` y el consumo queda **bloqueado** (503
+  `APROBACION_COMERCIAL_PENDIENTE`) hasta que se configure una política
+  aprobada. Activar el servicio exige, en este orden: política con tarifas
+  en `IA_POLITICA_JSON` → credencial de servicio en Vercel → redeploy.
 
 ## 4. Concurrencia y reserva (CAS por `updateTime`)
 
@@ -100,6 +114,7 @@ sustituye al por defecto):
 | `PERFIL_NO_ENCONTRADO`, `USUARIO_NO_ACTIVO`, `PERFIL_INCOHERENTE`, `OPERACION_NO_PERMITIDA`, `CUENTA_BLOQUEADA` | 403 |
 | `SALDO_INSUFICIENTE` | 402 |
 | `CUOTA_DIA_EXCEDIDA`, `CUOTA_MES_EXCEDIDA` | 429 |
+| `APROBACION_COMERCIAL_PENDIENTE` (bloqueo preventivo) | 503 |
 | `GOBIERNO_NO_DISPONIBLE`, `POLITICA_IA_INVALIDA` | 503 |
 
 Un rechazo del gobierno **gasta la clave de idempotencia**: la operación se
@@ -114,6 +129,17 @@ heurístico por falta de `GEMINI_API_KEY`, o error del proveedor), los créditos
 reservados se devuelven a la cuenta con el mismo CAS, dentro de la misma
 ventana: saldo y contadores quedan como antes del uso. El registro queda
 cerrado con `creditosReembolsados`.
+
+## 6bis. Créditos internos y facturación real del proveedor
+
+Los créditos, costes y cuotas de este gobierno son **controles internos de
+la aplicación** (quién puede usar la IA y cuántas veces): NO son un límite
+automático de la facturación de Gemini. La cuenta de Google Cloud del
+proveedor factura por llamadas y tokens con independencia de los créditos
+internos; si se necesita un tope económico real, debe aplicarse en el lado
+del proveedor (presupuestos/cuotas de la API en Google Cloud), que queda
+fuera del control de esta aplicación. El bloqueo preventivo de aprobación
+comercial es la salvaguarda mientras no exista política aprobada.
 
 ## 7. Rutas de administración (guardia ADMINISTRADOR veraz)
 
@@ -158,11 +184,13 @@ Firestore REST y tokens firmados localmente):
 | Suite | Pruebas | Qué cubre |
 | --- | --- | --- |
 | `tests/ia-fase2-politica.test.ts` | 11 | contrato y validación de la política (permisos, costes, cuotas, límites) |
-| `tests/ia-fase2-gobierno.test.ts` | 21 | gobierno en memoria: perfil veraz, reserva, reembolso, ajustes, auditoría |
+| `tests/ia-fase2-gobierno.test.ts` | 21 | gobierno en memoria: perfil veraz, reserva, reembolso, ajustes, auditoría (fixture con política aprobada) |
+| `tests/ia-fase2-bloqueo-consumo.test.ts` | 9 | bloqueo preventivo: pendiente ⇒ 503 sin proveedor; manipulaciones; Gemini solo no activa; admin operativa sin consumo; estado refleja el bloqueo |
+| `tests/ia-fase2-aislamiento-usuarios.test.ts` | 10 | aislamiento por usuario: saldos A/B independientes, suplantación, reembolso al propietario, cuotas por usuario, concurrencia sin sobregiro |
 | `tests/ia-fase2-gobierno-firestore.test.ts` | 19 | gobierno sobre Firestore REST falso: CAS, carreras, ventanas, reglas, privacidad de ajustes |
 | `tests/ia-fase2-admin.test.ts` | 11 | rutas de administración HTTP reales: guardia, resumen, cuenta, bloqueo/crédito, idempotencia, concurrencia, cableado |
 | `src/components/ia/PanelGobiernoIA.test.tsx` | 6 | panel: consulta, presentación accesible de errores/éxitos, envío con cabeceras correctas |
-| Fase 1 (5 suites) | 106 | se re-ejecutan íntegras: el núcleo, el registro y el arranque seguro siguen verdes |
+| Fase 1 (5 suites) | 106 | se re-ejecutan íntegras: el núcleo, el registro y el arranque seguro siguen verdes (la matriz ESM usa política aprobada y siembra cuentas) |
 
 Los tests de Fase 1 se actualizaron sólo de forma aditiva: `/api/health`
 incluye ahora el campo `gobierno` y el mini-Firestore de la matriz funcional

@@ -47,6 +47,15 @@
  * se reembolsan si la operación cierra sin ninguna llamada exitosa al
  * proveedor. Sin gobierno (modo NO_CONFIGURADO), el comportamiento es
  * EXACTAMENTE el de Fase 1.
+ *
+ * BLOQUEO PREVENTIVO (aprobación comercial): si la política vigente está
+ * PENDIENTE de aprobación (origen POR_DEFECTO —sin IA_POLITICA_JSON— o sin
+ * ninguna tarifa definida), TODA operación se rechaza con 503
+ * APROBACION_COMERCIAL_PENDIENTE antes de autenticar, reservar o crear el
+ * cliente del proveedor: ni coste 0, ni saldo, ni cuotas indefinidas activan
+ * el consumo. La aprobación sólo llega por configuración autorizada y
+ * validada en servidor (IA_POLITICA_JSON con tarifas); nunca por existir la
+ * clave de Gemini.
  */
 import type { CodigoErrorConfiguracionFirebase } from '../titularidades/configuracionFirebase.js';
 import { createHash } from 'node:crypto';
@@ -59,7 +68,7 @@ import {
   operacionIAPorId,
   type IdOperacionIA,
 } from '../../src/ia/catalogoOperacionesIA.js';
-import { permiteOperacion } from '../../src/ia/gobiernoIAContrato.js';
+import { permiteOperacion, resumenPoliticaGobiernoIA } from '../../src/ia/gobiernoIAContrato.js';
 import type { IdentidadVerificada } from '../titularidades/googleBackend';
 import { tokenDe } from '../titularidades/manejadorBuscarTitulares.js';
 import type { CierreOperacionIA, RegistroOperacionesIA } from './registroOperacionesIA';
@@ -92,6 +101,7 @@ export type CodigoRechazoIA =
   | 'REGISTRO_NO_DISPONIBLE'
   | 'ERROR_NUCLEO_IA'
   | 'POLITICA_IA_INVALIDA'
+  | 'APROBACION_COMERCIAL_PENDIENTE'
   | CodigoRechazoGobiernoIA
   | CodigoErrorConfiguracionFirebase;
 
@@ -125,6 +135,8 @@ export interface DependenciasNucleoIA {
 export interface EstadoNucleoIA {
   registro: ModoRegistroIA;
   gobierno: ModoGobiernoIA;
+  /** Presente sólo mientras el bloqueo preventivo de aprobación comercial está activo. */
+  bloqueoComercial?: 'APROBACION_PENDIENTE';
   errorConfiguracion?: CodigoErrorConfiguracionFirebase;
   autenticacion: 'TOKEN_FIREBASE';
   operaciones: number;
@@ -331,9 +343,15 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
     : gobierno
       ? gobierno.modo
       : 'NO_CONFIGURADO';
+  // BLOQUEO PREVENTIVO · aprobación comercial pendiente (política POR_DEFECTO o
+  // sin tarifas definidas): ninguna operación se ejecuta ni se crea el cliente
+  // del proveedor. Es una decisión de configuración (IA_POLITICA_JSON con
+  // tarifas), nunca algo que se active por existir la clave de Gemini.
+  const bloqueoComercial = gobierno ? resumenPoliticaGobiernoIA(gobierno.politica).pendienteAprobacionComercial : false;
 
   return {
     estado: () => ({ registro: modo, gobierno: modoGobierno, autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length,
+      ...(bloqueoComercial ? { bloqueoComercial: 'APROBACION_PENDIENTE' as const } : {}),
       ...(deps.errorConfiguracion ? { errorConfiguracion: deps.errorConfiguracion } : {}) }),
 
     operacion(id: IdOperacionIA): RequestHandler {
@@ -361,6 +379,18 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
           if (deps.errorGobierno) {
             // FASE 2 · política ilegible: fallo cerrado, nunca un respaldo permisivo.
             rechazar(503, deps.errorGobierno, 'La política de uso de IA está mal configurada. Operación no ejecutada.');
+            return;
+          }
+          if (bloqueoComercial) {
+            // BLOQUEO PREVENTIVO · aprobación comercial pendiente: se rechaza ANTES
+            // de autenticar, reservar o crear el cliente del proveedor. Ningún
+            // parámetro, rol o cabecera de la petición puede desactivarlo: sólo
+            // cambia con una política aprobada configurada en el servidor.
+            rechazar(
+              503,
+              'APROBACION_COMERCIAL_PENDIENTE',
+              'Las funciones de IA están pendientes de aprobación comercial. La operación no se ha ejecutado.',
+            );
             return;
           }
           const inicio = ahora();

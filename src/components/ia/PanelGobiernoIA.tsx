@@ -148,7 +148,7 @@ export function PanelGobiernoIA(props: { opciones?: OpcionesAdminGobiernoIA }): 
         )}
         {resumen?.politica?.pendienteAprobacionComercial && (
           <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300" data-testid="badge-pendiente">
-            Tarifas y límites PENDIENTES DE APROBACIÓN (rigen los valores neutros de Fase 1)
+            Tarifas y límites PENDIENTES DE APROBACIÓN: el servidor BLOQUEA el consumo de IA hasta aprobar la política (IA_POLITICA_JSON)
           </span>
         )}
       </header>

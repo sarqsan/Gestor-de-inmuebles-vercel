@@ -8,6 +8,9 @@ const emailMaster = original.match(/function\s+isMasterAdmin\(\)\s*\{[\s\S]*?'([
 if (!emailMaster) throw new Error('Master desconocido');
 const master = { uid: 'master', token: { email: emailMaster } };
 const actor = { uid: 'prop', token: { email: 'prop@test.local' } };
+// Un profesional con ficha veraz, pero sin autorización sobre inmuebles ajenos:
+// isStaff() es true para él; es false para el propietario del fixture anterior.
+const staffSinCartera = { uid: 'staffSinCartera', token: { email: 'staff@test.local' } };
 const tenant = { uid: 'tenant', token: { email: 'tenant@test.local' } };
 const propio = { id: 'inm_A', propietarioId: 'owner_A', propietarioPrincipalId: 'owner_A' };
 const ajeno = { id: 'inm_B', propietarioId: 'owner_B', propietarioPrincipalId: 'owner_B' };
@@ -15,6 +18,8 @@ const db: Peticion['db'] = {
   'usuarios_auth/prop': { usuarioId: 'prop', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'owner_A', inmuebleIds: [], carterasL: [] },
   'usuarios/prop': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', authUid: 'prop' },
   'usuarios/tenant': { tipoPerfil: 'INQUILINO', estado: 'ACTIVO', authUid: 'tenant', contratoIds: [] },
+  'usuarios_auth/staffSinCartera': { usuarioId:'staffSinCartera', tipoPerfil:'PROFESIONAL', estado:'ACTIVO', propietarioId:'', profesionalId:'profSinCartera', inmuebleIds:[], carterasL:[], carterasE:[] },
+  'profesionales/profSinCartera': { id:'profSinCartera' },
   'usuarios_auth/manager': { usuarioId:'manager', tipoPerfil:'PROFESIONAL', estado:'ACTIVO', propietarioId:'', profesionalId:'prof', inmuebleIds:[], carterasL:['owner_A'], carterasE:['owner_A'] },
   'usuarios_auth/managerL': { usuarioId:'managerL', tipoPerfil:'PROFESIONAL', estado:'ACTIVO', propietarioId:'', profesionalId:'prof', inmuebleIds:[], carterasL:['owner_A'], carterasE:[] },
   'usuarios_auth/revoked': { usuarioId:'revoked', tipoPerfil:'PROFESIONAL', estado:'ACTIVO', propietarioId:'', profesionalId:'prof', inmuebleIds:[], carterasL:[], carterasE:[] },
@@ -47,12 +52,13 @@ const run = (r: string) => ({
       detalles:{actorUid:actor.uid,rutas:['personas/p']}}}}),
   ownerGet: permit(r, 'propietarios', 'get', actor, { id: 'owner_B' }, null, 'owner_B'),
   inmuebleGet: permit(r, 'inmuebles', 'get', actor, ajeno, null, 'inm_B'),
+  staffGet: permit(r, 'inmuebles', 'get', staffSinCartera, ajeno, null, 'inm_B'),
   tenantGet: permit(r, 'inmuebles', 'get', tenant, ajeno, null, 'inm_B'),
 });
 
 describe('ROADMAP-01 · Rules efectivas (harness del fichero desplegable)', () => {
   it('matriz positiva/negativa: persona master, titular propio, gestor sin cartera y ajeno', () => {
-    expect(run(original)).toEqual({ personaGet: false, personaCreate: false, ownerGet: false, inmuebleGet: false, tenantGet: false });
+    expect(run(original)).toEqual({ personaGet: false, personaCreate: false, ownerGet: false, inmuebleGet: false, staffGet: false, tenantGet: false });
     expect(permit(original,'personas','get',master,persona,null,'p')).toBe(true);
     expect(permit(original,'personas','create',master,null,persona,'p')).toBe(true);
     expect(permit(original,'personas','delete',master,persona,null,'p')).toBe(false);
@@ -151,7 +157,7 @@ describe('ROADMAP-01 · Rules efectivas (harness del fichero desplegable)', () =
       { label:'rol sin ámbito persona', col:'personas', from:'allow create: if isMasterAdmin() && personaValida()', to:'allow create: if isSignedIn() && personaValida()', key:'personaCreate' },
       { label:'propietario incorrecto', col:'propietarios', from:'allow get: if isMasterAdmin() || ownsPropietario(propietarioId)', to:'allow get: if isMasterAdmin() || isPropietarioRole()', key:'ownerGet' },
       { label:'inmueble incorrecto', col:'inmuebles', from:'allow get: if esAdminInmuebles()\n        || inmuebleEsMio(resource.data)', to:'allow get: if esAdminInmuebles()\n        || isPropietarioRole()', key:'inmuebleGet' },
-      { label:'bypass staff', col:'inmuebles', from:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || inmuebleEnCarteraGestionada(resource.data)', to:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || isStaff()', key:'inmuebleGet' },
+      { label:'bypass staff', col:'inmuebles', from:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || inmuebleEnCarteraGestionada(resource.data)', to:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || isStaff()', key:'staffGet' },
       { label:'bypass tenant', col:'inmuebles', from:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || inmuebleEnCarteraGestionada(resource.data)', to:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || isTenant()', key:'tenantGet' },
       { label:'sin cartera', col:'inmuebles', from:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || inmuebleEnCarteraGestionada(resource.data)', to:'|| inmuebleAutorizadoExplicito(inmuebleId)\n        || activeUser()', key:'inmuebleGet' },
     ];

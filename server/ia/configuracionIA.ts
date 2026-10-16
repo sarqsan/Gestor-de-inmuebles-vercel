@@ -22,7 +22,12 @@
  *     política completa (permisos explícitos de los 4 perfiles, tarifa de las 12
  *     operaciones y cuotas finitas); si la variable existe y no es válida, se
  *     bloquean las operaciones (fallo cerrado).
- *   · Proveedor: `GEMINI_API_KEY` (la misma clave de siempre).
+ *   · Proveedor (FASE 9, Vía 2): la llave PROPIA de cada usuario, custodiada
+ *     cifrada por `server/ia/llavesUsuarioIA.ts` con la clave maestra
+ *     `IA_LLAVES_CLAVE_MAESTRA`. Sin clave maestra el subsistema queda
+ *     NO_CONFIGURADO (nadie registra llaves y nunca se crea el cliente del
+ *     proveedor); con clave maestra inválida, fallo cerrado. `GEMINI_API_KEY`
+ *     YA NO se usa para operaciones de usuario (sólo se informa en /api/health).
  *
  * Una credencial de otro proyecto bloquea las operaciones, no el arranque HTTP.
  * No escribe ni modifica secretos: sólo los lee.
@@ -41,6 +46,15 @@ import {
   politicaGobiernoIADesdeEntorno,
   type PoliticaGobiernoIA,
 } from '../../src/ia/gobiernoIAContrato.js';
+import {
+  modoSinLlaveDesdeEntorno,
+  modoVerificacionDesdeEntorno,
+  VARIABLE_ENTORNO_CLAVE_MAESTRA_LLAVES,
+  type ModoSinLlaveIA,
+  type ModoVerificacionLlaveIA,
+} from '../../src/ia/llavesUsuarioContrato.js';
+import { resolverClaveMaestraLlaves } from './cifradoLlavesIA.js';
+import { crearServicioLlavesFirestore, crearServicioLlavesMemoria, type ServicioLlavesIA } from './llavesUsuarioIA.js';
 
 export interface ConfiguracionNucleoIA {
   proyectoId: string | null;
@@ -74,6 +88,12 @@ export function crearDependenciasNucleoIA(
   errorPolitica?: string;
   /** Fuente autorizada de datos (Firestore REST con credencial de servicio) o `null`. */
   firestore: ClienteFirestoreRest | null;
+  /** FASE 9 · servicio de llaves de usuario (`null` ⇒ NO_CONFIGURADO). */
+  llaves: ServicioLlavesIA | null;
+  /** FASE 9 · qué hace el núcleo sin llave del usuario. */
+  sinLlave: ModoSinLlaveIA;
+  /** FASE 9 · si la verificación con el proveedor está activada (sólo por decisión expresa). */
+  verificacionLlaves: ModoVerificacionLlaveIA;
 } {
   const acceso = resolverAccesoFirebase(entorno);
   const configuracion = configurar(acceso, entorno);
@@ -100,17 +120,40 @@ export function crearDependenciasNucleoIA(
     console.warn(`[ia] ${VARIABLE_ENTORNO_POLITICA_IA} inválida: ${politicaResultado.error}. Operaciones bloqueadas.`);
   }
 
+  // FASE 9 · llaves de usuario: siguen al registro (Firestore en producción, memoria
+  // en desarrollo explícito). Sin clave maestra ⇒ NO_CONFIGURADO; inválida ⇒ fallo cerrado.
+  const claveMaestra = resolverClaveMaestraLlaves(entorno);
+  let llaves: ServicioLlavesIA | null = null;
+  let errorLlaves: 'LLAVES_CLAVE_MAESTRA_INVALIDA' | undefined;
+  if (claveMaestra.estado === 'INVALIDA') {
+    errorLlaves = 'LLAVES_CLAVE_MAESTRA_INVALIDA';
+    console.warn(`[ia] ${VARIABLE_ENTORNO_CLAVE_MAESTRA_LLAVES} inválida: ${claveMaestra.error}. Operaciones bloqueadas.`);
+  } else if (claveMaestra.estado === 'VALIDA') {
+    if (firestore) llaves = crearServicioLlavesFirestore(firestore, claveMaestra.clave);
+    else if (configuracion.modoRegistro === 'MEMORIA') llaves = crearServicioLlavesMemoria(claveMaestra.clave);
+  }
+  const sinLlave = modoSinLlaveDesdeEntorno(entorno);
+  const verificacionLlaves = modoVerificacionDesdeEntorno(entorno);
+
   const { proyectoId, errorConfiguracion } = configuracion;
   return {
     configuracion,
     politica,
     firestore,
+    llaves,
+    sinLlave,
+    verificacionLlaves,
     ...(errorPolitica ? { errorPolitica } : {}),
     registro,
     gobierno,
     ...(errorConfiguracion ? { errorConfiguracion } : {}),
     ...(errorPolitica ? { errorGobierno: 'POLITICA_IA_INVALIDA' as const } : {}),
+    ...(errorLlaves ? { errorLlaves } : {}),
     verificarToken: (token: string) => proyectoId && !errorConfiguracion ? verificarIdToken(token, proyectoId) : Promise.resolve(null),
-    crearClienteProveedor: () => (errorConfiguracion || errorPolitica ? null : crearClienteGemini(entorno.GEMINI_API_KEY)),
+    // FASE 9 · el cliente del proveedor SOLO nace de la llave propia del usuario que
+    // resolvió el núcleo. Sin contexto o sin llave ⇒ null (respaldo). La clave
+    // compartida del entorno (GEMINI_API_KEY) no se lee aquí.
+    crearClienteProveedor: (contexto) =>
+      errorConfiguracion || errorPolitica || errorLlaves || !contexto?.llaveUsuario ? null : crearClienteGemini(contexto.llaveUsuario),
   };
 }

@@ -56,6 +56,18 @@
  * el consumo. La aprobación sólo llega por configuración autorizada y
  * validada en servidor (IA_POLITICA_JSON con tarifas); nunca por existir la
  * clave de Gemini.
+ *
+ * FASE 9 — LLAVES DE USUARIO (Vía 2, `server/ia/llavesUsuarioIA.ts`): la
+ * credencial del proveedor es la que cada usuario registró en el alta guiada,
+ * custodiada cifrada por el servidor. Tras el permiso (y antes del registro y
+ * de la reserva de uso) el núcleo resuelve la llave del uid del token: si está
+ * disponible, el cliente del proveedor se crea con ESA llave; si no, en modo
+ * RESPALDO el endpoint responde con su respaldo heurístico (sin consumo) y en
+ * modo EXIGIR se rechaza con 428 LLAVE_USUARIO_REQUERIDA sin gastar clave de
+ * idempotencia, cuota ni saldo. Toda respuesta lleva `X-IA-Llave-Usuario`
+ * (activa | ausente | no-configurado). La clave compartida del entorno NO
+ * interviene en ninguna operación de usuario. Clave maestra inválida ⇒ fallo
+ * cerrado (503 LLAVES_CLAVE_MAESTRA_INVALIDA).
  */
 import type { CodigoErrorConfiguracionFirebase } from '../titularidades/configuracionFirebase.js';
 import { createHash } from 'node:crypto';
@@ -69,6 +81,15 @@ import {
   type IdOperacionIA,
 } from '../../src/ia/catalogoOperacionesIA.js';
 import { permiteOperacion, resumenPoliticaGobiernoIA } from '../../src/ia/gobiernoIAContrato.js';
+import {
+  CABECERA_LLAVE_USUARIO_IA,
+  RUTA_LLAVE_USUARIO_IA,
+  type CodigoRechazoLlavesIA,
+  type ModoLlavesIA,
+  type ModoSinLlaveIA,
+  type ValorCabeceraLlaveUsuarioIA,
+} from '../../src/ia/llavesUsuarioContrato.js';
+import type { ServicioLlavesIA } from './llavesUsuarioIA.js';
 import type { IdentidadVerificada } from '../titularidades/googleBackend';
 import { tokenDe } from '../titularidades/manejadorBuscarTitulares.js';
 import type { CierreOperacionIA, RegistroOperacionesIA } from './registroOperacionesIA';
@@ -89,6 +110,14 @@ export interface ClienteProveedorIA {
   };
 }
 
+/** FASE 9 · contexto con el que se pide el cliente del proveedor (llave propia del usuario). */
+export interface ContextoProveedorIA {
+  uid: string;
+  operacion: IdOperacionIA;
+  /** Llave descifrada del usuario (sólo en memoria durante la petición; nunca se registra). */
+  llaveUsuario?: string;
+}
+
 export type ModoRegistroIA = 'FIRESTORE' | 'MEMORIA' | 'NO_CONFIGURADO';
 
 /** Estado del gobierno de uso expuesto en `/api/health` (sin secretos). */
@@ -103,6 +132,7 @@ export type CodigoRechazoIA =
   | 'POLITICA_IA_INVALIDA'
   | 'APROBACION_COMERCIAL_PENDIENTE'
   | CodigoRechazoGobiernoIA
+  | CodigoRechazoLlavesIA
   | CodigoErrorConfiguracionFirebase;
 
 /** Evento de log estructurado (sin token, email, prompts ni cuerpos). */
@@ -126,8 +156,18 @@ export interface DependenciasNucleoIA {
   registro: RegistroOperacionesIA | null;
   /** FASE 2 · gobierno de uso (permisos, cuotas, créditos); `null` ⇒ Fase 1 intacta. */
   gobierno?: GobiernoIA | null;
-  /** Cliente real del proveedor; `null` si no hay clave (los endpoints usan su respaldo). */
-  crearClienteProveedor: () => ClienteProveedorIA | null;
+  /**
+   * Cliente real del proveedor; `null` si no hay clave (los endpoints usan su
+   * respaldo). FASE 9: recibe el contexto de la operación con la llave propia
+   * del usuario cuando el servicio de llaves la ha resuelto.
+   */
+  crearClienteProveedor: (contexto?: ContextoProveedorIA) => ClienteProveedorIA | null;
+  /** FASE 9 · servicio de llaves de usuario (Vía 2); `null`/ausente ⇒ NO_CONFIGURADO. */
+  llaves?: ServicioLlavesIA | null;
+  /** FASE 9 · clave maestra presente pero inválida: fallo cerrado (503). */
+  errorLlaves?: 'LLAVES_CLAVE_MAESTRA_INVALIDA';
+  /** FASE 9 · qué hacer sin llave del usuario (por defecto RESPALDO). */
+  sinLlave?: ModoSinLlaveIA;
   ahora?: () => Date;
   log?: (evento: EventoNucleoIA) => void;
 }
@@ -135,6 +175,8 @@ export interface DependenciasNucleoIA {
 export interface EstadoNucleoIA {
   registro: ModoRegistroIA;
   gobierno: ModoGobiernoIA;
+  /** FASE 9 · estado del subsistema de llaves de usuario (sin secretos). */
+  llaves: ModoLlavesIA;
   /** Presente sólo mientras el bloqueo preventivo de aprobación comercial está activo. */
   bloqueoComercial?: 'APROBACION_PENDIENTE';
   errorConfiguracion?: CodigoErrorConfiguracionFirebase;
@@ -350,9 +392,13 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
   // perfiles, tarifas de las 12 operaciones y cuotas finitas), nunca algo que se
   // active por existir la clave de Gemini.
   const bloqueoComercial = gobierno ? resumenPoliticaGobiernoIA(gobierno.politica).pendienteAprobacionComercial : false;
+  // FASE 9 · llaves de usuario: servicio montado ⇒ USUARIO; clave maestra inválida ⇒ fallo cerrado.
+  const llaves: ServicioLlavesIA | null = deps.errorLlaves ? null : deps.llaves ?? null;
+  const modoLlaves: ModoLlavesIA = deps.errorLlaves ? 'CLAVE_MAESTRA_INVALIDA' : llaves ? 'USUARIO' : 'NO_CONFIGURADO';
+  const sinLlave: ModoSinLlaveIA = deps.sinLlave ?? 'RESPALDO';
 
   return {
-    estado: () => ({ registro: modo, gobierno: modoGobierno, autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length,
+    estado: () => ({ registro: modo, gobierno: modoGobierno, llaves: modoLlaves, autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length,
       ...(bloqueoComercial ? { bloqueoComercial: 'APROBACION_PENDIENTE' as const } : {}),
       ...(deps.errorConfiguracion ? { errorConfiguracion: deps.errorConfiguracion } : {}) }),
 
@@ -393,6 +439,11 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
               'APROBACION_COMERCIAL_PENDIENTE',
               'Las funciones de IA están pendientes de aprobación comercial. La operación no se ha ejecutado.',
             );
+            return;
+          }
+          if (deps.errorLlaves) {
+            // FASE 9 · clave maestra ilegible: fallo cerrado, nunca una clave compartida de respaldo.
+            rechazar(503, deps.errorLlaves, 'La custodia de llaves de IA está mal configurada en el servidor. Operación no ejecutada.');
             return;
           }
           const inicio = ahora();
@@ -449,6 +500,39 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
               return;
             }
           }
+
+          // 3b) FASE 9 · Llave propia del usuario (Vía 2): tras el permiso y ANTES del
+          //     registro y de la reserva de uso. Sin servicio de llaves no hay nada que
+          //     resolver (los deps deciden el cliente, p. ej. el sandbox de Fase 8).
+          let llaveUsuario: string | undefined;
+          let estadoLlave: ValorCabeceraLlaveUsuarioIA = 'no-configurado';
+          if (llaves) {
+            let resolucion: Awaited<ReturnType<ServicioLlavesIA['resolverParaOperacion']>>;
+            try {
+              resolucion = await llaves.resolverParaOperacion(uid);
+            } catch {
+              rechazar(503, 'LLAVES_NO_DISPONIBLES', 'No se ha podido acceder a tu llave de IA, así que la operación no se ha ejecutado. Inténtalo de nuevo en unos segundos.', {}, { uid, operacionId });
+              return;
+            }
+            if (resolucion.estado === 'DISPONIBLE') {
+              llaveUsuario = resolucion.valor;
+              estadoLlave = 'activa';
+            } else {
+              estadoLlave = 'ausente';
+              if (sinLlave === 'EXIGIR') {
+                res.setHeader(CABECERA_LLAVE_USUARIO_IA, estadoLlave);
+                rechazar(
+                  428,
+                  'LLAVE_USUARIO_REQUERIDA',
+                  'Para usar la IA necesitas registrar tu propia clave de Google AI Studio en Configuración → Llave de IA.',
+                  { altaGuiada: RUTA_LLAVE_USUARIO_IA },
+                  { uid, operacionId },
+                );
+                return;
+              }
+            }
+          }
+          res.setHeader(CABECERA_LLAVE_USUARIO_IA, estadoLlave);
 
           // 4) Registro por usuario.
           const registro = deps.registro;
@@ -512,7 +596,11 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
             }
 
             const metricas = metricasVacias();
-            const real = deps.crearClienteProveedor();
+            // FASE 9 · con servicio de llaves, el cliente SOLO se crea con la llave del
+            // usuario; sin ella queda en null (respaldo) y no se consulta ninguna otra clave.
+            const real = llaves && !llaveUsuario
+              ? null
+              : deps.crearClienteProveedor({ uid, operacion: id, ...(llaveUsuario ? { llaveUsuario } : {}) });
             contexto = { operacion: id, operacionId, uid, cliente: real ? instrumentarCliente(real, metricas) : null };
             const creditosReservados = costeCreditos;
             aplazarFinHastaRegistrar(res, async () => {
@@ -602,6 +690,34 @@ export function crearClienteGemini(apiKey: string | undefined = process.env.GEMI
       },
     },
   });
+}
+
+/** Resultado de comprobar una llave de usuario con el proveedor (FASE 9 §4.7). */
+export type ResultadoVerificadorLlaveIA = 'OK' | 'RECHAZADA' | 'ERROR';
+export type VerificadorLlaveIA = (valor: string) => Promise<ResultadoVerificadorLlaveIA>;
+
+/**
+ * FASE 9 · Verificador REAL de la llave del usuario: `models.list` con ESA llave
+ * (sin tokens de generación, pero llamada de red real). Vive aquí porque el SDK
+ * del proveedor sólo se instancia en este fichero (invariante de la Fase 1).
+ * Sólo se monta con `IA_LLAVES_VERIFICACION=PROVEEDOR`; el repositorio no lo activa.
+ */
+export function crearVerificadorGeminiReal(): VerificadorLlaveIA {
+  return async function verificarConGemini(valor: string): Promise<ResultadoVerificadorLlaveIA> {
+    try {
+      const ai = new GoogleGenAI({ apiKey: valor, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+      await ai.models.list({ config: { pageSize: 1 } });
+      return 'OK';
+    } catch (error) {
+      const e = (error ?? {}) as { status?: unknown; code?: unknown; message?: unknown };
+      const numero = [e.status, e.code].find((v) => typeof v === 'number');
+      const texto = String(e.message ?? '');
+      if (numero === 400 || numero === 401 || numero === 403 || /API key not valid|API_KEY_INVALID|PERMISSION_DENIED|UNAUTHENTICATED/i.test(texto)) {
+        return 'RECHAZADA';
+      }
+      return 'ERROR';
+    }
+  };
 }
 
 /**

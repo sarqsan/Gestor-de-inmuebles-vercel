@@ -388,7 +388,7 @@ describe('IA Fase 1 · dependencias inyectadas sin registro (no configuración r
     expect(r.headers.get(CABECERA_REGISTRO_IA)).toBe('no-configurado');
     expect(llamadas).toHaveLength(0);
     expect(m.eventos).toContainEqual(expect.objectContaining({ evento: 'SIN_REGISTRO', uid: 'uid-ana' }));
-    expect(m.nucleo.estado()).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length });
+    expect(m.nucleo.estado()).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length });
   });
 });
 

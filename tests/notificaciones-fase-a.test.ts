@@ -18,8 +18,12 @@ import { join, resolve } from 'node:path';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { EmailProviderSafeMode, EmailProviderHTTP } from '../src/notificaciones/canales';
-import { crearTransporteEmailDesdeEntorno, RECETA_GMAIL_SMTP } from '../server/notificaciones/proveedoresEmail';
+import { CanalEmail, EmailProviderSafeMode, EmailProviderHTTP } from '../src/notificaciones/canales';
+import {
+  crearTransporteEmailDesdeEntorno,
+  identidadDespachoDesdeEntorno,
+  RECETA_GMAIL_SMTP,
+} from '../server/notificaciones/proveedoresEmail';
 import { EmailProviderSMTP, enmascararCredenciales, type FabricaTransporteSmtp } from '../server/notificaciones/proveedorSmtp';
 import { crearFuentePerfilFirestore, perfilDeTipoPerfil } from '../server/notificaciones/perfilUsuarioFirestore';
 import { resolverAutorizacion } from '../src/notificaciones/autorizacion';
@@ -29,6 +33,7 @@ import { MAX_REINTENTOS } from '../src/notificaciones/dispatcher';
 import {
   ejecutarRelojAvisos,
   periodoExigeAvisoDia5,
+  ubicacionInmueble,
   TIPO_EVENTO_INQUILINO_DIA5,
   TIPO_EVENTO_PROPIETARIO_DIA5,
   type PuertoRelojAvisos,
@@ -484,6 +489,187 @@ describe('C · reloj diario de avisos', () => {
 // ---------------------------------------------------------------------------
 // 4. Endpoint del cron
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// A ter · el mensaje identifica el inmueble (sin datos sensibles) y la
+// respuesta va al propietario
+// ---------------------------------------------------------------------------
+
+describe('A ter · identificación del aviso y respuesta al propietario', () => {
+  const IDENTIDAD = { nombre: 'Despacho Prueba', contacto: 'despacho@ejemplo.es' };
+
+  async function avisosDelDia5() {
+    const repo = new RepoMemoria();
+    const canal = new CanalEmailGrabador();
+    const puerto = puertoFake({
+      contratos: [contratoFixture()],
+      propietarios: { 'propietarios/prop-1': { id: 'prop-1', datos: { nombre: 'Pablo Propietario', email: 'pablo@ejemplo.es' } } },
+    });
+    const resumen = await ejecutarRelojAvisos({
+      ahora: AHORA,
+      puerto,
+      crearDispatcher: () => dispatcherCon(canal, repo),
+      identidadDespacho: IDENTIDAD,
+      origen: 'PRUEBA',
+    });
+    return { resumen, canal };
+  }
+
+  it('el aviso al inquilino identifica inmueble, propietario, contrato y quién escribe', async () => {
+    const { resumen, canal } = await avisosDelDia5();
+    expect(resumen.errores).toEqual([]);
+    const inquilino = canal.enviados.find((n) => n.tipo === TIPO_EVENTO_INQUILINO_DIA5)!;
+    // El CUERPO se envía renderizado (ya no va la clave de la plantilla).
+    expect(inquilino.cuerpo).toBeTruthy();
+    expect(inquilino.cuerpo).not.toContain('cobro.retraso_pago');
+    expect(inquilino.cuerpo).toContain('Calle Prueba 1, Alicante');
+    expect(inquilino.cuerpo).toContain('Pablo Propietario');
+    expect(inquilino.cuerpo).toContain('Despacho Prueba');
+    expect(inquilino.cuerpo).toContain('ctr-1');
+    expect(inquilino.cuerpo).toContain('900.00');
+    // Enlaces y props sin resolver no deben quedar en el texto.
+    expect(inquilino.cuerpo).not.toMatch(/\{[a-zA-Z]+\}/);
+    expect(inquilino.asunto).toContain('Calle Prueba 1');
+  });
+
+  it('ningún aviso filtra datos sensibles (DNI, IBAN, teléfono)', async () => {
+    const { canal } = await avisosDelDia5();
+    for (const aviso of canal.enviados) {
+      const texto = `${aviso.asunto}\n${aviso.cuerpo}`;
+      expect(texto).not.toContain('00000000T'); // DNI del inquilino (fixture)
+      expect(texto).not.toContain('600000000'); // teléfono del inquilino (fixture)
+      expect(texto).not.toMatch(/ES\d{2}[\s\d]{10,}/); // IBAN
+      expect(texto).not.toContain('Referencia catastral');
+    }
+  });
+
+  it('el inquilino responde al PROPIETARIO y el propietario al despacho (Reply-To)', async () => {
+    const { canal } = await avisosDelDia5();
+    const inquilino = canal.enviados.find((n) => n.tipo === TIPO_EVENTO_INQUILINO_DIA5)!;
+    const propietario = canal.enviados.find((n) => n.tipo === TIPO_EVENTO_PROPIETARIO_DIA5)!;
+    expect(inquilino.responderA).toBe('pablo@ejemplo.es');
+    expect(propietario.responderA).toBe('despacho@ejemplo.es');
+    // El remitente NO cambia: sigue siendo el buzón único de la plataforma.
+    expect(inquilino.destinatario.email).toBe('ana@ejemplo.es');
+  });
+
+  it('sin contacto del propietario el aviso sale igual, con el buzón del despacho', async () => {
+    const repo = new RepoMemoria();
+    const canal = new CanalEmailGrabador();
+    const puerto = puertoFake({ contratos: [contratoFixture()], propietarios: {} });
+    await ejecutarRelojAvisos({
+      ahora: AHORA,
+      puerto,
+      crearDispatcher: () => dispatcherCon(canal, repo),
+      identidadDespacho: IDENTIDAD,
+      origen: 'PRUEBA',
+    });
+    const inquilino = canal.enviados.find((n) => n.tipo === TIPO_EVENTO_INQUILINO_DIA5);
+    // El propietario cae al email desnormalizado del contrato (fixture: pablo@).
+    expect(inquilino?.responderA).toBe('pablo@ejemplo.es');
+  });
+
+  it('el canal EMAIL envía el texto renderizado y falla en claro si falta', async () => {
+    const capturado: Array<{ to: string; subject: string; body: string; replyTo?: string }> = [];
+    const canalEmail = new CanalEmail({
+      async enviar(message) {
+        capturado.push(message);
+        return { ok: true, externalId: 'ext-1' };
+      },
+    });
+    const base = { id: 'n1', asunto: 'Asunto', plantilla: 'cobro.retraso_pago', destinatario: { email: 'ana@ejemplo.es' } };
+    const conCuerpo = await canalEmail.enviar({
+      ...base,
+      cuerpo: 'Texto del aviso',
+      responderA: 'pablo@ejemplo.es',
+    } as unknown as Notificacion);
+    expect(conCuerpo.ok).toBe(true);
+    expect(capturado[0].body).toBe('Texto del aviso');
+    expect(capturado[0].replyTo).toBe('pablo@ejemplo.es');
+
+    const sinCuerpo = await canalEmail.enviar({ ...base } as unknown as Notificacion);
+    expect(sinCuerpo.ok).toBe(false);
+    expect(sinCuerpo.error).toContain('cuerpo_no_renderizado');
+    expect(capturado).toHaveLength(1);
+  });
+
+  it('un Reply-To con forma inválida no se envía como cabecera', async () => {
+    const capturado: Array<{ replyTo?: string }> = [];
+    const canalEmail = new CanalEmail({
+      async enviar(message) {
+        capturado.push(message);
+        return { ok: true };
+      },
+    });
+    await canalEmail.enviar({
+      id: 'n2',
+      asunto: 'Asunto',
+      cuerpo: 'Texto',
+      plantilla: 'cobro.retraso_pago',
+      destinatario: { email: 'ana@ejemplo.es' },
+      responderA: 'no-es-un-email',
+    } as unknown as Notificacion);
+    expect(capturado[0].replyTo).toBeUndefined();
+  });
+
+  it('SMTP envía la cabecera Reply-To (y no la inventa si no hay dirección)', async () => {
+    const opciones: Array<{ from: string; to: string; subject: string; text: string; replyTo?: string }> = [];
+    const fabrica: FabricaTransporteSmtp = () => ({
+      async sendMail(o) {
+        opciones.push(o);
+        return { messageId: 'mid-1' };
+      },
+    });
+    const proveedor = new EmailProviderSMTP(
+      { url: 'smtps://cuenta%40gmail.com:clave@smtp.gmail.com:465', from: 'Despacho <cuenta@gmail.com>' },
+      fabrica,
+    );
+    await proveedor.enviar({ to: 'ana@ejemplo.es', subject: 's', body: 'b', replyTo: 'pablo@ejemplo.es' });
+    expect(opciones[0].replyTo).toBe('pablo@ejemplo.es');
+    await proveedor.enviar({ to: 'ana@ejemplo.es', subject: 's', body: 'b' });
+    expect(opciones[1].replyTo).toBeUndefined();
+  });
+
+  it('el proveedor HTTP (Resend/SendGrid) traduce el Reply-To a su campo', async () => {
+    const cuerpos: Array<Record<string, unknown>> = [];
+    const fetchFalso = (async (_url: string, init?: { body?: string }) => {
+      cuerpos.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ id: 'r-1' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    const resend = new EmailProviderHTTP({
+      proveedor: 'RESEND',
+      apiKey: 'k',
+      from: 'Despacho <cuenta@gmail.com>',
+      replyTo: 'despacho@ejemplo.es',
+      fetchImpl: fetchFalso,
+    });
+    await resend.enviar({ to: 'ana@ejemplo.es', subject: 's', body: 'b' });
+    expect(cuerpos[0].reply_to).toBe('despacho@ejemplo.es');
+  });
+
+  it('la identidad del despacho sale del entorno sin exponer credenciales', async () => {
+    const identidad = identidadDespachoDesdeEntorno({
+      EMAIL_FROM: 'Gestor de Inmuebles <avisos@gmail.com>',
+      EMAIL_REPLY_TO: 'respuestas@tudominio.es',
+      SMTP_URL: 'smtps://cuenta:clave@smtp.gmail.com:465',
+    });
+    expect(identidad).toEqual({ nombre: 'Gestor de Inmuebles', contacto: 'respuestas@tudominio.es' });
+    expect(JSON.stringify(identidad)).not.toContain('clave');
+
+    // Sin EMAIL_REPLY_TO el contacto es el propio buzón remitente; y el nombre
+    // tiene un valor por defecto legible si EMAIL_FROM es solo una dirección.
+    const minimo = identidadDespachoDesdeEntorno({ EMAIL_FROM: 'avisos@gmail.com' });
+    expect(minimo.contacto).toBe('avisos@gmail.com');
+    expect(minimo.nombre).toBe('Gestión de alquileres');
+  });
+
+  it('la ubicación del inmueble se compone sin huecos', () => {
+    expect(ubicacionInmueble({ direccion: 'Calle Prueba 1', ciudad: 'Alicante', codigoPostal: '03001' }))
+      .toBe('Calle Prueba 1, 03001 Alicante');
+    expect(ubicacionInmueble({ direccion: 'Calle Prueba 1' })).toBe('Calle Prueba 1');
+    expect(ubicacionInmueble({})).toBe('el inmueble');
+  });
+});
 
 describe('D · endpoint protegido del cron', () => {
   let servidor: Server;

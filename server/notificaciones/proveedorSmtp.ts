@@ -19,18 +19,25 @@
  * errores (se enmascaran) ni se guardan en Firestore.
  */
 import nodemailer from 'nodemailer';
-import type { EmailProvider } from '../../src/notificaciones/canales.js';
+import { emailValido, type EmailProvider, type MensajeEmail } from '../../src/notificaciones/canales.js';
 
 export interface ConfigSmtp {
   /** URL SMTP completa (incluye usuario y contraseña de aplicación). */
   url: string;
   /** Remitente (`Nombre <cuenta@gmail.com>` o solo la dirección). */
   from: string;
+  /**
+   * Reply-To por defecto (`EMAIL_REPLY_TO`): la dirección a la que van las
+   * respuestas. El remitente NO cambia: Gmail exige que el `From` sea la cuenta
+   * autenticada (o un alias suyo), así que no se puede enviar «desde» el buzón
+   * de un tercero sin sus credenciales.
+   */
+  responderA?: string;
 }
 
 /** Opciones mínimas que usamos de nodemailer (facilita inyectar un doble en pruebas). */
 export interface TransporteSmtp {
-  sendMail(opciones: { from: string; to: string; subject: string; text: string }): Promise<{ messageId?: string }>;
+  sendMail(opciones: { from: string; to: string; subject: string; text: string; replyTo?: string }): Promise<{ messageId?: string }>;
 }
 
 export type FabricaTransporteSmtp = (url: string) => TransporteSmtp;
@@ -63,15 +70,17 @@ export class EmailProviderSMTP implements EmailProvider {
     private readonly crearTransporte: FabricaTransporteSmtp = crearFabricaTransporteSmtpPorDefecto(),
   ) {}
 
-  async enviar(message: { to: string; subject: string; body: string }): Promise<{ ok: boolean; externalId?: string; error?: string }> {
+  async enviar(message: MensajeEmail): Promise<{ ok: boolean; externalId?: string; error?: string }> {
     if (!message.to) return { ok: false, error: 'destinatario_sin_email' };
     if (!this.config.url || !this.config.from) return { ok: false, error: 'smtp_sin_credenciales' };
+    const responderA = emailValido(message.replyTo) ? message.replyTo.trim() : emailValido(this.config.responderA) ? this.config.responderA.trim() : undefined;
     try {
       const info = await this.crearTransporte(this.config.url).sendMail({
         from: this.config.from,
         to: message.to,
         subject: message.subject,
         text: message.body,
+        ...(responderA ? { replyTo: responderA } : {}),
       });
       return { ok: true, ...(info?.messageId ? { externalId: String(info.messageId) } : {}) };
     } catch (err) {

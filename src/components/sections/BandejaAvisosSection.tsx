@@ -162,6 +162,16 @@ export const BandejaAvisosSection: React.FC<BandejaAvisosSectionProps> = ({ curr
                     <td className="px-3 py-2">
                       <div className="font-semibold text-slate-800">{aviso.asunto || aviso.tipo}</div>
                       <div className="text-[10px] text-slate-400 font-mono">{aviso.tipo}</div>
+                      {aviso.cuerpo && (
+                        <details className="mt-1 max-w-[420px]">
+                          <summary className="cursor-pointer text-[11px] text-slate-500 hover:text-slate-700 select-none">
+                            Ver mensaje
+                          </summary>
+                          <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-600 bg-slate-50 border border-slate-100 rounded p-2">
+                            {aviso.cuerpo}
+                          </div>
+                        </details>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <div className="text-slate-700 flex items-center gap-1">

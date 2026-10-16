@@ -94,6 +94,8 @@ export interface EventoNotificacion {
   datos?: Record<string, string | number | boolean | null>;
   /** Destinatario explícito. */
   destinatario?: DestinatarioNotificacion;
+  /** Dirección a la que van las respuestas (Reply-To). Ver EnviarNotificacionPayload. */
+  responderA?: string;
   programarPara?: string; // ISO datetime (programada) o ausente (inmediata)
 }
 
@@ -119,6 +121,14 @@ export interface Notificacion {
   canal: CanalNotificacion;
   destinatario: DestinatarioNotificacion;
   asunto: string; // asunto resuelto (email)
+  /**
+   * TEXTO YA RENDERIZADO del aviso (el que se envía y el que se ve en la
+   * bandeja). Es obligatorio para entregar por EMAIL: sin él, la entrega falla
+   * de forma explícita en vez de mandar la clave de la plantilla como mensaje.
+   */
+  cuerpo?: string;
+  /** Reply-To del correo (NO el remitente): respuestas al buzón indicado. */
+  responderA?: string;
   plantilla: string; // nombre de plantilla registrada
   datos: Record<string, string | number | boolean | null>; // props resueltas
   entidadId: string;
@@ -179,6 +189,13 @@ export interface EnviarNotificacionPayload {
   canal?: CanalNotificacion;
   datos?: Record<string, string | number | boolean | null>;
   destinatario?: DestinatarioNotificacion;
+  /**
+   * Dirección a la que van las RESPUESTAS del destinatario (cabecera Reply-To).
+   * NO cambia el remitente: el correo siempre sale del buzón autenticado de la
+   * plataforma (delegar el envío al buzón de un tercero exigiría su contraseña).
+   * Permite, por ejemplo, que el inquilino responda al propietario.
+   */
+  responderA?: string;
   programarPara?: string;
 }
 

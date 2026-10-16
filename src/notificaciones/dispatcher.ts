@@ -108,6 +108,8 @@ export class DispatcherNotificaciones {
       canal: canal || 'INAPP',
       destinatario,
       asunto,
+      cuerpo,
+      ...(evento.responderA ? { responderA: evento.responderA } : {}),
       plantilla: plantilla ? plantilla.id : evento.tipoEvento,
       datos: saneadoDatos(evento.datos),
       entidadId: evento.entidadId,
@@ -227,6 +229,7 @@ export class DispatcherNotificaciones {
       canal,
       datos: saneadoDatos(payload.datos),
       destinatario: payload.destinatario,
+      ...(payload.responderA ? { responderA: payload.responderA } : {}),
     };
     let notificacion = this.crearNotificacionDeEvento(evento, payload.programarPara);
 

@@ -69,7 +69,9 @@ real (un recibo vencido ⇒ dos correos: inquilino y propietario).
 |---|---|---|
 | `EMAIL_PROVEEDOR` | Elige el transporte del canal EMAIL: `SMTP` (Gmail u otro servidor) o `RESEND` / `SENDGRID` (API) | `SMTP` |
 | `SMTP_URL` | Conexión SMTP **con** usuario y contraseña de aplicación | `smtps://despacho%40gmail.com:CLAVE_DE_APLICACION@smtp.gmail.com:465` |
-| `EMAIL_FROM` | Remitente visible de los avisos | `Gestor de Inmuebles <despacho@gmail.com>` |
+| `EMAIL_FROM` | Remitente visible de los avisos (debe ser la cuenta autenticada o un alias suyo) | `Gestor de Inmuebles <despacho@gmail.com>` |
+| `EMAIL_DESPACHO_NOMBRE` *(opcional)* | Nombre que firma los textos («Le escribimos desde …») | `Gestor de Inmuebles` |
+| `EMAIL_REPLY_TO` *(opcional)* | Buzón al que responden los avisos que no van a un propietario | `despacho@gmail.com` |
 | `CRON_SECRET` | Protege el reloj diario (`GET /api/cron/avisos`). Sin él, el reloj responde 503 y **no ejecuta nada** | 64 caracteres aleatorios |
 
 El **cron** ya está declarado en `vercel.json` (`/api/cron/avisos`, `0 6 * * *`).
@@ -85,7 +87,43 @@ No hay que crearlo a mano.
 - **Para enviar**, la app usa **un único buzón de la plataforma** (el que se
   configure en `SMTP_URL`). Es lo estándar y lo que permite que los avisos
   salgan aunque nadie esté conectado (el reloj corre en el servidor).
-- **Sincronizar el Gmail de cada propietario** sería otra cosa muy distinta:
+### ¿Y enviar «desde» el Gmail del propietario? No es posible (ni falta que hace)
+
+Se pidió que los avisos al inquilino **no salgan de la cuenta personal del
+despacho** y que el inquilino identifique siempre el inmueble y al propietario.
+Lo segundo ya está hecho; lo primero, tal cual, **no es técnicamente posible**:
+
+- Gmail **exige que el remitente (`De`) sea la cuenta autenticada** o un alias
+  autorizado dentro de ella. Para que un aviso saliera «desde» el buzón del
+  propietario, el sistema necesitaría **su contraseña de aplicación** (o una
+  delegación OAuth que Google solo concede a proveedores verificados): custodiar
+  las claves de decenas de propietarios es un riesgo inaceptable y ni siquiera
+  es lo que hace el software profesional.
+- Lo que sí se hace, y es el uso estándar del sector: el aviso sale del **buzón
+  único del despacho** y el inquilino **responde al propietario** con un clic
+  (cabecera *Reply-To*). Además, el texto identifica inmueble, contrato y
+  propietario, para que el inquilino lo relacione y **responda directamente al
+  propietario** sin depender de terceros.
+- Si el propietario prefiere que su dirección aparezca en el mensaje (para que
+  el inquilino lo reconozca a primera vista), se puede añadir un **alias en
+  Gmail** («Enviar como») y usarlo en `EMAIL_FROM`, pero eso ya es una decisión
+  de configuración de correo, no del ERP.
+
+### Lo que ve el inquilino en el mensaje
+
+- **Asunto**: `Recibo de alquiler pendiente — Calle Prueba 1 (2026-03)`.
+- **Cuerpo** (resumen): quién escribe (nombre del despacho), inmueble con
+  dirección y localidad, propietario, mes e importe pendiente, vencimiento,
+  **referencia del contrato** y aviso de que es un mensaje automático que nunca
+  pide claves ni pagos por enlace.
+- **Nada sensible**: no se incluye DNI, IBAN, teléfono ni referencia catastral
+  de nadie (lo verifica una prueba automática).
+- **Responder**: la respuesta del inquilino va al **propietario**; la del
+  propietario, al buzón del despacho.
+- En la app, la sección **Bandeja de avisos** muestra el mismo texto con
+  «Ver mensaje», para que el despacho sepa exactamente qué se envió.
+
+### Sincronizar el Gmail de cada propietario sería otra cosa muy distinta:
   obligaría a que cada uno autorizara su cuenta (OAuth), a custodiar sus tokens
   en el servidor y a pasar la verificación de Google para *scopes* sensibles de
   Gmail. **No se recomienda** en esta fase: multiplica trámites y riesgos sin

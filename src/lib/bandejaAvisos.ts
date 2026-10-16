@@ -54,7 +54,9 @@ function mapearAviso(id: string, datos: Partial<Notificacion>): AvisoBandeja | n
     id,
     tipo: String(datos.tipo || datos.plantilla || ''),
     asunto: datos.asunto,
-    cuerpo: String(datos.plantilla || ''),
+    // El texto renderizado del aviso (`cuerpo`). En documentos antiguos puede
+    // faltar: se deja vacío antes que mostrar la clave de la plantilla.
+    cuerpo: String(datos.cuerpo || ''),
     canal: (datos.canal || 'INAPP') as CanalNotificacion,
     estado: datos.estado,
     intentos: Number(datos.intentos || 0),

@@ -64,6 +64,12 @@ export interface DependenciasRelojAvisos {
   crearDispatcher: (contexto: ContextoAutorizacion) => DispatcherNotificaciones;
   /** Actor interno del reloj. Por defecto `SISTEMA` (alcance de administración). */
   contexto?: ContextoAutorizacion;
+  /**
+   * Identidad del despacho que firma los avisos (nombre y buzón de respuesta,
+   * SIN credenciales). Se usa para que el destinatario sepa quién escribe y a
+   * quién responder cuando no hay un propietario al que dirigir la respuesta.
+   */
+  identidadDespacho?: { nombre: string; contacto?: string | null };
   /** Tope de documentos por consulta (1..100). Por defecto 100. */
   limiteColeccion?: number;
   /** Procedencia del disparo, solo para la traza del resumen. */
@@ -173,6 +179,24 @@ async function contactoPropietario(
 }
 
 /**
+ * Ubicación legible del inmueble para el texto del aviso: `Dirección, Ciudad CP`
+ * sin dejar huecos ni comas sueltas cuando falta algún dato. NUNCA incluye
+ * referencias catastrales ni datos del titular.
+ */
+export function ubicacionInmueble(partes: {
+  direccion?: string;
+  ciudad?: string;
+  codigoPostal?: string;
+}): string {
+  const direccion = texto(partes.direccion);
+  const ciudad = texto(partes.ciudad);
+  const cp = texto(partes.codigoPostal);
+  const localidad = [cp, ciudad].filter(Boolean).join(' ');
+  const ubicacion = [direccion, localidad].filter(Boolean).join(', ');
+  return ubicacion || 'el inmueble';
+}
+
+/**
  * Ejecuta una pasada del reloj. NUNCA lanza: los fallos por aviso se acumulan en
  * `errores` y el resumen refleja exactamente lo que ocurrió.
  */
@@ -182,6 +206,7 @@ export async function ejecutarRelojAvisos(dependencias: DependenciasRelojAvisos)
     puerto,
     crearDispatcher,
     contexto = { perfil: 'SISTEMA' },
+    identidadDespacho,
     limiteColeccion = 100,
     origen = 'CRON',
   } = dependencias;
@@ -273,6 +298,20 @@ export async function ejecutarRelojAvisos(dependencias: DependenciasRelojAvisos)
       const inmuebleDireccion = texto(periodo.inmuebleDireccion) || texto(contrato.inmuebleDireccion) || 'Inmueble';
       const inquilinoNombre = texto(periodo.inquilinoNombre) || texto(contrato.candidatoNombre) || 'Inquilino';
       const importePendiente = (Number(periodo.importePrevisto) || 0) - (Number(periodo.importeRecibido) || 0);
+      const propietarioNombre = texto(periodo.propietarioNombre) || texto(contrato.propietarioNombre) || 'el propietario';
+      const ubicacion = ubicacionInmueble({
+        direccion: inmuebleDireccion,
+        ciudad: texto(contrato.inmuebleCiudad),
+        codigoPostal: texto(contrato.inmuebleCodigoPostal),
+      });
+      const despachoNombre = texto(identidadDespacho?.nombre) || 'Gestión de alquileres';
+      const despachoContacto = texto(identidadDespacho?.contacto);
+      // El contacto del propietario se resuelve ANTES de emitir el aviso al
+      // inquilino porque es también el Reply-To de ese aviso (el inquilino
+      // responde a su propietario SIN cambiar el remitente del correo).
+      const contacto = await contactoPropietario(puerto, contrato, periodo);
+      const responderAInquilino = contacto.email;
+      const responderAPropietario = despachoContacto;
 
       // (a) Inquilino: recordatorio para que abone.
       const emailInquilino = texto(periodo.inquilinoEmail) || texto(contrato.candidatoEmail);
@@ -290,19 +329,25 @@ export async function ejecutarRelojAvisos(dependencias: DependenciasRelojAvisos)
           tipoEvento: TIPO_EVENTO_INQUILINO_DIA5,
           entidadId,
           contacto: { email: emailInquilino, nombre: inquilinoNombre },
+          responderA: responderAInquilino,
           datos: {
             inmuebleDireccion,
+            inmuebleUbicacion: ubicacion,
+            inmuebleNombre: texto(contrato.inmuebleNombre) || ubicacion,
             periodoMesAnio: periodo.periodoMesAnio || '',
             fechaHoy,
             fechaVencimiento: periodo.fechaVencimiento || '',
             diaVencimiento: periodo.fechaVencimiento || '',
             importePrevisto: formatearImporte(importePendiente),
+            contratoReferencia: contratoId,
+            propietarioNombre,
+            despachoNombre,
+            despachoContacto: despachoContacto || '',
           },
         });
       }
 
       // (b) Propietario: renta no cobrada.
-      const contacto = await contactoPropietario(puerto, contrato, periodo);
       if (!contacto.email) {
         resumen.noEmitidos.push({ destinatario: 'PROPIETARIO', contratoId, periodoId: periodo.id, motivo: 'sin_email_contacto' });
       } else {
@@ -317,13 +362,20 @@ export async function ejecutarRelojAvisos(dependencias: DependenciasRelojAvisos)
           tipoEvento: TIPO_EVENTO_PROPIETARIO_DIA5,
           entidadId,
           contacto: { email: contacto.email, nombre: contacto.nombre || 'Propietario' },
+          responderA: responderAPropietario,
           datos: {
             inmuebleDireccion,
+            inmuebleUbicacion: ubicacion,
+            inmuebleNombre: texto(contrato.inmuebleNombre) || ubicacion,
             periodoMesAnio: periodo.periodoMesAnio || '',
             fechaHoy,
             fechaVencimiento: periodo.fechaVencimiento || '',
             inquilinoNombre,
             importePrevisto: formatearImporte(importePendiente),
+            contratoReferencia: contratoId,
+            propietarioNombre,
+            despachoNombre,
+            despachoContacto: despachoContacto || '',
           },
         });
       }
@@ -344,6 +396,8 @@ async function emitirAviso(opciones: {
   tipoEvento: string;
   entidadId: string;
   contacto: Contacto;
+  /** Reply-To del correo: a quién responde el destinatario (nunca cambia el remitente). */
+  responderA?: string;
   datos: Record<string, string | number | boolean | null>;
 }): Promise<void> {
   const {
@@ -357,6 +411,7 @@ async function emitirAviso(opciones: {
     tipoEvento,
     entidadId,
     contacto,
+    responderA,
     datos,
   } = opciones;
 
@@ -370,6 +425,7 @@ async function emitirAviso(opciones: {
       ...(propietarioId ? { propietarioId } : {}),
       datos,
       destinatario: { ...contacto },
+      ...(texto(responderA) ? { responderA: texto(responderA) } : {}),
     });
     resumen.emitidos.push({
       destinatario,

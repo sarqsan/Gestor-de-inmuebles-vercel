@@ -28,9 +28,26 @@ export interface ConfigEmail {
   from?: string;
 }
 
+/**
+ * Mensaje que recibe un proveedor de correo. `replyTo` es la cabecera Reply-To:
+ * NO cambia el remitente (el correo sale siempre del buzón autenticado de la
+ * plataforma), solo la dirección a la que van las respuestas del destinatario.
+ */
+export interface MensajeEmail {
+  to: string;
+  subject: string;
+  body: string;
+  replyTo?: string;
+}
+
 /** Proveedor de email real (Resend/SendGrid/SMTP) debe implementar esta interfaz. */
 export interface EmailProvider {
-  enviar(message: { to: string; subject: string; body: string }): Promise<{ ok: boolean; externalId?: string; error?: string }>;
+  enviar(message: MensajeEmail): Promise<{ ok: boolean; externalId?: string; error?: string }>;
+}
+
+/** Correo con forma válida (evita enviar una cabecera Reply-To basura). */
+export function emailValido(valor: unknown): valor is string {
+  return typeof valor === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim());
 }
 
 /**
@@ -43,7 +60,7 @@ export interface EmailProvider {
 export class EmailProviderSafeMode implements EmailProvider {
   constructor(private readonly config: ConfigEmail = { activo: false }) {}
 
-  async enviar(message: { to: string; subject: string; body: string }): Promise<{ ok: boolean; externalId?: string; error?: string }> {
+  async enviar(message: MensajeEmail): Promise<{ ok: boolean; externalId?: string; error?: string }> {
     if (!message.to) {
       return { ok: false, error: 'destinatario_sin_email' };
     }
@@ -69,6 +86,8 @@ export interface ConfigEmailHttp {
   proveedor: ProveedorEmailHttp;
   apiKey: string;
   from: string;
+  /** Reply-To por defecto del despliegue (`EMAIL_REPLY_TO`), sin credenciales. */
+  replyTo?: string;
   /** Inyectable en pruebas; por defecto `fetch` global (solo servidor). */
   fetchImpl?: typeof fetch;
 }
@@ -82,12 +101,13 @@ export interface ConfigEmailHttp {
 export class EmailProviderHTTP implements EmailProvider {
   constructor(private readonly config: ConfigEmailHttp) {}
 
-  async enviar(message: { to: string; subject: string; body: string }): Promise<{ ok: boolean; externalId?: string; error?: string }> {
+  async enviar(message: MensajeEmail): Promise<{ ok: boolean; externalId?: string; error?: string }> {
     if (!message.to) return { ok: false, error: 'destinatario_sin_email' };
     if (!this.config.apiKey || !this.config.from) {
       return { ok: false, error: 'proveedor_email_sin_credenciales' };
     }
     const ejecutar = this.config.fetchImpl || fetch;
+    const responderA = emailValido(message.replyTo) ? message.replyTo.trim() : emailValido(this.config.replyTo) ? this.config.replyTo.trim() : undefined;
     try {
       if (this.config.proveedor === 'RESEND') {
         const respuesta = await ejecutar('https://api.resend.com/emails', {
@@ -101,6 +121,7 @@ export class EmailProviderHTTP implements EmailProvider {
             to: [message.to],
             subject: message.subject,
             text: message.body,
+            ...(responderA ? { reply_to: responderA } : {}),
           }),
         });
         if (!respuesta.ok) {
@@ -121,6 +142,7 @@ export class EmailProviderHTTP implements EmailProvider {
           from: { email: this.config.from },
           subject: message.subject,
           content: [{ type: 'text/plain', value: message.body }],
+          ...(responderA ? { reply_to: { email: responderA } } : {}),
         }),
       });
       if (!respuesta.ok) {
@@ -143,10 +165,23 @@ export class CanalEmail implements EnviadorCanal {
     if (!to) {
       return { ok: false, provider: 'email', error: 'destinatario_sin_email', enviadoEn: new Date().toISOString() };
     }
+    // El cuerpo se envía YA RENDERIZADO. Si falta, es un fallo explícito: nunca
+    // se manda la clave de la plantilla (`cobro.retraso_pago`) como si fuese el
+    // mensaje, ni se da por enviado un aviso sin texto.
+    const cuerpo = typeof notificacion.cuerpo === 'string' ? notificacion.cuerpo.trim() : '';
+    if (!cuerpo) {
+      return {
+        ok: false,
+        provider: 'email',
+        error: 'cuerpo_no_renderizado (la notificación no lleva texto: no se envía la clave de la plantilla)',
+        enviadoEn: new Date().toISOString(),
+      };
+    }
     const res = await this.provider.enviar({
       to,
       subject: notificacion.asunto,
-      body: notificacion.plantilla,
+      body: cuerpo,
+      ...(emailValido(notificacion.responderA) ? { replyTo: notificacion.responderA.trim() } : {}),
     });
     return res.ok
       ? { ok: true, provider: 'email', externalId: res.externalId, enviadoEn: new Date().toISOString() }

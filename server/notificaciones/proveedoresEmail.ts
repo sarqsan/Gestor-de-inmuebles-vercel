@@ -19,6 +19,7 @@
 import {
   EmailProviderHTTP,
   EmailProviderSafeMode,
+  emailValido,
   type EmailProvider,
   type ProveedorEmailHttp,
 } from '../../src/notificaciones/canales.js';
@@ -47,6 +48,8 @@ export const VARIABLES_ENTORNO_EMAIL = {
   claveSendgrid: 'SENDGRID_API_KEY',
   smtp: 'SMTP_URL',
   desde: 'EMAIL_FROM',
+  responderA: 'EMAIL_REPLY_TO',
+  nombreDespacho: 'EMAIL_DESPACHO_NOMBRE',
 } as const;
 
 /**
@@ -80,6 +83,7 @@ export function crearTransporteEmailDesdeEntorno(
       ? (entorno.SENDGRID_API_KEY || '').trim()
       : '';
   const desde = (entorno.EMAIL_FROM || '').trim();
+  const responderA = (entorno.EMAIL_REPLY_TO || '').trim();
   const activoLegacy = entorno.ENABLE_EMAIL === 'true';
 
   if (usaSmtp && smtpUrl && desde) {
@@ -88,7 +92,7 @@ export function crearTransporteEmailDesdeEntorno(
       proveedor: 'SMTP',
       desde,
       provider: new EmailProviderSMTP(
-        { url: smtpUrl, from: desde },
+        { url: smtpUrl, from: desde, ...(responderA ? { responderA } : {}) },
         fabricaSmtp,
       ),
       detalle: 'SMTP configurado (Gmail u otro servidor): los envíos se aceptan o se rechazan de forma explícita.',
@@ -104,6 +108,7 @@ export function crearTransporteEmailDesdeEntorno(
         proveedor,
         apiKey,
         from: desde,
+        ...(responderA ? { replyTo: responderA } : {}),
         ...(fetchImpl ? { fetchImpl } : {}),
       }),
       detalle: `${proveedor} configurado: los envíos se aceptan o se rechazan de forma explícita (sin simulación).`,
@@ -124,4 +129,31 @@ export function crearTransporteEmailDesdeEntorno(
     provider: new EmailProviderSafeMode({ activo: activoLegacy, ...(desde ? { from: desde } : {}) }),
     detalle: `modo seguro (${motivos.join('; ')})${activoLegacy ? ': ENABLE_EMAIL=true no basta para enviar' : ''}`,
   };
+}
+
+/**
+ * Identidad del despacho que firma los avisos (nombre y buzón de respuesta), sin
+ * credenciales. Se usa en los textos para que el destinatario identifique quién
+ * escribe: el nombre se toma de `EMAIL_DESPACHO_NOMBRE` o del nombre visible de
+ * `EMAIL_FROM` (`Nombre <cuenta@dominio>`), y el contacto de `EMAIL_REPLY_TO` o
+ * del propio buzón remitente. Nunca devuelve claves.
+ */
+export interface IdentidadDespacho {
+  nombre: string;
+  contacto: string | null;
+}
+
+export function identidadDespachoDesdeEntorno(entorno: NodeJS.ProcessEnv = process.env): IdentidadDespacho {
+  const from = (entorno.EMAIL_FROM || '').trim();
+  const conNombre = /^\s*"?([^"<]+?)"?\s*<([^>]+)>\s*$/.exec(from);
+  const nombre =
+    (entorno[VARIABLES_ENTORNO_EMAIL.nombreDespacho] || '').trim() ||
+    (conNombre ? conNombre[1].trim() : '') ||
+    'Gestión de alquileres';
+  const contacto =
+    (entorno[VARIABLES_ENTORNO_EMAIL.responderA] || '').trim() ||
+    (conNombre ? conNombre[2].trim() : '') ||
+    (emailValido(from) ? from : '') ||
+    null;
+  return { nombre, contacto };
 }

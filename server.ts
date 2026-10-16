@@ -12,7 +12,7 @@ import { resolverAutorizacion, type FuentePerfilUsuario, type VerificadorToken }
 //   · transporte de correo REAL o modo seguro explícito (nunca «ok» sin envío);
 //   · perfil veraz del usuario desde Firestore para autorizar el endpoint;
 //   · reloj diario protegido por CRON_SECRET que evalúa la regla del día 5.
-import { crearTransporteEmailDesdeEntorno } from './server/notificaciones/proveedoresEmail.js';
+import { crearTransporteEmailDesdeEntorno, identidadDespachoDesdeEntorno } from './server/notificaciones/proveedoresEmail.js';
 import { crearFuentePerfilFirestore } from './server/notificaciones/perfilUsuarioFirestore.js';
 import { ejecutarRelojAvisos } from './server/notificaciones/relojAvisos.js';
 import { montarRutaCronAvisos } from './server/notificaciones/rutasCronAvisos.js';
@@ -95,6 +95,10 @@ const notificacionesRepo: RepositorioNotificaciones = {
 // contacta con nadie y devuelve fallo controlado: `ok` sin envío es imposible.
 const transporteEmail = crearTransporteEmailDesdeEntorno();
 const emailProvider = transporteEmail.provider;
+// FASE A — identidad que firma los avisos (nombre del despacho y buzón de
+// respuesta). Se deriva de `EMAIL_FROM` / `EMAIL_DESPACHO_NOMBRE` /
+// `EMAIL_REPLY_TO`: solo texto, jamás credenciales.
+const identidadDespacho = identidadDespachoDesdeEntorno();
 
 const transporteWebhook: TransporteWebhook = {
   post: async (url, body) => {
@@ -2849,6 +2853,7 @@ montarRutaCronAvisos(app, {
         puerto: puertoFirestoreReloj,
         crearDispatcher: construirDispatcher,
         contexto: { perfil: 'SISTEMA' },
+        identidadDespacho,
         origen,
       })
     : null,

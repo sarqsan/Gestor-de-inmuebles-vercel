@@ -33,6 +33,8 @@ import {
 import { crearRegistroMemoria, type RegistroOperacionIA } from './registroOperacionesIA.js';
 import { crearGobiernoMemoria, type GobiernoMemoriaIA } from './gobiernoIA.js';
 import { resolverConfiguracionIA } from './configuracionIA.js';
+import { resolverClaveMaestraLlaves } from './cifradoLlavesIA.js';
+import { VARIABLE_ENTORNO_CLAVE_MAESTRA_LLAVES } from '../../src/ia/llavesUsuarioContrato.js';
 import { OPERACIONES_IA, type IdOperacionIA } from '../../src/ia/catalogoOperacionesIA.js';
 import {
   TIPOS_PERFIL_IA,
@@ -108,6 +110,14 @@ export function evaluarEntornoIA(
   }
   if (tieneClaveProveedor) {
     avisos.push('GEMINI_API_KEY presente: el ensayo NO la usa (el sandbox corre con proveedor simulado); su uso real exige autorización expresa y límites de gasto verificados.');
+  }
+  // FASE 9 · Vía 2: sin clave maestra nadie puede registrar su llave propia y el
+  // servidor no crea el cliente del proveedor (aviso, no bloqueo: el sandbox es simulado).
+  const claveMaestra = resolverClaveMaestraLlaves(entorno);
+  if (claveMaestra.estado === 'AUSENTE') {
+    avisos.push(`Sin ${VARIABLE_ENTORNO_CLAVE_MAESTRA_LLAVES} el subsistema de llaves de usuario (Fase 9, Vía 2) queda NO_CONFIGURADO: la activación real exige configurarla.`);
+  } else if (claveMaestra.estado === 'INVALIDA') {
+    bloqueos.push(`${VARIABLE_ENTORNO_CLAVE_MAESTRA_LLAVES} inválida (${claveMaestra.error}): el servidor bloquearía las operaciones de IA (fallo cerrado).`);
   }
 
   return {

@@ -170,6 +170,7 @@ revisarla. No se inventó rama ni se atribuyó trabajo a ella.
 | `docs/BLOQUE-8-INVENTARIO-FUENTES.md` y `docs/FASE2-ANEXO-EVIDENCIA-EXTERNA.json` | Dry-run **histórico** sobre 52 filas reconstruidas, 0 AUTO / 36 INCOMPLETO / 15 BLOQUEADO / 1 NO_MIGRABLE; sin escrituras. | Transcripción ≠ JSON originales; faltan fuentes Rentasync completas, PDF, dump y autorizaciones. No se re-ejecutó B4 ni se importó/migró nada aquí. |
 | `docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md` y `docs/IA-FASE-2-GOBIERNO-USO.md` | Contrato de 11 operaciones, gobierno y aprobación comercial pendiente. | `server.ts` integra F1/F2; defaults solos no activan Gemini, no credencial/live. El contrato de política se endurece en la Fase IA 7 (sin comodines, sin tarifas implícitas, cuotas finitas): `docs/IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md`. |
 | `docs/IA-FASE-5-ASISTENTE-INCIDENCIAS-INQUILINO.md`, `IA-FASE-6-SEGUIMIENTO-INCIDENCIAS.md`, `IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md` y `IA-FASE-8-VALIDACION-ENTORNO-NO-PRODUCTIVO.md` | No existían antes de esta orden. | **INTEGRADAS en `main` (2026-10-16, PR #38)**: 12.ª operación del catálogo, seguimiento con trazabilidad por GAP 1, gobierno explícito y validación no productiva. El consumo de IA sigue BLOQUEADO por política; ver el anexo de esta sección. |
+| `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` e `IA-FASE-9-INFORME-CIERRE.md` | No existían antes de esta orden (el diseño original y sus commits se perdieron; el documento es una **reconstrucción** declarada). | **ENTREGADA EN RAMA, pendiente de integración (PR #39, 2026-10-16)**: DECISIÓN §11 = **Vía 2** (la clave del proveedor es de cada usuario), alta guiada en Configuración y tutorial PDF. `GEMINI_API_KEY` deja de alimentar operaciones. El consumo real sigue BLOQUEADO; ver el anexo «Orden IA 9». |
 | `docs/operaciones/alcance.md` y pruebas `.mjs` de operaciones/patrimonial | Arquitectura y suites ejecutadas en rama/árbol previos con limitación nativa declarada. | HEAD contiene ambos módulos; las suites `.mjs` y un E completo de operaciones no forman parte del CI consultado. No extrapolar certificación nativa/producción. |
 
 **Capacidades de §16 histórico, hoy:** `IA_CARTERA_TRANSVERSAL` **PA**
@@ -225,6 +226,39 @@ de cualquier autorización; · los tres flujos de gestión profesionales
 reutilizan la sincronización pero su cableado fino va con el rediseño de esa
 área; · reintentos programados de avisos pendientes (hoy en la siguiente
 sincronización).
+
+### Anexo · Orden IA 9 entregada en rama (2026-10-16, PR #39, pendiente de integración)
+
+Rama de sesión `arena/b93c6727-gestor-de-inmuebles-vercel`, base `4309f48`
+(= `main` tras el PR #38) → HEAD registrado en `docs/ESTADO-GIT-ERP.md`
+(«ENTREGA EN RAMA — FASE IA 9»). Evidencia declarada por la rama: suite
+completa **231 ficheros · 4.234 passed · 7 todo · 0 fallos**, `tsc --noEmit` **0 errores**,
+`npm run build` OK; 14 ficheros nuevos y 10 modificados; **sin** cambios en
+`firestore.rules`, `firebase.json`, `.firebaserc` ni `vercel.json`; sin
+dependencias nuevas ni migraciones. Informe de cierre:
+`docs/IA-FASE-9-INFORME-CIERRE.md`.
+
+Qué cambia de estado: **la clave del proveedor deja de ser del proyecto y pasa
+a ser de cada usuario** (DECISIÓN §11 del diseño: Vía 2). Cada usuario
+registra su clave de Google AI Studio en *Configuración → Llave de IA* (alta
+guiada de 7 pasos con tutorial PDF imprimible); el servidor la guarda cifrada
+(AES-256-GCM con `IA_LLAVES_CLAVE_MAESTRA`, AAD = uid) en `ia_llaves` (sólo
+servidor) y el núcleo crea el cliente del proveedor **únicamente** con esa
+llave, tras el permiso del gobierno y antes del registro/reserva; cabecera
+`X-IA-Llave-Usuario` y campo `ia.llaves` en `/api/health`. Sin llave: respaldo
+heurístico (`IA_LLAVES_SIN_LLAVE=RESPALDO`, por defecto) o `428
+LLAVE_USUARIO_REQUERIDA` (`EXIGIR`). `GEMINI_API_KEY` **ya no se usa** para
+operaciones (sólo se informa en health). Qué **NO** cambia: el consumo real
+sigue **BLOQUEADO** (la política TODO O NADA de la Fase 7 y la autorización
+expresa de la Fase 8 preceden a la llave); sin clave maestra el subsistema
+queda `NO_CONFIGURADO` y no se crea ningún cliente; no se publicaron reglas ni
+se configuró ninguna variable en producción. Pendientes accionables: ·
+decisión del responsable sobre `RESPALDO`/`EXIGIR` y sobre activar la
+verificación con el proveedor (`IA_LLAVES_VERIFICACION=PROVEEDOR`, llamada
+real); · generar y custodiar la clave maestra como secreto (`npm run
+ia:llaves:clave-maestra`); · procedimiento de rotación/recifrado de la clave
+maestra (fuera del alcance); · integración de la PR #39 y re-verificación de
+la suite sobre `main`.
 
 **Reglas de dependencia:** F0 precede pruebas E2E de captación; F1 precede
 lecturas/escrituras sensibles y F2; F2 aporta entidades para F3 y F4; F3

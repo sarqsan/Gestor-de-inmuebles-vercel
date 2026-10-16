@@ -3,6 +3,8 @@ import { FIREBASE_PROYECTO_ID } from '../../lib/entornoFirebase';
 import React, { useState, useRef } from 'react';
 import { UserProfile, Candidato, Inmueble } from '../../types';
 import { ImportExportPanel } from './ImportExportPanel';
+// IA · FASE 9 — alta guiada de la llave propia del usuario (Vía 2).
+import { AltaGuiadaLlaveIA } from '../ia/AltaGuiadaLlaveIA';
 import { ACEPTAR_IMPORTACION, validarNombreFicheroImportacion } from '../../lib/importExport/formato';
 import {
   User,
@@ -208,6 +210,9 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
             </div>
           </div>
         </div>
+
+        {/* IA · FASE 9 — Llave de IA (clave propia): alta guiada, estado sin secretos y tutorial PDF. */}
+        <AltaGuiadaLlaveIA />
 
         {/* General Pre-selection Parameters */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs space-y-4">

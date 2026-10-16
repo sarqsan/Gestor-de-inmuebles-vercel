@@ -165,7 +165,7 @@ describe('B · app REAL de server.ts: sin credencial bloquea antes de autenticar
     const r = await fetch(`${base}/api/health`);
     expect(r.status).toBe(200);
     const salud = await r.json();
-    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 12, errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
+    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 12, errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
     expect(JSON.stringify(salud)).not.toMatch(/private_key|client_email|apiKey|BEGIN/i);
   });
 });
@@ -478,6 +478,12 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/seguimiento/notificadorIncidencias.ts',
       'server/seguimiento/rutasSeguimientoIncidencias.ts',
       'server/notificaciones/repositorioNotificacionesFirestore.ts',
+      // FASE 9 · llaves de usuario (Vía 2): contrato + tutorial puros, cifrado, servicio y rutas.
+      'src/ia/llavesUsuarioContrato.ts',
+      'src/ia/tutorialLlaveUsuarioIA.ts',
+      'server/ia/cifradoLlavesIA.ts',
+      'server/ia/llavesUsuarioIA.ts',
+      'server/ia/rutasLlavesIA.ts',
     ];
 
     for (const rel of archivosServidor) {
@@ -654,7 +660,8 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     expect(body).toEqual({
       status: 'ok',
       geminiKeyConfigured: false,
-      ia: { registro: 'FIRESTORE', gobierno: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 12 },
+      // FASE 9 · sin IA_LLAVES_CLAVE_MAESTRA el subsistema de llaves de usuario queda NO_CONFIGURADO.
+      ia: { registro: 'FIRESTORE', gobierno: 'FIRESTORE', llaves: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 12 },
     });
   });
 

@@ -22,6 +22,7 @@
   "test:emulador:reglas": "npx --yes firebase-tools@15.33.0 emulators:exec --only auth,firestore,storage --project demo-gestor-reglas \"npx vitest run --config vitest.emulador.config.ts --reporter=default --reporter=json --outputFile.json=emulador-resultados.json\"",
   "ia:verificar-politica": "tsx scripts/verificar-politica-ia.mts",
   "ia:validar-entorno": "tsx scripts/validar-ia-entorno-no-productivo.mts",
+  "ia:llaves:clave-maestra": "tsx scripts/clave-maestra-llaves-ia.mts",
   "auditoria:repositorio": "tsx scripts/guardia-a04-repositorio.mts",
   "auditoria:reglas:matriz": "tsx scripts/diagnostico-b12-list.mts",
   "auditoria:reglas:list": "tsx scripts/auditoria-reglas-list.mts",

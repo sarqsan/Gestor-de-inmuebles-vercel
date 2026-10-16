@@ -405,6 +405,17 @@ barrido está acotado a 100 documentos por consulta (se marca truncamiento). La
 puerta de salida F0 sigue **abierta** hasta que exista una prueba con
 credenciales de prueba y acuse comprobado.
 
+**8.8 · Cierre de decisiones para la Fase A y siguiente fase (ronda del
+16-10-2026, tras revisión del informe).**
+
+| Decisión | Detalle | Efecto |
+|---|---|---|
+| Transporte inicial de correo | **Gmail por SMTP con contraseña de aplicación** (la cuenta del despacho). El código ya lo soporta (`EMAIL_PROVEEDOR=SMTP` + `SMTP_URL` + `EMAIL_FROM`); alternativas documentadas: Resend/SendGrid | Fase A lista para probar; guía en `docs/FASE-A-PUESTA-EN-MARCHA-AVISOS.md` |
+| Avisos del día 5 | **Solo correo + bandeja**, sin aviso preventivo previo (el responsable lo considera precipitado) | La regla vigente del reloj (vencimiento pasado + saldo pendiente) queda como definitiva |
+| Verificación del justificante | La hará **el propietario** | Fase B: bandeja de verificación en el portal del propietario, con aceptar/rechazar; el cobro sigue por la vía canónica |
+| ¿Sincronizar el Gmail del propietario? | **No es necesario**: para recibir basta la dirección de su ficha; el envío sale del buzón único de la plataforma. La sincronización por propietario exigiría consentimiento OAuth de cada uno, custodia de tokens y verificación de Google | Se documenta la aclaración en la guía de puesta en marcha |
+| Conexión bancaria (Nivel 1) | **Aceptado y registrado** para hacerlo cuando corresponda: reglas de categorización (alquiler, seguro, IBI, comunidad, hipoteca, suministros) y avisos sobre los extractos que ya se importan. **Coste 0 €**; el agregador PSD2 sigue descartado hasta presupuesto | Fase C del plan (§8.4), sin fecha: entra tras B y D |
+
 **8.7 · Detalle funcional y análisis de los seis puntos.** El informe completo,
 con el porqué de cada respuesta, las fuentes consultadas y las alternativas
 descartadas, está en

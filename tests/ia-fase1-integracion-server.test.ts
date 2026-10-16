@@ -455,6 +455,12 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       // FASE 5 · asistente de incidencias del inquilino (motor + servidor).
       'src/ia/asistenteIncidenciasIA.ts',
       'server/ia/asistenteIncidenciasInquilino.ts',
+      // FASE 6 · seguimiento de incidencias y notificaciones duraderas.
+      'src/seguimiento/incidencias.ts',
+      'server/seguimiento/seguimientoIncidencias.ts',
+      'server/seguimiento/notificadorIncidencias.ts',
+      'server/seguimiento/rutasSeguimientoIncidencias.ts',
+      'server/notificaciones/repositorioNotificacionesFirestore.ts',
     ];
 
     for (const rel of archivosServidor) {

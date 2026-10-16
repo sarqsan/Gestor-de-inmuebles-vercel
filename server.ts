@@ -41,6 +41,12 @@ import {
   type RegistroTrazasIncidenciasIA,
 } from './server/ia/asistenteIncidenciasInquilino.js';
 import { montarRutasAdminIA } from './server/ia/adminIA.js';
+// FASE 6 — seguimiento y trazabilidad de incidencias: hilo de eventos por
+// incidencia, avisos por el dispatcher canónico y estado REAL de entrega.
+import { crearServicioSeguimientoIncidencias } from './server/seguimiento/seguimientoIncidencias.js';
+import { crearNotificadorIncidencias } from './server/seguimiento/notificadorIncidencias.js';
+import { montarRutasSeguimientoIncidencias } from './server/seguimiento/rutasSeguimientoIncidencias.js';
+import { crearRepositorioNotificacionesFirestore } from './server/notificaciones/repositorioNotificacionesFirestore.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -50,8 +56,11 @@ import type {
 dotenv.config();
 
 // ---------------------------------------------------------------------------
-// Repositorio de notificaciones en memoria (producción: Firestore "notificaciones").
-// Conserva la notificación por id e idempotencyKey para anti-duplicados.
+// Repositorio de notificaciones. FASE 6: con credencial de servicio se usa el
+// repositorio DURADERO en Firestore (`notificaciones` + registro append-only de
+// entregas en `notificaciones_entregas`), de modo que el estado real de entrega
+// (estado, intentos, proveedor, id externo) sobrevive al proceso. Sin credencial
+// se conserva el almacén en memoria (desarrollo/tests): nunca se finge entrega.
 // ---------------------------------------------------------------------------
 const notificacionesStore = new Map<string, Notificacion>();
 const notificacionesRepo: RepositorioNotificaciones = {
@@ -108,7 +117,7 @@ function construirDispatcher(ctx: ContextoAutorizacion): DispatcherNotificacione
   };
   return new DispatcherNotificaciones({
     autorizacion: ctx,
-    repositorio: notificacionesRepo,
+    repositorio: notificacionesRepoDuradero ?? notificacionesRepo,
     canales,
   });
 }
@@ -228,6 +237,25 @@ const fuenteIncidenciasIA: FuenteAutorizadaInquilinoIA | null = dependenciasIA.f
   : null;
 const trazasIncidenciasIA: RegistroTrazasIncidenciasIA | null = dependenciasIA.firestore
   ? crearRegistroTrazasFirestoreIA(dependenciasIA.firestore)
+  : null;
+
+// FASE 6 — con credencial de servicio las notificaciones se persisten en
+// Firestore (documento canónico + registro de entregas). Sin credencial se
+// mantiene el almacén en memoria: el dispatcher y su deny-by-default no cambian.
+const notificacionesRepoDuradero: RepositorioNotificaciones | null = dependenciasIA.firestore
+  ? crearRepositorioNotificacionesFirestore(dependenciasIA.firestore)
+  : null;
+
+const servicioSeguimientoIncidencias = dependenciasIA.firestore
+  ? crearServicioSeguimientoIncidencias({
+      puerto: dependenciasIA.firestore,
+      notificar: crearNotificadorIncidencias({
+        crearDispatcher: construirDispatcher,
+        ...(process.env.SEGUIMIENTO_ADMIN_USUARIO_ID
+          ? { usuarioIdAdministracion: process.env.SEGUIMIENTO_ADMIN_USUARIO_ID }
+          : {}),
+      }),
+    })
   : null;
 
 app.post('/api/analizar-documento', nucleoIA.operacion('ANALIZAR_DOCUMENTO'), async (req, res) => {
@@ -2697,6 +2725,14 @@ app.get('/api/health', (req, res) => {
 // administrador (bloqueo/desbloqueo y movimiento de saldo con importe explícito).
 // Autorización SIEMPRE en servidor: token verificado + perfil veraz ADMINISTRADOR.
 // ---------------------------------------------------------------------------
+// FASE 6 — seguimiento de incidencias (autorizado en servidor): lectura de la
+// evolución y sincronización observada. No es una operación de IA: no consume
+// cuotas ni créditos, pero exige token verificado y autorización por incidencia.
+montarRutasSeguimientoIncidencias(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  servicio: servicioSeguimientoIncidencias,
+});
+
 montarRutasAdminIA(app, {
   verificarToken: dependenciasIA.verificarToken,
   gobierno: dependenciasIA.gobierno,

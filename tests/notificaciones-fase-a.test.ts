@@ -19,7 +19,8 @@ import express from 'express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { EmailProviderSafeMode, EmailProviderHTTP } from '../src/notificaciones/canales';
-import { crearTransporteEmailDesdeEntorno } from '../server/notificaciones/proveedoresEmail';
+import { crearTransporteEmailDesdeEntorno, RECETA_GMAIL_SMTP } from '../server/notificaciones/proveedoresEmail';
+import { EmailProviderSMTP, enmascararCredenciales, type FabricaTransporteSmtp } from '../server/notificaciones/proveedorSmtp';
 import { crearFuentePerfilFirestore, perfilDeTipoPerfil } from '../server/notificaciones/perfilUsuarioFirestore';
 import { resolverAutorizacion } from '../src/notificaciones/autorizacion';
 import { DispatcherNotificaciones } from '../src/notificaciones/dispatcher';
@@ -569,5 +570,82 @@ describe('D · endpoint protegido del cron', () => {
     // El reloj avisa; el cobro solo se registra por la vía canónica.
     const relojSrc = readFileSync(join(RAIZ, 'server/notificaciones/relojAvisos.ts'), 'utf8');
     expect(relojSrc).not.toMatch(/registrarPagoPeriodo\s*\(/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1.bis SMTP (Gmail) — transporte real del servidor
+// ---------------------------------------------------------------------------
+
+const URL_SMTP_PRUEBA = 'smtps://despacho%40gmail.com:contrasena_16_chars@smtp.gmail.com:465';
+
+function fabricaSmtpFalsa(comportamiento: { messageId?: string; error?: string }): {
+  fabrica: FabricaTransporteSmtp;
+  enviados: Array<{ from: string; to: string; subject: string; text: string }>;
+} {
+  const enviados: Array<{ from: string; to: string; subject: string; text: string }> = [];
+  const fabrica: FabricaTransporteSmtp = () => ({
+    async sendMail(opciones) {
+      enviados.push(opciones);
+      if (comportamiento.error) throw new Error(comportamiento.error);
+      return { messageId: comportamiento.messageId };
+    },
+  });
+  return { fabrica, enviados };
+}
+
+describe('A bis · SMTP de Gmail: el envío real del despacho', () => {
+  it('EMAIL_PROVEEDOR=SMTP con URL y remitente deja el transporte en REAL y entrega', async () => {
+    const { fabrica, enviados } = fabricaSmtpFalsa({ messageId: '<gmail-1@mail.gmail.com>' });
+    const transporte = crearTransporteEmailDesdeEntorno(
+      { EMAIL_PROVEEDOR: 'SMTP', SMTP_URL: URL_SMTP_PRUEBA, EMAIL_FROM: 'Despacho <despacho@gmail.com>' },
+      undefined,
+      fabrica,
+    );
+    expect(transporte.modo).toBe('REAL');
+    expect(transporte.proveedor).toBe('SMTP');
+
+    const resultado = await transporte.provider.enviar({ to: 'propietario@ejemplo.es', subject: 'Renta no cobrada', body: 'Detalle' });
+    expect(resultado.ok).toBe(true);
+    expect(resultado.externalId).toBe('<gmail-1@mail.gmail.com>');
+    expect(enviados).toHaveLength(1);
+    expect(enviados[0].from).toContain('despacho@gmail.com');
+  });
+
+  it('SMTP_URL presente sin declarar proveedor también usa SMTP (receta Gmail)', async () => {
+    const { fabrica } = fabricaSmtpFalsa({ messageId: 'x' });
+    const transporte = crearTransporteEmailDesdeEntorno({ SMTP_URL: RECETA_GMAIL_SMTP, EMAIL_FROM: 'a@b.es' }, undefined, fabrica);
+    expect(transporte.modo).toBe('REAL');
+    expect(transporte.proveedor).toBe('SMTP');
+  });
+
+  it('SMTP declarado sin URL cae en MODO SEGURO (nunca finge envío)', async () => {
+    const transporte = crearTransporteEmailDesdeEntorno({ EMAIL_PROVEEDOR: 'SMTP', EMAIL_FROM: 'a@b.es' });
+    expect(transporte.modo).toBe('MODO_SEGURO');
+    const resultado = await transporte.provider.enviar({ to: 'x@y.es', subject: 's', body: 'b' });
+    expect(resultado.ok).toBe(false);
+  });
+
+  it('un fallo de SMTP es explícito y NUNCA filtra la contraseña de aplicación', async () => {
+    const { fabrica } = fabricaSmtpFalsa({ error: `Invalid login at ${URL_SMTP_PRUEBA}` });
+    const provider = new EmailProviderSMTP({ url: URL_SMTP_PRUEBA, from: 'a@b.es' }, fabrica);
+    const resultado = await provider.enviar({ to: 'x@y.es', subject: 's', body: 'b' });
+    expect(resultado.ok).toBe(false);
+    expect(resultado.error).toContain('smtp_error');
+    expect(resultado.error).not.toContain('contrasena_16_chars');
+    expect(resultado.error).toContain('smtp.gmail.com');
+    expect(enmascararCredenciales('smtps://u:p@h:465 no')).toBe('smtps://***@h:465 no');
+    // También con el usuario sin codificar (`@` literal) y en la receta pública.
+    expect(enmascararCredenciales('smtps://u@gmail.com:p@h:465 no')).toBe('smtps://***@h:465 no');
+    expect(enmascararCredenciales(RECETA_GMAIL_SMTP)).not.toContain('CONTRASENA_DE_APLICACION');
+  });
+
+  it('sin URL ni remitente el proveedor SMTP no envía', async () => {
+    const provider = new EmailProviderSMTP({ url: '', from: '' });
+    expect(await provider.enviar({ to: 'x@y.es', subject: 's', body: 'b' })).toEqual({ ok: false, error: 'smtp_sin_credenciales' });
+  });
+
+  it('la receta de Gmail documentada es la esperada', () => {
+    expect(RECETA_GMAIL_SMTP).toBe('smtps://cuenta@gmail.com:CONTRASENA_DE_APLICACION@smtp.gmail.com:465');
   });
 });

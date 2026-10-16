@@ -22,13 +22,17 @@ import {
   type EmailProvider,
   type ProveedorEmailHttp,
 } from '../../src/notificaciones/canales.js';
+import { EmailProviderSMTP, type FabricaTransporteSmtp } from './proveedorSmtp.js';
 
 export type ModoEmail = 'REAL' | 'MODO_SEGURO';
 
+/** Proveedor real elegido para el canal EMAIL. */
+export type ProveedorEmailReal = ProveedorEmailHttp | 'SMTP';
+
 export interface TransporteEmail {
   modo: ModoEmail;
-  /** Proveedor HTTP activo, o `null` en modo seguro. */
-  proveedor: ProveedorEmailHttp | null;
+  /** Proveedor real activo (HTTP o SMTP), o `null` en modo seguro. */
+  proveedor: ProveedorEmailReal | null;
   /** Remitente configurado (`EMAIL_FROM`), o `null`. */
   desde: string | null;
   /** Implementación que recibe el canal EMAIL. */
@@ -41,15 +45,33 @@ export const VARIABLES_ENTORNO_EMAIL = {
   proveedor: 'EMAIL_PROVEEDOR',
   claveResend: 'RESEND_API_KEY',
   claveSendgrid: 'SENDGRID_API_KEY',
+  smtp: 'SMTP_URL',
   desde: 'EMAIL_FROM',
 } as const;
 
-/** Resuelve el transporte EMAIL desde el entorno. Función pura salvo `fetch`. */
+/**
+ * Receta Gmail documentada (no se inventa nada: son requisitos de Google):
+ * verificación en dos pasos activa + contraseña de aplicación de 16 caracteres,
+ * y `SMTP_URL` con `smtps://cuenta@gmail.com:CONTRASENA@smtp.gmail.com:465`.
+ */
+export const RECETA_GMAIL_SMTP = 'smtps://cuenta@gmail.com:CONTRASENA_DE_APLICACION@smtp.gmail.com:465';
+
+/**
+ * Resuelve el transporte EMAIL desde el entorno. Función pura salvo `fetch`/SMTP.
+ * Orden de decisión:
+ *   1. `EMAIL_PROVEEDOR=RESEND|SENDGRID` con su clave → proveedor HTTP.
+ *   2. `EMAIL_PROVEEDOR=SMTP` (o `SMTP_URL` presente sin proveedor declarado)
+ *      → SMTP; con Gmail es la vía de la contraseña de aplicación.
+ *   3. Cualquier otra combinación → MODO_SEGURO (nunca simula el envío).
+ */
 export function crearTransporteEmailDesdeEntorno(
   entorno: NodeJS.ProcessEnv = process.env,
   fetchImpl?: typeof fetch,
+  fabricaSmtp?: FabricaTransporteSmtp,
 ): TransporteEmail {
   const crudo = (entorno.EMAIL_PROVEEDOR || '').trim().toUpperCase();
+  const smtpUrl = (entorno.SMTP_URL || '').trim();
+  const usaSmtp = crudo === 'SMTP' || (!crudo && Boolean(smtpUrl));
   const proveedor: ProveedorEmailHttp | null =
     crudo === 'RESEND' ? 'RESEND' : crudo === 'SENDGRID' ? 'SENDGRID' : null;
   const apiKey = proveedor === 'RESEND'
@@ -59,6 +81,19 @@ export function crearTransporteEmailDesdeEntorno(
       : '';
   const desde = (entorno.EMAIL_FROM || '').trim();
   const activoLegacy = entorno.ENABLE_EMAIL === 'true';
+
+  if (usaSmtp && smtpUrl && desde) {
+    return {
+      modo: 'REAL',
+      proveedor: 'SMTP',
+      desde,
+      provider: new EmailProviderSMTP(
+        { url: smtpUrl, from: desde },
+        fabricaSmtp,
+      ),
+      detalle: 'SMTP configurado (Gmail u otro servidor): los envíos se aceptan o se rechazan de forma explícita.',
+    };
+  }
 
   if (proveedor && apiKey && desde) {
     return {
@@ -76,8 +111,9 @@ export function crearTransporteEmailDesdeEntorno(
   }
 
   const motivos = [
-    !proveedor ? `${VARIABLES_ENTORNO_EMAIL.proveedor} ausente o no soportado` : null,
-    !apiKey ? 'clave del proveedor ausente' : null,
+    crudo === 'SMTP' && !smtpUrl ? `${VARIABLES_ENTORNO_EMAIL.smtp} ausente` : null,
+    !proveedor && !usaSmtp ? `${VARIABLES_ENTORNO_EMAIL.proveedor} ausente o no soportado` : null,
+    proveedor && !apiKey ? 'clave del proveedor ausente' : null,
     !desde ? `${VARIABLES_ENTORNO_EMAIL.desde} ausente` : null,
   ].filter((m): m is string => Boolean(m));
 

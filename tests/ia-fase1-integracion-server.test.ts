@@ -480,6 +480,7 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/notificaciones/repositorioNotificacionesFirestore.ts',
       // FASE A · avisos reales: transporte de correo, perfil veraz, reloj y cron.
       'server/notificaciones/proveedoresEmail.ts',
+      'server/notificaciones/proveedorSmtp.ts',
       'server/notificaciones/perfilUsuarioFirestore.ts',
       'server/notificaciones/relojAvisos.ts',
       'server/notificaciones/rutasCronAvisos.ts',

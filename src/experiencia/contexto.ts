@@ -12,6 +12,9 @@ import type { ExperienceContext, ExperienceContextInput, ModuloERP } from './tip
 export const MODULO_POR_SECCION: Record<SectionType, ModuloERP> = {
   dashboard: 'inicio',
   inicio: 'inicio',
+  // FASE A (2026-10-16): la bandeja de avisos es una pantalla transversal de
+  // notificaciones; se mapea al módulo de inicio/control del ERP.
+  avisos: 'inicio',
   inmuebles: 'inmuebles',
   propietarios: 'propietarios',
   titulares: 'propietarios',

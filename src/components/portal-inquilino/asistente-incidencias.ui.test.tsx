@@ -69,11 +69,11 @@ function respuestaOk(origen: 'DETERMINISTA' | 'PROVEEDOR' = 'PROVEEDOR', avisos:
   };
 }
 
-function fetchDoble(cuerpo: unknown, status = 200) {
+function fetchDoble(cuerpo: unknown, status = 200, cabecerasExtra: Record<string, string> = {}) {
   const llamadas: Array<{ url: string; init: RequestInit }> = [];
   const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
     llamadas.push({ url: String(url), init: init ?? {} });
-    return new Response(JSON.stringify(cuerpo), { status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(cuerpo), { status, headers: { 'Content-Type': 'application/json', ...cabecerasExtra } });
   }) as unknown as typeof fetch;
   return { llamadas, fetchImpl };
 }
@@ -127,6 +127,31 @@ describe('Fase 5 · panel del asistente de incidencias', () => {
     expect(alerta.textContent).not.toContain('CUOTA_DIA_EXCEDIDA');
     expect(alerta.textContent).not.toContain('límite superado');
     expect(screen.queryByTestId('diagnostico-incidencia')).toBeNull();
+  });
+
+  it('sin llave propia registrada, el resultado avisa de que la IA no está conectada y dónde registrarla', async () => {
+    const { fetchImpl } = fetchDoble(respuestaOk('DETERMINISTA'), 200, { 'X-IA-Llave-Usuario': 'ausente' });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    render(<AsistenteIncidenciaAsistida contratoId="contrato-1" />);
+    pedirDiagnostico();
+
+    const aviso = await screen.findByTestId('aviso-ia-no-conectada');
+    expect(aviso.textContent).toMatch(/la ia no está conectada/i);
+    expect(aviso.textContent).toMatch(/llave de google ai studio/i);
+    expect(aviso.textContent).toMatch(/7 pasos/i);
+    expect(screen.getByTestId('diagnostico-incidencia').getAttribute('data-origen')).toBe('DETERMINISTA');
+  });
+
+  it('con llave propia activa no aparece el aviso de IA no conectada', async () => {
+    const { fetchImpl } = fetchDoble(respuestaOk('PROVEEDOR'), 200, { 'X-IA-Llave-Usuario': 'activa' });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    render(<AsistenteIncidenciaAsistida contratoId="contrato-1" />);
+    pedirDiagnostico();
+
+    await waitFor(() => expect(screen.getByTestId('diagnostico-incidencia')).toBeTruthy());
+    expect(screen.queryByTestId('aviso-ia-no-conectada')).toBeNull();
   });
 
   it('si el proveedor cae, se muestra el análisis determinista con su aviso (la pantalla no se rompe)', async () => {

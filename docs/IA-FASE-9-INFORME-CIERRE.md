@@ -4,9 +4,12 @@
 > cualquier Arena): base SHA → HEAD SHA, qué toca, qué NO toca, pruebas,
 > limitaciones reales, dependencias externas y política de resolución.
 >
-> **Estado: ENTREGADO EN RAMA — NO integrado.** La integración en `main`
-> corresponde a quien autorice la PR #39 (§3.4) y no se ha ejecutado desde esta
-> rama. **No se ha activado consumo real de IA** en ningún entorno.
+> **Estado: INTEGRADO EN `main`** (PR #39 fusionada el 2026-10-16, merge
+> `ad113d7`, base `4309f48`, HEAD de la entrega `71f27a9`). Este informe describe
+> el cierre de la entrega en rama; la re-verificación sobre `main` y el estado
+> vigente están en `docs/ESTADO-GIT-ERP.md` («INTEGRACIÓN — FASE IA 9»).
+> **El consumo real de IA sigue BLOQUEADO** hasta que se configuren los secretos
+> y variables de §5 en el entorno; no se ha activado en ningún entorno a fecha del merge.
 
 | Campo | Valor |
 | --- | --- |

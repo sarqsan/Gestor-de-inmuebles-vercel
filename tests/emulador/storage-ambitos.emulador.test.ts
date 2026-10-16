@@ -149,9 +149,11 @@ describe('Storage oficial · ámbitos y rutas (Firestore (default) sintético)',
     const ruta = 'gastos_facturas/prop-a/gasto-n/justificante.pdf';
     await assertFails(subir(ruta, TITULAR_A));
 
-    // Sonda temporal (solo emulador): averiguar si el motor admite una ruta
-    // a la base con nombre ANTES de proponer tocar storage.rules productivas.
-    // No se escribe la regla alternativa en el fichero del repositorio.
+    // Sonda DIAGNÓSTICA solo del emulador: una regla alternativa con base
+    // nombrada puede pasar aquí y NO estar admitida por Firebase publicado.
+    // Jamás autoriza sustituir las rutas productivas sin una prueba autorizada
+    // en entorno de aceptación y una decisión sobre los datos ya existentes.
+    // No se escribe la regla alternativa en storage.rules del repositorio.
     const alterna = STORAGE.replaceAll('/databases/(default)/documents/', `/databases/${BASE_NOMBRADA}/documents/`);
     expect(alterna).not.toBe(STORAGE);
     const envNombrado = await initializeTestEnvironment({

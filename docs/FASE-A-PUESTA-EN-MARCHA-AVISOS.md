@@ -4,8 +4,8 @@
 > notificaciones verifica la identidad, el canal de correo distingue
 > **envío real** de **modo seguro** (prohibido fingir), hay un **reloj diario**
 > protegido y una **bandeja interna** con el estado real de entrega. Falta
-> enchufar las credenciales en Vercel y comprobarlo. Son **3 variables y un
-> despliegue**; el cron ya está declarado en `vercel.json`.
+> enchufar las credenciales en Vercel y comprobarlo. Son **cuatro variables de
+> entorno y un despliegue**; el cron ya está declarado en `vercel.json`.
 >
 > **Nada de este documento se ha ejecutado**: no se ha configurado ningún
 > secreto, no se ha desplegado y no se ha enviado ningún correo.

@@ -4,6 +4,22 @@
 > el estado actualiza este fichero en el mismo commit.** No se almacenan
 > secretos en este documento.
 
+## INTEGRACIÓN — ORDEN IA FASES 5–8 (2026-10-16, PR #38)
+
+| Campo | Valor |
+|---|---|
+| Orden | IA del MAPA MAESTRO · Fases 5 (asistente de incidencias del inquilino), 6 (seguimiento y trazabilidad), 7 (gobierno de permisos/costes) y 8 (validación no productiva) |
+| Ramas | Sesión `arena/658e62cd-gestor-de-inmuebles-vercel`; destino de integración `main` |
+| BASE sobre la que se desarrolló | `6280e017bc18c1540fc52c76acd72a78a31f1309` (= `main` tras el PR #37) |
+| HEAD de la rama | `3a9c456` (verificado con `git ls-remote`); commits `c71c792` · `d6a6430` · `0a48357` · `2de454b` · `b55d01c` · `3a9c456` |
+| Integración | **PR #38 fusionada en `main`** (2026-10-16, autorizada expresamente). CI del repositorio en verde antes del merge: «Tipos, suite completa y build» y «Reglas Firestore y Storage (emuladores oficiales)» → `pass`. Informe de cierre de orden: `docs/IA-FASES-5-8-INFORME-CIERRE.md` |
+| Cambios | 51 ficheros, +8.295 / −187 (26 nuevos): 12.ª operación `ASISTENTE_INCIDENCIAS_INQUILINO`; `src/seguimiento/incidencias.ts` + `server/seguimiento/*` (hilo append-only con CAS, avisos por dispatcher GAP 1 con estado real de entrega); `server/notificaciones/repositorioNotificacionesFirestore.ts` (`notificaciones` + `notificaciones_entregas`); contrato de política TODO O NADA (sin comodines, sin tarifas implícitas, cuotas finitas) con **deny-by-default** por defecto; portal del inquilino (asistente + evolución); scripts `ia:verificar-politica` y `ia:validar-entorno` |
+| No tocado (verificado) | `firestore.rules`, `firebase.json`, `.firebaserc`, `vercel.json`, dependencias, migraciones y datos. Las colecciones nuevas son de acceso exclusivo por servidor y las cubre el catch-all `deny-by-default` |
+| Tests (mismo SHA) | Suite completa **228 ficheros · 4.185 passed · 7 todo · 0 fallos**; `npx tsc --noEmit -p .` **0 errores**; 12 suites IA de fase con sus cifras en el informe |
+| Estado de IA | **CONSUMO BLOQUEADO**: sin `IA_POLITICA_JSON` el servidor responde 503 `APROBACION_COMERCIAL_PENDIENTE`; con política mal formada, 503 `POLITICA_IA_INVALIDA`. Sin credenciales ni coste real; la activación gradual exige autorización expresa y los límites de gasto verificados (Fase 8) |
+| Pendientes reales | Límites/presupuesto y cuotas de API del proveedor verificados en Google Cloud; cableado fino de los modales profesionales a la sincronización; reintentos programados de avisos pendientes; proyecto/entorno no productivo dedicado para la activación gradual |
+| Worktree / Remoto | CLEAN / SYNCED |
+
 ## ESTADO ACTUAL (actualizado 2026-09-21)
 
 | Campo | Valor |

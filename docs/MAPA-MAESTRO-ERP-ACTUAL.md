@@ -417,6 +417,19 @@ credenciales de prueba y acuse comprobado.
 | Remitente y respuesta de los avisos | El correo sale del **buzón único del despacho** (`EMAIL_FROM`): Gmail exige que el `De` sea la cuenta autenticada, así que «enviar desde el Gmail del propietario» exigiría custodiar su contraseña (descartado). En su lugar: el aviso identifica inmueble, contrato y propietario, y las respuestas del inquilino van al propietario (Reply-To; `EMAIL_REPLY_TO` para el resto) | Aviso del día 5 reescrito sin datos sensibles (con prueba automática), cuerpo renderizado en el correo y en la bandeja (antes se enviaba la clave de la plantilla) |
 | Conexión bancaria (Nivel 1) | **Aceptado y registrado** para hacerlo cuando corresponda: reglas de categorización (alquiler, seguro, IBI, comunidad, hipoteca, suministros) y avisos sobre los extractos que ya se importan. **Coste 0 €**; el agregador PSD2 sigue descartado hasta presupuesto | Fase C del plan (§8.4), sin fecha: entra tras B y D |
 
+**8.9 · Incidencia de custodia del repositorio (16-10-2026) — resuelta sin
+pérdida.** Durante la verificación, el clon local se regeneró (reflog con dos
+únicas entradas: `clone` + `checkout`) y la rama de sesión quedó apuntando al
+commit base (`4309f48`), con `origin/arena/…` sin fetchar: la guardia A-04 pasó a
+WARNING (`origin-ausente`). Resolución aplicada, siguiendo el protocolo del
+propio script (nada destructivo): `git fetch origin <rama>`, repunte de la rama
+local al commit ya publicado (`git update-ref`) y `git reset -q HEAD` para
+resincronizar el índice **sin tocar el árbol de trabajo**. Ni un fichero perdido:
+el árbol conservaba todo el trabajo y los commits estaban en el remoto. A-04
+volvió a OK y la suite completa quedó en 232/232 ficheros (4.270 pruebas). Lección
+para futuras sesiones: si A-04 avisa de `origin-ausente`, comprobar primero el
+reflog antes de sospechar del código.
+
 **8.7 · Detalle funcional y análisis de los seis puntos.** El informe completo,
 con el porqué de cada respuesta, las fuentes consultadas y las alternativas
 descartadas, está en

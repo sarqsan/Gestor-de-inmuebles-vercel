@@ -87,6 +87,21 @@ No hay que crearlo a mano.
 - **Para enviar**, la app usa **un único buzón de la plataforma** (el que se
   configure en `SMTP_URL`). Es lo estándar y lo que permite que los avisos
   salgan aunque nadie esté conectado (el reloj corre en el servidor).
+
+### Si no quieres usar tu Gmail personal: crea un buzón para el ERP
+
+No hace falta más código ni trámites largos. La recomendación es **crear una
+cuenta de Gmail dedicada** (por ejemplo `avisos.tudespacho@gmail.com`), activarle
+la verificación en dos pasos y generar su contraseña de aplicación. Esa cuenta
+es la que se pone en `SMTP_URL` y `EMAIL_FROM`:
+
+- tu correo personal **nunca** aparece como remitente ni recibe respuestas por
+  error (los avisos al inquilino llevan al propietario como respuesta);
+- si algún día hay que cortar los envíos, se revoca esa contraseña y se acabó,
+  sin tocar tu cuenta;
+- el nombre que firma los textos se elige a mano (`EMAIL_DESPACHO_NOMBRE`), así
+  que puede decir «Gestión de Alquileres · [tu nombre]» sin exponer tu correo.
+
 ### ¿Y enviar «desde» el Gmail del propietario? No es posible (ni falta que hace)
 
 Se pidió que los avisos al inquilino **no salgan de la cuenta personal del

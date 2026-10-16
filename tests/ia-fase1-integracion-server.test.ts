@@ -1,11 +1,11 @@
 /**
  * IA · FASE 1 — INTEGRACIÓN EN server.ts
  * ======================================
- *  A. Cableado estático: los 11 endpoints del catálogo están montados con
+ *  A. Cableado estático: los 12 endpoints del catálogo están montados con
  *     `nucleoIA.operacion('<ID>')`, ningún manejador usa IA sin el núcleo y el
  *     SDK del proveedor sólo se instancia/llama dentro de `server/ia/`.
  *  B. App REAL de server.ts (importada como en Vercel, sin `listen` propio):
- *     sin credencial de producción, los 11 endpoints responden 503 sin
+ *     sin credencial de producción, los 12 endpoints responden 503 sin
  *     ejecutar nada; `/api/health` expone el estado del núcleo sin secretos.
  *  C. Configuración: proyecto/base de datos de la aplicación y modos del
  *     registro (FIRESTORE / MEMORIA / NO_CONFIGURADO) según el entorno.
@@ -36,7 +36,7 @@ function ficherosTs(dir: string): string[] {
 
 describe('A · cableado estático del núcleo de IA', () => {
   it('cada operación del catálogo está montada UNA vez en server.ts con su middleware del núcleo', () => {
-    expect(OPERACIONES_IA).toHaveLength(11);
+    expect(OPERACIONES_IA).toHaveLength(12);
     for (const { id, ruta } of OPERACIONES_IA) {
       const montaje = `app.post('${ruta}', nucleoIA.operacion('${id}'), async (req, res) => {`;
       expect(SERVER.split(montaje).length - 1, montaje).toBe(1);
@@ -164,7 +164,7 @@ describe('B · app REAL de server.ts: sin credencial bloquea antes de autenticar
     const r = await fetch(`${base}/api/health`);
     expect(r.status).toBe(200);
     const salud = await r.json();
-    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 11, errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
+    expect(salud.ia).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 12, errorConfiguracion: 'FIREBASE_CREDENCIAL_AUSENTE' });
     expect(JSON.stringify(salud)).not.toMatch(/private_key|client_email|apiKey|BEGIN/i);
   });
 });
@@ -206,7 +206,7 @@ describe('C · configuración del núcleo según el entorno', () => {
   });
 });
 
-describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional de los 11 endpoints reales', () => {
+describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional de los 12 endpoints reales', () => {
   const aplicacion = JSON.parse(readFileSync(join(RAIZ, 'firebase-applet-config.json'), 'utf8')) as {
     projectId: string;
     firestoreDatabaseId: string;
@@ -362,12 +362,38 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     const { codificarValor } = await import('../server/titularidades/googleBackend');
     const campos = (datos: Record<string, unknown>) =>
       (codificarValor(datos) as { mapValue: { fields: Record<string, unknown> } }).mapValue.fields;
-    const sembrarVeraz = (uid: string, usuarioId: string, tipoPerfil: string) => {
+    const sembrarVeraz = (uid: string, usuarioId: string, tipoPerfil: string, extra: Record<string, unknown> = {}) => {
       documentosFirestore.set(`usuarios_auth/${uid}`, { fields: campos({ usuarioId, estado: 'ACTIVO', tipoPerfil }) });
-      documentosFirestore.set(`usuarios/${usuarioId}`, { fields: campos({ authUid: uid, estado: 'ACTIVO', tipoPerfil }) });
+      documentosFirestore.set(`usuarios/${usuarioId}`, { fields: campos({ authUid: uid, estado: 'ACTIVO', tipoPerfil, ...extra }) });
     };
     sembrarVeraz('uid-ana', 'usuario-ana', 'PROPIETARIO');
     sembrarVeraz('uid-luis', 'usuario-luis', 'PROPIETARIO');
+    // FASE 5 · dos inquilinos con contrato propio y autorizado: el asistente de
+    // incidencias exige perfil INQUILINO y resuelve el alcance SÓLO desde estas
+    // fuentes (los contratos del cuerpo de la petición se ignoran).
+    sembrarVeraz('uid-ines', 'usuario-ines', 'INQUILINO', { contratoIds: ['contrato-ines'] });
+    sembrarVeraz('uid-marta', 'usuario-marta', 'INQUILINO', { contratoIds: ['contrato-marta'] });
+    const sembrarContratoInquilino = (contratoId: string, inmuebleId: string, propietarioId: string) => {
+      documentosFirestore.set(`contratos_formalizacion/${contratoId}`, {
+        fields: campos({
+          id: contratoId,
+          inquilinoId: `usuario-${contratoId.split('-')[1]}`,
+          inmuebleId,
+          propietarioId,
+          estado: 'ACTIVO',
+          esVigente: true,
+          fechaInicioContrato: '2026-01-01',
+          suministrosCargo: 'arrendatario',
+          gastosComunidadCargo: 'arrendador',
+          ibiCargo: 'arrendador',
+          permitirMascotas: true,
+        }),
+      });
+      documentosFirestore.set(`inmuebles/${inmuebleId}`, { fields: campos({ id: inmuebleId, direccion: 'Calle Mayor 1', ciudad: 'Madrid' }) });
+      documentosFirestore.set(`propietarios/${propietarioId}`, { fields: campos({ id: propietarioId, nombre: 'Propietaria Uno' }) });
+    };
+    sembrarContratoInquilino('contrato-ines', 'inmueble-ines', 'propietario-ines');
+    sembrarContratoInquilino('contrato-marta', 'inmueble-marta', 'propietario-marta');
     // FASE 2 · cuentas de créditos con saldo para la matriz (la política aprobada
     // fija coste 1 en ESTIMAR_PRICING; el resto de operaciones son coste 0).
     const hoy = new Date();
@@ -390,6 +416,8 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     };
     sembrarCuenta('uid-ana', 100);
     sembrarCuenta('uid-luis', 100);
+    sembrarCuenta('uid-ines', 100);
+    sembrarCuenta('uid-marta', 100);
 
     // Compila cada fichero TS de servidor a ESM suelto (sin bundler), igual que @vercel/node
     const cfg = ts.readConfigFile(join(RAIZ, 'tsconfig.json'), ts.sys.readFile).config;
@@ -424,6 +452,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/ia/adminIA.ts',
       'src/ia/catalogoOperacionesIA.ts',
       'src/ia/gobiernoIAContrato.ts',
+      // FASE 5 · asistente de incidencias del inquilino (motor + servidor).
+      'src/ia/asistenteIncidenciasIA.ts',
+      'server/ia/asistenteIncidenciasInquilino.ts',
     ];
 
     for (const rel of archivosServidor) {
@@ -550,6 +581,10 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       mejoras: ['Pintura neutra'],
       hechosAdicionales: ['Hecho secreto terraza privada'],
     },
+    ASISTENTE_INCIDENCIAS_INQUILINO: {
+      contratoId: 'contrato-ines',
+      descripcion: 'Gotea la tubería bajo el lavabo del baño desde ayer por la tarde.',
+    },
     ANALIZAR_INCIDENCIA: {
       incidencia: {
         titulo: 'Incidencia secreta fontanería',
@@ -596,14 +631,42 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     expect(body).toEqual({
       status: 'ok',
       geminiKeyConfigured: false,
-      ia: { registro: 'FIRESTORE', gobierno: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 11 },
+      ia: { registro: 'FIRESTORE', gobierno: 'FIRESTORE', autenticacion: 'TOKEN_FIREBASE', operaciones: 12 },
     });
   });
+
+  /**
+   * FASE 5 · Identidad de cada operación en la matriz. Por defecto Ana (perfil
+   * PROPIETARIO); el asistente de incidencias del inquilino exige perfil
+   * INQUILINO, así que trabaja con Inés (y con Marta en el caso de aislamiento
+   * entre usuarios). El resto de la matriz (9 casos) es idéntico para todas.
+   */
+  const IDENTIDADES_MATRIZ: Record<
+    string,
+    { uid: string; email: string; uidPar: string; emailPar: string; cuerpoPar?: Record<string, unknown> }
+  > = {
+    ASISTENTE_INCIDENCIAS_INQUILINO: {
+      uid: 'uid-ines',
+      email: 'ines.privado@example.com',
+      uidPar: 'uid-marta',
+      emailPar: 'marta.privado@example.com',
+      // El alcance del asistente es por contrato autorizado: el par necesita el SUYO.
+      cuerpoPar: { contratoId: 'contrato-marta' },
+    },
+  };
+  const identidadDeLaOperacion = (id: string) =>
+    IDENTIDADES_MATRIZ[id] ?? {
+      uid: 'uid-ana',
+      email: 'ana.privado@example.com',
+      uidPar: 'uid-luis',
+      emailPar: 'luis.privado@example.com',
+    };
 
   for (const { id, ruta } of OPERACIONES_IA) {
     it(`${ruta} (${id}) cumple los 9 casos funcionales y concurrencia sobre la app real`, async () => {
       const { decodificarCampos } = await import('../server/titularidades/googleBackend');
       const { CAMPOS_REGISTRO_IA } = await import('../server/ia/registroOperacionesIA');
+      const identidad = identidadDeLaOperacion(id);
       const cuerpoBase = {
         ...CUERPOS_VALIDOS[id],
         uid: 'uid-atacante-body',
@@ -624,7 +687,7 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       expect(documentosFirestore.size).toBe(tamAntes);
 
       // 2) Con token inválido o manipulado (firma otra clave, payload alterado, caducado, otro proyecto, alg none) -> 401
-      const tokenValidoAna = firmarToken({ sub: 'uid-ana', email: 'ana.privado@example.com' });
+      const tokenValidoAna = firmarToken({ sub: identidad.uid, email: identidad.email });
       const [h, p, s] = tokenValidoAna.split('.');
       const payloadManipulado = b64url(
         JSON.stringify({ ...JSON.parse(Buffer.from(p, 'base64url').toString('utf8')), sub: 'uid-admin' }),
@@ -671,7 +734,7 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       const datosReg = decodificarCampos((docGuardado?.fields || {}) as never);
       expect(datosReg).toMatchObject({
         id: opIdAna,
-        uid: 'uid-ana',
+        uid: identidad.uid,
         operacion: id,
         ruta,
         estado: 'COMPLETADA',
@@ -724,8 +787,31 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       const codigosConc = respuestasConc.map((r) => r.status).sort();
       expect(codigosConc).toEqual([200, 409, 409, 409]);
 
-      // 7) Aislamiento entre usuarios: misma clave de idempotencia con otro usuario (uid-luis) -> 200 e id distinto
-      const tokenLuis = firmarToken({ sub: 'uid-luis', email: 'luis.privado@example.com' });
+      // 7) Aislamiento entre usuarios: misma clave de idempotencia con otro usuario -> 200 e id distinto
+      const tokenLuis = firmarToken({ sub: identidad.uidPar, email: identidad.emailPar });
+      const cuerpoPar = { ...cuerpoBase, ...(identidad.cuerpoPar ?? {}) };
+      if (identidad.cuerpoPar) {
+        // El cuerpo del otro usuario no autoriza nada: si apunta a un contrato que
+        // no es suyo, se rechaza (403) y NO se ejecuta ni se registra operación.
+        const tamAjeno = documentosFirestore.size;
+        const rAjeno = await fetchReal(`${baseVercel}${ruta}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokenLuis}`,
+            'Idempotency-Key': `${claveBase}-ajeno-01`,
+          },
+          body: JSON.stringify(cuerpoBase),
+        });
+        expect(rAjeno.status).toBe(403);
+        expect(await rAjeno.json()).toMatchObject({ codigo: 'CONTRATO_NO_AUTORIZADO' });
+        // El intento SÍ queda trazado por el núcleo (FALLIDA, 403) pero NO genera
+        // traza de incidencia: la operación no llegó a analizar nada.
+        const opIdAjeno = rAjeno.headers.get('x-ia-operacion-id') ?? '';
+        expect(opIdAjeno).toMatch(/^iaop_[0-9a-f]{40}$/);
+        expect(documentosFirestore.has(`ia_incidencias_trazas/${opIdAjeno}`)).toBe(false);
+        expect(documentosFirestore.size).toBe(tamAjeno + 1);
+      }
       const rLuis = await fetchReal(`${baseVercel}${ruta}`, {
         method: 'POST',
         headers: {
@@ -733,14 +819,14 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
           Authorization: `Bearer ${tokenLuis}`,
           'Idempotency-Key': claveOk,
         },
-        body: JSON.stringify(cuerpoBase),
+        body: JSON.stringify(cuerpoPar),
       });
       expect(rLuis.status).toBe(200);
       const opIdLuis = rLuis.headers.get('x-ia-operacion-id');
       expect(opIdLuis).toMatch(/^iaop_[0-9a-f]{40}$/);
       expect(opIdLuis).not.toBe(opIdAna);
       const datosLuis = decodificarCampos((documentosFirestore.get(`ia_operaciones/${opIdLuis}`)?.fields || {}) as never);
-      expect(datosLuis).toMatchObject({ id: opIdLuis, uid: 'uid-luis', operacion: id, estado: 'COMPLETADA' });
+      expect(datosLuis).toMatchObject({ id: opIdLuis, uid: identidad.uidPar, operacion: id, estado: 'COMPLETADA' });
 
       // 5) Fallo de registro obligatorio -> 503 REGISTRO_NO_DISPONIBLE y no ejecuta la operación
       falloFirestoreRest = true;

@@ -578,6 +578,15 @@ export function clienteIA(res: Response): ClienteProveedorIA | null {
   return contexto.cliente;
 }
 
+/** Contexto resuelto por el núcleo (uid del token e id de operación), para los
+ *  endpoints que necesitan consultar fuentes autorizadas con esa identidad.
+ *  `null` sólo si el endpoint no se montó con `nucleoIA.operacion(...)`. */
+export function contextoOperacionIA(res: Response): { operacion: IdOperacionIA; operacionId: string; uid: string } | null {
+  const contexto = res.locals?.[CLAVE_CONTEXTO_IA] as ContextoOperacionIA | undefined;
+  if (!contexto) return null;
+  return { operacion: contexto.operacion, operacionId: contexto.operacionId, uid: contexto.uid };
+}
+
 /** Cliente real de Gemini (antes `getGeminiClient` en server.ts). `null` sin clave. */
 export function crearClienteGemini(apiKey: string | undefined = process.env.GEMINI_API_KEY): ClienteProveedorIA | null {
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {

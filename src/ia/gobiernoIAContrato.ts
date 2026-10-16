@@ -11,7 +11,7 @@
  *
  * POLÍTICA POR DEFECTO (sin configurar): conserva EXACTAMENTE el comportamiento
  * de Fase 1 — todo usuario autenticado con perfil veraz activo puede usar las
- * 11 operaciones, el coste es 0 créditos y no hay cuotas. NO fija precios ni
+ * 12 operaciones del catálogo, el coste es 0 créditos y no hay cuotas. NO fija precios ni
  * límites comerciales: esos valores están PENDIENTES DE APROBACIÓN y se
  * configuran de forma explícita (variable de entorno `IA_POLITICA_JSON`, ver
  * `politicaGobiernoIADesdeEntorno`). El saldo inicial de cada cuenta es 0 y

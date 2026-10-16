@@ -65,7 +65,13 @@ export function resolverConfiguracionIA(entorno: NodeJS.ProcessEnv = process.env
 
 export function crearDependenciasNucleoIA(
   entorno: NodeJS.ProcessEnv = process.env,
-): DependenciasNucleoIA & { configuracion: ConfiguracionNucleoIA; politica: PoliticaGobiernoIA | null; errorPolitica?: string } {
+): DependenciasNucleoIA & {
+  configuracion: ConfiguracionNucleoIA;
+  politica: PoliticaGobiernoIA | null;
+  errorPolitica?: string;
+  /** Fuente autorizada de datos (Firestore REST con credencial de servicio) o `null`. */
+  firestore: ClienteFirestoreRest | null;
+} {
   const acceso = resolverAccesoFirebase(entorno);
   const configuracion = configurar(acceso, entorno);
   const politicaResultado = politicaGobiernoIADesdeEntorno(entorno);
@@ -74,8 +80,9 @@ export function crearDependenciasNucleoIA(
 
   let registro: DependenciasNucleoIA['registro'] = null;
   let gobierno: GobiernoIA | null = null;
+  let firestore: ClienteFirestoreRest | null = null;
   if (acceso.cuenta && configuracion.modoRegistro === 'FIRESTORE' && configuracion.baseDatosId) {
-    const firestore = new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId });
+    firestore = new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId });
     registro = crearRegistroFirestore(firestore);
     if (politica) gobierno = crearGobiernoFirestore(firestore, politica);
   } else if (configuracion.modoRegistro === 'MEMORIA') {
@@ -94,6 +101,7 @@ export function crearDependenciasNucleoIA(
   return {
     configuracion,
     politica,
+    firestore,
     ...(errorPolitica ? { errorPolitica } : {}),
     registro,
     gobierno,

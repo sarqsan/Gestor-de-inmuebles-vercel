@@ -201,8 +201,8 @@ describe('IA Fase 2 · permisos por rol y operación', () => {
 
   it('el catálogo completo sigue montado y el estado del núcleo informa del gobierno', async () => {
     const m = await montar();
-    expect(OPERACIONES_IA.length).toBe(11);
-    expect(m.nucleo.estado()).toMatchObject({ registro: 'MEMORIA', gobierno: 'MEMORIA', operaciones: 11 });
+    expect(OPERACIONES_IA.length).toBe(12);
+    expect(m.nucleo.estado()).toMatchObject({ registro: 'MEMORIA', gobierno: 'MEMORIA', operaciones: 12 });
   });
 });
 

@@ -20,6 +20,8 @@ import type {
   UsuarioApp,
 } from '../../types';
 import { MiniaturaEvidencia } from './MiniaturaEvidencia';
+// IA · FASE 5 — diagnóstico asistido del inquilino (servidor autorizado).
+import { AsistenteIncidenciaAsistida } from './AsistenteIncidenciaAsistida';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
@@ -120,6 +122,13 @@ export const PortalIncidencias: React.FC<Props> = ({ usuario, contrato, inmueble
                   </ol>
                 </div>
               )}
+
+              <AsistenteIncidenciaAsistida
+                contratoId={contrato.id}
+                incidenciaId={vm.id}
+                descripcionInicial={vm.descripcion}
+                categoriaInicial={vm.categoria}
+              />
 
               {(vm.fotografias.length > 0 || vm.documentos.length > 0) && (
                 <div>
@@ -361,6 +370,16 @@ function NuevaIncidenciaModal({
             ))}
           </div>
         )}
+
+        {/* IA · FASE 5 — el inquilino puede orientar la avería ANTES de enviarla.
+            El asistente analiza con el contrato autorizado y no crea nada por sí solo. */}
+        <div className="mb-3">
+          <AsistenteIncidenciaAsistida
+            contratoId={contrato.id}
+            descripcionInicial={`${titulo} ${descripcion}`.trim()}
+            categoriaInicial={categoria}
+          />
+        </div>
 
         <button
           onClick={guardar}

@@ -225,7 +225,7 @@ describe('IA Fase 2 · cableado en server.ts', () => {
     const servidor = readFileSync(resolve(RAIZ, 'server.ts'), 'utf8');
     expect(servidor.match(/montarRutasAdminIA\(/g)).toHaveLength(1);
     expect(servidor).toContain("app.get('/api/health'");
-    expect(servidor.match(/app\.post\('[^']+', nucleoIA\.operacion\('/g)).toHaveLength(11); // Fase 1 intacta
+    expect(servidor.match(/app\.post\('[^']+', nucleoIA\.operacion\('/g)).toHaveLength(12); // Fase 1 y 5 completas
     // El panel no consume IA: no aparece clienteIA en el bloque de adminIA.
     const bloqueAdmin = servidor.slice(servidor.indexOf('montarRutasAdminIA(app'));
     expect(bloqueAdmin.slice(0, bloqueAdmin.indexOf('});'))).not.toMatch(/clienteIA|generateGeminiWithRetry/);

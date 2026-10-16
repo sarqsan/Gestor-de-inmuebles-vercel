@@ -26,6 +26,10 @@ export const OPERACIONES_IA = [
   { id: 'ESTIMAR_PRICING', ruta: '/api/estimar-pricing', descripcion: 'Revisión del precio de recomercialización' },
   { id: 'GENERAR_KIT_PUBLICACION', ruta: '/api/generar-kit-publicacion', descripcion: 'Kit de publicación del anuncio' },
   { id: 'ANALIZAR_INCIDENCIA', ruta: '/api/analizar-incidencia-ia', descripcion: 'Análisis pericial de incidencias' },
+  // IA · FASE 5 — asistente de incidencias para inquilinos: diagnóstico guiado con
+  // contrato autorizado, medidas preventivas seguras y derivación explícita. Se
+  // monta con el mismo núcleo (autenticación, idempotencia, gobierno y registro).
+  { id: 'ASISTENTE_INCIDENCIAS_INQUILINO', ruta: '/api/asistente/incidencias-inquilino', descripcion: 'Diagnóstico guiado de incidencias del inquilino (contrato autorizado)' },
 ] as const;
 
 export type OperacionIACatalogo = (typeof OPERACIONES_IA)[number];

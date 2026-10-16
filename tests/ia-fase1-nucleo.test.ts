@@ -415,7 +415,7 @@ describe('IA Fase 1 · contratos del núcleo', () => {
   it('operacion() con un id fuera del catálogo lanza al montar', () => {
     const nucleo = crearNucleoIA({ verificarToken: async () => null, registro: null, crearClienteProveedor: () => null });
     expect(() => nucleo.operacion('NO_EXISTE' as never)).toThrow(/desconocida/);
-    expect(nucleo.estado().operaciones).toBe(11);
+    expect(nucleo.estado().operaciones).toBe(12);
   });
 
   it('id de operación: determinista, aislado por usuario y no enumerable', () => {

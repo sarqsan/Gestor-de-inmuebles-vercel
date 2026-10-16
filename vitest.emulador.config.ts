@@ -1,6 +1,6 @@
-// Configuración de las pruebas de reglas contra el EMULADOR OFICIAL de Firestore.
+// Configuración de pruebas contra los EMULADORES OFICIALES de Firestore y Storage.
 // No forma parte de `vitest run` (ver exclude en vite.config.ts): se ejecuta con
-// `npm run test:emulador:reglas`, que arranca el emulador con firebase emulators:exec.
+// `npm run test:emulador:reglas`, que arranca ambos emuladores con firebase emulators:exec.
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({

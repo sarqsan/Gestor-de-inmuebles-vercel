@@ -1,4 +1,4 @@
-# Verificación de reglas Firestore con el EMULADOR OFICIAL y de la base del repositorio.
+# Verificación de reglas Firestore y Storage con EMULADORES OFICIALES y de la base del repositorio.
 # Sin secretos ni despliegue: sólo ejecuta pruebas y, en pull requests, publica un resumen.
 name: Emulador de reglas y verificación
 
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   reglas-emulador:
-    name: Reglas Firestore (emulador oficial)
+    name: Reglas Firestore y Storage (emuladores oficiales)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -35,7 +35,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Suite de reglas contra el emulador oficial de Firestore
+      - name: Suite de reglas contra los emuladores oficiales de Firestore y Storage
         id: emulador
         run: npm run test:emulador:reglas
 
@@ -49,7 +49,7 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            const cab = `### Emulador oficial de Firestore: ${process.env.RESULTADO === "success" ? "CORRECTO" : "FALLIDO"}\n\nCommit: \`${process.env.SHA}\`\n`;
+            const cab = `### Emuladores oficiales de Firestore y Storage: ${process.env.RESULTADO === "success" ? "CORRECTO" : "FALLIDO"}\n\nCommit: \`${process.env.SHA}\`\n`;
             let cuerpo = cab;
             try {
               const r = JSON.parse(fs.readFileSync("emulador-resultados.json", "utf8"));

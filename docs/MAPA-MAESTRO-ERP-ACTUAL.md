@@ -208,6 +208,33 @@ escritura en Firebase/producción. El archivo histórico siguiente se conserva
 literalmente (sus datos de época no se eliminan); `git diff --check` y estado
 final verificarán la preservación.
 
+### 6. Adenda posterior — ejecución local de la Fase 0 (16-10-2026)
+
+El corte anterior es una **foto de `fd3cae9d`**. Después de aquella auditoría,
+la Fase 0 instaló dependencias locales con `npm ci` (sin cambios de lockfile),
+reprodujo el único fallo del CI anterior y corrigió **solo el fixture** de
+`tests/roadmap01-seguridad.test.ts`: `isStaff()` es falso para el propietario
+empleado antes; el nuevo profesional con ficha veraz y sin cartera hace que la
+mutación de ampliación de lectura falle el control esperado, sin modificar
+Rules ni código productivo. En esta fase se comprometieron la auditoría y sus
+anexos sin reescribir el texto histórico. Esta adenda **no** atribuye la
+validación local posterior a la auditoría original.
+
+| Comprobación posterior | Resultado local | Frontera |
+|---|---|---|
+| `npx vitest run tests/roadmap01-seguridad.test.ts` | Antes 6/7; tras la corrección **7/7**. | Harness de Rules, no emulador oficial. |
+| `npx tsc --noEmit -p .` y `npm run build` | Ambos **PASS**; build con advertencias de tamaño/importaciones mixtas. | No certifican Firebase ni Vercel productivos. |
+| `npx vitest run --exclude tests/guardia-a04-rama-sesion.test.ts` | **220/220 archivos, 4076 correctas, 0 fallidas, 7 todo** (4083 total). | Esta es la suite del workflow, no las suites nativas `.mjs` ni los emuladores. |
+| `npm run test:operaciones` | **290/302**, 12 fallidas (aserciones de fuente, custodia y diff fijadas a bases antiguas). | No ocultar los fallos ni inferir una brecha con una comparación textual; revisar semántica y actualizar custodia solo en la fase de operaciones. |
+| `npm run test:patrimonial` | **85/88**, 3 fallidas (package/superficie/Rules frente a una base histórica). | El script compuesto `test:integracion` se detiene al fallar operaciones. No declarar las `.mjs` verdes ni modificar sus guardias por conveniencia. |
+
+No hay Java local ni prueba **oficial** de emuladores en esta adenda: los
+resultados oficiales de la PR de Fase 0 deben cotejarse contra su **SHA de
+head** antes del merge. Los 7 `todo` y las 15 fallidas de `.mjs` son deuda
+explícita; lo primero no es una prueba completada, lo segundo no forma parte
+de los dos jobs CI actuales. No se ha usado Gemini, Firebase real, banco,
+proveedor externo ni un despliegue manual.
+
 ---
 
 ## ARCHIVO HISTÓRICO (septiembre de 2026; conservado, **NO VIGENTE**)

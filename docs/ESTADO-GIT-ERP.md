@@ -4,6 +4,24 @@
 > el estado actualiza este fichero en el mismo commit.** No se almacenan
 > secretos en este documento.
 
+## ENTREGA EN RAMA — FASE A (avisos reales) + GMAIL POR SMTP (2026-10-16) — **PENDIENTE DE VERIFICACIÓN EN PRODUCCIÓN**
+
+| Campo | Valor |
+|---|---|
+| Orden | Cerrar la Fase A de la orden de capacidades: avisos que de verdad salen. Decisiones del 16-10-2026: transporte inicial **Gmail por SMTP** (contraseña de aplicación), aviso del día 5 **solo correo + bandeja**, verificación del justificante (Fase B) por **el propietario**, capa de **banco Nivel 1** registrada para cuando corresponda, SEPA y WhatsApp descartados |
+| Ramas | Sesión `arena/7eef00ef-gestor-de-inmuebles-vercel`; destino de integración `main`. **`main` no se ha tocado** en esta ronda |
+| BASE sobre la que se desarrolló | `ad113d7` (= `main` tras el PR #39) |
+| Commits | `904e582` (núcleo de la Fase A: verificador+perfil, correo real vs modo seguro, reloj cron, bandeja) · `b25ca7c` (docs, Fase 0) · `cf5fcf7` (Gmail por SMTP + arreglo del enmascarado de credenciales) · `d86f451` · `f808831` · `3eb23ce` (guía de puesta en marcha en Vercel/Gmail) · `27c5a17` (el aviso identifica el inmueble; Reply-To al propietario; arreglo del cuerpo renderizado) · `ffd047a` (docs: cuenta dedicada, ejemplo real del aviso, nota de la incidencia de custodia) |
+| HEAD de la rama | `ffd047a` (verificado con `git ls-remote` tras el push) |
+| Integración | **Sin PR abierta**: la rama queda publicada a la espera de la verificación en producción y del cierre formal de la Fase A |
+| Cambios | Transporte SMTP (`server/notificaciones/proveedorSmtp.ts`, nodemailer 6.10.1), resolución del transporte con modo REAL/MODO_SEGURO (`proveedoresEmail.ts`), reloj de avisos y endpoint de cron protegido, repositorio duradero de notificaciones, bandeja de avisos (`'avisos'` en la navegación), plantillas de cobro reescritas sin datos sensibles, Reply-To extremo a extremo, `EMAIL_DESPACHO_NOMBRE`/`EMAIL_REPLY_TO`, identidad del despacho, `.env.example` y guía de puesta en marcha |
+| No tocado (verificado) | `firestore.rules`, `storage.rules`, `firebase.json`, `.firebaserc`, migraciones, datos y `main`. El `crons` de `vercel.json` ya existía de la fase anterior |
+| Tests (mismo SHA) | Fase A **38/38** · integración del servidor **35/35** · arranque seguro **18/18** · suite completa **232 ficheros · 4.270 passed · 2 skipped · 7 todo · 0 fallos** · `npx tsc --noEmit` **0 errores** · `npm run build` **OK** · guardia A-04 **OK** |
+| Estado de IA | **CONSUMO BLOQUEADO** (sin cambios en esta ronda) |
+| Pendientes reales | (1) Configurar en Vercel `EMAIL_PROVEEDOR`, `SMTP_URL`, `EMAIL_FROM`, `CRON_SECRET` (+ `EMAIL_DESPACHO_NOMBRE`/`EMAIL_REPLY_TO`) y republicar; (2) prueba real con un recibo vencido y anotación de la evidencia (mapa §8); (3) revisar el buzón dedicado del ERP si se decide no usar el personal. Guía: `docs/FASE-A-PUESTA-EN-MARCHA-AVISOS.md`; parte de estado: `docs/CONTINUIDAD-FASE-A-RONDA-2026-10-16.md` |
+| Incidencia | Re-clonado del repositorio durante la verificación (rama reiniciada al commit base, `origin/arena/…` ausente): resuelto sin pérdida con `fetch` + `update-ref` + `reset -q HEAD`. Registro y protocolo: mapa §8.9 y `docs/CONTINUIDAD-FASE-A-RONDA-2026-10-16.md` §6 |
+| Worktree / Remoto | CLEAN / SYNCED (tras el push de `ffd047a`) |
+
 ## ENTREGA EN RAMA — FASE IA 9 (2026-10-16, PR #39) — **PENDIENTE DE INTEGRACIÓN**
 
 | Campo | Valor |

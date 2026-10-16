@@ -20,6 +20,7 @@ import {
   ArrowDownUp,
   Banknote,
   BarChart3,
+  BellRing,
   Building2,
   Calculator,
   FileText,
@@ -122,6 +123,20 @@ export const NAVEGACION: readonly ItemNavDef[] = [
     etiquetas: { porDefecto: 'Centro de Control' },
     descripciones: { porDefecto: 'KPIs, atención prioritaria, financiero y operaciones' },
     perfiles: ['ADMINISTRADOR', 'PROPIETARIO'],
+  },
+  {
+    // FASE A (2026-10-16): bandeja interna de avisos con estado REAL de entrega.
+    // No sustituye al correo: garantiza que el aviso quede también dentro de la app.
+    section: 'avisos',
+    grupo: 'CONTROL',
+    icono: BellRing,
+    etiquetas: { porDefecto: 'Bandeja de avisos', PROPIETARIO: 'Mis avisos', PROFESIONAL: 'Avisos de mis inmuebles' },
+    descripciones: {
+      porDefecto: 'Estado real de entrega de cada aviso emitido',
+      PROPIETARIO: 'Avisos de tus alquileres: entregados, pendientes y fallidos',
+      PROFESIONAL: 'Avisos de los inmuebles que gestionas',
+    },
+    perfiles: ['ADMINISTRADOR', 'PROPIETARIO', 'PROFESIONAL'],
   },
   {
     section: 'administracion',

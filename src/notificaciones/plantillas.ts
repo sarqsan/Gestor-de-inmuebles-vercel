@@ -38,6 +38,18 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP', 'WEBHOOK'],
     inicio: 'IMMEDIATE',
   },
+  // Regla del día 5 (decisión 16-10-2026): cuando el recibo pasa su día límite
+  // sin cobro, el PROPIETARIO recibe este aviso (el inquilino recibe el
+  // recordatorio de `cobro.retraso_pago`). No sustituye a la morosidad ni al
+  // recobro: solo informa y deja traza en la bandeja.
+  'cobro.renta_no_cobrada_propietario': {
+    id: 'cobro.renta_no_cobrada_propietario',
+    asunto: 'Renta no cobrada — {inmuebleDireccion} ({periodoMesAnio})',
+    cuerpo:
+      'El recibo de alquiler de {periodoMesAnio} del inmueble {inmuebleDireccion} no consta como cobrado a fecha de {fechaHoy} (vencimiento: {fechaVencimiento}). Inquilino: {inquilinoNombre}. Importe pendiente: {importePrevisto}. Revise el estado del cobro en la app; si el impago continúa, el expediente de recobro queda disponible.',
+    canalesPermitidos: ['EMAIL', 'INAPP', 'WEBHOOK'],
+    inicio: 'IMMEDIATE',
+  },
 
   // =======================================================================
   // AGENDA / VISITAS

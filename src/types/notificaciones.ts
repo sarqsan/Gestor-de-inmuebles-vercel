@@ -42,8 +42,13 @@ export interface ResultadoEntrega {
 // ---------------------------------------------------------------------------
 
 export interface ContextoAutorizacion {
-  /** Perfil autorizado del que dispara el envío. null ⇒ anónimo/denegado. */
-  perfil: 'ADMINISTRADOR' | 'PROPIETARIO' | 'PROFESIONAL' | null;
+  /**
+   * Perfil autorizado del que dispara el envío. null ⇒ anónimo/denegado.
+   * `SISTEMA` es el actor interno del servidor (reloj/cron protegido, procesos
+   * de plataforma): mismo alcance que ADMINISTRADOR y nunca procede de un token
+   * de usuario (el endpoint público jamás lo resuelve).
+   */
+  perfil: 'ADMINISTRADOR' | 'PROPIETARIO' | 'PROFESIONAL' | 'SISTEMA' | null;
   /** UID de Firebase Auth cuando aplica. */
   uid?: string;
   /** Vinculaciones del usuario autorizado (aislamiento). */

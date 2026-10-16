@@ -61,7 +61,9 @@ const GRUPOS_ESPERADOS: { id: GrupoNavId; nombre: string }[] = [
 /** Orden de render esperado (contrato de UX-1; cualquier cambio es deliberado). */
 const ORDEN_ESPERADO: Record<PerfilNavegacion, SectionType[]> = {
   ADMINISTRADOR: [
-    'dashboard', 'administracion',
+    // FASE A (2026-10-16): `avisos` (bandeja interna con estado real de entrega)
+    // se añade al grupo CONTROL, justo después del Centro de Control.
+    'dashboard', 'avisos', 'administracion',
     // AUDITORÍA 2026-09-29: `datos` tras `propietarios` (decisión deliberada FASE 16/22).
     'inmuebles', 'propietarios', 'datos', 'inversion', 'inquilinos', 'suministros',
     'cobros', 'tesoreria', 'gastos', 'financiacion', 'conciliacion', 'facturacion', 'fiscal', 'informes', 'morosidad',
@@ -70,7 +72,7 @@ const ORDEN_ESPERADO: Record<PerfilNavegacion, SectionType[]> = {
     'configuracion', 'ayuda',
   ],
   PROPIETARIO: [
-    'dashboard',
+    'dashboard', 'avisos',
     // AUDITORÍA 2026-09-29: `datos` tras `propietarios` (Importar/Exportar de primer nivel).
     // 2026-10-01: `titulares` («Propietarios / Titulares») es la entrada del PROPIETARIO hacia su
     // ficha de titular; antes el aviso «créalo desde Propietarios/Titulares» no llevaba a ningún sitio.
@@ -80,7 +82,7 @@ const ORDEN_ESPERADO: Record<PerfilNavegacion, SectionType[]> = {
     'incidencias', 'operaciones', 'polizas', 'actas',
     'configuracion', 'ayuda',
   ],
-  PROFESIONAL: ['administracion', 'inmuebles', 'cobros', 'formalizacion', 'configuracion', 'ayuda'],
+  PROFESIONAL: ['avisos', 'administracion', 'inmuebles', 'cobros', 'formalizacion', 'configuracion', 'ayuda'],
 };
 
 const PERFILES: PerfilNavegacion[] = ['ADMINISTRADOR', 'PROPIETARIO', 'PROFESIONAL'];
@@ -165,16 +167,16 @@ describe('UX-1 · A — Catálogo de navegación', () => {
 
 // ── B. Perfiles ──────────────────────────────────────────────────────────────
 describe('UX-1 · B — Navegación por perfil', () => {
-  it('ADMINISTRADOR: 29 destinos en el orden aprobado', () => {
+  it('ADMINISTRADOR: 30 destinos en el orden aprobado', () => {
     const s = seccionesDePerfil('ADMINISTRADOR');
     expect(s).toEqual(ORDEN_ESPERADO.ADMINISTRADOR);
-    expect(s.length).toBe(29);
+    expect(s.length).toBe(30);
   });
 
-  it('PROPIETARIO: 23 destinos, sin secciones de gestión interna', () => {
+  it('PROPIETARIO: 24 destinos, sin secciones de gestión interna', () => {
     const s = seccionesDePerfil('PROPIETARIO');
     expect(s).toEqual(ORDEN_ESPERADO.PROPIETARIO);
-    expect(s.length).toBe(23);
+    expect(s.length).toBe(24);
     // AUDITORÍA 2026-09-29 (FASE 16): Importar/Exportar es destino de primer nivel.
     expect(s).toContain('datos');
     expect(s.indexOf('datos')).toBeLessThan(s.indexOf('inversion'));
@@ -187,12 +189,12 @@ describe('UX-1 · B — Navegación por perfil', () => {
     }
   });
 
-  it('PROFESIONAL sin rol delegado: 4 destinos; con GESTOR_PATRIMONIAL: 6', () => {
+  it('PROFESIONAL sin rol delegado: 5 destinos; con GESTOR_PATRIMONIAL: 7', () => {
     const sin = seccionesDePerfil('PROFESIONAL');
-    expect(sin).toEqual(['administracion', 'inmuebles', 'configuracion', 'ayuda']);
+    expect(sin).toEqual(['avisos', 'administracion', 'inmuebles', 'configuracion', 'ayuda']);
     const con = seccionesDePerfil('PROFESIONAL', { gestorPatrimonial: true });
     expect(con).toEqual(ORDEN_ESPERADO.PROFESIONAL);
-    expect(con.length).toBe(6);
+    expect(con.length).toBe(7);
     for (const interna of ['morosidad', 'candidatos', 'inquilinos', 'propietarios', 'tesoreria'] as SectionType[]) {
       expect(con).not.toContain(interna);
     }
@@ -255,7 +257,7 @@ describe('UX-1 · E — Seis grupos aprobados', () => {
   it('ADMINISTRADOR: composición de cada grupo', () => {
     const porGrupo = Object.fromEntries(gruposDePerfil('ADMINISTRADOR').map((g) => [g.id, g.items.map((i) => i.id)]));
     expect(porGrupo).toEqual({
-      CONTROL: ['dashboard', 'administracion'],
+      CONTROL: ['dashboard', 'avisos', 'administracion'],
       // AUDITORÍA 2026-09-29: `datos` se ofrece dentro de CARTERA (decisión deliberada).
       CARTERA: ['inmuebles', 'propietarios', 'datos', 'inversion', 'inquilinos', 'suministros'],
       ECONOMICO: ['cobros', 'tesoreria', 'gastos', 'financiacion', 'conciliacion', 'facturacion', 'fiscal', 'informes', 'morosidad'],

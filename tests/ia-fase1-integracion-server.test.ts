@@ -478,6 +478,12 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/seguimiento/notificadorIncidencias.ts',
       'server/seguimiento/rutasSeguimientoIncidencias.ts',
       'server/notificaciones/repositorioNotificacionesFirestore.ts',
+      // FASE A · avisos reales: transporte de correo, perfil veraz, reloj y cron.
+      'server/notificaciones/proveedoresEmail.ts',
+      'server/notificaciones/perfilUsuarioFirestore.ts',
+      'server/notificaciones/relojAvisos.ts',
+      'server/notificaciones/rutasCronAvisos.ts',
+      'src/utils/cobrosEngine.ts',
       // FASE 9 · llaves de usuario (Vía 2): contrato + tutorial puros, cifrado, servicio y rutas.
       'src/ia/llavesUsuarioContrato.ts',
       'src/ia/tutorialLlaveUsuarioIA.ts',
@@ -662,6 +668,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       geminiKeyConfigured: false,
       // FASE 9 · sin IA_LLAVES_CLAVE_MAESTRA el subsistema de llaves de usuario queda NO_CONFIGURADO.
       ia: { registro: 'FIRESTORE', gobierno: 'FIRESTORE', llaves: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 12 },
+      // FASE A · sin proveedor de correo ni CRON_SECRET el canal queda en modo
+      // seguro y el reloj cerrado; el health lo publica sin secretos.
+      notificaciones: { email: { modo: 'MODO_SEGURO', proveedor: null }, cron: { configurado: false } },
     });
   });
 

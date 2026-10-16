@@ -5,9 +5,10 @@
  * proveedores (SMTP/Resend/SendGrid/WhatsApp Business) se leen SOLO desde el
  * backend/config de entorno; aquí no hay credenciales ni se exponen.
  *
- * - EMAIL: EmailProvider con modo seguro de desarrollo ("safe-mode"). Si no
- *   hay proveedor real configurado, NO se lanza la entrega; el resultado queda
- *   marcado como fallo controlado (causa explícita). En tests se usa un mock.
+ * - EMAIL: EmailProvider real (Resend/SendGrid por API HTTP) o modo seguro de
+ *   desarrollo ("safe-mode"). El modo seguro NO lanza la entrega y NUNCA puede
+ *   devolver `ok`: el resultado es siempre un fallo controlado con causa
+ *   explícita (regla FASE A: prohibido afirmar «enviado» sin envío real).
  * - INAPP: bandeja interna de plataforma (persistida por el repositorio).
  * - WEBHOOK: entrega a URL externa con validación de protocolo.
  * - WHATSAPP: preparado como canal futuro (sin implementar — requiere API
@@ -27,25 +28,109 @@ export interface ConfigEmail {
   from?: string;
 }
 
-/** Proveedor de email real posterior (Resend/SendGrid/SMTP) debe implementar esta interfaz. */
+/** Proveedor de email real (Resend/SendGrid/SMTP) debe implementar esta interfaz. */
 export interface EmailProvider {
   enviar(message: { to: string; subject: string; body: string }): Promise<{ ok: boolean; externalId?: string; error?: string }>;
 }
 
-/** Implementación segura por defecto: sin configuración externa NO envía. */
+/**
+ * Modo seguro (desarrollo/tests): NO contacta con ningún proveedor y por tanto
+ * NUNCA devuelve `ok: true`. Antes de la FASE A este proveedor podía simular un
+ * envío correcto (`safe-*`), lo que permitía afirmar «enviado» sin haber
+ * enviado nada. Regla vigente: un resultado `ok` exige aceptación REAL del
+ * proveedor; aquí siempre es un fallo controlado con causa explícita.
+ */
 export class EmailProviderSafeMode implements EmailProvider {
-  constructor(private readonly config: ConfigEmail) {}
+  constructor(private readonly config: ConfigEmail = { activo: false }) {}
 
   async enviar(message: { to: string; subject: string; body: string }): Promise<{ ok: boolean; externalId?: string; error?: string }> {
-    if (!this.config.activo) {
-      return { ok: false, error: 'email_no_configurado (safe-mode: sin proveedor SMTP/Resend)' };
-    }
     if (!message.to) {
       return { ok: false, error: 'destinatario_sin_email' };
     }
-    // En safe-mode activo (desarrollo): se registra sin contacto real con proveedor.
-    // Para producción sustituir por un EmailProvider real (Resend/SendGrid/SMTP).
-    return { ok: true, externalId: `safe-${Date.now().toString(36)}` };
+    if (!this.config.activo) {
+      return { ok: false, error: 'email_no_configurado (safe-mode: sin proveedor SMTP/Resend/SendGrid)' };
+    }
+    // ENABLE_EMAIL activo pero sin credenciales reales ⇒ sigue siendo safe-mode.
+    // Prohibido devolver ok: la entrega no ha ocurrido.
+    return {
+      ok: false,
+      error: 'modo_seguro_activo (safe-mode: sin proveedor REAL configurado; no se ha enviado nada)',
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// EMAIL · proveedor HTTP real (Resend / SendGrid)
+// ---------------------------------------------------------------------------
+
+export type ProveedorEmailHttp = 'RESEND' | 'SENDGRID';
+
+export interface ConfigEmailHttp {
+  proveedor: ProveedorEmailHttp;
+  apiKey: string;
+  from: string;
+  /** Inyectable en pruebas; por defecto `fetch` global (solo servidor). */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Proveedor de correo REAL por API HTTP. Solo se construye en el servidor con
+ * credenciales de entorno; nunca desde el cliente ni con secretos de Firestore.
+ * `ok: true` únicamente si el proveedor ACEPTA el mensaje (HTTP 2xx); cualquier
+ * otra cosa es un fallo explícito.
+ */
+export class EmailProviderHTTP implements EmailProvider {
+  constructor(private readonly config: ConfigEmailHttp) {}
+
+  async enviar(message: { to: string; subject: string; body: string }): Promise<{ ok: boolean; externalId?: string; error?: string }> {
+    if (!message.to) return { ok: false, error: 'destinatario_sin_email' };
+    if (!this.config.apiKey || !this.config.from) {
+      return { ok: false, error: 'proveedor_email_sin_credenciales' };
+    }
+    const ejecutar = this.config.fetchImpl || fetch;
+    try {
+      if (this.config.proveedor === 'RESEND') {
+        const respuesta = await ejecutar('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.config.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: this.config.from,
+            to: [message.to],
+            subject: message.subject,
+            text: message.body,
+          }),
+        });
+        if (!respuesta.ok) {
+          return { ok: false, error: `resend_http_${respuesta.status}` };
+        }
+        const cuerpo = (await respuesta.json().catch(() => null)) as { id?: string } | null;
+        return { ok: true, ...(cuerpo?.id ? { externalId: String(cuerpo.id) } : {}) };
+      }
+
+      const respuesta = await ejecutar('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: message.to }] }],
+          from: { email: this.config.from },
+          subject: message.subject,
+          content: [{ type: 'text/plain', value: message.body }],
+        }),
+      });
+      if (!respuesta.ok) {
+        return { ok: false, error: `sendgrid_http_${respuesta.status}` };
+      }
+      const idMensaje = respuesta.headers?.get?.('x-message-id') || undefined;
+      return { ok: true, ...(idMensaje ? { externalId: idMensaje } : {}) };
+    } catch (err) {
+      return { ok: false, error: `proveedor_email_error: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
 }
 

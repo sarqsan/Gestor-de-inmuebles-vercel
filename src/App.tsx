@@ -213,6 +213,8 @@ import { ConfiguracionSection } from './components/sections/ConfiguracionSection
 import { DatosSection } from './components/sections/DatosSection';
 // CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda, ayuda contextual y tutoriales
 import { CentroAyudaSection } from './components/sections/CentroAyudaSection';
+// FASE A (2026-10-16): bandeja interna de avisos (estado REAL de entrega).
+import { BandejaAvisosSection } from './components/sections/BandejaAvisosSection';
 import { TutorialPlayer } from './components/experiencia/TutorialPlayer';
 import { servicioProgresoTutoriales } from './lib/progresoTutorialesFirestore';
 import { contextoDesdeUsuario, ejecutarConsultaERP, iniciarTutorial, obtenerTutorial, crearProveedorGeminiRemoto, type AccionHost, type ExperienceContext, type ResultadoConsultaERP } from './experiencia';
@@ -352,6 +354,7 @@ const SECCIONES_PROPIETARIO: SectionType[] = [
   'inversion',
   'formalizacion',
   'cobros',
+  'avisos',
   // BLOQUE B — "Mis Liquidaciones" en el portal del propietario
   'tesoreria',
   'gastos',
@@ -373,7 +376,7 @@ const SECCIONES_PROPIETARIO: SectionType[] = [
   // CAPA TRANSVERSAL §6: Centro de Ayuda (solo lectura)
   'ayuda',
 ];
-const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'inversion', 'configuracion', 'ayuda'];
+const SECCIONES_PROFESIONAL: SectionType[] = ['administracion', 'inmuebles', 'inversion', 'configuracion', 'ayuda', 'avisos'];
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<SectionType>('inicio');
@@ -4481,6 +4484,12 @@ export default function App() {
               onImportData={handleImportData}
               onOpenConfigAseguradoras={() => setShowConfigAseguradorasModal(true)}
             />
+          )}
+
+          {/* FASE A (2026-10-16) — Bandeja de avisos: estado real de entrega del
+              dispatcher canónico (enviada/pendiente/fallida con causa). Solo lectura. */}
+          {activeSection === 'avisos' && (
+            <BandejaAvisosSection currentUser={currentUser} />
           )}
 
           {activeSection === 'ayuda' && (

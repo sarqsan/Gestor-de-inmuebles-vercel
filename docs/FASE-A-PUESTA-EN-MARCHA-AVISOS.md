@@ -12,6 +12,57 @@
 
 ---
 
+## 0. Camino corto · lo que tienes que hacer tú (unos 15 minutos)
+
+> Si solo vas a leer una parte del documento, lee esta. El resto es referencia y
+> solución de problemas.
+
+**Paso 1 · Consigue la contraseña de aplicación de Gmail** (de la cuenta que
+enviará los avisos; Gmail la exige para que un programa pueda enviar correo):
+
+1. Activa la **verificación en dos pasos** de esa cuenta (si aún no lo está):
+   <https://myaccount.google.com/security>.
+2. Entra en <https://myaccount.google.com/apppasswords>.
+3. Escribe un nombre, por ejemplo «Gestor de inmuebles», y pulsa **Crear**.
+4. Google muestra 16 letras en 4 grupos (`abcd efgh ijkl mnop`). Cópialas y
+   **quítales los espacios**: `abcdefghijklmnop`.
+
+**Paso 2 · Pega 4 valores en Vercel** (es donde está publicada la app):
+
+1. Entra en <https://vercel.com> y abre el proyecto de la app (el del dominio con
+   el que entras al ERP; si dudas, mira la pestaña **Domains**).
+2. **Settings** → **Environment Variables** → **Add New** (una por una). Deja
+   marcado **Production** (y **Preview** si quieres).
+
+| Key (nombre) | Value (valor) | Ejemplo (cuenta `alquileres@gmail.com`, clave `abcdefghijklmnop`) |
+|---|---|---|
+| `EMAIL_PROVEEDOR` | `SMTP` | `SMTP` |
+| `SMTP_URL` | `smtps://CUENTA%40gmail.com:CLAVE@smtp.gmail.com:465` | `smtps://alquileres%40gmail.com:abcdefghijklmnop@smtp.gmail.com:465` |
+| `EMAIL_FROM` | `Gestor de Inmuebles <CUENTA@gmail.com>` | `Gestor de Inmuebles <alquileres@gmail.com>` |
+| `CRON_SECRET` | una frase larga al azar, sin espacios (unos 40 caracteres) | `V7kP2mQ9xL4tR8wZ3nB6yH1sD5fG0jC` (inventa la tuya y **apúntala**) |
+
+> Los dos fallos más fáciles: en `SMTP_URL` la `@` del correo se escribe
+> **`%40`**, y la clave de aplicación va **sin espacios**.
+
+**Paso 3 · Republica.** **Deployments** → en el último despliegue, menú **⋯** →
+**Redeploy**. Las variables no entran en vigor hasta que se republica.
+
+**Paso 4 · Comprueba (2 minutos).**
+
+1. Abre `https://TU-DOMINIO/api/health` (el dominio con el que entras al ERP).
+   Debe aparecer `"email":{"modo":"REAL","proveedor":"SMTP"}` y
+   `"cron":{"configurado":true}`.
+2. Abre `https://TU-DOMINIO/api/cron/avisos?secret=TU_CRON_SECRET` — debe
+   responder `{"ok":true,...}` con el resumen. Ejecuta el reloj a mano; es
+   idempotente: repetirlo no duplica avisos.
+3. Abre el ERP → **Bandeja de avisos**: cada aviso aparece como «Enviada» o «No
+   entregada» con el motivo, para no dar nada por enviado sin serlo.
+
+Con esos cuatro pasos, la Fase A queda cerrada salvo la prueba con un contrato
+real (un recibo vencido ⇒ dos correos: inquilino y propietario).
+
+---
+
 ## 1. Qué se configura (resumen)
 
 | Variable | Para qué | Ejemplo |

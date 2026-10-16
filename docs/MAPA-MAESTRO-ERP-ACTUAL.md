@@ -235,6 +235,34 @@ explícita; lo primero no es una prueba completada, lo segundo no forma parte
 de los dos jobs CI actuales. No se ha usado Gemini, Firebase real, banco,
 proveedor externo ni un despliegue manual.
 
+### 7. Fase 1 — subfase de pruebas oficiales (16-10-2026; **NO cerrada**)
+
+La ampliación de CI incorpora el emulador **oficial de Storage** junto a Auth y
+Firestore bajo `--project demo-gestor-reglas`: **67/67** en PR #37 (61 casos
+previos Firestore y 6 de Storage) para el SHA de sus checks, y Vitest/tsc/build
+verdes. Las pruebas Storage incluyen titular/ajeno/anónimo, revocación, L/E,
+catálogo público frente a inventario privado, creación anónima acotada y rutas
+R-5 sin regla. No se cambian `storage.rules` ni `firestore.rules`, no se publica
+nada en Firebase y **ninguna prueba consulta datos reales**.
+
+**Bloqueo arquitectónico no resuelto:** con identidad **solo** en la base
+Firestore con nombre, las rutas actuales de Storage que consultan `(default)`
+**deniegan** en el emulador demo; sembrar un espejo en `(default)` hace pasar
+las rutas probadas. Una *sonda diagnóstica* que sustituye esas referencias por
+el nombre de base **solo en memoria durante el test** también pasa en el
+emulador, pero **no certifica soporte de Firebase publicado** ni que existan
+datos en `(default)`. La [guía de reglas de Storage de Firebase](https://firebase.google.com/docs/storage/security/rules-conditions#enhance_with_firestore)
+ejemplifica `(default)` y no se ha verificado la semántica productiva con una
+base nombrada aquí. No aplicar una sustitución mecánica de 42 rutas ni crear
+espejos en producción por un verde de CI. Hace falta una arquitectura de
+permisos y recuperación aprobada, una prueba en entorno **no productivo** con
+las mismas bases/bucket y consentimiento para cualquier despliegue o carga.
+
+La fase 1 sigue abierta: tampoco se han demostrado backup/restore de
+Firestore+Storage, ni aislamiento integral de todas las rutas y consultas por
+rol, ni efectos de Rules publicadas. Por eso esta subfase solo amplía evidencia
+y no habilita por sí sola el cierre de seguridad ni las siguientes fases.
+
 ---
 
 ## ARCHIVO HISTÓRICO (septiembre de 2026; conservado, **NO VIGENTE**)

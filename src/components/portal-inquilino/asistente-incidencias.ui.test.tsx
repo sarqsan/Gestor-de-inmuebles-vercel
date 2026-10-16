@@ -129,7 +129,7 @@ describe('Fase 5 · panel del asistente de incidencias', () => {
     expect(screen.queryByTestId('diagnostico-incidencia')).toBeNull();
   });
 
-  it('sin llave propia registrada, el resultado avisa de que la IA no está conectada y dónde registrarla', async () => {
+  it('sin llave propia registrada, el resultado avisa de que es análisis sin IA (sin pedir al inquilino que registre llave)', async () => {
     const { fetchImpl } = fetchDoble(respuestaOk('DETERMINISTA'), 200, { 'X-IA-Llave-Usuario': 'ausente' });
     vi.stubGlobal('fetch', fetchImpl);
 
@@ -137,9 +137,10 @@ describe('Fase 5 · panel del asistente de incidencias', () => {
     pedirDiagnostico();
 
     const aviso = await screen.findByTestId('aviso-ia-no-conectada');
-    expect(aviso.textContent).toMatch(/la ia no está conectada/i);
-    expect(aviso.textContent).toMatch(/llave de google ai studio/i);
-    expect(aviso.textContent).toMatch(/7 pasos/i);
+    expect(aviso.textContent).toMatch(/sin inteligencia artificial/i);
+    expect(aviso.textContent).toMatch(/análisis por reglas/i);
+    // El inquilino no registra llave: el aviso no le pide hacerlo.
+    expect(aviso.textContent).not.toMatch(/llave|google ai studio|configuración/i);
     expect(screen.getByTestId('diagnostico-incidencia').getAttribute('data-origen')).toBe('DETERMINISTA');
   });
 

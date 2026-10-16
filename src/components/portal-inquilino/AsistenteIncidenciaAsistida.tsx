@@ -179,8 +179,8 @@ export const AsistenteIncidenciaAsistida: React.FC<Props> = ({
             <div role="status" data-testid="aviso-ia-no-conectada" className="flex items-start gap-2 text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-xl p-2.5">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <p>
-                <strong>La IA no está conectada.</strong> Este resultado lo ha generado el análisis básico por reglas, no una inteligencia artificial.
-                Para usar la IA, registra tu propia llave de Google AI Studio en Configuración → «Llave de IA (clave propia)» y sigue los 7 pasos de la guía (puedes descargarla en PDF).
+                <strong>Análisis básico, sin inteligencia artificial.</strong> Este resultado lo ha generado el análisis por reglas del asistente.
+                Si tienes dudas sobre la incidencia, puedes contactar con tu propietario.
               </p>
             </div>
           )}

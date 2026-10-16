@@ -4,6 +4,22 @@
 > el estado actualiza este fichero en el mismo commit.** No se almacenan
 > secretos en este documento.
 
+## ENTREGA EN RAMA — FASE IA 9 (2026-10-16, PR #39) — **PENDIENTE DE INTEGRACIÓN**
+
+| Campo | Valor |
+|---|---|
+| Orden | IA del MAPA MAESTRO · Fase 9 (llaves de usuario): DECISIÓN §11 = **Vía 2** (clave propia de cada usuario) + alta guiada (§11.2) + tutorial PDF imprimible (§11.2.8). Diseño: `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` (**reconstrucción** declarada: el original y los commits `bf1d1b4`/`f63fbfe`/`1efe2c9`/`37b23f1` no existen en el remoto ni en ningún reflog) |
+| Ramas | Sesión `arena/b93c6727-gestor-de-inmuebles-vercel`; destino de integración `main` |
+| BASE sobre la que se desarrolló | `4309f48dc017b32fd5c28e0d3282d772fd2dd237` (= `main` tras el PR #38) |
+| Commits | `815fb5d` (diseño) · `0537ce5` (implementación) · `baeb38e` (corrección de montaje por defecto + regresión) · commit de bloque B (informe de cierre + MAPA + este fichero). HEAD final verificado con `git ls-remote`: `7ebd038` (commit de bloque B); el commit inmediatamente posterior, que fija este SHA aquí, es el HEAD de la rama y el de la PR #39 |
+| Integración | **PR #39 abierta contra `main`, NO fusionada.** Merge limpio según `git merge-tree --write-tree origin/main HEAD` (exit 0). Informe de cierre: `docs/IA-FASE-9-INFORME-CIERRE.md` |
+| Cambios | 24 ficheros, ≈ +3.200 / −15 (14 nuevos): contrato puro y tutorial declarativo (`src/ia/{llavesUsuarioContrato,tutorialLlaveUsuarioIA}.ts`); cifrado AES-256-GCM con AAD = uid (`server/ia/cifradoLlavesIA.ts`); servicio `ia_llaves`/`ia_llaves_eventos` con CAS e idempotencia (`server/ia/llavesUsuarioIA.ts`); rutas `GET/PUT/DELETE /api/ia/llave` y `POST /api/ia/llave/verificar` (`server/ia/rutasLlavesIA.ts`); núcleo: cliente del proveedor **sólo** con la llave del usuario, cabecera `X-IA-Llave-Usuario`, 428 `LLAVE_USUARIO_REQUERIDA` (EXIGIR), 503 fallo cerrado, `ia.llaves` en health; `GEMINI_API_KEY` deja de alimentar operaciones; UI `AltaGuiadaLlaveIA` en Configuración + PDF (jsPDF); script `ia:llaves:clave-maestra`; `.env.example` |
+| No tocado (verificado) | `firestore.rules`, `firebase.json`, `.firebaserc`, `vercel.json`, dependencias, migraciones y datos. Las colecciones nuevas son de acceso exclusivo por servidor y las cubre el catch-all `deny-by-default` (prueba estática) |
+| Tests (mismo SHA) | Fase 9: `tests/ia-fase9-llaves-usuario.test.ts` **39/39**, `tests/ia-fase9-tutorial-llave.test.ts` **2/2**, `src/components/ia/AltaGuiadaLlaveIA.test.tsx` **8/8**; Fase 1 ajustada (`ia-fase1-integracion-server` **35/35** con la app ESM real). Suite completa: **231 ficheros · 4.234 passed · 7 todo · 0 fallos** (exit 0, sobre `baeb38e`). `npx tsc --noEmit -p .` **0 errores**; `npm run build` **OK**; guardia A-04 **OK** |
+| Estado de IA | **CONSUMO BLOQUEADO** (sin cambios): 503 `APROBACION_COMERCIAL_PENDIENTE` sin política; además, sin `IA_LLAVES_CLAVE_MAESTRA` el subsistema de llaves queda `NO_CONFIGURADO` (503 `LLAVES_NO_CONFIGURADAS` en el alta; sin cliente del proveedor). Ninguna variable nueva configurada en ningún entorno desde esta rama |
+| Pendientes reales | Integración de la PR #39 y re-verificación sobre `main`; decisión `IA_LLAVES_SIN_LLAVE` (`RESPALDO`/`EXIGIR`) y activación o no de `IA_LLAVES_VERIFICACION=PROVEEDOR`; generación y custodia de la clave maestra como secreto; procedimiento de rotación/recifrado (fuera de alcance); autorización expresa y límites de gasto (Fase 8) siguen siendo requisito para cualquier consumo real |
+| Worktree / Remoto | CLEAN / SYNCED (tras el commit de bloque B) |
+
 ## INTEGRACIÓN — ORDEN IA FASES 5–8 (2026-10-16, PR #38)
 
 | Campo | Valor |

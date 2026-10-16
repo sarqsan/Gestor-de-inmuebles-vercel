@@ -29,7 +29,7 @@ import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorB
 // servidor, idempotencia y registro por usuario de cada operación de IA.
 // IA · FASE 2 — gobierno de uso: permisos por rol/operación, cuotas, créditos y
 // panel de administración (server/ia/gobiernoIA.ts y server/ia/adminIA.ts).
-import { clienteIA, contextoOperacionIA, crearNucleoIA, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
+import { clienteIA, contextoOperacionIA, crearNucleoIA, crearVerificadorGeminiReal, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
 import { crearDependenciasNucleoIA } from './server/ia/configuracionIA.js';
 import {
   crearAsistenteIncidenciasIA,
@@ -41,6 +41,10 @@ import {
   type RegistroTrazasIncidenciasIA,
 } from './server/ia/asistenteIncidenciasInquilino.js';
 import { montarRutasAdminIA } from './server/ia/adminIA.js';
+// IA · FASE 9 — llaves de usuario (Vía 2): cada usuario registra su propia clave
+// del proveedor en el alta guiada; el servidor la custodia cifrada y el núcleo
+// la usa SOLO para sus operaciones (server/ia/llavesUsuarioIA.ts y rutasLlavesIA.ts).
+import { montarRutasLlavesIA } from './server/ia/rutasLlavesIA.js';
 // FASE 6 — seguimiento y trazabilidad de incidencias: hilo de eventos por
 // incidencia, avisos por el dispatcher canónico y estado REAL de entrega.
 import { crearServicioSeguimientoIncidencias } from './server/seguimiento/seguimientoIncidencias.js';
@@ -2738,6 +2742,22 @@ montarRutasAdminIA(app, {
   gobierno: dependenciasIA.gobierno,
   politica: dependenciasIA.politica,
   ...(dependenciasIA.errorPolitica ? { errorPolitica: dependenciasIA.errorPolitica } : {}),
+});
+
+// ---------------------------------------------------------------------------
+// IA · FASE 9 — ALTA GUIADA DE LA LLAVE PROPIA (server/ia/rutasLlavesIA.ts)
+// GET/PUT/DELETE /api/ia/llave y POST /api/ia/llave/verificar. Autorización en
+// servidor (token verificado + perfil veraz); la llave nunca vuelve al cliente.
+// La verificación con el proveedor sólo se monta con IA_LLAVES_VERIFICACION=PROVEEDOR
+// (decisión expresa): el repositorio no la activa.
+// ---------------------------------------------------------------------------
+montarRutasLlavesIA(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  gobierno: dependenciasIA.gobierno,
+  llaves: dependenciasIA.llaves,
+  ...(dependenciasIA.errorLlaves ? { errorLlaves: dependenciasIA.errorLlaves } : {}),
+  sinLlave: dependenciasIA.sinLlave,
+  verificador: dependenciasIA.verificacionLlaves === 'PROVEEDOR' && dependenciasIA.llaves ? crearVerificadorGeminiReal() : null,
 });
 
 // ---------------------------------------------------------------------------

@@ -69,7 +69,10 @@ function textoResultado(resultado: ResultadoLlaveUsuarioIA): string {
   return `Error ${resultado.status}.`;
 }
 
-export function AltaGuiadaLlaveIA({ opciones = {}, descargarPdf, imprimirPdf }: AltaGuiadaLlaveIAProps): ReactElement {
+/** Referencia estable: un `{}` por defecto en la firma cambiaría en cada render y relanzaría la carga sin fin. */
+const OPCIONES_POR_DEFECTO: OpcionesLlavesUsuarioIA = Object.freeze({});
+
+export function AltaGuiadaLlaveIA({ opciones = OPCIONES_POR_DEFECTO, descargarPdf, imprimirPdf }: AltaGuiadaLlaveIAProps): ReactElement {
   const [estado, setEstado] = useState<EstadoPantalla>({
     cargando: true, subsistema: null, llave: null, noDisponible: null, mensaje: null, error: null, enviando: false,
   });

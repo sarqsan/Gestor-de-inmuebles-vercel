@@ -17,7 +17,13 @@ import { AltaGuiadaLlaveIA } from './AltaGuiadaLlaveIA';
 import { CABECERA_IDEMPOTENCIA_IA } from '../../ia/catalogoOperacionesIA';
 import { RUTA_LLAVE_USUARIO_IA, RUTA_VERIFICAR_LLAVE_USUARIO_IA, resumenLlaveAusente } from '../../ia/llavesUsuarioContrato';
 
-afterEach(() => cleanup());
+// Sin `opciones` el componente usa el token real: se sustituye para no tocar Firebase en jsdom.
+vi.mock('../../lib/busquedaTitularesServidor', () => ({ tokenUsuarioActual: async () => null }));
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const LLAVE = 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q'; // 39 caracteres, forma válida
 const SUBSISTEMA = { modo: 'USUARIO', sinLlave: 'RESPALDO', verificacion: 'DESACTIVADA' };
@@ -48,6 +54,17 @@ function fetchDoble(rutas: Array<[metodo: string, ruta: string, responder: Respo
 
 const opciones = (fetchImpl: typeof fetch) => ({ fetchImpl, obtenerToken: async () => 'token-ana' });
 const cabecera = (init: RequestInit | undefined, nombre: string) => (init?.headers as Record<string, string>)[nombre];
+
+describe('AltaGuiadaLlaveIA · montaje por defecto (sin props)', () => {
+  it('con el fetch real fallando, consulta UNA sola vez y muestra el error (sin bucle de renderizado)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('sin red'));
+    render(<AltaGuiadaLlaveIA />);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('No se ha podido consultar'));
+    await new Promise((resolver) => setTimeout(resolver, 60));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0][0])).toBe(RUTA_LLAVE_USUARIO_IA);
+  });
+});
 
 describe('AltaGuiadaLlaveIA · estado y tutorial', () => {
   it('muestra AUSENTE, el estado del subsistema y los pasos; los botones del tutorial llaman al PDF', async () => {

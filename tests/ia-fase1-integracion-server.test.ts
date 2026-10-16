@@ -18,6 +18,7 @@ import type { AddressInfo } from 'node:net';
 import { join, relative, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OPERACIONES_IA } from '../src/ia/catalogoOperacionesIA';
+import { construirPoliticaIACompleta, OPERACIONES_IA_IDS } from '../src/ia/gobiernoIAContrato';
 import { crearDependenciasNucleoIA, resolverConfiguracionIA } from '../server/ia/configuracionIA';
 
 const RAIZ = resolve(__dirname, '..');
@@ -276,9 +277,25 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     for (const v of VARIABLES) previas[v] = process.env[v];
     process.env.VERCEL = '1';
     delete process.env.GEMINI_API_KEY;
-    // FASE 2 · política APROBADA (ENTORNO con una tarifa definida): sin ella el
-    // bloqueo preventivo de aprobación comercial rechazaría toda la matriz.
-    process.env.IA_POLITICA_JSON = JSON.stringify({ costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } });
+    // FASE 7 · política APROBADA y COMPLETA: los cuatro perfiles declarados con
+    // las 12 operaciones (explícitas, sin comodines), la tarifa de las 12 (coste 1
+    // sólo en ESTIMAR_PRICING, como antes; el resto coste 0 declarado) y cuotas
+    // finitas holgadas para que la matriz (≈5 llamadas por operación y usuario) no
+    // choque con ellas. Sin política completa el bloqueo preventivo rechazaría todo.
+    process.env.IA_POLITICA_JSON = JSON.stringify(
+      construirPoliticaIACompleta({
+        permisos: {
+          PROPIETARIO: OPERACIONES_IA_IDS,
+          PROFESIONAL: OPERACIONES_IA_IDS,
+          INQUILINO: OPERACIONES_IA_IDS,
+          ADMINISTRADOR: OPERACIONES_IA_IDS,
+        },
+        costeCreditosPorOperacion: Object.fromEntries(
+          OPERACIONES_IA_IDS.map((id) => [id, id === 'ESTIMAR_PRICING' ? 1 : 0]),
+        ),
+        cuotas: { operacionesPorDia: 500, operacionesPorMes: 5000 },
+      }),
+    );
     process.env.FIREBASE_SERVICE_ACCOUNT = JSON.stringify({
       project_id: aplicacion.projectId,
       client_email: `sa@${aplicacion.projectId}.iam.gserviceaccount.com`,

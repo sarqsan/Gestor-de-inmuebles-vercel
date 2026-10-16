@@ -20,6 +20,7 @@
     "test:integracion": "npm run test:operaciones && npm run test:patrimonial",
     "test:emulador:operaciones": "node --import tsx --test src/features/operaciones/tests/emulator/operaciones.emulator.mjs",
   "test:emulador:reglas": "npx --yes firebase-tools@15.33.0 emulators:exec --only auth,firestore,storage --project demo-gestor-reglas \"npx vitest run --config vitest.emulador.config.ts --reporter=default --reporter=json --outputFile.json=emulador-resultados.json\"",
+  "ia:verificar-politica": "tsx scripts/verificar-politica-ia.mts",
   "auditoria:repositorio": "tsx scripts/guardia-a04-repositorio.mts",
   "auditoria:reglas:matriz": "tsx scripts/diagnostico-b12-list.mts",
   "auditoria:reglas:list": "tsx scripts/auditoria-reglas-list.mts",

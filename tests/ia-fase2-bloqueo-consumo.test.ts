@@ -23,8 +23,12 @@ import { crearGobiernoMemoria, type GobiernoMemoriaIA } from '../server/ia/gobie
 import { crearRegistroMemoria } from '../server/ia/registroOperacionesIA';
 import { montarRutasAdminIA, type EventoAdminIA } from '../server/ia/adminIA';
 import {
+  construirPoliticaIACompleta,
+  OPERACIONES_IA_IDS,
   politicaGobiernoIADesdeEntorno,
   validarPoliticaGobiernoIA,
+  type PoliticaGobiernoIA,
+  type SobrescriturasPoliticaIA,
 } from '../src/ia/gobiernoIAContrato';
 import { CABECERA_IDEMPOTENCIA_IA } from '../src/ia/catalogoOperacionesIA';
 import type { IdentidadVerificada } from '../server/titularidades/googleBackend';
@@ -63,11 +67,30 @@ interface OpcionesMontaje {
   errorGobierno?: 'POLITICA_IA_INVALIDA';
 }
 
+/** FASE 7 · política COMPLETA y explícita para las pruebas del mecanismo: los CUATRO
+ * perfiles declarados (sin comodines) y la tarifa de las 12 operaciones. Las
+ * sobrescrituras de un perfil sustituyen su ámbito; las de coste/cuota se fusionan. */
+function politicaPermisiva(parcial: SobrescriturasPoliticaIA = {}): PoliticaGobiernoIA {
+  return construirPoliticaIACompleta({
+    ...parcial,
+    // La operación que ejercen estas suites se declara a 0 créditos salvo que la
+    // prueba fije otra tarifa: siguen probando permisos, cuotas y saldo, no precios.
+    costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 0, ...(parcial.costeCreditosPorOperacion ?? {}) },
+    permisos: {
+      PROPIETARIO: OPERACIONES_IA_IDS,
+      PROFESIONAL: OPERACIONES_IA_IDS,
+      INQUILINO: OPERACIONES_IA_IDS,
+      ADMINISTRADOR: OPERACIONES_IA_IDS,
+      ...(parcial.permisos ?? {}),
+    },
+  });
+}
+
 /** Monta núcleo + rutas admin sobre el mismo gobierno. `conCliente` simula GEMINI_API_KEY presente. */
 async function montar(opciones: OpcionesMontaje = {}) {
   const resultado = opciones.politica === undefined
     ? politicaGobiernoIADesdeEntorno({}) // POR_DEFECTO: exactamente lo que tendrá producción sin IA_POLITICA_JSON
-    : validarPoliticaGobiernoIA(opciones.politica);
+    : validarPoliticaGobiernoIA(politicaPermisiva(opciones.politica as SobrescriturasPoliticaIA));
   if (resultado.estado !== 'VALIDA') throw new Error('política de prueba inválida');
   const registro = crearRegistroMemoria();
   const gobierno: GobiernoMemoriaIA = crearGobiernoMemoria(resultado.politica, { listarOperaciones: () => registro.listar() });
@@ -140,12 +163,19 @@ describe('IA Fase 2 · bloqueo preventivo con aprobación comercial pendiente', 
     expect(m.eventos[0]).toMatchObject({ evento: 'RECHAZADA', codigo: 'APROBACION_COMERCIAL_PENDIENTE', codigoHttp: 503 });
   });
 
-  it('coste 0 y cuotas indefinidas NO bastan: política ENTORNO sin ninguna tarifa también queda bloqueada', async () => {
-    const m = await montar({ politica: { costeCreditosPorOperacion: {}, cuotas: { operacionesPorDia: null, operacionesPorMes: null } } });
+  it('FASE 7 · tarifas vacías o cuotas ilimitadas ⇒ política INVÁLIDA: 503 POLITICA_IA_INVALIDA', async () => {
+    // Ya no existe el «coste 0 implícito» ni la cuota «sin límite»: una política
+    // que no declara las 12 tarifas y las dos cuotas finitas es una configuración
+    // incompleta, y el servidor la trata como fallo cerrado.
+    expect(validarPoliticaGobiernoIA({ costeCreditosPorOperacion: {}, cuotas: { operacionesPorDia: null, operacionesPorMes: null } }).estado).toBe('INVALIDA');
+    expect(validarPoliticaGobiernoIA({ cuotas: { operacionesPorDia: null } }).estado).toBe('INVALIDA');
+    expect(validarPoliticaGobiernoIA({ costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 1 } }).estado).toBe('INVALIDA');
+    const m = await montar({ errorGobierno: 'POLITICA_IA_INVALIDA', politica: { costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 1 } } });
     const r = await m.pedir('/api/redactar-clausula', m.autenticado(), { prompt: 'x' });
     expect(r.status).toBe(503);
-    expect(await r.json()).toMatchObject({ codigo: 'APROBACION_COMERCIAL_PENDIENTE' });
+    expect(await r.json()).toMatchObject({ codigo: 'POLITICA_IA_INVALIDA' });
     expect(m.llamadas).toHaveLength(0);
+    expect(m.registro.listar()).toHaveLength(0);
   });
 
   it('peticiones manipuladas no desactivan el bloqueo: uid ajeno en el body, rol ADMINISTRADOR o cabeceras extra siguen en 503', async () => {

@@ -344,9 +344,11 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
       ? gobierno.modo
       : 'NO_CONFIGURADO';
   // BLOQUEO PREVENTIVO · aprobación comercial pendiente (política POR_DEFECTO o
-  // sin tarifas definidas): ninguna operación se ejecuta ni se crea el cliente
-  // del proveedor. Es una decisión de configuración (IA_POLITICA_JSON con
-  // tarifas), nunca algo que se active por existir la clave de Gemini.
+  // política declarada incompleta, Fase 7): ninguna operación se ejecuta ni se
+  // crea el cliente del proveedor. Es una decisión de configuración
+  // (IA_POLITICA_JSON con la política COMPLETA: permisos explícitos de los 4
+  // perfiles, tarifas de las 12 operaciones y cuotas finitas), nunca algo que se
+  // active por existir la clave de Gemini.
   const bloqueoComercial = gobierno ? resumenPoliticaGobiernoIA(gobierno.politica).pendienteAprobacionComercial : false;
 
   return {

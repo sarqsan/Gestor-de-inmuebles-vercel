@@ -148,7 +148,13 @@ export function PanelGobiernoIA(props: { opciones?: OpcionesAdminGobiernoIA }): 
         )}
         {resumen?.politica?.pendienteAprobacionComercial && (
           <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300" data-testid="badge-pendiente">
-            Tarifas y límites PENDIENTES DE APROBACIÓN: el servidor BLOQUEA el consumo de IA hasta aprobar la política (IA_POLITICA_JSON)
+            Política INCOMPLETA o sin aprobar: el servidor BLOQUEA el consumo de IA hasta declarar permisos explícitos por perfil,
+            tarifas finitas de las operaciones y cuotas finitas (IA_POLITICA_JSON)
+          </span>
+        )}
+        {resumen?.politica && resumen.politica.politicaCompleta && (
+          <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300" data-testid="badge-completa">
+            Política declarada y completa: permisos explícitos, tarifas y cuotas finitas
           </span>
         )}
       </header>
@@ -160,17 +166,22 @@ export function PanelGobiernoIA(props: { opciones?: OpcionesAdminGobiernoIA }): 
       {resumen?.politica && (
         <div className="mb-4 grid gap-2 text-xs text-slate-300 sm:grid-cols-3">
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-2">
-            <div className="text-[10px] uppercase text-slate-500">Cuota diaria / mensual</div>
-            <div className="font-semibold">{resumen.politica.cuotas.operacionesPorDia ?? 'sin límite'} / {resumen.politica.cuotas.operacionesPorMes ?? 'sin límite'}</div>
+            <div className="text-[10px] uppercase text-slate-500">Cuota diaria / mensual (finita)</div>
+            <div className="font-semibold">{resumen.politica.cuotas.operacionesPorDia} / {resumen.politica.cuotas.operacionesPorMes}</div>
           </div>
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-2">
-            <div className="text-[10px] uppercase text-slate-500">Operaciones del catálogo</div>
-            <div className="font-semibold">{Object.keys(resumen.politica.costeCreditosPorOperacion).length}</div>
-          </div>
-          <div className="rounded-lg border border-slate-800 bg-slate-900 p-2">
-            <div className="text-[10px] uppercase text-slate-500">Operaciones con coste &gt; 0</div>
+            <div className="text-[10px] uppercase text-slate-500">Tarifas declaradas</div>
             <div className="font-semibold">
-              {(Object.values(resumen.politica.costeCreditosPorOperacion) as number[]).filter((c) => c > 0).length}
+              {Object.keys(resumen.politica.costeCreditosPorOperacion).length} operaciones
+              {' · '}
+              {(Object.values(resumen.politica.costeCreditosPorOperacion) as number[]).filter((c) => c > 0).length} con coste &gt; 0
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-800 bg-slate-900 p-2">
+            <div className="text-[10px] uppercase text-slate-500">Perfiles con permisos explícitos</div>
+            <div className="font-semibold">
+              {new Set(Object.values(resumen.politica.perfilesPorOperacion).flat()).size} de 4
+              <span className="ml-1 text-[10px] text-slate-500">(sin comodines)</span>
             </div>
           </div>
         </div>

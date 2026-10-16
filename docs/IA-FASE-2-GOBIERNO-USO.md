@@ -1,5 +1,12 @@
 # IA · Fase 2 — Gobierno de uso (permisos, cuotas y créditos)
 
+> **Actualizado por la FASE 7** (`docs/IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md`):
+> la política ya no admite comodines `'*'`, ni tarifas implícitas, ni cuotas
+> `null` (ilimitadas), y la política por defecto **deniega todas las
+> operaciones**. Lo que sigue describe las puertas del núcleo, que no cambian;
+> los detalles del formato de `IA_POLITICA_JSON` se leen en el documento de la
+> Fase 7.
+
 > **Origen de la definición.** Continuación directa de la Fase 1
 > (`docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md`): «Los créditos y el saldo, los
 > límites por usuario y los paneles quedarían para fases posteriores.» Esta
@@ -16,13 +23,15 @@ crearse el cliente del proveedor:
 
 0. **Bloqueo preventivo de aprobación comercial.** Si la política vigente
    está PENDIENTE de aprobación (origen `POR_DEFECTO` —sin
-   `IA_POLITICA_JSON`— o sin ninguna tarifa definida), TODA operación se
-   rechaza con 503 `APROBACION_COMERCIAL_PENDIENTE` antes de autenticar,
+   `IA_POLITICA_JSON`— o política declarada pero incompleta), TODA operación
+   se rechaza con 503 `APROBACION_COMERCIAL_PENDIENTE` antes de autenticar,
    reservar o crear el cliente del proveedor. Ni coste 0, ni saldo, ni
-   cuotas indefinidas, ni la presencia de `GEMINI_API_KEY` activan el
-   consumo: la aprobación sólo llega por una política válida con tarifas
-   configurada en servidor. Las rutas de administración siguen operativas
-   durante el bloqueo (consultan y gestionan sin tocar al proveedor).
+   cuotas, ni la presencia de `GEMINI_API_KEY` activan el consumo: la
+   aprobación sólo llega por una política DECLARADA y COMPLETA (permisos
+   explícitos de los cuatro perfiles, tarifa de las 12 operaciones y cuotas
+   finitas) configurada en servidor. Las rutas de administración siguen
+   operativas durante el bloqueo (consultan y gestionan sin tocar al
+   proveedor).
 1. **Perfil veraz.** `gobierno.perfilVeraz(uid)` lee el espejo de identidad
    `usuarios_auth/{uid}` y la ficha `usuarios/{usuarioId}` (la misma fuente
    autorizada de la Fase 1). El uid sale del token verificado; el espejo y la
@@ -61,37 +70,46 @@ proveedor.
 
 ## 3. Política de uso (`IA_POLITICA_JSON`, opcional)
 
-Sin la variable, rige la política `POR_DEFECTO`: todos los roles permiten
-todas las operaciones (`*`), coste 0 créditos por operación y sin cuotas —
-Fase 1 intacta, sólo con traza contable. El resumen de administración la
-marca `pendienteAprobacionComercial: true` hasta que se definan tarifas.
+Sin la variable, rige la política `POR_DEFECTO` (FASE 7): **deniega todas las
+operaciones** (los cuatro perfiles quedan declarados con ámbito vacío), declara
+las tarifas y cuotas de referencia y el resumen de administración la marca
+`pendienteAprobacionComercial: true`. El consumo está **bloqueado**.
 
-Con `IA_POLITICA_JSON` (JSON, secciones opcionales; cada valor presente
-sustituye al por defecto):
+Con `IA_POLITICA_JSON` la política es TODO O NADA: se declaran los permisos de
+los cuatro perfiles, la tarifa de las 12 operaciones del catálogo y las dos
+cuotas finitas. La plantilla aprobada está en
+`docs/politica-ia.ejemplo.json`:
 
 ```json
 {
-  "permisos":            { "PROPIETARIO": "*", "ADMINISTRADOR": ["ESTIMAR_PRICING"] },
-  "costeCreditosPorOperacion": { "ESTIMAR_PRICING": 2 },
-  "cuotas":              { "operacionesPorDia": 50, "operacionesPorMes": 1000 }
+  "permisos": {
+    "PROPIETARIO": ["ANALIZAR_DOCUMENTO", "PROPONER_MEJORAS", "ESTIMAR_PRICING", "GENERAR_KIT_PUBLICACION", "ASISTENTE_INTERPRETAR"],
+    "PROFESIONAL": ["ANALIZAR_INSPECCION", "ANALIZAR_INCIDENCIA", "PROPONER_MEJORAS", "ASISTENTE_INTERPRETAR"],
+    "INQUILINO":   ["ASISTENTE_INCIDENCIAS_INQUILINO", "ASISTENTE_INTERPRETAR"],
+    "ADMINISTRADOR": ["ANALIZAR_DOCUMENTO", "…las 12 del catálogo…"]
+  },
+  "costeCreditosPorOperacion": { "ANALIZAR_DOCUMENTO": 2, "…": 1 },
+  "cuotas": { "operacionesPorDia": 20, "operacionesPorMes": 200 }
 }
 ```
 
-- Roles: `PROPIETARIO`, `PROFESIONAL`, `INQUILINO`, `ADMINISTRADOR`. Un
-  ámbito es `'*'` **o** una lista no vacía de ids del catálogo (sin mezclar
-  `'*'` con ids, sin repetidos, sin ids desconocidos).
-- Cuotas: `null` (sin límite) o enteros ≥ 1 por ventana natural UTC
-  (día = fecha, mes = YYYY-MM).
-- Créditos por operación: enteros ≥ 0; el saldo vive en `[0, 1.000.000]`.
-- **Fallo cerrado:** si la variable existe pero no valida, el arranque la
-  rechaza y todas las operaciones de IA responden 503
-  `POLITICA_IA_INVALIDA`. Nunca hay respaldo permisivo con una política
-  mal configurada.
-- **Bloqueo preventivo:** sin la variable (o sin tarifas definidas) la
-  política es `POR_DEFECTO` y el consumo queda **bloqueado** (503
-  `APROBACION_COMERCIAL_PENDIENTE`) hasta que se configure una política
-  aprobada. Activar el servicio exige, en este orden: política con tarifas
-  en `IA_POLITICA_JSON` → credencial de servicio en Vercel → redeploy.
+- Roles: `PROPIETARIO`, `PROFESIONAL`, `INQUILINO`, `ADMINISTRADOR`. El ámbito
+  es una **lista explícita** de ids del catálogo (el comodín `'*'` ya no
+  existe; la lista vacía se admite y significa «este perfil no usa IA»).
+- Cuotas: enteros ≥ 1 por ventana natural UTC (día = fecha, mes = YYYY-MM).
+  `null` (ilimitado) es INVÁLIDO.
+- Créditos por operación: enteros ≥ 0 declarados **para todas** las operaciones
+  del catálogo; el saldo vive en `[0, 1.000.000]`.
+- **Fallo cerrado:** si la variable existe pero no valida (comodines, perfiles o
+  tarifas sin declarar, cuotas ilimitadas), el arranque la rechaza y todas las
+  operaciones de IA responden 503 `POLITICA_IA_INVALIDA`. Nunca hay respaldo
+  permisivo con una política mal configurada.
+- **Bloqueo preventivo:** sin la variable (o con una política declarada
+  incompleta) el consumo queda **bloqueado** (503
+  `APROBACION_COMERCIAL_PENDIENTE`) hasta que se configure la política
+  aprobada. Activar el servicio exige, en este orden: política completa en
+  `IA_POLITICA_JSON` (verificada con `npm run ia:verificar-politica`) →
+  credencial de servicio en Vercel → redeploy.
 
 ## 4. Concurrencia y reserva (CAS por `updateTime`)
 

@@ -20,7 +20,13 @@ import { crearNucleoIA, clienteIA, type ClienteProveedorIA } from '../server/ia/
 import { crearGobiernoMemoria, type GobiernoMemoriaIA } from '../server/ia/gobiernoIA';
 import { crearRegistroMemoria } from '../server/ia/registroOperacionesIA';
 import { montarRutasAdminIA } from '../server/ia/adminIA';
-import { validarPoliticaGobiernoIA } from '../src/ia/gobiernoIAContrato';
+import {
+  construirPoliticaIACompleta,
+  OPERACIONES_IA_IDS,
+  validarPoliticaGobiernoIA,
+  type PoliticaGobiernoIA,
+  type SobrescriturasPoliticaIA,
+} from '../src/ia/gobiernoIAContrato';
 import { CABECERA_IDEMPOTENCIA_IA } from '../src/ia/catalogoOperacionesIA';
 import type { IdentidadVerificada } from '../server/titularidades/googleBackend';
 
@@ -62,10 +68,29 @@ interface OpcionesMontaje {
   fallosProveedor?: number;
 }
 
-/** Política aprobada (tarifa 2 en REDACTAR_CLAUSULA), saldos A y B independientes. */
+/** FASE 7 · política COMPLETA y explícita para las pruebas del mecanismo: los CUATRO
+ * perfiles declarados (sin comodines) y la tarifa de las 12 operaciones. Las
+ * sobrescrituras de un perfil sustituyen su ámbito; las de coste/cuota se fusionan. */
+function politicaPermisiva(parcial: SobrescriturasPoliticaIA = {}): PoliticaGobiernoIA {
+  return construirPoliticaIACompleta({
+    ...parcial,
+    // La operación que ejercen estas suites se declara a 0 créditos salvo que la
+    // prueba fije otra tarifa: siguen probando permisos, cuotas y saldo, no precios.
+    costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 0, ...(parcial.costeCreditosPorOperacion ?? {}) },
+    permisos: {
+      PROPIETARIO: OPERACIONES_IA_IDS,
+      PROFESIONAL: OPERACIONES_IA_IDS,
+      INQUILINO: OPERACIONES_IA_IDS,
+      ADMINISTRADOR: OPERACIONES_IA_IDS,
+      ...(parcial.permisos ?? {}),
+    },
+  });
+}
+
+/** Política declarada COMPLETA (Fase 7: sin comodines) con tarifa 2 en REDACTAR_CLAUSULA; saldos A y B independientes. */
 async function montar(opciones: OpcionesMontaje = {}) {
   const resultado = validarPoliticaGobiernoIA(
-    opciones.politica ?? { costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 2 } },
+    politicaPermisiva((opciones.politica ?? { costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 2 } }) as SobrescriturasPoliticaIA),
   );
   if (resultado.estado !== 'VALIDA') throw new Error('política de prueba inválida');
   const registro = crearRegistroMemoria();

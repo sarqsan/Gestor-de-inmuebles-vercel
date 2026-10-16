@@ -9,6 +9,7 @@ import { crearDependenciasReales } from '../server/titularidades/backendTitulare
 import { crearDependenciasNucleoIA, resolverConfiguracionIA } from '../server/ia/configuracionIA';
 import { leerCuentaServicio } from '../server/titularidades/googleBackend';
 import { OPERACIONES_IA } from '../src/ia/catalogoOperacionesIA';
+import { construirPoliticaIACompleta } from '../src/ia/gobiernoIAContrato';
 
 const config = JSON.parse(readFileSync('firebase-applet-config.json', 'utf8'));
 const crudoCanonico = JSON.stringify(config);
@@ -178,7 +179,7 @@ describe('matriz HTTP: servidor real con lectores reales, sin red externa', () =
     // inválida; 401 con credencial válida y sin sesión), no la política comercial:
     // se fija una política APROBADA para que el bloqueo preventivo de aprobación
     // pendiente no enmascare el 401 esperado en los casos válidos.
-    vi.stubEnv('IA_POLITICA_JSON', JSON.stringify({ costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } }));
+    vi.stubEnv('IA_POLITICA_JSON', JSON.stringify(construirPoliticaIACompleta()));
     vi.stubEnv('FIREBASE_SERVICE_ACCOUNT', raw);
     for (const [k, v] of Object.entries(caso.env ?? {})) vi.stubEnv(k, v);
     // Intercepta solo el archivo de configuración. El lector de credenciales es real.

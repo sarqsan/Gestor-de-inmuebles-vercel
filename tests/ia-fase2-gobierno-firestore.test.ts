@@ -35,7 +35,13 @@ import {
   crearGobiernoFirestore,
   idAjusteIA,
 } from '../server/ia/gobiernoIA';
-import { validarPoliticaGobiernoIA } from '../src/ia/gobiernoIAContrato';
+import {
+  construirPoliticaIACompleta,
+  OPERACIONES_IA_IDS,
+  validarPoliticaGobiernoIA,
+  type PoliticaGobiernoIA,
+  type SobrescriturasPoliticaIA,
+} from '../src/ia/gobiernoIAContrato';
 import type { IdOperacionIA } from '../src/ia/catalogoOperacionesIA';
 
 const par = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -163,8 +169,27 @@ function firestoreFalsoGobierno(opciones: { conflictoPatch?: number } = {}) {
   return { fetchImpl: fetchImpl as never, peticiones, documentos };
 }
 
+/** FASE 7 · política COMPLETA y explícita para las pruebas del mecanismo: los CUATRO
+ * perfiles declarados (sin comodines) y la tarifa de las 12 operaciones. Las
+ * sobrescrituras de un perfil sustituyen su ámbito; las de coste/cuota se fusionan. */
+function politicaPermisiva(parcial: SobrescriturasPoliticaIA = {}): PoliticaGobiernoIA {
+  return construirPoliticaIACompleta({
+    ...parcial,
+    // La operación que ejercen estas suites se declara a 0 créditos salvo que la
+    // prueba fije otra tarifa: siguen probando permisos, cuotas y saldo, no precios.
+    costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 0, ...(parcial.costeCreditosPorOperacion ?? {}) },
+    permisos: {
+      PROPIETARIO: OPERACIONES_IA_IDS,
+      PROFESIONAL: OPERACIONES_IA_IDS,
+      INQUILINO: OPERACIONES_IA_IDS,
+      ADMINISTRADOR: OPERACIONES_IA_IDS,
+      ...(parcial.permisos ?? {}),
+    },
+  });
+}
+
 function gobiernoFirestore(politicaCruda: unknown, opciones?: { conflictoPatch?: number }) {
-  const resultado = validarPoliticaGobiernoIA(politicaCruda);
+  const resultado = validarPoliticaGobiernoIA(politicaPermisiva((politicaCruda ?? {}) as SobrescriturasPoliticaIA));
   if (resultado.estado !== 'VALIDA') throw new Error('política de prueba inválida');
   const falso = firestoreFalsoGobierno(opciones);
   const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS, fetchImpl: falso.fetchImpl });

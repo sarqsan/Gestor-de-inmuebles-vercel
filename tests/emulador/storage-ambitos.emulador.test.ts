@@ -146,6 +146,26 @@ describe('Storage oficial · ámbitos y rutas (Firestore (default) sintético)',
     });
     // La ruta pide /(default)/: los documentos sembrados SOLO en la base con
     // nombre no deben hacer que una petición obtenga permisos por accidente.
-    await assertFails(subir('gastos_facturas/prop-a/gasto-n/justificante.pdf', TITULAR_A));
+    const ruta = 'gastos_facturas/prop-a/gasto-n/justificante.pdf';
+    await assertFails(subir(ruta, TITULAR_A));
+
+    // Sonda temporal (solo emulador): averiguar si el motor admite una ruta
+    // a la base con nombre ANTES de proponer tocar storage.rules productivas.
+    // No se escribe la regla alternativa en el fichero del repositorio.
+    const alterna = STORAGE.replaceAll('/databases/(default)/documents/', `/databases/${BASE_NOMBRADA}/documents/`);
+    expect(alterna).not.toBe(STORAGE);
+    const envNombrado = await initializeTestEnvironment({
+      projectId: PROYECTO,
+      firestore: { rules: FIRESTORE, ...hostYPort('FIRESTORE_EMULATOR_HOST') },
+      storage: { rules: alterna, ...hostYPort('FIREBASE_STORAGE_EMULATOR_HOST') },
+    });
+    try {
+      const cliente = envNombrado.authenticatedContext(TITULAR_A.uid, {
+        email: TITULAR_A.email, email_verified: true,
+      }).storage();
+      await assertSucceeds(Promise.resolve(cliente.ref(ruta).put(BYTES, { contentType: 'application/pdf' })));
+    } finally {
+      await envNombrado.cleanup();
+    }
   });
 });

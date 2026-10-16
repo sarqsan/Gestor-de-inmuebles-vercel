@@ -113,7 +113,7 @@ bloque), según `storage.rules`/cierre B12; no se han probado aquí.
 |---|---|---|
 | **A16-01 P0 — solicitud pública: FC** | `PortalSolicitudPublicaView.tsx:268` crea `solicitudes` con `candidatoNombre/candidatoEmail/candidatoTelefono`, sin `nombre/email/telefono`; `firestore.rules` §4 exige estos tres campos en `allow create`. `App.tsx:2465` llama `saveSolicitudFirestore` sin esperar resultado y la vista anuncia éxito; el helper captura el error. Reproducción estática local cotejó los cinco campos: presentes `inmuebleId, estado`; ausentes `nombre, email, telefono`. Crear un candidato aparte **no** significa haber guardado la solicitud. | Denegación deducible **si** se aplican las reglas del repo; reglas realmente desplegadas NV. Exigir prueba emulador de escritura anónima y E2E de acuse sin falso éxito. No hacer prueba contra producción. |
 | **A16-02 P0 — portales por token: FC** | `App.tsx:1110–1240` monta listeners globales de `invitaciones`, `slots_visita`, `solicitudes_documentacion` incluso anónimo; `App.tsx:3857` busca candidato desde estado cuyo listener es solo autenticado. `firestore.rules` §§3,5–7 niega `get/list/update` anónimos para esos recursos. `PortalVisitaPublicaView.tsx:128` ejecuta `bookSlotTransaction` cliente, `handlePublicDocSubmit` usa `saveSolicitudDocFirestore` cliente y `handlePublicQuestionnaireSubmit` actualiza estado/Firestore sin ruta token del servidor. Comentarios de Rules anuncian `/api/visita/:token`, `/api/cuestionario/:token` y `server/ia/portalDocumentacion.ts`: ninguno está montado/presente. | Con Rules del repo los enlaces públicos no tienen vía autorizada para recuperar y persistir los datos esperados; sin E2E Firebase y sin estado publicado no cuantificar usuarios afectados. Distinguir los enlaces nominales de registro que usan otra vía (`enlaces_registro`). En documentación pública puede mostrarse falso éxito si no hay solicitud o falla escritura. |
-| **A16-03 P0/P1 — notificaciones: FC** | `server.ts:86–90` llama siempre `resolverAutorizacion(authHeader, undefined, undefined)`; `src/notificaciones/autorizacion.ts` retorna `{perfil:null}`; `dispatcher.ts:144` rechaza `no_autorizado`. Reproducción local del resolver con token sintético y esas dependencias → `{perfil:null}`. El endpoint `/api/notificaciones/enviar` no puede entregar un payload válido tal como está conectado. Test `tests/notificaciones.test.ts` inyecta un admin simulado, NO prueba el montaje. | Sin hacer llamadas HTTP ni enviar mensajes reales. `notificacionesStore` es Map en RAM; `EmailProviderSafeMode` activo puede devolver `ok` con ID `safe-*` **sin enviar** correo, WhatsApp `null`. Dar prioridad P0 si avisos operativos dependen de esta ruta; no anunciar notificaciones enviadas. |
+| **A16-03 P0/P1 — notificaciones: FC** | `server.ts:86–90` llama siempre `resolverAutorizacion(authHeader, undefined, undefined)`; `src/notificaciones/autorizacion.ts` retorna `{perfil:null}`; `dispatcher.ts:144` rechaza `no_autorizado`. Reproducción local del resolver con token sintético y esas dependencias → `{perfil:null}`. El endpoint `/api/notificaciones/enviar` no puede entregar un payload válido tal como está conectado. Test `tests/notificaciones.test.ts` inyecta un admin simulado, NO prueba el montaje. | Sin hacer llamadas HTTP ni enviar mensajes reales. `notificacionesStore` es Map en RAM; `EmailProviderSafeMode` activo puede devolver `ok` con ID `safe-*` **sin enviar** correo, WhatsApp `null`. Dar prioridad P0 si avisos operativos dependen de esta ruta; no anunciar notificaciones enviadas. **Actualización 16-10-2026 (Fase 0 de la orden de capacidades):** el montaje ya inyecta verificador de token real y fuente de perfil en Firestore (`server.ts`, `server/notificaciones/perfilUsuarioFirestore.ts`), el modo seguro **no puede** devolver `ok` y existe un cron protegido (`/api/cron/avisos`). Cierre formal pendiente de la puerta de salida F0 (credenciales de prueba y envío real verificado en entorno no productivo). |
 | **A16-04 P1 — ficheros efímeros y límites: PA** | `server.ts:126,182` sirve binarios por URL inenumerable con controles de MIME/cabeceras/TTL; `src/lib/documentosServidor.ts` limita a 15 MB/250 entradas/96 MB/12 h y los pierde al reinicio. `uploadDocumentoAportadoFile` prefiere este servidor y degrada a Storage o `data:` local; la vista acepta hasta **25 MB**, Storage `documentos_solicitados` solo `<15 MB`. La creación Storage anónima limita tipo/tamaño/nombre, no valida el token del candidato. | Buenas defensas de capacidad/TTL no son durabilidad ni RBAC en la URL. Sin prueba de reinicio, versión serverless, fuga ni Storage real; evaluar finalidad/retención y fracaso de carga antes de aceptar documentos sensibles. |
 | **A16-05 P1 — Storage/base de datos: NV** | Comparación de configuración y 42 rutas `(default)` en Storage frente a Firestore con nombre; sin E oficial Storage ni inspección de mirrors/datos en proyecto. | Probar en emulador y entorno de aceptación con perfiles/inmuebles; no concluir lectura permitida/denegada en producción sin esa evidencia. |
 | **A16-06 P1 — CI: FC (prueba), no fallo de seguridad demostrado** | Run `38801638602` para `8c4ca750227514b66d49233c335178f374797432` tiene el **mismo tree SHA** que HEAD; TypeScript OK, emulador oficial Firestore 61/61; suite Vitest 219/220 archivos, 4075 correctas / 1 fallida / 7 omitidas (4083 total). `tests/roadmap01-seguridad.test.ts:164`: «mutación no detectada: bypass staff». El fixture usa `PROPIETARIO`, pero la mutación reemplaza la guarda por `isStaff()`: la expectativa de cambio de decisión es inadecuada para ese actor; no demuestra bypass real. Build del job omitido tras fallo. | Repetir con entorno preparado, reparar **solo previa autorización de código**, y exigir suite/build verdes sobre el nuevo SHA. No usar CI verde de `c36c552` (árbol anterior) para certificar HEAD. |
@@ -170,7 +170,7 @@ revisarla. No se inventó rama ni se atribuyó trabajo a ella.
 | `docs/BLOQUE-8-INVENTARIO-FUENTES.md` y `docs/FASE2-ANEXO-EVIDENCIA-EXTERNA.json` | Dry-run **histórico** sobre 52 filas reconstruidas, 0 AUTO / 36 INCOMPLETO / 15 BLOQUEADO / 1 NO_MIGRABLE; sin escrituras. | Transcripción ≠ JSON originales; faltan fuentes Rentasync completas, PDF, dump y autorizaciones. No se re-ejecutó B4 ni se importó/migró nada aquí. |
 | `docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md` y `docs/IA-FASE-2-GOBIERNO-USO.md` | Contrato de 11 operaciones, gobierno y aprobación comercial pendiente. | `server.ts` integra F1/F2; defaults solos no activan Gemini, no credencial/live. El contrato de política se endurece en la Fase IA 7 (sin comodines, sin tarifas implícitas, cuotas finitas): `docs/IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md`. |
 | `docs/IA-FASE-5-ASISTENTE-INCIDENCIAS-INQUILINO.md`, `IA-FASE-6-SEGUIMIENTO-INCIDENCIAS.md`, `IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md` y `IA-FASE-8-VALIDACION-ENTORNO-NO-PRODUCTIVO.md` | No existían antes de esta orden. | **INTEGRADAS en `main` (2026-10-16, PR #38)**: 12.ª operación del catálogo, seguimiento con trazabilidad por GAP 1, gobierno explícito y validación no productiva. El consumo de IA sigue BLOQUEADO por política; ver el anexo de esta sección. |
-| `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` e `IA-FASE-9-INFORME-CIERRE.md` | No existían antes de esta orden (el diseño original y sus commits se perdieron; el documento es una **reconstrucción** declarada). | **ENTREGADA EN RAMA, pendiente de integración (PR #39, 2026-10-16)**: DECISIÓN §11 = **Vía 2** (la clave del proveedor es de cada usuario), alta guiada en Configuración y tutorial PDF. `GEMINI_API_KEY` deja de alimentar operaciones. El consumo real sigue BLOQUEADO; ver el anexo «Orden IA 9». |
+| `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` e `IA-FASE-9-INFORME-CIERRE.md` | No existían antes de esta orden (el diseño original y sus commits se perdieron; el documento es una **reconstrucción** declarada). | **INTEGRADA en `main` (16-10-2026, PR #39, merge `ad113d7`)**: DECISIÓN §11 = **Vía 2** (la clave del proveedor es de cada usuario), alta guiada en Configuración y tutorial PDF. `GEMINI_API_KEY` deja de alimentar operaciones. El consumo real sigue BLOQUEADO; ver el anexo «Orden IA 9». |
 | `docs/operaciones/alcance.md` y pruebas `.mjs` de operaciones/patrimonial | Arquitectura y suites ejecutadas en rama/árbol previos con limitación nativa declarada. | HEAD contiene ambos módulos; las suites `.mjs` y un E completo de operaciones no forman parte del CI consultado. No extrapolar certificación nativa/producción. |
 
 **Capacidades de §16 histórico, hoy:** `IA_CARTERA_TRANSVERSAL` **PA**
@@ -227,7 +227,7 @@ reutilizan la sincronización pero su cableado fino va con el rediseño de esa
 área; · reintentos programados de avisos pendientes (hoy en la siguiente
 sincronización).
 
-### Anexo · Orden IA 9 entregada en rama (2026-10-16, PR #39, pendiente de integración)
+### Anexo · Orden IA 9 integrada en `main` (2026-10-16, PR #39, merge `ad113d7`)
 
 Rama de sesión `arena/b93c6727-gestor-de-inmuebles-vercel`, base `4309f48`
 (= `main` tras el PR #38) → HEAD registrado en `docs/ESTADO-GIT-ERP.md`
@@ -329,6 +329,86 @@ La fase 1 sigue abierta: tampoco se han demostrado backup/restore de
 Firestore+Storage, ni aislamiento integral de todas las rutas y consultas por
 rol, ni efectos de Rules publicadas. Por eso esta subfase solo amplía evidencia
 y no habilita por sí sola el cierre de seguridad ni las siguientes fases.
+
+---
+
+### 8. Corte ampliado 16-10-2026 — `main` = `ad113d7` (PR #39) y ORDEN DE CAPACIDADES 16-10
+
+**8.1 · Verificación previa obligatoria (hecha antes de tocar nada).** `main`
+avanzó de `4309f48` a **`ad113d7`** (merge de la PR #39, «Fase IA 9 · llaves de
+usuario (Vía 2)»), 6 commits, 26 ficheros (+3.350/−15): `server/ia/*`, `src/ia/*`,
+`src/lib/llavesUsuarioIA.ts`, `src/components/ia/AltaGuiadaLlaveIA.tsx`,
+`ConfiguracionSection.tsx`, `server.ts` (+22), `.env.example`, `package.json` y
+cuatro ficheros de pruebas. **Efecto sobre esta orden:** **ninguno** en la pila de
+notificaciones, en `firestore.rules`, `storage.rules`, `firebase.json` ni
+`vercel.json`; **sí** en el marco de IA (la clave del proveedor pasa a ser de cada
+usuario y el consumo real sigue **bloqueado**). Consecuencia: la fase del escáner
+IA de facturas sigue sin poder consumir proveedor hasta autorización expresa.
+
+**8.2 · Decisiones del responsable (segunda ronda, 16-10-2026).**
+
+| Punto | Decisión | Efecto en el plan |
+|---|---|---|
+| 1 · Pasarela de pago | **No**. El inquilino paga por transferencia y **sube el justificante**; el ERP avisa al propietario de si cobró y, **si pasa el día 5 sin cobro**, avisa al inquilino (para que abone) **y** al propietario | Fase B sobre el circuito de cobros existente (`registroCobros`, `morosidadPolicy`, GAP 1) |
+| 2 · Conexión bancaria | **Solo si es sencilla**; quiere avisos de cobro de recibos y categorización directa de pagos (p. ej. seguros) | Nivel 1 = reglas de categorización sobre la importación ya existente (coste 0). El agregador PSD2 **no es sencillo ni gratuito**: exige proveedor AISP, contrato y tarifa por cuenta/mes |
+| 3 · Escáner IA de facturas → gasto | **Sí, obligatorio** | Fase E; ubicación registrada en 8.4; **bloqueada** por la autorización de consumo de IA |
+| 4 · Actualización anual de renta (IPC/IRAV) | **Sí**, con **aviso al inquilino un mes antes** para que el siguiente recibo se abone ya actualizado | Fase D (cláusula por contrato, índice con fuente y fecha, tope legal, anexo y aviso) |
+| 5 · Verificación de solvencia | **Sí si es totalmente gratuita**, y prefiere que las comprobaciones las haga la **aseguradora de impago** | Vía gratuita = certificado que descarga y sube el propio candidato con consentimiento + checklist; **no** se contrata consulta automatizada de pago (ver 8.3) |
+| 6 · Domiciliación SEPA | **No**, igual que el punto 1 | No se amplía `sepaPain008` ni el circuito de adeudos |
+| 6·bis · WhatsApp | **No por ahora**; el responsable lo ve complejo y **tiene razón** | Una WABA por propietario multiplica trámites y coste. Alternativa gratuita sin API documentada; queda fuera de alcance |
+| 6·c · Export contable del asesor | **Debe existir**: uno, dos o **todos** los inmuebles y uno o **varios años**, con contratos, inquilinos, gastos, cobros y facturas | Fase F: extensión del exportador canónico del BLOQUE 6 (`src/lib/importExport/`), no un módulo nuevo |
+
+**8.3 · Aseguradora de impago que YA existe en la app (respuesta a su pregunta).**
+El módulo está construido: `solicitudes_seguro_impago` con expediente del
+candidato (1–2 titulares + avalista, ingresos y ratio de esfuerzo),
+**configuración de aseguradoras** (`configuracion_aseguradoras`: ARAG, Caser,
+Mutua de Propietarios, DAS, con asunto propio `[REF-IMPAGO] …`), checklist
+documental por aseguradora, análisis IA previo (score y nivel de riesgo), envío
+por Gmail (API o web) o manual, estados de la respuesta (`FAVORABLE`,
+`FAVORABLE_CONDICIONADO`, `DESFAVORABLE`, `DOCUMENTACION_REQUERIDA`,
+`EN_ESTUDIO`) con importe máximo, prima y condiciones, y decisión del propietario
+(`ACEPTAR_CANDIDATO`, `SOLICITAR_AVAL_EXTRA`, `RECHAZAR_CANDIDATO`,
+`TRAMITAR_OTRA_ASEGURADORA`). **Lo que NO tiene** (y no se va a inventar): API de
+aseguradora (ninguna la ofrece al particular), consulta automatizada a ficheros
+de morosidad (ASNEF/RAI/BADEXCUG/FIM: de pago y con contrato) y creación
+automática de la póliza. Encaje recomendado: que el **análisis de riesgo lo haga
+la aseguradora** (como ya hace) y que la app solo aporte la **vía gratuita**
+(certificado del candidato + coherencia documental) si se pide expresamente.
+
+**8.4 · Ubicación de las capacidades nuevas en este mapa.**
+
+| Capacidad | Sección de destino | Estado |
+|---|---|---|
+| Avisos reales (verificador, transporte real vs modo seguro, reloj diario, bandeja) | **8 · F0 (P0)**, incidencia **A16-03** y §5 | **Fase 0 ejecutada; Fase A implementada en rama con evidencia local**, pendiente de credenciales y prueba no productiva |
+| Cobro por transferencia + justificante subido por el inquilino + aviso del día 5 (inquilino y propietario) | **§14 · BLOQUE 3** (documentación, economía y trazabilidad) y **§3 · GAP1** | Planificado (Fase B); sin implementar |
+| Nivel 1 bancario: reglas de categorización y avisos sobre extractos importados | **§3 · GAP6** y **§14 · BLOQUE 3** | Planificado (Fase C). La conexión real (PSD2) queda **condicionada a proveedor y presupuesto** |
+| Actualización de renta IPC/IRAV con aviso al inquilino un mes antes | **§14 · BLOQUE 3** y **§3 · GAP2** | Planificado (Fase D); normativa **verificada en fuentes y pendiente de revalidar antes de codificar** |
+| Escáner IA de facturas → gasto | **§16.4** (promesa histórica) y **§14 · BLOQUE 3** | Planificado (Fase E), bloqueado por autorización de consumo de IA |
+| Export contable del asesor (multi-inmueble, multi-ejercicio) | **§14 · BLOQUE 6** | Planificado (Fase F) |
+| Fianza autonómica, 180/347/303 y VeriFactu | **§14 · BLOQUE 3** | **Fuera de esta orden** (se mantiene como está) |
+| SEPA por adeudo, WhatsApp por API y consultas de morosidad de pago | — | **Descartados por decisión del responsable (16-10-2026)** |
+
+**8.5 · Fase A — qué se ha implementado y con qué evidencia (rama de sesión).**
+
+| Pieza | Dónde | Evidencia |
+|---|---|---|
+| Verificador de identidad real en el endpoint | `server.ts` (`verificadorTokenNotificaciones`, `fuentePerfilNotificaciones`) + `server/notificaciones/perfilUsuarioFirestore.ts` | Pruebas de autorización (token válido/ inválido/anónimo) y de perfil (`estado == 'ACTIVO'`, perfiles notificables); guarda estática contra volver a `undefined` |
+| Transporte de correo real frente a modo seguro | `src/notificaciones/canales.ts` (`EmailProviderHTTP` RESEND/SENDGRID) + `server/notificaciones/proveedoresEmail.ts` | Modo seguro **nunca** devuelve `ok`; aceptación real con id externo y rechazo explícito probados con `fetch` inyectado; la clave no aparece en el detalle |
+| Reloj diario protegido | `server/notificaciones/relojAvisos.ts` + `rutasCronAvisos.ts` + `crons` en `vercel.json` | Idempotencia (segunda pasada = duplicadas, sin reenvío), regla del día 5 (inquilino + propietario), sin contacto = no emitido, truncamiento marcado, 503 sin `CRON_SECRET`, 401 con secreto inválido |
+| Bandeja interna | `src/lib/bandejaAvisos.ts`, `src/components/sections/BandejaAvisosSection.tsx`, sección `avisos` en `App.tsx` y catálogo de navegación | Estado real de entrega por aviso; guardas de navegación actualizadas (ADMINISTRADOR 30 destinos, PROPIETARIO 24, PROFESIONAL 7 con rol delegado) |
+| Privacidad del `health` | `server.ts` | Publica `MODO_SEGURO` / `REAL` y si el cron está configurado; **ningún secreto** |
+
+**8.6 · Lo que NO puede darse por cerrado todavía.** No hay credenciales de
+proveedor de correo ni `CRON_SECRET` en un entorno no productivo; no se ha
+enviado ningún correo real; no se ha desplegado nada; el conteo de contratos por
+barrido está acotado a 100 documentos por consulta (se marca truncamiento). La
+puerta de salida F0 sigue **abierta** hasta que exista una prueba con
+credenciales de prueba y acuse comprobado.
+
+**8.7 · Detalle funcional y análisis de los seis puntos.** El informe completo,
+con el porqué de cada respuesta, las fuentes consultadas y las alternativas
+descartadas, está en
+[`PLAN-CAPACIDADES-DECISIONES-2026-10-16.md`](PLAN-CAPACIDADES-DECISIONES-2026-10-16.md).
 
 ---
 

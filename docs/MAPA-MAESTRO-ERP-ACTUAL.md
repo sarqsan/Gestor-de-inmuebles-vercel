@@ -168,14 +168,19 @@ revisarla. No se inventó rama ni se atribuyó trabajo a ella.
 | §1–§15 y cabecera antiguos de **este mapa**, PR #6/#7 y cierres de septiembre | `main=3778a5a`, «Bloque B/D/F/GAP5 cerrado», 2253/2385 tests locales, emulador entonces bloqueado. | Son **SH**: `main=fd3cae9`, E Firestore 61/61 en CI más reciente y global 1 fallo; «cerrado» prueba integración de la época, no servicio real actual. No se borra ni reescribe la procedencia. |
 | `docs/BLOQUE-11-AUDITORIA-INTEGRAL-CIERRE.md` y `docs/BLOQUE-12-REPARACION-INTEGRAL-CIERRE.md` | Suites en verde y A-01/A-02 de suscripciones acotadas corregidos; A-03 R-5 Storage, A-11 residuales y custodia A-04 registrados. | Cierres sobre árboles anteriores. El código de suscripciones autenticadas incluye ámbito, pero la nueva incoherencia de embudos públicos y CI posterior **no** quedó validada allí. No decir «sin hallazgos» hoy. |
 | `docs/BLOQUE-8-INVENTARIO-FUENTES.md` y `docs/FASE2-ANEXO-EVIDENCIA-EXTERNA.json` | Dry-run **histórico** sobre 52 filas reconstruidas, 0 AUTO / 36 INCOMPLETO / 15 BLOQUEADO / 1 NO_MIGRABLE; sin escrituras. | Transcripción ≠ JSON originales; faltan fuentes Rentasync completas, PDF, dump y autorizaciones. No se re-ejecutó B4 ni se importó/migró nada aquí. |
-| `docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md` y `docs/IA-FASE-2-GOBIERNO-USO.md` | Contrato de 11 operaciones, gobierno y aprobación comercial pendiente. | `server.ts` integra F1/F2; defaults solos no activan Gemini, no credencial/live. La Fase 2 de código posterior introduce bloqueo 503 cuando el gobierno requiere tarifa aprobada. |
+| `docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md` y `docs/IA-FASE-2-GOBIERNO-USO.md` | Contrato de 11 operaciones, gobierno y aprobación comercial pendiente. | `server.ts` integra F1/F2; defaults solos no activan Gemini, no credencial/live. El contrato de política se endurece en la Fase IA 7 (sin comodines, sin tarifas implícitas, cuotas finitas): `docs/IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md`. |
+| `docs/IA-FASE-5-ASISTENTE-INCIDENCIAS-INQUILINO.md`, `IA-FASE-6-SEGUIMIENTO-INCIDENCIAS.md`, `IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md` y `IA-FASE-8-VALIDACION-ENTORNO-NO-PRODUCTIVO.md` | No existían antes de esta orden. | **INTEGRADAS en `main` (2026-10-16, PR #38)**: 12.ª operación del catálogo, seguimiento con trazabilidad por GAP 1, gobierno explícito y validación no productiva. El consumo de IA sigue BLOQUEADO por política; ver el anexo de esta sección. |
 | `docs/operaciones/alcance.md` y pruebas `.mjs` de operaciones/patrimonial | Arquitectura y suites ejecutadas en rama/árbol previos con limitación nativa declarada. | HEAD contiene ambos módulos; las suites `.mjs` y un E completo de operaciones no forman parte del CI consultado. No extrapolar certificación nativa/producción. |
 
 **Capacidades de §16 histórico, hoy:** `IA_CARTERA_TRANSVERSAL` **PA**
 (asistente conectado solo a tres consultas tipadas, no a un analista general
 de cartera); `INCIDENCIA_IA_END_TO_END` **PA** (endpoint de análisis y módulos
 operativos relacionados, no cadena completa tenant→diagnóstico→póliza→OT→
-factura automatizada); `ESCANER_FACTURAS_IA` **NV en la otra app / SD en HEAD**
+factura automatizada; tras la orden IA 5–8 quedan **cubiertos con evidencia**
+el tramo inquilino→diagnóstico guiado (Fase 5) y el seguimiento/trazabilidad
+del ciclo de la incidencia con aviso por GAP 1 y estado real de entrega (Fase
+6), ambos con el consumo de IA bloqueado por política; siguen **sin cubrir**
+póliza→OT→factura automatizada); `ESCANER_FACTURAS_IA` **NV en la otra app / SD en HEAD**
 (el análisis `/api/analizar-documento` se dirige a documentos de candidatos,
 no a factura→gasto validado por usuario); `FICHA_ECONOMICA_INMUEBLE` **PA**
 (existen expediente, tributos, fiscalidad e informes, falta probar y completar
@@ -192,6 +197,34 @@ visión anual unificada). Estos objetivos siguen siendo requisitos históricos
 | **F3 — integraciones externas e IA (P1/P2)** | Contratos, homologación, autorizaciones, sandbox de proveedor, precios/cupos aprobados y consentimiento de datos. | Demostrar envío+acuse correlacionado, fallo/reintento y revocación para cada proveedor (Gmail/SMTP, banco SEPA, AEAT/VeriFactu, B2B, portales, OTP, Catastro); donde no haya proveedor, mantener estado «preparado». IA: política comercial aprobada **antes** de permitir uso y pruebas de perfil, saldo, cuota e idempotencia en sandbox; ninguna llamada por esta auditoría. |
 | **F4 — migración histórica y recuperación de datos** | Fuentes originales íntegras verificadas por SHA, catálogo de propietarios/inmuebles/contratos, binarios, consentimiento y backup/restore probados; decisiones B4/O7 explícitas. | Dry-run completo sin huérfanos/autos dudosos, autorizaciones por registro, plan de rollback y revisión humana; importación únicamente en entorno autorizado por orden separada; conciliación de conteos, documentos y saldos antes/después. Las 52 filas reconstruidas no cumplen la puerta. |
 | **F5 — producto, UX y relevo de ramas** | F0–F4 según capacidad; comparación semántica de ramas DIV/RA sin fusionar automáticamente. | Confirmar o descartar explícitamente UX-1/N titulares/circuito candidato alternativo con pruebas de compatibilidad; recorridos reales con navegador y accesibilidad, métricas de errores/operación, backup y recuperación ensayados; matriz final de evidencias por perfil/servicio/versión. No marcar cerrada una fase solo por un test unitario. |
+
+### Anexo · Orden IA 5–8 integrada en `main` (2026-10-16)
+
+Rama de sesión `arena/658e62cd-gestor-de-inmuebles-vercel`, base `6280e017`
+(= `main` tras el PR #37) → HEAD de la rama `3a9c456`, integrada con la **PR
+#38** (merge en `main`, CI del repositorio en verde: «Reglas Firestore y
+Storage (emuladores oficiales)» y «Tipos, suite completa y build», ambos
+`pass`). Evidencia declarada por la rama: suite completa **228 ficheros ·
+4.185 passed · 7 todo · 0 fallos**, `tsc --noEmit` **0 errores**; 26 ficheros
+nuevos y 24 modificados; **sin** cambios en `firestore.rules`, `firebase.json`,
+`.firebaserc` ni `vercel.json`; sin dependencias nuevas ni migraciones.
+
+Qué cambia de estado: el catálogo central pasa de 11 a **12 operaciones** (nueva
+`ASISTENTE_INCIDENCIAS_INQUILINO`); aparece el seguimiento de incidencias
+(`incidencias_seguimiento`) con notificaciones duraderas y registro de entregas
+por intento; el contrato de política de IA pasa a **TODO O NADA** (permisos
+explícitos de los cuatro perfiles, tarifa de las 12 operaciones, cuotas
+finitas) con **política por defecto que deniega toda operación**; y se añade el
+ensayo de validación no productiva (`npm run ia:validar-entorno`) con proveedor
+simulado. Qué **NO** cambia: el consumo de IA sigue **BLOQUEADO** (503
+`APROBACION_COMERCIAL_PENDIENTE` sin `IA_POLITICA_JSON`; 503
+`POLITICA_IA_INVALIDA` con política mal formada), sin credenciales ni coste
+real, y no se publicaron reglas. Pendientes accionables: · Límites/gasto real
+del proveedor en Google Cloud (presupuesto y cuotas de API) verificados antes
+de cualquier autorización; · los tres flujos de gestión profesionales
+reutilizan la sincronización pero su cableado fino va con el rediseño de esa
+área; · reintentos programados de avisos pendientes (hoy en la siguiente
+sincronización).
 
 **Reglas de dependencia:** F0 precede pruebas E2E de captación; F1 precede
 lecturas/escrituras sensibles y F2; F2 aporta entidades para F3 y F4; F3

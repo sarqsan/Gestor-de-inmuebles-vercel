@@ -29,7 +29,13 @@ import { clienteIA, crearNucleoIA, generateGeminiWithRetry, type ClienteProveedo
 import { CAMPOS_REGISTRO_IA, crearRegistroMemoria, type RegistroOperacionesIAMemoria } from '../server/ia/registroOperacionesIA';
 import { crearGobiernoMemoria, type GobiernoMemoriaIA } from '../server/ia/gobiernoIA';
 import { OPERACIONES_IA, type IdOperacionIA } from '../src/ia/catalogoOperacionesIA';
-import { validarPoliticaGobiernoIA } from '../src/ia/gobiernoIAContrato';
+import {
+  construirPoliticaIACompleta,
+  OPERACIONES_IA_IDS,
+  validarPoliticaGobiernoIA,
+  type PoliticaGobiernoIA,
+  type SobrescriturasPoliticaIA,
+} from '../src/ia/gobiernoIAContrato';
 import type { IdentidadVerificada } from '../server/titularidades/googleBackend';
 
 const TOKENS: Record<string, IdentidadVerificada> = {
@@ -65,8 +71,27 @@ interface OpcionesMontaje {
   proveedor?: ClienteProveedorIA | null;
 }
 
+/** FASE 7 · política COMPLETA y explícita para las pruebas del mecanismo: los CUATRO
+ * perfiles declarados (sin comodines) y la tarifa de las 12 operaciones. Las
+ * sobrescrituras de un perfil sustituyen su ámbito; las de coste/cuota se fusionan. */
+function politicaPermisiva(parcial: SobrescriturasPoliticaIA = {}): PoliticaGobiernoIA {
+  return construirPoliticaIACompleta({
+    ...parcial,
+    // La operación que ejercen estas suites se declara a 0 créditos salvo que la
+    // prueba fije otra tarifa: siguen probando permisos, cuotas y saldo, no precios.
+    costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 0, ...(parcial.costeCreditosPorOperacion ?? {}) },
+    permisos: {
+      PROPIETARIO: OPERACIONES_IA_IDS,
+      PROFESIONAL: OPERACIONES_IA_IDS,
+      INQUILINO: OPERACIONES_IA_IDS,
+      ADMINISTRADOR: OPERACIONES_IA_IDS,
+      ...(parcial.permisos ?? {}),
+    },
+  });
+}
+
 function politica(opciones: unknown): ReturnType<typeof validarPoliticaGobiernoIA> {
-  return validarPoliticaGobiernoIA(opciones);
+  return validarPoliticaGobiernoIA(politicaPermisiva((opciones ?? {}) as SobrescriturasPoliticaIA));
 }
 
 const servidores: Server[] = [];
@@ -79,12 +104,12 @@ function perfilFijo(gobierno: GobiernoMemoriaIA, uid: string, tipoPerfil: string
 }
 
 async function montar(opciones: OpcionesMontaje = {}) {
-  // Desde el bloqueo preventivo, operar exige política aprobada (ENTORNO con
-  // tarifas). El fixture por defecto define una tarifa en ESTIMAR_PRICING —una
-  // operación que estos tests no ejercen— para que REDACTAR_CLAUSULA siga
-  // costando 0 y los saldos de prueba no cambien. Los escenarios con aprobación
-  // PENDIENTE (bloqueo 503) se cubren en ia-fase2-bloqueo-consumo.test.ts.
-  const resultadoPolitica = politica(opciones.politica ?? { costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } });
+  // FASE 7 · operar exige política DECLARADA (ENTORNO) y COMPLETA. El fixture por
+  // defecto declara las 12 tarifas con la tabla de referencia y fija
+  // REDACTAR_CLAUSULA —la operación que estos tests ejercen— en 0 créditos para
+  // que los saldos de prueba no cambien. Los escenarios con aprobación PENDIENTE
+  // (bloqueo 503) se cubren en ia-fase2-bloqueo-consumo.test.ts.
+  const resultadoPolitica = politica(opciones.politica ?? { costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 0, ESTIMAR_PRICING: 1 } });
   if (resultadoPolitica.estado !== 'VALIDA') throw new Error('política de prueba inválida');
   const registro = opciones.registro ?? crearRegistroMemoria();
   const gobierno = opciones.gobierno === undefined
@@ -190,19 +215,26 @@ describe('IA Fase 2 · permisos por rol y operación', () => {
     expect(m.registro.listar()).toHaveLength(0);
   });
 
-  it('perfil con permiso explícito → 200; la política por defecto permite todo (Fase 1)', async () => {
+  it('perfil con permiso explícito → 200; el ámbito vacío del perfil → 403 (Fase 7: deny-by-default)', async () => {
     const m = await montar({ politica: { permisos: { PROPIETARIO: ['REDACTAR_CLAUSULA'] }, costeCreditosPorOperacion: { ESTIMAR_PRICING: 1 } } });
     perfilFijo(m.gobierno, 'uid-ana', 'PROPIETARIO');
     expect((await m.llamar(m.autenticado())).status).toBe(200);
     const m2 = await montar();
     perfilFijo(m2.gobierno, 'uid-ana', 'PROPIETARIO');
     expect((await m2.llamar(m2.autenticado())).status).toBe(200);
+    // Sin la operación en el ámbito del perfil (ámbito vacío), el núcleo corta en 403.
+    const m3 = await montar({ politica: { permisos: { PROPIETARIO: [] } } });
+    perfilFijo(m3.gobierno, 'uid-ana', 'PROPIETARIO');
+    const r = await m3.llamar(m3.autenticado());
+    expect(r.status).toBe(403);
+    expect(await r.json()).toMatchObject({ codigo: 'OPERACION_NO_PERMITIDA' });
+    expect(m3.llamadas).toHaveLength(0);
   });
 
   it('el catálogo completo sigue montado y el estado del núcleo informa del gobierno', async () => {
     const m = await montar();
-    expect(OPERACIONES_IA.length).toBe(11);
-    expect(m.nucleo.estado()).toMatchObject({ registro: 'MEMORIA', gobierno: 'MEMORIA', operaciones: 11 });
+    expect(OPERACIONES_IA.length).toBe(12);
+    expect(m.nucleo.estado()).toMatchObject({ registro: 'MEMORIA', gobierno: 'MEMORIA', operaciones: 12 });
   });
 });
 

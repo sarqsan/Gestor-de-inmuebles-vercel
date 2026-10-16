@@ -116,6 +116,39 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+  // FASE 6 · seguimiento de incidencias: prioridad, actualización, escalado y
+  // derivación solicitada por el inquilino desde el asistente (Fase 5).
+  'incidencia.prioridad_cambiada': {
+    id: 'incidencia.prioridad_cambiada',
+    asunto: 'Cambio de prioridad de una incidencia — {inmuebleDireccion}',
+    cuerpo: 'La incidencia «{titulo}» pasa a prioridad {prioridad}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'incidencia.actualizada': {
+    id: 'incidencia.actualizada',
+    asunto: 'Nueva información en una incidencia — {inmuebleDireccion}',
+    cuerpo:
+      'La incidencia «{titulo}» tiene información nueva ({campos}). El estado actual es {estado}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
+  'incidencia.escalada': {
+    id: 'incidencia.escalada',
+    asunto: 'Incidencia escalada — {inmuebleDireccion}',
+    cuerpo:
+      'La incidencia «{titulo}» ({prioridad}) requiere atención: {motivo}. No tiene profesional asignado.',
+    canalesPermitidos: ['EMAIL', 'INAPP', 'WEBHOOK'],
+    inicio: 'IMMEDIATE',
+  },
+  'incidencia.derivacion_solicitada': {
+    id: 'incidencia.derivacion_solicitada',
+    asunto: 'Derivación solicitada por el inquilino — {inmuebleDireccion}',
+    cuerpo:
+      'El inquilino ha pedido seguimiento de la incidencia «{titulo}» desde el asistente. Estado actual: {estado}.',
+    canalesPermitidos: ['EMAIL', 'INAPP'],
+    inicio: 'IMMEDIATE',
+  },
 
   // =======================================================================
   // SEGUROS

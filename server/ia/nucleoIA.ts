@@ -344,9 +344,11 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
       ? gobierno.modo
       : 'NO_CONFIGURADO';
   // BLOQUEO PREVENTIVO · aprobación comercial pendiente (política POR_DEFECTO o
-  // sin tarifas definidas): ninguna operación se ejecuta ni se crea el cliente
-  // del proveedor. Es una decisión de configuración (IA_POLITICA_JSON con
-  // tarifas), nunca algo que se active por existir la clave de Gemini.
+  // política declarada incompleta, Fase 7): ninguna operación se ejecuta ni se
+  // crea el cliente del proveedor. Es una decisión de configuración
+  // (IA_POLITICA_JSON con la política COMPLETA: permisos explícitos de los 4
+  // perfiles, tarifas de las 12 operaciones y cuotas finitas), nunca algo que se
+  // active por existir la clave de Gemini.
   const bloqueoComercial = gobierno ? resumenPoliticaGobiernoIA(gobierno.politica).pendienteAprobacionComercial : false;
 
   return {
@@ -576,6 +578,15 @@ export function clienteIA(res: Response): ClienteProveedorIA | null {
     throw new Error('Llamada de IA fuera del núcleo: monta el endpoint con nucleoIA.operacion(...).');
   }
   return contexto.cliente;
+}
+
+/** Contexto resuelto por el núcleo (uid del token e id de operación), para los
+ *  endpoints que necesitan consultar fuentes autorizadas con esa identidad.
+ *  `null` sólo si el endpoint no se montó con `nucleoIA.operacion(...)`. */
+export function contextoOperacionIA(res: Response): { operacion: IdOperacionIA; operacionId: string; uid: string } | null {
+  const contexto = res.locals?.[CLAVE_CONTEXTO_IA] as ContextoOperacionIA | undefined;
+  if (!contexto) return null;
+  return { operacion: contexto.operacion, operacionId: contexto.operacionId, uid: contexto.uid };
 }
 
 /** Cliente real de Gemini (antes `getGeminiClient` en server.ts). `null` sin clave. */

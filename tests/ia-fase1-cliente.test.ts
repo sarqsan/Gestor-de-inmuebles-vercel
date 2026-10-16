@@ -140,9 +140,9 @@ describe('IA Fase 1 · guardas estáticas del cliente', () => {
       }
     }
     expect(usos).toEqual([]);
-    // Las 13 llamadas de las pantallas cubren 10 de las 11 operaciones; el asistente va por fetchIA.
+    // Las 14 llamadas de las pantallas cubren 11 de las 12 operaciones; el asistente va por fetchIA.
     const llamadas = FUENTES.flatMap((f) => [...f.codigo.matchAll(/solicitarIA\('([^']+)'/g)].map((m) => m[1]));
-    expect(llamadas).toHaveLength(13);
+    expect(llamadas).toHaveLength(14);
     expect(new Set(llamadas)).toEqual(new Set(RUTAS.filter((r) => r !== '/api/asistente/interpretar')));
   });
 

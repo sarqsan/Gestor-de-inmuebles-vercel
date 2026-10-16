@@ -22,10 +22,13 @@ const RESUMEN = {
   politica: {
     version: 1,
     origen: 'POR_DEFECTO',
+    // FASE 7 · sin política declarada: nada completo, cuotas finitas de referencia y
+    // ningún perfil con permisos (el comodín ya no existe).
     pendienteAprobacionComercial: true,
-    cuotas: { operacionesPorDia: null, operacionesPorMes: null },
+    politicaCompleta: false,
+    cuotas: { operacionesPorDia: 20, operacionesPorMes: 200 },
     costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 0 },
-    perfilesPorOperacion: { REDACTAR_CLAUSULA: ['PROPIETARIO', 'PROFESIONAL', 'INQUILINO', 'ADMINISTRADOR'] },
+    perfilesPorOperacion: { REDACTAR_CLAUSULA: [] },
   },
   operacionesRecientes: [
     {
@@ -79,9 +82,37 @@ describe('PanelGobiernoIA · consulta', () => {
     render(<PanelGobiernoIA opciones={opciones(fetchImpl)} />);
     await waitFor(() => expect(screen.getByTestId('panel-gobierno-ia')).toBeTruthy());
     expect(await screen.findByText(/gobierno: FIRESTORE/)).toBeTruthy();
-    expect(screen.getByTestId('badge-pendiente').textContent).toContain('PENDIENTES DE APROBACIÓN');
+    expect(screen.getByTestId('badge-pendiente').textContent).toContain('Política INCOMPLETA');
+    expect(screen.queryByTestId('badge-completa')).toBeNull();
+    // FASE 7 · cuotas FINITAS a la vista: nunca «sin límite».
+    expect(screen.getByText('20 / 200')).toBeTruthy();
+    expect(screen.getByText(/0 de 4/)).toBeTruthy();
+    expect(screen.queryByText(/sin límite/)).toBeNull();
     expect(screen.getByText(/uid-ana/)).toBeTruthy();
     expect(screen.getByText('REDACTAR_CLAUSULA')).toBeTruthy();
+  });
+
+  it('FASE 7 · con política declarada y completa el panel lo certifica (sin badge de pendiente)', async () => {
+    const completa = {
+      ...RESUMEN,
+      politica: {
+        ...RESUMEN.politica,
+        origen: 'ENTORNO',
+        pendienteAprobacionComercial: false,
+        politicaCompleta: true,
+        costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 2, ASISTENTE_INCIDENCIAS_INQUILINO: 2 },
+        perfilesPorOperacion: {
+          REDACTAR_CLAUSULA: ['ADMINISTRADOR'],
+          ASISTENTE_INCIDENCIAS_INQUILINO: ['INQUILINO'],
+        },
+      },
+    };
+    const { fetchImpl } = fetchDoble({ '/api/ia/admin/resumen': () => completa });
+    render(<PanelGobiernoIA opciones={opciones(fetchImpl)} />);
+    await waitFor(() => expect(screen.getByTestId('badge-completa')).toBeTruthy());
+    expect(screen.queryByTestId('badge-pendiente')).toBeNull();
+    expect(screen.getByTestId('badge-completa').textContent).toContain('permisos explícitos');
+    expect(screen.getByText(/2 de 4/)).toBeTruthy();
   });
 
   it('sin permiso (403) muestra el error del servidor y no inventa datos', async () => {

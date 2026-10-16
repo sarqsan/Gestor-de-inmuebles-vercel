@@ -71,6 +71,9 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { confirmar } from '../../feedback/confirmacion';
+// FASE 6 — tras guardar, el SERVIDOR observa la incidencia autorizada y registra
+// el hilo de seguimiento + aviso al inquilino si algo cambió de verdad.
+import { sincronizarSeguimientoIncidencia } from '../../lib/seguimientoIncidencias';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 
 interface IncidenciasSectionProps {
@@ -190,6 +193,8 @@ export const IncidenciasSection: React.FC<IncidenciasSectionProps> = ({
   // CRUD Handlers
   const handleSaveIncidencia = async (inc: Incidencia) => {
     await saveIncidenciaFirestore(inc);
+    // Seguimiento y avisos: best-effort, nunca bloquea el guardado ya hecho.
+    void sincronizarSeguimientoIncidencia(inc.id).catch(() => undefined);
   };
 
   const handleDeleteIncidencia = async (id: string) => {

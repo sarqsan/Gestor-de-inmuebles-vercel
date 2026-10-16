@@ -20,6 +20,11 @@ import type {
   UsuarioApp,
 } from '../../types';
 import { MiniaturaEvidencia } from './MiniaturaEvidencia';
+// IA · FASE 5 — diagnóstico asistido del inquilino (servidor autorizado).
+import { AsistenteIncidenciaAsistida } from './AsistenteIncidenciaAsistida';
+// FASE 6 — evolución del seguimiento (autorizada en servidor) y sincronización.
+import { EvolucionIncidenciaPortal } from './EvolucionIncidenciaPortal';
+import { sincronizarSeguimientoIncidencia } from '../../lib/seguimientoIncidencias';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
@@ -120,6 +125,15 @@ export const PortalIncidencias: React.FC<Props> = ({ usuario, contrato, inmueble
                   </ol>
                 </div>
               )}
+
+              <AsistenteIncidenciaAsistida
+                contratoId={contrato.id}
+                incidenciaId={vm.id}
+                descripcionInicial={vm.descripcion}
+                categoriaInicial={vm.categoria}
+              />
+
+              <EvolucionIncidenciaPortal incidenciaId={vm.id} />
 
               {(vm.fotografias.length > 0 || vm.documentos.length > 0) && (
                 <div>
@@ -264,6 +278,10 @@ function NuevaIncidenciaModal({
       }
 
       await vincularIncidenciaAContrato(contrato.id, incidencia.id);
+      // FASE 6 — el servidor observa la incidencia ya escrita y registra el
+      // evento de seguimiento + aviso a gestión. Un fallo aquí NO invalida el
+      // alta (la incidencia ya existe): la próxima sincronización lo recupera.
+      void sincronizarSeguimientoIncidencia(incidencia.id).catch(() => undefined);
       await auditarAccionPortal({
         usuarioId: usuario.id,
         usuarioEmail: usuario.email,
@@ -361,6 +379,16 @@ function NuevaIncidenciaModal({
             ))}
           </div>
         )}
+
+        {/* IA · FASE 5 — el inquilino puede orientar la avería ANTES de enviarla.
+            El asistente analiza con el contrato autorizado y no crea nada por sí solo. */}
+        <div className="mb-3">
+          <AsistenteIncidenciaAsistida
+            contratoId={contrato.id}
+            descripcionInicial={`${titulo} ${descripcion}`.trim()}
+            categoriaInicial={categoria}
+          />
+        </div>
 
         <button
           onClick={guardar}

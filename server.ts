@@ -29,9 +29,24 @@ import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorB
 // servidor, idempotencia y registro por usuario de cada operación de IA.
 // IA · FASE 2 — gobierno de uso: permisos por rol/operación, cuotas, créditos y
 // panel de administración (server/ia/gobiernoIA.ts y server/ia/adminIA.ts).
-import { clienteIA, crearNucleoIA, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
+import { clienteIA, contextoOperacionIA, crearNucleoIA, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
 import { crearDependenciasNucleoIA } from './server/ia/configuracionIA.js';
+import {
+  crearAsistenteIncidenciasIA,
+  crearFuenteAutorizadaInquilinoIA,
+  crearRegistroTrazasFirestoreIA,
+  normalizarPeticionAsistenteIncidenciasIA,
+  MODELO_PROVEEDOR_ASISTENTE_INCIDENCIAS,
+  type FuenteAutorizadaInquilinoIA,
+  type RegistroTrazasIncidenciasIA,
+} from './server/ia/asistenteIncidenciasInquilino.js';
 import { montarRutasAdminIA } from './server/ia/adminIA.js';
+// FASE 6 — seguimiento y trazabilidad de incidencias: hilo de eventos por
+// incidencia, avisos por el dispatcher canónico y estado REAL de entrega.
+import { crearServicioSeguimientoIncidencias } from './server/seguimiento/seguimientoIncidencias.js';
+import { crearNotificadorIncidencias } from './server/seguimiento/notificadorIncidencias.js';
+import { montarRutasSeguimientoIncidencias } from './server/seguimiento/rutasSeguimientoIncidencias.js';
+import { crearRepositorioNotificacionesFirestore } from './server/notificaciones/repositorioNotificacionesFirestore.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -41,8 +56,11 @@ import type {
 dotenv.config();
 
 // ---------------------------------------------------------------------------
-// Repositorio de notificaciones en memoria (producción: Firestore "notificaciones").
-// Conserva la notificación por id e idempotencyKey para anti-duplicados.
+// Repositorio de notificaciones. FASE 6: con credencial de servicio se usa el
+// repositorio DURADERO en Firestore (`notificaciones` + registro append-only de
+// entregas en `notificaciones_entregas`), de modo que el estado real de entrega
+// (estado, intentos, proveedor, id externo) sobrevive al proceso. Sin credencial
+// se conserva el almacén en memoria (desarrollo/tests): nunca se finge entrega.
 // ---------------------------------------------------------------------------
 const notificacionesStore = new Map<string, Notificacion>();
 const notificacionesRepo: RepositorioNotificaciones = {
@@ -99,7 +117,7 @@ function construirDispatcher(ctx: ContextoAutorizacion): DispatcherNotificacione
   };
   return new DispatcherNotificaciones({
     autorizacion: ctx,
-    repositorio: notificacionesRepo,
+    repositorio: notificacionesRepoDuradero ?? notificacionesRepo,
     canales,
   });
 }
@@ -209,6 +227,36 @@ app.get('/api/documents/:fileId', (req, res) => {
 // ---------------------------------------------------------------------------
 const dependenciasIA = crearDependenciasNucleoIA();
 const nucleoIA = crearNucleoIA(dependenciasIA);
+
+// IA · FASE 5 — el asistente de incidencias del inquilino lee contrato, inmueble
+// e incidencia con la MISMA credencial de servicio (REST, sólo lectura) y deja
+// una traza mínima por operación. Sin credencial no hay fuente autorizada: la
+// ruta responde 503 y nunca analiza datos del cliente.
+const fuenteIncidenciasIA: FuenteAutorizadaInquilinoIA | null = dependenciasIA.firestore
+  ? crearFuenteAutorizadaInquilinoIA(dependenciasIA.firestore)
+  : null;
+const trazasIncidenciasIA: RegistroTrazasIncidenciasIA | null = dependenciasIA.firestore
+  ? crearRegistroTrazasFirestoreIA(dependenciasIA.firestore)
+  : null;
+
+// FASE 6 — con credencial de servicio las notificaciones se persisten en
+// Firestore (documento canónico + registro de entregas). Sin credencial se
+// mantiene el almacén en memoria: el dispatcher y su deny-by-default no cambian.
+const notificacionesRepoDuradero: RepositorioNotificaciones | null = dependenciasIA.firestore
+  ? crearRepositorioNotificacionesFirestore(dependenciasIA.firestore)
+  : null;
+
+const servicioSeguimientoIncidencias = dependenciasIA.firestore
+  ? crearServicioSeguimientoIncidencias({
+      puerto: dependenciasIA.firestore,
+      notificar: crearNotificadorIncidencias({
+        crearDispatcher: construirDispatcher,
+        ...(process.env.SEGUIMIENTO_ADMIN_USUARIO_ID
+          ? { usuarioIdAdministracion: process.env.SEGUIMIENTO_ADMIN_USUARIO_ID }
+          : {}),
+      }),
+    })
+  : null;
 
 app.post('/api/analizar-documento', nucleoIA.operacion('ANALIZAR_DOCUMENTO'), async (req, res) => {
   try {
@@ -848,6 +896,82 @@ app.post('/api/asistente/interpretar', nucleoIA.operacion('ASISTENTE_INTERPRETAR
   } catch (err: any) {
     console.warn('Asistente §6 F4: error consultando Gemini, el cliente usará el resolutor local.', err?.message || err);
     return res.status(502).json({ disponible: true, proveedor: 'gemini', error: 'PROVEEDOR_ERROR' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// IA · FASE 5 — ASISTENTE DE INCIDENCIAS PARA INQUILINOS.
+// Diagnóstico guiado con contrato autorizado. La identidad (uid) y el id de
+// operación salen del núcleo; contrato, inmueble, propietario e incidencia se
+// resuelven en servidor desde las fuentes autorizadas (nunca del cuerpo de la
+// petición). La respuesta distingue hipótesis técnica, interpretación
+// contractual y decisión económica, explica la incertidumbre y sólo sugiere la
+// derivación: no atribuye responsabilidad, no crea cargos ni obligaciones.
+// ---------------------------------------------------------------------------
+const MENSAJES_RECHAZO_INCIDENCIAS: Record<string, string> = {
+  PERFIL_INQUILINO_REQUERIDO: 'Este asistente es exclusivo del portal del inquilino.',
+  PERFIL_NO_ACTIVO: 'Tu cuenta no está activa: no se puede analizar la incidencia.',
+  SIN_CONTRATO_AUTORIZADO: 'No hay ningún contrato vigente vinculado a tu cuenta.',
+  CONTRATO_NO_AUTORIZADO: 'El contrato indicado no está vinculado a tu cuenta.',
+  INCIDENCIA_NO_AUTORIZADA: 'La incidencia indicada no pertenece a tus contratos.',
+  PETICION_INVALIDA: 'Falta la descripción de la incidencia o no es válida.',
+  FUENTE_NO_DISPONIBLE: 'No se han podido leer tus datos autorizados, así que no se ha analizado nada.',
+};
+
+app.post('/api/asistente/incidencias-inquilino', nucleoIA.operacion('ASISTENTE_INCIDENCIAS_INQUILINO'), async (req, res) => {
+  try {
+    const contexto = contextoOperacionIA(res);
+    if (!contexto) {
+      return res.status(500).json({ error: 'Operación de IA sin contexto de núcleo.', codigo: 'ERROR_NUCLEO_IA' });
+    }
+    if (!fuenteIncidenciasIA) {
+      return res.status(503).json({ error: MENSAJES_RECHAZO_INCIDENCIAS.FUENTE_NO_DISPONIBLE, codigo: 'FUENTE_NO_DISPONIBLE' });
+    }
+    const ai = clienteIA(res);
+    const consultarProveedor = async (prompt: string): Promise<unknown | null> => {
+      if (!ai) return null;
+      const respuesta = await generateGeminiWithRetry(ai, {
+        model: MODELO_PROVEEDOR_ASISTENTE_INCIDENCIAS,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+      });
+      const texto = typeof respuesta?.text === 'string' ? respuesta.text.trim() : '';
+      if (!texto) return null;
+      try {
+        return JSON.parse(texto) as unknown;
+      } catch {
+        return null;
+      }
+    };
+    const asistente = crearAsistenteIncidenciasIA({ fuente: fuenteIncidenciasIA, traza: trazasIncidenciasIA });
+    const resultado = await asistente.diagnosticar({
+      uid: contexto.uid,
+      operacionId: contexto.operacionId,
+      peticion: normalizarPeticionAsistenteIncidenciasIA(req.body),
+      consultarProveedor,
+    });
+    if (resultado.estado === 'RECHAZADO') {
+      return res.status(resultado.codigoHttp).json({
+        error: MENSAJES_RECHAZO_INCIDENCIAS[resultado.codigo] ?? 'Operación no autorizada.',
+        codigo: resultado.codigo,
+      });
+    }
+    return res.json({
+      success: true,
+      diagnostico: resultado.diagnostico,
+      origenRespuesta: resultado.origenRespuesta,
+      avisos: resultado.avisos,
+      // Alcance resuelto en servidor (identificadores, no datos sensibles): permite
+      // al portal mostrar sobre qué contrato/inmueble se ha analizado.
+      alcance: {
+        contratoId: resultado.contexto.contratoId,
+        inmuebleId: resultado.contexto.inmueble.id,
+        incidenciaId: resultado.contexto.incidencia?.id ?? null,
+      },
+    });
+  } catch (err) {
+    console.error('Error en el asistente de incidencias del inquilino:', err);
+    return res.status(502).json({ error: 'El asistente no ha podido completar el análisis.', codigo: 'PROVEEDOR_ERROR' });
   }
 });
 
@@ -2601,6 +2725,14 @@ app.get('/api/health', (req, res) => {
 // administrador (bloqueo/desbloqueo y movimiento de saldo con importe explícito).
 // Autorización SIEMPRE en servidor: token verificado + perfil veraz ADMINISTRADOR.
 // ---------------------------------------------------------------------------
+// FASE 6 — seguimiento de incidencias (autorizado en servidor): lectura de la
+// evolución y sincronización observada. No es una operación de IA: no consume
+// cuotas ni créditos, pero exige token verificado y autorización por incidencia.
+montarRutasSeguimientoIncidencias(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  servicio: servicioSeguimientoIncidencias,
+});
+
 montarRutasAdminIA(app, {
   verificarToken: dependenciasIA.verificarToken,
   gobierno: dependenciasIA.gobierno,

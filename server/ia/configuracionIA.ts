@@ -15,10 +15,13 @@
  *     que la búsqueda de titulares) → Firestore REST en la base de datos de la
  *     aplicación (`FIRESTORE_DATABASE_ID` o la de la configuración). Sin
  *     credencial: memoria solo en desarrollo explícito; bloqueo en producción.
- *   · Gobierno de uso (FASE 2): sigue al registro — Firestore en producción,
+ *   · Gobierno de uso (FASE 2 + 7): sigue al registro — Firestore en producción,
  *     memoria en desarrollo. La política viene de `src/ia/gobiernoIAContrato.ts`
- *     (por defecto conserva Fase 1) o de `IA_POLITICA_JSON`; si la variable
- *     existe y no es válida, se bloquean las operaciones (fallo cerrado).
+ *     (por defecto DENIEGA todas las operaciones y mantiene el bloqueo por
+ *     aprobación comercial pendiente) o de `IA_POLITICA_JSON`, que exige la
+ *     política completa (permisos explícitos de los 4 perfiles, tarifa de las 12
+ *     operaciones y cuotas finitas); si la variable existe y no es válida, se
+ *     bloquean las operaciones (fallo cerrado).
  *   · Proveedor: `GEMINI_API_KEY` (la misma clave de siempre).
  *
  * Una credencial de otro proyecto bloquea las operaciones, no el arranque HTTP.
@@ -65,7 +68,13 @@ export function resolverConfiguracionIA(entorno: NodeJS.ProcessEnv = process.env
 
 export function crearDependenciasNucleoIA(
   entorno: NodeJS.ProcessEnv = process.env,
-): DependenciasNucleoIA & { configuracion: ConfiguracionNucleoIA; politica: PoliticaGobiernoIA | null; errorPolitica?: string } {
+): DependenciasNucleoIA & {
+  configuracion: ConfiguracionNucleoIA;
+  politica: PoliticaGobiernoIA | null;
+  errorPolitica?: string;
+  /** Fuente autorizada de datos (Firestore REST con credencial de servicio) o `null`. */
+  firestore: ClienteFirestoreRest | null;
+} {
   const acceso = resolverAccesoFirebase(entorno);
   const configuracion = configurar(acceso, entorno);
   const politicaResultado = politicaGobiernoIADesdeEntorno(entorno);
@@ -74,8 +83,9 @@ export function crearDependenciasNucleoIA(
 
   let registro: DependenciasNucleoIA['registro'] = null;
   let gobierno: GobiernoIA | null = null;
+  let firestore: ClienteFirestoreRest | null = null;
   if (acceso.cuenta && configuracion.modoRegistro === 'FIRESTORE' && configuracion.baseDatosId) {
-    const firestore = new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId });
+    firestore = new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId });
     registro = crearRegistroFirestore(firestore);
     if (politica) gobierno = crearGobiernoFirestore(firestore, politica);
   } else if (configuracion.modoRegistro === 'MEMORIA') {
@@ -94,6 +104,7 @@ export function crearDependenciasNucleoIA(
   return {
     configuracion,
     politica,
+    firestore,
     ...(errorPolitica ? { errorPolitica } : {}),
     registro,
     gobierno,

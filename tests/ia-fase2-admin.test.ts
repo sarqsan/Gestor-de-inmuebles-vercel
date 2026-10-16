@@ -16,7 +16,14 @@ import express from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
 import { montarRutasAdminIA, type EventoAdminIA } from '../server/ia/adminIA';
 import { ConflictoConcurrenciaIA, crearGobiernoMemoria, type GobiernoIA } from '../server/ia/gobiernoIA';
-import { validarPoliticaGobiernoIA } from '../src/ia/gobiernoIAContrato';
+import {
+  construirPoliticaIACompleta,
+  CUOTAS_IA_REFERENCIA,
+  OPERACIONES_IA_IDS,
+  validarPoliticaGobiernoIA,
+  type PoliticaGobiernoIA,
+  type SobrescriturasPoliticaIA,
+} from '../src/ia/gobiernoIAContrato';
 import { CABECERA_IDEMPOTENCIA_IA } from '../src/ia/catalogoOperacionesIA';
 import type { IdentidadVerificada } from '../server/titularidades/googleBackend';
 import { readFileSync } from 'node:fs';
@@ -36,6 +43,25 @@ afterEach(async () => {
   await Promise.all(servidores.splice(0).map((s) => new Promise<void>((resolve) => s.close(() => resolve()))));
 });
 
+/** FASE 7 · política COMPLETA y explícita para las pruebas del mecanismo: los CUATRO
+ * perfiles declarados (sin comodines) y la tarifa de las 12 operaciones. Las
+ * sobrescrituras de un perfil sustituyen su ámbito; las de coste/cuota se fusionan. */
+function politicaPermisiva(parcial: SobrescriturasPoliticaIA = {}): PoliticaGobiernoIA {
+  return construirPoliticaIACompleta({
+    ...parcial,
+    // La operación que ejercen estas suites se declara a 0 créditos salvo que la
+    // prueba fije otra tarifa: siguen probando permisos, cuotas y saldo, no precios.
+    costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 0, ...(parcial.costeCreditosPorOperacion ?? {}) },
+    permisos: {
+      PROPIETARIO: OPERACIONES_IA_IDS,
+      PROFESIONAL: OPERACIONES_IA_IDS,
+      INQUILINO: OPERACIONES_IA_IDS,
+      ADMINISTRADOR: OPERACIONES_IA_IDS,
+      ...(parcial.permisos ?? {}),
+    },
+  });
+}
+
 function politicaValida(crudo: unknown) {
   const r = validarPoliticaGobiernoIA(crudo);
   if (r.estado !== 'VALIDA') throw new Error('política de prueba inválida');
@@ -43,7 +69,7 @@ function politicaValida(crudo: unknown) {
 }
 
 async function montar(opciones: { politica?: unknown; conGobierno?: boolean; adminVeraz?: boolean } = {}) {
-  const politica = politicaValida(opciones.politica ?? undefined);
+  const politica = politicaValida(opciones.politica === undefined ? undefined : politicaPermisiva(opciones.politica as SobrescriturasPoliticaIA));
   const gobierno = crearGobiernoMemoria(politica);
   gobierno.fijarPerfil('uid-admin', { usuarioId: 'usr-admin', tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO' }, { authUid: 'uid-admin', tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO' });
   gobierno.fijarPerfil('uid-prop', { usuarioId: 'usr-prop', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' }, { authUid: 'uid-prop', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' });
@@ -108,7 +134,16 @@ describe('IA Fase 2 · guardía de administración', () => {
     expect(cuerpo.gobierno.modo).toBe('MEMORIA');
     expect(cuerpo.politica.origen).toBe('POR_DEFECTO');
     expect(cuerpo.politica.pendienteAprobacionComercial).toBe(true);
-    expect(cuerpo.politica.cuotas).toEqual({ operacionesPorDia: null, operacionesPorMes: null });
+    // FASE 7 · sin política declarada: 0 operaciones permitidas, cuotas finitas de
+    // referencia y nada «ilimitado»; el resumen lo marca como pendiente.
+    expect(cuerpo.politica.politicaCompleta).toBe(false);
+    expect(cuerpo.politica.cuotas).toEqual(CUOTAS_IA_REFERENCIA);
+    expect(Object.values(cuerpo.politica.perfilesPorOperacion)).toEqual(
+      expect.arrayContaining([[]]),
+    );
+    for (const perfiles of Object.values(cuerpo.politica.perfilesPorOperacion) as unknown[][]) {
+      expect(perfiles).toHaveLength(0);
+    }
     expect(Array.isArray(cuerpo.operacionesRecientes)).toBe(true);
     expect(JSON.stringify(cuerpo)).not.toMatch(/private_key|Bearer|apiKey/i);
   });
@@ -225,7 +260,7 @@ describe('IA Fase 2 · cableado en server.ts', () => {
     const servidor = readFileSync(resolve(RAIZ, 'server.ts'), 'utf8');
     expect(servidor.match(/montarRutasAdminIA\(/g)).toHaveLength(1);
     expect(servidor).toContain("app.get('/api/health'");
-    expect(servidor.match(/app\.post\('[^']+', nucleoIA\.operacion\('/g)).toHaveLength(11); // Fase 1 intacta
+    expect(servidor.match(/app\.post\('[^']+', nucleoIA\.operacion\('/g)).toHaveLength(12); // Fase 1 y 5 completas
     // El panel no consume IA: no aparece clienteIA en el bloque de adminIA.
     const bloqueAdmin = servidor.slice(servidor.indexOf('montarRutasAdminIA(app'));
     expect(bloqueAdmin.slice(0, bloqueAdmin.indexOf('});'))).not.toMatch(/clienteIA|generateGeminiWithRetry/);

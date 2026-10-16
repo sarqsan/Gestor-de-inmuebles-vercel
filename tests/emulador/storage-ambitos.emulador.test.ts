@@ -17,6 +17,9 @@ const RAIZ = resolve(__dirname, '../..');
 const FIRESTORE = readFileSync(resolve(RAIZ, 'firestore.rules'), 'utf8');
 const STORAGE = readFileSync(resolve(RAIZ, 'storage.rules'), 'utf8');
 const PROYECTO = 'demo-gestor-reglas';
+const BASE_NOMBRADA = (JSON.parse(readFileSync(resolve(RAIZ, 'firebase.json'), 'utf8')) as {
+  firestore: { database: string }[];
+}).firestore[0].database;
 const BYTES = new Uint8Array([37, 80, 68, 70, 45, 49]);
 let env: RulesTestEnvironment;
 
@@ -116,5 +119,33 @@ describe('Storage oficial · ámbitos y rutas (Firestore (default) sintético)',
   it('la ruta sin regla no se abre por autenticar al usuario (R-5)', async () => {
     await assertFails(subir('presupuestos/pres-1/factura.pdf', TITULAR_A));
     await assertFails(subir('trabajos/trab-1/factura.pdf', TITULAR_A));
+  });
+
+  it('no confunde documentos solo en la base con nombre con el espejo en (default)', async () => {
+    // REST del emulador, proyecto demo exclusivo. Authorization: owner es el
+    // marcador administrativo del emulador, NO una credencial de producción.
+    // Crear la ficha en la base nombrada y quitarla de (default) reproduce la
+    // topología configurada sin afirmar que los datos productivos sean iguales.
+    const [host, port] = process.env.FIRESTORE_EMULATOR_HOST!.split(':');
+    if (!['localhost', '127.0.0.1'].includes(host)) throw new Error('Se exige un emulador local para la base con nombre');
+    expect(BASE_NOMBRADA).not.toBe('(default)');
+    const url = `http://${host}:${port}/v1/projects/${PROYECTO}/databases/${BASE_NOMBRADA}/documents/usuarios_auth/${TITULAR_A.uid}`;
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: {
+        estado: { stringValue: 'ACTIVO' }, propietarioId: { stringValue: 'prop-a' },
+        tipoPerfil: { stringValue: 'PROPIETARIO' },
+      } }),
+    });
+    if (!response.ok) throw new Error(`El emulador no aceptó la base con nombre: HTTP ${response.status}`);
+    const documento = await response.json() as { name: string };
+    expect(documento.name).toContain(`/databases/${BASE_NOMBRADA}/documents/usuarios_auth/${TITULAR_A.uid}`);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`usuarios_auth/${TITULAR_A.uid}`).delete();
+    });
+    // La ruta pide /(default)/: los documentos sembrados SOLO en la base con
+    // nombre no deben hacer que una petición obtenga permisos por accidente.
+    await assertFails(subir('gastos_facturas/prop-a/gasto-n/justificante.pdf', TITULAR_A));
   });
 });

@@ -1,3 +1,249 @@
+# MAPA MAESTRO CANÓNICO DEL ERP — GESTOR DE INMUEBLES
+
+## CORTE VIGENTE — AUDITORÍA INTEGRAL 16-10-2026
+
+> **Esta sección y sus dos anexos son la lectura vigente del mapa existente.**
+> Todo lo que sigue tras «ARCHIVO HISTÓRICO» reproduce íntegro el mapa anterior
+> como evidencia de época (septiembre de 2026): sus expresiones «actual»,
+> «cerrado», «publicado», «rama de sesión» y cifras de tests **no son afirmaciones
+> del estado a este corte**. Ante contradicción manda el código/reglas de HEAD,
+> después la ejecución identificada por SHA y por último este dictamen; nunca
+> un título de cierre o un test de otra rama. Este documento **no autoriza**
+> cambios, consumo de IA, despliegues ni escrituras en producción.
+
+**Identidad del corte.** Repositorio `sarqsan/Gestor-de-inmuebles-vercel`;
+rama de trabajo `arena/dea47ba8-gestor-de-inmuebles-vercel`, base/HEAD
+`fd3cae9daf987c9f04f148e55bb4136aa8cc090f` (merge PR #35 del 15-10-2026).
+`main` local coincide con este HEAD. Estado Git antes de documentar: limpio;
+873 archivos rastreados. No se modificaron archivos ejecutables, reglas,
+configuración, lockfiles ni datos. Se inspeccionaron código, reglas, pruebas,
+CI GitHub y 48 puntas anunciadas por `origin` sin cambiar de rama. Los 262
+commits alcanzables permiten leer antecedentes; un commit ancestral no certifica
+que su comportamiento sobreviva intacto. Las ejecuciones en GitHub son
+**históricas/externas a este sandbox** incluso cuando tienen el mismo árbol.
+
+**Anexos inseparables de este mapa, no mapas alternativos:**
+
+- [Inventario de 75 unidades de capacidad, evidencia, datos, pruebas y fase](anexos/MAPA-MAESTRO-ERP-INVENTARIO-2026-10-16.md). Las unidades con subcapacidades de distinto estado lo dicen expresamente; no se promedian estados.
+- [Matriz reproducible de las 48 ramas remotas y recuperación sin integración](anexos/MAPA-MAESTRO-ERP-RAMAS-2026-10-16.md). Incluye ausencia verificable de `arena/2edd80de-gestor-de-inmuebles-vercel`.
+
+### 0. Regla de clasificación y dictamen ejecutivo
+
+| Estado | Umbral para usarlo; interpretación a este corte |
+|---|---|
+| **IV — integrado y validado** | Solo una unidad y un alcance precisos con evidencia ejecutada en **el mismo árbol** y con tipo de entorno explícito. Se aplica a los casos cubiertos por las 61 pruebas en el emulador **oficial de Firestore** en CI; **no** significa aplicación end-to-end o producción validada. |
+| **IP — integrado, validación parcial** | Ruta/UI/servicio y tests de motor/UI/harness/mocks disponibles; no hay traza completa UI→autorización→datos→servicio externo→resultado durable en entorno de aceptación. Es el estado dominante del ERP, no «operativo en producción». |
+| **PA — parcial o bloqueado** | Falta una dependencia indispensable de producto, transporte, binario, regla, fuente o prueba, aunque exista modelo/UI. |
+| **FC — fallo confirmado** | Contradicción ejecutable determinista entre productor/reglas/consumidor, o fallo real en CI. Para los portales se demuestra por código de HEAD y reglas del repo; **no** se ha reproducido en Firebase desplegado y el efecto en producción depende de sus reglas vigentes. Un FC de prueba no implica brecha de seguridad. |
+| **NV — no verificable** | Estado de despliegue, datos, permisos, proveedor, credenciales, branch inexistente o comportamiento externo inaccesibles sin operación no autorizada. |
+| **SD — solo documentado/preparado** | Contrato, requisito o stub, sin ejecución de la operación completa; «generar fichero» no es «entregar al banco/AEAT». |
+| **RA — en otra rama/Arena** | Existe tip alternativo comparado por ruta/historia, pero no archivo/función equivalente demostrada en HEAD. No fusionado aquí. |
+| **SH — superado histórico** | Cifra, fase o despliegue atribuido a un árbol anterior; se conserva como procedencia, no como verificación actual. |
+
+**Resultado:** hay 75 unidades inventariadas (algunas con subcapacidades de
+distinto estado). Existe una app de gestión amplia con Firestore/Storage,
+motores puros, UI por rol, API Express, pruebas y un emulador oficial para un
+subconjunto. **No hay certificación E2E general ni verificación de Firebase,
+Storage, Gemini, correo, bancos, portales, AEAT o Vercel reales en esta
+revisión.** Los principales bloqueos de negocio son **solicitud, cuestionario,
+visita y documentación públicos** bajo las reglas del repo, el endpoint de
+notificaciones montado sin verificador, la durabilidad documental y CI global
+rojo. Las medidas de acceso restrictivo en Rules se preservan: el diagnóstico
+**no** recomienda abrir acceso anónimo indiscriminado.
+
+### 1. Arquitectura y fuente de verdad
+
+```
+React 19 / TypeScript / Vite — App.tsx, navegación, secciones, portales
+  ├─ authService → Firebase Auth + usuarios / usuarios_auth (perfil veraz)
+  ├─ firebase.ts y adaptadores de dominio → Firestore [base con nombre]
+  │   ├─ inmueble / propietario / titularidades / carteras / alquiler
+  │   ├─ finanzas / cobros / tesorería / fiscalidad / documentos / operaciones
+  │   └─ importación, sindicación, morosidad, actas y gobierno IA
+  ├─ Firebase Storage (rutas de storage.rules) y cachés locales de lectura
+  └─ /api/* relativo → vercel.json → api/index.ts → Express server.ts
+       ├─ 11 operaciones IA → server/ia (ID token, idempotencia, registro,
+       │                     política de uso; Gemini solo si autorizado/configurado)
+       ├─ Catastro (OVC público) / búsqueda de titulares (REST Google con cuenta de servicio)
+       ├─ documentos efímeros por URL de capacidad (RAM; NO Storage)
+       └─ notificaciones (resolver sin verificador, repositorio RAM)
+```
+
+`firebase-applet-config.json`, `.firebaserc` y `firebase.json` concuerdan en
+proyecto y base Firestore **con nombre** (`ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51`). `vercel.json` configura función y
+rewrites, **no** demuestra que Vercel publicado apunte al mismo estado de
+reglas/datos ni que los endpoints funcionen. En `App.tsx` entrar como
+`ADMINISTRADOR` llama `seedInitialDataIfEmpty()` (puede escribir semilla);
+por eso no se levantó la app ni se inició sesión contra el proyecto. La
+configuración de IA requiere cuenta de servicio compatible en producción
+(`FIREBASE_SERVICE_ACCOUNT` o variantes), token verificado y política válida;
+con gobierno y tarifas aún no aprobadas devuelve 503 preventivo; sin registro
+persistente no consume Gemini y algunos endpoints sirven heurísticas. La
+presencia de `GEMINI_API_KEY` no es una aprobación comercial ni evidencia de uso.
+
+**Datos y control de acceso:** `firestore.rules` separa `get/list` y
+`create/update/delete`, usa perfil veraz, propietario, inmueble, cartera L/E y
+delegación parcial; hay 76 bloques `match` de primer nivel **incluida la
+denegación final**, más tres anidados (contar bloques no valida consultas).
+`firestore.indexes.json` declara ocho índices compuestos: seis de `actas*` y
+dos de `gestiones_cartera`. No se verificó su publicación o suficiencia en
+consultas vivas. `storage.rules` declara 20 patrones de primer nivel con
+ámbitos específicos; el emulador oficial CI consultado es **solo Firestore**,
+no Storage. El cliente guarda algunos datos `rentselect_*` en `localStorage` y
+presenta datos iniciales; un valor en caché o `INITIAL_*` no acredita que el
+servidor lo haya aceptado. `tests/harness/firestoreRulesEval.ts` y
+`tests/harness/storageRulesEval.ts` son evaluadores propios, no el servicio
+Firebase. El inventario anexo identifica colecciones reales por capacidad.
+
+**Riesgo de coherencia entre bases:** `storage.rules` contiene 42 referencias
+`firestore.get/exists(/databases/(default)/documents/...)` mientras el
+cliente, el backend IA/titulares y `firebase.json` señalan la base con nombre.
+Es una **discrepancia estática confirmada**, no prueba de qué documentos
+existan o se hayan replicado en `(default)` ni de la semántica publicada:
+**NV** el efecto operativo. Comprobar con emulador oficial de Storage y
+configuración/datos autorizados; no editar reglas ni inferir que Storage
+protege las URLs `/api/documents/:fileId`. Persisten los residuales conocidos
+R-3 (MIME `application/octet-stream`), R-4 (downloadURL como capacidad) y R-5
+(rutas `presupuestos/`, `trabajos/`, `profesionales/{id}/documentos/` sin
+bloque), según `storage.rules`/cierre B12; no se han probado aquí.
+
+### 2. Incidencias y fronteras críticas ordenadas por impacto
+
+| ID / prioridad | Evidencia fuente→regla→efecto, estado | Límite de constatación y condición objetiva |
+|---|---|---|
+| **A16-01 P0 — solicitud pública: FC** | `PortalSolicitudPublicaView.tsx:268` crea `solicitudes` con `candidatoNombre/candidatoEmail/candidatoTelefono`, sin `nombre/email/telefono`; `firestore.rules` §4 exige estos tres campos en `allow create`. `App.tsx:2465` llama `saveSolicitudFirestore` sin esperar resultado y la vista anuncia éxito; el helper captura el error. Reproducción estática local cotejó los cinco campos: presentes `inmuebleId, estado`; ausentes `nombre, email, telefono`. Crear un candidato aparte **no** significa haber guardado la solicitud. | Denegación deducible **si** se aplican las reglas del repo; reglas realmente desplegadas NV. Exigir prueba emulador de escritura anónima y E2E de acuse sin falso éxito. No hacer prueba contra producción. |
+| **A16-02 P0 — portales por token: FC** | `App.tsx:1110–1240` monta listeners globales de `invitaciones`, `slots_visita`, `solicitudes_documentacion` incluso anónimo; `App.tsx:3857` busca candidato desde estado cuyo listener es solo autenticado. `firestore.rules` §§3,5–7 niega `get/list/update` anónimos para esos recursos. `PortalVisitaPublicaView.tsx:128` ejecuta `bookSlotTransaction` cliente, `handlePublicDocSubmit` usa `saveSolicitudDocFirestore` cliente y `handlePublicQuestionnaireSubmit` actualiza estado/Firestore sin ruta token del servidor. Comentarios de Rules anuncian `/api/visita/:token`, `/api/cuestionario/:token` y `server/ia/portalDocumentacion.ts`: ninguno está montado/presente. | Con Rules del repo los enlaces públicos no tienen vía autorizada para recuperar y persistir los datos esperados; sin E2E Firebase y sin estado publicado no cuantificar usuarios afectados. Distinguir los enlaces nominales de registro que usan otra vía (`enlaces_registro`). En documentación pública puede mostrarse falso éxito si no hay solicitud o falla escritura. |
+| **A16-03 P0/P1 — notificaciones: FC** | `server.ts:86–90` llama siempre `resolverAutorizacion(authHeader, undefined, undefined)`; `src/notificaciones/autorizacion.ts` retorna `{perfil:null}`; `dispatcher.ts:144` rechaza `no_autorizado`. Reproducción local del resolver con token sintético y esas dependencias → `{perfil:null}`. El endpoint `/api/notificaciones/enviar` no puede entregar un payload válido tal como está conectado. Test `tests/notificaciones.test.ts` inyecta un admin simulado, NO prueba el montaje. | Sin hacer llamadas HTTP ni enviar mensajes reales. `notificacionesStore` es Map en RAM; `EmailProviderSafeMode` activo puede devolver `ok` con ID `safe-*` **sin enviar** correo, WhatsApp `null`. Dar prioridad P0 si avisos operativos dependen de esta ruta; no anunciar notificaciones enviadas. |
+| **A16-04 P1 — ficheros efímeros y límites: PA** | `server.ts:126,182` sirve binarios por URL inenumerable con controles de MIME/cabeceras/TTL; `src/lib/documentosServidor.ts` limita a 15 MB/250 entradas/96 MB/12 h y los pierde al reinicio. `uploadDocumentoAportadoFile` prefiere este servidor y degrada a Storage o `data:` local; la vista acepta hasta **25 MB**, Storage `documentos_solicitados` solo `<15 MB`. La creación Storage anónima limita tipo/tamaño/nombre, no valida el token del candidato. | Buenas defensas de capacidad/TTL no son durabilidad ni RBAC en la URL. Sin prueba de reinicio, versión serverless, fuga ni Storage real; evaluar finalidad/retención y fracaso de carga antes de aceptar documentos sensibles. |
+| **A16-05 P1 — Storage/base de datos: NV** | Comparación de configuración y 42 rutas `(default)` en Storage frente a Firestore con nombre; sin E oficial Storage ni inspección de mirrors/datos en proyecto. | Probar en emulador y entorno de aceptación con perfiles/inmuebles; no concluir lectura permitida/denegada en producción sin esa evidencia. |
+| **A16-06 P1 — CI: FC (prueba), no fallo de seguridad demostrado** | Run `38801638602` para `8c4ca750227514b66d49233c335178f374797432` tiene el **mismo tree SHA** que HEAD; TypeScript OK, emulador oficial Firestore 61/61; suite Vitest 219/220 archivos, 4075 correctas / 1 fallida / 7 omitidas (4083 total). `tests/roadmap01-seguridad.test.ts:164`: «mutación no detectada: bypass staff». El fixture usa `PROPIETARIO`, pero la mutación reemplaza la guarda por `isStaff()`: la expectativa de cambio de decisión es inadecuada para ese actor; no demuestra bypass real. Build del job omitido tras fallo. | Repetir con entorno preparado, reparar **solo previa autorización de código**, y exigir suite/build verdes sobre el nuevo SHA. No usar CI verde de `c36c552` (árbol anterior) para certificar HEAD. |
+| **A16-07 P1/P2 — integración externa: SD/NV** | SEPA genera XML, no ejecuta orden bancaria; `VerifactuTransportPendiente` devuelve `INDISPONIBLE`, B2B privado/SPFE no intercambia; sindicación en modo `PORTAL_NO_CONECTADO`; OTP actas sin entrega externa. Gmail REST y Catastro tienen adaptadores pero sin prueba live, IA F2 sin aprobación comercial no consume proveedor. | No inferir prestación jurídica/fiscal/financiera de PDF, fichero, mock o etiqueta UI. Bloquear afirmaciones de entrega sin acuse oficial/homologación/consentimiento. |
+| **A16-08 P2 — texto ejecutable desfasado: SH** | Comentario inicial de `src/lib/importExport/ejecucion.ts` dice «solo GASTO y COBRO» y «INMUEBLE vinculado», pero `ESCRIBIBLES`, planificación y ejecución ya permiten **alta INMUEBLE** con titular resuelto. | Fuente efectiva es el código y E del subcaso, no el comentario; corregir el texto solo en futura orden autorizada de código. No se modificó aquí. |
+
+### 3. Evidencia de pruebas, verificaciones locales y límites
+
+| Tipo y referencia | Resultado conocido | Qué **no** prueba |
+|---|---|---|
+| **Inspección local**: `git status`, `git log`, `git diff`, búsqueda/lectura de código/reglas/tests/docs y `gh` de PR/CI | Árbol previo limpio, commits/branches/evidencia identificados; sin llamadas Firebase ni app | No reproduce producción ni reemplaza test ejecutado. |
+| **Validación local segura, sin dependencias**: `node --check` de los 28 `*.mjs` rastreados | 28/28 sintaxis OK | No ejecuta tests, importaciones, transacciones ni emulador. |
+| **Reproducción local pura**: `node --experimental-strip-types` importa `src/notificaciones/autorizacion.ts` y llama `resolverAutorizacion('Bearer token-sintetico', undefined, undefined)` | `{perfil:null}`; coincide exactamente con dependencias del montaje en `server.ts` | No es petición HTTP, autenticación Firebase ni prueba de envío. |
+| **Comprobaciones estáticas locales**: lectura de `newSolicitud` + `allow create`; comparación JSON de proyecto/base e índice; búsqueda de rutas montadas | Faltan 3/5 campos exigidos a solicitud, 0 rutas API token para visita/cuestionario/documentación, 8 índices, 42 usos `(default)` en Storage | No prueba reglas ni datos desplegados, semántica de Storage ni servicio remoto. |
+| **CI oficial Firestore**, `.github/workflows/emulador-reglas.yml`, run `38801638602`, commit `8c4ca750…` (tree = HEAD) | Job `Reglas Firestore (emulador oficial)` **success**, 61/61; Auth+Firestore demo, suites `tests/emulador/` | No Storage oficial; no todas las colecciones; no UI/browser; no Firebase real. |
+| **CI TypeScript/Vitest/build**, mismo run/árbol | `npx tsc --noEmit -p .` OK; Vitest 4075 pass, 1 fail, 7 skip; **build skipped**, job failure | No build verde del HEAD ni integración aceptada; test fallido no es automáticamente una brecha. |
+| **CI antiguo** run `38724739920` en `c36c5528…` | Ambos jobs consultados correctos | Árbol anterior (57 archivos de diff frente a HEAD): no se transfiere el verde. |
+| **Pruebas presentes no ejecutadas aquí** | 244 rutas rastreadas con `*.test.ts(x|mjs)` en inventario inicial; `.mjs` adicionales y runners `test:integracion`, `test:emulador:operaciones` requieren dependencias/servicios | Los scripts B/C/E y el harness no son Firebase oficial; las pruebas con mocks inyectados no certifican servicios. |
+| **Bloqueo local**: `node_modules` ausente; Java, `tsx`, `tsc`, `vitest` no instalados globalmente | No se ejecutó `npm ci`, `npm run build`, Vitest ni emuladores aquí. `test:emulador:reglas` usa `npx --yes firebase-tools@15.33.0`, que instalaría herramienta, por lo que no se invocó. | No se ocultan tests fallidos; no se altera lockfile ni estado del entorno para obtener un verde artificial. |
+
+`gh run view 38801638602 --log-failed` devolvió EOF: los comentarios de PR
+#35 dan el resumen cuantificado de los jobs (61/61; 4075/4083 con 1 fallo y 7
+skips). El árbol de HEAD y `8c4ca750…` se contrastó con `git rev-parse
+HEAD^{tree} 8c4ca750…^{tree}`; idéntico. Hay pruebas textuales de Rules que
+no son emulador, y tests de `.mjs` fuera de esos jobs. No se atribuye a esta
+revisión ninguna validación E2E/banco/AEAT/Gmail/Gemini/Storage productiva.
+
+### 4. Estado de ramas y material histórico
+
+**48 puntas remotas:** 35 ancestrales o idénticas a HEAD y 13 con commits no
+ancestrales; su tabla, SHAs y divergencias individuales están en el
+[anexo de ramas](anexos/MAPA-MAESTRO-ERP-RAMAS-2026-10-16.md). `git cherry`
+marca con `-` el parche de `22cdce99fc` y `deaa970d73` aunque sus ramas no
+sean ancestrales. Riesgo de trabajo no incorporado *literalmente* en HEAD:
+`1e73995d5` (bienvenida guiada y eliminación de titular secundario),
+`8e63461ef` (presentación alternativa de N titulares), `3a6ee6b05`
+(contenedor de documentación pública y circuito alternativo de candidatos),
+`b33867fa8` (test H8) y `b9043e49d` (workflow de despliegue de reglas;
+PR #22 aún abierto). Que HEAD tenga otras implementaciones homónimas no prueba
+paridad ni recomienda mezclar las ramas. No se recuperó/fusionó nada.
+
+**Rama solicitada** `arena/2edd80de-gestor-de-inmuebles-vercel`: ausente en
+refs locales y `origin/refs/heads` consultados, API GitHub 404. **NV** su SHA,
+contenido y funciones; hace falta una referencia accesible (SHA/PR/ref) para
+revisarla. No se inventó rama ni se atribuyó trabajo a ella.
+
+**Historia documental reconciliada (el estado arriba prevalece):**
+
+| Procedencia | Valor histórico preservado | Lectura a 16-10-2026 |
+|---|---|---|
+| `docs/auditoria/DIAGNOSTICO_FUNCIONAL_2026-09-16.md` | Diagnóstico de ausencia de Storage/API en el árbol de entonces. | En HEAD existen `storage.rules`, `api/index.ts` y `vercel.json`; riesgos de aquella foto no pueden repetirse literalmente como si fuesen actuales. |
+| §1–§15 y cabecera antiguos de **este mapa**, PR #6/#7 y cierres de septiembre | `main=3778a5a`, «Bloque B/D/F/GAP5 cerrado», 2253/2385 tests locales, emulador entonces bloqueado. | Son **SH**: `main=fd3cae9`, E Firestore 61/61 en CI más reciente y global 1 fallo; «cerrado» prueba integración de la época, no servicio real actual. No se borra ni reescribe la procedencia. |
+| `docs/BLOQUE-11-AUDITORIA-INTEGRAL-CIERRE.md` y `docs/BLOQUE-12-REPARACION-INTEGRAL-CIERRE.md` | Suites en verde y A-01/A-02 de suscripciones acotadas corregidos; A-03 R-5 Storage, A-11 residuales y custodia A-04 registrados. | Cierres sobre árboles anteriores. El código de suscripciones autenticadas incluye ámbito, pero la nueva incoherencia de embudos públicos y CI posterior **no** quedó validada allí. No decir «sin hallazgos» hoy. |
+| `docs/BLOQUE-8-INVENTARIO-FUENTES.md` y `docs/FASE2-ANEXO-EVIDENCIA-EXTERNA.json` | Dry-run **histórico** sobre 52 filas reconstruidas, 0 AUTO / 36 INCOMPLETO / 15 BLOQUEADO / 1 NO_MIGRABLE; sin escrituras. | Transcripción ≠ JSON originales; faltan fuentes Rentasync completas, PDF, dump y autorizaciones. No se re-ejecutó B4 ni se importó/migró nada aquí. |
+| `docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md` y `docs/IA-FASE-2-GOBIERNO-USO.md` | Contrato de 11 operaciones, gobierno y aprobación comercial pendiente. | `server.ts` integra F1/F2; defaults solos no activan Gemini, no credencial/live. La Fase 2 de código posterior introduce bloqueo 503 cuando el gobierno requiere tarifa aprobada. |
+| `docs/operaciones/alcance.md` y pruebas `.mjs` de operaciones/patrimonial | Arquitectura y suites ejecutadas en rama/árbol previos con limitación nativa declarada. | HEAD contiene ambos módulos; las suites `.mjs` y un E completo de operaciones no forman parte del CI consultado. No extrapolar certificación nativa/producción. |
+
+**Capacidades de §16 histórico, hoy:** `IA_CARTERA_TRANSVERSAL` **PA**
+(asistente conectado solo a tres consultas tipadas, no a un analista general
+de cartera); `INCIDENCIA_IA_END_TO_END` **PA** (endpoint de análisis y módulos
+operativos relacionados, no cadena completa tenant→diagnóstico→póliza→OT→
+factura automatizada); `ESCANER_FACTURAS_IA` **NV en la otra app / SD en HEAD**
+(el análisis `/api/analizar-documento` se dirige a documentos de candidatos,
+no a factura→gasto validado por usuario); `FICHA_ECONOMICA_INMUEBLE` **PA**
+(existen expediente, tributos, fiscalidad e informes, falta probar y completar
+visión anual unificada). Estos objetivos siguen siendo requisitos históricos
+útiles, no funciones desplegadas por el hecho de estar en el texto.
+
+### 5. Dependencias, fases y condiciones de salida medibles (trabajo futuro, NO realizado)
+
+| Orden | Producto/servicios de los que depende | Puerta de salida verificable antes de declarar cierre |
+|---|---|---|
+| **F0 — integridad de embudos y notificaciones (P0)** | Decisión de producto sobre token seguro y persistencia durable; frontend, API, Rules y protección de PII coordinados. | En rama de implementación **autorizada**, registrar caso nuevo y existente de solicitud sin éxito falso; visita/consulta/cuest./documentación por token con caducidad/ámbito, dobles reservas y escrituras denegadas fuera de scope; pruebas E oficiales Firestore + Storage para anónimo y por rol, respuestas API verificadas con credencial de prueba; notificación con verificador real inyectado, proveedor/safe-mode diferenciados y acuse comprobado. No abrir colecciones privadas como atajo. |
+| **F1 — seguridad/datos/infra (P1)** | Fixture aislado para base con nombre/(default), Auth, Storage; propietario, gestor L/E/partial, profesional e inquilino; credenciales **no productivas** y permisos de prueba. | E oficial Storage/Firestore sobre rutas y consultas principales (incluidas `solicitudes`, `candidatos`, Storage documentos, R-5, índice/operaciones); resolver diferencia `(default)` con evidencia, negar fuga transversal; CI global, TypeScript y build verdes en **mismo SHA**, sin skips ocultos; auditoría de errores y reversión documental. Verificar reglas realmente publicadas **solo con autorización separada**. |
+| **F2 — recorridos ERP y economía (P1)** | F0/F1 y datos sintéticos completos (inmueble, cotitular, alquiler, gasto, cobro, seguro, incidente, orden de trabajo). | Trazas UI→Firestore→Storage→informe/ZIP y reconciliación de importes/estados bajo 4 perfiles; operaciones `.mjs` y emulador de operaciones con árbol actual; documento binario descargable tras reinicio o fallo explícito; fiscalidad/centro de inmueble coincidentes en un mismo ejercicio. Nada de dinero real. |
+| **F3 — integraciones externas e IA (P1/P2)** | Contratos, homologación, autorizaciones, sandbox de proveedor, precios/cupos aprobados y consentimiento de datos. | Demostrar envío+acuse correlacionado, fallo/reintento y revocación para cada proveedor (Gmail/SMTP, banco SEPA, AEAT/VeriFactu, B2B, portales, OTP, Catastro); donde no haya proveedor, mantener estado «preparado». IA: política comercial aprobada **antes** de permitir uso y pruebas de perfil, saldo, cuota e idempotencia en sandbox; ninguna llamada por esta auditoría. |
+| **F4 — migración histórica y recuperación de datos** | Fuentes originales íntegras verificadas por SHA, catálogo de propietarios/inmuebles/contratos, binarios, consentimiento y backup/restore probados; decisiones B4/O7 explícitas. | Dry-run completo sin huérfanos/autos dudosos, autorizaciones por registro, plan de rollback y revisión humana; importación únicamente en entorno autorizado por orden separada; conciliación de conteos, documentos y saldos antes/después. Las 52 filas reconstruidas no cumplen la puerta. |
+| **F5 — producto, UX y relevo de ramas** | F0–F4 según capacidad; comparación semántica de ramas DIV/RA sin fusionar automáticamente. | Confirmar o descartar explícitamente UX-1/N titulares/circuito candidato alternativo con pruebas de compatibilidad; recorridos reales con navegador y accesibilidad, métricas de errores/operación, backup y recuperación ensayados; matriz final de evidencias por perfil/servicio/versión. No marcar cerrada una fase solo por un test unitario. |
+
+**Reglas de dependencia:** F0 precede pruebas E2E de captación; F1 precede
+lecturas/escrituras sensibles y F2; F2 aporta entidades para F3 y F4; F3
+requiere condiciones contractuales/operativas externas; F4 no puede partir de
+una transcripción incompleta. Donde no hay credenciales, emulador, permiso o
+fuente original, la respuesta es **NV/PA**, no simulación etiquetada como
+servicio real. Este orden es un mapa de cierre con criterios objetivos, no una
+orden de implementar ni un sustituto de la auditoría hecha hoy.
+
+**Custodia de esta auditoría:** solo cambia `docs/MAPA-MAESTRO-ERP-ACTUAL.md`
+y los dos anexos documentales enlazados. Ningún commit, push, PR nuevo,
+merge, despliegue, instalación, ejecución de servidor, consumo Gemini o
+escritura en Firebase/producción. El archivo histórico siguiente se conserva
+literalmente (sus datos de época no se eliminan); `git diff --check` y estado
+final verificarán la preservación.
+
+### 6. Adenda posterior — ejecución local de la Fase 0 (16-10-2026)
+
+El corte anterior es una **foto de `fd3cae9d`**. Después de aquella auditoría,
+la Fase 0 instaló dependencias locales con `npm ci` (sin cambios de lockfile),
+reprodujo el único fallo del CI anterior y corrigió **solo el fixture** de
+`tests/roadmap01-seguridad.test.ts`: `isStaff()` es falso para el propietario
+empleado antes; el nuevo profesional con ficha veraz y sin cartera hace que la
+mutación de ampliación de lectura falle el control esperado, sin modificar
+Rules ni código productivo. En esta fase se comprometieron la auditoría y sus
+anexos sin reescribir el texto histórico. Esta adenda **no** atribuye la
+validación local posterior a la auditoría original.
+
+| Comprobación posterior | Resultado local | Frontera |
+|---|---|---|
+| `npx vitest run tests/roadmap01-seguridad.test.ts` | Antes 6/7; tras la corrección **7/7**. | Harness de Rules, no emulador oficial. |
+| `npx tsc --noEmit -p .` y `npm run build` | Ambos **PASS**; build con advertencias de tamaño/importaciones mixtas. | No certifican Firebase ni Vercel productivos. |
+| `npx vitest run --exclude tests/guardia-a04-rama-sesion.test.ts` | **220/220 archivos, 4076 correctas, 0 fallidas, 7 todo** (4083 total). | Esta es la suite del workflow, no las suites nativas `.mjs` ni los emuladores. |
+| `npm run test:operaciones` | **290/302**, 12 fallidas (aserciones de fuente, custodia y diff fijadas a bases antiguas). | No ocultar los fallos ni inferir una brecha con una comparación textual; revisar semántica y actualizar custodia solo en la fase de operaciones. |
+| `npm run test:patrimonial` | **85/88**, 3 fallidas (package/superficie/Rules frente a una base histórica). | El script compuesto `test:integracion` se detiene al fallar operaciones. No declarar las `.mjs` verdes ni modificar sus guardias por conveniencia. |
+
+No hay Java local ni prueba **oficial** de emuladores en esta adenda: los
+resultados oficiales de la PR de Fase 0 deben cotejarse contra su **SHA de
+head** antes del merge. Los 7 `todo` y las 15 fallidas de `.mjs` son deuda
+explícita; lo primero no es una prueba completada, lo segundo no forma parte
+de los dos jobs CI actuales. No se ha usado Gemini, Firebase real, banco,
+proveedor externo ni un despliegue manual.
+
+---
+
+## ARCHIVO HISTÓRICO (septiembre de 2026; conservado, **NO VIGENTE**)
+
+> **ATENCIÓN:** desde aquí se conserva el texto previo sin actualizar sus SHAs,
+> números de suite, ramas ni declaraciones de «estado actual». No aplicar sus
+> instrucciones de despliegue ni usarlo para certificar el árbol de octubre.
+> Volver al corte vigente y anexos para la clasificación contrastada.
+
 > **Revalidación 2026-09-28: BLOQUEO EXTERNO DEMOSTRADO de Emulator.** CLI instalada y dependencias locales reparadas; JDK y JAR oficiales no descargables por fallos de red/TLS tras probar fuentes oficiales alternativas. Validación local 2.385/2.385 PASS; no certificación oficial. Evidencia e intentos en `docs/ROADMAP-02-ONBOARDING-CARTERAS-INVITACIONES.md`. Procedimiento permanente: `docs/operaciones/PRINCIPIO-RESOLUTIVO-ARENA.md`. No merge autorizado.
 
 # MAPA MAESTRO CANÓNICO DEL ERP — GESTOR DE INMUEBLES

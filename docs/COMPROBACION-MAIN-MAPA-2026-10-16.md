@@ -40,7 +40,7 @@ reglas, configuración ni datos.
 | `main` local | `4309f48dc017b32fd5c28e0d3282d772fd2dd237` |
 | `origin/main` | `4309f48dc017b32fd5c28e0d3282d772fd2dd237` (idéntico) |
 | Commit de `main` | *Merge pull request #38* (`arena/658e62cd` → `main`), 2026-10-16 15:32 +0200 |
-| Rama de esta sesión | `arena/7eef00ef-gestor-de-inmuebles-vercel` (base `4309f48`, sin commits propios antes de este documento) |
+| Rama de esta sesión | `arena/7eef00ef-gestor-de-inmuebles-vercel` (base `4309f48`; publicada en `origin`) |
 | Historia | 279 commits alcanzables (clon completo tras `git fetch --unshallow`) |
 | Ficheros rastreados | 903 |
 | PR integradas | #27 … #38 `MERGED`; PR #38 fusionada hoy 13:32 UTC |
@@ -73,20 +73,22 @@ Desde entonces `main` ha avanzado **tres integraciones** (60 ficheros, +8.990/�
 |---|---|---|
 | `npm ci` | OK, sin cambios en `package-lock.json` | Nada funcional |
 | `npx tsc --noEmit -p .` | **0 errores** (22 s) | No ejecuta la app |
-| `npx vitest run` | **228 ficheros · 4.183 correctas · 2 fallidas · 7 todo** (4.192) | No es emulador oficial ni navegador |
+| `npx vitest run` (antes de publicar la rama) | **228 ficheros · 4.183 correctas · 2 fallidas · 7 todo** (4.192) | No es emulador oficial ni navegador |
+| `npx vitest run` (tras publicar la rama de sesión) | **228/228 ficheros · 4.185 correctas · 0 fallidas · 7 todo** (4.192) | Igual cifra que declaró la PR #38 |
 | `npm run build` | **OK** (`vite` 17,61 s · `dist/server.cjs` 355,5 kB) | Aviso conocido de chunk > 500 kB (5,32 MB, gzip 1,31 MB) |
 | `npm run test:operaciones` (nativo `.mjs`) | **302: 290 OK / 12 fallan** | Fuera del CI consultado |
 | `npm run test:patrimonial` (nativo `.mjs`) | **88: 85 OK / 3 fallan** | Fuera del CI consultado |
-| `npx tsx scripts/guardia-a04-repositorio.mts` | `A-04: BLOCKED` (ver nota) | Guardia de **custodia de este sandbox**, no de producto |
+| `npx tsx scripts/guardia-a04-repositorio.mts` | `A-04: BLOCKED` → **`A-04: OK`** tras publicar la rama de sesión | Guardia de **custodia de este sandbox**, no de producto |
 
-**Detalle de los dos fallos de Vitest.** Pertenecen a un único fichero,
+**Detalle de los dos fallos transitorios de Vitest.** Pertenecían a un único fichero,
 `tests/guardia-a04-rama-sesion.test.ts`, que comprueba la guardia A-04 del
-checkout. En este sandbox la guardia marca dos señales juntas: `HEAD == main` sin
-estar en `main` y ausencia de `refs/remotes/origin/<rama-de-sesión>` (la rama aún
-no se había publicado al ejecutarla). Es un **artefacto de custodia del sandbox**,
-no un defecto de producto: el propio workflow de CI **excluye ese fichero por
-diseño** («esa prueba se ejecuta sólo en local»). Una vez publicada la rama de
-sesión (`git push origin arena/7eef00ef-…`) la señal desaparece.
+checkout. Al ejecutarla por primera vez, la guardia marcaba dos señales juntas:
+`HEAD == main` sin estar en `main` y ausencia de
+`refs/remotes/origin/<rama-de-sesión>` (la rama aún no se había publicado). Era un
+**artefacto de custodia del sandbox**, no un defecto de producto: el propio workflow
+de CI **excluye ese fichero por diseño** («esa prueba se ejecuta sólo en local»).
+Publicada la rama de sesión (`git push origin arena/7eef00ef-…`), la guardia pasa a
+`A-04: OK` y la suite completa queda **verde sin exclusiones** (4.185 correctas).
 
 **Detalle de los fallos nativos.** `test:operaciones` (12) y `test:patrimonial` (3)
 son **aserciones de fuente/custodia ancladas a bases antiguas** (diffs byte a byte
@@ -324,7 +326,7 @@ git diff fd3cae9d HEAD -- firebase.json                               # +3 (emul
 npm ci && npx tsc --noEmit -p . && npm run build                      # OK / 0 errores / OK
 npx vitest run                                                        # 228 · 4183 pass · 2 fail · 7 todo
 npm run test:operaciones; npm run test:patrimonial                    # 290/302 · 85/88
-npx tsx scripts/guardia-a04-repositorio.mts                           # A-04: BLOCKED (custodia del sandbox)
+npx tsx scripts/guardia-a04-repositorio.mts                           # A-04: OK (tras publicar la rama)
 grep -o 'databases/(default)' storage.rules | wc -l                   # 42
 grep -c '"collectionGroup"' firestore.indexes.json                    # 8
 gh run list --branch main --limit 6                                   # vacío (sin CI en push a main)

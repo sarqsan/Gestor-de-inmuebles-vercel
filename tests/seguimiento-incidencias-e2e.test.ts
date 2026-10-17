@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { codificarValor } from '../server/titularidades/googleBackend';
 
 const RAIZ = resolve(__dirname, '..');
@@ -76,9 +76,12 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
   ] as const;
   const previas: Record<string, string | undefined> = {};
 
-  const tokenInquilina = firmarToken('uid-ines', 'ines.privada@example.com');
-  const tokenPropietario = firmarToken('uid-pedro', 'pedro.privado@example.com');
-  const tokenAjena = firmarToken('uid-marta', 'marta.privada@example.com');
+  // El reloj del escenario debe coincidir con sus fechas de negocio, no con
+  // el día en que corre CI. Sólo se sustituye Date; HTTP y sus timers son reales.
+  const AHORA_ESCENARIO = new Date('2026-10-16T12:00:00.000Z');
+  let tokenInquilina: string;
+  let tokenPropietario: string;
+  let tokenAjena: string;
 
   const clavesDocumentos = () => [...documentosFirestore.keys()].sort();
 
@@ -110,8 +113,8 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
   const clavesDe = (prefijo: string) => clavesDocumentos().filter((k) => k.startsWith(prefijo));
 
   /** Eventos registrados en el hilo de la incidencia (leído de la fuente). */
-  function eventosDelHilo(): Array<{ tipo: string; entrega?: { estado: string; notificacionId?: string } }> {
-    const doc = documentosFirestore.get('incidencias_seguimiento/inc-1');
+  function eventosDelHilo(incidenciaId = 'inc-1'): Array<{ tipo: string; entrega?: { estado: string; notificacionId?: string } }> {
+    const doc = documentosFirestore.get(`incidencias_seguimiento/${incidenciaId}`);
     const eventos = doc?.fields.eventos as { arrayValue?: { values?: Array<{ mapValue?: { fields?: Record<string, unknown> } }> } } | undefined;
     return (eventos?.arrayValue?.values ?? []).map((v) => {
       const campos = v.mapValue?.fields ?? {};
@@ -135,6 +138,12 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
   }
 
   beforeAll(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(AHORA_ESCENARIO);
+    // JWT y cachés usan el MISMO reloj que el servicio de seguimiento.
+    tokenInquilina = firmarToken('uid-ines', 'ines.privada@example.com');
+    tokenPropietario = firmarToken('uid-pedro', 'pedro.privado@example.com');
+    tokenAjena = firmarToken('uid-marta', 'marta.privada@example.com');
     const { reiniciarCacheCertificados, reiniciarCacheTokens } = await import('../server/titularidades/googleBackend');
     for (const v of VARIABLES) previas[v] = process.env[v];
     process.env.VERCEL = '1';
@@ -245,6 +254,7 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
   }, 60_000);
 
   afterAll(async () => {
+    vi.useRealTimers();
     globalThis.fetch = fetchReal;
     await new Promise<void>((r) => (servidor ? servidor.close(() => r()) : r()));
     for (const v of VARIABLES) {
@@ -377,4 +387,37 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
     });
     expect(raro.status).toBe(400);
   });
+  it('escala ALTA exactamente a las 24 horas y no duplica evento ni aviso al repetir', async () => {
+    const original = documentosFirestore.get('incidencias/inc-1')!;
+    const campos = (datos: unknown) => (codificarValor(datos) as { mapValue: { fields: Record<string, unknown> } }).mapValue.fields;
+    documentosFirestore.set('incidencias/inc-plazo', {
+      fields: {
+        ...original.fields,
+        ...campos({ id: 'inc-plazo', prioridad: 'ALTA', estado: 'ABIERTA', fechaCreacion: '2026-10-15T12:00:00.001Z' }),
+      },
+      updateTime: updateTimeNuevo(),
+    });
+    try {
+      const antes = await sincronizar(tokenInquilina, { incidenciaId: 'inc-plazo' });
+      expect(antes.status).toBe(200);
+      expect((await antes.json()).eventos.map((e: { tipo: string }) => e.tipo)).toEqual(['INCIDENCIA_CREADA']);
+      vi.setSystemTime(new Date(AHORA_ESCENARIO.getTime() + 1));
+      const alLimite = await sincronizar(tokenInquilina, { incidenciaId: 'inc-plazo' });
+      expect(alLimite.status).toBe(200);
+      expect((await alLimite.json()).eventos.map((e: { tipo: string }) => e.tipo)).toEqual(['INCIDENCIA_ESCALADA']);
+      const eventosAntes = eventosDelHilo('inc-plazo');
+      const avisosAntes = clavesDe('notificaciones/');
+      const repetida = await sincronizar(tokenInquilina, { incidenciaId: 'inc-plazo' });
+      expect(repetida.status).toBe(200);
+      expect(await repetida.json()).toMatchObject({ estado: 'SIN_CAMBIOS', eventos: [] });
+      // Un reintento puede actualizar la entrega, pero no la identidad del evento.
+      expect(clavesDe('notificaciones/')).toEqual(avisosAntes);
+      const eventosDespues = eventosDelHilo('inc-plazo');
+      expect(eventosDespues.map((e) => e.tipo)).toEqual(['INCIDENCIA_CREADA', 'INCIDENCIA_ESCALADA']);
+      expect(eventosDespues.map((e) => e.entrega?.notificacionId)).toEqual(eventosAntes.map((e) => e.entrega?.notificacionId));
+    } finally {
+      vi.setSystemTime(AHORA_ESCENARIO);
+    }
+  });
+
 });

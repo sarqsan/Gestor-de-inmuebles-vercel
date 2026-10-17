@@ -11,8 +11,8 @@
  *   explícita (regla FASE A: prohibido afirmar «enviado» sin envío real).
  * - INAPP: bandeja interna de plataforma (persistida por el repositorio).
  * - WEBHOOK: entrega a URL externa con validación de protocolo.
- * - WHATSAPP: preparado como canal futuro (sin implementar — requiere API
- *   externa y credenciales no disponibles).
+ * - WHATSAPP: descartado como canal operativo; cualquier tipado residual solo
+ *   permite interpretar registros históricos y no dispone de proveedor.
  */
 
 import type { CanalNotificacion, Notificacion, ResultadoEntrega } from '../types/notificaciones';

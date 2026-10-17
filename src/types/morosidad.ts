@@ -170,7 +170,7 @@ export interface TransicionExpediente {
 // POLÍTICA DE RECOBRO (dunning) — 100 % CONFIGURABLE
 // ==========================================================================
 
-export type CanalDeseado = 'EMAIL' | 'INAPP' | 'WEBHOOK' | 'WHATSAPP';
+export type CanalDeseado = 'EMAIL' | 'INAPP' | 'WEBHOOK';
 
 /**
  * Destinatarios posibles de una acción de recobro (mínimo privilegio por defecto).
@@ -303,6 +303,7 @@ export type EstadoComunicacion =
   /** Registro manual de una comunicación ya realizada fuera del canal del ERP. */
   | 'REGISTRADA_MANUALMENTE';
 
+/** WHATSAPP solo se conserva para descodificar registros históricos; no se admite en acciones nuevas. */
 export type MedioComunicacion =
   | 'EMAIL'
   | 'INAPP'
@@ -438,8 +439,8 @@ export type EstadoCuotaCompromiso = 'PENDIENTE' | 'PARCIAL' | 'CUBIERTA' | 'VENC
 
 /**
  * Los pagos que cubren un compromiso NUNCA se inventan aquí: cada cuota se
- * «cubre» referenciando importes ya cobrados en `CobroPeriodo`
- * (`registrarPagoPeriodo` / conciliación GAP6 = fuente oficial del cobro).
+ * «cubre» referenciando importes ya cobrados en `CobroPeriodo` mediante la vía
+ * oficial `registrarPagoPeriodo`. P3 bancario no crea ni registra cobros.
  */
 export interface CuotaCompromiso {
   /** `cuota_{compromisoId}_{n}` */

@@ -543,7 +543,7 @@ export default function App() {
   const [tesoreriaFicherosSepa, setTesoreriaFicherosSepa] = useState<FicheroSEPA[]>([]);
   const [tesoreriaMandatosSepa, setTesoreriaMandatosSepa] = useState<MandatoSEPA[]>([]);
   const [tesoreriaTrabajos, setTesoreriaTrabajos] = useState<TrabajoProfesional[]>([]);
-  // Espejo de sesión GAP 6 (movimientos + propuestas importados en Conciliación)
+  // Puente de compatibilidad legacy; P3 no publica importaciones ni sugerencias a esta sesión.
   const [tesoreriaSesionConciliacion, setTesoreriaSesionConciliacion] = useState<SesionConciliacion>({ movimientos: [], propuestas: [] });
   // BLOQUE C — Morosidad: expedientes, compromisos, política vigente y espejo del propietario
   const [morosidadExpedientes, setMorosidadExpedientes] = useState<ExpedienteMorosidad[]>([]);
@@ -822,7 +822,7 @@ export default function App() {
         autorizacion: contextoAutorizacionDesdeUsuario(currentUser),
         repositorio: repositorioNotificacionesFirestore(escritorNotificacionesGAP1),
         // Sin proveedor de email declarado ⇒ GAP 1 registra la comunicación pero
-        // NUNCA afirma entrega real (safe-mode). Lo mismo aplica a burofax/WhatsApp.
+        // NUNCA afirma entrega real (safe-mode). Lo mismo aplica a burofax u otros canales externos.
         emailProvider: null,
       },
       destinatarios: {
@@ -1412,7 +1412,7 @@ export default function App() {
     const unsubscribeTesoreriaFicheros = subscribeFicherosSepa((data) => setTesoreriaFicherosSepa(data || []), currentUser);
     const unsubscribeTesoreriaMandatos = subscribeMandatosSepa((data) => setTesoreriaMandatosSepa(data || []), currentUser);
     const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []), dataScope);
-    // Puente GAP 6 → Tesorería: espejo de sesión de movimientos y propuestas
+    // Puente legacy de Tesorería; las operaciones P3 permanecen desconectadas de este espejo.
     const unsubscribeTesoreriaMovSesion = suscribirMovimientosSesion((data) => setTesoreriaSesionConciliacion(data));
 
     // BLOQUE C — Morosidad: el admin ve todos los expedientes; el propietario solo

@@ -26,7 +26,9 @@ export type EstadoNotificacion =
   | 'FALLIDA'
   | 'CANCELADA';
 
-export type CanalNotificacion = 'EMAIL' | 'INAPP' | 'WEBHOOK' | 'WHATSAPP';
+export type CanalNotificacion = 'EMAIL' | 'INAPP' | 'WEBHOOK';
+/** Solo para decodificar notificaciones ya persistidas antes de retirar el canal. */
+export type CanalNotificacionHistorico = CanalNotificacion | 'WHATSAPP';
 
 /** Resultado de un intento de entrega por un proveedor. */
 export interface ResultadoEntrega {
@@ -105,7 +107,7 @@ export interface DestinatarioNotificacion {
   usuarioId?: string;
   /** Nombre legible para personalizar la plantilla. */
   nombre?: string;
-  telefono?: string; // canal futuro WhatsApp
+  telefono?: string; // dato de contacto; no habilita un canal automático
   webhookUrl?: string;
 }
 
@@ -118,7 +120,7 @@ export interface Notificacion {
   idempotencyKey: string; // único por evento → anti-duplicados
   tipo: string; // clave de plantilla, p. ej. 'cobro.proximo_vencimiento'
   origen: OrigenNotificacion;
-  canal: CanalNotificacion;
+  canal: CanalNotificacionHistorico;
   destinatario: DestinatarioNotificacion;
   asunto: string; // asunto resuelto (email)
   /**
@@ -206,7 +208,7 @@ export interface EnviarNotificacionResponse {
   notificacion?: Notificacion;
   entregada?: boolean;
   estado?: EstadoNotificacion;
-  canal?: CanalNotificacion;
+  canal?: CanalNotificacionHistorico;
   provider?: string;
   externalId?: string;
   duplicada?: boolean;

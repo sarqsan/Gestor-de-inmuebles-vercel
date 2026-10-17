@@ -881,7 +881,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
               </h3>
 
               <p className="text-xs text-slate-600 max-w-md mx-auto">
-                {toastMessage || 'Los horarios han sido creados e integrados en el sistema.'} Puedes ir a la pestaña <strong>Preseleccionados</strong> para enviar el enlace personalizado por WhatsApp a cada candidato.
+                {toastMessage || 'Los horarios han sido creados e integrados en el sistema.'} Puedes ir a la pestaña <strong>Preseleccionados</strong> para copiar el enlace individual de cada candidato. La plataforma no afirma haberlo enviado.
               </p>
 
               <div className="pt-4 flex items-center justify-center gap-3">

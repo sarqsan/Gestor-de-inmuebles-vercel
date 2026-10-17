@@ -11,7 +11,6 @@ import {
 } from '../types';
 import {
   getSolicitudDocEstadoInfo,
-  generarMensajeWhatsappSolicitud,
 } from '../utils/documentTemplates';
 import {
   X,
@@ -21,7 +20,6 @@ import {
   Clock,
   AlertTriangle,
   ExternalLink,
-  MessageSquare,
   Copy,
   Check,
   Calendar,
@@ -46,7 +44,6 @@ interface DetalleSolicitudDocModalProps {
   candidato?: Candidato | null;
   onClose: () => void;
   onUpdateSolicitud: (updated: SolicitudDocumentacion) => Promise<void>;
-  onOpenWhatsapp?: (url: string) => void;
   onUpdateCandidateDocs?: (candidateId: string, docs: DocumentoAnalizado[]) => void;
 }
 
@@ -55,12 +52,10 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
   candidato,
   onClose,
   onUpdateSolicitud,
-  onOpenWhatsapp,
   onUpdateCandidateDocs,
 }) => {
   const [solState, setSolState] = useState<SolicitudDocumentacion>(solicitud);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
-  const [copiedMsg, setCopiedMsg] = useState<boolean>(false);
   const [correctionTargetId, setCorrectionTargetId] = useState<string | null>(null);
   const [correctionReason, setCorrectionReason] = useState<string>('');
   const [previewFile, setPreviewFile] = useState<ArchivoAportado | null>(null);
@@ -103,26 +98,6 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
     navigator.clipboard.writeText(publicUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
-  };
-
-  const handleCopyWhatsappText = () => {
-    const msg = generarMensajeWhatsappSolicitud(solState);
-    navigator.clipboard.writeText(msg);
-    setCopiedMsg(true);
-    setTimeout(() => setCopiedMsg(false), 2500);
-  };
-
-  const handleOpenWhatsappClick = () => {
-    const msg = generarMensajeWhatsappSolicitud(solState);
-    const cleanPhone = solState.candidatoTelefono.replace(/[^0-9]/g, '');
-    const phoneWithPrefix = cleanPhone.startsWith('34') ? cleanPhone : `34${cleanPhone}`;
-    const whatsappUrl = `https://wa.me/${phoneWithPrefix}?text=${encodeURIComponent(msg)}`;
-
-    if (onOpenWhatsapp) {
-      onOpenWhatsapp(whatsappUrl);
-    } else {
-      window.open(whatsappUrl, '_blank');
-    }
   };
 
   // Helper: Run Gemini AI analysis on a document item's attached files
@@ -477,13 +452,6 @@ export const DetalleSolicitudDocModal: React.FC<DetalleSolicitudDocModalProps> =
                 </a>
               </div>
 
-              <button
-                onClick={handleOpenWhatsappClick}
-                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-colors"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>Recordar por WhatsApp</span>
-              </button>
             </div>
           </div>
 

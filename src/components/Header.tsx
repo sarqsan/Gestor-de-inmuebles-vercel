@@ -63,7 +63,7 @@ export const Header: React.FC<HeaderProps> = ({
       case 'titulares':
         return { title: 'Propietarios / Titulares', subtitle: 'Crea y mantiene tus titulares: datos personales, de contacto y fiscales' };
       case 'preseleccionados':
-        return { title: 'Preseleccionados e Invitaciones', subtitle: 'Agenda de visitas a viviendas y citaciones por WhatsApp' };
+        return { title: 'Preseleccionados e Invitaciones', subtitle: 'Agenda de visitas a viviendas y enlaces de invitación' };
       case 'solicitudes':
         return { title: 'Solicitudes y Captura', subtitle: 'Enlaces públicos de inscripción para candidatos' };
       case 'candidatos':

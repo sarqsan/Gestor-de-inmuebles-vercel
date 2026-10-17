@@ -300,7 +300,7 @@ describe('GAP4 — Integración con dispatcher GAP1 (reuso, sin nuevo motor)', (
         },
         async guardar(n: any) { store.set(n.id, n); },
       },
-      canales: { EMAIL: null, INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: null, INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const res = await dispatcher.dispatch({
       origen: 'FINANCIACION',

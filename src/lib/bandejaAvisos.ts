@@ -14,7 +14,7 @@
  */
 import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { db } from './firebase';
-import type { CanalNotificacion, EstadoNotificacion, Notificacion } from '../types/notificaciones';
+import type { CanalNotificacionHistorico, EstadoNotificacion, Notificacion } from '../types/notificaciones';
 
 export const COLECCION_NOTIFICACIONES = 'notificaciones';
 export const MAXIMO_AVISOS_BANDEJA = 100;
@@ -24,7 +24,7 @@ export interface AvisoBandeja {
   tipo: string;
   asunto: string;
   cuerpo: string;
-  canal: CanalNotificacion;
+  canal: CanalNotificacionHistorico;
   estado: EstadoNotificacion;
   intentos: number;
   fechaCreacion: string;
@@ -57,7 +57,7 @@ function mapearAviso(id: string, datos: Partial<Notificacion>): AvisoBandeja | n
     // El texto renderizado del aviso (`cuerpo`). En documentos antiguos puede
     // faltar: se deja vacío antes que mostrar la clave de la plantilla.
     cuerpo: String(datos.cuerpo || ''),
-    canal: (datos.canal || 'INAPP') as CanalNotificacion,
+    canal: (datos.canal || 'INAPP') as CanalNotificacionHistorico,
     estado: datos.estado,
     intentos: Number(datos.intentos || 0),
     fechaCreacion: String(datos.fechaCreacion || ''),

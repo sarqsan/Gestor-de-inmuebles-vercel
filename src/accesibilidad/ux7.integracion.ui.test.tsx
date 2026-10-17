@@ -182,10 +182,11 @@ describe('UX-7 · guardas sobre el árbol real', () => {
       }
     }
 
-    // 105: incluye la capa de `BajaInmuebleModal` (baja patrimonial), cubierta con el hook.
-    expect(total).toBe(105);
+    // 104: inventario vigente tras DEC-01; el antiguo modal de WhatsApp fue retirado del árbol activo.
+    // La capa de `BajaInmuebleModal` (baja patrimonial) sigue incluida y cubierta con el hook.
+    expect(total).toBe(104);
     expect(pendientes.sort()).toEqual([
-      'components/DetalleSolicitudDocModal.tsx:917',
+      'components/DetalleSolicitudDocModal.tsx:885',
       'components/PublicPropertyGallery.tsx:150',
       'components/feedback/DialogoConfirmacion.tsx:46',
       'components/modals/DetalleIncidenciaModal.tsx:2103',

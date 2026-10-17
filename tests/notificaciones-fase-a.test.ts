@@ -81,7 +81,7 @@ function dispatcherCon(canal: EnviadorCanal, repo: RepositorioNotificaciones): D
   return new DispatcherNotificaciones({
     autorizacion: { perfil: 'SISTEMA' },
     repositorio: repo,
-    canales: { EMAIL: canal, INAPP: null, WEBHOOK: null, WHATSAPP: null },
+    canales: { EMAIL: canal, INAPP: null, WEBHOOK: null },
   });
 }
 
@@ -407,7 +407,7 @@ describe('C · reloj diario de avisos', () => {
     const dispatcherSeguro = new DispatcherNotificaciones({
       autorizacion: { perfil: 'SISTEMA' },
       repositorio: repo,
-      canales: { EMAIL: { canal: 'EMAIL', enviar: async () => ({ ok: false, provider: 'email', error: 'modo_seguro_activo' }) }, INAPP: null, WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: { canal: 'EMAIL', enviar: async () => ({ ok: false, provider: 'email', error: 'modo_seguro_activo' }) }, INAPP: null, WEBHOOK: null },
     });
 
     const resumen = await ejecutarRelojAvisos({ ahora: AHORA, puerto, crearDispatcher: () => dispatcherSeguro });
@@ -718,6 +718,8 @@ describe('D · endpoint protegido del cron', () => {
     expect(sinSecreto.status).toBe(401);
     const malo = await fetch(`${base}${RUTA_CRON_AVISOS}`, { headers: { Authorization: 'Bearer otro' } });
     expect(malo.status).toBe(401);
+    const esquemaAusente = await fetch(`${base}${RUTA_CRON_AVISOS}`, { headers: { Authorization: 'token-test' } });
+    expect(esquemaAusente.status).toBe(401);
   });
 
   it('con el secreto correcto devuelve el resumen trazable y contadores', async () => {
@@ -731,10 +733,29 @@ describe('D · endpoint protegido del cron', () => {
     expect(cuerpo.fallidas).toBe(0);
   });
 
-  it('acepta la ejecución manual por query (?secret=)', async () => {
-    const r = await fetch(`${base}${RUTA_CRON_AVISOS}?secret=secreto-de-prueba`);
-    expect(r.status).toBe(200);
-    expect((await r.json()).ok).toBe(true);
+  it('rechaza CRON_SECRET en query string y no ejecuta el reloj', async () => {
+    let ejecuciones = 0;
+    const app = express();
+    montarRutaCronAvisos(app, {
+      secreto: 'token-test',
+      ejecutar: async () => {
+        ejecuciones += 1;
+        return resumenVacio;
+      },
+    });
+    const local = app.listen(0, '127.0.0.1');
+    await once(local, 'listening');
+    const url = `http://127.0.0.1:${(local.address() as AddressInfo).port}${RUTA_CRON_AVISOS}?secret=token-test`;
+    try {
+      const r = await fetch(url);
+      expect(r.status).toBe(401);
+      expect((await r.json()).error).toBe('no_autorizado');
+      expect(ejecuciones).toBe(0);
+    } finally {
+      const cerrado = once(local, 'close');
+      local.close();
+      await cerrado;
+    }
   });
 
   it('sin credencial de servicio el endpoint responde 503 reloj_no_disponible', async () => {
@@ -742,7 +763,9 @@ describe('D · endpoint protegido del cron', () => {
     montarRutaCronAvisos(app, { secreto: 's', ejecutar: null, motivoNoDisponible: 'sin Firestore' });
     const local = app.listen(0, '127.0.0.1');
     await once(local, 'listening');
-    const r = await fetch(`http://127.0.0.1:${(local.address() as AddressInfo).port}${RUTA_CRON_AVISOS}?secret=s`);
+    const r = await fetch(`http://127.0.0.1:${(local.address() as AddressInfo).port}${RUTA_CRON_AVISOS}`, {
+      headers: { Authorization: 'Bearer test-token' },
+    });
     expect(r.status).toBe(503);
     expect((await r.json()).error).toBe('reloj_no_disponible');
     local.close();

@@ -89,7 +89,7 @@ describe('SMTP con dispatcher: persistencia y reintentos sin falso ENVIADA', () 
       .mockRejectedValueOnce(Object.assign(new Error('conexión simulada'), { code: 'ECONNECTION' }))
       .mockResolvedValue({ messageId: 'smtp-confirmado', accepted: [TO], rejected: [] });
     const canal = new CanalEmail(new EmailProviderSMTP(config, () => ({ sendMail })));
-    const dispatcher = new DispatcherNotificaciones({ autorizacion: { perfil: 'SISTEMA' }, repositorio: repo, canales: { EMAIL: canal, INAPP: null, WEBHOOK: null, WHATSAPP: null } });
+    const dispatcher = new DispatcherNotificaciones({ autorizacion: { perfil: 'SISTEMA' }, repositorio: repo, canales: { EMAIL: canal, INAPP: null, WEBHOOK: null } });
     const primera = await dispatcher.reintentar(notificacion());
     expect(primera).toMatchObject({ ok: false, estado: 'FALLIDA' });
     expect(store.get('not-smtp')).toMatchObject({ estado: 'FALLIDA', intentos: 1 });
@@ -109,7 +109,7 @@ describe('SMTP con dispatcher: persistencia y reintentos sin falso ENVIADA', () 
       guardar: async (n) => { guardada = n; },
     };
     const { proveedor, sendMail } = proveedorCon({ messageId: 'id-local', accepted: [], rejected: [TO] });
-    const dispatcher = new DispatcherNotificaciones({ autorizacion: { perfil: 'SISTEMA' }, repositorio: repo, canales: { EMAIL: new CanalEmail(proveedor), INAPP: null, WEBHOOK: null, WHATSAPP: null } });
+    const dispatcher = new DispatcherNotificaciones({ autorizacion: { perfil: 'SISTEMA' }, repositorio: repo, canales: { EMAIL: new CanalEmail(proveedor), INAPP: null, WEBHOOK: null } });
     for (let i = 0; i < MAX_REINTENTOS; i++) expect(await dispatcher.reintentar(guardada)).toMatchObject({ ok: false, estado: 'FALLIDA' });
     expect(await dispatcher.reintentar(guardada)).toMatchObject({ ok: false, error: 'max_reintentos' });
     expect(guardada.intentos).toBe(MAX_REINTENTOS);

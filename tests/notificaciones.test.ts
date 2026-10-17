@@ -50,7 +50,6 @@ function contexto(overrides: Partial<{ canales: Record<string, EnviadorCanal | n
       EMAIL: canales.EMAIL || new MockEmailOk(),
       INAPP: canales.INAPP || new CanalInApp(),
       WEBHOOK: canales.WEBHOOK || null,
-      WHATSAPP: canales.WHATSAPP || null,
     },
   };
 }
@@ -63,7 +62,6 @@ function dispatcherAdmin(repo: RepoMemoria, canales: Record<string, EnviadorCana
       EMAIL: canales.EMAIL ?? new MockEmailOk(),
       INAPP: canales.INAPP ?? new CanalInApp(),
       WEBHOOK: null,
-      WHATSAPP: null,
     },
   });
 }
@@ -103,11 +101,11 @@ describe('Sistema de notificaciones — motor', () => {
 
   it('4. selección de canal', () => {
     const plantilla = PLANTILLAS['cobro.proximo_vencimiento'];
-    expect(seleccionarCanal(plantilla, 'EMAIL', { email: true, inapp: true, webhook: false, whatsapp: false })).toBe('EMAIL');
+    expect(seleccionarCanal(plantilla, 'EMAIL', { email: true, inapp: true, webhook: false })).toBe('EMAIL');
     // sin email disponible → inapp
-    expect(seleccionarCanal(plantilla, 'EMAIL', { email: false, inapp: true, webhook: false, whatsapp: false })).toBe('INAPP');
+    expect(seleccionarCanal(plantilla, 'EMAIL', { email: false, inapp: true, webhook: false })).toBe('INAPP');
     // canal no permitido
-    expect(seleccionarCanal(PLANTILLAS['cobro.retraso_pago'], 'WHATSAPP', { email: false, inapp: false, webhook: true, whatsapp: true })).toBe('WEBHOOK');
+    expect(seleccionarCanal(PLANTILLAS['cobro.retraso_pago'], 'WHATSAPP', { email: false, inapp: false, webhook: true })).toBe('WEBHOOK');
   });
 
   it('5. idempotencia — misma clave no duplica', async () => {
@@ -130,12 +128,31 @@ describe('Sistema de notificaciones — motor', () => {
     expect(mock.enviados.length).toBe(1);
   });
 
+  it('6b. despachos simultáneos con la misma clave no provocan dos envíos', async () => {
+    const repo = new RepoMemoria();
+    let envios = 0;
+    const lento: EnviadorCanal = {
+      canal: 'EMAIL',
+      async enviar(n) {
+        envios += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return { ok: true, provider: 'email-test', externalId: `ext-${n.id}`, enviadoEn: new Date().toISOString() };
+      },
+    };
+    const uno = dispatcherAdmin(repo, { EMAIL: lento });
+    const dos = dispatcherAdmin(repo, { EMAIL: lento });
+    const resultados = await Promise.all([uno.dispatch(payloadEmail), dos.dispatch(payloadEmail)]);
+    expect(envios).toBe(1);
+    expect(resultados.filter((r) => r.entregada)).toHaveLength(1);
+    expect(resultados.some((r) => r.duplicada)).toBe(true);
+  });
+
   it('7. reintento de fallida', async () => {
     const repo = new RepoMemoria();
     const d = new DispatcherNotificaciones({
       autorizacion: { perfil: 'ADMINISTRADOR', uid: 'u_admin' },
       repositorio: repo,
-      canales: { EMAIL: new MockEmailFalla(), INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: new MockEmailFalla(), INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const res = await d.dispatch(payloadEmail);
     expect(res.ok).toBe(false);
@@ -145,7 +162,7 @@ describe('Sistema de notificaciones — motor', () => {
     const dOk = new DispatcherNotificaciones({
       autorizacion: { perfil: 'ADMINISTRADOR', uid: 'u_admin' },
       repositorio: repo,
-      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const ret = await dOk.reintentar({ ...fallida, intentos: 0 });
     expect(ret.ok).toBe(true);
@@ -166,7 +183,7 @@ describe('Sistema de notificaciones — motor', () => {
     const d = new DispatcherNotificaciones({
       autorizacion: { perfil: 'ADMINISTRADOR', uid: 'u_admin' },
       repositorio: repo,
-      canales: { EMAIL: new MockEmailFalla(), INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: new MockEmailFalla(), INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const res = await d.dispatch(payloadEmail);
     expect(res.notificacion?.estado).toBe('FALLIDA');
@@ -199,7 +216,7 @@ describe('Sistema de notificaciones — motor', () => {
     const d = new DispatcherNotificaciones({
       autorizacion: { perfil: 'PROPIETARIO', uid: 'u_A', propietarioId: 'prop_A', inmuebleIds: ['inm_A'] },
       repositorio: repo,
-      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const res = await d.dispatch({ ...payloadEmail, propietarioId: 'prop_B', inmuebleId: 'inm_A' });
     expect(res.ok).toBe(false);
@@ -211,7 +228,7 @@ describe('Sistema de notificaciones — motor', () => {
     const d = new DispatcherNotificaciones({
       autorizacion: { perfil: null },
       repositorio: repo,
-      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const res = await d.dispatch(payloadEmail);
     expect(res.ok).toBe(false);
@@ -223,7 +240,7 @@ describe('Sistema de notificaciones — motor', () => {
     const d = new DispatcherNotificaciones({
       autorizacion: { perfil: 'PROPIETARIO', uid: 'u_A', propietarioId: 'prop_A', inmuebleIds: ['inm_A'] },
       repositorio: repo,
-      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const res = await d.dispatch({ ...payloadEmail, propietarioId: 'prop_A', inmuebleId: 'inm_Z' });
     expect(res.ok).toBe(false);
@@ -294,7 +311,7 @@ describe('Sistema de notificaciones — motor', () => {
     const d = new DispatcherNotificaciones({
       autorizacion: { perfil: 'PROPIETARIO', uid: 'u_A', propietarioId: 'prop_A', inmuebleIds: ['inm_A'] },
       repositorio: repo,
-      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null, WHATSAPP: null },
+      canales: { EMAIL: new MockEmailOk(), INAPP: new CanalInApp(), WEBHOOK: null },
     });
     const res = await d.dispatch({ ...payloadEmail, propietarioId: undefined, inmuebleId: 'inm_A' });
     expect(res.ok).toBe(true);

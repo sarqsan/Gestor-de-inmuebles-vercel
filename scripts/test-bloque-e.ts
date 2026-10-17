@@ -358,7 +358,10 @@ function cuerpoDeFuncion(nombre: string): string {
 //     resuelto por el helper de ámbito: nunca `isStaff()` global ni `isTenant()`.
 const listadosAcotadosE62 = COLECCIONES_E62.map(({ coleccion, guarda, alcance }) => {
   const bloque = bloqueDeColeccion(coleccion);
-  const listados = bloque.split('\n').filter((ln) => ln.includes('allow list:'));
+  // La expresión Rules puede continuar en varias líneas. Evaluamos la guarda
+  // completa terminada en punto y coma, no solo la primera línea del permiso.
+  const listados = [...bloque.matchAll(/allow list:\s*([^;]+);/g)]
+    .map((match) => match[0].replace(/\s+/g, ' '));
   return (
     bloque.length > 0 &&
     listados.length === 1 &&

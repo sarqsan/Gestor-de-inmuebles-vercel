@@ -9,10 +9,10 @@
  *
  * Módulo PURO: sin React, sin jsPDF, sin red. Nunca contiene una clave.
  */
-import { LONGITUD_LLAVE_GEMINI, PREFIJO_LLAVE_GEMINI } from './llavesUsuarioContrato.js';
+import { LONGITUD_LLAVE_GEMINI, PREFIJO_LLAVE_GEMINI, PREFIJO_LLAVE_GEMINI_ACTUAL } from './llavesUsuarioContrato.js';
 
 export const URL_OFICIAL_CLAVES_AI_STUDIO = 'https://aistudio.google.com/app/apikey';
-export const VERSION_TUTORIAL_LLAVE = '1.0 · Fase IA 9';
+export const VERSION_TUTORIAL_LLAVE = '1.1 · Fase IA 9';
 
 export type ClavePasoAltaGuiada =
   | 'QUE_ES'
@@ -79,7 +79,7 @@ const PASOS_ALTA_GUIADA: readonly PasoAltaGuiadaLlave[] = Object.freeze<PasoAlta
     detalle: [
       `Abre ${URL_OFICIAL_CLAVES_AI_STUDIO} e inicia sesión con tu cuenta de Google.`,
       'Pulsa «Crear clave de API» (Create API key). Si te pide un proyecto, elige el que te proponga o crea uno nuevo con cualquier nombre.',
-      `Se mostrará la clave: una cadena de ${LONGITUD_LLAVE_GEMINI} caracteres que empieza por «${PREFIJO_LLAVE_GEMINI}». Cópiala con el botón de copiar.`,
+      `Copia la clave completa con el botón de copiar. Se admiten los prefijos «${PREFIJO_LLAVE_GEMINI}» (formato clásico, ${LONGITUD_LLAVE_GEMINI} caracteres) y «${PREFIJO_LLAVE_GEMINI_ACTUAL}» (longitud variable).`,
       'Si Google te ofrece restringir la clave, puedes hacerlo más adelante; para este tutorial basta con crearla.',
     ],
   },
@@ -154,7 +154,7 @@ export const TUTORIAL_LLAVE_USUARIO_IA: TutorialLlaveUsuarioIA = Object.freeze({
     },
     {
       pregunta: 'Me dice que la clave tiene un formato incorrecto.',
-      respuesta: `Comprueba que la has copiado entera (${LONGITUD_LLAVE_GEMINI} caracteres), que empieza por «${PREFIJO_LLAVE_GEMINI}» y que no lleva espacios ni comillas al principio o al final.`,
+      respuesta: `Comprueba que la has copiado entera y sin espacios internos. Se admiten «${PREFIJO_LLAVE_GEMINI}» (${LONGITUD_LLAVE_GEMINI} caracteres) y «${PREFIJO_LLAVE_GEMINI_ACTUAL}» (longitud variable, con límites de entrada del Gestor). La aceptación del formato no confirma que Google la acepte.`,
     },
   ],
   camposParaAnotar: [

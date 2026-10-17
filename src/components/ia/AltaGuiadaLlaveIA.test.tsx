@@ -101,37 +101,41 @@ describe('AltaGuiadaLlaveIA · estado y tutorial', () => {
 });
 
 describe('AltaGuiadaLlaveIA · alta', () => {
-  it('rechaza en local una clave con mala forma sin llamar al servidor', async () => {
+  it.each([
+    ['sk-no-es-de-google-1234567890123456', /«AIza» o «AQ\.»/],
+    ['AQ.corta', /incompleta/],
+    ['AQ.' + 'a'.repeat(40) + '!', /caracteres no admitidos/],
+  ])('rechaza en local una clave con mala forma sin llamar al servidor (%#)', async (llave, mensaje) => {
     const { fetchImpl, llamadas } = fetchDoble([
       ['GET', RUTA_LLAVE_USUARIO_IA, () => ({ llaves: SUBSISTEMA, llave: resumenLlaveAusente(), altaGuiada: [] })],
     ]);
     render(<AltaGuiadaLlaveIA opciones={opciones(fetchImpl)} descargarPdf={() => {}} imprimirPdf={() => true} />);
     await waitFor(() => screen.getByLabelText(/Tu clave de API/));
-    fireEvent.change(screen.getByLabelText(/Tu clave de API/), { target: { value: 'sk-no-es-de-google-1234567890123456' } });
+    fireEvent.change(screen.getByLabelText(/Tu clave de API/), { target: { value: llave } });
     fireEvent.click(screen.getByText('Guardar clave'));
-    expect((await screen.findByRole('alert')).textContent).toMatch(/empieza por «AIza»/);
+    expect((await screen.findByRole('alert')).textContent).toMatch(mensaje);
     expect(llamadas.filter((l) => l.init?.method === 'PUT')).toHaveLength(0);
   });
 
-  it('envía la clave con Idempotency-Key, vacía el campo, muestra REGISTRADA y el sufijo; nunca pinta la clave', async () => {
+  it.each([LLAVE, 'AQ.' + 'aB9_-'.repeat(20)])('envía el formato admitido con autenticación, vacía el campo y no lo muestra (%#)', async (llave) => {
     const { fetchImpl, llamadas } = fetchDoble([
       ['GET', RUTA_LLAVE_USUARIO_IA, () => ({ llaves: SUBSISTEMA, llave: resumenLlaveAusente(), altaGuiada: [] })],
-      ['PUT', RUTA_LLAVE_USUARIO_IA, () => ({ estado: 'REGISTRADA', llave: REGISTRADA, llaves: SUBSISTEMA })],
+      ['PUT', RUTA_LLAVE_USUARIO_IA, () => ({ estado: 'REGISTRADA', llave: { ...REGISTRADA, sufijo: llave.slice(-4) }, llaves: SUBSISTEMA })],
     ]);
     const { container } = render(<AltaGuiadaLlaveIA opciones={opciones(fetchImpl)} descargarPdf={() => {}} imprimirPdf={() => true} />);
     const campo = await screen.findByLabelText(/Tu clave de API/);
     expect(campo?.getAttribute('type')).toBe('password');
-    fireEvent.change(campo, { target: { value: ` "${LLAVE}" ` } });
+    fireEvent.change(campo, { target: { value: ` "${llave}" ` } });
     fireEvent.click(screen.getByText('Guardar clave'));
     await waitFor(() => expect(screen.getByTestId('estado-llave').textContent).toContain('REGISTRADA'));
     const put = llamadas.find((l) => l.init?.method === 'PUT')!;
-    expect(JSON.parse(String(put.init?.body))).toEqual({ llave: LLAVE }); // normalizada en local (comillas/espacios fuera)
+    expect(JSON.parse(String(put.init?.body))).toEqual({ llave }); // normalizada en local (comillas/espacios fuera)
     expect(cabecera(put.init, CABECERA_IDEMPOTENCIA_IA)).toMatch(/^[A-Za-z0-9_\-:.]{8,128}$/);
     expect(cabecera(put.init, 'Authorization')).toBe('Bearer token-ana');
     expect((screen.getByLabelText(/Sustituir por otra clave/) as HTMLInputElement).value).toBe('');
-    expect(screen.getByText(`…${LLAVE.slice(-4)}`)).toBeTruthy();
+    expect(screen.getByText(`…${llave.slice(-4)}`)).toBeTruthy();
     expect(screen.getByText(/Clave guardada cifrada/)).toBeTruthy();
-    expect(container.textContent).not.toContain(LLAVE);
+    expect(container.textContent).not.toContain(llave);
     expect(screen.getByText('Revocar')).toBeTruthy();
   });
 

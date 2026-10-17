@@ -106,10 +106,18 @@ export type CodigoRechazoLlavesIA =
 // confirma el proveedor.
 // ---------------------------------------------------------------------------
 
-/** Clave de Google AI Studio: `AIza` + 35 caracteres [A-Za-z0-9_-] (39 en total). */
+/** Formato clásico: conserva su regla estricta de 39 caracteres. */
 export const LONGITUD_LLAVE_GEMINI = 39;
 export const PREFIJO_LLAVE_GEMINI = 'AIza';
 const PATRON_LLAVE_GEMINI = /^AIza[0-9A-Za-z_-]{35}$/;
+export const PREFIJO_LLAVE_GEMINI_ACTUAL = 'AQ.';
+/**
+ * Límite defensivo local, NO longitud oficial de Google: un token AQ. debe
+ * contener al menos 32 caracteres base64url y caber en el cuerpo ya admitido.
+ * Sólo el proveedor puede confirmar autenticidad, vigencia y permisos.
+ */
+export const MIN_LONGITUD_CUERPO_LLAVE_AQ = 32;
+const PATRON_CUERPO_LLAVE_AQ = /^[0-9A-Za-z_-]+$/;
 /** Marcador que trae `.env.example`; nunca es una llave. */
 export const MARCADOR_LLAVE_GEMINI = 'MY_GEMINI_API_KEY';
 /** Tope de lo que el servidor acepta en el cuerpo antes de normalizar. */
@@ -140,8 +148,18 @@ export function validarFormatoLlaveProveedorIA(entrada: unknown): ResultadoForma
   if (valor === MARCADOR_LLAVE_GEMINI) {
     return { estado: 'INVALIDA', codigo: 'MARCADOR_DE_POSICION', mensaje: 'Eso es un marcador de ejemplo, no una clave real.' };
   }
+  if (valor.startsWith(PREFIJO_LLAVE_GEMINI_ACTUAL)) {
+    const cuerpo = valor.slice(PREFIJO_LLAVE_GEMINI_ACTUAL.length);
+    if (cuerpo.length < MIN_LONGITUD_CUERPO_LLAVE_AQ || valor.length > MAX_LONGITUD_ENTRADA_LLAVE) {
+      return { estado: 'INVALIDA', codigo: 'LONGITUD', mensaje: 'La clave AQ. está incompleta o supera el límite de entrada del Gestor. Cópiala entera desde Google AI Studio.' };
+    }
+    if (!PATRON_CUERPO_LLAVE_AQ.test(cuerpo)) {
+      return { estado: 'INVALIDA', codigo: 'CARACTERES', mensaje: 'La clave AQ. contiene caracteres no admitidos. Vuelve a copiarla desde Google AI Studio, sin espacios internos.' };
+    }
+    return { estado: 'VALIDA', valor, sufijo: sufijoLlave(valor) };
+  }
   if (!valor.startsWith(PREFIJO_LLAVE_GEMINI)) {
-    return { estado: 'INVALIDA', codigo: 'PREFIJO', mensaje: `Una clave de Google AI Studio empieza por «${PREFIJO_LLAVE_GEMINI}». Comprueba que has copiado la clave completa.` };
+    return { estado: 'INVALIDA', codigo: 'PREFIJO', mensaje: `Los formatos admitidos empiezan por «${PREFIJO_LLAVE_GEMINI}» o «${PREFIJO_LLAVE_GEMINI_ACTUAL}». Comprueba que has copiado la clave completa.` };
   }
   if (valor.length !== LONGITUD_LLAVE_GEMINI) {
     return { estado: 'INVALIDA', codigo: 'LONGITUD', mensaje: `La clave debe tener ${LONGITUD_LLAVE_GEMINI} caracteres (la tuya tiene ${valor.length}). Cópiala entera, sin espacios.` };

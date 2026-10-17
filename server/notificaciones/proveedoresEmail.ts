@@ -23,7 +23,7 @@ import {
   type EmailProvider,
   type ProveedorEmailHttp,
 } from '../../src/notificaciones/canales.js';
-import { EmailProviderSMTP, type FabricaTransporteSmtp } from './proveedorSmtp.js';
+import { EmailProviderSMTP, configuracionSmtpValida, type FabricaTransporteSmtp } from './proveedorSmtp.js';
 
 export type ModoEmail = 'REAL' | 'MODO_SEGURO';
 
@@ -86,7 +86,7 @@ export function crearTransporteEmailDesdeEntorno(
   const responderA = (entorno.EMAIL_REPLY_TO || '').trim();
   const activoLegacy = entorno.ENABLE_EMAIL === 'true';
 
-  if (usaSmtp && smtpUrl && desde) {
+  if (usaSmtp && configuracionSmtpValida(smtpUrl, desde)) {
     return {
       modo: 'REAL',
       proveedor: 'SMTP',
@@ -116,6 +116,7 @@ export function crearTransporteEmailDesdeEntorno(
   }
 
   const motivos = [
+    usaSmtp && smtpUrl && desde && !configuracionSmtpValida(smtpUrl, desde) ? 'configuración SMTP inválida' : null,
     crudo === 'SMTP' && !smtpUrl ? `${VARIABLES_ENTORNO_EMAIL.smtp} ausente` : null,
     !proveedor && !usaSmtp ? `${VARIABLES_ENTORNO_EMAIL.proveedor} ausente o no soportado` : null,
     proveedor && !apiKey ? 'clave del proveedor ausente' : null,

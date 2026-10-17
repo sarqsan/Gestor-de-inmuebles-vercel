@@ -617,7 +617,7 @@ describe('A ter · identificación del aviso y respuesta al propietario', () => 
     const fabrica: FabricaTransporteSmtp = () => ({
       async sendMail(o) {
         opciones.push(o);
-        return { messageId: 'mid-1' };
+        return { messageId: 'mid-1', accepted: [o.to], rejected: [] };
       },
     });
     const proveedor = new EmailProviderSMTP(
@@ -774,7 +774,7 @@ function fabricaSmtpFalsa(comportamiento: { messageId?: string; error?: string }
     async sendMail(opciones) {
       enviados.push(opciones);
       if (comportamiento.error) throw new Error(comportamiento.error);
-      return { messageId: comportamiento.messageId };
+      return { messageId: comportamiento.messageId, accepted: [opciones.to], rejected: [] };
     },
   });
   return { fabrica, enviados };

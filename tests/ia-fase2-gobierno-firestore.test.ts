@@ -127,6 +127,29 @@ function firestoreFalsoGobierno(opciones: { conflictoPatch?: number } = {}) {
       return respuesta(salida);
     }
 
+    if (u.pathname.endsWith(':commit')) {
+      const writes = (body?.writes as Array<{
+        update?: { name?: string; fields?: Record<string, unknown> };
+        currentDocument?: { exists?: boolean; updateTime?: string };
+      }>) || [];
+      const parsed = writes.map((write) => {
+        const clave = decodeURIComponent(String(write.update?.name || '').split('/documents/')[1] || '');
+        return { write, clave, anterior: documentos.get(clave) };
+      });
+      const conflicto = parsed.some(({ write, anterior }) =>
+        write.currentDocument?.exists === false ? Boolean(anterior)
+          : Boolean(write.currentDocument?.updateTime && anterior?.updateTime !== write.currentDocument.updateTime)
+            || (!write.currentDocument?.exists && !write.currentDocument?.updateTime));
+      if (conflicto) return respuesta({ error: { status: 'FAILED_PRECONDITION' } }, 400);
+      for (const { write, clave } of parsed) {
+        documentos.set(clave, {
+          fields: (write.update?.fields as Record<string, unknown>) || {},
+          updateTime: siguienteVersion(),
+        });
+      }
+      return respuesta({ writeResults: parsed.map(() => ({ updateTime: siguienteVersion() })) });
+    }
+
     if (method === 'POST') {
       const id = u.searchParams.get('documentId') || '';
       const clave = `${u.pathname.split('/documents/')[1]}/${id}`;
@@ -230,7 +253,7 @@ describe('IA Fase 2 · adaptador REST: CAS por updateTime', () => {
   });
 
   it('consultarIgualdadesOrden filtra por igualdad, ordena y limita', async () => {
-    const { cliente } = gobiernoFirestore(undefined);
+    const { cliente, falso } = gobiernoFirestore(undefined);
     await cliente.crearDocumento('ia_operaciones', 'op1', { uid: 'u1', iniciadaEn: new Date('2026-10-15T10:00:00Z') });
     await cliente.crearDocumento('ia_operaciones', 'op2', { uid: 'u2', iniciadaEn: new Date('2026-10-15T11:00:00Z') });
     await cliente.crearDocumento('ia_operaciones', 'op3', { uid: 'u1', iniciadaEn: new Date('2026-10-15T12:00:00Z') });
@@ -242,6 +265,30 @@ describe('IA Fase 2 · adaptador REST: CAS por updateTime', () => {
     expect(filas.map((f) => f.id)).toEqual(['op3', 'op1']);
     const limitadas = await cliente.consultarIgualdadesOrden('ia_operaciones', { limite: 2 });
     expect(limitadas).toHaveLength(2);
+    await cliente.consultarIgualdadesOrden('ia_operaciones', { igualdades: [['uid', 'u1']], limite: 100, offset: 100 });
+    const ultimaConsulta = falso.peticiones[falso.peticiones.length - 1].body?.structuredQuery as Record<string, unknown>;
+    expect(ultimaConsulta.offset).toBe(100);
+  });
+});
+
+describe('Firestore REST · commit atómico con precondiciones', () => {
+  it('crea varios documentos juntos y no deja escrituras parciales al perder una precondición', async () => {
+    const { cliente, falso } = gobiernoFirestore(undefined);
+    const resultado = await cliente.escribirAtomico([
+      { coleccion: 'p4_operaciones', id: 'op-1', datos: { estado: 'CREADA' }, precondicion: { tipo: 'NO_EXISTE' } },
+      { coleccion: 'anexos_actualizacion_renta', id: 'anexo-1', datos: { version: 1 }, precondicion: { tipo: 'NO_EXISTE' } },
+    ]);
+    expect(resultado).toBe('COMMIT');
+    expect(falso.documentos.has('p4_operaciones/op-1')).toBe(true);
+    expect(falso.documentos.has('anexos_actualizacion_renta/anexo-1')).toBe(true);
+
+    const conflicto = await cliente.escribirAtomico([
+      { coleccion: 'p4_operaciones', id: 'op-2', datos: { estado: 'CREADA' }, precondicion: { tipo: 'NO_EXISTE' } },
+      { coleccion: 'anexos_actualizacion_renta', id: 'anexo-1', datos: { version: 2 }, precondicion: { tipo: 'NO_EXISTE' } },
+    ]);
+    expect(conflicto).toBe('CONFLICTO');
+    expect(falso.documentos.has('p4_operaciones/op-2')).toBe(false);
+    expect(decodificarCampos(falso.documentos.get('anexos_actualizacion_renta/anexo-1')!.fields as never)).toEqual({ version: 1 });
   });
 });
 
@@ -425,6 +472,29 @@ describe('IA Fase 2 · consultas del panel y reglas', () => {
     const operaciones = await gobierno.operacionesDeUsuario('uid-ana');
     expect(operaciones.map((o) => o.id)).toEqual(['op3', 'op1']);
     expect(operaciones[0].estado).toBe('FALLIDA');
+  });
+
+  it('la cuenta del titular incluye operaciones autorizadas de gestores y mantiene actor/titular separados', async () => {
+    const { gobierno, cliente } = gobiernoFirestore(undefined);
+    await cliente.crearDocumento('ia_operaciones', 'op-gestor-a', {
+      uid: 'uid-gestor', uidTitular: 'owner-a', propietarioId: 'prop-a',
+      operacion: OP, estado: 'COMPLETADA', iniciadaEn: new Date('2026-10-15T12:00:00Z'),
+    });
+    await cliente.crearDocumento('ia_operaciones', 'op-propietario-a', {
+      uid: 'owner-a', uidTitular: 'owner-a', propietarioId: 'prop-a',
+      operacion: OP, estado: 'COMPLETADA', iniciadaEn: new Date('2026-10-15T11:00:00Z'),
+    });
+    await cliente.crearDocumento('ia_operaciones', 'op-gestor-b', {
+      uid: 'uid-gestor-b', uidTitular: 'owner-b', propietarioId: 'prop-b',
+      operacion: OP, estado: 'COMPLETADA', iniciadaEn: new Date('2026-10-15T13:00:00Z'),
+    });
+    await cliente.crearDocumento('ia_operaciones', 'op-legacy-a', {
+      uid: 'owner-a', operacion: OP, estado: 'COMPLETADA', iniciadaEn: new Date('2026-10-15T10:00:00Z'),
+    });
+    const propietario = await gobierno.operacionesDeUsuario('owner-a');
+    expect(propietario.map((operacion) => operacion.id)).toEqual(['op-gestor-a', 'op-propietario-a', 'op-legacy-a']);
+    expect(propietario[0]).toMatchObject({ uid: 'uid-gestor', uidTitular: 'owner-a', propietarioId: 'prop-a' });
+    expect(await gobierno.operacionesDeUsuario('uid-gestor')).toEqual([]);
   });
 
   it('firestore.rules NO abre acceso a ia_cuentas ni ia_ajustes (denegación global)', () => {

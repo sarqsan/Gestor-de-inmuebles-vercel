@@ -24,7 +24,10 @@ import {
   type CuentaServicio,
 } from '../server/titularidades/googleBackend';
 import { COLECCION_OPERACIONES_IA, crearRegistroFirestore, type CierreOperacionIA } from '../server/ia/registroOperacionesIA';
-import { clienteIA, crearNucleoIA, generateGeminiWithRetry, idOperacionIA } from '../server/ia/nucleoIA';
+import { crearGobiernoMemoria } from '../server/ia/gobiernoIA';
+import { construirPoliticaIACompleta } from '../src/ia/gobiernoIAContrato';
+import { clienteIA, crearNucleoIA, generateGeminiWithRetry, idOperacionIA, type ContextoProveedorIA } from '../server/ia/nucleoIA';
+import type { ServicioLlavesIA } from '../server/ia/llavesUsuarioIA';
 import { decidir, parsearReglas, type ContextoPeticion, type Metodo } from './helpers/evaluadorReglasFirestore';
 
 const par = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -201,17 +204,57 @@ describe('IA Fase 1 · extremo a extremo con el registro Firestore', () => {
       return (fs.fetchImpl as unknown as (u: string, i?: unknown) => Promise<unknown>)(url, init);
     }) as never;
     const registro = crearRegistroFirestore(new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS, fetchImpl: fetchTrazado }));
+    const llaveTitularPrueba = 'mock-sintetico-llave-titular-ana-no-valida-para-proveedor';
+    const contextosProveedor: ContextoProveedorIA[] = [];
+    const llaves = {
+      modo: 'MEMORIA' as const,
+      resolverParaOperacion: async (uid: string) => uid === 'uid-ana'
+        ? { estado: 'DISPONIBLE' as const, valor: llaveTitularPrueba, sufijo: 'titular-ana' }
+        : { estado: 'AUSENTE' as const },
+    } as unknown as ServicioLlavesIA;
+    const gobierno = crearGobiernoMemoria(
+      construirPoliticaIACompleta({ costeCreditosPorOperacion: { ANALIZAR_DOCUMENTO: 0 } }),
+      { listarOperaciones: () => [] },
+    );
+    gobierno.fijarPerfil(
+      'uid-ana',
+      { estado: 'ACTIVO', tipoPerfil: 'PROPIETARIO' },
+      { authUid: 'uid-ana', estado: 'ACTIVO', tipoPerfil: 'PROPIETARIO' },
+    );
     const nucleo = crearNucleoIA({
       verificarToken: async (token) => (token === 'token-ana' ? { uid: 'uid-ana' } : null),
       registro,
-      crearClienteProveedor: () => ({
-        models: {
-          generateContent: async () => {
-            orden.push('proveedor');
-            return { text: '{"ok":true}', usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 } };
+      gobierno,
+      llaves,
+      crearClienteProveedor: (contexto) => {
+        if (!contexto || contexto.uid !== 'uid-ana' || contexto.llaveUsuario !== llaveTitularPrueba) {
+          throw new Error('El proveedor debe recibir únicamente la llave sintética del titular resuelto.');
+        }
+        contextosProveedor.push(contexto);
+        return {
+          models: {
+            generateContent: async () => {
+              orden.push('proveedor');
+              return { text: '{"ok":true}', usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 } };
+            },
           },
-        },
-      }),
+        };
+      },
+      resolverTitularIA: async ({ uidActor, request }) => {
+        const contratoId = (request.body as { contratoId?: unknown } | undefined)?.contratoId;
+        if (uidActor !== 'uid-ana' || contratoId !== 'contrato-ana') {
+          return { estado: 'RECHAZADO', codigo: 'CONTRATO_NO_AUTORIZADO' };
+        }
+        return {
+          estado: 'RESUELTO',
+          contexto: {
+            propietarioUid: 'uid-ana',
+            propietarioId: 'prop-ana',
+            contratoId: 'contrato-ana',
+            inmuebleId: 'inmueble-ana',
+          },
+        };
+      },
       log: () => undefined,
     });
     const app = express();
@@ -226,12 +269,20 @@ describe('IA Fase 1 · extremo a extremo con el registro Firestore', () => {
     servidores.push(servidor);
     const url = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api/analizar-documento`;
     const peticion = () =>
-      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token-ana', 'Idempotency-Key': 'clave-e2e-0001' }, body: '{"documentBase64":"privado"}' });
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token-ana', 'Idempotency-Key': 'clave-e2e-0001' }, body: '{"documentBase64":"privado","contratoId":"contrato-ana"}' });
 
     const r = await peticion();
     orden.push('respuesta');
     expect(r.status).toBe(200);
     expect(orden).toEqual(['firestore:POST', 'proveedor', 'firestore:PATCH', 'respuesta']);
+    expect(contextosProveedor).toHaveLength(1);
+    expect(contextosProveedor[0]).toMatchObject({
+      uid: 'uid-ana',
+      actorUid: 'uid-ana',
+      propietarioId: 'prop-ana',
+      operacion: 'ANALIZAR_DOCUMENTO',
+      llaveUsuario: llaveTitularPrueba,
+    });
     const id = idOperacionIA('uid-ana', 'clave-e2e-0001');
     const guardado = fs.documentos.get(`${COLECCION_OPERACIONES_IA}/${id}`) as Record<string, Record<string, string>>;
     expect(guardado.uid).toEqual({ stringValue: 'uid-ana' });

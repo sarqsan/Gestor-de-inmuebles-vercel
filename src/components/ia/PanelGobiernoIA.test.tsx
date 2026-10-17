@@ -32,7 +32,7 @@ const RESUMEN = {
   },
   operacionesRecientes: [
     {
-      id: 'iaop_1', uid: 'uid-ana', operacion: 'REDACTAR_CLAUSULA', estado: 'COMPLETADA',
+      id: 'iaop_1', uid: 'uid-ana', uidTitular: 'owner-ana', propietarioId: 'prop-ana', operacion: 'REDACTAR_CLAUSULA', estado: 'COMPLETADA',
       codigoHttp: 200, origenRespuesta: 'PROVEEDOR', iniciadaEn: '2026-10-15T10:00:00.000Z',
       tokensTotales: 120, costeCreditos: 0,
     },
@@ -89,6 +89,9 @@ describe('PanelGobiernoIA · consulta', () => {
     expect(screen.getByText(/0 de 4/)).toBeTruthy();
     expect(screen.queryByText(/sin límite/)).toBeNull();
     expect(screen.getByText(/uid-ana/)).toBeTruthy();
+    expect(screen.getByText('Actor UID')).toBeTruthy();
+    expect(screen.getByText('Titular UID')).toBeTruthy();
+    expect(screen.getByText('owner-ana')).toBeTruthy();
     expect(screen.getByText('REDACTAR_CLAUSULA')).toBeTruthy();
   });
 

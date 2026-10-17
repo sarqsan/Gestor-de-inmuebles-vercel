@@ -28,8 +28,10 @@ import {
   crearNucleoIA,
   generateGeminiWithRetry,
   type ClienteProveedorIA,
+  type ContextoTitularResueltoIA,
   type EventoNucleoIA,
 } from './nucleoIA.js';
+import type { ServicioLlavesIA } from './llavesUsuarioIA.js';
 import { crearRegistroMemoria, type RegistroOperacionIA } from './registroOperacionesIA.js';
 import { crearGobiernoMemoria, type GobiernoMemoriaIA } from './gobiernoIA.js';
 import { resolverConfiguracionIA } from './configuracionIA.js';
@@ -261,11 +263,11 @@ const UID_POR_DEFECTO = 'uid-prueba-fase8';
  */
 export async function ejecutarSandboxIA(opciones: OpcionesSandboxIA): Promise<InformeSandboxIA> {
   const uidPrueba = opciones.uidPrueba ?? UID_POR_DEFECTO;
-  const usuarioIdPrueba = opciones.usuarioIdPrueba ?? `usuario-${uidPrueba}`;
+  const uidTitularPrueba = `titular-${uidPrueba}`;
+  const propietarioIdPrueba = `prop-${uidPrueba}`;
   const ahora = opciones.ahora ?? (() => new Date());
   const registro = crearRegistroMemoria();
   const gobierno: GobiernoMemoriaIA = crearGobiernoMemoria(opciones.politica, { listarOperaciones: () => registro.listar() });
-  const cuentasCredito = new Map<string, number>([[uidPrueba, opciones.creditoInicial ?? 100]]);
   const fijarPerfil = (uid: string, tipoPerfil: TipoPerfilIA) =>
     gobierno.fijarPerfil(
       uid,
@@ -273,12 +275,14 @@ export async function ejecutarSandboxIA(opciones: OpcionesSandboxIA): Promise<In
       { authUid: uid, tipoPerfil, estado: 'ACTIVO' },
     );
   fijarPerfil(uidPrueba, opciones.perfil);
+  fijarPerfil(uidTitularPrueba, 'PROPIETARIO');
   for (const extra of opciones.perfilesExtra ?? []) fijarPerfil(`uid-prueba-${extra.toLowerCase()}`, extra);
-  // Saldo de prueba: se concede con el propio gobierno (idempotente por clave).
-  const creditoInicial = cuentasCredito.get(uidPrueba) ?? 0;
+  // Saldo de prueba: se concede a la cuenta sintética del titular que aporta
+  // llave/cuota, nunca a la identidad del actor del ensayo.
+  const creditoInicial = opciones.creditoInicial ?? 100;
   if (creditoInicial > 0) {
     await gobierno.ajustarCredito({
-      uid: uidPrueba, adminUid: uidPrueba, claveIdempotencia: 'sandbox-credito-inicial',
+      uid: uidTitularPrueba, adminUid: uidPrueba, claveIdempotencia: 'sandbox-credito-inicial',
       creditos: creditoInicial, motivo: 'validación Fase 8', ahora: ahora(),
     });
   }
@@ -286,11 +290,25 @@ export async function ejecutarSandboxIA(opciones: OpcionesSandboxIA): Promise<In
   const simulado = opciones.proveedor ? null : proveedorSimulado();
   const cliente = opciones.proveedor ?? (simulado as ReturnType<typeof proveedorSimulado>).cliente;
   const llamadas = simulado?.llamadas ?? [];
+  // Llave y contrato sintéticos exclusivos del sandbox: nunca se consulta
+  // GEMINI_API_KEY ni se deriva un titular desde la petición del cliente.
+  const llaves = {
+    resolverParaOperacion: async () => ({ estado: 'DISPONIBLE' as const, valor: CLAVE_PROVEEDOR_SIMULADO, sufijo: 'ULADO' }),
+  } as unknown as ServicioLlavesIA;
+  const resolverTitularIA = async ({ uidActor }: { uidActor: string }): Promise<{ estado: 'RESUELTO'; contexto: ContextoTitularResueltoIA } | null> => uidActor === uidPrueba
+    ? {
+      estado: 'RESUELTO',
+      contexto: { propietarioUid: uidTitularPrueba, propietarioId: propietarioIdPrueba, contratoId: `contrato-${uidPrueba}`, inmuebleId: `inmueble-${uidPrueba}` },
+    }
+    : null;
   const eventos: EventoNucleoIA[] = [];
   const nucleo = crearNucleoIA({
     verificarToken: async (token) => (token === `token-${uidPrueba}` ? { uid: uidPrueba } : null),
     registro,
     gobierno,
+    llaves,
+    sinLlave: 'EXIGIR',
+    resolverTitularIA,
     crearClienteProveedor: () => cliente,
     log: (evento) => eventos.push(evento),
     ahora,

@@ -60,6 +60,10 @@ import { crearServicioSeguimientoIncidencias } from './server/seguimiento/seguim
 import { crearNotificadorIncidencias } from './server/seguimiento/notificadorIncidencias.js';
 import { montarRutasSeguimientoIncidencias } from './server/seguimiento/rutasSeguimientoIncidencias.js';
 import { crearRepositorioNotificacionesFirestore } from './server/notificaciones/repositorioNotificacionesFirestore.js';
+import { crearServicioJustificantesCobro } from './server/cobros/justificantesCobro.js';
+import { montarRutasJustificantesCobro } from './server/cobros/rutasJustificantesCobro.js';
+import { crearServicioActualizacionRenta } from './server/actualizacionRenta/servicioActualizacionRenta.js';
+import { montarRutasActualizacionRenta } from './server/actualizacionRenta/rutasActualizacionRenta.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -288,6 +292,20 @@ const servicioSeguimientoIncidencias = dependenciasIA.firestore
           : {}),
       }),
     })
+  : null;
+
+// P2 — custodia de justificantes y auditoría durables; si falta Firestore o
+// Storage/IAM no se instala un backend en memoria ni se finge la persistencia.
+const servicioJustificantesCobro = dependenciasIA.firestore && dependenciasIA.storage
+  ? crearServicioJustificantesCobro({ puerto: dependenciasIA.firestore, almacen: dependenciasIA.storage })
+  : null;
+
+// P4 · preview + confirmación explícita del actor autorizado. Las mutaciones se
+// escriben en un commit Firestore atómico, idempotente y append-only en colecciones
+// propias; el aviso queda PENDIENTE_ENVIO. No se conecta al cron ni a transportes,
+// no se modifica el contrato ni recibos/cobros históricos y no hay fallback en memoria.
+const servicioActualizacionRenta = dependenciasIA.firestore
+  ? crearServicioActualizacionRenta({ puerto: dependenciasIA.firestore })
   : null;
 
 app.post('/api/analizar-documento', nucleoIA.operacion('ANALIZAR_DOCUMENTO'), async (req, res) => {
@@ -2773,6 +2791,16 @@ app.get('/api/health', (req, res) => {
 montarRutasSeguimientoIncidencias(app, {
   verificarToken: dependenciasIA.verificarToken,
   servicio: servicioSeguimientoIncidencias,
+});
+
+montarRutasJustificantesCobro(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  servicio: servicioJustificantesCobro,
+});
+
+montarRutasActualizacionRenta(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  servicio: servicioActualizacionRenta,
 });
 
 montarRutasAdminIA(app, {

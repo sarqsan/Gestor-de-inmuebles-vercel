@@ -18,7 +18,8 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
-import { crearNucleoIA, clienteIA, type ClienteProveedorIA, type EventoNucleoIA } from '../server/ia/nucleoIA';
+import { crearNucleoIA, clienteIA, type ClienteProveedorIA, type ContextoProveedorIA, type EventoNucleoIA } from '../server/ia/nucleoIA';
+import type { ServicioLlavesIA } from '../server/ia/llavesUsuarioIA';
 import { crearGobiernoMemoria, type GobiernoMemoriaIA } from '../server/ia/gobiernoIA';
 import { crearRegistroMemoria } from '../server/ia/registroOperacionesIA';
 import { montarRutasAdminIA, type EventoAdminIA } from '../server/ia/adminIA';
@@ -97,14 +98,42 @@ async function montar(opciones: OpcionesMontaje = {}) {
   gobierno.fijarPerfil('uid-ana', { usuarioId: 'usr-ana', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' }, { authUid: 'uid-ana', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' });
   gobierno.fijarPerfil('uid-admin', { usuarioId: 'usr-admin', tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO' }, { authUid: 'uid-admin', tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO' });
   const { cliente, llamadas } = proveedorFalso();
+  const llaveTitularPrueba = 'mock-sintetico-llave-titular-ana-no-valida-para-proveedor';
+  const llaves = {
+    modo: 'MEMORIA' as const,
+    resolverParaOperacion: async (uid: string) => uid === 'uid-ana'
+      ? { estado: 'DISPONIBLE' as const, valor: llaveTitularPrueba, sufijo: 'titular-ana' }
+      : { estado: 'AUSENTE' as const },
+  } as unknown as ServicioLlavesIA;
+  const contextosProveedor: ContextoProveedorIA[] = [];
   const eventos: EventoNucleoIA[] = [];
   const eventosAdmin: EventoAdminIA[] = [];
   const nucleo = crearNucleoIA({
     verificarToken: async (token) => TOKENS[token] ?? null,
     registro,
     gobierno,
+    llaves,
     ...(opciones.errorGobierno ? { errorGobierno: opciones.errorGobierno } : {}),
-    crearClienteProveedor: () => (opciones.conCliente === false ? null : cliente),
+    crearClienteProveedor: (contexto) => {
+      if (contexto) contextosProveedor.push(contexto);
+      if (opciones.conCliente === false) return null;
+      return contexto?.uid === 'uid-ana' && contexto.llaveUsuario === llaveTitularPrueba ? cliente : null;
+    },
+    resolverTitularIA: async ({ uidActor, request }) => {
+      const contratoId = (request.body as { contratoId?: unknown } | undefined)?.contratoId;
+      if (uidActor !== 'uid-ana' || contratoId !== 'contrato-ana') {
+        return { estado: 'RECHAZADO', codigo: 'CONTRATO_NO_AUTORIZADO' };
+      }
+      return {
+        estado: 'RESUELTO',
+        contexto: {
+          propietarioUid: 'uid-ana',
+          propietarioId: 'prop-ana',
+          contratoId: 'contrato-ana',
+          inmuebleId: 'inmueble-ana',
+        },
+      };
+    },
     log: (evento) => eventos.push(evento),
   });
   const ejecuciones: unknown[] = [];
@@ -138,7 +167,7 @@ async function montar(opciones: OpcionesMontaje = {}) {
     Authorization: `Bearer ${token}`,
     [CABECERA_IDEMPOTENCIA_IA]: clave,
   });
-  return { nucleo, gobierno, registro, llamadas, eventos, eventosAdmin, ejecuciones, pedir, autenticado, politica: resultado.politica };
+  return { nucleo, gobierno, registro, llamadas, eventos, eventosAdmin, ejecuciones, contextosProveedor, llaveTitularPrueba, pedir, autenticado, politica: resultado.politica };
 }
 
 describe('IA Fase 2 · bloqueo preventivo con aprobación comercial pendiente', () => {
@@ -216,10 +245,19 @@ describe('IA Fase 2 · bloqueo preventivo con aprobación comercial pendiente', 
   it('el ÚNICO camino de activación es la política aprobada: con tarifa definida la operación ejecuta y llama al proveedor', async () => {
     const m = await montar({ politica: { costeCreditosPorOperacion: { REDACTAR_CLAUSULA: 1 } } });
     await m.gobierno.ajustarCredito({ uid: 'uid-ana', adminUid: 'uid-admin', claveIdempotencia: 'carga-inicial', creditos: 5, motivo: 'prueba', ahora: new Date() });
-    const r = await m.pedir('/api/redactar-clausula', m.autenticado(), { prompt: 'x' });
+    const r = await m.pedir('/api/redactar-clausula', m.autenticado(), { prompt: 'x', contratoId: 'contrato-ana' });
     expect(r.status).toBe(200);
     expect(await r.json()).toMatchObject({ motor: 'gemini' });
     expect(m.llamadas).toHaveLength(1);
+    expect(m.contextosProveedor).toEqual([
+      expect.objectContaining({
+        uid: 'uid-ana',
+        actorUid: 'uid-ana',
+        propietarioId: 'prop-ana',
+        operacion: 'REDACTAR_CLAUSULA',
+        llaveUsuario: m.llaveTitularPrueba,
+      }),
+    ]);
     const cuenta = await m.gobierno.cuenta('uid-ana');
     expect(cuenta?.saldoCreditos).toBe(4); // consume exactamente el coste definido
   });

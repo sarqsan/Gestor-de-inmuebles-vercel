@@ -1,8 +1,10 @@
 /** BLOQUE E — Recibos y pagos (cobros del contrato + justificantes). */
-import React, { useMemo, useState } from 'react';
-import { CheckCircle2, Clock, Download, FileWarning, Receipt } from 'lucide-react';
-import type { ContratoFormalizacion } from '../../types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, Clock, Download, FileWarning, Receipt, RefreshCw } from 'lucide-react';
+import type { ContratoFormalizacion, RegistroJustificanteCobro } from '../../types';
 import { obtenerUrlDescarga } from '../../lib/suministrosFirestore';
+import { consultarJustificantesCobro, ErrorApiJustificantesCobro } from '../../lib/justificantesCobroApi';
+import { PresentarJustificanteCobro } from './PresentarJustificanteCobro';
 
 interface Props {
   contrato: ContratoFormalizacion;
@@ -46,6 +48,27 @@ function fmtFecha(iso?: string): string {
 }
 
 export const PortalRecibos: React.FC<Props> = ({ contrato }) => {
+  const [justificantes, setJustificantes] = useState<RegistroJustificanteCobro[]>([]);
+  const [errorP2, setErrorP2] = useState('');
+  const [cargandoP2, setCargandoP2] = useState(false);
+  const cargarJustificantes = useCallback(async () => {
+    if (!contrato.id) return;
+    setCargandoP2(true);
+    try {
+      const resultado = await consultarJustificantesCobro([contrato.id]);
+      setJustificantes(resultado.items);
+      setErrorP2('');
+    } catch (error) {
+      setErrorP2(error instanceof ErrorApiJustificantesCobro
+        ? error.message
+        : 'No se pudo consultar el estado de los justificantes.');
+    } finally {
+      setCargandoP2(false);
+    }
+  }, [contrato.id]);
+
+  useEffect(() => { void cargarJustificantes(); }, [cargarJustificantes]);
+
   const cobros = useMemo(
     () => [...(contrato.registroCobros || [])].sort((a, b) => (a.periodoMesAnio < b.periodoMesAnio ? 1 : -1)),
     [contrato]
@@ -73,6 +96,15 @@ export const PortalRecibos: React.FC<Props> = ({ contrato }) => {
         </p>
         <p className="mt-1 font-mono text-[11px] bg-slate-50 rounded-lg p-2 break-all">{contrato.propietarioIban}</p>
       </section>
+
+      {errorP2 && (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <p>{errorP2} La presentación no se considera guardada hasta recibir confirmación durable.</p>
+          <button type="button" onClick={() => void cargarJustificantes()} disabled={cargandoP2} className="mt-2 inline-flex items-center gap-1 font-bold underline disabled:opacity-50">
+            <RefreshCw className={`h-3 w-3 ${cargandoP2 ? 'animate-spin' : ''}`} /> Actualizar estado
+          </button>
+        </div>
+      )}
 
       {cobros.length === 0 && (
         <p className="text-center text-sm text-slate-500 py-8">Aún no hay recibos generados para este contrato.</p>
@@ -110,6 +142,12 @@ export const PortalRecibos: React.FC<Props> = ({ contrato }) => {
                 storagePath={c.justificante.storagePath}
               />
             )}
+            <PresentarJustificanteCobro
+              contratoId={contrato.id}
+              cobro={c}
+              registro={justificantes.find((j) => j.cobroPeriodoId === c.id)}
+              onActualizado={cargarJustificantes}
+            />
           </article>
         );
       })}

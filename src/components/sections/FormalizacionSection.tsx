@@ -13,6 +13,7 @@ import { getFormalizacionEstadoInfo, imprimirContratoPDF, generarTextoActaEntreg
 import { formatEuro, formatDate } from '../../utils/formatters';
 import { subscribeHabitacionesInmueble, saveHabitacionFirestore, saveContratoFirestore } from '../../lib/firebase';
 import { CicloContractualPanel } from '../CicloContractualPanel';
+import { ActualizacionRentaPreviewPanel } from '../ActualizacionRentaPreviewPanel';
 import {
   FileText,
   Key,
@@ -416,6 +417,8 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                     </div>
                   </div>
                 </div>
+
+                <ActualizacionRentaPreviewPanel contrato={contrato} disabled={!puedeEditar} />
 
                 {/* GAP 2: Ciclo contractual (modalidad, anexos, finalización, finiquito) */}
                 <CicloContractualPanel

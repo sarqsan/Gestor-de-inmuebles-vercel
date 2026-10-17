@@ -38,7 +38,11 @@ export type OrigenRespuestaIA = 'PROVEEDOR' | 'RESPALDO' | 'ERROR';
 /** Datos de apertura: se escriben ANTES de ejecutar la operación. */
 export interface AperturaOperacionIA {
   id: string;
+  /** Actor autenticado: clave de idempotencia y trazabilidad. */
   uid: string;
+  /** Titular contractual que aporta llave y cuota (no el actor gestor/inquilino). */
+  uidTitular?: string;
+  propietarioId?: string;
   operacion: IdOperacionIA;
   ruta: string;
   iniciadaEn: Date;
@@ -71,6 +75,8 @@ export interface RegistroOperacionIA extends Partial<Omit<CierreOperacionIA, 'es
   version: number;
   id: string;
   uid: string;
+  uidTitular?: string;
+  propietarioId?: string;
   operacion: IdOperacionIA;
   ruta: string;
   estado: EstadoOperacionIA;
@@ -91,7 +97,7 @@ export interface RegistroOperacionesIA {
 
 /** Lista blanca de campos persistidos: cualquier otro dato queda fuera del registro. */
 export const CAMPOS_REGISTRO_IA = [
-  'version', 'id', 'uid', 'operacion', 'ruta', 'estado', 'iniciadaEn',
+  'version', 'id', 'uid', 'uidTitular', 'propietarioId', 'operacion', 'ruta', 'estado', 'iniciadaEn',
   'codigoHttp', 'finalizadaEn', 'duracionMs', 'origenRespuesta',
   'llamadasProveedor', 'llamadasProveedorFallidas', 'modelos',
   'tokensEntrada', 'tokensSalida', 'tokensRazonamiento', 'tokensTotales', 'errorProveedor',
@@ -103,6 +109,8 @@ function documentoApertura(apertura: AperturaOperacionIA): RegistroOperacionIA {
     version: VERSION_REGISTRO_IA,
     id: apertura.id,
     uid: apertura.uid,
+    ...(apertura.uidTitular ? { uidTitular: apertura.uidTitular } : {}),
+    ...(apertura.propietarioId ? { propietarioId: apertura.propietarioId } : {}),
     operacion: apertura.operacion,
     ruta: apertura.ruta,
     estado: 'EN_CURSO',

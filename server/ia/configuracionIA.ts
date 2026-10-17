@@ -34,7 +34,13 @@
  */
 import { resolverAccesoFirebase, type CodigoErrorConfiguracionFirebase } from '../titularidades/configuracionFirebase.js';
 import { ClienteFirestoreRest, verificarIdToken, type CuentaServicio } from '../titularidades/googleBackend.js';
-import { crearClienteGemini, type DependenciasNucleoIA, type ModoRegistroIA } from './nucleoIA.js';
+import { ClienteGoogleStorageRest, resolverBucketStorage } from '../cobros/almacenGoogleStorage.js';
+import {
+  crearClienteGemini,
+  type DependenciasNucleoIA,
+  type ModoRegistroIA,
+  type ResultadoResolverTitularNucleoIA,
+} from './nucleoIA.js';
 import { crearRegistroFirestore, crearRegistroMemoria } from './registroOperacionesIA.js';
 import {
   crearGobiernoFirestore,
@@ -55,6 +61,45 @@ import {
 } from '../../src/ia/llavesUsuarioContrato.js';
 import { resolverClaveMaestraLlaves } from './cifradoLlavesIA.js';
 import { crearServicioLlavesFirestore, crearServicioLlavesMemoria, type ServicioLlavesIA } from './llavesUsuarioIA.js';
+import { crearServicioContextoTitularIA } from './contextoTitularIA.js';
+import type { IdOperacionIA } from '../../src/ia/catalogoOperacionesIA.js';
+
+/**
+ * Referencias de contrato admitidas por cada ruta IA. El identificador puede
+ * venir del cliente como localizador, nunca como prueba de permiso: el servicio
+ * vuelve a leer contrato/actor/cartera/titular en Firestore. No se acepta un
+ * `propietarioId`, UID pagador o llave suministrados por el cliente.
+ */
+const RUTAS_CONTRATO_IA: Readonly<Record<IdOperacionIA, readonly string[]>> = {
+  ANALIZAR_DOCUMENTO: ['contratoId', 'contexto.contratoId', 'candidatoManualData.contratoId'],
+  GENERAR_CORREO_ASEGURADORA: ['contratoId', 'solicitudSeguro.contratoId'],
+  ANALIZAR_RESPUESTA_ASEGURADORA: ['contratoId'],
+  ASISTENTE_INTERPRETAR: ['contratoId'],
+  ASISTENTE_INCIDENCIAS_INQUILINO: ['contratoId'],
+  ANALIZAR_CUESTIONARIO: ['contratoId'],
+  REDACTAR_CLAUSULA: ['contratoId', 'contextoInmueble.contratoId'],
+  ANALIZAR_INSPECCION: ['contratoId', 'contexto.contratoId'],
+  PROPONER_MEJORAS: ['contratoId'],
+  ESTIMAR_PRICING: ['contratoId'],
+  GENERAR_KIT_PUBLICACION: ['contratoId'],
+  ANALIZAR_INCIDENCIA: ['contratoId', 'incidencia.contratoId', 'contratoContexto.contratoId'],
+};
+
+function objetoPeticionIA(valor: unknown): Record<string, unknown> {
+  return typeof valor === 'object' && valor !== null && !Array.isArray(valor)
+    ? valor as Record<string, unknown>
+    : {};
+}
+
+/** Devuelve sólo un id sintácticamente válido; la autorización sucede en Firestore. */
+export function contratoIdDePeticionIA(operacion: IdOperacionIA, cuerpo: unknown): string | null {
+  const raiz = objetoPeticionIA(cuerpo);
+  for (const ruta of RUTAS_CONTRATO_IA[operacion]) {
+    const valor = ruta.split('.').reduce<unknown>((actual, segmento) => objetoPeticionIA(actual)[segmento], raiz);
+    if (typeof valor === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/.test(valor)) return valor;
+  }
+  return null;
+}
 
 export interface ConfiguracionNucleoIA {
   proyectoId: string | null;
@@ -88,6 +133,8 @@ export function crearDependenciasNucleoIA(
   errorPolitica?: string;
   /** Fuente autorizada de datos (Firestore REST con credencial de servicio) o `null`. */
   firestore: ClienteFirestoreRest | null;
+  /** Storage privado de justificantes P2; `null` ⇒ 503, nunca memoria temporal. */
+  storage: ClienteGoogleStorageRest | null;
   /** FASE 9 · servicio de llaves de usuario (`null` ⇒ NO_CONFIGURADO). */
   llaves: ServicioLlavesIA | null;
   /** FASE 9 · qué hace el núcleo sin llave del usuario. */
@@ -104,8 +151,11 @@ export function crearDependenciasNucleoIA(
   let registro: DependenciasNucleoIA['registro'] = null;
   let gobierno: GobiernoIA | null = null;
   let firestore: ClienteFirestoreRest | null = null;
+  let storage: ClienteGoogleStorageRest | null = null;
   if (acceso.cuenta && configuracion.modoRegistro === 'FIRESTORE' && configuracion.baseDatosId) {
     firestore = new ClienteFirestoreRest({ cuenta: acceso.cuenta, baseDatosId: configuracion.baseDatosId });
+    const bucket = resolverBucketStorage();
+    if (bucket) storage = new ClienteGoogleStorageRest({ cuenta: acceso.cuenta, bucket });
     registro = crearRegistroFirestore(firestore);
     if (politica) gobierno = crearGobiernoFirestore(firestore, politica);
   } else if (configuracion.modoRegistro === 'MEMORIA') {
@@ -134,18 +184,37 @@ export function crearDependenciasNucleoIA(
   }
   const sinLlave = modoSinLlaveDesdeEntorno(entorno);
   const verificacionLlaves = modoVerificacionDesdeEntorno(entorno);
+  const servicioContextoTitularIA = firestore ? crearServicioContextoTitularIA(firestore) : null;
 
   const { proyectoId, errorConfiguracion } = configuracion;
   return {
     configuracion,
     politica,
     firestore,
+    storage,
     llaves,
     sinLlave,
     verificacionLlaves,
     ...(errorPolitica ? { errorPolitica } : {}),
     registro,
     gobierno,
+    ...(servicioContextoTitularIA ? {
+      resolverTitularIA: async ({ uidActor, operacion, request }: { uidActor: string; operacion: IdOperacionIA; request: import('express').Request }): Promise<ResultadoResolverTitularNucleoIA> => {
+        const contratoId = contratoIdDePeticionIA(operacion, request.body);
+        if (!contratoId) return { estado: 'RECHAZADO', codigo: 'PETICION_INVALIDA' };
+        const resultado = await servicioContextoTitularIA.resolver({ uidActor, contratoId });
+        if (resultado.estado !== 'RESUELTO') return { estado: 'RECHAZADO', codigo: resultado.codigo };
+        return {
+          estado: 'RESUELTO',
+          contexto: {
+            propietarioUid: resultado.propietarioUid,
+            propietarioId: resultado.propietarioId,
+            contratoId: resultado.contratoId,
+            inmuebleId: resultado.inmuebleId,
+          },
+        };
+      },
+    } : {}),
     ...(errorConfiguracion ? { errorConfiguracion } : {}),
     ...(errorPolitica ? { errorGobierno: 'POLITICA_IA_INVALIDA' as const } : {}),
     ...(errorLlaves ? { errorLlaves } : {}),

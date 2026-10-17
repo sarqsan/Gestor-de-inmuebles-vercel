@@ -16,7 +16,8 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
-import { crearNucleoIA, clienteIA, type ClienteProveedorIA } from '../server/ia/nucleoIA';
+import { crearNucleoIA, clienteIA, type ClienteProveedorIA, type ResultadoResolverTitularNucleoIA } from '../server/ia/nucleoIA';
+import type { ServicioLlavesIA } from '../server/ia/llavesUsuarioIA';
 import { crearGobiernoMemoria, type GobiernoMemoriaIA } from '../server/ia/gobiernoIA';
 import { crearRegistroMemoria } from '../server/ia/registroOperacionesIA';
 import { montarRutasAdminIA } from '../server/ia/adminIA';
@@ -98,11 +99,26 @@ async function montar(opciones: OpcionesMontaje = {}) {
   gobierno.fijarPerfil('uid-ana', { usuarioId: 'usr-ana', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' }, { authUid: 'uid-ana', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' });
   gobierno.fijarPerfil('uid-luis', { usuarioId: 'usr-luis', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' }, { authUid: 'uid-luis', tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' });
   gobierno.fijarPerfil('uid-admin', { usuarioId: 'usr-admin', tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO' }, { authUid: 'uid-admin', tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO' });
+  for (const uid of ['uid-ana', 'uid-luis', 'uid-admin']) {
+    gobierno.fijarPerfil(`owner-${uid}`, { usuarioId: `owner-${uid}`, tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' }, { authUid: `owner-${uid}`, tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' });
+  }
+  const llaves = {
+    resolverParaOperacion: async (uid: string) => ({ estado: 'DISPONIBLE' as const, valor: `mock-key-${uid}`, sufijo: 'MOCK' }),
+  } as unknown as ServicioLlavesIA;
+  const resolverTitularIA = async ({ uidActor }: { uidActor: string }): Promise<ResultadoResolverTitularNucleoIA> => ({
+    estado: 'RESUELTO',
+    contexto: {
+      propietarioUid: `owner-${uidActor}`, propietarioId: `prop-${uidActor}`,
+      contratoId: `contract-${uidActor}`, inmuebleId: `asset-${uidActor}`,
+    },
+  });
   const { cliente, llamadas } = proveedorFalso({ fallos: opciones.fallosProveedor });
   const nucleo = crearNucleoIA({
     verificarToken: async (token) => TOKENS[token] ?? null,
     registro,
     gobierno,
+    llaves,
+    resolverTitularIA,
     crearClienteProveedor: () => cliente,
     ahora: AHORA,
     log: () => undefined,
@@ -150,10 +166,10 @@ async function montar(opciones: OpcionesMontaje = {}) {
   const saldoA = opciones.saldoA ?? 10;
   const saldoB = opciones.saldoB ?? 3;
   if (saldoA > 0) {
-    await gobierno.ajustarCredito({ uid: 'uid-ana', adminUid: 'uid-admin', claveIdempotencia: 'is-carga-a', creditos: saldoA, motivo: 'prueba', ahora: AHORA() });
+    await gobierno.ajustarCredito({ uid: 'owner-uid-ana', adminUid: 'uid-admin', claveIdempotencia: 'is-carga-a', creditos: saldoA, motivo: 'prueba', ahora: AHORA() });
   }
   if (saldoB > 0) {
-    await gobierno.ajustarCredito({ uid: 'uid-luis', adminUid: 'uid-admin', claveIdempotencia: 'is-carga-b', creditos: saldoB, motivo: 'prueba', ahora: AHORA() });
+    await gobierno.ajustarCredito({ uid: 'owner-uid-luis', adminUid: 'uid-admin', claveIdempotencia: 'is-carga-b', creditos: saldoB, motivo: 'prueba', ahora: AHORA() });
   }
   return { gobierno, registro, llamadas, operar, admin };
 }
@@ -163,8 +179,8 @@ describe('IA Fase 2 · aislamiento de créditos entre usuarios', () => {
     const m = await montar(); // A=10, B=3, coste 2
     const r = await m.operar('token-a', 'clave-iso-a1');
     expect(r.status).toBe(200);
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.saldoCreditos).toBe(8);
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(3);
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.saldoCreditos).toBe(8);
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(3);
     expect(m.registro.listar()[0].uid).toBe('uid-ana');
   });
 
@@ -172,29 +188,29 @@ describe('IA Fase 2 · aislamiento de créditos entre usuarios', () => {
     const m = await montar();
     const r = await m.operar('token-b', 'clave-iso-b1');
     expect(r.status).toBe(200);
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(1);
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.saldoCreditos).toBe(10);
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(1);
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.saldoCreditos).toBe(10);
   });
 
   it('un usuario ordinario no puede consultar ni modificar el saldo de otro: las rutas de administración exigen ADMINISTRADOR', async () => {
     const m = await montar();
-    const consulta = await m.admin('/api/ia/admin/cuenta/uid-luis', 'token-a');
+    const consulta = await m.admin('/api/ia/admin/cuenta/owner-uid-luis', 'token-a');
     expect(consulta.status).toBe(403);
     expect(await consulta.json()).toMatchObject({ codigo: 'NO_ADMINISTRADOR' });
-    const credito = await m.admin('/api/ia/admin/cuenta/uid-luis/credito', 'token-a', { creditos: 100, motivo: 'suplantación' }, 'clave-iso-mal-1');
+    const credito = await m.admin('/api/ia/admin/cuenta/owner-uid-luis/credito', 'token-a', { creditos: 100, motivo: 'suplantación' }, 'clave-iso-mal-1');
     expect(credito.status).toBe(403);
-    const bloqueo = await m.admin('/api/ia/admin/cuenta/uid-luis/bloqueo', 'token-b', { bloqueado: true, motivo: 'suplantación' }, 'clave-iso-mal-2');
+    const bloqueo = await m.admin('/api/ia/admin/cuenta/owner-uid-luis/bloqueo', 'token-b', { bloqueado: true, motivo: 'suplantación' }, 'clave-iso-mal-2');
     expect(bloqueo.status).toBe(403);
     // y no existe ninguna ruta de usuario para saldos: el saldo ajeno es inaccesible
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(3);
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(3);
   });
 
   it('suplantar el uid en el cuerpo no mueve saldo ajeno: el cargo va al uid del TOKEN', async () => {
     const m = await montar();
     const r = await m.operar('token-a', 'clave-iso-spoof1', { uid: 'uid-luis', usuarioId: 'uid-luis', propietarioId: 'uid-luis' });
     expect(r.status).toBe(200);
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.saldoCreditos).toBe(8); // paga A
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(3); // B intacto
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.saldoCreditos).toBe(8); // paga A
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(3); // B intacto
     expect(m.registro.listar()[0].uid).toBe('uid-ana');
   });
 
@@ -204,16 +220,16 @@ describe('IA Fase 2 · aislamiento de créditos entre usuarios', () => {
     const rb = await m.operar('token-b', 'clave-compartida-1');
     expect(ra.status).toBe(200);
     expect(rb.status).toBe(200); // no es duplicado: el id incluye el uid del token
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.saldoCreditos).toBe(8);
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(1);
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.saldoCreditos).toBe(8);
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(1);
   });
 
   it('el reembolso vuelve a la cuenta ORIGINAL de la operación, nunca a otra', async () => {
     const m = await montar({ fallosProveedor: 5 }); // proveedor siempre falla ⇒ exitosas 0 ⇒ reembolso
     const r = await m.operar('token-a', 'clave-iso-reemb-1');
     expect(r.status).toBe(200); // respaldo heurístico
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.saldoCreditos).toBe(10); // reembolso íntegro a A
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(3); // B sin cambios
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.saldoCreditos).toBe(10); // reembolso íntegro a A
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(3); // B sin cambios
     const [registro] = m.registro.listar();
     expect(registro.creditosReembolsados).toBe(2);
     expect(registro.uid).toBe('uid-ana');
@@ -228,8 +244,8 @@ describe('IA Fase 2 · aislamiento de créditos entre usuarios', () => {
     ]);
     const codigos = respuestas.map((r) => r.status).sort();
     expect(codigos).toEqual([200, 200, 402]); // exactamente dos consumen; la tercera, SALDO_INSUFICIENTE
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.saldoCreditos).toBe(0); // nunca negativo
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(3);
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.saldoCreditos).toBe(0); // nunca negativo
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(3);
   });
 
   it('las cuotas son por usuario: A agota su cuota diaria y B sigue operando', async () => {
@@ -241,19 +257,19 @@ describe('IA Fase 2 · aislamiento de créditos entre usuarios', () => {
     expect(a2.status).toBe(429); // CUOTA_DIA_EXCEDIDA de A
     expect(await a2.json()).toMatchObject({ codigo: 'CUOTA_DIA_EXCEDIDA' });
     expect(b1.status).toBe(200); // B tiene su propia ventana
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.ventanaDiaUsos).toBe(1);
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.ventanaDiaUsos).toBe(1);
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.ventanaDiaUsos).toBe(1);
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.ventanaDiaUsos).toBe(1);
   });
 
   it('el ajuste administrativo de crédito sólo afecta al destinatario y queda auditado', async () => {
     const m = await montar();
-    const r = await m.admin('/api/ia/admin/cuenta/uid-luis/credito', 'token-admin', { creditos: 5, motivo: 'recarga B' }, 'clave-iso-ajuste');
+    const r = await m.admin('/api/ia/admin/cuenta/owner-uid-luis/credito', 'token-admin', { creditos: 5, motivo: 'recarga B' }, 'clave-iso-ajuste');
     expect(r.status).toBe(200);
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(8); // 3 + 5
-    expect(await (await m.gobierno.cuenta('uid-ana'))?.saldoCreditos).toBe(10); // A intacto
-    const duplicado = await m.admin('/api/ia/admin/cuenta/uid-luis/credito', 'token-admin', { creditos: 5, motivo: 'recarga B' }, 'clave-iso-ajuste');
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(8); // 3 + 5
+    expect(await (await m.gobierno.cuenta('owner-uid-ana'))?.saldoCreditos).toBe(10); // A intacto
+    const duplicado = await m.admin('/api/ia/admin/cuenta/owner-uid-luis/credito', 'token-admin', { creditos: 5, motivo: 'recarga B' }, 'clave-iso-ajuste');
     expect(duplicado.status).toBe(409); // reintento idempotente: sin doble efecto
-    expect(await (await m.gobierno.cuenta('uid-luis'))?.saldoCreditos).toBe(8);
+    expect(await (await m.gobierno.cuenta('owner-uid-luis'))?.saldoCreditos).toBe(8);
   });
 
   it('tras múltiples operaciones mezcladas, cada cuenta conserva saldos y contadores independientes', async () => {
@@ -265,8 +281,8 @@ describe('IA Fase 2 · aislamiento de créditos entre usuarios', () => {
     const rb5 = await m.operar('token-b', 'clave-mix-5');
     expect(rb4.status).toBe(402);
     expect(rb5.status).toBe(402);
-    const a = await m.gobierno.cuenta('uid-ana');
-    const b = await m.gobierno.cuenta('uid-luis');
+    const a = await m.gobierno.cuenta('owner-uid-ana');
+    const b = await m.gobierno.cuenta('owner-uid-luis');
     expect(a?.saldoCreditos).toBe(6);
     expect(a?.totalOperaciones).toBe(2);
     expect(a?.totalCreditosConsumidos).toBe(4);

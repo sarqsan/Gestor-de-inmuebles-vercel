@@ -1019,6 +1019,20 @@ export type ModalidadContractual =
   | 'LOCAL_USO_DISTINTO'
   | 'HABITACION';
 
+/** Evidencia explícita de la cláusula de revisión de renta; nunca se infiere. */
+export interface EvidenciaClausulaActualizacionRenta {
+  estado: 'ACREDITADA' | 'AUSENTE_CONFIRMADA' | 'NO_ACREDITADA';
+  textoExtracto?: string;
+  referenciaDocumental?: string;
+  mecanismo?: 'IRAV' | 'IPC' | 'IGC' | 'SIN_DETALLAR' | 'OTRO';
+}
+
+/** Alcance de uso documentado para una habitación o arrendamiento temporal. */
+export interface EvidenciaUsoActualizacionRenta {
+  usoHabitacion?: 'VIVIENDA_HABITUAL' | 'VIVIENDA_TEMPORAL';
+  referenciaDocumental?: string;
+}
+
 /** Motivo/tipo por el que un contrato alcanza un estado terminal. */
 export type TipoFinalizacionContrato =
   | 'FINALIZACION_NATURAL'
@@ -1276,7 +1290,16 @@ export interface ContratoFormalizacion {
   fianzaLegalImporte: number;
   garantiaAdicionalMeses: number; // Máximo 2 según LAU
   garantiaAdicionalImporte: number;
+  /** Fecha en que empieza la vigencia económica/posesoria; no sustituye a la fecha de celebración. */
   fechaInicioContrato: string; // YYYY-MM-DD
+  /** Fecha de celebración/firma acreditada; se usa para seleccionar cohorte normativa, nunca como aniversario por defecto. */
+  fechaCelebracionContrato?: string; // YYYY-MM-DD
+  /** Evidencia documental de pacto de actualización o de su ausencia confirmada. */
+  evidenciaClausulaActualizacionRenta?: EvidenciaClausulaActualizacionRenta;
+  /** Referencia verificable al contrato original asociado a la evidencia anterior. */
+  referenciaContratoActualizacionRenta?: string;
+  /** Evidencia de uso necesaria para clasificar temporada/habitación sin inferencias. */
+  evidenciaUsoActualizacionRenta?: EvidenciaUsoActualizacionRenta;
   fechaFinContrato?: string; // YYYY-MM-DD (fecha de finalización, extinción o salida del inquilino)
   esVigente?: boolean; // Indica si es el contrato actualmente activo/en vigor para el inmueble
   modalidadAlquiler?: 'completo' | 'habitaciones';
@@ -1299,7 +1322,7 @@ export interface ContratoFormalizacion {
   clausulasPersonalizadas: ClausulaPersonalizada[];
 
   // ---- GAP 2: MODALIDAD CONTRACTUAL Y CICLO DE VIDA ----
-  /** Modalidad jurídica del contrato (ver ModalidadContractual). Si no existe, se infiere del resto de datos. */
+  /** Modalidad jurídica del contrato (ver ModalidadContractual). P4 no la infiere: si falta, exige revisión. */
   modalidadContractual?: ModalidadContractual;
   /** Finalidad o uso pactado (actividad en locales, uso concreto en temporada/habitación). */
   finalidadUso?: string;
@@ -1388,6 +1411,64 @@ export interface JustificanteCobro {
   fechaSubida: string;
   subidoPor?: string;
   notas?: string;
+}
+
+/** Estado del flujo documental P2; no es el estado del dinero/cobro. */
+export type EstadoJustificanteCobro =
+  | 'SUBIENDO'
+  | 'ERROR_SUBIDA'
+  | 'PENDIENTE_REVISION'
+  | 'ACEPTADO'
+  | 'RECHAZADO';
+
+export type ActorJustificanteCobro = 'INQUILINO' | 'PROPIETARIO' | 'GESTOR';
+export type MetodoPagoDeclaradoJustificante = 'transferencia' | 'domiciliacion' | 'bizum' | 'efectivo' | 'otro';
+
+/** Vista pública del registro privado `justificantes_cobro` servida por API autorizada. */
+export interface RegistroJustificanteCobro {
+  id: string;
+  contratoId: string;
+  cobroPeriodoId: string;
+  propietarioId: string;
+  inmuebleId: string;
+  estado: EstadoJustificanteCobro;
+  version: number;
+  intento: number;
+  nombreArchivo: string;
+  tipoMime: string;
+  tamanoBytes: number;
+  importeDeclarado: number;
+  fechaPagoDeclarada: string;
+  metodoPagoDeclarado: MetodoPagoDeclaradoJustificante;
+  subidoEn: string;
+  actualizadoEn: string;
+  subidoPorUsuarioId: string;
+  revisadoEn?: string;
+  revisadoPorUsuarioId?: string;
+  motivoRevision?: string;
+}
+
+/** Evento inmutable de `justificantes_cobro_auditoria`; rectificaciones añaden eventos. */
+export interface EventoAuditoriaJustificanteCobro {
+  id: string;
+  justificanteId: string;
+  contratoId: string;
+  cobroPeriodoId: string;
+  accion: 'SUBIDA_INICIADA' | 'REINTENTO_SUBIDA' | 'PRESENTADO' | 'ERROR_SUBIDA'
+    | 'ACEPTADO' | 'RECHAZADO' | 'RECTIFICADO';
+  estadoAnterior?: EstadoJustificanteCobro;
+  estadoNuevo: EstadoJustificanteCobro;
+  creadoEn: string;
+  actor: ActorJustificanteCobro;
+  actorUsuarioId: string;
+  motivo?: string;
+  nombreArchivo?: string;
+  tipoMime?: string;
+  tamanoBytes?: number;
+  importeDeclarado?: number;
+  fechaPagoDeclarada?: string;
+  metodoPagoDeclarado?: MetodoPagoDeclaradoJustificante;
+  archivoDisponible: boolean;
 }
 
 export interface HistorialCobroItem {

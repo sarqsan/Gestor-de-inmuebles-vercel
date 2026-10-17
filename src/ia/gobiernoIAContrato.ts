@@ -115,7 +115,11 @@ export interface CuentaIADTO {
 /** Resumen de operación para el panel (sin prompts ni datos personales). */
 export interface OperacionResumenIADTO {
   id: string;
+  /** UID del actor autenticado que inició la operación. */
   uid: string;
+  /** UID de la cuenta titular a la que se imputan llave, cuota y créditos. */
+  uidTitular?: string;
+  propietarioId?: string;
   operacion: string;
   estado: string;
   codigoHttp?: number;

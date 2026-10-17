@@ -478,7 +478,7 @@ export const MorosidadSection: React.FC<MorosidadSectionProps> = (props) => {
                                   <td className="px-4 py-3 text-xs text-slate-600">
                                     {prog.proximaFecha || '—'}
                                     <div className="text-[10px] text-slate-400">
-                                      Los cobros proceden de la fuente oficial (cobrosEngine/GAP 6); el compromiso no altera ningún recibo.
+                                      Los cobros ya registrados proceden de cobrosEngine; la conciliación bancaria P3 no crea ni modifica recibos.
                                     </div>
                                   </td>
                                 </tr>

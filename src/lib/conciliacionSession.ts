@@ -1,19 +1,13 @@
 /**
- * PUENTE DE SESIÓN — Conciliación bancaria (GAP 6) → Tesorería (BLOQUE B).
- * (integración canónica 2026-09-20)
+ * PUENTE LEGACY GAP6 → Tesorería (BLOQUE B).
  *
- * El motor de conciliación bancaria (GAP 6) trabaja con movimientos importados
- * por sesión (CSV/OFX/MT940/Norma43) y sus propuestas de conciliación en
- * memoria; no tiene persistencia propia en Firestore (estado actual del GAP 6).
+ * La persistencia P3 y sus Rules requieren aún validación con emulador; en todo
+ * caso, P3 deliberadamente NO publica importaciones ni sugerencias a este
+ * espejo: importar no crea cobros, evidencia aceptada ni altera saldos.
  *
- * Este módulo es un ESPEJO DE SESIÓN aditivo: la sección de Conciliación
- * registra en él los movimientos y las propuestas (sin alterar su lógica) y
- * la sección de Tesorería lo suscribe para ofrecer el selector de EVIDENCIA
- * de pago de liquidaciones a partir de movimientos con propuesta CONFIRMADA
- * (cadena propietario→liquidación→orden→PAIN.001→evidencia→conciliación).
- *
- * Sin conciliación automática aquí: solo se expone la evidencia de un
- * movimiento ya conciliado/confirmado por el GAP 6.
+ * El espejo se conserva por compatibilidad con consumidores heredados. Solo
+ * una integración futura explícita podrá exponer movimientos con decisión
+ * manual CONCILIADO; una propuesta o un justificante aceptado no bastan.
  */
 import type { MovimientoBancario, PropuestaConciliacion } from '../types/conciliacion';
 
@@ -39,8 +33,7 @@ function notificar(): void {
 }
 
 /**
- * Registra movimientos importados (idempotente por `hashIdempotencia`,
- * la misma clave de deduplicación que usa el GAP 6).
+ * API de compatibilidad legacy. P3 no la llama ni publica sus documentos en sesión.
  */
 export function registrarMovimientosSesion(nuevos: MovimientoBancario[]): void {
   if (!nuevos || nuevos.length === 0) return;
@@ -52,9 +45,7 @@ export function registrarMovimientosSesion(nuevos: MovimientoBancario[]): void {
 }
 
 /**
- * Registra/actualiza propuestas de conciliación (idempotente por `id`:
- * la última versión por id es la que se conserva — refleja el estado actual
- * del GAP 6 tras confirmar/rechazar).
+ * API de compatibilidad legacy; no sustituye el historial transaccional append-only de P3.
  */
 export function registrarPropuestasSesion(actualizadas: PropuestaConciliacion[]): void {
   if (!actualizadas || actualizadas.length === 0) return;

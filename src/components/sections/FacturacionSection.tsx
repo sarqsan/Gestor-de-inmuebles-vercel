@@ -885,7 +885,7 @@ function DetalleFactura({
 
         <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5" />
-          Factura emitida ≠ cobro. El pago lo gestiona Cobros y Conciliación (GAP6). Nada se renunera ni altera silenciosamente.
+          Factura emitida ≠ cobro. Registre el pago por la vía de Cobros; importar o conciliar un extracto P3 no crea ingresos ni cambia saldos.
         </div>
       </div>
     </div>

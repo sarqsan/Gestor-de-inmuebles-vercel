@@ -87,9 +87,9 @@ interface TesoreriaSectionProps {
   mandatos: MandatoSEPA[];
   trabajos?: TrabajoProfesional[];
   currentUser?: UsuarioApp | null;
-  /** INTEGRACIÓN A (GAP 6): movimientos bancarios canónicos para evidencia de pago. */
+  /** Puente legacy opcional: P3 no publica movimientos ni sugerencias en Tesorería. */
   movimientosBancarios?: MovimientoBancario[];
-  /** INTEGRACIÓN A (GAP 6): propuestas de conciliación (estado CONFIRMADO = conciliado). */
+  /** Movimientos del puente heredado; P3 no publica imports ni sugerencias a Tesorería. */
   propuestasConciliacion?: PropuestaConciliacion[];
   /** INTEGRACIÓN A: gastos del modelo oficial (colección `gastos`) para importación. */
   gastosCanonicos?: Gasto[];
@@ -183,7 +183,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
   const [pagoFecha, setPagoFecha] = useState(new Date().toISOString().slice(0, 10));
   const [pagoEvidenciaId, setPagoEvidenciaId] = useState<string>('');
 
-  // Evidencia de pago desde movimiento bancario conciliado (GAP 6)
+  // Evidencia legacy opcional; solo estados CONCILIADO manuales, nunca justificantes
   const evidenciasPago = useMemo(() => {
     if (!pagoLiq) return [];
     return movimientosBancariosParaLiquidacion(movimientosBancarios, propuestasConciliacion, pagoLiq);
@@ -936,7 +936,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
               <p className="text-slate-500">IBAN destino: <span className="font-mono">{pagoLiq.cuentaAbonoIban}</span></p>
               {evidenciasPago.length > 0 && (
                 <div>
-                  <label htmlFor="campo-evidencia-movimiento-bancario-conciliado" className="font-semibold block mb-1">Evidencia: movimiento bancario conciliado (GAP 6)</label>
+                  <label htmlFor="campo-evidencia-movimiento-bancario-conciliado" className="font-semibold block mb-1">Evidencia opcional: movimiento con conciliación manual</label>
                   <select value={pagoEvidenciaId} onChange={(e) => onElegirEvidencia(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
                      id="campo-evidencia-movimiento-bancario-conciliado">
                     <option value="">— Introducir referencia manualmente —</option>
@@ -946,7 +946,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                       </option>
                     ))}
                   </select>
-                  <p className="text-[10px] text-slate-400 mt-1">Selección rellena referencia y fecha. El movimiento debe estar CONCILIADO/CONFIRMADO en Conciliación bancaria.</p>
+                  <p className="text-[10px] text-slate-400 mt-1">La selección solo aporta evidencia. El movimiento debe tener una decisión manual CONCILIADO; aceptar un justificante no equivale a conciliarlo.</p>
                 </div>
               )}
               <div><label htmlFor="campo-referencia-bancaria-evidencia" className="font-semibold block mb-1">Referencia bancaria * (evidencia)</label><input value={pagoRef} onChange={(e) => setPagoRef(e.target.value)} placeholder="Ej. TRF-2026-09-001" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"

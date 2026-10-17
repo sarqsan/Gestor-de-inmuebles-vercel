@@ -97,7 +97,7 @@ describe('BLOQUE C · clasificación de deuda desde la fuente canónica', () => 
       [mkCobro(6, { estado: 'DEVUELTO' }), 'NO_RECLAMABLE', false],
       [mkCobro(7, { estado: 'RECIBIDO', importeRecibido: 900 }), 'PAGADA', false],
       [mkCobro(8, { estado: 'INCIDENCIA', motivoIncidencia: 'Discrepancia de importe' }), 'EN_DISPUTA', false],
-      // 'PAGADO' heredado: el saldo manda — nunca se da por cobrado lo que no está conciliado
+      // 'PAGADO' heredado: el saldo registrado en Cobros manda; un estado sin importe no cancela deuda
       [mkCobro(9, { estado: 'PAGADO' as CobroPeriodo['estado'], fechaVencimiento: '2026-03-05' }), 'VENCIDA_PARCIAL', true], // saldo real ⇒ sigue siendo deuda
       [mkCobro(10, { estado: 'PAGADO' as CobroPeriodo['estado'], importeRecibido: 400, fechaVencimiento: '2026-03-05' }), 'VENCIDA_PARCIAL', true],
       [mkCobro(12, { estado: 'PAGADO' as CobroPeriodo['estado'], importeRecibido: 900, fechaVencimiento: '2026-03-05' }), 'PAGADA_SIN_VERIFICAR', false],

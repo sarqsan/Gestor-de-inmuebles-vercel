@@ -6,7 +6,7 @@
  * - Reutiliza la Factura oficial de GAP 7: los importes se COPIAN, nunca se recalculan.
  * - Determinismo: misma factura + formato + versión → misma representación e IDs.
  * - Idempotencia: idempotencyKey estable por facturaId+formato; no duplica envíos ni estados.
- * - Información de pago: SOLO consulta el estado económico existente (Cobros/GAP 6).
+ * - Información de pago: refleja el estado/enlaces operativos ya existentes; P3 no los crea ni los modifica.
  * - Sin APIs/certificados/endpoints inventados.
  */
 
@@ -69,14 +69,14 @@ function esNifEspanolValido(nif: string): boolean {
 // ---------------------------------------------------------------------------
 
 export interface EstadoEconomicoExistente {
-  /** Estado del cobro conciliado (GAP 5/GAP 6): importe cobrado y fecha si existen. */
+  /** Estado del cobro ya registrado en la vía operativa de Cobros. */
   importeCobrado?: number;
   fechaCobro?: string;
 }
 
 /**
- * Construye la información de pago B2B a partir de Cobros/GAP 6.
- * NO crea un segundo sistema de cobros: refleja el estado económico existente.
+ * Construye la información de pago B2B a partir de referencias/estado operativos ya existentes.
+ * NO crea cobros; una importación P3 tampoco establece enlaces ni marca una factura como pagada.
  */
 export function informacionPagoDesdeCobros(factura: Factura, economico?: EstadoEconomicoExistente): InformacionPagoB2B {
   const info: InformacionPagoB2B = {
@@ -85,7 +85,7 @@ export function informacionPagoDesdeCobros(factura: Factura, economico?: EstadoE
     estadoPago: 'NO_PAGADA',
   };
   if (factura.cobroPeriodoId || factura.movimientoBancarioId) {
-    // La conciliación (GAP 6) ya vinculó la factura a un cobro/movimiento real.
+    // Referencia vinculada por una vía operativa externa a P3; este motor solo refleja el estado.
     info.estadoPago = 'PAGADA';
     info.importePagado = economico?.importeCobrado ?? factura.importeTotal;
     info.fechaUltimoPago = economico?.fechaCobro;

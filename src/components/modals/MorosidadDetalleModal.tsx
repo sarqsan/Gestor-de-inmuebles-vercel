@@ -409,8 +409,7 @@ export const MorosidadDetalleModal: React.FC<Props> = (props) => {
                     Registrar pago
                   </button>
                   <p className="md:col-span-4 text-[11px] text-slate-500">
-                    Si el cobro ya está conciliado (GAP 6) no es necesario repetirlo: la sincronización del detector
-                    detecta el pago y cierra el expediente sola.
+                    Una conciliación bancaria P3 no registra el pago en Cobros ni cierra el expediente. Registre el cobro aquí solo tras verificarlo por la vía operativa.
                   </p>
                 </div>
               )}

@@ -484,6 +484,7 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/notificaciones/perfilUsuarioFirestore.ts',
       'server/notificaciones/relojAvisos.ts',
       'server/notificaciones/rutasCronAvisos.ts',
+      'server/notificaciones/rutaPruebaSmtp.ts',
       'src/utils/cobrosEngine.ts',
       // FASE 9 · llaves de usuario (Vía 2): contrato + tutorial puros, cifrado, servicio y rutas.
       'src/ia/llavesUsuarioContrato.ts',

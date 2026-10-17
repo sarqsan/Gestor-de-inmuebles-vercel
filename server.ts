@@ -16,6 +16,7 @@ import { crearTransporteEmailDesdeEntorno, identidadDespachoDesdeEntorno } from 
 import { crearFuentePerfilFirestore } from './server/notificaciones/perfilUsuarioFirestore.js';
 import { ejecutarRelojAvisos } from './server/notificaciones/relojAvisos.js';
 import { montarRutaCronAvisos } from './server/notificaciones/rutasCronAvisos.js';
+import { montarRutaPruebaSmtp } from './server/notificaciones/rutaPruebaSmtp.js';
 // Auditoría de acceso a documentos (2026-09-22): id inenumerable, tipos de
 // contenido seguros, cabeceras anti-caché y almacén acotado para los documentos
 // que sirve este propio servidor (fuera del alcance de las reglas de Storage).
@@ -2835,6 +2836,19 @@ app.post('/api/notificaciones/enviar', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: 'error_interno', motivoDenegacion: err instanceof Error ? err.message : 'Error inesperado' });
   }
+});
+
+// ---------------------------------------------------------------------------
+// FASE A — PRUEBA TÉCNICA AISLADA DE SMTP (POST /api/notificaciones/probar-smtp)
+// Exclusiva para ADMINISTRADOR autenticado, destinatario acotado al propio
+// administrador o al buzón del despacho, sin DispatcherNotificaciones ni
+// escrituras en Firestore.
+// ---------------------------------------------------------------------------
+montarRutaPruebaSmtp(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  fuentePerfil: fuentePerfilNotificaciones,
+  transporte: transporteEmail,
+  identidadDespacho,
 });
 
 // ---------------------------------------------------------------------------

@@ -219,7 +219,7 @@ export function AltaGuiadaLlaveIA({ opciones = OPCIONES_POR_DEFECTO, descargarPd
 
           <div className="space-y-2">
             <label htmlFor="campo-llave-ia" className="block text-xs font-semibold text-slate-700">
-              {activa ? 'Sustituir por otra clave' : 'Tu clave de API (empieza por AIza)'}
+              {activa ? 'Sustituir por otra clave' : 'Tu clave de API (AIza o AQ.)'}
             </label>
             <div className="flex flex-col sm:flex-row gap-2">
               <input

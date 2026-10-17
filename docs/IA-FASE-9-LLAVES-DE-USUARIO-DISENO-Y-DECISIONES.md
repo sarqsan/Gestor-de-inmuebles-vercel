@@ -153,8 +153,11 @@ interviene en ningún punto del flujo de usuario.
 
 ### 4.6 Validación de formato (local, sin red)
 
-La clave de Gemini (Google AI Studio) tiene la forma `AIza` + 35 caracteres
-`[A-Za-z0-9_-]` (39 en total). La validación recorta espacios y comillas,
+El formato clásico conserva la regla `AIza` + 35 caracteres
+`[A-Za-z0-9_-]` (39 en total). También se admite `AQ.` con cuerpo base64url
+de longitud variable: mínimo defensivo local de 32 caracteres de cuerpo y
+máximo de 200 caracteres totales (límite de entrada existente). Estos límites
+no se presentan como longitudes oficiales de Google. La validación recorta espacios y comillas,
 rechaza el marcador `MY_GEMINI_API_KEY`, longitudes y alfabetos distintos, y
 devuelve un código accionable (`VACIA`, `MARCADOR_DE_POSICION`, `LONGITUD`,
 `PREFIJO`, `CARACTERES`). Es una comprobación de **forma**: la validez real
@@ -297,7 +300,7 @@ profesionales. Por eso la Vía 2 se entrega con un alta guiada en
   (no compartirla, no pegarla en correos ni chats).
 - **11.2.3 Crear la clave en Google AI Studio** — enlace oficial
   `https://aistudio.google.com/app/apikey`, botón «Crear clave de API»,
-  elección/creación del proyecto, copia de la clave (empieza por `AIza`).
+  elección/creación del proyecto, copia de la clave completa (prefijos admitidos: `AIza` o `AQ.`).
 - **11.2.4 Pegar la clave en el ERP** — campo de contraseña (no se ve lo
   escrito), validación local de forma con mensajes accionables, botón
   «Guardar clave». El navegador la envía una sola vez por HTTPS.

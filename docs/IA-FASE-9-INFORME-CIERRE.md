@@ -4,9 +4,12 @@
 > cualquier Arena): base SHA → HEAD SHA, qué toca, qué NO toca, pruebas,
 > limitaciones reales, dependencias externas y política de resolución.
 >
-> **Estado: ENTREGADO EN RAMA — NO integrado.** La integración en `main`
-> corresponde a quien autorice la PR #39 (§3.4) y no se ha ejecutado desde esta
-> rama. **No se ha activado consumo real de IA** en ningún entorno.
+> **Estado: INTEGRADO EN `main`** (PR #39 fusionada el 2026-10-16, merge
+> `ad113d7`, base `4309f48`, HEAD de la entrega `71f27a9`). Este informe describe
+> el cierre de la entrega en rama; la re-verificación sobre `main` y el estado
+> vigente están en `docs/ESTADO-GIT-ERP.md` («INTEGRACIÓN — FASE IA 9»).
+> **El consumo real de IA sigue BLOQUEADO** hasta que se configuren los secretos
+> y variables de §5 en el entorno; no se ha activado en ningún entorno a fecha del merge.
 
 | Campo | Valor |
 | --- | --- |
@@ -35,7 +38,7 @@ PDF— y las decisiones de detalle tomadas por esta Arena quedaron escritas en �
 | Pieza | Fichero | Contenido |
 | --- | --- | --- |
 | Diseño | `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` | Problema, vías comparadas, DECISIÓN §11 (Vía 2), arquitectura §4, alta guiada §11.2, tutorial §11.2.8, variables §10, limitaciones §9, plan §8 |
-| Contrato puro | `src/ia/llavesUsuarioContrato.ts` | Estados `AUSENTE/REGISTRADA/VERIFICADA/REVOCADA`, resumen sin secretos (sólo sufijo de 4), validación de **forma** (`AIza…`, 39 caracteres, códigos accionables), modos `USUARIO/NO_CONFIGURADO/CLAVE_MAESTRA_INVALIDA`, `RESPALDO/EXIGIR`, `DESACTIVADA/PROVEEDOR`, rutas y cabecera `X-IA-Llave-Usuario` |
+| Contrato puro | `src/ia/llavesUsuarioContrato.ts` | Estados `AUSENTE/REGISTRADA/VERIFICADA/REVOCADA`, resumen sin secretos (sólo sufijo de 4), validación de **forma** (`AIza…` clásico de 39 caracteres o `AQ.` de longitud variable acotada; códigos accionables), modos `USUARIO/NO_CONFIGURADO/CLAVE_MAESTRA_INVALIDA`, `RESPALDO/EXIGIR`, `DESACTIVADA/PROVEEDOR`, rutas y cabecera `X-IA-Llave-Usuario` |
 | Tutorial declarativo | `src/ia/tutorialLlaveUsuarioIA.ts` | 7 pasos del alta guiada + avisos de custodia + preguntas frecuentes; enlace oficial `aistudio.google.com/app/apikey`; una sola fuente para la pantalla y el PDF |
 | Cifrado | `server/ia/cifradoLlavesIA.ts` | AES-256-GCM con `IA_LLAVES_CLAVE_MAESTRA` (32 bytes base64/base64url), IV aleatorio, **AAD = uid** (un criptograma copiado a otro usuario no descifra), huella HMAC para «misma clave», generador de clave maestra |
 | Servicio | `server/ia/llavesUsuarioIA.ts` | `ia_llaves/{uid}` + `ia_llaves_eventos/{uid}_{idempotencia}`; alta, `SIN_CAMBIOS`, sustitución (contador), revocación (borra el criptograma, conserva historial), marca de verificación, `resolverParaOperacion` (sólo núcleo); Firestore con CAS por `updateTime` y reintentos; variante en memoria para desarrollo/pruebas |

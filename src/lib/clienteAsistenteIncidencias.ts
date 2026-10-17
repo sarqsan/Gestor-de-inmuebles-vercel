@@ -34,6 +34,8 @@ export type ResultadoAsistenteIncidencias =
       origenRespuesta: 'DETERMINISTA' | 'PROVEEDOR';
       avisos: string[];
       alcance: AlcanceAsistenteIncidencias;
+      /** Cabecera X-IA-Llave-Usuario del servidor: 'ausente' = sin llave propia registrada (respaldo por reglas). */
+      llaveUsuario: 'activa' | 'ausente' | 'no-configurado' | null;
     }
   | { estado: 'ERROR'; status: number; codigo?: string; error: string };
 
@@ -61,6 +63,11 @@ const MENSAJES_POR_CODIGO: Record<string, string> = {
 export function mensajeAsistenteIncidencias(codigo: string | undefined, porDefecto: string): string {
   if (codigo && MENSAJES_POR_CODIGO[codigo]) return MENSAJES_POR_CODIGO[codigo];
   return porDefecto;
+}
+
+function leerEstadoLlaveUsuario(respuesta: Response): 'activa' | 'ausente' | 'no-configurado' | null {
+  const valor = respuesta.headers?.get?.('X-IA-Llave-Usuario');
+  return valor === 'activa' || valor === 'ausente' || valor === 'no-configurado' ? valor : null;
 }
 
 export async function analizarIncidenciaInquilino(
@@ -95,5 +102,6 @@ export async function analizarIncidenciaInquilino(
     origenRespuesta: cuerpo.origenRespuesta === 'PROVEEDOR' ? 'PROVEEDOR' : 'DETERMINISTA',
     avisos: Array.isArray(cuerpo.avisos) ? cuerpo.avisos.filter((a): a is string => typeof a === 'string') : [],
     alcance: cuerpo.alcance,
+    llaveUsuario: leerEstadoLlaveUsuario(respuesta),
   };
 }

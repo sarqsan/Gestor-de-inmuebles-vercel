@@ -56,6 +56,7 @@ export const AsistenteIncidenciaAsistida: React.FC<Props> = ({
   const [error, setError] = useState('');
   const [avisos, setAvisos] = useState<string[]>([]);
   const [origen, setOrigen] = useState<'DETERMINISTA' | 'PROVEEDOR'>('DETERMINISTA');
+  const [sinLlaveConectada, setSinLlaveConectada] = useState(false);
   const [derivacionEnviada, setDerivacionEnviada] = useState(false);
 
   const analizar = async (respuestasEnviadas: RespuestaAclaratoriaIA[]) => {
@@ -75,6 +76,7 @@ export const AsistenteIncidenciaAsistida: React.FC<Props> = ({
     }
     setDiagnostico(resultado.diagnostico);
     setOrigen(resultado.origenRespuesta);
+    setSinLlaveConectada(resultado.llaveUsuario === 'ausente');
     setAvisos(resultado.avisos);
     setDerivacionEnviada(false);
     setEstado('RESULTADO');
@@ -172,6 +174,16 @@ export const AsistenteIncidenciaAsistida: React.FC<Props> = ({
               {origen === 'PROVEEDOR' ? 'Análisis asistido ampliado' : 'Análisis determinista del asistente'}
             </span>
           </div>
+
+          {sinLlaveConectada && (
+            <div role="status" data-testid="aviso-ia-no-conectada" className="flex items-start gap-2 text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-xl p-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <p>
+                <strong>Análisis básico, sin inteligencia artificial.</strong> Este resultado lo ha generado el análisis por reglas del asistente.
+                Si tienes dudas sobre la incidencia, puedes contactar con tu propietario.
+              </p>
+            </div>
+          )}
 
           {diagnostico.accionInmediata && (
             <p role="alert" className="flex items-start gap-2 text-xs font-bold text-red-800 bg-red-50 border border-red-200 rounded-xl p-2.5">

@@ -32,6 +32,8 @@ describe('IA Fase 9 · tutorial del alta guiada', () => {
     expect(TUTORIAL_LLAVE_USUARIO_IA.pasos.some((p) => p.enlace === URL_OFICIAL_CLAVES_AI_STUDIO)).toBe(true);
     expect(resumenAltaGuiadaLlave().map((p) => p.clave)).toEqual(['QUE_ES', 'ANTES_DE_EMPEZAR', 'CREAR_EN_AI_STUDIO', 'PEGAR_EN_ERP', 'CONFIRMACION', 'VERIFICACION', 'SUSTITUIR_O_REVOCAR']);
     expect(JSON.stringify(TUTORIAL_LLAVE_USUARIO_IA)).not.toMatch(PATRON_CLAVE);
+    expect(JSON.stringify(TUTORIAL_LLAVE_USUARIO_IA)).toContain('AQ.');
+    expect(JSON.stringify(TUTORIAL_LLAVE_USUARIO_IA)).toContain('longitud variable');
   });
 
   it('genera un PDF A4 multipágina con nombre estable y el texto esperado', () => {

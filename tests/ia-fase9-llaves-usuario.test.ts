@@ -104,11 +104,34 @@ async function escuchar(app: express.Express): Promise<string> {
   return `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
 }
 
+const LLAVE_AQ = 'AQ.' + 'aB9_-'.repeat(20); // token sintético, sin credencial real
+
 // ---------------------------------------------------------------------------
 describe('IA Fase 9 · contrato puro (forma de la clave y DTO sin secretos)', () => {
   it('acepta una clave con la forma de Google AI Studio y devuelve sólo el sufijo', () => {
     const r = validarFormatoLlaveProveedorIA(`  "${LLAVE_ANA}"\n`);
     expect(r).toEqual({ estado: 'VALIDA', valor: LLAVE_ANA, sufijo: LLAVE_ANA.slice(-4) });
+  });
+
+  it.each([32, 64, 103, 197])('acepta AQ. con cuerpo base64url variable (%i), sin atribuir validez del proveedor', (longitud) => {
+    const valor = 'AQ.' + 'a'.repeat(longitud - 4) + 'B9_-';
+    expect(validarFormatoLlaveProveedorIA(` "${valor}" `)).toEqual({ estado: 'VALIDA', valor, sufijo: 'B9_-' });
+  });
+
+  it.each([
+    ['AQ.', 'LONGITUD'], ['AQ.corta', 'LONGITUD'],
+    ['AQ.' + 'a'.repeat(31), 'LONGITUD'], ['AQ.' + 'a'.repeat(198), 'LONGITUD'],
+    ['AQ.' + 'a'.repeat(32) + '!', 'CARACTERES'],
+    ['AQ.' + 'a'.repeat(32) + '.abc', 'CARACTERES'],
+    ['AQ.' + 'a'.repeat(32) + ' x', 'CARACTERES'],
+    ['AQ.' + 'a'.repeat(32) + '\nx', 'CARACTERES'],
+    ['AQ.' + 'a'.repeat(32) + 'é', 'CARACTERES'],
+    ['AQ.' + 'a'.repeat(32) + '/=', 'CARACTERES'],
+    ['aq.' + 'a'.repeat(40), 'PREFIJO'],
+  ])('rechaza AQ. malformada (%#) sin revelar el valor', (valor, codigo) => {
+    const r = validarFormatoLlaveProveedorIA(valor);
+    expect(r).toMatchObject({ estado: 'INVALIDA', codigo });
+    if (r.estado === 'INVALIDA' && valor.length > 3) expect(r.mensaje).not.toContain(valor);
   });
 
   it('rechaza con código accionable: vacía, marcador, prefijo, longitud y caracteres', () => {
@@ -231,23 +254,23 @@ function puertoSimulado() {
 
 function pruebasServicio(nombre: string, crear: () => { servicio: ServicioLlavesIA; documentos: () => Map<string, Record<string, unknown>>; eventos: () => Map<string, Record<string, unknown>> }) {
   describe(`IA Fase 9 · servicio de llaves (${nombre})`, () => {
-    it('alta: valida forma, cifra, no expone el valor y deja evento ALTA', async () => {
+    it.each([LLAVE_ANA, LLAVE_AQ])('alta: valida forma, cifra, no expone el valor y deja evento ALTA (%#)', async (llave) => {
       const { servicio, documentos, eventos } = crear();
       expect(await servicio.resumen('uid-ana')).toMatchObject({ estado: 'AUSENTE' });
-      const r = await servicio.registrar({ uid: 'uid-ana', valor: ` ${LLAVE_ANA} `, claveIdempotencia: 'alta-ana-0001', ahora: AHORA });
+      const r = await servicio.registrar({ uid: 'uid-ana', valor: ` ${llave} `, claveIdempotencia: 'alta-ana-0001', ahora: AHORA });
       expect(r.estado).toBe('REGISTRADA');
       if (r.estado === 'REGISTRADA') {
         expect(r.sustitucion).toBe(false);
-        expect(r.resumen).toMatchObject({ estado: 'REGISTRADA', sufijo: LLAVE_ANA.slice(-4), registradaEn: AHORA.toISOString(), sustituciones: 0 });
-        expect(JSON.stringify(r.resumen)).not.toContain(LLAVE_ANA);
+        expect(r.resumen).toMatchObject({ estado: 'REGISTRADA', sufijo: llave.slice(-4), registradaEn: AHORA.toISOString(), sustituciones: 0 });
+        expect(JSON.stringify(r.resumen)).not.toContain(llave);
       }
       const doc = documentos().get('uid-ana');
       expect(doc).toBeDefined();
-      expect(JSON.stringify(doc)).not.toContain(LLAVE_ANA);
+      expect(JSON.stringify(doc)).not.toContain(llave);
       expect(doc).toMatchObject({ version: 1, estado: 'REGISTRADA', proveedor: 'GEMINI' });
       const evento = eventos().get(idEventoLlaveIA('uid-ana', 'alta-ana-0001'));
-      expect(evento).toMatchObject({ uid: 'uid-ana', tipo: 'ALTA', sufijo: LLAVE_ANA.slice(-4) });
-      expect(JSON.stringify(evento)).not.toContain(LLAVE_ANA);
+      expect(evento).toMatchObject({ uid: 'uid-ana', tipo: 'ALTA', sufijo: llave.slice(-4) });
+      expect(JSON.stringify(evento)).not.toContain(llave);
     });
 
     it('formato inválido no escribe nada; misma llave ⇒ SIN_CAMBIOS; misma Idempotency-Key ⇒ DUPLICADA', async () => {
@@ -484,6 +507,24 @@ describe('IA Fase 9 · rutas HTTP del alta guiada', () => {
     // Los logs llevan uid y sufijo, nunca la llave.
     expect(m.eventos.some((e) => e.evento === 'LLAVE_ALTA' && e.uid === 'uid-ana' && e.sufijo === LLAVE_ANA.slice(-4))).toBe(true);
     expect(JSON.stringify(m.eventos)).not.toContain(LLAVE_ANA);
+  });
+
+  it('PUT acepta AQ., aísla por usuario y no incluye el secreto en respuestas ni logs; rechaza AQ. inválida', async () => {
+    const m = await montar();
+    const alta = await m.llamar(RUTA_LLAVE_USUARIO_IA, { method: 'PUT', token: 'token-ana', idem: 'aq-alta-0001', body: JSON.stringify({ llave: LLAVE_AQ }) });
+    expect(alta.status).toBe(200);
+    const cuerpo = await alta.json();
+    expect(cuerpo).toMatchObject({ estado: 'REGISTRADA', llave: { sufijo: LLAVE_AQ.slice(-4) } });
+    expect(JSON.stringify(cuerpo)).not.toContain(LLAVE_AQ);
+    expect(await m.llaves!.resolverParaOperacion('uid-ana')).toMatchObject({ estado: 'DISPONIBLE', valor: LLAVE_AQ });
+    expect(await m.llaves!.resumen('uid-luis')).toMatchObject({ estado: 'AUSENTE' });
+    for (const [i, llave] of ['AQ.corta', LLAVE_AQ + '!', 'AQ.' + 'a'.repeat(198)].entries()) {
+      const r = await m.llamar(RUTA_LLAVE_USUARIO_IA, { method: 'PUT', token: 'token-ana', idem: `aq-mal-000${i}`, body: JSON.stringify({ llave }) });
+      expect(r.status).toBe(422);
+      expect(JSON.stringify(await r.json())).not.toContain(llave);
+    }
+    expect(JSON.stringify(m.eventos)).not.toContain(LLAVE_AQ);
+    expect(JSON.stringify(m.eventosNucleo)).not.toContain(LLAVE_AQ);
   });
 
   it('DELETE: 404 sin llave, 200 al revocar, 404 al repetir (ya no hay llave activa); verificar: 503 desactivada por defecto', async () => {

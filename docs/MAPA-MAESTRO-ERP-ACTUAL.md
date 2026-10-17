@@ -170,7 +170,7 @@ revisarla. No se inventó rama ni se atribuyó trabajo a ella.
 | `docs/BLOQUE-8-INVENTARIO-FUENTES.md` y `docs/FASE2-ANEXO-EVIDENCIA-EXTERNA.json` | Dry-run **histórico** sobre 52 filas reconstruidas, 0 AUTO / 36 INCOMPLETO / 15 BLOQUEADO / 1 NO_MIGRABLE; sin escrituras. | Transcripción ≠ JSON originales; faltan fuentes Rentasync completas, PDF, dump y autorizaciones. No se re-ejecutó B4 ni se importó/migró nada aquí. |
 | `docs/IA-FASE-1-NUCLEO-CENTRALIZADO.md` y `docs/IA-FASE-2-GOBIERNO-USO.md` | Contrato de 11 operaciones, gobierno y aprobación comercial pendiente. | `server.ts` integra F1/F2; defaults solos no activan Gemini, no credencial/live. El contrato de política se endurece en la Fase IA 7 (sin comodines, sin tarifas implícitas, cuotas finitas): `docs/IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md`. |
 | `docs/IA-FASE-5-ASISTENTE-INCIDENCIAS-INQUILINO.md`, `IA-FASE-6-SEGUIMIENTO-INCIDENCIAS.md`, `IA-FASE-7-GOBIERNO-IA-PERMISOS-COSTES.md` y `IA-FASE-8-VALIDACION-ENTORNO-NO-PRODUCTIVO.md` | No existían antes de esta orden. | **INTEGRADAS en `main` (2026-10-16, PR #38)**: 12.ª operación del catálogo, seguimiento con trazabilidad por GAP 1, gobierno explícito y validación no productiva. El consumo de IA sigue BLOQUEADO por política; ver el anexo de esta sección. |
-| `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` e `IA-FASE-9-INFORME-CIERRE.md` | No existían antes de esta orden (el diseño original y sus commits se perdieron; el documento es una **reconstrucción** declarada). | **INTEGRADA en `main` (16-10-2026, PR #39, merge `ad113d7`)**: DECISIÓN §11 = **Vía 2** (la clave del proveedor es de cada usuario), alta guiada en Configuración y tutorial PDF. `GEMINI_API_KEY` deja de alimentar operaciones. El consumo real sigue BLOQUEADO; ver el anexo «Orden IA 9». |
+| `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` e `IA-FASE-9-INFORME-CIERRE.md` | No existían antes de esta orden (el diseño original y sus commits se perdieron; el documento es una **reconstrucción** declarada). | **INTEGRADAS en `main` (2026-10-16, PR #39, merge `ad113d7`)**: DECISIÓN §11 = **Vía 2** (la clave del proveedor es de cada usuario), alta guiada en Configuración y tutorial PDF. `GEMINI_API_KEY` deja de alimentar operaciones. El consumo real sigue BLOQUEADO; ver el anexo «Orden IA 9». |
 | `docs/operaciones/alcance.md` y pruebas `.mjs` de operaciones/patrimonial | Arquitectura y suites ejecutadas en rama/árbol previos con limitación nativa declarada. | HEAD contiene ambos módulos; las suites `.mjs` y un E completo de operaciones no forman parte del CI consultado. No extrapolar certificación nativa/producción. |
 
 **Capacidades de §16 histórico, hoy:** `IA_CARTERA_TRANSVERSAL` **PA**
@@ -227,16 +227,20 @@ reutilizan la sincronización pero su cableado fino va con el rediseño de esa
 área; · reintentos programados de avisos pendientes (hoy en la siguiente
 sincronización).
 
-### Anexo · Orden IA 9 integrada en `main` (2026-10-16, PR #39, merge `ad113d7`)
+### Anexo · Orden IA 9 integrada en `main` (2026-10-16, PR #39)
 
-Rama de sesión `arena/b93c6727-gestor-de-inmuebles-vercel`, base `4309f48`
-(= `main` tras el PR #38) → HEAD registrado en `docs/ESTADO-GIT-ERP.md`
-(«ENTREGA EN RAMA — FASE IA 9»). Evidencia declarada por la rama: suite
-completa **231 ficheros · 4.234 passed · 7 todo · 0 fallos**, `tsc --noEmit` **0 errores**,
-`npm run build` OK; 14 ficheros nuevos y 10 modificados; **sin** cambios en
-`firestore.rules`, `firebase.json`, `.firebaserc` ni `vercel.json`; sin
-dependencias nuevas ni migraciones. Informe de cierre:
-`docs/IA-FASE-9-INFORME-CIERRE.md`.
+Rama de entrega `arena/b93c6727-gestor-de-inmuebles-vercel`, base `4309f48`
+(= `main` tras el PR #38) → HEAD de la entrega `71f27a9`, **integrada en `main`
+con la PR #39** (merge `ad113d7`, fusionada el 2026-10-16). CI del repositorio en
+verde antes del merge: «Reglas Firestore y Storage (emuladores oficiales)» y
+«Tipos, suite completa y build», ambos `pass`. **Re-verificación sobre `main`
+(`ad113d7`)** realizada en la rama de sesión `arena/982887a8-gestor-de-inmuebles-vercel`:
+suite completa **231 ficheros · 4.234 passed · 7 todo · 0 fallos**, `tsc --noEmit`
+**0 errores**, `npm run build` OK y guardia A-04 OK. Evidencia de la entrega: 14
+ficheros nuevos y 10 modificados; **sin** cambios en `firestore.rules`,
+`firebase.json`, `.firebaserc` ni `vercel.json`; sin dependencias nuevas ni
+migraciones. Informe de cierre: `docs/IA-FASE-9-INFORME-CIERRE.md`. Registro de
+estado: `docs/ESTADO-GIT-ERP.md` («INTEGRACIÓN — FASE IA 9»).
 
 Qué cambia de estado: **la clave del proveedor deja de ser del proyecto y pasa
 a ser de cada usuario** (DECISIÓN §11 del diseño: Vía 2). Cada usuario
@@ -252,13 +256,17 @@ operaciones (sólo se informa en health). Qué **NO** cambia: el consumo real
 sigue **BLOQUEADO** (la política TODO O NADA de la Fase 7 y la autorización
 expresa de la Fase 8 preceden a la llave); sin clave maestra el subsistema
 queda `NO_CONFIGURADO` y no se crea ningún cliente; no se publicaron reglas ni
-se configuró ninguna variable en producción. Pendientes accionables: ·
-decisión del responsable sobre `RESPALDO`/`EXIGIR` y sobre activar la
-verificación con el proveedor (`IA_LLAVES_VERIFICACION=PROVEEDOR`, llamada
-real); · generar y custodiar la clave maestra como secreto (`npm run
-ia:llaves:clave-maestra`); · procedimiento de rotación/recifrado de la clave
-maestra (fuera del alcance); · integración de la PR #39 y re-verificación de
-la suite sobre `main`.
+se configuró ninguna variable en producción; **ninguna variable nueva se ha
+configurado en ningún entorno** tras la integración. Pendientes accionables
+(decisiones del responsable, sólo el día que se quiera activar la IA): ·
+Decisión 0: generar y custodiar la clave maestra como secreto (`npm run
+ia:llaves:clave-maestra`; comprobación con `-- --verificar`); · Decisión 1:
+`IA_LLAVES_SIN_LLAVE` = `RESPALDO` (por defecto) o `EXIGIR`; · Decisión 2:
+`IA_LLAVES_VERIFICACION` = `DESACTIVADA` (por defecto) o `PROVEEDOR` (llamada
+real `models.list`); · requisitos previos de las Fases 7–8 (política
+`IA_POLITICA_JSON` aprobada, `npm run ia:validar-entorno`, credencial de
+servicio de Firebase); · procedimiento de rotación/recifrado de la clave
+maestra (fuera del alcance; limitación declarada).
 
 **Reglas de dependencia:** F0 precede pruebas E2E de captación; F1 precede
 lecturas/escrituras sensibles y F2; F2 aporta entidades para F3 y F4; F3

@@ -4,8 +4,9 @@
  * Criterios independientes y ponderables
  */
 
-import { MovimientoBancario, CandidatoConciliacion, FactorCoincidencia, ResultadoMatching, ConfiguracionMatching, DEFAULT_CONFIG_MATCHING, ConfianzaMatch } from '../../types/conciliacion';
+import { MovimientoBancario, CandidatoConciliacion, FactorCoincidencia, ResultadoMatching, ConfiguracionMatching, DEFAULT_CONFIG_MATCHING, ConfianzaMatch, PropuestaConciliacion } from '../../types/conciliacion';
 import { CobroPeriodo, Gasto, Inmueble, ContratoFormalizacion } from '../../types';
+import { normalizarFechaBancaria } from './validacionExtracto';
 
 function normalizarTexto(s: string): string {
   return s.toLowerCase()
@@ -41,7 +42,8 @@ function importeCoincide(impMov: number, impCand: number, config: ConfiguracionM
 export function evaluarCandidato(
   movimiento: MovimientoBancario,
   candidato: CandidatoConciliacion,
-  config: ConfiguracionMatching = DEFAULT_CONFIG_MATCHING
+  config: ConfiguracionMatching = DEFAULT_CONFIG_MATCHING,
+  inmuebleEtiqueta?: string,
 ): ResultadoMatching {
   const factores: FactorCoincidencia[] = [];
   let puntuacionTotal = 0;
@@ -97,15 +99,6 @@ export function evaluarCandidato(
     refCoincide = true;
     refDetalle = `ID candidato en concepto bancario`;
   }
-  // Buscar contratoId
-  if (!refCoincide && candidato.contratoId) {
-    const contratoNorm = normalizarTexto(candidato.contratoId);
-    if (movConceptoNorm.includes(contratoNorm.slice(0,8)) || movRefNorm.includes(contratoNorm.slice(0,8))) {
-      refCoincide = true;
-      refDetalle = `Contrato ${candidato.contratoId} en banco`;
-    }
-  }
-
   if (refCoincide) {
     factores.push({ criterio: 'REFERENCIA', puntuacion: config.pesoReferencia, detalle: refDetalle, coincide: true });
     puntuacionTotal += config.pesoReferencia;
@@ -113,7 +106,19 @@ export function evaluarCandidato(
     factores.push({ criterio: 'REFERENCIA', puntuacion: 0, detalle: `Referencia no coincide`, coincide: false });
   }
 
-  // 4. CONCEPTO
+  // 4. CONTRATO: solo se puntúa si el identificador completo aparece en el texto bancario.
+  const textoBancario = normalizarTexto(`${movimiento.concepto} ${movimiento.referencia || ''}`);
+  const contratoBuscado = candidato.contratoId ? normalizarTexto(candidato.contratoId) : '';
+  const contratoCoincide = Boolean(contratoBuscado.length >= 5 && textoBancario.includes(contratoBuscado));
+  const puntosContrato = contratoCoincide ? Math.round(config.pesoReferencia * 0.5) : 0;
+  factores.push({
+    criterio: 'CONTRATO', puntuacion: puntosContrato,
+    detalle: contratoCoincide ? 'Identificador de contrato presente en concepto/referencia' : 'Contrato no identificable en el movimiento',
+    coincide: contratoCoincide,
+  });
+  puntuacionTotal += puntosContrato;
+
+  // 5. CONCEPTO
   let conceptoPuntos = 0;
   let conceptoDetalle = '';
   const candConceptoNorm = candidato.concepto ? normalizarTexto(candidato.concepto) : '';
@@ -148,23 +153,36 @@ export function evaluarCandidato(
     factores.push({ criterio: 'CONCEPTO', puntuacion: 0, detalle: `Concepto no coincide`, coincide: false });
   }
 
-  // 5. RELACIÓN ESTRUCTURAL
-  let estructuralPuntos = 0;
-  let estructuralDetalle = '';
-  if (movimiento.inmuebleId && candidato.inmuebleId && movimiento.inmuebleId === candidato.inmuebleId) {
-    estructuralPuntos = config.pesoEstructural;
-    estructuralDetalle = `Mismo inmueble ${candidato.inmuebleId}`;
+  // 6. INMUEBLE: cruza ID explícito o etiqueta del inmueble contra concepto/referencia.
+  // Nunca se copia la dirección al detalle persistido del factor.
+  const textoInmuebleBancario = normalizarTexto(`${movimiento.concepto} ${movimiento.referencia || ''}`);
+  const etiquetas = String(inmuebleEtiqueta || '').split('|').map(normalizarTexto).filter(Boolean);
+  const parada = new Set(['calle', 'avenida', 'av', 'del', 'de', 'la', 'el', 'piso', 'local', 'casa', 'edificio', 'plaza']);
+  const etiquetaCoincideCompleta = etiquetas.some((etiqueta) => etiqueta.length >= 5 && textoInmuebleBancario.includes(etiqueta));
+  const etiquetaCoincideParcial = etiquetas.some((etiqueta) => {
+    const tokens = etiqueta.split(' ').filter((token) => token.length > 2 && !parada.has(token));
+    const textoTokens = new Set(textoInmuebleBancario.split(' '));
+    const alfanumericos = tokens.filter((token) => !/^[0-9]+$/.test(token));
+    const numericos = tokens.filter((token) => /^[0-9]+$/.test(token));
+    const aciertosAlfanumericos = alfanumericos.filter((token) => textoTokens.has(token)).length;
+    const aciertosNumericos = numericos.filter((token) => textoTokens.has(token)).length;
+    return aciertosAlfanumericos >= 2 || (aciertosAlfanumericos >= 1 && aciertosNumericos >= 1);
+  });
+  const inmuebleIdCoincide = Boolean(movimiento.inmuebleId && movimiento.inmuebleId === candidato.inmuebleId);
+  let puntosInmueble = 0;
+  let detalleInmueble = 'Sin dato de inmueble coincidente';
+  if (inmuebleIdCoincide || etiquetaCoincideCompleta) {
+    puntosInmueble = config.pesoEstructural;
+    detalleInmueble = 'Referencia de inmueble coincidente';
+  } else if (etiquetaCoincideParcial) {
+    puntosInmueble = Math.round(config.pesoEstructural * 0.7);
+    detalleInmueble = 'Referencia parcial de inmueble';
   } else if (movimiento.propietarioId === candidato.propietarioId) {
-    estructuralPuntos = Math.round(config.pesoEstructural*0.5);
-    estructuralDetalle = `Mismo propietario`;
+    puntosInmueble = Math.round(config.pesoEstructural * 0.5);
+    detalleInmueble = 'Titular coincidente; inmueble pendiente de validar';
   }
-
-  if (estructuralPuntos>0) {
-    factores.push({ criterio: 'INMUEBLE', puntuacion: estructuralPuntos, detalle: estructuralDetalle, coincide: true });
-    puntuacionTotal += estructuralPuntos;
-  } else {
-    factores.push({ criterio: 'INMUEBLE', puntuacion: 0, detalle: `Sin relación estructural`, coincide: false });
-  }
+  factores.push({ criterio: 'INMUEBLE', puntuacion: puntosInmueble, detalle: detalleInmueble, coincide: inmuebleIdCoincide || etiquetaCoincideCompleta || etiquetaCoincideParcial });
+  puntuacionTotal += puntosInmueble;
 
   // Confianza
   let confianza: ConfianzaMatch = 'SIN_MATCH';
@@ -186,58 +204,72 @@ export function evaluarCandidato(
   };
 }
 
+function diaCandidato(valor: unknown): string | null {
+  return typeof valor === 'string' ? normalizarFechaBancaria(valor) : null;
+}
+
 export function buscarCandidatos(
   movimiento: MovimientoBancario,
   cobros: CobroPeriodo[],
   gastos: Gasto[],
   inmuebles: Inmueble[],
   contratos: ContratoFormalizacion[],
-  config: ConfiguracionMatching = DEFAULT_CONFIG_MATCHING
+  config: ConfiguracionMatching = DEFAULT_CONFIG_MATCHING,
+  propuestasExistentes: PropuestaConciliacion[] = [],
 ): ResultadoMatching[] {
   const candidatos: CandidatoConciliacion[] = [];
-
-  // Aislamiento estricto por propietario: movimiento propietario no concilia otro propietario
-  const cobrosFiltrados = cobros.filter(c => {
-    if (c.propietarioId && c.propietarioId === movimiento.propietarioId) return true;
-    // Fallback solo si el inmueble del cobro pertenece al mismo propietario que el movimiento
-    if (c.inmuebleId) {
-      const inm = inmuebles.find(i => i.id === c.inmuebleId);
-      if (inm && (inm.propietarioId === movimiento.propietarioId || inm.propietarioPrincipalId === movimiento.propietarioId)) {
-        // Pero si el cobro ya tiene propietarioId distinto, no permitir cruce
-        if (c.propietarioId && c.propietarioId !== movimiento.propietarioId) return false;
-        return true;
-      }
-    }
-    return false;
+  const inmueblePorId = new Map(inmuebles.map((i) => [i.id, i]));
+  const contratoPorId = new Map(contratos.map((c) => [c.id, c]));
+  const estaConciliado = (tipo: 'COBRO' | 'GASTO', id: string) => propuestasExistentes.some((p) =>
+    p.propietarioId === movimiento.propietarioId && p.estado === 'CONCILIADO'
+    && p.candidato?.tipo === tipo && p.candidato.id === id);
+  const perteneceAlTitular = (propietario?: string, inmuebleId?: string) => {
+    if (propietario && propietario !== movimiento.propietarioId) return false;
+    if (movimiento.inmuebleId && inmuebleId && inmuebleId !== movimiento.inmuebleId) return false;
+    if (propietario === movimiento.propietarioId) return true;
+    const inmueble = inmuebleId ? inmueblePorId.get(inmuebleId) : undefined;
+    return Boolean(inmueble && (inmueble.propietarioId === movimiento.propietarioId
+      || inmueble.propietarioPrincipalId === movimiento.propietarioId
+      || inmueble.titularesIds?.includes(movimiento.propietarioId)));
+  };
+  const cobrosFiltrados = cobros.flatMap((c) => {
+    if (!perteneceAlTitular(c.propietarioId, c.inmuebleId)) return [];
+    if (c.estado === 'ANULADO' || c.estado === 'DEVUELTO') return [];
+    const contrato = c.contratoId
+      ? contratoPorId.get(c.contratoId)
+      : contratos.find((item) => item.propietarioId === movimiento.propietarioId
+        && item.inmuebleId === c.inmuebleId
+        && item.registroCobros?.some((registro) => registro.id === c.id));
+    if (!contrato || contrato.propietarioId !== movimiento.propietarioId || contrato.inmuebleId !== c.inmuebleId) return [];
+    const importe = c.importeRecibido > 0 ? c.importeRecibido : c.importePrevisto;
+    const fechaRaw = ((c.estado === 'RECIBIDO' || c.estado === 'VERIFICADO') && c.fechaPago) ? c.fechaPago : c.fechaVencimiento;
+    const fecha = diaCandidato(fechaRaw);
+    if (!Number.isFinite(importe) || importe <= 0 || !fecha || !c.id) return [];
+    return [{ cobro: c, contratoId: contrato.id, importe, fecha }];
   });
-  const gastosFiltrados = gastos.filter(g => {
-    if (g.propietarioId && g.propietarioId === movimiento.propietarioId) return true;
-    if (g.inmuebleId) {
-      const inm = inmuebles.find(i => i.id === g.inmuebleId);
-      if (inm && (inm.propietarioId === movimiento.propietarioId || inm.propietarioPrincipalId === movimiento.propietarioId)) {
-        if (g.propietarioId && g.propietarioId !== movimiento.propietarioId) return false;
-        return true;
-      }
-    }
-    return false;
-  });
+  const gastosFiltrados = gastos.filter((g) => perteneceAlTitular(g.propietarioId, g.inmuebleId)
+    && g.estado !== 'ANULADO' && g.estado !== 'EN_REVISION'
+    && typeof g.id === 'string' && typeof g.inmuebleId === 'string' && Boolean(g.inmuebleId)
+    && Number.isFinite(g.importe) && g.importe > 0
+    && Boolean(diaCandidato(g.fechaPago || g.fechaDevengo || g.fecha)));
 
   // COBROS: solo si movimiento es INGRESO
   if (movimiento.tipo === 'INGRESO') {
-    for (const cobro of cobrosFiltrados) {
-      // No buscar ya conciliados? Se valida después, pero incluimos para scoring
+    for (const registro of cobrosFiltrados) {
+      const cobro = registro.cobro;
       candidatos.push({
         tipo: 'COBRO',
         id: cobro.id,
-        contratoId: cobro.contratoId,
+        contratoId: registro.contratoId,
         inmuebleId: cobro.inmuebleId,
-        propietarioId: cobro.propietarioId,
-        importe: cobro.importePrevisto,
-        fecha: cobro.fechaVencimiento,
-        referencia: cobro.id,
+        propietarioId: cobro.propietarioId || movimiento.propietarioId,
+        importe: registro.importe,
+        fecha: registro.fecha,
+        referencia: cobro.referenciaBancaria || cobro.id,
         concepto: cobro.nombreMes,
         inquilinoNombre: cobro.inquilinoNombre,
         estadoActual: cobro.estado,
+        yaConciliado: estaConciliado('COBRO', cobro.id),
       });
     }
   }
@@ -245,22 +277,29 @@ export function buscarCandidatos(
   // GASTOS: solo si movimiento es GASTO
   if (movimiento.tipo === 'GASTO') {
     for (const gasto of gastosFiltrados) {
+      const fecha = diaCandidato(gasto.fechaPago || gasto.fechaDevengo || gasto.fecha);
+      if (!fecha) continue;
       candidatos.push({
         tipo: 'GASTO',
         id: gasto.id,
         inmuebleId: gasto.inmuebleId,
         propietarioId: gasto.propietarioId || movimiento.propietarioId,
         importe: gasto.importe,
-        fecha: gasto.fecha,
+        fecha,
         referencia: gasto.id,
         concepto: gasto.concepto,
         proveedor: gasto.proveedor,
         estadoActual: gasto.estado,
+        yaConciliado: estaConciliado('GASTO', gasto.id),
       });
     }
   }
 
-  const resultados = candidatos.map(c => evaluarCandidato(movimiento, c, config));
+  const resultados = candidatos.map((c) => {
+    const inmueble = inmueblePorId.get(c.inmuebleId);
+    const etiqueta = inmueble ? [inmueble.alias, inmueble.direccion, inmueble.ciudad, inmueble.id].filter(Boolean).join('|') : '';
+    return evaluarCandidato(movimiento, c, config, etiqueta);
+  });
   // Ordenar por puntuación descendente
   resultados.sort((a,b) => b.puntuacion - a.puntuacion);
   return resultados;

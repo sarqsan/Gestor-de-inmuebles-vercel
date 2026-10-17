@@ -1,22 +1,20 @@
-/**
- * Normalizador — todos los formatos → MovimientoBancario
- * Conserva información suficiente para auditar origen
- */
+/** Normalizadores P3: almacenan referencias mínimas; no guardan filas crudas ni IBAN completo. */
+import type { MovimientoBancario, OrigenFormatoBancario } from '../../types/conciliacion';
+import type { MovimientoCsvNormalizado } from './csvParser';
+import type { MovimientoOfxRaw } from './ofxParser';
+import type { MovimientoMt940Raw } from './mt940Parser';
+import type { MovimientoNorma43Raw } from './norma43Parser';
+import { cuentaRefBancaria, enmascararCuentaBancaria, huellaEstable, redactarTextoBancario } from './validacionExtracto';
 
-import { MovimientoBancario, OrigenFormatoBancario } from '../../types/conciliacion';
-import { MovimientoCsvNormalizado } from './csvParser';
-import { MovimientoOfxRaw } from './ofxParser';
-import { MovimientoMt940Raw } from './mt940Parser';
-import { MovimientoNorma43Raw } from './norma43Parser';
+export interface OpcionesNormalizacionBancaria {
+  divisa?: string;
+  cuenta?: string;
+  cuentaRef?: string;
+  importadoPor?: string;
+}
 
-function hashString(str: string): string {
-  // FNV-1a simple
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
+function textoClave(valor?: string): string {
+  return String(valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 export function generarHashIdempotencia(
@@ -24,10 +22,81 @@ export function generarHashIdempotencia(
   importe: number,
   concepto: string,
   referencia?: string,
-  identificador?: string
+  identificador?: string,
+  propietarioId = '',
+  cuentaRef = 'cuenta-no-indicada',
+  divisa = 'EUR',
 ): string {
-  const base = `${fecha}|${importe.toFixed(2)}|${concepto.trim().toLowerCase()}|${(referencia||'').trim().toLowerCase()}|${(identificador||'').trim().toLowerCase()}`;
-  return hashString(base);
+  const base = identificador
+    ? `${propietarioId}|${cuentaRef}|ID|${textoClave(identificador)}`
+    : `${propietarioId}|${cuentaRef}|${divisa}|${fecha}|${Number(importe).toFixed(2)}|${textoClave(referencia)}|${textoClave(concepto)}`;
+  return huellaEstable(base);
+}
+
+function identidadCuenta(cuenta?: string, cuentaFallback?: string, cuentaRef?: string): { cuentaRef?: string; cuentaIbanEnmascarado?: string } {
+  const valor = cuenta || cuentaFallback;
+  if (!valor && !cuentaRef) return {};
+  return {
+    ...(cuentaRef || cuentaRefBancaria(valor) ? { cuentaRef: cuentaRef || cuentaRefBancaria(valor) } : {}),
+    ...(valor ? { cuentaIbanEnmascarado: enmascararCuentaBancaria(valor) } : {}),
+  };
+}
+
+function completarMovimiento(args: {
+  idImportacion: string;
+  propietarioId: string;
+  fechaImportacion: string;
+  origen: OrigenFormatoBancario;
+  fecha: string;
+  fechaValor?: string;
+  importe: number;
+  concepto: string;
+  conceptoOriginal?: string;
+  referencia?: string;
+  identificador?: string;
+  saldo?: number;
+  divisa?: string;
+  cuenta?: string;
+  cuentaIban?: string;
+  cuentaRef?: string;
+  fila?: number;
+  importadoPor?: string;
+}): MovimientoBancario {
+  const cuenta = identidadCuenta(args.cuenta, args.cuentaIban, args.cuentaRef);
+  const tipo = args.importe >= 0 ? 'INGRESO' : 'GASTO';
+  const concepto = redactarTextoBancario(args.concepto.trim(), 500);
+  const referenciaSegura = redactarTextoBancario(args.referencia, 180);
+  const identificadorSeguro = args.identificador ? `idb_${huellaEstable(textoClave(args.identificador))}` : undefined;
+  const hash = generarHashIdempotencia(
+    args.fecha, args.importe, concepto, referenciaSegura, args.identificador,
+    args.propietarioId, cuenta.cuentaRef || 'cuenta-no-indicada', args.divisa || 'EUR',
+  );
+  return {
+    idImportacion: args.idImportacion,
+    idMovimiento: `mov_${hash}`,
+    fechaOperacion: args.fecha,
+    ...(args.fechaValor ? { fechaValor: args.fechaValor } : {}),
+    importe: args.importe,
+    tipo,
+    concepto,
+    conceptoOriginal: redactarTextoBancario(args.conceptoOriginal || concepto, 500),
+    ...(referenciaSegura ? { referencia: referenciaSegura } : {}),
+    ...(identificadorSeguro ? { identificadorBanco: identificadorSeguro } : {}),
+    ...(args.saldo !== undefined ? { saldo: args.saldo } : {}),
+    origen: args.origen,
+    propietarioId: args.propietarioId,
+    ...cuenta,
+    ...(args.divisa ? { divisa: args.divisa } : {}),
+    ...(Number.isInteger(args.fila) ? { filaOrigen: args.fila } : {}),
+    estadoValidacion: concepto || args.referencia || args.identificador ? 'VALIDO' : 'REQUIERE_REVISION',
+    metadatosOriginales: {
+      ...(Number.isInteger(args.fila) ? { filaOrigen: args.fila as number } : {}),
+      divisa: args.divisa || null,
+    },
+    hashIdempotencia: hash,
+    fechaImportacion: args.fechaImportacion,
+    ...(args.importadoPor ? { importadoPor: args.importadoPor } : {}),
+  };
 }
 
 export function normalizarDesdeCSV(
@@ -36,42 +105,16 @@ export function normalizarDesdeCSV(
   propietarioId: string,
   fechaImportacion: string,
   cuentaIban?: string,
-  importadoPor?: string
+  importadoPor?: string,
+  opciones: OpcionesNormalizacionBancaria = {},
 ): MovimientoBancario[] {
-  return movimientos.map((m, idx) => {
-    const tipo = m.importe >=0 ? 'INGRESO' : 'GASTO';
-    const importeAbs = Math.abs(m.importe);
-    const concepto = m.concepto.trim();
-    const hash = generarHashIdempotencia(m.fecha, m.importe, concepto, m.referencia, m.identificador);
-    const idMov = m.identificador ? `csv_${hashString(m.identificador)}` : `csv_${hash}_${idx}`;
-
-    return {
-      idImportacion,
-      idMovimiento: idMov,
-      fechaOperacion: m.fecha,
-      fechaValor: m.fechaValor,
-      importe: m.importe, // conservar signo
-      tipo,
-      concepto,
-      conceptoOriginal: (m.raw ? JSON.stringify(m.raw) : concepto).slice(0,500),
-      referencia: m.referencia,
-      identificadorBanco: m.identificador,
-      saldo: m.saldo,
-      origen: 'CSV' as OrigenFormatoBancario,
-      propietarioId,
-      cuentaIban,
-      metadatosOriginales: {
-        fecha: m.fecha,
-        importe: m.importe,
-        concepto,
-        referencia: m.referencia || null,
-        identificador: m.identificador || null,
-      },
-      hashIdempotencia: hash,
-      fechaImportacion,
-      importadoPor,
-    };
-  });
+  return movimientos.map((m) => completarMovimiento({
+    idImportacion, propietarioId, fechaImportacion, origen: 'CSV', fecha: m.fecha,
+    fechaValor: m.fechaValor, importe: m.importe, concepto: m.concepto,
+    referencia: m.referencia, identificador: m.identificador, saldo: m.saldo,
+    divisa: m.divisa || opciones.divisa, cuenta: m.cuenta || opciones.cuenta, cuentaRef: opciones.cuentaRef,
+    cuentaIban, fila: m.fila, importadoPor: opciones.importadoPor || importadoPor,
+  }));
 }
 
 export function normalizarDesdeOFX(
@@ -80,39 +123,17 @@ export function normalizarDesdeOFX(
   propietarioId: string,
   fechaImportacion: string,
   cuentaIban?: string,
-  importadoPor?: string
+  importadoPor?: string,
+  opciones: OpcionesNormalizacionBancaria = {},
 ): MovimientoBancario[] {
-  return movimientos.map(m => {
-    const tipo = m.importe >=0 ? 'INGRESO' : 'GASTO';
-    const concepto = `${m.nombre || ''} ${m.memo || ''}`.trim() || 'Movimiento OFX';
-    const hash = generarHashIdempotencia(m.fecha, m.importe, concepto, m.referencia, m.fitid);
-    // FITID es id estable para idempotencia
-    const idMov = `ofx_${hashString(m.fitid)}`;
-
-    return {
-      idImportacion,
-      idMovimiento: idMov,
-      fechaOperacion: m.fecha,
-      importe: m.importe,
-      tipo,
-      concepto: concepto.slice(0,500),
-      conceptoOriginal: `${m.nombre || ''} | ${m.memo || ''}`.slice(0,500),
-      referencia: m.referencia,
-      identificadorBanco: m.fitid,
-      saldo: m.saldo,
-      origen: 'OFX' as OrigenFormatoBancario,
-      propietarioId,
-      cuentaIban,
-      metadatosOriginales: {
-        FITID: m.fitid,
-        NAME: m.nombre || null,
-        MEMO: m.memo || null,
-        TRNTYPE: m.tipo || null,
-      },
-      hashIdempotencia: hash,
-      fechaImportacion,
-      importadoPor,
-    };
+  return movimientos.map((m) => {
+    const concepto = `${m.nombre || ''} ${m.memo || ''}`.trim();
+    return completarMovimiento({
+      idImportacion, propietarioId, fechaImportacion, origen: 'OFX', fecha: m.fecha,
+      importe: m.importe, concepto, referencia: m.referencia, identificador: m.fitid,
+      saldo: m.saldo, divisa: m.divisa || opciones.divisa, cuenta: opciones.cuenta, cuentaRef: opciones.cuentaRef,
+      cuentaIban, fila: m.fila, importadoPor: opciones.importadoPor || importadoPor,
+    });
   });
 }
 
@@ -122,38 +143,16 @@ export function normalizarDesdeMT940(
   propietarioId: string,
   fechaImportacion: string,
   cuentaIban?: string,
-  importadoPor?: string
+  importadoPor?: string,
+  opciones: OpcionesNormalizacionBancaria = {},
 ): MovimientoBancario[] {
-  return movimientos.map((m, idx) => {
-    const tipo = m.importe >=0 ? 'INGRESO' : 'GASTO';
-    const hash = generarHashIdempotencia(m.fecha, m.importe, m.concepto, m.referencia, m.identificador);
-    const idMov = m.identificador ? `mt940_${hashString(m.identificador)}_${m.fecha}` : `mt940_${hash}_${idx}`;
-
-    return {
-      idImportacion,
-      idMovimiento: idMov,
-      fechaOperacion: m.fecha,
-      fechaValor: m.fechaValor,
-      importe: m.importe,
-      tipo,
-      concepto: m.concepto.slice(0,500),
-      conceptoOriginal: (m.raw86 || m.raw61).slice(0,500),
-      referencia: m.referencia,
-      identificadorBanco: m.identificador,
-      saldo: m.saldo,
-      origen: 'MT940' as OrigenFormatoBancario,
-      propietarioId,
-      cuentaIban,
-      metadatosOriginales: {
-        raw61: m.raw61.slice(0,200),
-        raw86: (m.raw86 || '').slice(0,200),
-        tipo: m.tipo,
-      },
-      hashIdempotencia: hash,
-      fechaImportacion,
-      importadoPor,
-    };
-  });
+  return movimientos.map((m) => completarMovimiento({
+    idImportacion, propietarioId, fechaImportacion, origen: 'MT940', fecha: m.fecha,
+    fechaValor: m.fechaValor, importe: m.importe, concepto: m.concepto,
+    referencia: m.referencia, identificador: m.identificador, saldo: m.saldo,
+    divisa: m.divisa || opciones.divisa, cuenta: opciones.cuenta, cuentaRef: opciones.cuentaRef,
+    cuentaIban, fila: m.fila, importadoPor: opciones.importadoPor || importadoPor,
+  }));
 }
 
 export function normalizarDesdeNorma43(
@@ -162,41 +161,19 @@ export function normalizarDesdeNorma43(
   propietarioId: string,
   fechaImportacion: string,
   cuentaIban?: string,
-  importadoPor?: string
+  importadoPor?: string,
+  opciones: OpcionesNormalizacionBancaria = {},
 ): MovimientoBancario[] {
-  return movimientos.map((m, idx) => {
-    const tipo = m.importe >=0 ? 'INGRESO' : 'GASTO';
-    const conceptoAdicional = m.conceptoAdicional.join(' ').trim();
-    const concepto = conceptoAdicional || `Concepto ${m.conceptoComun || ''} ${m.conceptoPropio || ''}`.trim() || 'Movimiento Norma43';
-    const referencia = `${m.referencia1 || ''} ${m.referencia2 || ''}`.trim() || m.documento;
-    const identificador = `${m.referencia1 || ''}${m.referencia2 || ''}`.trim() || undefined;
-    const hash = generarHashIdempotencia(m.fechaOperacion, m.importe, concepto, referencia, identificador);
-    const idMov = identificador ? `n43_${hashString(identificador)}_${m.fechaOperacion}` : `n43_${hash}_${idx}`;
-
-    return {
-      idImportacion,
-      idMovimiento: idMov,
-      fechaOperacion: m.fechaOperacion,
-      fechaValor: m.fechaValor,
-      importe: m.importe,
-      tipo,
-      concepto: concepto.slice(0,500),
-      conceptoOriginal: `${m.raw22} | ${m.conceptoAdicional.join(' | ')}`.slice(0,500),
-      referencia: referencia || undefined,
-      identificadorBanco: identificador,
-      origen: 'NORMA43' as OrigenFormatoBancario,
-      propietarioId,
-      cuentaIban,
-      metadatosOriginales: {
-        conceptoComun: m.conceptoComun || null,
-        conceptoPropio: m.conceptoPropio || null,
-        documento: m.documento || null,
-        referencia1: m.referencia1 || null,
-        referencia2: m.referencia2 || null,
-      },
-      hashIdempotencia: hash,
-      fechaImportacion,
-      importadoPor,
-    };
+  return movimientos.map((m) => {
+    const concepto = m.conceptoAdicional.join(' ').trim()
+      || [m.conceptoComun, m.conceptoPropio].filter(Boolean).join(' ').trim();
+    const referencia = [m.referencia1, m.referencia2].filter(Boolean).join(' ').trim() || m.documento;
+    const identificador = [m.referencia1, m.referencia2].filter(Boolean).join('').trim() || undefined;
+    return completarMovimiento({
+      idImportacion, propietarioId, fechaImportacion, origen: 'NORMA43', fecha: m.fechaOperacion,
+      fechaValor: m.fechaValor, importe: m.importe, concepto, referencia, identificador,
+      divisa: opciones.divisa, cuenta: opciones.cuenta, cuentaRef: opciones.cuentaRef, cuentaIban,
+      fila: m.fila, importadoPor: opciones.importadoPor || importadoPor,
+    });
   });
 }

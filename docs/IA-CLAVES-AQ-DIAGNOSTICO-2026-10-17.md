@@ -2,6 +2,50 @@
 
 Fecha: 2026-10-17 (UTC). **ABIERTA. Parche preparado; no integrado ni publicado en producción.**
 
+
+## Actualización — orden de cierre #41 y desbloqueo #42 (sin fusión ni despliegue)
+
+**Estado: #41 corregida y CI verde; #42 con parche verificado, pero NO actualizado su HEAD. Intervención parcialmente completada.** Se reutiliza el diagnóstico original de este documento y los comentarios CI de ambas PR; no se repite la auditoría de producción.
+
+### Causa y corrección de los cuatro fallos
+
+El fixture E2E creó una incidencia `ALTA` el `2026-10-16T07:00:00Z` y esperaba que nunca escalase, pero `server.ts` construye el servicio con reloj real. `motivoEscalado` exige escalar a las **24 horas** sin asignar: a partir de `2026-10-17T07:00:00Z` aparece correctamente `INCIDENCIA_ESCALADA`. Ese evento extra rompe, por orden, las expectativas de alta (269), repetición (298), evolución legible (332) y recuento al escalar urgente (355). No son cuatro defectos independientes ni una regresión de AQ.: el diagnóstico previo ya reprodujo los mismos fallos en la base; ni #41 ni #42 modifican esos archivos productivos.
+
+Reproducción actual antes del arreglo: 4 fallos / 8 pruebas. Commit `3dbaa729d36a2657229a32e4a303ec1f06d0bb14`: sólo cambia `tests/seguimiento-incidencias-e2e.test.ts`. Fija **Date**, no timers de HTTP, al instante del escenario, y firma los JWT con ese mismo reloj; restaura el reloj al terminar. Mantiene todas las aserciones previas y añade un escenario de frontera: no escala a 24 h menos 1 ms, sí a 24 h, y repetir conserva un único evento y las mismas identidades de aviso. No cambia reglas productivas ni idempotencia.
+
+### #42: dependencia y defectos SMTP demostrados
+
+- HEAD remoto: `69d4bbd10582592c508cce89d0b2c431022e323e`, rama `arena/7eef00ef-gestor-de-inmuebles-vercel`, base PR `main`; merge-base con #41: `ad113d7`. Dependencias añadidas: `nodemailer` y sus tipos. Inspeccionados los 31 archivos de la PR, cuerpo, commits, comentarios, revisiones y checks antes de editar.
+- **No depende funcionalmente de #41** para SMTP. Sí necesita la corrección de reloj para CI independiente de fecha; la compatibilidad AQ. es una integración paralela limpia. Hay divergencia con main y conflictos documentales en `docs/ESTADO-GIT-ERP.md` y `docs/MAPA-MAESTRO-ERP-ACTUAL.md` (confirmados por `git merge-tree`, sin iniciar un merge). No se resolvieron a ciegas ni se ampliaron líneas de trabajo.
+- Nuevas pruebas de regresión contra el SMTP original: **13 fallidas / 5 correctas**. Demuestran que una promesa resuelta o un Message-ID local sin destinatario aceptado devuelve éxito; esto llega a `ENVIADA` en el dispatcher. También detectan que los timeouts se pasaban como defaults del mensaje y que el texto de error podía filtrar credenciales no incluidas en una URL.
+- Parche candidato: sólo declara éxito si `accepted` confirma al destinatario y éste no figura en `rejected`/`pending`; aplica timeouts de conexión/saludo/socket a las opciones del transporte, con debug/log desactivados; registra únicamente códigos SMTP acotados y el host, no mensajes arbitrarios; una configuración no SMTP/incompleta queda en modo seguro. `ENABLE_EMAIL=true` por sí solo nunca da éxito. Aceptación por el servidor SMTP **no significa llegada garantizada al buzón**.
+- Las pruebas cubren conexión, autenticación, timeout, rechazos, transporte inyectado, persistencia de FALLIDA/ENVIADA, límite de reintentos y repetición sin reenvío. Los dobles antiguos ahora informan `accepted` explícitamente; no se retira ninguna aserción. Sin credenciales ni correos reales.
+
+### Pruebas y alcance verificado
+
+| Código | Comprobación | Resultado |
+|---|---|---|
+| #41 corregida | Seguimiento + llaves/formulario/tutorial | 102 correctas (tras el primer arreglo); suite final incluye la versión reforzada del escenario de frontera |
+| #41 `3dbaa72` | Vitest completo local | **231 archivos, 4258 passed, 7 todo, 0 fallos** |
+| #41 `3dbaa72` | TypeScript y build local | Correctos; sólo advertencia de tamaño del bundle |
+| #41 `3dbaa72` | GitHub Actions run `39020267987` | Emuladores y tipos/suite/build: **success** |
+| Candidato #42 (69d4bbd + parches) | Fase A + SMTP + seguimiento + llaves + arranque e integración servidor | **211/211**, 9 archivos |
+| Candidato #42 | TypeScript y build | Correctos; sólo advertencia de tamaño del bundle |
+| Parches #42 | Aplicación sobre copia limpia de `69d4bbd` | Ambos aplican y reproducen byte a byte los archivos probados |
+
+Los 12 fallos históricos de Operaciones y 3 de Patrimonial siguen documentados en el diagnóstico previo. No se han ocultado ni corregido fuera de alcance, ni se repiten esas auditorías: esta intervención sólo cambia una prueba de seguimiento y prepara el parche SMTP. No se afirma que esas suites adicionales hayan quedado verdes.
+
+### Entrega controlada y bloqueo restante
+
+Rama única de escritura: `arena/07da0de4-gestor-de-inmuebles-vercel`. La sesión no puede publicar en la rama `arena/7eef00ef…` que alimenta #42. Por ello **no se afirma que #42 contenga ya la integración**, aunque el candidato esté probado. Se entregan:
+
+1. `patches/pr42/01-compatibilidad-41.patch`: cambios de formato/ayuda/pruebas de #41 y reloj E2E sobre el HEAD exacto de #42. SHA256 `2f3651fb24592f367535d55c8a90fd571f762dc95403f62bd81dd36543b4a377`.
+2. `patches/pr42/02-smtp-aceptacion-y-seguridad.patch`: `server/notificaciones/{proveedorSmtp,proveedoresEmail}.ts`, dobles de `tests/notificaciones-fase-a.test.ts` y nueva suite `tests/smtp-aceptacion-regresion.test.ts`. SHA256 `3270a38fee4ad6e2cef85bea8ff70fb387a32e3a761170a66f451eec65416bd8`.
+
+No se copia SMTP a la superficie productiva de #41. No se crea otra PR. No se fusiona, cierra ni despliega ninguna PR ni se configuran credenciales. Los Preview/checks automáticos de GitHub/Vercel son ajenos a un despliegue manual de esta intervención.
+
+**Pendiente para #42:** aplicar los parches desde una sesión autorizada para su rama, reconciliar los dos conflictos documentales con main y ejecutar CI en su HEAD publicado. Esto no requiere pedir al usuario comandos de terminal. #41 sigue abierta en borrador; #42 abierta no borrador y `CONFLICTING` con main. La prueba funcional real en producción del diagnóstico original sigue fuera del alcance de esta orden y no se declara realizada.
+
 ## 1. Sesión e inspección previa a modificar archivos
 
 - Repositorio: `sarqsan/Gestor-de-inmuebles-vercel`.

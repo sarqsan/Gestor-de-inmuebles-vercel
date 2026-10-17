@@ -1,0 +1,412 @@
+diff --git a/docs/IA-FASE-9-INFORME-CIERRE.md b/docs/IA-FASE-9-INFORME-CIERRE.md
+index a34e15f..fc6d2a0 100644
+--- a/docs/IA-FASE-9-INFORME-CIERRE.md
++++ b/docs/IA-FASE-9-INFORME-CIERRE.md
+@@ -4,9 +4,12 @@
+ > cualquier Arena): base SHA → HEAD SHA, qué toca, qué NO toca, pruebas,
+ > limitaciones reales, dependencias externas y política de resolución.
+ >
+-> **Estado: ENTREGADO EN RAMA — NO integrado.** La integración en `main`
+-> corresponde a quien autorice la PR #39 (§3.4) y no se ha ejecutado desde esta
+-> rama. **No se ha activado consumo real de IA** en ningún entorno.
++> **Estado: INTEGRADO EN `main`** (PR #39 fusionada el 2026-10-16, merge
++> `ad113d7`, base `4309f48`, HEAD de la entrega `71f27a9`). Este informe describe
++> el cierre de la entrega en rama; la re-verificación sobre `main` y el estado
++> vigente están en `docs/ESTADO-GIT-ERP.md` («INTEGRACIÓN — FASE IA 9»).
++> **El consumo real de IA sigue BLOQUEADO** hasta que se configuren los secretos
++> y variables de §5 en el entorno; no se ha activado en ningún entorno a fecha del merge.
+ 
+ | Campo | Valor |
+ | --- | --- |
+@@ -35,7 +38,7 @@ PDF— y las decisiones de detalle tomadas por esta Arena quedaron escritas en 
+ | Pieza | Fichero | Contenido |
+ | --- | --- | --- |
+ | Diseño | `docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md` | Problema, vías comparadas, DECISIÓN §11 (Vía 2), arquitectura §4, alta guiada §11.2, tutorial §11.2.8, variables §10, limitaciones §9, plan §8 |
+-| Contrato puro | `src/ia/llavesUsuarioContrato.ts` | Estados `AUSENTE/REGISTRADA/VERIFICADA/REVOCADA`, resumen sin secretos (sólo sufijo de 4), validación de **forma** (`AIza…`, 39 caracteres, códigos accionables), modos `USUARIO/NO_CONFIGURADO/CLAVE_MAESTRA_INVALIDA`, `RESPALDO/EXIGIR`, `DESACTIVADA/PROVEEDOR`, rutas y cabecera `X-IA-Llave-Usuario` |
++| Contrato puro | `src/ia/llavesUsuarioContrato.ts` | Estados `AUSENTE/REGISTRADA/VERIFICADA/REVOCADA`, resumen sin secretos (sólo sufijo de 4), validación de **forma** (`AIza…` clásico de 39 caracteres o `AQ.` de longitud variable acotada; códigos accionables), modos `USUARIO/NO_CONFIGURADO/CLAVE_MAESTRA_INVALIDA`, `RESPALDO/EXIGIR`, `DESACTIVADA/PROVEEDOR`, rutas y cabecera `X-IA-Llave-Usuario` |
+ | Tutorial declarativo | `src/ia/tutorialLlaveUsuarioIA.ts` | 7 pasos del alta guiada + avisos de custodia + preguntas frecuentes; enlace oficial `aistudio.google.com/app/apikey`; una sola fuente para la pantalla y el PDF |
+ | Cifrado | `server/ia/cifradoLlavesIA.ts` | AES-256-GCM con `IA_LLAVES_CLAVE_MAESTRA` (32 bytes base64/base64url), IV aleatorio, **AAD = uid** (un criptograma copiado a otro usuario no descifra), huella HMAC para «misma clave», generador de clave maestra |
+ | Servicio | `server/ia/llavesUsuarioIA.ts` | `ia_llaves/{uid}` + `ia_llaves_eventos/{uid}_{idempotencia}`; alta, `SIN_CAMBIOS`, sustitución (contador), revocación (borra el criptograma, conserva historial), marca de verificación, `resolverParaOperacion` (sólo núcleo); Firestore con CAS por `updateTime` y reintentos; variante en memoria para desarrollo/pruebas |
+diff --git a/docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md b/docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md
+index 4a1c184..1fe9335 100644
+--- a/docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md
++++ b/docs/IA-FASE-9-LLAVES-DE-USUARIO-DISENO-Y-DECISIONES.md
+@@ -153,8 +153,11 @@ interviene en ningún punto del flujo de usuario.
+ 
+ ### 4.6 Validación de formato (local, sin red)
+ 
+-La clave de Gemini (Google AI Studio) tiene la forma `AIza` + 35 caracteres
+-`[A-Za-z0-9_-]` (39 en total). La validación recorta espacios y comillas,
++El formato clásico conserva la regla `AIza` + 35 caracteres
++`[A-Za-z0-9_-]` (39 en total). También se admite `AQ.` con cuerpo base64url
++de longitud variable: mínimo defensivo local de 32 caracteres de cuerpo y
++máximo de 200 caracteres totales (límite de entrada existente). Estos límites
++no se presentan como longitudes oficiales de Google. La validación recorta espacios y comillas,
+ rechaza el marcador `MY_GEMINI_API_KEY`, longitudes y alfabetos distintos, y
+ devuelve un código accionable (`VACIA`, `MARCADOR_DE_POSICION`, `LONGITUD`,
+ `PREFIJO`, `CARACTERES`). Es una comprobación de **forma**: la validez real
+@@ -297,7 +300,7 @@ profesionales. Por eso la Vía 2 se entrega con un alta guiada en
+   (no compartirla, no pegarla en correos ni chats).
+ - **11.2.3 Crear la clave en Google AI Studio** — enlace oficial
+   `https://aistudio.google.com/app/apikey`, botón «Crear clave de API»,
+-  elección/creación del proyecto, copia de la clave (empieza por `AIza`).
++  elección/creación del proyecto, copia de la clave completa (prefijos admitidos: `AIza` o `AQ.`).
+ - **11.2.4 Pegar la clave en el ERP** — campo de contraseña (no se ve lo
+   escrito), validación local de forma con mensajes accionables, botón
+   «Guardar clave». El navegador la envía una sola vez por HTTPS.
+diff --git a/src/components/ia/AltaGuiadaLlaveIA.test.tsx b/src/components/ia/AltaGuiadaLlaveIA.test.tsx
+index e19f836..49543d0 100644
+--- a/src/components/ia/AltaGuiadaLlaveIA.test.tsx
++++ b/src/components/ia/AltaGuiadaLlaveIA.test.tsx
+@@ -101,37 +101,41 @@ describe('AltaGuiadaLlaveIA · estado y tutorial', () => {
+ });
+ 
+ describe('AltaGuiadaLlaveIA · alta', () => {
+-  it('rechaza en local una clave con mala forma sin llamar al servidor', async () => {
++  it.each([
++    ['sk-no-es-de-google-1234567890123456', /«AIza» o «AQ\.»/],
++    ['AQ.corta', /incompleta/],
++    ['AQ.' + 'a'.repeat(40) + '!', /caracteres no admitidos/],
++  ])('rechaza en local una clave con mala forma sin llamar al servidor (%#)', async (llave, mensaje) => {
+     const { fetchImpl, llamadas } = fetchDoble([
+       ['GET', RUTA_LLAVE_USUARIO_IA, () => ({ llaves: SUBSISTEMA, llave: resumenLlaveAusente(), altaGuiada: [] })],
+     ]);
+     render(<AltaGuiadaLlaveIA opciones={opciones(fetchImpl)} descargarPdf={() => {}} imprimirPdf={() => true} />);
+     await waitFor(() => screen.getByLabelText(/Tu clave de API/));
+-    fireEvent.change(screen.getByLabelText(/Tu clave de API/), { target: { value: 'sk-no-es-de-google-1234567890123456' } });
++    fireEvent.change(screen.getByLabelText(/Tu clave de API/), { target: { value: llave } });
+     fireEvent.click(screen.getByText('Guardar clave'));
+-    expect((await screen.findByRole('alert')).textContent).toMatch(/empieza por «AIza»/);
++    expect((await screen.findByRole('alert')).textContent).toMatch(mensaje);
+     expect(llamadas.filter((l) => l.init?.method === 'PUT')).toHaveLength(0);
+   });
+ 
+-  it('envía la clave con Idempotency-Key, vacía el campo, muestra REGISTRADA y el sufijo; nunca pinta la clave', async () => {
++  it.each([LLAVE, 'AQ.' + 'aB9_-'.repeat(20)])('envía el formato admitido con autenticación, vacía el campo y no lo muestra (%#)', async (llave) => {
+     const { fetchImpl, llamadas } = fetchDoble([
+       ['GET', RUTA_LLAVE_USUARIO_IA, () => ({ llaves: SUBSISTEMA, llave: resumenLlaveAusente(), altaGuiada: [] })],
+-      ['PUT', RUTA_LLAVE_USUARIO_IA, () => ({ estado: 'REGISTRADA', llave: REGISTRADA, llaves: SUBSISTEMA })],
++      ['PUT', RUTA_LLAVE_USUARIO_IA, () => ({ estado: 'REGISTRADA', llave: { ...REGISTRADA, sufijo: llave.slice(-4) }, llaves: SUBSISTEMA })],
+     ]);
+     const { container } = render(<AltaGuiadaLlaveIA opciones={opciones(fetchImpl)} descargarPdf={() => {}} imprimirPdf={() => true} />);
+     const campo = await screen.findByLabelText(/Tu clave de API/);
+     expect(campo?.getAttribute('type')).toBe('password');
+-    fireEvent.change(campo, { target: { value: ` "${LLAVE}" ` } });
++    fireEvent.change(campo, { target: { value: ` "${llave}" ` } });
+     fireEvent.click(screen.getByText('Guardar clave'));
+     await waitFor(() => expect(screen.getByTestId('estado-llave').textContent).toContain('REGISTRADA'));
+     const put = llamadas.find((l) => l.init?.method === 'PUT')!;
+-    expect(JSON.parse(String(put.init?.body))).toEqual({ llave: LLAVE }); // normalizada en local (comillas/espacios fuera)
++    expect(JSON.parse(String(put.init?.body))).toEqual({ llave }); // normalizada en local (comillas/espacios fuera)
+     expect(cabecera(put.init, CABECERA_IDEMPOTENCIA_IA)).toMatch(/^[A-Za-z0-9_\-:.]{8,128}$/);
+     expect(cabecera(put.init, 'Authorization')).toBe('Bearer token-ana');
+     expect((screen.getByLabelText(/Sustituir por otra clave/) as HTMLInputElement).value).toBe('');
+-    expect(screen.getByText(`…${LLAVE.slice(-4)}`)).toBeTruthy();
++    expect(screen.getByText(`…${llave.slice(-4)}`)).toBeTruthy();
+     expect(screen.getByText(/Clave guardada cifrada/)).toBeTruthy();
+-    expect(container.textContent).not.toContain(LLAVE);
++    expect(container.textContent).not.toContain(llave);
+     expect(screen.getByText('Revocar')).toBeTruthy();
+   });
+ 
+diff --git a/src/components/ia/AltaGuiadaLlaveIA.tsx b/src/components/ia/AltaGuiadaLlaveIA.tsx
+index 6466807..07dc745 100644
+--- a/src/components/ia/AltaGuiadaLlaveIA.tsx
++++ b/src/components/ia/AltaGuiadaLlaveIA.tsx
+@@ -219,7 +219,7 @@ export function AltaGuiadaLlaveIA({ opciones = OPCIONES_POR_DEFECTO, descargarPd
+ 
+           <div className="space-y-2">
+             <label htmlFor="campo-llave-ia" className="block text-xs font-semibold text-slate-700">
+-              {activa ? 'Sustituir por otra clave' : 'Tu clave de API (empieza por AIza)'}
++              {activa ? 'Sustituir por otra clave' : 'Tu clave de API (AIza o AQ.)'}
+             </label>
+             <div className="flex flex-col sm:flex-row gap-2">
+               <input
+diff --git a/src/ia/llavesUsuarioContrato.ts b/src/ia/llavesUsuarioContrato.ts
+index fc9be7a..7901d4b 100644
+--- a/src/ia/llavesUsuarioContrato.ts
++++ b/src/ia/llavesUsuarioContrato.ts
+@@ -106,10 +106,18 @@ export type CodigoRechazoLlavesIA =
+ // confirma el proveedor.
+ // ---------------------------------------------------------------------------
+ 
+-/** Clave de Google AI Studio: `AIza` + 35 caracteres [A-Za-z0-9_-] (39 en total). */
++/** Formato clásico: conserva su regla estricta de 39 caracteres. */
+ export const LONGITUD_LLAVE_GEMINI = 39;
+ export const PREFIJO_LLAVE_GEMINI = 'AIza';
+ const PATRON_LLAVE_GEMINI = /^AIza[0-9A-Za-z_-]{35}$/;
++export const PREFIJO_LLAVE_GEMINI_ACTUAL = 'AQ.';
++/**
++ * Límite defensivo local, NO longitud oficial de Google: un token AQ. debe
++ * contener al menos 32 caracteres base64url y caber en el cuerpo ya admitido.
++ * Sólo el proveedor puede confirmar autenticidad, vigencia y permisos.
++ */
++export const MIN_LONGITUD_CUERPO_LLAVE_AQ = 32;
++const PATRON_CUERPO_LLAVE_AQ = /^[0-9A-Za-z_-]+$/;
+ /** Marcador que trae `.env.example`; nunca es una llave. */
+ export const MARCADOR_LLAVE_GEMINI = 'MY_GEMINI_API_KEY';
+ /** Tope de lo que el servidor acepta en el cuerpo antes de normalizar. */
+@@ -140,8 +148,18 @@ export function validarFormatoLlaveProveedorIA(entrada: unknown): ResultadoForma
+   if (valor === MARCADOR_LLAVE_GEMINI) {
+     return { estado: 'INVALIDA', codigo: 'MARCADOR_DE_POSICION', mensaje: 'Eso es un marcador de ejemplo, no una clave real.' };
+   }
++  if (valor.startsWith(PREFIJO_LLAVE_GEMINI_ACTUAL)) {
++    const cuerpo = valor.slice(PREFIJO_LLAVE_GEMINI_ACTUAL.length);
++    if (cuerpo.length < MIN_LONGITUD_CUERPO_LLAVE_AQ || valor.length > MAX_LONGITUD_ENTRADA_LLAVE) {
++      return { estado: 'INVALIDA', codigo: 'LONGITUD', mensaje: 'La clave AQ. está incompleta o supera el límite de entrada del Gestor. Cópiala entera desde Google AI Studio.' };
++    }
++    if (!PATRON_CUERPO_LLAVE_AQ.test(cuerpo)) {
++      return { estado: 'INVALIDA', codigo: 'CARACTERES', mensaje: 'La clave AQ. contiene caracteres no admitidos. Vuelve a copiarla desde Google AI Studio, sin espacios internos.' };
++    }
++    return { estado: 'VALIDA', valor, sufijo: sufijoLlave(valor) };
++  }
+   if (!valor.startsWith(PREFIJO_LLAVE_GEMINI)) {
+-    return { estado: 'INVALIDA', codigo: 'PREFIJO', mensaje: `Una clave de Google AI Studio empieza por «${PREFIJO_LLAVE_GEMINI}». Comprueba que has copiado la clave completa.` };
++    return { estado: 'INVALIDA', codigo: 'PREFIJO', mensaje: `Los formatos admitidos empiezan por «${PREFIJO_LLAVE_GEMINI}» o «${PREFIJO_LLAVE_GEMINI_ACTUAL}». Comprueba que has copiado la clave completa.` };
+   }
+   if (valor.length !== LONGITUD_LLAVE_GEMINI) {
+     return { estado: 'INVALIDA', codigo: 'LONGITUD', mensaje: `La clave debe tener ${LONGITUD_LLAVE_GEMINI} caracteres (la tuya tiene ${valor.length}). Cópiala entera, sin espacios.` };
+diff --git a/src/ia/tutorialLlaveUsuarioIA.ts b/src/ia/tutorialLlaveUsuarioIA.ts
+index 8eb7a8b..d4e612a 100644
+--- a/src/ia/tutorialLlaveUsuarioIA.ts
++++ b/src/ia/tutorialLlaveUsuarioIA.ts
+@@ -9,10 +9,10 @@
+  *
+  * Módulo PURO: sin React, sin jsPDF, sin red. Nunca contiene una clave.
+  */
+-import { LONGITUD_LLAVE_GEMINI, PREFIJO_LLAVE_GEMINI } from './llavesUsuarioContrato.js';
++import { LONGITUD_LLAVE_GEMINI, PREFIJO_LLAVE_GEMINI, PREFIJO_LLAVE_GEMINI_ACTUAL } from './llavesUsuarioContrato.js';
+ 
+ export const URL_OFICIAL_CLAVES_AI_STUDIO = 'https://aistudio.google.com/app/apikey';
+-export const VERSION_TUTORIAL_LLAVE = '1.0 · Fase IA 9';
++export const VERSION_TUTORIAL_LLAVE = '1.1 · Fase IA 9';
+ 
+ export type ClavePasoAltaGuiada =
+   | 'QUE_ES'
+@@ -79,7 +79,7 @@ const PASOS_ALTA_GUIADA: readonly PasoAltaGuiadaLlave[] = Object.freeze<PasoAlta
+     detalle: [
+       `Abre ${URL_OFICIAL_CLAVES_AI_STUDIO} e inicia sesión con tu cuenta de Google.`,
+       'Pulsa «Crear clave de API» (Create API key). Si te pide un proyecto, elige el que te proponga o crea uno nuevo con cualquier nombre.',
+-      `Se mostrará la clave: una cadena de ${LONGITUD_LLAVE_GEMINI} caracteres que empieza por «${PREFIJO_LLAVE_GEMINI}». Cópiala con el botón de copiar.`,
++      `Copia la clave completa con el botón de copiar. Se admiten los prefijos «${PREFIJO_LLAVE_GEMINI}» (formato clásico, ${LONGITUD_LLAVE_GEMINI} caracteres) y «${PREFIJO_LLAVE_GEMINI_ACTUAL}» (longitud variable).`,
+       'Si Google te ofrece restringir la clave, puedes hacerlo más adelante; para este tutorial basta con crearla.',
+     ],
+   },
+@@ -154,7 +154,7 @@ export const TUTORIAL_LLAVE_USUARIO_IA: TutorialLlaveUsuarioIA = Object.freeze({
+     },
+     {
+       pregunta: 'Me dice que la clave tiene un formato incorrecto.',
+-      respuesta: `Comprueba que la has copiado entera (${LONGITUD_LLAVE_GEMINI} caracteres), que empieza por «${PREFIJO_LLAVE_GEMINI}» y que no lleva espacios ni comillas al principio o al final.`,
++      respuesta: `Comprueba que la has copiado entera y sin espacios internos. Se admiten «${PREFIJO_LLAVE_GEMINI}» (${LONGITUD_LLAVE_GEMINI} caracteres) y «${PREFIJO_LLAVE_GEMINI_ACTUAL}» (longitud variable, con límites de entrada del Gestor). La aceptación del formato no confirma que Google la acepte.`,
+     },
+   ],
+   camposParaAnotar: [
+diff --git a/tests/ia-fase9-llaves-usuario.test.ts b/tests/ia-fase9-llaves-usuario.test.ts
+index f20751f..7eea35d 100644
+--- a/tests/ia-fase9-llaves-usuario.test.ts
++++ b/tests/ia-fase9-llaves-usuario.test.ts
+@@ -104,6 +104,8 @@ async function escuchar(app: express.Express): Promise<string> {
+   return `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
+ }
+ 
++const LLAVE_AQ = 'AQ.' + 'aB9_-'.repeat(20); // token sintético, sin credencial real
++
+ // ---------------------------------------------------------------------------
+ describe('IA Fase 9 · contrato puro (forma de la clave y DTO sin secretos)', () => {
+   it('acepta una clave con la forma de Google AI Studio y devuelve sólo el sufijo', () => {
+@@ -111,6 +113,27 @@ describe('IA Fase 9 · contrato puro (forma de la clave y DTO sin secretos)', ()
+     expect(r).toEqual({ estado: 'VALIDA', valor: LLAVE_ANA, sufijo: LLAVE_ANA.slice(-4) });
+   });
+ 
++  it.each([32, 64, 103, 197])('acepta AQ. con cuerpo base64url variable (%i), sin atribuir validez del proveedor', (longitud) => {
++    const valor = 'AQ.' + 'a'.repeat(longitud - 4) + 'B9_-';
++    expect(validarFormatoLlaveProveedorIA(` "${valor}" `)).toEqual({ estado: 'VALIDA', valor, sufijo: 'B9_-' });
++  });
++
++  it.each([
++    ['AQ.', 'LONGITUD'], ['AQ.corta', 'LONGITUD'],
++    ['AQ.' + 'a'.repeat(31), 'LONGITUD'], ['AQ.' + 'a'.repeat(198), 'LONGITUD'],
++    ['AQ.' + 'a'.repeat(32) + '!', 'CARACTERES'],
++    ['AQ.' + 'a'.repeat(32) + '.abc', 'CARACTERES'],
++    ['AQ.' + 'a'.repeat(32) + ' x', 'CARACTERES'],
++    ['AQ.' + 'a'.repeat(32) + '\nx', 'CARACTERES'],
++    ['AQ.' + 'a'.repeat(32) + 'é', 'CARACTERES'],
++    ['AQ.' + 'a'.repeat(32) + '/=', 'CARACTERES'],
++    ['aq.' + 'a'.repeat(40), 'PREFIJO'],
++  ])('rechaza AQ. malformada (%#) sin revelar el valor', (valor, codigo) => {
++    const r = validarFormatoLlaveProveedorIA(valor);
++    expect(r).toMatchObject({ estado: 'INVALIDA', codigo });
++    if (r.estado === 'INVALIDA' && valor.length > 3) expect(r.mensaje).not.toContain(valor);
++  });
++
+   it('rechaza con código accionable: vacía, marcador, prefijo, longitud y caracteres', () => {
+     const casos: Array<[unknown, string]> = [
+       ['', 'VACIA'],
+@@ -231,23 +254,23 @@ function puertoSimulado() {
+ 
+ function pruebasServicio(nombre: string, crear: () => { servicio: ServicioLlavesIA; documentos: () => Map<string, Record<string, unknown>>; eventos: () => Map<string, Record<string, unknown>> }) {
+   describe(`IA Fase 9 · servicio de llaves (${nombre})`, () => {
+-    it('alta: valida forma, cifra, no expone el valor y deja evento ALTA', async () => {
++    it.each([LLAVE_ANA, LLAVE_AQ])('alta: valida forma, cifra, no expone el valor y deja evento ALTA (%#)', async (llave) => {
+       const { servicio, documentos, eventos } = crear();
+       expect(await servicio.resumen('uid-ana')).toMatchObject({ estado: 'AUSENTE' });
+-      const r = await servicio.registrar({ uid: 'uid-ana', valor: ` ${LLAVE_ANA} `, claveIdempotencia: 'alta-ana-0001', ahora: AHORA });
++      const r = await servicio.registrar({ uid: 'uid-ana', valor: ` ${llave} `, claveIdempotencia: 'alta-ana-0001', ahora: AHORA });
+       expect(r.estado).toBe('REGISTRADA');
+       if (r.estado === 'REGISTRADA') {
+         expect(r.sustitucion).toBe(false);
+-        expect(r.resumen).toMatchObject({ estado: 'REGISTRADA', sufijo: LLAVE_ANA.slice(-4), registradaEn: AHORA.toISOString(), sustituciones: 0 });
+-        expect(JSON.stringify(r.resumen)).not.toContain(LLAVE_ANA);
++        expect(r.resumen).toMatchObject({ estado: 'REGISTRADA', sufijo: llave.slice(-4), registradaEn: AHORA.toISOString(), sustituciones: 0 });
++        expect(JSON.stringify(r.resumen)).not.toContain(llave);
+       }
+       const doc = documentos().get('uid-ana');
+       expect(doc).toBeDefined();
+-      expect(JSON.stringify(doc)).not.toContain(LLAVE_ANA);
++      expect(JSON.stringify(doc)).not.toContain(llave);
+       expect(doc).toMatchObject({ version: 1, estado: 'REGISTRADA', proveedor: 'GEMINI' });
+       const evento = eventos().get(idEventoLlaveIA('uid-ana', 'alta-ana-0001'));
+-      expect(evento).toMatchObject({ uid: 'uid-ana', tipo: 'ALTA', sufijo: LLAVE_ANA.slice(-4) });
+-      expect(JSON.stringify(evento)).not.toContain(LLAVE_ANA);
++      expect(evento).toMatchObject({ uid: 'uid-ana', tipo: 'ALTA', sufijo: llave.slice(-4) });
++      expect(JSON.stringify(evento)).not.toContain(llave);
+     });
+ 
+     it('formato inválido no escribe nada; misma llave ⇒ SIN_CAMBIOS; misma Idempotency-Key ⇒ DUPLICADA', async () => {
+@@ -486,6 +509,24 @@ describe('IA Fase 9 · rutas HTTP del alta guiada', () => {
+     expect(JSON.stringify(m.eventos)).not.toContain(LLAVE_ANA);
+   });
+ 
++  it('PUT acepta AQ., aísla por usuario y no incluye el secreto en respuestas ni logs; rechaza AQ. inválida', async () => {
++    const m = await montar();
++    const alta = await m.llamar(RUTA_LLAVE_USUARIO_IA, { method: 'PUT', token: 'token-ana', idem: 'aq-alta-0001', body: JSON.stringify({ llave: LLAVE_AQ }) });
++    expect(alta.status).toBe(200);
++    const cuerpo = await alta.json();
++    expect(cuerpo).toMatchObject({ estado: 'REGISTRADA', llave: { sufijo: LLAVE_AQ.slice(-4) } });
++    expect(JSON.stringify(cuerpo)).not.toContain(LLAVE_AQ);
++    expect(await m.llaves!.resolverParaOperacion('uid-ana')).toMatchObject({ estado: 'DISPONIBLE', valor: LLAVE_AQ });
++    expect(await m.llaves!.resumen('uid-luis')).toMatchObject({ estado: 'AUSENTE' });
++    for (const [i, llave] of ['AQ.corta', LLAVE_AQ + '!', 'AQ.' + 'a'.repeat(198)].entries()) {
++      const r = await m.llamar(RUTA_LLAVE_USUARIO_IA, { method: 'PUT', token: 'token-ana', idem: `aq-mal-000${i}`, body: JSON.stringify({ llave }) });
++      expect(r.status).toBe(422);
++      expect(JSON.stringify(await r.json())).not.toContain(llave);
++    }
++    expect(JSON.stringify(m.eventos)).not.toContain(LLAVE_AQ);
++    expect(JSON.stringify(m.eventosNucleo)).not.toContain(LLAVE_AQ);
++  });
++
+   it('DELETE: 404 sin llave, 200 al revocar, 404 al repetir (ya no hay llave activa); verificar: 503 desactivada por defecto', async () => {
+     const m = await montar();
+     expect((await m.llamar(RUTA_LLAVE_USUARIO_IA, { method: 'DELETE', token: 'token-ana', idem: 'rev-0001' })).status).toBe(404);
+diff --git a/tests/ia-fase9-tutorial-llave.test.ts b/tests/ia-fase9-tutorial-llave.test.ts
+index bcf35d3..43f03f3 100644
+--- a/tests/ia-fase9-tutorial-llave.test.ts
++++ b/tests/ia-fase9-tutorial-llave.test.ts
+@@ -32,6 +32,8 @@ describe('IA Fase 9 · tutorial del alta guiada', () => {
+     expect(TUTORIAL_LLAVE_USUARIO_IA.pasos.some((p) => p.enlace === URL_OFICIAL_CLAVES_AI_STUDIO)).toBe(true);
+     expect(resumenAltaGuiadaLlave().map((p) => p.clave)).toEqual(['QUE_ES', 'ANTES_DE_EMPEZAR', 'CREAR_EN_AI_STUDIO', 'PEGAR_EN_ERP', 'CONFIRMACION', 'VERIFICACION', 'SUSTITUIR_O_REVOCAR']);
+     expect(JSON.stringify(TUTORIAL_LLAVE_USUARIO_IA)).not.toMatch(PATRON_CLAVE);
++    expect(JSON.stringify(TUTORIAL_LLAVE_USUARIO_IA)).toContain('AQ.');
++    expect(JSON.stringify(TUTORIAL_LLAVE_USUARIO_IA)).toContain('longitud variable');
+   });
+ 
+   it('genera un PDF A4 multipágina con nombre estable y el texto esperado', () => {
+diff --git a/tests/seguimiento-incidencias-e2e.test.ts b/tests/seguimiento-incidencias-e2e.test.ts
+index 46f7cc6..82421b9 100644
+--- a/tests/seguimiento-incidencias-e2e.test.ts
++++ b/tests/seguimiento-incidencias-e2e.test.ts
+@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
+ import type { Server } from 'node:http';
+ import type { AddressInfo } from 'node:net';
+ import { join, resolve } from 'node:path';
+-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
++import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+ import { codificarValor } from '../server/titularidades/googleBackend';
+ 
+ const RAIZ = resolve(__dirname, '..');
+@@ -76,9 +76,12 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
+   ] as const;
+   const previas: Record<string, string | undefined> = {};
+ 
+-  const tokenInquilina = firmarToken('uid-ines', 'ines.privada@example.com');
+-  const tokenPropietario = firmarToken('uid-pedro', 'pedro.privado@example.com');
+-  const tokenAjena = firmarToken('uid-marta', 'marta.privada@example.com');
++  // El reloj del escenario debe coincidir con sus fechas de negocio, no con
++  // el día en que corre CI. Sólo se sustituye Date; HTTP y sus timers son reales.
++  const AHORA_ESCENARIO = new Date('2026-10-16T12:00:00.000Z');
++  let tokenInquilina: string;
++  let tokenPropietario: string;
++  let tokenAjena: string;
+ 
+   const clavesDocumentos = () => [...documentosFirestore.keys()].sort();
+ 
+@@ -110,8 +113,8 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
+   const clavesDe = (prefijo: string) => clavesDocumentos().filter((k) => k.startsWith(prefijo));
+ 
+   /** Eventos registrados en el hilo de la incidencia (leído de la fuente). */
+-  function eventosDelHilo(): Array<{ tipo: string; entrega?: { estado: string; notificacionId?: string } }> {
+-    const doc = documentosFirestore.get('incidencias_seguimiento/inc-1');
++  function eventosDelHilo(incidenciaId = 'inc-1'): Array<{ tipo: string; entrega?: { estado: string; notificacionId?: string } }> {
++    const doc = documentosFirestore.get(`incidencias_seguimiento/${incidenciaId}`);
+     const eventos = doc?.fields.eventos as { arrayValue?: { values?: Array<{ mapValue?: { fields?: Record<string, unknown> } }> } } | undefined;
+     return (eventos?.arrayValue?.values ?? []).map((v) => {
+       const campos = v.mapValue?.fields ?? {};
+@@ -135,6 +138,12 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
+   }
+ 
+   beforeAll(async () => {
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(AHORA_ESCENARIO);
++    // JWT y cachés usan el MISMO reloj que el servicio de seguimiento.
++    tokenInquilina = firmarToken('uid-ines', 'ines.privada@example.com');
++    tokenPropietario = firmarToken('uid-pedro', 'pedro.privado@example.com');
++    tokenAjena = firmarToken('uid-marta', 'marta.privada@example.com');
+     const { reiniciarCacheCertificados, reiniciarCacheTokens } = await import('../server/titularidades/googleBackend');
+     for (const v of VARIABLES) previas[v] = process.env[v];
+     process.env.VERCEL = '1';
+@@ -245,6 +254,7 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
+   }, 60_000);
+ 
+   afterAll(async () => {
++    vi.useRealTimers();
+     globalThis.fetch = fetchReal;
+     await new Promise<void>((r) => (servidor ? servidor.close(() => r()) : r()));
+     for (const v of VARIABLES) {
+@@ -377,4 +387,37 @@ describe('Fase 6 · seguimiento de incidencias de punta a punta', () => {
+     });
+     expect(raro.status).toBe(400);
+   });
++  it('escala ALTA exactamente a las 24 horas y no duplica evento ni aviso al repetir', async () => {
++    const original = documentosFirestore.get('incidencias/inc-1')!;
++    const campos = (datos: unknown) => (codificarValor(datos) as { mapValue: { fields: Record<string, unknown> } }).mapValue.fields;
++    documentosFirestore.set('incidencias/inc-plazo', {
++      fields: {
++        ...original.fields,
++        ...campos({ id: 'inc-plazo', prioridad: 'ALTA', estado: 'ABIERTA', fechaCreacion: '2026-10-15T12:00:00.001Z' }),
++      },
++      updateTime: updateTimeNuevo(),
++    });
++    try {
++      const antes = await sincronizar(tokenInquilina, { incidenciaId: 'inc-plazo' });
++      expect(antes.status).toBe(200);
++      expect((await antes.json()).eventos.map((e: { tipo: string }) => e.tipo)).toEqual(['INCIDENCIA_CREADA']);
++      vi.setSystemTime(new Date(AHORA_ESCENARIO.getTime() + 1));
++      const alLimite = await sincronizar(tokenInquilina, { incidenciaId: 'inc-plazo' });
++      expect(alLimite.status).toBe(200);
++      expect((await alLimite.json()).eventos.map((e: { tipo: string }) => e.tipo)).toEqual(['INCIDENCIA_ESCALADA']);
++      const eventosAntes = eventosDelHilo('inc-plazo');
++      const avisosAntes = clavesDe('notificaciones/');
++      const repetida = await sincronizar(tokenInquilina, { incidenciaId: 'inc-plazo' });
++      expect(repetida.status).toBe(200);
++      expect(await repetida.json()).toMatchObject({ estado: 'SIN_CAMBIOS', eventos: [] });
++      // Un reintento puede actualizar la entrega, pero no la identidad del evento.
++      expect(clavesDe('notificaciones/')).toEqual(avisosAntes);
++      const eventosDespues = eventosDelHilo('inc-plazo');
++      expect(eventosDespues.map((e) => e.tipo)).toEqual(['INCIDENCIA_CREADA', 'INCIDENCIA_ESCALADA']);
++      expect(eventosDespues.map((e) => e.entrega?.notificacionId)).toEqual(eventosAntes.map((e) => e.entrega?.notificacionId));
++    } finally {
++      vi.setSystemTime(AHORA_ESCENARIO);
++    }
++  });
++
+ });

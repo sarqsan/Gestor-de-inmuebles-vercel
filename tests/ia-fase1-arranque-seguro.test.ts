@@ -59,6 +59,8 @@ describe('app real: un proyecto incompatible no derriba HTTP ni permite operacio
     expect(json).toEqual({
       status: 'ok', geminiKeyConfigured: false,
       ia: { registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 12, errorConfiguracion: 'FIREBASE_PROYECTO_INCOMPATIBLE' },
+      // FASE A · estado del transporte de avisos y del reloj, sin secretos.
+      notificaciones: { email: { modo: 'MODO_SEGURO', proveedor: null }, cron: { configurado: false } },
     });
     for (const secreto of secretos) expect(JSON.stringify(json)).not.toContain(secreto);
   });

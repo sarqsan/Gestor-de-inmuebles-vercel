@@ -5,9 +5,17 @@ import dotenv from 'dotenv';
 // GAP 1 — Sistema transaccional de notificaciones (dispatcher + canales + resolver auth)
 import { DispatcherNotificaciones } from './src/notificaciones/dispatcher.js';
 import type { EnviadorCanal, RepositorioNotificaciones } from './src/notificaciones/dispatcher';
-import { CanalEmail, CanalInApp, CanalWebhook, EmailProviderSafeMode } from './src/notificaciones/canales.js';
+import { CanalEmail, CanalInApp, CanalWebhook } from './src/notificaciones/canales.js';
 import type { TransporteWebhook } from './src/notificaciones/canales';
-import { resolverAutorizacion } from './src/notificaciones/autorizacion.js';
+import { resolverAutorizacion, type FuentePerfilUsuario, type VerificadorToken } from './src/notificaciones/autorizacion.js';
+// FASE A (2026-10-16) — avisos que de verdad salen:
+//   · transporte de correo REAL o modo seguro explícito (nunca «ok» sin envío);
+//   · perfil veraz del usuario desde Firestore para autorizar el endpoint;
+//   · reloj diario protegido por CRON_SECRET que evalúa la regla del día 5.
+import { crearTransporteEmailDesdeEntorno, identidadDespachoDesdeEntorno } from './server/notificaciones/proveedoresEmail.js';
+import { crearFuentePerfilFirestore } from './server/notificaciones/perfilUsuarioFirestore.js';
+import { ejecutarRelojAvisos } from './server/notificaciones/relojAvisos.js';
+import { montarRutaCronAvisos } from './server/notificaciones/rutasCronAvisos.js';
 // Auditoría de acceso a documentos (2026-09-22): id inenumerable, tipos de
 // contenido seguros, cabeceras anti-caché y almacén acotado para los documentos
 // que sirve este propio servidor (fuera del alcance de las reglas de Storage).
@@ -82,12 +90,15 @@ const notificacionesRepo: RepositorioNotificaciones = {
   },
 };
 
-// Canales configurados desde entorno. Sin proveedor real → EmailProviderSafeMode desactivado.
-const emailProvider = new EmailProviderSafeMode({
-  activo: process.env.ENABLE_EMAIL === 'true',
-  smtpUrl: process.env.SMTP_URL,
-  from: process.env.EMAIL_FROM,
-});
+// FASE A — canales configurados SOLO desde el entorno del servidor.
+// `REAL` (Resend/SendGrid con credenciales) entrega de verdad; `MODO_SEGURO` no
+// contacta con nadie y devuelve fallo controlado: `ok` sin envío es imposible.
+const transporteEmail = crearTransporteEmailDesdeEntorno();
+const emailProvider = transporteEmail.provider;
+// FASE A — identidad que firma los avisos (nombre del despacho y buzón de
+// respuesta). Se deriva de `EMAIL_FROM` / `EMAIL_DESPACHO_NOMBRE` /
+// `EMAIL_REPLY_TO`: solo texto, jamás credenciales.
+const identidadDespacho = identidadDespachoDesdeEntorno();
 
 const transporteWebhook: TransporteWebhook = {
   post: async (url, body) => {
@@ -105,11 +116,27 @@ const transporteWebhook: TransporteWebhook = {
   },
 };
 
+// FASE A — cierra el cableado del hallazgo A16-03: el endpoint de notificaciones
+// ya no resuelve la autorización con dependencias `undefined`. El token se
+// verifica contra el proyecto de la app y el perfil se resuelve en Firestore
+// (`usuarios.authUid` + `estado == 'ACTIVO'`). Sin credencial de servicio no hay
+// fuente de perfil ⇒ contexto anónimo y denegación (deny-by-default).
+const verificadorTokenNotificaciones: VerificadorToken = {
+  async verificar(token: string) {
+    const identidad = await dependenciasIA.verificarToken(token);
+    return identidad?.uid ?? null;
+  },
+};
+
+let fuentePerfilFirestore: FuentePerfilUsuario | undefined;
+
+function fuentePerfilNotificaciones(): FuentePerfilUsuario | undefined {
+  if (!dependenciasIA.firestore) return undefined;
+  return fuentePerfilFirestore ?? (fuentePerfilFirestore = crearFuentePerfilFirestore(dependenciasIA.firestore));
+}
+
 function resolverContextoDeRequest(req: express.Request): Promise<ContextoAutorizacion> {
-  const authHeader = req.headers.authorization;
-  const noVerificador = undefined;
-  const noFuente = undefined;
-  return resolverAutorizacion(authHeader, noVerificador, noFuente);
+  return resolverAutorizacion(req.headers.authorization, verificadorTokenNotificaciones, fuentePerfilNotificaciones());
 }
 
 function construirDispatcher(ctx: ContextoAutorizacion): DispatcherNotificaciones {
@@ -2720,7 +2747,17 @@ app.post('/api/titulares/buscar', crearManejadorBuscarTitulares());
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', geminiKeyConfigured: !!process.env.GEMINI_API_KEY, ia: nucleoIA.estado() });
+  // FASE A — estado del transporte de avisos y del reloj, SIN secretos: el modo
+  // (`REAL` / `MODO_SEGURO`) es lo único que se publica, jamás credenciales.
+  res.json({
+    status: 'ok',
+    geminiKeyConfigured: !!process.env.GEMINI_API_KEY,
+    ia: nucleoIA.estado(),
+    notificaciones: {
+      email: { modo: transporteEmail.modo, proveedor: transporteEmail.proveedor },
+      cron: { configurado: Boolean(process.env.CRON_SECRET?.trim()) },
+    },
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2798,6 +2835,29 @@ app.post('/api/notificaciones/enviar', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: 'error_interno', motivoDenegacion: err instanceof Error ? err.message : 'Error inesperado' });
   }
+});
+
+// ---------------------------------------------------------------------------
+// FASE A — RELOJ DIARIO DE AVISOS (Vercel Cron → GET /api/cron/avisos)
+// Sin CRON_SECRET el endpoint responde 503 y NO ejecuta nada (fallo cerrado);
+// con credencial de servicio, el barrido es idempotente y deja resumen
+// trazable (avisos del día 5 al inquilino y al propietario, reintentos
+// pendientes). No marca cobros: eso sigue siendo `registrarPagoPeriodo`.
+// ---------------------------------------------------------------------------
+const puertoFirestoreReloj = dependenciasIA.firestore;
+montarRutaCronAvisos(app, {
+  secreto: process.env.CRON_SECRET?.trim() || null,
+  ejecutar: puertoFirestoreReloj
+    ? (origen) => ejecutarRelojAvisos({
+        ahora: new Date(),
+        puerto: puertoFirestoreReloj,
+        crearDispatcher: construirDispatcher,
+        contexto: { perfil: 'SISTEMA' },
+        identidadDespacho,
+        origen,
+      })
+    : null,
+  motivoNoDisponible: 'Sin credencial de servicio de Firestore el reloj no puede leer contratos ni persistir el estado real de entrega.',
 });
 
 // SPA fallback for direct public links (/solicitud/*, /visita/*)

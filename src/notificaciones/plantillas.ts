@@ -30,11 +30,47 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+  // Aviso al INQUILINO (regla del día 5). El texto identifica sin ambigüedad el
+  // inmueble, el contrato y quién gestiona el alquiler, para que el inquilino
+  // relacione el mensaje sin exponer ningún dato sensible: NO incluye DNI, IBAN,
+  // teléfonos ni referencias catastrales. La respuesta del inquilino se dirige al
+  // propietario mediante Reply-To (el remitente sigue siendo el buzón del
+  // despacho: delegar el envío al buzón de un tercero exigiría su contraseña).
   'cobro.retraso_pago': {
     id: 'cobro.retraso_pago',
-    asunto: 'Aviso de retraso en el pago — {inmuebleDireccion}',
-    cuerpo:
-      'El recibo de alquiler de {periodoMesAnio} no consta como pagado a fecha de {fechaHoy}. Importe pendiente: {importePrevisto}.',
+    asunto: 'Recibo de alquiler pendiente — {inmuebleDireccion} ({periodoMesAnio})',
+    cuerpo: [
+      'Le escribimos desde {despachoNombre}, que gestiona el alquiler del inmueble {inmuebleUbicacion} por cuenta del propietario/a {propietarioNombre}.',
+      '',
+      'El recibo de alquiler de {periodoMesAnio} no consta como pagado a fecha de {fechaHoy}. Importe pendiente: {importePrevisto} (vencimiento: {fechaVencimiento}). Referencia del contrato: {contratoReferencia}.',
+      '',
+      'Si ya ha realizado la transferencia, puede ignorar este mensaje: se registrará en cuanto se confirme.',
+      '',
+      'Para cualquier duda puede responder a este mismo correo.',
+      '',
+      'Aviso informativo: este mensaje es automático y nunca le pedirá claves, datos de tarjeta ni pagos por enlaces. El alquiler se abona por la transferencia habitual a la cuenta indicada en su contrato.',
+    ].join('\n'),
+    canalesPermitidos: ['EMAIL', 'INAPP', 'WEBHOOK'],
+    inicio: 'IMMEDIATE',
+  },
+  // Regla del día 5 (decisión 16-10-2026): cuando el recibo pasa su día límite
+  // sin cobro, el PROPIETARIO recibe este aviso (el inquilino recibe el
+  // recordatorio de `cobro.retraso_pago`). No sustituye a la morosidad ni al
+  // recobro: solo informa y deja traza en la bandeja.
+  'cobro.renta_no_cobrada_propietario': {
+    id: 'cobro.renta_no_cobrada_propietario',
+    asunto: 'Renta no cobrada — {inmuebleDireccion} ({periodoMesAnio})',
+    cuerpo: [
+      'Estimado/a {propietarioNombre}:',
+      '',
+      'El recibo de alquiler de {periodoMesAnio} del inmueble {inmuebleUbicacion} no consta como cobrado a fecha de {fechaHoy} (vencimiento: {fechaVencimiento}).',
+      '',
+      'Inquilino: {inquilinoNombre}. Importe pendiente: {importePrevisto}. Referencia del contrato: {contratoReferencia}.',
+      '',
+      'Puede consultar el estado del cobro en la app; si el impago continúa, el expediente de recobro queda disponible.',
+      '',
+      '{despachoNombre}',
+    ].join('\n'),
     canalesPermitidos: ['EMAIL', 'INAPP', 'WEBHOOK'],
     inicio: 'IMMEDIATE',
   },

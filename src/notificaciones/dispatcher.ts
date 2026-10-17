@@ -108,6 +108,8 @@ export class DispatcherNotificaciones {
       canal: canal || 'INAPP',
       destinatario,
       asunto,
+      cuerpo,
+      ...(evento.responderA ? { responderA: evento.responderA } : {}),
       plantilla: plantilla ? plantilla.id : evento.tipoEvento,
       datos: saneadoDatos(evento.datos),
       entidadId: evento.entidadId,
@@ -145,7 +147,10 @@ export class DispatcherNotificaciones {
     if (!perfil) {
       return { ok: false, error: 'no_autorizado', motivoDenegacion: 'Se requiere un usuario autenticado con perfil válido.' };
     }
-    if (perfil !== 'ADMINISTRADOR') {
+    // Alcance total: ADMINISTRADOR y el actor interno SISTEMA (reloj/cron
+    // protegido). SISTEMA no se resuelve desde tokens de usuario en el endpoint.
+    const alcanceTotal = perfil === 'ADMINISTRADOR' || perfil === 'SISTEMA';
+    if (!alcanceTotal) {
       // Un no-admin solo puede notificar su propia cartera y sus inmuebles.
       if (payload.propietarioId && payload.propietarioId !== this.ctx.autorizacion?.propietarioId) {
         return {
@@ -169,7 +174,7 @@ export class DispatcherNotificaciones {
     }
     // Titularidad efectiva: los no-admins quedan SIEMPRE anclados a su cartera.
     const propietarioIdEfectivo =
-      perfil === 'ADMINISTRADOR' ? payload.propietarioId : this.ctx.autorizacion?.propietarioId;
+      alcanceTotal ? payload.propietarioId : this.ctx.autorizacion?.propietarioId;
 
     // 3. Idempotencia (duplicado rechazado sin nuevos envíos)
     //    La clave se deriva del evento si el cliente no la aporta.
@@ -224,6 +229,7 @@ export class DispatcherNotificaciones {
       canal,
       datos: saneadoDatos(payload.datos),
       destinatario: payload.destinatario,
+      ...(payload.responderA ? { responderA: payload.responderA } : {}),
     };
     let notificacion = this.crearNotificacionDeEvento(evento, payload.programarPara);
 

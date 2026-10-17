@@ -46,7 +46,10 @@ export type SectionType =
   | 'mis_asignaciones'
   | 'mi_perfil'
   // CAPA TRANSVERSAL §6 (Fase 1): Centro de Ayuda
-  | 'ayuda';
+  | 'ayuda'
+  // FASE A (2026-10-16): bandeja interna de avisos con estado REAL de entrega
+  // (solo lectura de `notificaciones`, nunca cambia cobros ni reenvía).
+  | 'avisos';
 
 export type CandidateStatus =
   | 'nuevo'

@@ -213,8 +213,12 @@ function ejercicioDeFactura(f: {
 }
 
 function fechaGasto(g: Gasto): string {
-  const candidata = g.fechaDevengo || g.fechaPago || g.fecha || '';
-  return esFechaIsoValida(candidata) ? candidata : '';
+  // Primera fecha VÁLIDA (devengo → pago → alias): un devengo imposible no
+  // debe bloquear una fechaPago acreditada, igual que ya hace el cobro.
+  for (const candidata of [g.fechaDevengo, g.fechaPago, g.fecha]) {
+    if (esFechaIsoValida(candidata)) return candidata;
+  }
+  return '';
 }
 
 function ejercicioDeGasto(g: Gasto): number | null {
@@ -231,15 +235,35 @@ export function redondear2(n: number): number {
 }
 
 function importeValido(n: unknown): n is number {
-  return typeof n === 'number' && Number.isFinite(n) && n >= 0;
+  // Además de finito y no negativo, el importe debe ser representable en
+  // céntimos enteros seguros: más allá de MAX_SAFE_INTEGER céntimos el
+  // cuadre en coma flotante dejaría de ser exacto y se falsearía en silencio.
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0
+    && Number.isSafeInteger(Math.round(n * 100));
+}
+
+/** true si el importe es representable en céntimos exactos (sin subcéntimo). */
+function esImporteEnCentimosExactos(n: number): boolean {
+  const centimos = Math.round(n * 100);
+  // Tolerancia solo para el error binario de representar euros con dos
+  // decimales (p. ej. 1234567.89): sigue muy por debajo de un subcéntimo.
+  const tolerancia = Math.min(0.001, Math.max(1e-9, Math.abs(centimos) * Number.EPSILON * 8));
+  return Math.abs(n * 100 - centimos) <= tolerancia;
 }
 
 function texto(v: unknown): string {
   return typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v);
 }
 
+function compararPorIdYContenido<T extends { id?: unknown }>(a: T, b: T): number {
+  return texto(a.id).localeCompare(texto(b.id))
+    || jsonEstable(a).localeCompare(jsonEstable(b));
+}
+
 function ordenarPorId<T extends { id?: unknown }>(arr: readonly T[]): T[] {
-  return [...arr].sort((a, b) => texto(a.id).localeCompare(texto(b.id)));
+  // Desempate por contenido canónico: con ids duplicados, el orden de
+  // llegada tampoco debe cambiar el paquete (determinismo también ahí).
+  return [...arr].sort(compararPorIdYContenido);
 }
 
 /**
@@ -357,22 +381,26 @@ export function validarAmbitoPaquete(
     }
   }
 
+  if (solicitado.propietarioIds.some((p) => typeof p !== 'string' || p.trim() === '')) {
+    return denegar('propietarioIds contiene un identificador vacío o no textual');
+  }
   const legibles = autorizado.propietarioIdsLegibles; // null = master
   let propietariosEfectivos: string[];
   if (solicitado.propietarioIds.length === 0) {
     if (legibles === null) {
       return denegar('master debe indicar propietarioIds explícitos (sin volcado global implícito)');
     }
-    propietariosEfectivos = [...legibles];
+    propietariosEfectivos = [...new Set(legibles)];
     avisos.push('sin propietarioIds: se incluyen todos los legibles');
   } else {
     if (legibles !== null) {
       const fuera = solicitado.propietarioIds.filter((p) => !legibles.includes(p));
       if (fuera.length > 0) return denegar(`fuera de ámbito: ${fuera.join(', ')} (no legible)`);
     }
-    propietariosEfectivos = [...solicitado.propietarioIds];
+    propietariosEfectivos = [...new Set(solicitado.propietarioIds)];
   }
-  if (propietariosEfectivos.length === 0) {
+  if (propietariosEfectivos.length === 0
+    || propietariosEfectivos.some((p) => typeof p !== 'string' || p.trim() === '')) {
     return denegar('sin propietarios efectivos: paquete denegado (fail-closed)');
   }
 
@@ -382,12 +410,15 @@ export function validarAmbitoPaquete(
     for (const id of solicitado.inmuebleIds) {
       const ficha = catalogoInmuebles.find((c) => c.id === id);
       if (!ficha) return denegar(`inmueble '${id}' no encontrado en catálogo`);
-      const titular = ficha.propietarioId ?? ficha.propietarioPrincipalId ?? null;
-      if (legibles !== null && (!titular || !efectivos.has(titular))) {
-        return denegar(`inmueble '${id}' fuera de ámbito (titular '${titular ?? '?'}' no autorizado)`);
+      const titulares = [ficha.propietarioId, ficha.propietarioPrincipalId]
+        .filter((t): t is string => typeof t === 'string' && t.trim() !== '');
+      // También para master: pedir p1 + un inmueble cuyos titulares
+      // acreditados son otros es una solicitud contradictoria, no un permiso.
+      if (titulares.length === 0 ? legibles !== null : !titulares.some((t) => efectivos.has(t))) {
+        return denegar(`inmueble '${id}' fuera de ámbito (titular '${titulares.join('/') || '?'}' no autorizado)`);
       }
     }
-    inmueblesEfectivos = [...solicitado.inmuebleIds];
+    inmueblesEfectivos = [...new Set(solicitado.inmuebleIds)];
   }
   const ejerciciosEfectivos = ejercicios.length > 0 ? ejercicios : null;
   const mesesEfectivos = meses.length > 0 ? meses : null;
@@ -434,23 +465,73 @@ export function generarPaqueteAsesor(
   const incidencias: IncidenciaPaqueteAsesor[] = [];
   const incidencia = (i: IncidenciaPaqueteAsesor) => { incidencias.push(i); };
 
+  const titularesDeFicha = (f: { propietarioId?: unknown; propietarioPrincipalId?: unknown }): string[] =>
+    [...new Set([f.propietarioId, f.propietarioPrincipalId]
+      .filter((t): t is string => typeof t === 'string' && t.trim() !== ''))];
   const titularDeInmueble = new Map<string, string | null>();
-  for (const inm of entrada.inmuebles) {
-    titularDeInmueble.set(inm.id, inm.propietarioId ?? inm.propietarioPrincipalId ?? null);
+  const titularesPorInmueble = new Map<string, Set<string>>();
+  for (const inm of ordenarPorId(entrada.inmuebles)) {
+    const titulares = titularesDeFicha(inm);
+    // Mapa singular (compatibilidad): primer titular en orden canónico.
+    if (!titularDeInmueble.has(texto(inm.id))) {
+      titularDeInmueble.set(texto(inm.id), titulares[0] ?? null);
+    }
+    const conjunto = titularesPorInmueble.get(texto(inm.id)) ?? new Set<string>();
+    for (const t of titulares) conjunto.add(t);
+    titularesPorInmueble.set(texto(inm.id), conjunto);
   }
+  /** true si el inmueble es conocido y NINGÚN titular acreditado es `propietarioId`. */
+  const inmuebleDeOtroPropietario = (inmuebleId: unknown, propietarioId: unknown): boolean => {
+    if (typeof inmuebleId !== 'string' || inmuebleId === '') return false;
+    const titulares = titularesPorInmueble.get(inmuebleId);
+    return titulares !== undefined && titulares.size > 0
+      && !(typeof propietarioId === 'string' && titulares.has(propietarioId));
+  };
   const inmuebleEnAmbito = (inmuebleId: unknown): boolean =>
     inms === null || (typeof inmuebleId === 'string' && inms.has(inmuebleId));
+  /** Único titular acreditado del inmueble que está en el ámbito; null si 0 o varios. */
+  const titularUnicoEnAmbito = (inmuebleId: unknown): string | null => {
+    if (typeof inmuebleId !== 'string') return null;
+    const enAmbito = [...(titularesPorInmueble.get(inmuebleId) ?? [])]
+      .filter((t) => props.has(t));
+    return enAmbito.length === 1 ? enAmbito[0] : null;
+  };
+  const idValido = (id: unknown): boolean => typeof id === 'string' && id.trim() !== '';
 
   // -- Inmuebles (contexto del paquete) -------------------------------------
   const inmueblesIncluidos = ordenarPorId(entrada.inmuebles.filter((inm) => {
-    const titular = titularDeInmueble.get(inm.id) ?? null;
-    return titular !== null && props.has(titular) && inmuebleEnAmbito(inm.id);
+    const titularesPropios = titularesDeFicha(inm);
+    if (!idValido(inm.id)) {
+      if (titularesPropios.some((t) => props.has(t))) {
+        incidencia({
+          codigo: 'INMUEBLE_SIN_ID', severidad: 'CRITICA',
+          descripcion: 'Inmueble sin identificador: excluido del paquete (no es referenciable)',
+          entidad: 'inmueble',
+        });
+      }
+      return false;
+    }
+    // La fila se juzga por SUS titulares, nunca por los de otra fila con el
+    // mismo id (un id repetido entre propietarios no arrastra la fila ajena).
+    return titularesPropios.some((t) => props.has(t)) && inmuebleEnAmbito(inm.id);
   }));
-  const direccionDeInmueble = new Map(inmueblesIncluidos.map((i) => [i.id, i.direccion ?? '']));
-  // Si un inmueble del paquete no trae dirección en la selección, se busca en
-  // el catálogo completo SOLO como etiqueta (el dato ya pasó el filtro).
-  for (const inm of entrada.inmuebles) {
-    if (!direccionDeInmueble.has(inm.id)) direccionDeInmueble.set(inm.id, inm.direccion ?? '');
+  for (const grupo of gruposDuplicadosPorId(entrada.inmuebles.filter((i) => inmuebleEnAmbito(i.id)))) {
+    if (inmueblesIncluidos.some((i) => texto(i.id) === grupo.id)) {
+      incidencia({
+        codigo: 'INMUEBLE_DUPLICADO', severidad: 'CRITICA',
+        descripcion: `El inmueble ${grupo.id} aparece ${grupo.elementos.length} veces en la entrada: solo entran las filas cuyos titulares están en el ámbito; la ambigüedad queda identificada`,
+        entidad: 'inmueble', id: grupo.id,
+      });
+    }
+  }
+  // Direcciones SOLO de inmuebles incluidos (jamás del catálogo completo:
+  // una referencia cruzada no debe filtrar la dirección de otro propietario).
+  // Si un mismo id incluido trae direcciones distintas, no se elige una.
+  const direccionDeInmueble = new Map<string, string>();
+  for (const inm of inmueblesIncluidos) {
+    const previa = direccionDeInmueble.get(inm.id);
+    const actual = inm.direccion ?? '';
+    direccionDeInmueble.set(inm.id, previa !== undefined && previa !== actual ? '' : actual);
   }
 
   // -- Contratos vigentes en el ejercicio (novedad §4.3.3) ------------------
@@ -458,7 +539,24 @@ export function generarPaqueteAsesor(
   /** Propietario efectivo acreditado por contrato (para cruzar con sus cobros). */
   const propietarioDeContrato = new Map<string, string>();
   for (const c of ordenarPorId(entrada.contratos)) {
-    const pid = c.propietarioId ?? titularDeInmueble.get(c.inmuebleId) ?? null;
+    const pid = c.propietarioId ?? titularUnicoEnAmbito(c.inmuebleId)
+      ?? titularDeInmueble.get(c.inmuebleId) ?? null;
+    if (!idValido(c.id) && pid !== null && props.has(pid)) {
+      incidencia({
+        codigo: 'CONTRATO_SIN_ID', severidad: 'CRITICA',
+        descripcion: 'Contrato sin identificador: excluido del paquete (no es referenciable por sus cobros)',
+        entidad: 'contrato',
+      });
+      continue;
+    }
+    if (pid !== null && props.has(pid) && inmuebleDeOtroPropietario(c.inmuebleId, pid)) {
+      incidencia({
+        codigo: 'CONTRATO_INMUEBLE_PROPIETARIO_DISTINTO', severidad: 'CRITICA',
+        descripcion: `Contrato ${c.id} atribuido a ${pid} sobre el inmueble ${texto(c.inmuebleId)}, que acredita otro titular: excluido (ambigüedad de propietario)`,
+        entidad: 'contrato', id: c.id,
+      });
+      continue;
+    }
     if (!pid || !props.has(pid)) {
       if (pid === null) {
         incidencia({
@@ -472,6 +570,13 @@ export function generarPaqueteAsesor(
     if (!inmuebleEnAmbito(c.inmuebleId)) continue;
     contratosAmbito.push(c);
     propietarioDeContrato.set(c.id, pid);
+  }
+  for (const grupo of gruposDuplicadosPorId(contratosAmbito)) {
+    incidencia({
+      codigo: 'CONTRATO_DUPLICADO', severidad: 'CRITICA',
+      descripcion: `El contrato ${grupo.id} aparece ${grupo.elementos.length} veces en el ámbito: sus cobros quedan sujetos a las reglas de duplicado de movimientos; la ambigüedad queda identificada`,
+      entidad: 'contrato', id: grupo.id,
+    });
   }
   const contratosIncluidos: ContratoFormalizacion[] = [];
   for (const c of contratosAmbito) {
@@ -508,6 +613,14 @@ export function generarPaqueteAsesor(
     const pidContrato = propietarioDeContrato.get(c.id);
     for (const cobro of ordenarPorId(c.registroCobros ?? [])) {
       if (!props.has(cobro.propietarioId)) continue;
+      if (!idValido(cobro.id)) {
+        incidencia({
+          codigo: 'COBRO_SIN_ID', severidad: 'CRITICA',
+          descripcion: `Cobro sin identificador en el contrato ${c.id}: excluido (no es referenciable)`,
+          entidad: 'cobro',
+        });
+        continue;
+      }
       if (!inmuebleEnAmbito(cobro.inmuebleId)) continue;
       // Consistencia contrato↔cobro: una discrepancia no se silencia ni se
       // atribuye al ámbito equivocado; el cobro queda fuera e identificado.
@@ -556,13 +669,29 @@ export function generarPaqueteAsesor(
       cobrosIncluidos.push(cobro);
     }
   }
-  cobrosIncluidos.sort((a, b) => texto(a.id).localeCompare(texto(b.id)));
+  cobrosIncluidos.sort(compararPorIdYContenido);
 
   // -- Gastos ----------------------------------------------------------------
   const gastosIncluidos: Gasto[] = [];
   for (const g of ordenarPorId(entrada.gastos)) {
     if (!props.has(g.propietarioId)) continue;
+    if (!idValido(g.id)) {
+      incidencia({
+        codigo: 'GASTO_SIN_ID', severidad: 'CRITICA',
+        descripcion: 'Gasto sin identificador: excluido del paquete y del libro (no es referenciable)',
+        entidad: 'gasto',
+      });
+      continue;
+    }
     if (!inmuebleEnAmbito(g.inmuebleId)) continue;
+    if (inmuebleDeOtroPropietario(g.inmuebleId, g.propietarioId)) {
+      incidencia({
+        codigo: 'GASTO_INMUEBLE_PROPIETARIO_DISTINTO', severidad: 'CRITICA',
+        descripcion: `Gasto ${g.id} de ${texto(g.propietarioId)} asignado al inmueble ${texto(g.inmuebleId)}, que acredita otro titular: excluido`,
+        entidad: 'gasto', id: g.id,
+      });
+      continue;
+    }
     if (ejercicios !== null) {
       const ej = ejercicioDeGasto(g);
       if (ej === null) {
@@ -603,6 +732,22 @@ export function generarPaqueteAsesor(
   const facturasIncluidas: { factura: (typeof facturasEntrada)[number]; ejercicio: number }[] = [];
   for (const f of ordenarPorId(facturasEntrada)) {
     if (!props.has(f.propietarioId)) continue;
+    if (!idValido(f.id)) {
+      incidencia({
+        codigo: 'FACTURA_SIN_ID', severidad: 'CRITICA',
+        descripcion: 'Factura sin identificador: excluida del paquete (ningún gasto puede vincularla)',
+        entidad: 'factura',
+      });
+      continue;
+    }
+    if (inmuebleDeOtroPropietario(f.inmuebleId, f.propietarioId)) {
+      incidencia({
+        codigo: 'FACTURA_INMUEBLE_PROPIETARIO_DISTINTO', severidad: 'CRITICA',
+        descripcion: `Factura ${f.id} de ${texto(f.propietarioId)} asignada al inmueble ${texto(f.inmuebleId)}, que acredita otro titular: excluida`,
+        entidad: 'factura', id: f.id,
+      });
+      continue;
+    }
     if (f.inmuebleId !== undefined && f.inmuebleId !== null && f.inmuebleId !== ''
       && !inmuebleEnAmbito(f.inmuebleId)) continue;
     if ((f.inmuebleId === undefined || f.inmuebleId === null || f.inmuebleId === '') && inms !== null) {
@@ -673,6 +818,25 @@ export function generarPaqueteAsesor(
     incluirLiquidaciones ? (entrada.liquidaciones ?? []) : [],
   ).filter((liq) => {
     if (!props.has(liq.propietarioId)) return false;
+    if (!idValido(liq.id)) {
+      incidencia({
+        codigo: 'LIQUIDACION_SIN_ID', severidad: 'CRITICA',
+        descripcion: 'Liquidación sin identificador: excluida del paquete (no es referenciable)',
+        entidad: 'liquidacion',
+      });
+      return false;
+    }
+    const cruzado = (liq.inmuebleIds ?? []).find(
+      (id) => inmuebleDeOtroPropietario(id, liq.propietarioId),
+    );
+    if (cruzado !== undefined) {
+      incidencia({
+        codigo: 'LIQUIDACION_INMUEBLE_PROPIETARIO_DISTINTO', severidad: 'CRITICA',
+        descripcion: `Liquidación ${liq.id} de ${texto(liq.propietarioId)} incluye el inmueble ${texto(cruzado)}, que acredita otro titular: excluida como agregación`,
+        entidad: 'liquidacion', id: liq.id,
+      });
+      return false;
+    }
     if (!enEjercicios(typeof liq.anio === 'number' ? liq.anio : null)) return false;
     if (meses !== null) {
       const mes = mesDeLiquidacion(liq);
@@ -696,6 +860,22 @@ export function generarPaqueteAsesor(
     incluirPolizas ? (entrada.polizas ?? []) : [],
   ).filter((p) => {
     if (!props.has(p.propietarioId)) return false;
+    if (!idValido(p.id)) {
+      incidencia({
+        codigo: 'POLIZA_SIN_ID', severidad: 'CRITICA',
+        descripcion: 'Póliza sin identificador: excluida del paquete (no es referenciable)',
+        entidad: 'poliza',
+      });
+      return false;
+    }
+    if (inmuebleDeOtroPropietario(p.inmuebleId, p.propietarioId)) {
+      incidencia({
+        codigo: 'POLIZA_INMUEBLE_PROPIETARIO_DISTINTO', severidad: 'CRITICA',
+        descripcion: `Póliza ${p.id} de ${texto(p.propietarioId)} asignada al inmueble ${texto(p.inmuebleId)}, que acredita otro titular: excluida`,
+        entidad: 'poliza', id: p.id,
+      });
+      return false;
+    }
     if (p.inmuebleId && !inmuebleEnAmbito(p.inmuebleId)) return false;
     if (!p.inmuebleId && inms !== null) return false;
     if (!hayFiltroTemporal) return true;
@@ -712,6 +892,21 @@ export function generarPaqueteAsesor(
     return true;
   });
 
+  for (const grupo of gruposDuplicadosPorId(liquidacionesIncluidas)) {
+    incidencia({
+      codigo: 'LIQUIDACION_DUPLICADA', severidad: 'CRITICA',
+      descripcion: `La liquidación ${grupo.id} aparece ${grupo.elementos.length} veces: datos/liquidaciones.csv las conserva todas y el neto informativo suma las filas tal cual; la duplicidad queda identificada`,
+      entidad: 'liquidacion', id: grupo.id,
+    });
+  }
+  for (const grupo of gruposDuplicadosPorId(polizasIncluidas)) {
+    incidencia({
+      codigo: 'POLIZA_DUPLICADA', severidad: 'CRITICA',
+      descripcion: `La póliza ${grupo.id} aparece ${grupo.elementos.length} veces en el paquete: se conservan las filas y la duplicidad queda identificada`,
+      entidad: 'poliza', id: grupo.id,
+    });
+  }
+
   // -- Duplicados de movimientos (se identifican; el libro no dobla) ---------
   // datos/*.csv conserva TODAS las filas fuente. En el libro:
   //  · réplicas exactas del mismo id computan UNA vez (réplica = mismo
@@ -720,18 +915,31 @@ export function generarPaqueteAsesor(
   //    ninguna copia (no se elige una «verdadera» en silencio);
   //  · posibles duplicados de negocio con ids distintos se conservan y se
   //    señalan (precedente DUP_ORIGEN del expediente B6).
+  // La huella de «réplica exacta» cubre TODO campo que alimenta el CSV o el
+  // libro: si difiere la contraparte, la deducibilidad, el proveedor o el
+  // documento, no son la misma operación y el id es conflictivo.
   const huellaCobro = (c: CobroPeriodo): string => jsonEstable({
     contratoId: c.contratoId, inmuebleId: c.inmuebleId, propietarioId: c.propietarioId,
-    anio: c.anio, mes: c.mes, periodoMesAnio: c.periodoMesAnio,
+    inquilinoId: c.inquilinoId ?? null, inquilinoNombre: c.inquilinoNombre ?? null,
+    inmuebleDireccion: c.inmuebleDireccion ?? null,
+    anio: c.anio, mes: c.mes, periodoMesAnio: c.periodoMesAnio, nombreMes: c.nombreMes,
     importePrevisto: c.importePrevisto, importeRecibido: c.importeRecibido,
     estado: c.estado, fechaPago: c.fechaPago ?? null, fechaVencimiento: c.fechaVencimiento,
+    metodoPago: c.metodoPago ?? null, observaciones: c.observaciones ?? null,
+    documentoNombre: c.justificante?.nombreArchivo ?? null,
   });
   const huellaGasto = (g: Gasto): string => jsonEstable({
     inmuebleId: g.inmuebleId, propietarioId: g.propietarioId, contratoId: g.contratoId ?? null,
+    tipo: g.tipo, proveedor: g.proveedor ?? null, aCargoDe: g.aCargoDe,
     importe: g.importe, estado: g.estado, categoria: g.categoria, concepto: g.concepto,
     fechaDevengo: g.fechaDevengo ?? null, fechaPago: g.fechaPago ?? null, fecha: g.fecha ?? null,
     ejercicioFiscal: g.ejercicioFiscal ?? null, periodoMesAnio: g.periodoMesAnio ?? null,
+    deducible: g.deducible ?? null, esDeducible: g.esDeducible ?? null,
+    tipoDeducible: g.tipoDeducible ?? null, metodoPago: g.metodoPago ?? null,
+    inmuebleDireccion: g.inmuebleDireccion ?? null,
     facturaId: g.facturaId ?? null, origen: g.origen ?? null, origenId: g.origenId ?? null,
+    documentoNombre: g.documento?.nombre ?? null,
+    documentosNombres: (g.documentos ?? []).map((d) => d?.nombre ?? null),
   });
   const cobrosDuplicadosExactos = new Set<string>();
   const cobrosIdConflictivo = new Set<string>();
@@ -845,6 +1053,13 @@ export function generarPaqueteAsesor(
       continue;
     }
     if (cobro.importeRecibido <= 0) continue;
+    if (!esImporteEnCentimosExactos(cobro.importeRecibido)) {
+      incidencia({
+        codigo: 'IMPORTE_CON_SUBCENTIMO', severidad: 'AVISO',
+        descripcion: `Cobro ${cobro.id} con importeRecibido ${cobro.importeRecibido} no representable en céntimos exactos: se conserva sin redondear en origen, pero el CSV/libro solo expresan céntimos y su cuadre no es plenamente verificable`,
+        entidad: 'cobro', id: cobro.id,
+      });
+    }
     const fecha = esFechaIsoValida(cobro.fechaPago)
       ? cobro.fechaPago
       : esFechaIsoValida(cobro.fechaVencimiento) ? cobro.fechaVencimiento : '';
@@ -907,6 +1122,13 @@ export function generarPaqueteAsesor(
         entidad: 'gasto', id: g.id,
       });
       continue;
+    }
+    if (!esImporteEnCentimosExactos(g.importe)) {
+      incidencia({
+        codigo: 'IMPORTE_CON_SUBCENTIMO', severidad: 'AVISO',
+        descripcion: `Gasto ${g.id} con importe ${g.importe} no representable en céntimos exactos: se conserva sin redondear en origen, pero el CSV/libro solo expresan céntimos y su cuadre no es plenamente verificable`,
+        entidad: 'gasto', id: g.id,
+      });
     }
     const fecha = fechaGasto(g);
     if (!fecha) {
@@ -1158,14 +1380,22 @@ export function generarPaqueteAsesor(
   }));
   const filasContratos = contratosIncluidos.map((c) => ({
     id: c.id, inmuebleId: c.inmuebleId,
-    propietarioId: c.propietarioId ?? titularDeInmueble.get(c.inmuebleId) ?? '',
+    propietarioId: c.propietarioId ?? propietarioDeContrato.get(c.id)
+      ?? titularUnicoEnAmbito(c.inmuebleId) ?? titularDeInmueble.get(c.inmuebleId) ?? '',
     candidatoId: c.candidatoId ?? '', candidatoNombre: c.candidatoNombre ?? '',
     fechaInicioContrato: c.fechaInicioContrato ?? '',
     fechaFinContrato: c.fechaFinContrato ?? '',
     rentaMensual: c.rentaMensual ?? '', estado: texto(c.estado),
     inmuebleDireccion: c.inmuebleDireccion ?? '',
   }));
-  const filasCobros = cobrosIncluidos.map((cb) => ({ ...(cb as unknown as Record<string, unknown>) }));
+  // Proyección estricta a las columnas del CSV (como en gastos): el paquete
+  // estructurado tampoco debe retener DNI/teléfono/email/referencia bancaria
+  // del registro completo; la minimización no es solo cosa del ZIP final.
+  const filasCobros = cobrosIncluidos.map((cb) => {
+    const fila: Record<string, unknown> = {};
+    for (const col of COLUMNAS_CSV['COBRO']) fila[col] = (cb as unknown as Record<string, unknown>)[col] ?? '';
+    return fila;
+  });
   const filasGastos = gastosIncluidos.map((g) => {
     const fila: Record<string, unknown> = {};
     for (const col of COLUMNAS_CSV['GASTO']) fila[col] = (g as unknown as Record<string, unknown>)[col] ?? '';

@@ -44,6 +44,7 @@
 | `src/lib/paqueteAsesor/verificador.ts` | Verificador INDEPENDIENTE del ZIP (CRC/SHA-256, conteos, totales y cuadre recalculados; no importa el motor) |
 | `src/lib/paqueteAsesor/paqueteAsesor.test.ts` | 30 pruebas (fixtures sintéticas) |
 | `src/lib/paqueteAsesor/verificador.test.ts` | 12 pruebas (manipulación de bytes/manifiesto y cuadre) |
+| `src/lib/paqueteAsesor/auditoriaAdversarial.test.ts` | 20 pruebas adversariales (ZIP a nivel de bytes, paquetes refirmados, cruces de propietario, duplicados, fechas/importes y minimización) |
 | `docs/FASE-F-PAQUETE-ASESOR-NUCLEO-AISLADO.md` | Este informe |
 
 Reutilización sin tocar lo existente: `analizarDeducibilidad`
@@ -81,13 +82,18 @@ Contrato de entrada/salida (continuación 2026-10-18):
   libro, filas proyectadas e incidencias) y ZIP determinista de 12 entradas
   con SHA-256 por entrada. Paquetes anteriores sin `mesesEfectivos`:
   el verificador los trata como `null` con advertencia heredada.
-- **Verificación:** `verificarPaqueteAsesorZip` parsea el ZIP (EOCD,
-  directorio central, CRC-32, tamaños, cobertura sin huecos), contrasta los
-  SHA-256 del manifiesto y RECÁLCULA en céntimos desde los CSV: conteos,
-  totales (global/porEjercicio/porMes) y cuadre libro↔`datos/cobros|gastos.csv`.
-  Exige incidencia identificadora para cada discrepancia detectable:
-  duplicados, desglose de factura que no suma el total y referencias
-  documentales. No repara ni reconstruye: reporta errores y advertencias.
+- **Verificación:** `verificarPaqueteAsesorZip` parsea el ZIP (EOCD y sus
+  discos/contadores, banderas, directorio central y cabeceras locales con
+  ambos tamaños, nombres relativos seguros, CRC-32 y cobertura sin huecos),
+  contrasta los SHA-256 del manifiesto y RECÁLCULA en céntimos desde los CSV:
+  cabeceras/aridad, conteos, totales (global/porEjercicio/porMes), ámbito
+  manifiesto↔informe↔CSV y correspondencia línea↔fuente (fecha real, importe
+  e inmueble), no solo la suma. Los JSON manipulados producen errores
+  nombrados, nunca excepciones. Exige incidencia identificadora para cada
+  discrepancia detectable: duplicados, desglose de factura que no suma el
+  total y referencias documentales. Un importe con subcéntimo se declara no
+  verificable desde un CSV de céntimos. No repara ni reconstruye: reporta
+  errores y advertencias.
 
 ## 3. Trazabilidad PLAN §5-F → código → prueba
 
@@ -102,6 +108,7 @@ Contrato de entrada/salida (continuación 2026-10-18):
 | Puerta: «ZIP que el asesor pueda cuadrar» | `verificaciones[]` (5 cuadres) + `totales.json` | «cuadre: verificaciones en verde…» |
 | Verificación por tercero (continuación) | `verificarPaqueteAsesorZip` (sin importar `motor.ts`) | `verificador.test.ts`: 12 casos incl. byte manipulado, manifiesto inflado, línea eliminada, entradas ausentes, ZIP truncado |
 | Discrepancias identificadas (continuación) | duplicados exactos/conflictivos, desglose que no suma, vínculos cruzados, documentos sin binario | «duplicados: exacto computa una vez…», «factura cuyo desglose no suma…», «toda referencia documental…» |
+| Auditoría adversarial (2026-10-18) | ZIP/manifiesto/CSV refirmados, cuadre línea↔fuente, aislamiento propietario↔inmueble, ids/duplicados, importes extremos y determinismo con duplicados | `auditoriaAdversarial.test.ts`: 20 casos; antes de corregir, la batería original de 19 dio 18 fallidos/1 superado (solo vectores CRC/SHA) |
 
 Reglas honradas (con su prueba):
 
@@ -114,12 +121,28 @@ Reglas honradas (con su prueba):
   `CRITICA` y fuera del cuadre («incluye cobro recibido…»).
 - **Minimización:** sin IBAN (ni el del arrendador ni el de abono de la
   liquidación), sin DNI/teléfono/email; NIF solo en factura
-  («minimización: el ZIP no contiene…»).
+  («minimización: el ZIP no contiene…»). También en el paquete
+  estructurado: `filas.cobros` se proyecta a las columnas del CSV y no
+  retiene el registro completo del cobro.
 - **Determinismo:** entrada barajada + mismo `generatedAt` ⇒ mismo ZIP y
   mismo `paqueteId`; `generatedAt` distinto ⇒ mismo contenido, ZIP distinto
   («ZIP reproducible»).
 - **Fail-closed:** fuera de ámbito / master sin explicitar / sin
-  `generatedAt` ⇒ denegado («ámbito fail-closed», 4 pruebas).
+  `generatedAt` ⇒ denegado («ámbito fail-closed», 4 pruebas). La auditoría
+  añadió: ids de propietario vacíos denegados, master no puede pedir un
+  inmueble cuyos titulares acreditados no intersectan los propietarios, y
+  toda referencia propietario↔inmueble incompatible (contrato, gasto,
+  factura, liquidación o póliza) se excluye e identifica sin arrastrar
+  direcciones de otro propietario.
+- **Ids y duplicados no movimiento:** una entidad sin id no entra como fila
+  referenciable; los duplicados de inmueble/contrato/factura/liquidación/
+  póliza quedan identificados. La réplica «exacta» de cobro/gasto solo lo es
+  si coinciden también contraparte, deducibilidad, proveedor y documento
+  (campos que alimentan CSV/libro); si no, el id es conflictivo.
+- **Fechas e importes extremos:** un devengo imposible no bloquea una
+  `fechaPago` válida; los importes deben ser finitos, no negativos y seguros
+  en céntimos. El subcéntimo no se redondea en origen, pero se identifica y
+  el verificador no presenta ese cuadre como acreditado.
 - **Duplicados de movimientos:** `datos/*.csv` conserva todas las filas; en
   el libro, la réplica exacta del mismo id computa una vez y el id con datos
   distintos no computa ninguna copia. Posibles duplicados de negocio (mismo
@@ -144,7 +167,9 @@ propietarios (p2 nunca aparece con ámbito p1); determinismo byte a byte;
 **filtro mensual `YYYY-MM`** con intersección fail-closed y totales por mes;
 **verificador independiente** que recalcula conteos/totales/cuadre desde los
 bytes del ZIP y exige incidencia para duplicados, desgloses incoherentes y
-referencias documentales.
+referencias documentales; **auditoría adversarial** con paquetes refirmados
+y manipulaciones a nivel de bytes (la batería se ejecutó antes de corregir:
+18 fallos reproducibles sobre 19 casos).
 
 **Pendientes (no parte de esta entrega; no se finge su cierre):**
 
@@ -169,9 +194,10 @@ referencias documentales.
    solos de enumerar la lista) y la selección por parte de mes.
 6. **Alias `fecha` de gasto no serializado en `datos/gastos.csv`**
    (contrato CSV v1): si la línea del libro de un gasto solo depende de ese
-   alias, su cuadre no es re-derivable al céntimo desde el ZIP; el
-   verificador lo declara como advertencia. Resolverlo toca el contrato v1:
-   trabajo de integración, no de este núcleo.
+   alias, el verificador SÍ contrasta su importe e inmueble contra la fuente,
+   pero no puede re-derivar la fecha; solo esa fecha se declara como
+   advertencia (`GASTO_ALIAS_FECHA_NO_SERIALIZADO`). Resolverlo toca el
+   contrato v1: trabajo de integración, no de este núcleo.
 7. **`paqueteId` no recomputable desde el ZIP** (huella del contenido
    tipado): el verificador lo contrasta por formato/informe/esperado y lo
    declara como advertencia; nunca finge re-derivarlo.
@@ -181,7 +207,7 @@ referencias documentales.
 1. Leer este fichero y `tipos.ts` (límites). Actualizar la rama de integración
    y ejecutar: `npx vitest run src/lib/paqueteAsesor/`,
    `npx tsc --noEmit` y la suite completa. Conflicto textual esperado con
-   P1–P4: **ninguno** (seis ficheros de esta fase, cero preexistentes
+   P1–P4: **ninguno** (siete ficheros de esta fase, cero preexistentes
    editados). Conflicto semántico a revisar: si P3 (conciliación) cambia
    tipos de `CobroPeriodo`/`Gasto`, recompilarán estos tests y lo dirán.
 2. Cablear la UI (punto 1 de pendientes) reutilizando las `fuentes` del panel
@@ -202,3 +228,12 @@ suite focal del paquete, suites relacionadas (exportador canónico,
 expediente fiscal, deducibilidad, auditoría import/export, xlsx), `tsc`,
 suite completa y build sobre el SHA final de la rama. Ninguna escritura en
 Firestore/Storage/producción; ninguna llamada externa; fixtures sintéticas.
+
+Auditoría adversarial 2026-10-18 (desde `78bb9f6…`): línea base focal
+42/42; batería adversarial original antes de corregir 18 fallidos/1 superado
+(solo los vectores conocidos CRC-32/SHA-256); tras las correcciones, la
+batería —ampliada con una regresión de periodo contable frente a fecha de
+pago— y el foco completo quedan registrados en el informe de cierre con sus
+totales exactos. Riesgo residual declarado, sin corregir por contrato: la
+inyección de fórmulas al abrir un CSV en una hoja de cálculo depende del
+consumidor; este núcleo no altera valores de origen con prefijos.

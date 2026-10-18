@@ -27,8 +27,9 @@
  *    tipado, no de los CSV): se contrasta formato y coincidencia con el
  *    informe y, si se aporta, con uno esperado. Nunca se da por re-derivado.
  *  · `datos/gastos.csv` usa el contrato CSV v1 (sin alias `fecha`); un gasto
- *    cuya línea del libro solo dependía de ese alias no es re-derivable al
- *    céntimo desde el CSV: advertencia, no error (queda declarado).
+ *    cuya línea del libro solo dependía de ese alias tiene importe e
+ *    inmueble contrastables, pero su FECHA no es re-derivable desde el CSV:
+ *    advertencia solo para la fecha, nunca para el importe.
  */
 import { crc32 } from '../expedienteFiscal/zip';
 import { sha256Hex } from '../importacion/hash';
@@ -94,6 +95,38 @@ function u32(b: Uint8Array, o: number): number {
   return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
 }
 
+/** Objeto JSON (no array ni null): los JSON manipulados no deben provocar excepciones. */
+function esObjetoPlano(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Fecha real `YYYY-MM-DD` (rechaza imposibles como 2025-02-31, sin usar reloj). */
+function esFechaReal(v: unknown): v is string {
+  if (typeof v !== 'string') return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return false;
+  const anio = Number(m[1]);
+  const mes = Number(m[2]);
+  const dia = Number(m[3]);
+  if (mes < 1 || mes > 12 || dia < 1) return false;
+  const bisiesto = anio % 4 === 0 && (anio % 100 !== 0 || anio % 400 === 0);
+  const diasMes = [31, bisiesto ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1];
+  return dia <= diasMes;
+}
+
+/** Primera fecha REAL de entre candidatas (una imposible no bloquea a la siguiente). */
+function primeraFechaReal(...candidatas: unknown[]): string {
+  for (const c of candidatas) if (esFechaReal(c)) return c;
+  return '';
+}
+
+/** Ruta ZIP segura: relativa, con '/', sin segmentos '.'/'..' ni unidad. */
+function esNombreEntradaInseguro(nombre: string): boolean {
+  if (nombre === '' || nombre.includes('\\') || nombre.startsWith('/')) return true;
+  if (/^[A-Za-z]:/.test(nombre)) return true;
+  return nombre.split('/').some((seg) => seg === '' || seg === '.' || seg === '..');
+}
+
 /**
  * Lee las entradas del ZIP vía directorio central y valida la cobertura
  * completa del fichero (sin bytes huérfanos entre estructuras conocidas).
@@ -127,9 +160,21 @@ export function leerEntradasZipPaqueteAsesor(
   if (eocd + 22 + u16(zip, eocd + 20) !== zip.length) {
     err('Hay bytes tras el EOCD (o el comentario declarado no cuadra con la longitud)');
   }
+  const discoEocd = u16(zip, eocd + 4);
+  const discoDirectorio = u16(zip, eocd + 6);
+  const entradasEnDisco = u16(zip, eocd + 8);
   const totalDeclarado = u16(zip, eocd + 10);
   const cdSize = u32(zip, eocd + 12);
   const cdOffset = u32(zip, eocd + 16);
+  if (discoEocd !== 0 || discoDirectorio !== 0) {
+    err(`ZIP multidisco no contractual (disco EOCD ${discoEocd}, disco del directorio ${discoDirectorio})`);
+  }
+  if (entradasEnDisco !== totalDeclarado) {
+    err(`El EOCD declara ${entradasEnDisco} entradas en este disco pero ${totalDeclarado} en total`);
+  }
+  if (cdOffset > eocd || cdSize > eocd) {
+    err(`Directorio central fuera de rango (offset ${cdOffset}, tamaño ${cdSize}, EOCD en ${eocd})`);
+  }
   if (cdOffset + cdSize !== eocd) {
     err(`El directorio central no termina donde empieza el EOCD (offset ${cdOffset} + tamaño ${cdSize} ≠ ${eocd})`);
   }
@@ -141,6 +186,7 @@ export function leerEntradasZipPaqueteAsesor(
       err(`Cabecera central de la entrada nº ${n + 1} ilegible en el offset ${p}`);
       break;
     }
+    const banderas = u16(zip, p + 8);
     const metodo = u16(zip, p + 10);
     const crc = u32(zip, p + 16);
     const tamComp = u32(zip, p + 20);
@@ -148,8 +194,22 @@ export function leerEntradasZipPaqueteAsesor(
     const ln = u16(zip, p + 28);
     const le = u16(zip, p + 30);
     const lc = u16(zip, p + 32);
+    const discoInicio = u16(zip, p + 34);
     const lho = u32(zip, p + 42);
+    if (p + 46 + ln + le + lc > eocd) {
+      err(`Cabecera central de la entrada nº ${n + 1} desborda el directorio central`);
+      break;
+    }
     const nombre = decodificadorUtf8.decode(zip.subarray(p + 46, p + 46 + ln));
+    if (esNombreEntradaInseguro(nombre)) {
+      err(`Nombre de entrada inseguro o no relativo: '${nombre}'`, nombre);
+    }
+    if (banderas !== 0) {
+      err(`Entrada '${nombre}' con banderas ZIP ${banderas}: el contrato STORE del escritor no usa banderas (ni cifrado ni data descriptor)`, nombre);
+    }
+    if (discoInicio !== 0) {
+      err(`Entrada '${nombre}' declara empezar en el disco ${discoInicio}: ZIP multidisco no contractual`, nombre);
+    }
     if (metodo !== 0) {
       err(`Entrada '${nombre}' con método ${metodo}: el verificador solo acepta STORE (0)`, nombre);
     }
@@ -163,12 +223,21 @@ export function leerEntradasZipPaqueteAsesor(
     }
     const lnLocal = u16(zip, lho + 26);
     const leLocal = u16(zip, lho + 28);
+    if (lho + 30 + lnLocal + leLocal > zip.length) {
+      err(`Entrada '${nombre}': la cabecera local desborda el fichero`, nombre);
+      p += 46 + ln + le + lc;
+      continue;
+    }
     const nombreLocal = decodificadorUtf8.decode(zip.subarray(lho + 30, lho + 30 + lnLocal));
     if (nombreLocal !== nombre) {
       err(`Entrada '${nombre}': el nombre de la cabecera local es '${nombreLocal}'`, nombre);
     }
-    if (u16(zip, lho + 8) !== metodo || u32(zip, lho + 14) !== crc || u32(zip, lho + 22) !== tam) {
-      err(`Entrada '${nombre}': método/CRC/tamaño de la cabecera local no coinciden con la central`, nombre);
+    if (u16(zip, lho + 6) !== banderas) {
+      err(`Entrada '${nombre}': las banderas de la cabecera local (${u16(zip, lho + 6)}) no coinciden con la central (${banderas})`, nombre);
+    }
+    if (u16(zip, lho + 8) !== metodo || u32(zip, lho + 14) !== crc
+      || u32(zip, lho + 18) !== tamComp || u32(zip, lho + 22) !== tam) {
+      err(`Entrada '${nombre}': método/CRC/tamaños de la cabecera local no coinciden con la central`, nombre);
     }
     const datosOffset = lho + 30 + lnLocal + leLocal;
     if (datosOffset + tam > zip.length) {
@@ -183,6 +252,9 @@ export function leerEntradasZipPaqueteAsesor(
       localHeaderOffset: lho, datosOffset,
     });
     p += 46 + ln + le + lc;
+  }
+  if (p !== eocd) {
+    err(`El directorio central no termina exactamente donde empieza el EOCD (recorrido hasta ${p})`);
   }
   if (entradas.length !== totalDeclarado) {
     err(`El EOCD declara ${totalDeclarado} entradas pero se han podido leer ${entradas.length}`);
@@ -255,17 +327,21 @@ function parsearRegistrosCsv(textoCsv: string): string[][] {
   return registros;
 }
 
-function parsearCsv(textoCsv: string): { cabecera: string[]; filas: FilaCsv[] } | null {
+function parsearCsv(
+  textoCsv: string,
+): { cabecera: string[]; filas: FilaCsv[]; filasMalformadas: number[] } | null {
   const registros = parsearRegistrosCsv(textoCsv);
   if (registros.length === 0) return null;
   const cabecera = registros[0];
   const filas: FilaCsv[] = [];
+  const filasMalformadas: number[] = [];
   for (let i = 1; i < registros.length; i += 1) {
+    if (registros[i].length !== cabecera.length) filasMalformadas.push(i + 1);
     const fila: FilaCsv = {};
     cabecera.forEach((col, idx) => { fila[col] = registros[i][idx] ?? ''; });
     filas.push(fila);
   }
-  return { cabecera, filas };
+  return { cabecera, filas, filasMalformadas };
 }
 
 // ---------------------------------------------------------------------------
@@ -277,13 +353,21 @@ function centimosDeTexto(s: string): number | null {
   const m = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(s.trim());
   if (!m) return null;
   const cent = Number(m[2]) * 100 + Number((m[3] ?? '').padEnd(2, '0'));
+  if (!Number.isSafeInteger(cent)) return null;
   return m[1] === '-' ? -cent : cent;
 }
 
 /** Céntimos de un número del manifiesto (ya redondeado a 2 por el contrato). */
 function centimosDeNumero(n: unknown): number | null {
   if (typeof n !== 'number' || !Number.isFinite(n)) return null;
-  return Math.round(n * 100);
+  const cent = Math.round(n * 100);
+  if (!Number.isSafeInteger(cent)) return null;
+  // Un importe con subcéntimo no es representable en este contrato: no se
+  // redondea en silencio para fingir un cuadre en céntimos. La tolerancia
+  // solo absorbe el error binario de los euros con dos decimales.
+  const tolerancia = Math.min(0.001, Math.max(1e-9, Math.abs(cent) * Number.EPSILON * 8));
+  if (Math.abs(n * 100 - cent) > tolerancia) return null;
+  return cent;
 }
 
 const eurosDeCentimos = (c: number): number => c / 100;
@@ -307,6 +391,55 @@ const ENTRADAS_ESPERADAS = [
   'manifest.json',
   'totales.json',
 ] as const;
+
+/**
+ * Cabeceras CSV contractuales, redeclaradas aquí (copia del verificador: si
+ * el motor cambiara una columna sin versionar el esquema, este contraste
+ * debe fallar, no aprender la nueva cabecera en silencio).
+ */
+const CABECERAS_CSV_ESPERADAS: Readonly<Record<string, readonly string[]>> = {
+  'datos/inmuebles.csv': [
+    'id', 'direccion', 'ciudad', 'referenciaCatastral',
+    'propietarioId', 'propietarioPrincipalId', 'estado', 'tipoInmueble',
+  ],
+  'datos/contratos.csv': [
+    'id', 'inmuebleId', 'propietarioId', 'candidatoId', 'candidatoNombre',
+    'fechaInicioContrato', 'fechaFinContrato', 'rentaMensual', 'estado',
+    'inmuebleDireccion',
+  ],
+  'datos/cobros.csv': [
+    'id', 'inmuebleId', 'contratoId', 'inquilinoId', 'propietarioId', 'mes', 'anio',
+    'periodoMesAnio', 'nombreMes', 'importePrevisto', 'importeRecibido',
+    'fechaVencimiento', 'fechaPago', 'estado', 'metodoPago', 'observaciones',
+  ],
+  'datos/gastos.csv': [
+    'id', 'inmuebleId', 'propietarioId', 'contratoId', 'tipo', 'categoria', 'concepto',
+    'proveedor', 'importe', 'estado', 'fechaDevengo', 'fechaPago', 'periodoMesAnio',
+    'aCargoDe', 'deducible', 'ejercicioFiscal', 'metodoPago', 'origen', 'origenId',
+    'createdAt', 'updatedAt',
+  ],
+  'datos/facturas.csv': [
+    'id', 'propietarioId', 'inmuebleId', 'contratoId', 'gastoId', 'clase',
+    'tipo', 'serie', 'numero', 'ejercicio', 'fechaExpedicion', 'fechaOperacion',
+    'emisorNombre', 'emisorNif', 'receptorNombre', 'receptorNif',
+    'baseImponible', 'cuotaIva', 'cuotaRetencion', 'importeTotal', 'estado',
+  ],
+  'datos/liquidaciones.csv': [
+    'id', 'propietarioId', 'propietarioNombre', 'periodo', 'anio', 'mes',
+    'totalBrutoCobrado', 'totalHonorarios', 'totalIvaHonorarios', 'totalGastos',
+    'totalRetenciones', 'totalAjustes', 'totalDeducciones', 'netoPropietario',
+    'estado', 'fechaGeneracion', 'fechaPago',
+  ],
+  'datos/polizas.csv': [
+    'id', 'propietarioId', 'inmuebleId', 'aseguradora', 'numeroPoliza', 'tipo',
+    'fechaInicio', 'fechaVencimiento', 'estado', 'primaAnual',
+  ],
+  'libro-ingresos-gastos.csv': [
+    'fecha', 'ejercicio', 'tipo', 'concepto', 'inmuebleId', 'inmuebleDireccion',
+    'contraparte', 'base', 'iva', 'retencion', 'total', 'categoria', 'deducible',
+    'origenDeducibilidad', 'fuenteTipo', 'fuenteId', 'documentoNombre', 'desgloseFiscal',
+  ],
+};
 
 interface TotalesRecalculados {
   totalIngresosCent: number;
@@ -398,17 +531,76 @@ export function verificarPaqueteAsesorZip(
 
   // 2) Manifiesto: esquema, banderas de honestidad, orden y hashes SHA-256.
   let manifest: ManifestPaqueteAsesor | null = null;
+  let manifestTotalesValidos = false;
+  let manifestHeredadoSinMeses = false;
+  let ambitoManifest: {
+    propietarios: Set<string>;
+    inmuebles: Set<string> | null;
+    ejercicios: Set<number> | null;
+    meses: Set<string> | null;
+  } | null = null;
   const textoManifest = textoDe('manifest.json');
   if (textoManifest === null) {
     error('MANIFEST_AUSENTE', "Falta 'manifest.json': sin manifiesto no hay qué verificar");
   } else {
     try {
-      manifest = JSON.parse(textoManifest) as ManifestPaqueteAsesor;
+      const parsed: unknown = JSON.parse(textoManifest);
+      if (!esObjetoPlano(parsed)) {
+        error('MANIFEST_ILEGIBLE', 'manifest.json no contiene un objeto JSON');
+      } else {
+        manifest = parsed as unknown as ManifestPaqueteAsesor;
+      }
     } catch (e) {
       error('MANIFEST_ILEGIBLE', `manifest.json no es JSON válido (${e instanceof Error ? e.message : 'error'})`);
     }
   }
   if (manifest !== null) {
+    // Forma estructural mínima: un manifiesto manipulado debe producir un
+    // error nombrado, nunca una excepción al recorrer sus campos.
+    const mRec = manifest as unknown as Record<string, unknown>;
+    const esArrayDeObjetos = (v: unknown): boolean =>
+      Array.isArray(v) && v.every(esObjetoPlano);
+    const totalesRec = mRec.totales;
+    manifestTotalesValidos = esObjetoPlano(totalesRec)
+      && esArrayDeObjetos(totalesRec.porEjercicio)
+      && (totalesRec.porMes === undefined || esArrayDeObjetos(totalesRec.porMes));
+    if (!manifestTotalesValidos) {
+      error('TOTALES_ILEGIBLES', 'manifest.totales no contiene un objeto de totales con series por ejercicio/mes legibles');
+    }
+    if (!esObjetoPlano(mRec.hashes)) {
+      error('MANIFEST_ILEGIBLE', 'manifest.hashes no es un objeto ruta → SHA-256');
+    }
+    if (!esObjetoPlano(mRec.conteos)) {
+      error('MANIFEST_ILEGIBLE', 'manifest.conteos no es un objeto de conteos');
+    }
+    if (!esArrayDeObjetos(mRec.verificaciones)) {
+      error('MANIFEST_ILEGIBLE', 'manifest.verificaciones no es un array de objetos');
+    }
+    const idsTexto = (v: unknown): string[] | null =>
+      Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim() !== '')
+        ? [...new Set(v as string[])] : null;
+    const propietariosAmbito = idsTexto(mRec.propietariosEfectivos);
+    const inmueblesAmbito = mRec.inmueblesEfectivos === null ? null : idsTexto(mRec.inmueblesEfectivos);
+    const ejerciciosAmbito = mRec.ejerciciosEfectivos === null
+      ? null
+      : Array.isArray(mRec.ejerciciosEfectivos)
+        && mRec.ejerciciosEfectivos.every((x) => Number.isInteger(x))
+        ? [...new Set(mRec.ejerciciosEfectivos as number[])] : null;
+    const mesesAmbito = mRec.mesesEfectivos === null || mRec.mesesEfectivos === undefined
+      ? null : idsTexto(mRec.mesesEfectivos);
+    if (propietariosAmbito === null || propietariosAmbito.length === 0
+      || (mRec.inmueblesEfectivos !== null && inmueblesAmbito === null)
+      || (mRec.ejerciciosEfectivos !== null && ejerciciosAmbito === null)
+      || (mRec.mesesEfectivos !== null && mRec.mesesEfectivos !== undefined && mesesAmbito === null)) {
+      error('AMBITO_MANIFEST_INVALIDO', 'El ámbito declarado en el manifiesto (propietarios/inmuebles/ejercicios/meses efectivos) no es legible');
+    } else {
+      ambitoManifest = {
+        propietarios: new Set(propietariosAmbito),
+        inmuebles: inmueblesAmbito === null ? null : new Set(inmueblesAmbito),
+        ejercicios: ejerciciosAmbito === null ? null : new Set(ejerciciosAmbito),
+        meses: mesesAmbito === null ? null : new Set(mesesAmbito),
+      };
+    }
     if (manifest.schemaVersion !== PAQUETE_ASESOR_SCHEMA) {
       error('SCHEMA_NO_SOPORTADO', `Esquema '${manifest.schemaVersion}' ≠ '${PAQUETE_ASESOR_SCHEMA}'`);
     }
@@ -429,6 +621,7 @@ export function verificarPaqueteAsesorZip(
       error('PAQUETE_ID_DISTINTO_ESPERADO', `paqueteId ${manifest.paqueteId ?? '?'} ≠ esperado ${opciones.paqueteIdEsperado}`);
     }
     if (manifest.mesesEfectivos === undefined) {
+      manifestHeredadoSinMeses = true;
       advertencia(
         'MESES_EFECTIVOS_AUSENTE_HEREDADO',
         'Manifiesto heredado sin mesesEfectivos: se interpreta como sin filtro mensual (null)',
@@ -440,7 +633,8 @@ export function verificarPaqueteAsesorZip(
     if (JSON.stringify(nombresZip) !== JSON.stringify(esperado)) {
       error('ENTRADAS_ZIP_DISTINTAS', `Las entradas del ZIP no son las 12 del contrato en su orden (leídas: ${nombresZip.join(', ') || 'ninguna'})`);
     }
-    const hashes = manifest.hashes ?? {};
+    const hashes: Record<string, string> = esObjetoPlano(manifest.hashes)
+      ? manifest.hashes : {};
     for (const nombre of esperado) {
       if (nombre === 'manifest.json') {
         if ('manifest.json' in hashes) {
@@ -468,15 +662,37 @@ export function verificarPaqueteAsesorZip(
         error('HASH_DE_ENTRADA_INESPERADA', `El manifiesto declara hash de una entrada no contractual: '${nombre}'`);
       }
     }
-    // El informe debe citar el mismo paqueteId que el manifiesto.
+    // El informe debe citar el mismo paqueteId y el mismo ámbito que el manifiesto.
     const informe = textoDe('informe.txt');
     if (informe !== null && manifest.paqueteId !== undefined && !informe.includes(manifest.paqueteId)) {
       error('INFORME_PAQUETE_ID_DISTINTO', 'informe.txt no cita el paqueteId del manifiesto');
     }
+    if (informe !== null && ambitoManifest !== null) {
+      const valorInforme = (etiqueta: string): string | null => {
+        const linea = informe.split('\n').find((l) => l.trim().startsWith(`${etiqueta}:`));
+        return linea === undefined ? null : linea.trim().slice(etiqueta.length + 1).trim();
+      };
+      const esperadoInforme: [string, string][] = [
+        ['Propietarios', [...ambitoManifest.propietarios].join(', ')],
+        ['Inmuebles', ambitoManifest.inmuebles === null
+          ? '(todos los de los propietarios)' : [...ambitoManifest.inmuebles].join(', ')],
+        ['Ejercicios', ambitoManifest.ejercicios === null
+          ? '(sin filtro anual)' : [...ambitoManifest.ejercicios].join(', ')],
+      ];
+      if (!manifestHeredadoSinMeses) {
+        esperadoInforme.push(['Meses', ambitoManifest.meses === null
+          ? '(sin filtro mensual)' : [...ambitoManifest.meses].join(', ')]);
+      }
+      for (const [etiqueta, valorEsperado] of esperadoInforme) {
+        if (valorInforme(etiqueta) !== valorEsperado) {
+          error('INFORME_NO_COINCIDE_CON_MANIFEST', `informe.txt: '${etiqueta}: ${valorInforme(etiqueta) ?? '(ausente)'}' no coincide con el manifiesto ('${valorEsperado}')`);
+        }
+      }
+    }
   }
 
   // 3) CSV: cabeceras, conteos y libro (recálculo completo en céntimos).
-  const csvs = new Map<string, { cabecera: string[]; filas: FilaCsv[] }>();
+  const csvs = new Map<string, { cabecera: string[]; filas: FilaCsv[]; filasMalformadas: number[] }>();
   for (const nombre of ENTRADAS_ESPERADAS) {
     if (!nombre.endsWith('.csv')) continue;
     const txt = textoDe(nombre);
@@ -486,6 +702,18 @@ export function verificarPaqueteAsesorZip(
       error('CSV_ILEGIBLE', `'${nombre}' no es parseable como CSV`, { entrada: nombre });
       continue;
     }
+    const cabeceraEsperada = CABECERAS_CSV_ESPERADAS[nombre];
+    if (cabeceraEsperada !== undefined
+      && JSON.stringify(parsed.cabecera) !== JSON.stringify(cabeceraEsperada)) {
+      error(
+        nombre === 'libro-ingresos-gastos.csv' ? 'CABECERA_LIBRO_DISTINTA' : 'CABECERA_CSV_DISTINTA',
+        `La cabecera de '${nombre}' no es la contractual (${parsed.cabecera.join('|')})`,
+        { entrada: nombre },
+      );
+    }
+    for (const numLinea of parsed.filasMalformadas) {
+      error('CSV_FILA_MALFORMADA', `'${nombre}' línea ${numLinea}: número de campos distinto de la cabecera (${parsed.cabecera.length})`, { entrada: nombre });
+    }
     csvs.set(nombre, parsed);
   }
   const libro = csvs.get('libro-ingresos-gastos.csv');
@@ -494,39 +722,181 @@ export function verificarPaqueteAsesorZip(
   if (incidenciasTxt !== null) {
     try {
       const parsed = JSON.parse(incidenciasTxt) as unknown;
-      if (Array.isArray(parsed)) incidencias = parsed as IncidenciaPaqueteAsesor[];
-      else error('INCIDENCIAS_ILEGIBLES', 'incidencias.json no es un array');
+      if (Array.isArray(parsed)) {
+        const validas = parsed.filter((i): i is IncidenciaPaqueteAsesor =>
+          esObjetoPlano(i) && typeof i.codigo === 'string' && i.codigo !== '');
+        if (validas.length !== parsed.length) {
+          error('INCIDENCIAS_ILEGIBLES', 'incidencias.json contiene elementos que no son incidencias (objeto con código)');
+        }
+        incidencias = validas;
+      } else error('INCIDENCIAS_ILEGIBLES', 'incidencias.json no es un array');
     } catch (e) {
       error('INCIDENCIAS_ILEGIBLES', `incidencias.json no es JSON válido (${e instanceof Error ? e.message : 'error'})`);
     }
   }
   /** ¿Existe incidencia identificadora para una entidad? (código + id) */
   const hayIncidencia = (codigo: string | RegExp, id: string): boolean =>
-    incidencias.some((i) => (typeof codigo === 'string' ? i.codigo === codigo : codigo.test(i.codigo)) && i.id === id);
+    incidencias.some((i) => typeof i?.codigo === 'string'
+      && (typeof codigo === 'string' ? i.codigo === codigo : codigo.test(i.codigo)) && i.id === id);
+  if (incidencias.some((i) => i.codigo === 'IMPORTE_CON_SUBCENTIMO')) {
+    error(
+      'CUADRE_NO_VERIFICABLE_POR_SUBCENTIMO',
+      'El paquete declara importes con subcéntimo: el CSV/libro solo representan céntimos, así que su cuadre no puede acreditarse desde los bytes del paquete',
+    );
+  }
+
+  // 3b) CSV fuente: ids utilizables, duplicados identificados y ámbito.
+  // El manifiesto no basta como declaración: propietario/inmueble/periodo se
+  // contrastan fila a fila contra lo que el paquete dice ser.
+  const duplicadoEsperado: Readonly<Record<string, string>> = {
+    'datos/inmuebles.csv': 'INMUEBLE_DUPLICADO',
+    'datos/contratos.csv': 'CONTRATO_DUPLICADO',
+    'datos/facturas.csv': 'FACTURA_DUPLICADA',
+    'datos/liquidaciones.csv': 'LIQUIDACION_DUPLICADA',
+    'datos/polizas.csv': 'POLIZA_DUPLICADA',
+  };
+  const mesTextoValido = (v: string): boolean => {
+    const m = /^(\d{4})-(\d{2})$/.exec(v);
+    return m !== null && Number(m[2]) >= 1 && Number(m[2]) <= 12;
+  };
+  const mesDeFechaFlexible = (v: string): string => {
+    if (esFechaReal(v)) return v.slice(0, 7);
+    const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(v);
+    if (dmy && esFechaReal(`${dmy[3]}-${dmy[2]}-${dmy[1]}`)) return `${dmy[3]}-${dmy[2]}`;
+    return '';
+  };
+  const enteroDeTexto = (v: string): number | null =>
+    /^-?\d+$/.test(v.trim()) ? Number(v) : null;
+  for (const [nombre, csv] of csvs) {
+    if (!nombre.startsWith('datos/')) continue;
+    const porId = new Map<string, FilaCsv[]>();
+    for (const fila of csv.filas) {
+      const id = fila.id ?? '';
+      if (id.trim() === '') {
+        error('CSV_ID_VACIO', `'${nombre}' contiene una fila sin id: no es referenciable ni contrastable`, { entrada: nombre });
+      } else {
+        const arr = porId.get(id) ?? [];
+        arr.push(fila);
+        porId.set(id, arr);
+      }
+      if (ambitoManifest !== null) {
+        if (nombre === 'datos/inmuebles.csv') {
+          const titulares = [fila.propietarioId ?? '', fila.propietarioPrincipalId ?? '']
+            .filter((x) => x !== '');
+          if (!titulares.some((x) => ambitoManifest!.propietarios.has(x))) {
+            error('AMBITO_PROPIETARIO_FUERA_DE_MANIFEST', `Inmueble ${id || '(sin id)'} sin titular dentro de propietariosEfectivos`, { entrada: nombre, id });
+          }
+        } else if (csv.cabecera.includes('propietarioId')
+          && !ambitoManifest.propietarios.has(fila.propietarioId ?? '')) {
+          error('AMBITO_PROPIETARIO_FUERA_DE_MANIFEST', `'${nombre}' fila ${id || '(sin id)'} de propietario '${fila.propietarioId ?? ''}', fuera de propietariosEfectivos`, { entrada: nombre, id });
+        }
+        if (ambitoManifest.inmuebles !== null) {
+          const idInmueble = nombre === 'datos/inmuebles.csv' ? id
+            : csv.cabecera.includes('inmuebleId') ? (fila.inmuebleId ?? '') : null;
+          if (idInmueble !== null && !ambitoManifest.inmuebles.has(idInmueble)) {
+            error('AMBITO_INMUEBLE_FUERA_DE_MANIFEST', `'${nombre}' fila ${id || '(sin id)'} del inmueble '${idInmueble}', fuera de inmueblesEfectivos`, { entrada: nombre, id });
+          }
+        }
+        let ejercicioFila: number | null = null;
+        let mesFila = '';
+        if (nombre === 'datos/cobros.csv') {
+          ejercicioFila = enteroDeTexto(fila.anio ?? '');
+          mesFila = mesTextoValido(fila.periodoMesAnio ?? '') ? fila.periodoMesAnio
+            : ejercicioFila !== null && enteroDeTexto(fila.mes ?? '') !== null
+              ? `${ejercicioFila}-${String(enteroDeTexto(fila.mes ?? '')).padStart(2, '0')}` : '';
+        } else if (nombre === 'datos/gastos.csv') {
+          const fecha = primeraFechaReal(fila.fechaDevengo, fila.fechaPago);
+          ejercicioFila = enteroDeTexto(fila.ejercicioFiscal ?? '')
+            ?? (fecha ? Number(fecha.slice(0, 4)) : null);
+          mesFila = mesTextoValido(fila.periodoMesAnio ?? '') ? fila.periodoMesAnio
+            : fecha ? fecha.slice(0, 7) : '';
+        } else if (nombre === 'datos/facturas.csv') {
+          mesFila = mesDeFechaFlexible(fila.fechaExpedicion ?? '');
+          const ejercicioDeclarado = enteroDeTexto(fila.ejercicio ?? '');
+          ejercicioFila = ejercicioDeclarado !== null
+            && ejercicioDeclarado >= 1900 && ejercicioDeclarado <= 9999
+            ? ejercicioDeclarado
+            : mesFila ? Number(mesFila.slice(0, 4)) : null;
+        } else if (nombre === 'datos/liquidaciones.csv') {
+          ejercicioFila = enteroDeTexto(fila.anio ?? '');
+          mesFila = mesTextoValido(fila.periodo ?? '') ? fila.periodo
+            : ejercicioFila !== null && enteroDeTexto(fila.mes ?? '') !== null
+              ? `${ejercicioFila}-${String(enteroDeTexto(fila.mes ?? '')).padStart(2, '0')}` : '';
+        }
+        if (ambitoManifest.ejercicios !== null && ejercicioFila !== null
+          && !ambitoManifest.ejercicios.has(ejercicioFila)) {
+          error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id || '(sin id)'} del ejercicio ${ejercicioFila}, fuera de ejerciciosEfectivos`, { entrada: nombre, id });
+        }
+        if (ambitoManifest.meses !== null && mesTextoValido(mesFila)
+          && !ambitoManifest.meses.has(mesFila)) {
+          error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id || '(sin id)'} del mes ${mesFila}, fuera de mesesEfectivos`, { entrada: nombre, id });
+        }
+      }
+    }
+    const codigoDuplicado = duplicadoEsperado[nombre];
+    if (codigoDuplicado !== undefined) {
+      for (const [id, filasId] of porId) {
+        if (filasId.length > 1 && !hayIncidencia(codigoDuplicado, id)) {
+          error('DISCREPANCIA_NO_IDENTIFICADA', `'${nombre}' repite el id ${id} (${filasId.length} filas) sin incidencia ${codigoDuplicado}`, { entrada: nombre, id });
+        }
+      }
+    }
+  }
 
   const recalc = totalesVacios();
   let lineasLibro = 0;
-  let baseIvaRetencionCent: { base: number; iva: number; retencion: number }[] = [];
   if (libro) {
     lineasLibro = libro.filas.length;
-    const esperada = ['fecha', 'ejercicio', 'tipo', 'concepto', 'inmuebleId', 'inmuebleDireccion', 'contraparte', 'base', 'iva', 'retencion', 'total', 'categoria', 'deducible', 'origenDeducibilidad', 'fuenteTipo', 'fuenteId', 'documentoNombre', 'desgloseFiscal'];
-    if (JSON.stringify(libro.cabecera) !== JSON.stringify(esperada)) {
-      error('CABECERA_LIBRO_DISTINTA', `La cabecera del libro no es la del contrato (${libro.cabecera.join('|')})`, { entrada: 'libro-ingresos-gastos.csv' });
-    }
     for (const fila of libro.filas) {
       const id = fila.fuenteId ?? '';
-      if (!RE_FECHA_ISO_V.test(fila.fecha ?? '')) {
-        error('LINEA_FECHA_INVALIDA', `Línea (${fila.fuenteTipo} ${id}) con fecha '${fila.fecha}' no ISO`, { entrada: 'libro-ingresos-gastos.csv', id });
+      if (id.trim() === '') {
+        error('LINEA_SIN_FUENTE', 'Línea del libro sin fuenteId: no es contrastable contra los CSV fuente', { entrada: 'libro-ingresos-gastos.csv' });
+        continue;
+      }
+      if (!esFechaReal(fila.fecha ?? '')) {
+        error('LINEA_FECHA_INVALIDA', `Línea (${fila.fuenteTipo} ${id}) con fecha '${fila.fecha}' que no es una fecha real YYYY-MM-DD`, { entrada: 'libro-ingresos-gastos.csv', id });
         continue;
       }
       const cent = centimosDeTexto(fila.total ?? '');
-      if (cent === null) {
-        error('LINEA_TOTAL_INVALIDO', `Línea (${fila.fuenteTipo} ${id}) con total '${fila.total}' ilegible en céntimos`, { entrada: 'libro-ingresos-gastos.csv', id });
+      if (cent === null || cent < 0) {
+        error('LINEA_TOTAL_INVALIDO', `Línea (${fila.fuenteTipo} ${id}) con total '${fila.total}' ilegible en céntimos no negativos`, { entrada: 'libro-ingresos-gastos.csv', id });
         continue;
       }
       if (fila.tipo !== 'INGRESO' && fila.tipo !== 'GASTO') {
         error('LINEA_TIPO_INVALIDO', `Línea (${fila.fuenteTipo} ${id}) con tipo '${fila.tipo}'`, { entrada: 'libro-ingresos-gastos.csv', id });
         continue;
+      }
+      const fuenteEsperada = fila.tipo === 'INGRESO' ? 'COBRO' : 'GASTO';
+      if (fila.fuenteTipo !== fuenteEsperada) {
+        error('LINEA_NO_COINCIDE_CON_FUENTE', `Línea ${id}: tipo ${fila.tipo} con fuenteTipo '${fila.fuenteTipo}' (esperado ${fuenteEsperada})`, { entrada: 'libro-ingresos-gastos.csv', id });
+        continue;
+      }
+      if (ambitoManifest !== null) {
+        // Sin contraste temporal aquí: la fecha del libro es pago/devengo,
+        // mientras el filtro contractual usa el periodo contable de la
+        // fuente (un cobro de febrero puede pagarse en marzo).
+        if (ambitoManifest.inmuebles !== null
+          && !ambitoManifest.inmuebles.has(fila.inmuebleId ?? '')) {
+          error('AMBITO_INMUEBLE_FUERA_DE_MANIFEST', `Línea (${fila.fuenteTipo} ${id}) del inmueble '${fila.inmuebleId ?? ''}', fuera de inmueblesEfectivos`, { entrada: 'libro-ingresos-gastos.csv', id });
+        }
+      }
+      // Dominios por clase de línea: un ingreso no es «deducible» y un gasto
+      // sin desglose no puede traer base/IVA/retención inventados.
+      if (fila.tipo === 'INGRESO') {
+        if ((fila.deducible ?? '') !== '' || (fila.origenDeducibilidad ?? '') !== '') {
+          error('LINEA_DEDUCIBLE_INVALIDO', `Línea de ingreso (${id}) con deducible/origenDeducibilidad consignados`, { entrada: 'libro-ingresos-gastos.csv', id });
+        }
+      } else if (fila.deducible !== 'true' && fila.deducible !== 'false') {
+        error('LINEA_DEDUCIBLE_INVALIDO', `Línea de gasto (${id}) con deducible '${fila.deducible ?? ''}' (solo true/false)`, { entrada: 'libro-ingresos-gastos.csv', id });
+      }
+      const desglosesValidos = ['SIN_DESGLOSE_EN_ORIGEN', 'FACTURA_VINCULADA', 'FACTURA_INCONSISTENTE'];
+      const hayDesglose = (fila.base ?? '') !== '' || (fila.iva ?? '') !== '' || (fila.retencion ?? '') !== '';
+      if (!desglosesValidos.includes(fila.desgloseFiscal ?? '')
+        || (fila.tipo === 'INGRESO' && fila.desgloseFiscal !== 'SIN_DESGLOSE_EN_ORIGEN')
+        || (fila.desgloseFiscal !== 'FACTURA_VINCULADA' && hayDesglose)
+        || (fila.desgloseFiscal === 'FACTURA_VINCULADA'
+          && (fila.tipo !== 'GASTO' || (fila.base ?? '') === '' || (fila.iva ?? '') === ''))) {
+        error('LINEA_DESGLOSE_INVALIDO', `Línea (${fila.fuenteTipo} ${id}): desgloseFiscal '${fila.desgloseFiscal ?? ''}' incompatible con base/IVA/retención consignados`, { entrada: 'libro-ingresos-gastos.csv', id });
       }
       const ejercicio = Number(fila.ejercicio);
       if (!Number.isInteger(ejercicio) || ejercicio !== Number(fila.fecha.slice(0, 4))) {
@@ -556,7 +926,6 @@ export function verificarPaqueteAsesorZip(
         );
       }
     }
-    if (baseIvaRetencionCent.length === 0) baseIvaRetencionCent = [];
   }
 
   // 4) Conteos y totales declarados vs recalculados (manifiesto y totales.json).
@@ -580,9 +949,9 @@ export function verificarPaqueteAsesorZip(
     if (manifest.numIncidencias !== incidencias.length) {
       error('NUM_INCIDENCIAS_NO_COINCIDE', `manifiesto numIncidencias=${manifest.numIncidencias} ≠ incidencias.json (${incidencias.length})`);
     }
-    for (const v of manifest.verificaciones ?? []) {
-      if (v.ok !== true) {
-        error('VERIFICACION_DECLARADA_FALLIDA', `El propio manifiesto declara fallida la verificación '${v.nombre}' (esperado ${v.esperado} / obtenido ${v.obtenido})`);
+    for (const v of Array.isArray(manifest.verificaciones) ? manifest.verificaciones : []) {
+      if (!esObjetoPlano(v) || v.ok !== true) {
+        error('VERIFICACION_DECLARADA_FALLIDA', `El propio manifiesto declara fallida la verificación '${v?.nombre ?? '?'}' (esperado ${v?.esperado ?? '?'} / obtenido ${v?.obtenido ?? '?'})`);
       }
     }
     const cotejarTotales = (totales: TotalesPaqueteAsesor, origen: string): void => {
@@ -634,16 +1003,20 @@ export function verificarPaqueteAsesorZip(
         cotejarSerie(totales.porMes, recalc.porMes, 'porMes', (f) => (f as TotalesMesAsesor).mes);
       }
     };
-    cotejarTotales(manifest.totales, 'manifest.totales');
+    if (manifestTotalesValidos) cotejarTotales(manifest.totales, 'manifest.totales');
     const totalesTexto = textoDe('totales.json');
     if (totalesTexto !== null) {
       try {
         // Formato contractual: { totales, verificaciones }.
-        const parsed = JSON.parse(totalesTexto) as { totales?: TotalesPaqueteAsesor };
-        if (parsed.totales === undefined) {
-          error('TOTALES_ILEGIBLES', 'totales.json no contiene la clave "totales"');
+        const parsed: unknown = JSON.parse(totalesTexto);
+        const totalesParsed = esObjetoPlano(parsed) ? parsed.totales : undefined;
+        const esSerieObjetos = (v: unknown): boolean =>
+          Array.isArray(v) && v.every(esObjetoPlano);
+        if (!esObjetoPlano(totalesParsed) || !esSerieObjetos(totalesParsed.porEjercicio)
+          || (totalesParsed.porMes !== undefined && !esSerieObjetos(totalesParsed.porMes))) {
+          error('TOTALES_ILEGIBLES', 'totales.json no contiene un objeto "totales" con series legibles');
         } else {
-          cotejarTotales(parsed.totales, 'totales.json');
+          cotejarTotales(totalesParsed as unknown as TotalesPaqueteAsesor, 'totales.json');
         }
       } catch (e) {
         error('TOTALES_ILEGIBLES', `totales.json no es JSON válido (${e instanceof Error ? e.message : 'error'})`);
@@ -651,7 +1024,7 @@ export function verificarPaqueteAsesorZip(
     }
     // Neto de liquidaciones: informativo pero también recalculable.
     const liqs = csvs.get('datos/liquidaciones.csv');
-    if (liqs && liqs.cabecera.includes('netoPropietario')) {
+    if (manifestTotalesValidos && liqs && liqs.cabecera.includes('netoPropietario')) {
       let netoCent = 0;
       let ilegible = false;
       for (const l of liqs.filas) {
@@ -670,16 +1043,26 @@ export function verificarPaqueteAsesorZip(
   const gastos = csvs.get('datos/gastos.csv');
   const facturas = csvs.get('datos/facturas.csv');
   if (libro && cobros && gastos) {
-    const lineasIngresoPorId = new Map<string, number[]>();
-    const lineasGastoPorId = new Map<string, number[]>();
+    interface LineaComparable { fecha: string; cent: number; inmuebleId: string }
+    const lineasIngresoPorId = new Map<string, LineaComparable[]>();
+    const lineasGastoPorId = new Map<string, LineaComparable[]>();
     for (const fila of libro.filas) {
       const cent = centimosDeTexto(fila.total ?? '');
-      if (cent === null || !RE_FECHA_ISO_V.test(fila.fecha ?? '')) continue;
+      if (cent === null || cent < 0 || !esFechaReal(fila.fecha ?? '')) continue;
+      if (fila.fuenteTipo !== 'COBRO' && fila.fuenteTipo !== 'GASTO') continue;
+      if ((fila.fuenteId ?? '').trim() === '') continue;
       const mapa = fila.fuenteTipo === 'COBRO' ? lineasIngresoPorId : lineasGastoPorId;
       const arr = mapa.get(fila.fuenteId) ?? [];
-      arr.push(cent);
+      arr.push({ fecha: fila.fecha, cent, inmuebleId: fila.inmuebleId ?? '' });
       mapa.set(fila.fuenteId, arr);
     }
+    const claveLinea = (l: LineaComparable): string => `${l.fecha}|${l.cent}|${l.inmuebleId}`;
+    const mismos = (a: string[], b: string[]): boolean =>
+      JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+    const mismosCent = (a: LineaComparable[], b: LineaComparable[]): boolean =>
+      mismos(a.map((l) => String(l.cent)), b.map((l) => String(l.cent)));
+    const huellaCsv = (csv: { cabecera: string[] }, fila: FilaCsv): string =>
+      JSON.stringify(csv.cabecera.map((col) => fila[col] ?? ''));
     const agruparPorId = (filas: FilaCsv[]): Map<string, FilaCsv[]> => {
       const m = new Map<string, FilaCsv[]>();
       for (const f of filas) {
@@ -689,33 +1072,43 @@ export function verificarPaqueteAsesorZip(
       }
       return m;
     };
-    // Cobros: computable ⇔ no ANULADO/IMPAGADO, importe>0, fecha válida.
+    // Cobros: computable ⇔ no ANULADO/IMPAGADO, importe>0, fecha real.
+    // No basta con que las sumas coincidan: fecha e importe de CADA línea se
+    // contrastan con su fuente (mover un día dentro del mes también es falso).
     for (const [id, filasId] of agruparPorId(cobros.filas)) {
       if (filasId.length > 1
         && !hayIncidencia(/COBRO_(DUPLICADO_EXACTO|ID_CONFLICTIVO)/, id)) {
         error('DISCREPANCIA_NO_IDENTIFICADA', `El cobro ${id} aparece ${filasId.length} veces en datos/cobros.csv sin incidencia de duplicado`, { entrada: 'datos/cobros.csv', id });
       }
-      const centEsperado: number[] = [];
+      const candidatos: LineaComparable[] = [];
       for (const f of filasId) {
         if (f.estado === 'ANULADO' || f.estado === 'IMPAGADO') continue;
         const cent = centimosDeTexto(f.importeRecibido ?? '');
         if (cent === null || cent <= 0) continue;
-        const fecha = RE_FECHA_ISO_V.test(f.fechaPago ?? '') ? f.fechaPago
-          : RE_FECHA_ISO_V.test(f.fechaVencimiento ?? '') ? f.fechaVencimiento : '';
+        const fecha = primeraFechaReal(f.fechaPago, f.fechaVencimiento);
         if (!fecha) continue;
-        centEsperado.push(cent);
+        candidatos.push({ fecha, cent, inmuebleId: f.inmuebleId ?? '' });
       }
-      const centLibro = lineasIngresoPorId.get(id) ?? [];
-      const sumaEsperada = centEsperado.reduce((s, c) => s + c, 0);
-      const sumaLibro = centLibro.reduce((s, c) => s + c, 0);
-      if (sumaEsperada !== sumaLibro) {
-        const explicado = hayIncidencia(/COBRO_(DUPLICADO_EXACTO|ID_CONFLICTIVO)/, id)
-          && (sumaLibro === 0 // conflictivo: ninguna computa
-            || (centEsperado.length > 0 && centLibro.length === 1
-              && centEsperado.every((c) => c === centLibro[0]))); // exacto: 1 sola
-        if (!explicado) {
-          error('CUADRE_COBRO_DISTINTO_LIBRO', `Cobro ${id}: fuentes computables suman ${eurosDeCentimos(sumaEsperada)} pero el libro trae ${centLibro.length} línea(s) por ${eurosDeCentimos(sumaLibro)}`, { entrada: 'datos/cobros.csv', id });
+      let esperado = candidatos;
+      let clasificacionFalsa = false;
+      if (filasId.length > 1 && hayIncidencia('COBRO_ID_CONFLICTIVO', id)) {
+        esperado = []; // conflictivo: ninguna copia computa
+      } else if (filasId.length > 1 && hayIncidencia('COBRO_DUPLICADO_EXACTO', id)) {
+        if (new Set(filasId.map((f) => huellaCsv(cobros, f))).size === 1) {
+          esperado = candidatos.slice(0, 1); // réplica exacta: computa una sola
+        } else {
+          clasificacionFalsa = true;
         }
+      }
+      const actual = lineasIngresoPorId.get(id) ?? [];
+      if (clasificacionFalsa) {
+        error('CUADRE_COBRO_DISTINTO_LIBRO', `Cobro ${id}: se declara COBRO_DUPLICADO_EXACTO pero las filas de datos/cobros.csv no son idénticas`, { entrada: 'datos/cobros.csv', id });
+      } else if (!mismosCent(esperado, actual)) {
+        const sumaEsperada = esperado.reduce((s, l) => s + l.cent, 0);
+        const sumaLibro = actual.reduce((s, l) => s + l.cent, 0);
+        error('CUADRE_COBRO_DISTINTO_LIBRO', `Cobro ${id}: fuentes computables suman ${eurosDeCentimos(sumaEsperada)} pero el libro trae ${actual.length} línea(s) por ${eurosDeCentimos(sumaLibro)}`, { entrada: 'datos/cobros.csv', id });
+      } else if (!mismos(esperado.map(claveLinea), actual.map(claveLinea))) {
+        error('LINEA_NO_COINCIDE_CON_FUENTE', `Cobro ${id}: fecha/inmueble de su línea del libro no coinciden con datos/cobros.csv (con el mismo importe)`, { entrada: 'libro-ingresos-gastos.csv', id });
       }
     }
     for (const id of lineasIngresoPorId.keys()) {
@@ -724,38 +1117,60 @@ export function verificarPaqueteAsesorZip(
       }
     }
     // Gastos: computable ⇔ no ANULADO, importe válido, fecha devengo/pago.
-    // (El alias `fecha` del ERP no viaja en el CSV v1 — ver cabecera.)
+    // El alias `fecha` no viaja en el CSV v1, pero SOLO degrada la FECHA: el
+    // importe sigue siendo plenamente contrastable contra la fuente.
     for (const [id, filasId] of agruparPorId(gastos.filas)) {
       if (filasId.length > 1
         && !hayIncidencia(/GASTO_(DUPLICADO_EXACTO|ID_CONFLICTIVO)/, id)) {
         error('DISCREPANCIA_NO_IDENTIFICADA', `El gasto ${id} aparece ${filasId.length} veces en datos/gastos.csv sin incidencia de duplicado`, { entrada: 'datos/gastos.csv', id });
       }
-      const centEsperado: number[] = [];
-      let requiereAlias = false;
+      const conFecha: LineaComparable[] = [];
+      const conAlias: LineaComparable[] = [];
       for (const f of filasId) {
         if (f.estado === 'ANULADO') continue;
         const cent = centimosDeTexto(f.importe ?? '');
         if (cent === null) continue;
-        const fecha = RE_FECHA_ISO_V.test(f.fechaDevengo ?? '') ? f.fechaDevengo
-          : RE_FECHA_ISO_V.test(f.fechaPago ?? '') ? f.fechaPago : '';
-        if (!fecha) { requiereAlias = true; continue; }
-        centEsperado.push(cent);
+        const fecha = primeraFechaReal(f.fechaDevengo, f.fechaPago);
+        const candidato = { fecha, cent, inmuebleId: f.inmuebleId ?? '' };
+        if (fecha) conFecha.push(candidato); else conAlias.push(candidato);
       }
-      const centLibro = lineasGastoPorId.get(id) ?? [];
-      const sumaEsperada = centEsperado.reduce((s, c) => s + c, 0);
-      const sumaLibro = centLibro.reduce((s, c) => s + c, 0);
-      if (sumaEsperada !== sumaLibro) {
-        const explicadoPorDuplicado = hayIncidencia(/GASTO_(DUPLICADO_EXACTO|ID_CONFLICTIVO)/, id)
-          && (sumaLibro === 0
-            || (centEsperado.length > 0 && centLibro.length === 1
-              && centEsperado.every((c) => c === centLibro[0])));
-        if (!explicadoPorDuplicado) {
-          if (requiereAlias) {
-            advertencia('GASTO_ALIAS_FECHA_NO_SERIALIZADO', `Gasto ${id}: su cuadre puede depender del alias 'fecha' que el CSV v1 no serializa (libro ${eurosDeCentimos(sumaLibro)} vs fuentes con fecha ${eurosDeCentimos(sumaEsperada)}); no re-derivable al céntimo desde el paquete`, { entrada: 'datos/gastos.csv', id });
-          } else {
-            error('CUADRE_GASTO_DISTINTO_LIBRO', `Gasto ${id}: fuentes computables suman ${eurosDeCentimos(sumaEsperada)} pero el libro trae ${centLibro.length} línea(s) por ${eurosDeCentimos(sumaLibro)}`, { entrada: 'datos/gastos.csv', id });
-          }
+      let esperadoFecha = conFecha;
+      let esperadoAlias = conAlias;
+      let clasificacionFalsa = false;
+      if (filasId.length > 1 && hayIncidencia('GASTO_ID_CONFLICTIVO', id)) {
+        esperadoFecha = [];
+        esperadoAlias = [];
+      } else if (filasId.length > 1 && hayIncidencia('GASTO_DUPLICADO_EXACTO', id)) {
+        if (new Set(filasId.map((f) => huellaCsv(gastos, f))).size === 1) {
+          esperadoFecha = conFecha.slice(0, 1);
+          esperadoAlias = conFecha.length > 0 ? [] : conAlias.slice(0, 1);
+        } else {
+          clasificacionFalsa = true;
         }
+      }
+      const esperadoTodos = [...esperadoFecha, ...esperadoAlias];
+      const actual = lineasGastoPorId.get(id) ?? [];
+      const sumaEsperada = esperadoTodos.reduce((s, l) => s + l.cent, 0);
+      const sumaLibro = actual.reduce((s, l) => s + l.cent, 0);
+      if (clasificacionFalsa) {
+        error('CUADRE_GASTO_DISTINTO_LIBRO', `Gasto ${id}: se declara GASTO_DUPLICADO_EXACTO pero las filas de datos/gastos.csv no son idénticas`, { entrada: 'datos/gastos.csv', id });
+      } else if (!mismosCent(esperadoTodos, actual)) {
+        const excluidoSinFecha = esperadoAlias.length > 0
+          && hayIncidencia('GASTO_SIN_FECHA', id)
+          && mismosCent(esperadoFecha, actual);
+        if (!excluidoSinFecha) {
+          error('CUADRE_GASTO_DISTINTO_LIBRO', `Gasto ${id}: fuentes computables suman ${eurosDeCentimos(sumaEsperada)} pero el libro trae ${actual.length} línea(s) por ${eurosDeCentimos(sumaLibro)}`, { entrada: 'datos/gastos.csv', id });
+        }
+      } else if (esperadoAlias.length > 0) {
+        advertencia('GASTO_ALIAS_FECHA_NO_SERIALIZADO', `Gasto ${id}: el importe cuadra con la fuente, pero su fecha puede depender del alias 'fecha' que el CSV v1 no serializa; la fecha de la línea no es re-derivable desde el paquete`, { entrada: 'datos/gastos.csv', id });
+        if (!mismos(
+          esperadoTodos.map((l) => `${l.cent}|${l.inmuebleId}`),
+          actual.map((l) => `${l.cent}|${l.inmuebleId}`),
+        )) {
+          error('LINEA_NO_COINCIDE_CON_FUENTE', `Gasto ${id}: el inmueble de su línea no coincide con datos/gastos.csv`, { entrada: 'libro-ingresos-gastos.csv', id });
+        }
+      } else if (!mismos(esperadoTodos.map(claveLinea), actual.map(claveLinea))) {
+        error('LINEA_NO_COINCIDE_CON_FUENTE', `Gasto ${id}: fecha/inmueble de su línea del libro no coinciden con datos/gastos.csv (con el mismo importe)`, { entrada: 'libro-ingresos-gastos.csv', id });
       }
     }
     const gastosIds = agruparPorId(gastos.filas);

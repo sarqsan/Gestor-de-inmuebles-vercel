@@ -268,14 +268,12 @@ import {
 import { contextoAutorizacionDesdeUsuario, repositorioNotificacionesFirestore } from './utils/morosidad/puenteGAP1';
 import { revisarCompromisosVigentes } from './utils/morosidad/morosidadStore';
 import type { CompromisoPago, ExpedienteMorosidad, PoliticaMorosidad, ResumenMorosidadPropietario } from './types/morosidad';
-import { suscribirMovimientosSesion } from './lib/conciliacionSession';
 import {
   resumenCambiosUsuario,
   validarBajaUsuario,
   aplicarBajaUsuario,
   detalleBajaUsuario,
 } from './lib/adminUsuarios';
-import type { SesionConciliacion } from './lib/conciliacionSession';
 import type {
   FicheroSEPA,
   GastoInmueble,
@@ -544,7 +542,6 @@ export default function App() {
   const [tesoreriaMandatosSepa, setTesoreriaMandatosSepa] = useState<MandatoSEPA[]>([]);
   const [tesoreriaTrabajos, setTesoreriaTrabajos] = useState<TrabajoProfesional[]>([]);
   // Puente de compatibilidad legacy; P3 no publica importaciones ni sugerencias a esta sesión.
-  const [tesoreriaSesionConciliacion, setTesoreriaSesionConciliacion] = useState<SesionConciliacion>({ movimientos: [], propuestas: [] });
   // BLOQUE C — Morosidad: expedientes, compromisos, política vigente y espejo del propietario
   const [morosidadExpedientes, setMorosidadExpedientes] = useState<ExpedienteMorosidad[]>([]);
   const [morosidadCompromisos, setMorosidadCompromisos] = useState<CompromisoPago[]>([]);
@@ -1412,8 +1409,6 @@ export default function App() {
     const unsubscribeTesoreriaFicheros = subscribeFicherosSepa((data) => setTesoreriaFicherosSepa(data || []), currentUser);
     const unsubscribeTesoreriaMandatos = subscribeMandatosSepa((data) => setTesoreriaMandatosSepa(data || []), currentUser);
     const unsubscribeTesoreriaTrabajos = subscribeTrabajosProfesionales((data) => setTesoreriaTrabajos(data || []), dataScope);
-    // Puente legacy de Tesorería; las operaciones P3 permanecen desconectadas de este espejo.
-    const unsubscribeTesoreriaMovSesion = suscribirMovimientosSesion((data) => setTesoreriaSesionConciliacion(data));
 
     // BLOQUE C — Morosidad: el admin ve todos los expedientes; el propietario solo
     // el espejo recortado (`morosidad_resumen_propietario`), nunca el expediente completo.
@@ -1494,7 +1489,6 @@ export default function App() {
       unsubscribeTesoreriaFicheros();
       unsubscribeTesoreriaMandatos();
       unsubscribeTesoreriaTrabajos();
-      unsubscribeTesoreriaMovSesion();
       configurarAuditWriter(null);
       unsubscribeSolicitudesSeguro();
       if (unsubscribeAseguradoras) unsubscribeAseguradoras();
@@ -4218,8 +4212,6 @@ export default function App() {
                 ficheros={tesoreriaFicherosSepa}
                 mandatos={tesoreriaMandatosSepa}
                 trabajos={tesoreriaTrabajos}
-                movimientosBancarios={tesoreriaSesionConciliacion.movimientos}
-                propuestasConciliacion={tesoreriaSesionConciliacion.propuestas}
                 gastosCanonicos={scopedGastos}
                 currentUser={currentUser}
                 onSaveLiquidacion={handleSaveTesoreriaLiquidacion}

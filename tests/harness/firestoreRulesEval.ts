@@ -286,7 +286,7 @@ export function crearEvaluadorReglas(RULES: string) {
           const d = src[j];
           if (d === '(') nivel++;
           else if (d === ')') { if (nivel === 0) break; nivel--; }
-          else if (/\s/.test(d) || (d === ',' && nivel === 0)) break;
+          else if ((/\s/.test(d) || d === ',') && nivel === 0) break;
           j++;
         }
         toks.push('\u0001' + src.slice(i, j));
@@ -322,36 +322,49 @@ export function crearEvaluadorReglas(RULES: string) {
     };
 
     function primario(): Nodo {
+      let nodo: Nodo;
       const t = peek();
-      if (t === '(') { p++; const e = expr(); eat(')'); return e; }
-      if (t === '!') { p++; return { k: 'not', e: primario() }; }
-      if (t === '[') {
-        p++; const items: Nodo[] = [];
-        if (peek() !== ']') { for (;;) { items.push(expr()); if (peek() === ',') { p++; continue; } break; } }
+      if (t === '(') {
+        p++;
+        const e = expr();
+        eat(')');
+        nodo = e;
+      } else if (t === '!') {
+        p++;
+        nodo = { k: 'not', e: primario() };
+      } else if (t === '[') {
+        p++;
+        const items: Nodo[] = [];
+        if (peek() !== ']') {
+          for (;;) {
+            items.push(expr());
+            if (peek() === ',') { p++; continue; }
+            break;
+          }
+        }
         eat(']');
-        return { k: 'list', items };
-      }
-      if (t === '{') {
-        p++; const entries: [string, Nodo][] = [];
+        nodo = { k: 'list', items };
+      } else if (t === '{') {
+        p++;
+        const entries: [string, Nodo][] = [];
         if (peek() !== '}') {
           for (;;) {
             const key = toks[p++];
             if (!key || !/^(?:[A-Za-z_][A-Za-z0-9_]*|'[^']*'|"[^"]*")$/.test(key))
               throw new Error(`HARNESS NO CUBRE: clave de mapa ${JSON.stringify(key)}`);
             const normalized = key.startsWith("'") || key.startsWith('"') ? key.slice(1, -1) : key;
-            eat(':'); entries.push([normalized, expr()]);
+            eat(':');
+            entries.push([normalized, expr()]);
             if (peek() === ',') { p++; continue; }
             break;
           }
         }
         eat('}');
-        return { k: 'map', entries };
-      }
-      if (t && (t.startsWith('`') || t.startsWith('\u0001'))) {
+        nodo = { k: 'map', entries };
+      } else if (t && (t.startsWith('`') || t.startsWith('\u0001'))) {
         p++;
         const bruto = t.startsWith('`') ? t.slice(1, -1) : t.slice(1);
         const partes: (string | Nodo)[] = [];
-        // `$( … )` admite llamadas anidadas: se balancean paréntesis en vez de cortar en el primer `)`.
         let ult = 0;
         for (;;) {
           const k = bruto.indexOf('$(', ult);
@@ -369,26 +382,41 @@ export function crearEvaluadorReglas(RULES: string) {
           ult = f + 1;
         }
         if (ult < bruto.length) partes.push(bruto.slice(ult));
-        return { k: 'path', partes };
+        nodo = { k: 'path', partes };
+      } else if (t && /^'/.test(t)) {
+        p++;
+        nodo = { k: 'lit', v: t.slice(1, -1) };
+      } else if (t && /^[0-9]/.test(t)) {
+        p++;
+        nodo = { k: 'lit', v: Number(t) };
+      } else if (t === 'true' || t === 'false') {
+        p++;
+        nodo = { k: 'lit', v: t === 'true' };
+      } else if (!t || !/^[A-Za-z_$]/.test(t)) {
+        throw new Error(`HARNESS NO CUBRE: token ${JSON.stringify(t)}`);
+      } else {
+        p++;
+        nodo = { k: 'ident', nombre: t };
+        if (peek() === '(') {
+          p++;
+          const args = argumentos();
+          nodo = { k: 'call', obj: null, nombre: t, args };
+        }
       }
-      if (t && /^'/.test(t)) { p++; return { k: 'lit', v: t.slice(1, -1) }; }
-      if (t && /^[0-9]/.test(t)) { p++; return { k: 'lit', v: Number(t) }; }
-      if (t === 'true' || t === 'false') { p++; return { k: 'lit', v: t === 'true' }; }
-      if (!t || !/^[A-Za-z_$]/.test(t)) throw new Error(`HARNESS NO CUBRE: token ${JSON.stringify(t)}`);
-      p++;
-      let nodo: Nodo = { k: 'ident', nombre: t };
       for (;;) {
         if (peek() === '.') {
           p++;
           const nombre = toks[p++];
           if (!nombre || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(nombre)) throw new Error(`HARNESS NO CUBRE: acceso tras punto (${JSON.stringify(nombre)})`);
-          if (peek() === '(') { p++; const args = argumentos(); nodo = { k: 'call', obj: nodo, nombre, args }; }
-          else nodo = { k: 'field', obj: nodo, nombre };
+          if (peek() === '(') {
+            p++;
+            const args = argumentos();
+            nodo = { k: 'call', obj: nodo, nombre, args };
+          } else {
+            nodo = { k: 'field', obj: nodo, nombre };
+          }
           continue;
         }
-        if (peek() === '(') { p++; const args = argumentos(); nodo = { k: 'call', obj: null, nombre: t, args }; continue; }
-        // acceso dinámico por índice: `existing()[nombre]` (usado por
-        // `campoListaActual` y compañía). Sigue el mismo criterio fail-loud.
         if (peek() === '[') {
           p++;
           const idx = expr();

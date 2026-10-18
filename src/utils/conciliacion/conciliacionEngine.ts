@@ -310,6 +310,7 @@ export function decidirConciliacionManual(
     ...(candidatoAnterior ? { candidatoAnteriorId: `${candidatoAnterior.tipo}:${candidatoAnterior.id}` } : {}),
     ...(candidatoNuevo ? { candidatoNuevoId: `${candidatoNuevo.tipo}:${candidatoNuevo.id}` } : {}),
     operacionId,
+    revision: (propuesta.revision || 0) + 1,
   };
   const accionHistorial = ({
     CONCILIAR: 'APLICADA', RECHAZAR: 'RECHAZADA', REVERSAR: 'REVERSADA', CORREGIR: 'CORREGIDA',

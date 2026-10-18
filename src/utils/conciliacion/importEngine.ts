@@ -130,6 +130,7 @@ function construirResultado(args: {
     ...(parseo.saldoInicial !== undefined ? { saldoInicial: parseo.saldoInicial } : {}),
     ...(parseo.saldoFinal !== undefined ? { saldoFinal: parseo.saldoFinal } : {}),
     resultadosMovimientos,
+    idsMovimientosNuevos: nuevos.map((m) => m.idMovimiento),
     estado,
   };
   return { importacion, movimientos: parseo.movimientos, nuevos, duplicados, requiereRevision, errores, confirmable: errores.length === 0 && requiereRevision.length === 0 };

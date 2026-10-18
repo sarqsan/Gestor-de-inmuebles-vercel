@@ -2593,17 +2593,9 @@ service cloud.firestore {
       }
       allow get: if isMasterAdmin() || (isPropietarioRole() && movimientoVisible(existing()));
       allow list: if isMasterAdmin() || (isPropietarioRole() && movimientoEsMio(resource.data));
-      allow create: if isMasterAdmin() || (
-        isPropietarioRole()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-        && 'idMovimiento' in incoming() && incoming().idMovimiento is string
-        && 'hashIdempotencia' in incoming()
-      ) && sinSecretosBancarios();
-      allow update: if isMasterAdmin() || (
-        isPropietarioRole()
-        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-      ) && sinSecretosBancarios();
+      // E-07/importación manual cerrada provisionalmente por decisión conservadora.
+      // Parsers conservados en código; ningún cliente puede crear/alterar movimientos.
+      allow create, update: if false;
       allow delete: if isMasterAdmin();
     }
 
@@ -2613,28 +2605,54 @@ service cloud.firestore {
       }
       function sinSecretosBancarios() {
         return !(
-          'credentials' in incoming() ||
-          'apiKey' in incoming() ||
-          'accessToken' in incoming() ||
-          'psd2' in incoming() ||
-          'ibanSecreto' in incoming() ||
-          'tokenBancario' in incoming() ||
-          'password' in incoming() ||
-          'secret' in incoming()
+          'credentials' in incoming() || 'apiKey' in incoming() || 'accessToken' in incoming()
+          || 'psd2' in incoming() || 'ibanSecreto' in incoming() || 'tokenBancario' in incoming()
+          || 'password' in incoming() || 'secret' in incoming()
         );
+      }
+      function actorEnAmbito(pid) {
+        return isMasterAdmin() || (isPropietarioRole() && myPropId() == pid);
+      }
+      function eventoPostDecision() {
+        return 'ultimoEventoId' in incoming() && incoming().ultimoEventoId is string
+          && existsAfter(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(incoming().propietarioId + '_' + incoming().ultimoEventoId))
+          && getAfter(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(incoming().propietarioId + '_' + incoming().ultimoEventoId)).data.propuestaId == incoming().id
+          && getAfter(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(incoming().propietarioId + '_' + incoming().ultimoEventoId)).data.movimientoId == incoming().movimientoId
+          && getAfter(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(incoming().propietarioId + '_' + incoming().ultimoEventoId)).data.estadoNuevo == incoming().estado
+          && getAfter(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(incoming().propietarioId + '_' + incoming().ultimoEventoId)).data.revision == incoming().revision;
+      }
+      function transicionConciliacionPermitida() {
+        let ev = getAfter(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(incoming().propietarioId + '_' + incoming().ultimoEventoId)).data;
+        return ev.estadoAnterior == existing().estado
+          && ev.estadoNuevo == incoming().estado
+          && ev.actorUid == request.auth.uid
+          && ev.motivo == incoming().motivoDecision
+          && ev.revision == existing().revision + 1
+          && incoming().historial.size() == existing().historial.size() + 1
+          && incoming().historial[incoming().historial.size() - 1].id == ev.id
+          && incoming().historial[incoming().historial.size() - 1].actorUid == request.auth.uid
+          && incoming().historial[incoming().historial.size() - 1].motivo == ev.motivo
+          && ((ev.accion == 'CONCILIAR' && ['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].hasAny([existing().estado]) && incoming().estado == 'CONCILIADO')
+            || (ev.accion == 'RECHAZAR' && ['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].hasAny([existing().estado]) && incoming().estado == 'RECHAZADO')
+            || (ev.accion == 'REVERSAR' && existing().estado == 'CONCILIADO' && incoming().estado == 'REVERSADO')
+            || (ev.accion == 'CORREGIR' && existing().estado == 'CONCILIADO' && incoming().estado == 'CONCILIADO'));
       }
       allow get: if isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(existing()));
       allow list: if isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(resource.data));
-      allow create: if isMasterAdmin() || (
-        isPropietarioRole()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-        && 'movimientoId' in incoming() && incoming().movimientoId is string
-      ) && sinSecretosBancarios();
-      allow update: if isMasterAdmin() || (
-        isPropietarioRole()
-        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-      ) && sinSecretosBancarios();
+      // Importación/propuestas nuevas cerradas hasta autorización formal y E2E.
+      allow create: if false;
+      allow update: if conciliacionEsMia(existing())
+        && actorEnAmbito(existing().propietarioId)
+        && incoming().propietarioId == existing().propietarioId
+        && incoming().id == existing().id
+        && incoming().movimientoId == existing().movimientoId
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'estado', 'revision', 'ultimoEventoId', 'motivoDecision', 'historial', 'ambigua',
+          'importeCandidato', 'diferenciaImporte', 'esDiscrepancia', 'confianza', 'puntuacion',
+          'factores', 'aplicado', 'fechaConfirmacion', 'confirmadoPor', 'fechaRechazo', 'rechazadoPor',
+          'fechaReversion', 'revertidoPor', 'motivoReversion', 'candidato'
+        ])
+        && eventoPostDecision() && transicionConciliacionPermitida() && sinSecretosBancarios();
       allow delete: if isMasterAdmin();
     }
 
@@ -2655,16 +2673,76 @@ service cloud.firestore {
       }
       allow get: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(existing()));
       allow list: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(resource.data));
-      allow create: if isMasterAdmin() || (
-        isPropietarioRole()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-      ) && sinSecretosBancarios();
-      allow update: if isMasterAdmin() || (
-        isPropietarioRole()
-        && 'propietarioId' in existing() && existing().propietarioId == myPropId()
-        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId()
-      ) && sinSecretosBancarios();
+      // Sin importación autorizada, ningún cliente crea o cambia cabeceras de import.
+      allow create, update: if false;
       allow delete: if isMasterAdmin();
+    }
+
+    // Eventos P3: append-only, actor autenticado y mismo commit que la propuesta.
+    match /eventos_conciliacion_bancaria/{eventoDocId} {
+      function actorEnAmbito(pid) {
+        return isMasterAdmin() || (isPropietarioRole() && myPropId() == pid);
+      }
+      function propuestaAntes() {
+        return get(/databases/$(database)/documents/conciliaciones_bancarias/$(incoming().propietarioId + '_' + incoming().propuestaId)).data;
+      }
+      function propuestaDespues() {
+        return getAfter(/databases/$(database)/documents/conciliaciones_bancarias/$(incoming().propietarioId + '_' + incoming().propuestaId)).data;
+      }
+      function estadoEventoCoherente() {
+        return ((incoming().accion == 'CONCILIAR'
+            && ['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].hasAny([incoming().estadoAnterior])
+            && incoming().estadoNuevo == 'CONCILIADO')
+          || (incoming().accion == 'RECHAZAR'
+            && ['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].hasAny([incoming().estadoAnterior])
+            && incoming().estadoNuevo == 'RECHAZADO')
+          || (incoming().accion == 'REVERSAR'
+            && incoming().estadoAnterior == 'CONCILIADO' && incoming().estadoNuevo == 'REVERSADO')
+          || (incoming().accion == 'CORREGIR'
+            && incoming().estadoAnterior == 'CONCILIADO' && incoming().estadoNuevo == 'CONCILIADO'));
+      }
+      allow get: if isMasterAdmin() || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId());
+      allow list: if isMasterAdmin() || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow create: if actorEnAmbito(incoming().propietarioId)
+        && !exists(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(eventoDocId))
+        && incoming().id is string && eventoDocId == incoming().propietarioId + '_' + incoming().id
+        && incoming().actorUid == request.auth.uid
+        && incoming().motivo is string && incoming().motivo.size() >= 5 && incoming().motivo.size() <= 500
+        && incoming().operacionId is string
+        && exists(/databases/$(database)/documents/conciliaciones_bancarias/$(incoming().propietarioId + '_' + incoming().propuestaId))
+        && exists(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId))
+        && get(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId)).data.propietarioId == incoming().propietarioId
+        && get(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId)).data.hashFichero == incoming().evidenciaHashFichero
+        && get(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId)).data.idsMovimientosNuevos.hasAny([incoming().movimientoId])
+        && exists(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId))
+        && get(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId)).data.propietarioId == incoming().propietarioId
+        && get(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId)).data.idMovimiento == incoming().movimientoId
+        && get(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId)).data.idImportacion == incoming().evidenciaImportacionId
+        && propuestaAntes().propietarioId == incoming().propietarioId
+        && propuestaAntes().movimientoId == incoming().movimientoId
+        && propuestaAntes().estado == incoming().estadoAnterior
+        && propuestaDespues().estado == incoming().estadoNuevo
+        && propuestaDespues().ultimoEventoId == incoming().id
+        && propuestaDespues().revision == incoming().revision
+        && propuestaDespues().historial.size() == propuestaAntes().historial.size() + 1
+        && propuestaDespues().historial[propuestaDespues().historial.size() - 1].id == incoming().id
+        && propuestaDespues().historial[propuestaDespues().historial.size() - 1].actorUid == request.auth.uid
+        && propuestaDespues().historial[propuestaDespues().historial.size() - 1].motivo == incoming().motivo
+        && estadoEventoCoherente()
+        && (incoming().accion != 'CONCILIAR' || (
+          propuestaDespues().candidato.propietarioId == incoming().propietarioId
+          && propuestaDespues().candidato.inmuebleId is string
+          && ((propuestaDespues().importeMovimiento >= 0 && propuestaDespues().candidato.tipo == 'COBRO')
+            || (propuestaDespues().importeMovimiento < 0 && propuestaDespues().candidato.tipo == 'GASTO'))
+          && incoming().candidatoNuevoId == propuestaDespues().candidato.tipo + ':' + propuestaDespues().candidato.id
+        ))
+        && incoming().keys().hasOnly([
+          'id', 'propietarioId', 'propuestaId', 'movimientoId', 'accion', 'fecha', 'actorUid',
+          'actorUsuarioId', 'motivo', 'estadoAnterior', 'estadoNuevo', 'candidatoAnteriorId',
+          'candidatoNuevoId', 'operacionId', 'revision', 'evidenciaImportacionId', 'evidenciaHashFichero', 'movimientoDocId'
+        ])
+        && incoming().evidenciaHashFichero is string && incoming().evidenciaHashFichero.size() == 64;
+      allow update, delete: if false;
     }
 
     // =========================================================================

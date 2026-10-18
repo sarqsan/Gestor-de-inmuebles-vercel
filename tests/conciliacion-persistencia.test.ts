@@ -233,16 +233,23 @@ describe('R1 cargarConciliacionPropietario', () => {
     expect(mem.calls.getDocs).toBe(0);
   });
 
-  it('roundtrip guardar → cargar recupera el mismo estado con orden determinista', async () => {
+  it('roundtrip guardar está bloqueado por alcance; carga recupera estado con orden determinista desde store directo', async () => {
+    // La importación está deshabilitada: guardar debe lanzar
+    await expect(
+      guardarImportacionConciliacion({
+        propietarioId: 'prop_A',
+        movimientos: [mov({})],
+        propuestas: [prop({})],
+        importacion: imp({}),
+      }),
+    ).rejects.toThrow('IMPORTACION_BANCARIA_DESHABILITADA');
+    // Simula datos ya existentes insertados directamente (sin usar guardar)
     const m1 = mov({ idMovimiento: 'm_b', hashIdempotencia: 'hb', fechaOperacion: '2026-09-03' });
     const m2 = mov({ idMovimiento: 'm_a', hashIdempotencia: 'ha', fechaOperacion: '2026-09-01' });
     const m3 = mov({ idMovimiento: 'm_c', hashIdempotencia: 'hc', fechaOperacion: '2026-09-01' });
-    await guardarImportacionConciliacion({
-      propietarioId: 'prop_A',
-      movimientos: [m1, m2, m3],
-      propuestas: [prop({ id: 'conc_1', movimientoId: 'm_b' })],
-      importacion: imp({ totalMovimientos: 3, nuevos: 3 }),
-    });
+    mem.store.set('movimientos_bancarios', new Map([[`prop_A_${m1.hashIdempotencia}`, m1], [`prop_A_${m2.hashIdempotencia}`, m2], [`prop_A_${m3.hashIdempotencia}`, m3]]));
+    mem.store.set('conciliaciones_bancarias', new Map([['prop_A_conc_1', prop({ id: 'conc_1', movimientoId: 'm_b' })]]));
+    mem.store.set('importaciones_bancarias', new Map([['prop_A_imp_1', imp({ totalMovimientos: 3, nuevos: 3 })]]));
     const estado = await cargarConciliacionPropietario('prop_A');
     expect(estado.movimientos.map((m) => m.idMovimiento)).toEqual(['m_a', 'm_c', 'm_b']);
     expect(estado.propuestas).toHaveLength(1);
@@ -253,18 +260,14 @@ describe('R1 cargarConciliacionPropietario', () => {
   });
 
   it('aislamiento estricto: no devuelve documentos de otro propietario', async () => {
-    await guardarImportacionConciliacion({
-      propietarioId: 'prop_A',
-      movimientos: [mov({ idMovimiento: 'm_a', hashIdempotencia: 'ha' })],
-      propuestas: [],
-      importacion: imp({}),
-    });
-    await guardarImportacionConciliacion({
-      propietarioId: 'prop_B',
-      movimientos: [mov({ idMovimiento: 'm_b', hashIdempotencia: 'hb', propietarioId: 'prop_B' })],
-      propuestas: [],
-      importacion: imp({ id: 'imp_B', propietarioId: 'prop_B' }),
-    });
+    mem.store.set('movimientos_bancarios', new Map([
+      ['prop_A_ha', mov({ idMovimiento: 'm_a', hashIdempotencia: 'ha' })],
+      ['prop_B_hb', mov({ idMovimiento: 'm_b', hashIdempotencia: 'hb', propietarioId: 'prop_B' })],
+    ]));
+    mem.store.set('importaciones_bancarias', new Map([
+      ['prop_A_imp_1', imp({})],
+      ['prop_B_imp_B', imp({ id: 'imp_B', propietarioId: 'prop_B' })],
+    ]));
     const estadoA = await cargarConciliacionPropietario('prop_A');
     expect(estadoA.movimientos.map((m) => m.idMovimiento)).toEqual(['m_a']);
     expect(estadoA.importaciones.map((i) => i.id)).toEqual(['imp_1']);
@@ -298,47 +301,28 @@ describe('R1 cargarConciliacionPropietario', () => {
 // ---------------------------------------------------------------------------
 // Guardado
 // ---------------------------------------------------------------------------
-describe('R1 guardarImportacionConciliacion / actualizarPropuestaConciliacion', () => {
-  it('guarda en batch con IDs namespaced e idempotente (re-guardar no duplica)', async () => {
+describe('R1 guardarImportacionConciliacion / actualizarPropuestaConciliacion (reparación)', () => {
+  it('guardarImportacion está bloqueado por alcance conservador', async () => {
     const args = {
       propietarioId: 'prop_A',
       movimientos: [mov({})],
       propuestas: [prop({})],
       importacion: imp({}),
     };
-    const r1 = await guardarImportacionConciliacion(args);
-    expect(r1).toEqual({ movimientos: 1, propuestas: 1 });
-    expect(mem.calls.commits).toBe(1);
-    expect(mem.store.get('movimientos_bancarios')!.has('prop_A_a1b2c3d4')).toBe(true);
-    expect(mem.store.get('conciliaciones_bancarias')!.has('prop_A_conc_1')).toBe(true);
-    expect(mem.store.get('importaciones_bancarias')!.has('prop_A_imp_1')).toBe(true);
-    await guardarImportacionConciliacion(args);
-    expect(mem.store.get('movimientos_bancarios')!.size).toBe(1);
-    expect(mem.store.get('conciliaciones_bancarias')!.size).toBe(1);
-    expect(mem.store.get('importaciones_bancarias')!.size).toBe(1);
-  });
-
-  it('sanea undefined antes de escribir (compatibilidad Firestore)', async () => {
-    await guardarImportacionConciliacion({
-      propietarioId: 'prop_A',
-      movimientos: [mov({ importadoPor: undefined, cuentaIban: undefined })],
-      propuestas: [],
-      importacion: imp({}),
-    });
-    const stored = mem.store.get('movimientos_bancarios')!.get('prop_A_a1b2c3d4');
-    expect('importadoPor' in stored).toBe(false);
-    expect('cuentaIban' in stored).toBe(false);
-    expect(stored.propietarioId).toBe('prop_A');
+    await expect(guardarImportacionConciliacion(args)).rejects.toThrow('IMPORTACION_BANCARIA_DESHABILITADA');
+    expect(mem.calls.commits).toBe(0);
+    expect(mem.store.size).toBe(0);
   });
 
   it('no escribe nada con propietario demo', async () => {
-    const r = await guardarImportacionConciliacion({
-      propietarioId: 'prop_demo',
-      movimientos: [mov({})],
-      propuestas: [prop({})],
-      importacion: imp({}),
-    });
-    expect(r).toEqual({ movimientos: 0, propuestas: 0 });
+    await expect(
+      guardarImportacionConciliacion({
+        propietarioId: 'prop_demo',
+        movimientos: [mov({})],
+        propuestas: [prop({})],
+        importacion: imp({}),
+      }),
+    ).rejects.toThrow('IMPORTACION_BANCARIA_DESHABILITADA');
     expect(mem.calls.commits).toBe(0);
     expect(mem.store.size).toBe(0);
     await actualizarPropuestaConciliacion('prop_demo', prop({}));
@@ -383,12 +367,9 @@ describe('R1 consulta filtrada por propietario (compatible con reglas §24)', ()
   });
 
   it('recuperar después de actualizar refleja la transición persistida', async () => {
-    await guardarImportacionConciliacion({
-      propietarioId: 'prop_A',
-      movimientos: [mov({})],
-      propuestas: [prop({})],
-      importacion: imp({}),
-    });
+    mem.store.set('movimientos_bancarios', new Map([['prop_A_a1b2c3d4', mov({})]]));
+    mem.store.set('conciliaciones_bancarias', new Map([['prop_A_conc_1', prop({})]]));
+    mem.store.set('importaciones_bancarias', new Map([['prop_A_imp_1', imp({})]]));
     await actualizarPropuestaConciliacion('prop_A', prop({ estado: 'CONFIRMADO' }));
     const estado = await cargarConciliacionPropietario('prop_A');
     expect(estado.propuestas).toHaveLength(1);
@@ -397,18 +378,19 @@ describe('R1 consulta filtrada por propietario (compatible con reglas §24)', ()
     expect(estado.importaciones).toHaveLength(1);
   });
 
-  it('propietario falsificado en el documento se neutraliza al guardar', async () => {
-    await guardarImportacionConciliacion({
-      propietarioId: 'prop_A',
-      movimientos: [mov({ propietarioId: 'prop_B' })],
-      propuestas: [prop({ propietarioId: 'prop_B' })],
-      importacion: imp({ propietarioId: 'prop_B' }),
-    });
-    const movGuardado = mem.store.get('movimientos_bancarios')!.get('prop_A_a1b2c3d4');
-    expect(movGuardado.propietarioId).toBe('prop_A');
-    const propGuardada = mem.store.get('conciliaciones_bancarias')!.get('prop_A_conc_1');
-    expect(propGuardada.propietarioId).toBe('prop_A');
-    // B no recupera nada: el docId namespaced y el propietarioId sellado pertenecen a A
+  it('propietario falsificado en el documento se neutraliza al guardar (bloqueado por alcance)', async () => {
+    await expect(
+      guardarImportacionConciliacion({
+        propietarioId: 'prop_A',
+        movimientos: [mov({ propietarioId: 'prop_B' })],
+        propuestas: [prop({ propietarioId: 'prop_B' })],
+        importacion: imp({ propietarioId: 'prop_B' }),
+      }),
+    ).rejects.toThrow('IMPORTACION_BANCARIA_DESHABILITADA');
+    // Inserción directa simula datos previos con propietario correcto sellado
+    mem.store.set('movimientos_bancarios', new Map([['prop_A_a1b2c3d4', mov({ propietarioId: 'prop_A' })]]));
+    mem.store.set('conciliaciones_bancarias', new Map([['prop_A_conc_1', prop({ propietarioId: 'prop_A' })]]));
+    mem.store.set('importaciones_bancarias', new Map([['prop_A_imp_1', imp({ propietarioId: 'prop_A' })]]));
     const estadoB = await cargarConciliacionPropietario('prop_B');
     expect(estadoB.movimientos).toHaveLength(0);
     expect(estadoB.propuestas).toHaveLength(0);
@@ -452,19 +434,19 @@ const COLECCIONES_R1 = [
 
 const invDeleteSoloMaster = (b: string): boolean =>
   /allow delete:\s*if isMasterAdmin\(\);/.test(b);
-const invCreateExigePropietario = (b: string): boolean =>
-  b.includes('allow create:') && /incoming\(\)\.propietarioId == myPropId\(\)/.test(b);
-const invUpdatePropietarioInmutable = (b: string): boolean =>
-  b.includes('allow update:') &&
-  /existing\(\)\.propietarioId == myPropId\(\)/.test(b) &&
-  /incoming\(\)\.propietarioId == myPropId\(\)/.test(b);
+const invCreateBloqueado = (b: string): boolean =>
+  /allow create:\s*if false;/.test(b) || /allow create, update:\s*if false;/.test(b);
+const invUpdateBloqueadoMovImp = (b: string): boolean =>
+  /allow create, update:\s*if false;/.test(b);
+const invUpdateRequiereEvento = (b: string): boolean =>
+  b.includes('allow update:') && b.includes('eventoPostDecision()') && b.includes('transicionConciliacionPermitida()');
 const invSinAccesoGenerico = (b: string): boolean =>
   !/allow (read|get|list|create|update|write)[\w, ]*:\s*if isSignedIn\(\);/.test(b);
 const invSoloRolesPropietarioYMaster = (b: string): boolean => {
   const allows = [...b.matchAll(/allow [\w, ]+: if ([\s\S]*?);/g)].map((m) => m[1]);
   if (allows.length === 0) return false;
   return allows.every(
-    (cond) => cond.includes('isMasterAdmin()') || cond.includes('isPropietarioRole()'),
+    (cond) => cond.includes('isMasterAdmin()') || cond.includes('isPropietarioRole()') || cond.includes('actorEnAmbito') || cond.includes('false'),
   );
 };
 const invSinSecretos = (b: string): boolean => b.includes('sinSecretosBancarios()');
@@ -476,7 +458,7 @@ const BLOQUE_RELAJADO = `match /movimientos_bancarios/{movimientoId} {
   allow delete: if isSignedIn();
 }`;
 
-describe('R1 firestore.rules §24: invariantes de aislamiento', () => {
+describe('R1 firestore.rules §24: invariantes de aislamiento (reparación P3)', () => {
   it('las 3 colecciones existen y están antes del catch-all', () => {
     const catchAll = RULES_SRC.indexOf('match /{document=**}');
     expect(catchAll).toBeGreaterThan(0);
@@ -485,14 +467,18 @@ describe('R1 firestore.rules §24: invariantes de aislamiento', () => {
       expect(idx).toBeGreaterThan(0);
       expect(idx).toBeLessThan(catchAll);
     }
+    expect(RULES_SRC.indexOf('match /eventos_conciliacion_bancaria/')).toBeGreaterThan(0);
   });
 
-  it('el extractor captura el bloque completo (los 5 allows)', () => {
+  it('el extractor captura el bloque completo (allows presentes)', () => {
     for (const c of COLECCIONES_R1) {
       const b = bloqueReglas(c);
-      for (const k of ['allow get:', 'allow list:', 'allow create:', 'allow update:', 'allow delete:']) {
-        expect(b).toContain(k);
-      }
+      expect(b).toContain('allow get:');
+      expect(b).toContain('allow list:');
+      expect(b).toContain('allow delete:');
+      // create/update pueden estar combinados como 'allow create, update: if false;' en la reparación conservadora
+      expect(b.includes('allow create:') || b.includes('allow create, update:')).toBe(true);
+      expect(b.includes('allow update:') || b.includes('allow create, update:')).toBe(true);
     }
   });
 
@@ -500,19 +486,24 @@ describe('R1 firestore.rules §24: invariantes de aislamiento', () => {
     for (const c of COLECCIONES_R1) expect(invDeleteSoloMaster(bloqueReglas(c))).toBe(true);
   });
 
-  it('create exige propietarioId propio', () => {
-    for (const c of COLECCIONES_R1) expect(invCreateExigePropietario(bloqueReglas(c))).toBe(true);
+  it('movimientos e importaciones bloquean create/update desde cliente', () => {
+    expect(invUpdateBloqueadoMovImp(bloqueReglas(MOVIMIENTOS_BANCARIOS_COL))).toBe(true);
+    expect(invUpdateBloqueadoMovImp(bloqueReglas(IMPORTACIONES_BANCARIAS_COL))).toBe(true);
+    expect(invCreateBloqueado(bloqueReglas(MOVIMIENTOS_BANCARIOS_COL))).toBe(true);
+    expect(invCreateBloqueado(bloqueReglas(IMPORTACIONES_BANCARIAS_COL))).toBe(true);
   });
 
-  it('update exige propietario inmutable (existente == entrante == propio)', () => {
-    for (const c of COLECCIONES_R1) expect(invUpdatePropietarioInmutable(bloqueReglas(c))).toBe(true);
+  it('conciliaciones bloquea create y exige evento para update', () => {
+    const b = bloqueReglas(CONCILIACIONES_BANCARIAS_COL);
+    expect(invCreateBloqueado(b)).toBe(true);
+    expect(invUpdateRequiereEvento(b)).toBe(true);
   });
 
   it('sin accesos genéricos isSignedIn() ni read/write abiertos', () => {
     for (const c of COLECCIONES_R1) expect(invSinAccesoGenerico(bloqueReglas(c))).toBe(true);
   });
 
-  it('todo allow pasa por isMasterAdmin() o isPropietarioRole() (profesional/inquilino/anónimo sin vía)', () => {
+  it('todo allow pasa por isMasterAdmin() o isPropietarioRole()/actorEnAmbito (profesional/inquilino/anónimo sin vía)', () => {
     for (const c of COLECCIONES_R1) expect(invSoloRolesPropietarioYMaster(bloqueReglas(c))).toBe(true);
   });
 
@@ -520,12 +511,20 @@ describe('R1 firestore.rules §24: invariantes de aislamiento', () => {
     for (const c of COLECCIONES_R1) expect(invSinSecretos(bloqueReglas(c))).toBe(true);
   });
 
+  it('eventos_conciliacion_bancaria es append-only con actor autenticado y evidencia', () => {
+    const b = bloqueReglas('eventos_conciliacion_bancaria');
+    expect(b).toContain('allow create:');
+    expect(b).toContain('actorUid == request.auth.uid');
+    expect(b).toContain('evidenciaHashFichero');
+    expect(b).toContain('allow update, delete: if false;');
+  });
+
   it('§14 discriminación: los invariantes FALLAN ante un bloque relajado', () => {
     expect(invDeleteSoloMaster(BLOQUE_RELAJADO)).toBe(false);
-    expect(invCreateExigePropietario(BLOQUE_RELAJADO)).toBe(false);
-    expect(invUpdatePropietarioInmutable(BLOQUE_RELAJADO)).toBe(false);
+    expect(invCreateBloqueado(BLOQUE_RELAJADO)).toBe(false);
+    expect(invUpdateBloqueadoMovImp(BLOQUE_RELAJADO)).toBe(false);
     expect(invSinAccesoGenerico(BLOQUE_RELAJADO)).toBe(false);
     expect(invSoloRolesPropietarioYMaster(BLOQUE_RELAJADO)).toBe(false);
     expect(invSinSecretos(BLOQUE_RELAJADO)).toBe(false);
   });
-});
+})

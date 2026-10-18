@@ -31,7 +31,6 @@ import type {
   TrabajoProfesional,
   UsuarioApp,
 } from '../../types';
-import type { MovimientoBancario, PropuestaConciliacion } from '../../types/conciliacion';
 import {
   aprobarLiquidacion,
   anularLiquidacion,
@@ -44,7 +43,6 @@ import {
 import {
   clasificarCobrosPeriodo,
   marcarCobrosLiquidados,
-  movimientosBancariosParaLiquidacion,
   proyectarMovimientos,
   resumenGastosLiquidados,
   resumenCobrosLiquidados,
@@ -87,10 +85,6 @@ interface TesoreriaSectionProps {
   mandatos: MandatoSEPA[];
   trabajos?: TrabajoProfesional[];
   currentUser?: UsuarioApp | null;
-  /** Puente legacy opcional: P3 no publica movimientos ni sugerencias en Tesorería. */
-  movimientosBancarios?: MovimientoBancario[];
-  /** Movimientos del puente heredado; P3 no publica imports ni sugerencias a Tesorería. */
-  propuestasConciliacion?: PropuestaConciliacion[];
   /** INTEGRACIÓN A: gastos del modelo oficial (colección `gastos`) para importación. */
   gastosCanonicos?: Gasto[];
   onSaveLiquidacion: (l: LiquidacionPropietario) => Promise<void> | void;
@@ -124,7 +118,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
   const {
     contratos, inmuebles, propietarios, liquidaciones, gastos, ordenes, ficheros, mandatos,
     trabajos = [], currentUser,
-    movimientosBancarios = [], propuestasConciliacion = [], gastosCanonicos = [],
+    gastosCanonicos = [],
     onSaveLiquidacion, onSaveGasto, onDeleteGasto,
     onSaveOrdenPago, onSaveFicheroSepa, onSaveMandato, onSaveContratos,
   } = props;
@@ -181,24 +175,6 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
   const [pagoLiq, setPagoLiq] = useState<LiquidacionPropietario | null>(null);
   const [pagoRef, setPagoRef] = useState('');
   const [pagoFecha, setPagoFecha] = useState(new Date().toISOString().slice(0, 10));
-  const [pagoEvidenciaId, setPagoEvidenciaId] = useState<string>('');
-
-  // Evidencia legacy opcional; solo estados CONCILIADO manuales, nunca justificantes
-  const evidenciasPago = useMemo(() => {
-    if (!pagoLiq) return [];
-    return movimientosBancariosParaLiquidacion(movimientosBancarios, propuestasConciliacion, pagoLiq);
-  }, [movimientosBancarios, propuestasConciliacion, pagoLiq]);
-
-  const onElegirEvidencia = (idMov: string) => {
-    setPagoEvidenciaId(idMov);
-    if (!idMov) return;
-    const ev = evidenciasPago.find((e) => e.idMovimiento === idMov);
-    if (ev) {
-      setPagoRef(ev.referenciaBancaria);
-      if (ev.fechaPago) setPagoFecha(ev.fechaPago);
-    }
-  };
-
   // INTEGRACIÓN A: importación unidireccional del modelo oficial `gastos` (colección canónica)
   const [showGastoImport, setShowGastoImport] = useState(false);
   const [gimpId, setGimpId] = useState('');
@@ -613,7 +589,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
                               {l.estado === 'BORRADOR' && <button onClick={() => handleAprobar(l)} className="px-2.5 py-1.5 bg-blue-600 text-white rounded-lg text-[11px] font-bold">Aprobar</button>}
                               {l.estado === 'APROBADA' && (<>
                                 <button onClick={() => handleCrearOrden(l)} className="px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[11px] font-bold">Orden pago</button>
-                                <button onClick={() => { setPagoLiq(l); setPagoRef(''); setPagoEvidenciaId(''); }} className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-[11px] font-bold">Pagar</button>
+                                <button onClick={() => { setPagoLiq(l); setPagoRef(''); }} className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-[11px] font-bold">Pagar</button>
                               </>)}
                             </div>
                           </td>
@@ -917,7 +893,7 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
           onRecalcular={() => handleRecalcular(liquidaciones.find((l) => l.id === detalleLiq.id) || detalleLiq)}
           onAprobar={() => handleAprobar(liquidaciones.find((l) => l.id === detalleLiq.id) || detalleLiq)}
           onAnular={() => handleAnular(liquidaciones.find((l) => l.id === detalleLiq.id) || detalleLiq)}
-          onPagar={(l) => { setDetalleLiq(null); setPagoLiq(l); setPagoRef(''); setPagoEvidenciaId(''); }}
+          onPagar={(l) => { setDetalleLiq(null); setPagoLiq(l); setPagoRef(''); }}
           onCrearOrden={(l) => { handleCrearOrden(l); }}
           onPdf={(l) => imprimirLiquidacionPDF(l)}
         />
@@ -934,21 +910,6 @@ export const TesoreriaSection: React.FC<TesoreriaSectionProps> = (props) => {
             <form onSubmit={handleConfirmarPago} className="p-5 space-y-3 text-xs">
               <p>Neto a transferir a <strong>{pagoLiq.propietarioNombre}</strong>: <strong className="font-mono text-emerald-700 text-base">{formatoImporteSepa(pagoLiq.netoPropietario)} €</strong></p>
               <p className="text-slate-500">IBAN destino: <span className="font-mono">{pagoLiq.cuentaAbonoIban}</span></p>
-              {evidenciasPago.length > 0 && (
-                <div>
-                  <label htmlFor="campo-evidencia-movimiento-bancario-conciliado" className="font-semibold block mb-1">Evidencia opcional: movimiento con conciliación manual</label>
-                  <select value={pagoEvidenciaId} onChange={(e) => onElegirEvidencia(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-                     id="campo-evidencia-movimiento-bancario-conciliado">
-                    <option value="">— Introducir referencia manualmente —</option>
-                    {evidenciasPago.map((ev) => (
-                      <option key={ev.idMovimiento} value={ev.idMovimiento}>
-                        {ev.fechaPago || 's/f'} · {ev.referenciaBancaria} · {formatoImporteSepa(ev.importe)} €
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] text-slate-400 mt-1">La selección solo aporta evidencia. El movimiento debe tener una decisión manual CONCILIADO; aceptar un justificante no equivale a conciliarlo.</p>
-                </div>
-              )}
               <div><label htmlFor="campo-referencia-bancaria-evidencia" className="font-semibold block mb-1">Referencia bancaria * (evidencia)</label><input value={pagoRef} onChange={(e) => setPagoRef(e.target.value)} placeholder="Ej. TRF-2026-09-001" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
                                                                                                            id="campo-referencia-bancaria-evidencia"/></div>
               <div><label htmlFor="campo-fecha-de-pago" className="font-semibold block mb-1">Fecha de pago</label><input type="date" value={pagoFecha} onChange={(e) => setPagoFecha(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"

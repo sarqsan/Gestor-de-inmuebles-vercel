@@ -1,12 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { MovimientoBancario, PropuestaConciliacion, ImportacionBancaria, ResumenConciliacion, TipoClasificacionNoConciliado, DEFAULT_CONFIG_MATCHING } from '../../types/conciliacion';
+import { MovimientoBancario, PropuestaConciliacion, ImportacionBancaria, ResumenConciliacion } from '../../types/conciliacion';
 import { CobroPeriodo, Gasto, Inmueble, ContratoFormalizacion, UsuarioApp } from '../../types';
-import { registrarMovimientosSesion, registrarPropuestasSesion } from '../../lib/conciliacionSession';
-import { actualizarPropuestaConciliacion, cargarConciliacionPropietario, fusionarSinDuplicados, guardarImportacionConciliacion } from '../../lib/conciliacionFirestore';
-import { importarDesdeCSV, importarDesdeOFX, importarDesdeMT940, importarDesdeNorma43, detectarFormato } from '../../utils/conciliacion/importEngine';
-import { crearPropuestasParaMovimientos, confirmarPropuesta, rechazarPropuesta, marcarNoConciliable, aplicarConciliacion, calcularResumenConciliacion } from '../../utils/conciliacion/conciliacionEngine';
-import { buscarCandidatos } from '../../utils/conciliacion/matchingEngine';
-import { CsvMapping } from '../../utils/conciliacion/csvParser';
+import { cargarConciliacionPropietario, fusionarSinDuplicados, IMPORTACION_BANCARIA_AUTORIZADA, registrarDecisionConciliacion } from '../../lib/conciliacionFirestore';
+import { calcularResumenConciliacion } from '../../utils/conciliacion/conciliacionEngine';
 import { Upload, FileText, AlertTriangle, CheckCircle2, XCircle, Clock, Search, Filter, Download, Eye, Banknote, TrendingDown, Shield, FileCheck2, BarChart3 } from 'lucide-react';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { avisarOperacion } from '../../feedback/canalFeedback';
@@ -34,10 +30,11 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
   const [busqueda, setBusqueda] = useState<string>('');
   const [selectedMovimiento, setSelectedMovimiento] = useState<MovimientoBancario | null>(null);
   const [selectedPropuesta, setSelectedPropuesta] = useState<PropuestaConciliacion | null>(null);
-  const [csvMapping, setCsvMapping] = useState<CsvMapping>({});
-  const [nombreFichero, setNombreFichero] = useState<string>('');
   const [cargandoPersistido, setCargandoPersistido] = useState(true);
   const [errorPersistencia, setErrorPersistencia] = useState<string | null>(null);
+  const [guardandoDecision, setGuardandoDecision] = useState(false);
+  const [motivoDecision, setMotivoDecision] = useState('');
+  const [importacionBloqueada, setImportacionBloqueada] = useState(false);
 
   const allCobros = useMemo(() => {
     if (cobros && cobros.length>0) return cobros;
@@ -47,14 +44,6 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
     }
     return todos;
   }, [cobros, contratos]);
-
-  // BLOQUE B (puente aditivo, 2026-09-20): espeja las propuestas en el
-  // estado de sesión para que Tesorería ofrezca la evidencia de pago de
-  // liquidaciones desde movimientos con propuesta CONFIRMADA.
-  // NO altera la lógica de conciliación del GAP 6.
-  useEffect(() => {
-    registrarPropuestasSesion(propuestas);
-  }, [propuestas]);
 
   const propietarioId = useMemo(() => {
     if (currentUser?.tipoPerfil === 'PROPIETARIO' && currentUser.propietarioId) return currentUser.propietarioId;
@@ -75,7 +64,6 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
         setMovimientos((prev) => fusionarSinDuplicados(estado.movimientos, prev, (m) => m.idMovimiento));
         setPropuestas((prev) => fusionarSinDuplicados(estado.propuestas, prev, (x) => x.id));
         setImportaciones((prev) => fusionarSinDuplicados(estado.importaciones, prev, (x) => x.id));
-        registrarMovimientosSesion(estado.movimientos);
       } catch (e: any) {
         if (!cancelado) setErrorPersistencia(`No se pudo cargar el estado guardado: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`);
       } finally {
@@ -85,56 +73,55 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
     return () => { cancelado = true; };
   }, [propietarioId]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setNombreFichero(file.name);
-    const contenido = await file.text();
-    const formato = detectarFormato(contenido);
+  // La importación está cerrada hasta autorización formal. No se lee el fichero,
+  // no se llama a parsers ni se persiste nada por una invocación directa al handler.
+  const handleFileUpload = async (_e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!IMPORTACION_BANCARIA_AUTORIZADA) {
+      setImportacionBloqueada(true);
+      return;
+    }
+  };
 
-    let resultado;
+  const validarCandidatoVisible = (propuesta: PropuestaConciliacion) => {
+    const candidato = propuesta.candidato;
+    if (!candidato || candidato.propietarioId !== propuesta.propietarioId || !candidato.inmuebleId) return false;
+    if (candidato.tipo === 'COBRO') {
+      const cobro = allCobros.find((item) => item.id === candidato.id);
+      const contrato = cobro?.contratoId ? contratos.find((item) => item.id === cobro.contratoId) : undefined;
+      return Boolean(cobro && contrato && contrato.propietarioId === propuesta.propietarioId
+        && contrato.inmuebleId === candidato.inmuebleId && cobro.inmuebleId === candidato.inmuebleId
+        && (!cobro.propietarioId || cobro.propietarioId === propuesta.propietarioId));
+    }
+    const gasto = gastos.find((item) => item.id === candidato.id);
+    return Boolean(gasto && gasto.propietarioId === propuesta.propietarioId && gasto.inmuebleId === candidato.inmuebleId);
+  };
+
+  const handleDecision = async (propuesta: PropuestaConciliacion, accion: 'CONCILIAR' | 'RECHAZAR') => {
+    if (guardandoDecision) return;
+    if (!currentUser) { avisarOperacion({ tipo: 'error', mensaje: 'Se requiere una sesión autenticada para decidir.' }); return; }
+    if (motivoDecision.trim().length < 5) { avisarOperacion({ tipo: 'error', mensaje: 'Indica un motivo de al menos cinco caracteres.' }); return; }
+    if (accion === 'CONCILIAR' && !validarCandidatoVisible(propuesta)) {
+      avisarOperacion({ tipo: 'error', mensaje: 'El candidato no se ha podido verificar en el ámbito visible del titular.' }); return;
+    }
+    setGuardandoDecision(true);
+    setErrorPersistencia(null);
     try {
-      if (formato === 'CSV') {
-        resultado = importarDesdeCSV(contenido, propietarioId, movimientos, csvMapping, file.name, undefined, currentUser?.email);
-      } else if (formato === 'OFX') {
-        resultado = importarDesdeOFX(contenido, propietarioId, movimientos, file.name, undefined, currentUser?.email);
-      } else if (formato === 'MT940') {
-        resultado = importarDesdeMT940(contenido, propietarioId, movimientos, file.name, currentUser?.email);
-      } else if (formato === 'NORMA43') {
-        resultado = importarDesdeNorma43(contenido, propietarioId, movimientos, file.name, undefined, currentUser?.email);
-      } else {
-        // Intentar CSV por defecto
-        resultado = importarDesdeCSV(contenido, propietarioId, movimientos, csvMapping, file.name, undefined, currentUser?.email);
-      }
-
-      setMovimientos(prev => [...prev, ...resultado.nuevos]);
-      // BLOQUE B (puente aditivo, 2026-09-20): espejo de sesión para que la
-      // sección de Tesorería ofrezca la evidencia de pago desde estos
-      // movimientos. NO altera la lógica de conciliación del GAP 6.
-      registrarMovimientosSesion(resultado.nuevos);
-      setImportaciones(prev => [...prev, resultado.importacion]);
-
-      // Generar propuestas
-      const nuevasPropuestas = crearPropuestasParaMovimientos(resultado.nuevos, allCobros, gastos, inmuebles, contratos, DEFAULT_CONFIG_MATCHING);
-      setPropuestas(prev => [...prev, ...nuevasPropuestas]);
-
-      // R1: persistencia en Firestore (no bloquea la UI; el fallo se muestra en banner).
-      setErrorPersistencia(null);
-      guardarImportacionConciliacion({
-        propietarioId,
-        movimientos: resultado.nuevos,
-        propuestas: nuevasPropuestas,
-        importacion: resultado.importacion,
-      }).catch((e: any) => setErrorPersistencia(`No se pudo guardar la importación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
-
-      if (resultado.errores.length>0) {
-        avisarOperacion({ tipo: 'error', mensaje: `Importación con errores: ${resultado.errores.slice(0,3).join(', ')}` });
-      }
-
-      // Notificación (reutiliza motor existente) — solo log, no segundo dispatcher
-      console.log(`[GAP6] Importación ${formato} ${resultado.importacion.id}: ${resultado.nuevos.length} nuevos, ${resultado.duplicados.length} duplicados`);
-    } catch (err: any) {
-      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(err, 'No se ha podido importar el extracto bancario.') });
+      const operacionId = globalThis.crypto?.randomUUID?.();
+      if (!operacionId) throw new Error('IDENTIFICADOR_IDEMPOTENTE_NO_DISPONIBLE');
+      const actualizada = await registrarDecisionConciliacion(propietarioId, propuesta.id, {
+        accion, actor: currentUser, motivo: motivoDecision, operacionId,
+        ...(accion === 'CONCILIAR' && propuesta.candidato ? { candidato: propuesta.candidato } : {}),
+      });
+      setPropuestas((prev) => prev.map((p) => p.id === actualizada.id ? actualizada : p));
+      setSelectedPropuesta(actualizada);
+      setMotivoDecision('');
+      avisarOperacion({ tipo: 'exito', mensaje: accion === 'CONCILIAR' ? 'Decisión conciliada y auditada.' : 'Propuesta rechazada y auditada.' });
+    } catch (e: any) {
+      const mensaje = mensajeDeErrorUsuario(e, 'No se ha podido guardar la decisión. No se aplicó ningún cambio local.');
+      setErrorPersistencia(mensaje);
+      avisarOperacion({ tipo: 'error', mensaje });
+    } finally {
+      setGuardandoDecision(false);
     }
   };
 
@@ -157,52 +144,6 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
 
   const resumen: ResumenConciliacion = useMemo(() => calcularResumenConciliacion(propuestas), [propuestas]);
 
-  const handleConfirmar = (propuesta: PropuestaConciliacion) => {
-    try {
-      const confirmada = confirmarPropuesta(propuesta, currentUser);
-      setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? confirmada : p));
-      setErrorPersistencia(null);
-      actualizarPropuestaConciliacion(propietarioId, confirmada)
-        .catch((e: any) => setErrorPersistencia(`No se pudo guardar la confirmación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
-      setSelectedPropuesta(confirmada);
-    } catch (e:any) {
-      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') });
-    }
-  };
-
-  const handleAplicar = (propuesta: PropuestaConciliacion) => {
-    const res = aplicarConciliacion(propuesta, allCobros, gastos, contratos, movimientos, currentUser);
-    if (res.error) {
-      avisarOperacion({ tipo: 'error', mensaje: `No se puede aplicar: ${res.error}` });
-      return;
-    }
-    setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? res.propuestaActualizada : p));
-    setErrorPersistencia(null);
-    actualizarPropuestaConciliacion(propietarioId, res.propuestaActualizada)
-      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la aplicación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
-    setSelectedPropuesta(res.propuestaActualizada);
-    if (res.contratoActualizado) {
-      console.log(`Contrato actualizado ${res.contratoActualizado.id} con trazabilidad conciliación`);
-    }
-  };
-
-  const handleRechazar = (propuesta: PropuestaConciliacion) => {
-    const rechazada = rechazarPropuesta(propuesta, currentUser, 'Rechazado por usuario');
-    setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? rechazada : p));
-    setErrorPersistencia(null);
-    actualizarPropuestaConciliacion(propietarioId, rechazada)
-      .catch((e: any) => setErrorPersistencia(`No se pudo guardar el rechazo: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
-    setSelectedPropuesta(rechazada);
-  };
-
-  const handleNoConciliable = (propuesta: PropuestaConciliacion, clasif: TipoClasificacionNoConciliado) => {
-    const noConc = marcarNoConciliable(propuesta, clasif, currentUser);
-    setPropuestas(prev => prev.map(p=>p.id===propuesta.id ? noConc : p));
-    setErrorPersistencia(null);
-    actualizarPropuestaConciliacion(propietarioId, noConc)
-      .catch((e: any) => setErrorPersistencia(`No se pudo guardar la clasificación: ${mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.')}`));
-    setSelectedPropuesta(noConc);
-  };
 
   return (
     <div className="space-y-6 pb-12">
@@ -220,23 +161,17 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
 
       {/* Importar */}
       <div className="bg-white p-4 rounded-2xl border shadow-2xs space-y-3">
-        <h3 className="font-bold text-sm flex items-center gap-2"><Upload className="w-4 h-4 text-indigo-600" />Importar Extracto — CSV / OFX / MT940 / Norma43</h3>
+        <h3 className="font-bold text-sm flex items-center gap-2"><Upload className="w-4 h-4 text-indigo-600" />Importar extracto bancario — deshabilitado</h3>
+        <p role="note" aria-label="Importación deshabilitada" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">La importación manual está temporalmente cerrada por alcance. Los parsers se conservan, pero ningún fichero se lee ni se guarda hasta autorización expresa y validación integral.</p>
+        {importacionBloqueada && <p role="alert" className="text-xs text-rose-700">Importación bloqueada; no se procesó ni persistió el archivo.</p>}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
           <div className="col-span-2">
             <label htmlFor="campo-fichero-bancario" className="block font-semibold mb-1">Fichero bancario</label>
-            <input type="file" accept=".csv,.ofx,.mt940,.txt,.043" onChange={handleFileUpload} disabled={cargandoPersistido} className="w-full px-3 py-2 bg-slate-50 border rounded-xl disabled:opacity-50"
-               id="campo-fichero-bancario"/>
-            <p className="text-[11px] text-slate-500 mt-1">Detecta formato automáticamente. CSV permite mapear columnas. OFX usa FITID para idempotencia. MT940 soporta :20: :25: :28C: :60F:/:60M: :61: :86: :62F:/:62M:. Norma43 registros 11/22/23/88.</p>
-          </div>
-          <div>
-            <label htmlFor="campo-mapeo-csv-opcional" className="block font-semibold mb-1">Mapeo CSV (opcional)</label>
-            <input placeholder="fecha columna" value={csvMapping.fecha||''} onChange={e=>setCsvMapping({...csvMapping, fecha: e.target.value})} className="w-full px-2 py-1 bg-slate-50 border rounded mb-1 text-xs"
-               id="campo-mapeo-csv-opcional"/>
-            <input placeholder="importe columna" value={csvMapping.importe||''} onChange={e=>setCsvMapping({...csvMapping, importe: e.target.value})} className="w-full px-2 py-1 bg-slate-50 border rounded mb-1 text-xs" />
-            <input placeholder="concepto columna" value={csvMapping.concepto||''} onChange={e=>setCsvMapping({...csvMapping, concepto: e.target.value})} className="w-full px-2 py-1 bg-slate-50 border rounded text-xs" />
+            <input type="file" accept=".csv,.ofx,.mt940,.txt,.043" onChange={handleFileUpload} disabled className="w-full px-3 py-2 bg-slate-50 border rounded-xl opacity-50 cursor-not-allowed"
+               id="campo-fichero-bancario" aria-disabled="true" />
+            <p className="text-[11px] text-slate-500 mt-1">CSV, OFX, MT940 y Norma 43 no están habilitados como entrada de datos en esta versión.</p>
           </div>
         </div>
-        {nombreFichero && <div className="text-xs text-slate-600">Último fichero: {nombreFichero}</div>}
       </div>
 
       {/* R1: estado de persistencia Firestore */}
@@ -321,9 +256,7 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
                     <td className="py-2 px-3 text-right flex gap-1 justify-end">
                       <button
                         aria-label="Ver detalle" onClick={()=>{setSelectedMovimiento(mov); setSelectedPropuesta(prop);}} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg"><Eye className="w-3.5 h-3.5" /></button>
-                      {prop.estado==='PROPUESTO' && <button onClick={()=>handleConfirmar(prop)} className="px-2 py-1 bg-blue-600 text-white rounded-lg font-bold text-[11px]">Confirmar</button>}
-                      {prop.estado==='CONFIRMADO' && <button onClick={()=>handleAplicar(prop)} className="px-2 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[11px]">Aplicar</button>}
-                      {prop.estado!=='CONCILIADO' && prop.estado!=='RECHAZADO' && <button onClick={()=>handleRechazar(prop)} className="px-2 py-1 bg-slate-200 rounded-lg font-bold text-[11px]">Rechazar</button>}
+                      
                     </td>
                   </tr>
                 );
@@ -365,30 +298,28 @@ export const ConciliacionBancariaSection: React.FC<ConciliacionBancariaSectionPr
               <ul className="list-disc pl-4">
                 {selectedPropuesta.factores.map((f,i)=><li key={i} className={f.coincide?'text-emerald-700':'text-slate-500'}>{f.criterio} {f.puntuacion}pts — {f.detalle} {f.coincide?'✅':'❌'}</li>)}
               </ul>
-              <div className="pt-2 flex gap-2 flex-wrap">
-                {selectedPropuesta.estado==='PROPUESTO' && <button onClick={()=>handleConfirmar(selectedPropuesta)} className="px-3 py-1.5 bg-blue-600 text-white rounded-xl font-bold">Confirmar</button>}
-                {selectedPropuesta.estado==='CONFIRMADO' && <button onClick={()=>handleAplicar(selectedPropuesta)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl font-bold">Aplicar — No modifica importe histórico, solo trazabilidad</button>}
-                <button onClick={()=>handleRechazar(selectedPropuesta)} className="px-3 py-1.5 bg-slate-200 rounded-xl font-bold">Rechazar</button>
-                <button onClick={()=>handleNoConciliable(selectedPropuesta, 'COMISION_BANCARIA')} className="px-3 py-1.5 bg-amber-100 border border-amber-200 rounded-xl font-bold">Comisión bancaria</button>
-                <button onClick={()=>handleNoConciliable(selectedPropuesta, 'TRANSFERENCIA_INTERNA')} className="px-3 py-1.5 bg-slate-100 border rounded-xl font-bold">Transferencia interna</button>
-                <button onClick={()=>handleNoConciliable(selectedPropuesta, 'NO_IDENTIFICADO')} className="px-3 py-1.5 bg-slate-100 border rounded-xl font-bold">No identificar — No conciliar</button>
+              <div className="pt-2 space-y-2">
+                {['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].includes(selectedPropuesta.estado) && (
+                  <>
+                    <label htmlFor="motivo-decision-conciliacion" className="block font-semibold">Motivo obligatorio (se guardará en el evento de auditoría)</label>
+                    <textarea id="motivo-decision-conciliacion" value={motivoDecision} onChange={(e) => setMotivoDecision(e.target.value)} maxLength={500} rows={3} className="w-full rounded-lg border p-2" disabled={guardandoDecision} />
+                    <div className="flex gap-2 flex-wrap">
+                      <button onClick={() => void handleDecision(selectedPropuesta, 'CONCILIAR')} disabled={guardandoDecision || !validarCandidatoVisible(selectedPropuesta)} className="px-3 py-1.5 bg-blue-700 text-white rounded-xl font-bold disabled:opacity-50">{guardandoDecision ? 'Guardando…' : 'Conciliar manualmente'}</button>
+                      <button onClick={() => void handleDecision(selectedPropuesta, 'RECHAZAR')} disabled={guardandoDecision} className="px-3 py-1.5 bg-slate-200 rounded-xl font-bold disabled:opacity-50">Rechazar propuesta</button>
+                    </div>
+                    <p className="text-[11px] text-slate-600">La decisión se confirma en pantalla solo después de que Firestore confirme conjuntamente la propuesta y su evento. No altera cobros, gastos ni saldos.</p>
+                  </>
+                )}
+                {!['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].includes(selectedPropuesta.estado) && <p className="text-xs">Esta propuesta está en estado terminal para decisiones desde la interfaz.</p>}
               </div>
               <div className="text-[11px] text-slate-500">Trazabilidad: {selectedPropuesta.historial.map(h=>`${h.fecha.slice(0,19)} ${h.accion} ${h.usuario||''}`).join(' | ')}</div>
             </div>
           </div>
 
-          {selectedPropuesta.candidatosAlternativos && selectedPropuesta.candidatosAlternativos.length>0 && (
+          {selectedPropuesta.candidatosAlternativos && selectedPropuesta.candidatosAlternativos.length > 0 && (
             <div className="p-3 bg-white border rounded-xl text-xs">
-              <h4 className="font-bold mb-2">Candidatos alternativos</h4>
-              <div className="space-y-1">
-                {selectedPropuesta.candidatosAlternativos.map(c=><div key={c.id} className="flex justify-between p-2 bg-slate-50 border rounded-lg"><span>{c.tipo} {c.id.slice(0,8)} {c.importe}€ {c.fecha} {c.inquilinoNombre||c.proveedor}</span><button onClick={()=>{
-                  const resultados = buscarCandidatos(selectedMovimiento, [], [], inmuebles, contratos);
-                  const propuestaCambiada = {...selectedPropuesta, candidato: c};
-                  // @ts-ignore
-                  const nueva = {...selectedPropuesta, candidato: c};
-                  setSelectedPropuesta(nueva);
-                }} className="px-2 py-0.5 bg-blue-100 border border-blue-200 rounded text-[11px] font-bold">Seleccionar</button></div>)}
-              </div>
+              <h4 className="font-bold mb-2">Candidatos alternativos (solo lectura; no se deciden desde esta vista)</h4>
+              <ul className="space-y-1">{selectedPropuesta.candidatosAlternativos.map((c) => <li key={c.id}>{c.tipo} {c.id.slice(0, 8)} · {c.importe}€ · {c.fecha}</li>)}</ul>
             </div>
           )}
         </div>

@@ -1,13 +1,14 @@
 /**
- * PUENTE LEGACY GAP6 → Tesorería (BLOQUE B).
+ * PUENTE LEGACY GAP6 → Tesorería (BLOQUE B) — DEPRECADO 2026-10-18.
  *
- * La persistencia P3 y sus Rules requieren aún validación con emulador; en todo
- * caso, P3 deliberadamente NO publica importaciones ni sugerencias a este
- * espejo: importar no crea cobros, evidencia aceptada ni altera saldos.
+ * Reparación P3: este espejo ya NO se suscribe desde App.tsx ni se alimenta
+ * desde ConciliacionBancariaSection. P3 no publica importaciones ni sugerencias
+ * a Tesorería; importar no crea cobros, evidencia aceptada ni altera saldos.
+ * Se conserva solo por compatibilidad de tipos y para evitar romper imports
+ * históricos. No debe usarse para nueva lógica; Tesorería registra pagos
+ * manualmente sin evidencia automática bancaria.
  *
- * El espejo se conserva por compatibilidad con consumidores heredados. Solo
- * una integración futura explícita podrá exponer movimientos con decisión
- * manual CONCILIADO; una propuesta o un justificante aceptado no bastan.
+ * Futuro: eliminar tras confirmar que ningún consumidor lo usa.
  */
 import type { MovimientoBancario, PropuestaConciliacion } from '../types/conciliacion';
 

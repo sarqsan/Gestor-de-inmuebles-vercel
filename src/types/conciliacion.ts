@@ -187,6 +187,11 @@ export interface EventoConciliacionBancaria {
   candidatoAnteriorId?: string;
   candidatoNuevoId?: string;
   operacionId: string;
+  revision: number;
+  /** Solo persiste cuando la decisión es válida contra una importación con hash verificable. */
+  evidenciaImportacionId?: string;
+  evidenciaHashFichero?: string;
+  movimientoDocId?: string;
 }
 
 export interface ResultadoMatching {

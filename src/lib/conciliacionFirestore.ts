@@ -17,8 +17,9 @@
  *   en `omitidosInvalidos`); los errores de Firestore se propagan al
  *   llamador para su tratamiento en UI. Este módulo nunca silencia fallos.
  */
-import { collection, doc, getDocs, query, setDoc, where, writeBatch } from 'firebase/firestore';
-import { db, sanitizeObjectForFirestore } from './firebase';
+import { collection, doc, getDocs, query, runTransaction, setDoc, where, writeBatch } from 'firebase/firestore';
+import { auth, db, sanitizeObjectForFirestore } from './firebase';
+import { decidirConciliacionManual, type OpcionesDecisionConciliacion } from '../utils/conciliacion/conciliacionEngine';
 import type {
   ImportacionBancaria,
   MovimientoBancario,
@@ -28,6 +29,9 @@ import type {
 export const MOVIMIENTOS_BANCARIOS_COL = 'movimientos_bancarios';
 export const CONCILIACIONES_BANCARIAS_COL = 'conciliaciones_bancarias';
 export const IMPORTACIONES_BANCARIAS_COL = 'importaciones_bancarias';
+export const EVENTOS_CONCILIACION_COL = 'eventos_conciliacion_bancaria';
+/** La importación manual permanece cerrada hasta decisión formal y pruebas E2E. */
+export const IMPORTACION_BANCARIA_AUTORIZADA = false;
 
 /** Id sintético que usa la UI cuando aún no hay inmuebles: nunca se persiste. */
 export const ID_PROPIETARIO_DEMO = 'prop_demo';
@@ -212,6 +216,9 @@ export async function guardarImportacionConciliacion(args: {
   importacion: ImportacionBancaria;
 }): Promise<{ movimientos: number; propuestas: number }> {
   const { propietarioId, movimientos, propuestas, importacion } = args;
+  if (!IMPORTACION_BANCARIA_AUTORIZADA) {
+    throw new Error('IMPORTACION_BANCARIA_DESHABILITADA_POR_ALCANCE');
+  }
   if (!esPropietarioPersistible(propietarioId)) {
     return { movimientos: 0, propuestas: 0 };
   }
@@ -246,9 +253,69 @@ export async function actualizarPropuestaConciliacion(
   propuesta: PropuestaConciliacion,
 ): Promise<void> {
   if (!esPropietarioPersistible(propietarioId)) return;
+  // Legacy mutator is intentionally retained for source compatibility. Rules now
+  // deny direct state changes; decisions must use registrarDecisionConciliacion.
   await setDoc(
     doc(db, CONCILIACIONES_BANCARIAS_COL, docIdPropuesta(propietarioId, propuesta)),
     sanitizeObjectForFirestore({ ...propuesta, propietarioId }),
     { merge: true },
   );
+}
+
+/** Persiste una decisión humana y su evento append-only en una única transacción. */
+export async function registrarDecisionConciliacion(
+  propietarioId: string,
+  propuestaId: string,
+  opciones: OpcionesDecisionConciliacion,
+): Promise<PropuestaConciliacion> {
+  if (!esPropietarioPersistible(propietarioId)) throw new Error('TITULAR_NO_PERSISTIBLE');
+  const uidAutenticado = auth.currentUser?.uid;
+  const uidActor = opciones.actor.authUid || opciones.actor.uid;
+  if (!uidAutenticado || uidAutenticado !== uidActor) throw new Error('ACTOR_NO_COINCIDE_CON_SESION_AUTENTICADA');
+
+  const proposalRef = doc(db, CONCILIACIONES_BANCARIAS_COL, sanearIdDoc(`${propietarioId}_${propuestaId}`));
+  const eventId = `conc_evt_${opciones.operacionId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+  const eventRef = doc(db, EVENTOS_CONCILIACION_COL, sanearIdDoc(`${propietarioId}_${eventId}`));
+  return runTransaction(db, async (tx) => {
+    const proposalSnap = await tx.get(proposalRef);
+    if (!proposalSnap.exists()) throw new Error('PROPUESTA_NO_ENCONTRADA');
+    const current = proposalSnap.data() as PropuestaConciliacion;
+    if (current.id !== propuestaId || current.propietarioId !== propietarioId) throw new Error('PROPUESTA_FUERA_DEL_AMBITO');
+    const movementQuery = query(
+      collection(db, MOVIMIENTOS_BANCARIOS_COL),
+      where('propietarioId', '==', propietarioId),
+      where('idMovimiento', '==', current.movimientoId),
+    );
+    const movementSnap = (await (tx as any).get(movementQuery)) as import('firebase/firestore').QuerySnapshot;
+    const importRef = doc(db, IMPORTACIONES_BANCARIAS_COL, docIdImportacion(propietarioId, { id: current.idImportacion }));
+    const importSnap = await tx.get(importRef);
+    const eventSnap = await tx.get(eventRef);
+    if (movementSnap.empty) throw new Error('MOVIMIENTO_NO_ENCONTRADO');
+    if (movementSnap.size !== 1) throw new Error('MOVIMIENTO_AMBIGUO');
+    if (eventSnap.exists()) throw new Error('DECISION_REPETIDA');
+    if (!importSnap.exists()) throw new Error('EVIDENCIA_IMPORTACION_NO_ENCONTRADA');
+    const movimiento = movementSnap.docs[0].data() as MovimientoBancario;
+    const importacion = importSnap.data() as ImportacionBancaria;
+    if (movimiento.propietarioId !== propietarioId || movimiento.idMovimiento !== current.movimientoId) {
+      throw new Error('MOVIMIENTO_FUERA_DEL_AMBITO');
+    }
+    if (importacion.propietarioId !== propietarioId || importacion.id !== current.idImportacion
+      || !importacion.idsMovimientosNuevos?.includes(current.movimientoId)
+      || !/^[a-f0-9]{64}$/i.test(importacion.hashFichero || '')) {
+      throw new Error('EVIDENCIA_IMPORTACION_INVALIDA');
+    }
+    const decision = decidirConciliacionManual(current, opciones);
+    if (decision.evento.propietarioId !== propietarioId || decision.evento.actorUid !== uidAutenticado) {
+      throw new Error('EVENTO_NO_AUTORIZADO');
+    }
+    const evento = {
+      ...decision.evento,
+      evidenciaImportacionId: importacion.id,
+      evidenciaHashFichero: importacion.hashFichero!,
+      movimientoDocId: movementSnap.docs[0].id,
+    };
+    tx.set(eventRef, sanitizeObjectForFirestore(evento));
+    tx.set(proposalRef, sanitizeObjectForFirestore(decision.propuestaActualizada), { merge: true });
+    return decision.propuestaActualizada;
+  });
 }

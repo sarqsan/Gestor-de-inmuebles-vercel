@@ -78,7 +78,7 @@ export const ETIQUETA_EVENTO_SEGUIMIENTO: Readonly<Record<TipoEventoSeguimientoI
 
 /** Estado de la notificación asociada al evento (entrega REAL, nunca supuesta). */
 export interface EntregaEventoSeguimiento {
-  canal: 'EMAIL' | 'INAPP' | 'WEBHOOK' | 'WHATSAPP' | null;
+  canal: 'EMAIL' | 'INAPP' | 'WEBHOOK' | 'WHATSAPP' | null; // WHATSAPP solo puede aparecer en trazas históricas.
   estado: 'ENVIADA' | 'PENDIENTE' | 'NO_ENVIADA' | 'DUPLICADA' | 'SIN_DESTINATARIO';
   notificacionId?: string;
   provider?: string;

@@ -143,6 +143,24 @@
         }
       ],
       "description": "ORDEN 2 (D1R §20.2) — gestiones designadas a un gestor por estado: listarGestionesDeGestor where gestorUsuarioId== && estado=="
+    },
+    {
+      "collectionGroup": "ia_operaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uidTitular", "order": "ASCENDING" },
+        { "fieldPath": "iniciadaEn", "order": "DESCENDING" }
+      ],
+      "description": "IA: historial facturado por titular contractual (también incluye operaciones de gestores e inquilinos autorizados)"
+    },
+    {
+      "collectionGroup": "ia_operaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "iniciadaEn", "order": "DESCENDING" }
+      ],
+      "description": "IA: historial heredado sin uidTitular, consultado para compatibilidad de auditoría"
     }
   ],
   "fieldOverrides": [],

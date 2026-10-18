@@ -54,7 +54,8 @@ function TablaOperaciones({ operaciones, titulo }: { operaciones: OperacionResum
         <thead className="text-slate-500">
           <tr>
             <th className="py-1 pr-3">Fecha</th>
-            <th className="py-1 pr-3">Uid</th>
+            <th className="py-1 pr-3">Actor UID</th>
+            <th className="py-1 pr-3">Titular UID</th>
             <th className="py-1 pr-3">Operación</th>
             <th className="py-1 pr-3">Estado</th>
             <th className="py-1 pr-3">Origen</th>
@@ -64,12 +65,13 @@ function TablaOperaciones({ operaciones, titulo }: { operaciones: OperacionResum
         </thead>
         <tbody>
           {operaciones.length === 0 && (
-            <tr><td className="py-2 text-slate-500" colSpan={7}>Sin operaciones registradas.</td></tr>
+            <tr><td className="py-2 text-slate-500" colSpan={8}>Sin operaciones registradas.</td></tr>
           )}
           {operaciones.map((op) => (
             <tr key={op.id} className="border-t border-slate-800">
               <td className="py-1 pr-3 whitespace-nowrap">{fechaCorta(op.iniciadaEn)}</td>
               <td className="py-1 pr-3 font-mono text-[11px]">{op.uid}</td>
+              <td className="py-1 pr-3 font-mono text-[11px]">{op.uidTitular ?? '—'}</td>
               <td className="py-1 pr-3">{op.operacion}</td>
               <td className="py-1 pr-3"><EtiquetaEstado estado={op.estado} /></td>
               <td className="py-1 pr-3">{op.origenRespuesta ?? '—'}</td>

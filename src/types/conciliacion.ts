@@ -1,8 +1,7 @@
 /**
- * GAP 6 — Conciliación Bancaria Automática
- * Modelo normalizado, idempotencia, matching, propuestas, trazabilidad
- * Regla: NO modificar silenciosamente contabilidad operativa
- * Flujo: detectar → proponer → validar → aplicar → trazable
+ * P3/GAP6 — Importación asistida de extractos bancarios aportados por el usuario.
+ * Modelo normalizado, validación, idempotencia, sugerencias y decisiones manuales.
+ * La sugerencia nunca se confirma sola; importar/conciliar no registra cobros ni cambia saldos.
  */
 
 export type TipoMovimientoBancario = 'INGRESO' | 'GASTO';
@@ -13,6 +12,7 @@ export type EstadoMovimientoBancario =
   | 'CONFIRMADO'
   | 'RECHAZADO'
   | 'CONCILIADO'
+  | 'REVERSADO'
   | 'ERROR'
   | 'NO_CONCILIABLE';
 
@@ -42,30 +42,54 @@ export interface MovimientoBancario {
   origen: OrigenFormatoBancario;
   propietarioId: string; // aislamiento estricto
   inmuebleId?: string; // si se puede inferir
-  cuentaIban?: string; // :25: o cabecera Norma43
-  metadatosOriginales: Record<string, string | number | null>; // mínimo para auditoría
-  hashIdempotencia: string; // hash determinista campos normalizados
+  /** Compatibilidad legacy. P3 no guarda IBAN completo en documentos nuevos. */
+  cuentaIban?: string;
+  cuentaIbanEnmascarado?: string;
+  cuentaRef?: string; // referencia opaca derivada, no credencial ni IBAN reversible
+  divisa?: string;
+  filaOrigen?: number;
+  estadoValidacion?: 'VALIDO' | 'REQUIERE_REVISION';
+  metadatosOriginales: Record<string, string | number | null>; // solo metadatos mínimos, sin fila bancaria en bruto
+  hashIdempotencia: string; // huella estable normalizada
   fechaImportacion: string; // ISO
-  importadoPor?: string;
+  importadoPor?: string; // UID, nunca correo/token bancario
+}
+
+export type EstadoFilaImportacion = 'NUEVO' | 'DUPLICADO' | 'REQUIERE_REVISION' | 'ERROR';
+
+export interface ResultadoFilaImportacion {
+  fila: number;
+  estado: EstadoFilaImportacion;
+  idMovimiento?: string;
+  hashIdempotencia?: string;
+  fechaOperacion?: string;
+  codigoError?: string; // código sin texto original ni datos bancarios
 }
 
 export interface ImportacionBancaria {
   id: string;
   propietarioId: string;
-  origen: OrigenFormatoBancario;
+  origen: OrigenFormatoBancario | 'DESCONOCIDO';
   fechaImportacion: string;
-  importadoPor?: string;
-  nombreFichero?: string;
+  importadoPor?: string; // UID, no email
+  nombreFichero?: string; // extensión genérica, no nombre original
   totalMovimientos: number;
   nuevos: number;
   duplicados: number;
   errores: number;
-  cuentaIban?: string;
+  requiereRevision?: number;
+  /** SHA-256 del archivo de origen, no se almacena el archivo ni su contenido. */
+  hashFichero?: string;
+  divisa?: string;
+  cuentaRef?: string;
+  cuentaIbanEnmascarado?: string;
   fechaExtractoDesde?: string;
   fechaExtractoHasta?: string;
   saldoInicial?: number;
   saldoFinal?: number;
-  hashFichero?: string;
+  resultadosMovimientos?: ResultadoFilaImportacion[];
+  /** IDs opacos de los movimientos nuevos guardados en esta transacción P3. */
+  idsMovimientosNuevos?: string[];
   estado: 'COMPLETADA' | 'PARCIAL' | 'ERROR';
 }
 
@@ -119,9 +143,16 @@ export interface PropuestaConciliacion {
   notas?: string;
   historial: HistorialConciliacionItem[];
   // Trazabilidad aplicación
-  aplicado: boolean;
+  aplicado: boolean; // solo compatibilidad GAP6; P3 no modifica la contabilidad operativa
   fechaAplicacion?: string;
   aplicadoPor?: string;
+  revision?: number;
+  ultimoEventoId?: string;
+  ambigua?: boolean;
+  fechaReversion?: string;
+  revertidoPor?: string;
+  motivoReversion?: string;
+  motivoDecision?: string;
   // Reversibilidad
   reversible: boolean;
 }
@@ -129,11 +160,33 @@ export interface PropuestaConciliacion {
 export interface HistorialConciliacionItem {
   id: string;
   fecha: string;
-  accion: 'CREADA' | 'PROPUESTA' | 'CONFIRMADA' | 'RECHAZADA' | 'APLICADA' | 'REVERSADA' | 'ERROR' | 'NO_CONCILIABLE';
+  accion: 'CREADA' | 'PROPUESTA' | 'CONFIRMADA' | 'RECHAZADA' | 'APLICADA' | 'REVERSADA' | 'CORREGIDA' | 'ERROR' | 'NO_CONCILIABLE';
   usuario?: string;
+  actorUid?: string;
+  motivo?: string;
+  candidatoAnteriorId?: string;
+  candidatoNuevoId?: string;
   detalle?: string;
   estadoAnterior?: EstadoMovimientoBancario;
   estadoNuevo?: EstadoMovimientoBancario;
+}
+
+/** Registro append-only de una decisión manual en P3. */
+export interface EventoConciliacionBancaria {
+  id: string;
+  propietarioId: string;
+  propuestaId: string;
+  movimientoId: string;
+  accion: 'CONCILIAR' | 'RECHAZAR' | 'REVERSAR' | 'CORREGIR';
+  fecha: string;
+  actorUid: string;
+  actorUsuarioId?: string;
+  motivo: string;
+  estadoAnterior: EstadoMovimientoBancario;
+  estadoNuevo: EstadoMovimientoBancario;
+  candidatoAnteriorId?: string;
+  candidatoNuevoId?: string;
+  operacionId: string;
 }
 
 export interface ResultadoMatching {

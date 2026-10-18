@@ -299,7 +299,7 @@ export const NuevoCandidatoSection: React.FC<NuevoCandidatoSectionProps> = ({
                   <span>Método Ágil Recomendado</span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  Solo necesitas introducir el nombre del interesado. Una vez creado, se generará un cuestionario en PDF listo para enviar por WhatsApp o Email para que el candidato responda por sí mismo.
+                  Solo necesitas introducir el nombre del interesado. Una vez creado, se generará un cuestionario en PDF listo para descargar y compartir manualmente por un canal autorizado.
                 </p>
               </div>
 

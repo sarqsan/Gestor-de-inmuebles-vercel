@@ -449,13 +449,19 @@ async function run() {
       historial: [],
       ...partial,
     }) as unknown as PropuestaConciliacion;
-  const propConfirmada = mkProp({ id: 'conc_1', movimientoId: 'MOV_A', estado: 'CONFIRMADO', importeMovimiento: -812.88 });
-  const propPendiente = mkProp({ id: 'conc_2', movimientoId: 'MOV_B', estado: 'PENDIENTE', importeMovimiento: -100 });
+  const propConciliada = mkProp({ id: 'conc_1', movimientoId: 'MOV_A', estado: 'CONCILIADO', importeMovimiento: -812.88 });
+  const propConfirmadaLegacy = mkProp({ id: 'conc_2', movimientoId: 'MOV_B', estado: 'CONFIRMADO', importeMovimiento: -100 });
   const movB = mkMov({ idMovimiento: 'MOV_B', importe: -100, referencia: 'TRF-B' });
   const movIngreso = mkMov({ idMovimiento: 'MOV_C', importe: 500, referencia: 'ING' });
   const movOtroProp = mkMov({ idMovimiento: 'MOV_D', importe: -50, referencia: 'OTRO', propietarioId: 'prop_2' });
-  const evidencias = movimientosBancariosParaLiquidacion([movA, movB, movIngreso, movOtroProp], [propConfirmada, propPendiente], { id: 'liq_x', propietarioId: 'prop_1' });
-  assert(evidencias.length === 1 && evidencias[0].idMovimiento === 'MOV_A', 86, 'Solo movimientos CONFIRMADOS + negativos + del propietario sirven de evidencia', JSON.stringify(evidencias.map((e) => e.idMovimiento)));
+  const movSinConciliacionPropia = mkMov({ idMovimiento: 'MOV_E', importe: -60, referencia: 'AJENO' });
+  const propuestaDeOtroTitular = mkProp({ id: 'conc_3', movimientoId: 'MOV_E', estado: 'CONCILIADO', importeMovimiento: -60, propietarioId: 'prop_2' });
+  const evidencias = movimientosBancariosParaLiquidacion(
+    [movA, movB, movIngreso, movOtroProp, movSinConciliacionPropia],
+    [propConciliada, propConfirmadaLegacy, propuestaDeOtroTitular],
+    { id: 'liq_x', propietarioId: 'prop_1' },
+  );
+  assert(evidencias.length === 1 && evidencias[0].idMovimiento === 'MOV_A', 86, 'Solo CONCILIADO manual, negativo y del mismo propietario sirve de evidencia; CONFIRMADO legacy y otra cartera no', JSON.stringify(evidencias.map((e) => e.idMovimiento)));
 
   // ---------- INTEGRACIÓN A: puente GAP 1 (eventos canónicos) ----------
   const evtGen = eventoLiquidacionGenerada({ liquidacionId: 'liq_1', periodo: '2026-09', propietarioId: 'prop_1', propietarioNombre: 'Ana', neto: 812.88 });

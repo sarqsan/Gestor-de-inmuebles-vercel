@@ -381,13 +381,13 @@ export const FacturaElectronicaB2BPanel: React.FC<{
               </div>
             )}
 
-            {/* Pago: solo refleja Cobros/conciliación GAP 6 */}
+            {/* Pago: estado reflejado; las importaciones P3 no lo actualizan. */}
             <div className="mt-2 text-[11px] text-slate-600 flex items-center gap-1.5 flex-wrap">
               <Banknote className="w-3.5 h-3.5 text-slate-400" />
               <span>
                 Pago: <strong>{feb.informacionPago.estadoPago || 'NO_PAGADA'}</strong>
                 {typeof feb.informacionPago.importePagado === 'number' && ` · ${feb.informacionPago.importePagado.toFixed(2)} €`}
-                {(factura.cobroPeriodoId || factura.movimientoBancarioId) && ' · vinculado por conciliación (GAP 6)'}
+                {(factura.cobroPeriodoId || factura.movimientoBancarioId) && ' · referencia vinculada; la importación P3 no registra ni confirma el pago'}
               </span>
             </div>
 

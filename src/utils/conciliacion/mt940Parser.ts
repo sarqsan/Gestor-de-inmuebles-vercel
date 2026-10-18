@@ -1,17 +1,17 @@
-/**
- * MT940 Parser — soporta :20: :25: :28C: :60F:/:60M: :61: :86: :62F:/:62M:
- * Tolerante a variaciones razonables de :86:
- */
+/** Parser MT940 con validación de estructura y errores redactados sin líneas bancarias. */
+import { normalizarFechaBancaria, parseImporteBancario } from './validacionExtracto';
 
 export interface MovimientoMt940Raw {
-  fecha: string; // YYYY-MM-DD
+  fecha: string;
   fechaValor?: string;
-  importe: number; // positivo ingreso, negativo gasto según D/C
+  importe: number;
   tipo: 'C' | 'D' | 'RC' | 'RD';
-  concepto: string; // :86:
-  referencia?: string; // ref de :61: o :86:
-  identificador?: string; // id estable si existe
+  concepto: string;
+  referencia?: string;
+  identificador?: string;
   saldo?: number;
+  divisa?: string;
+  fila: number;
   raw61: string;
   raw86?: string;
 }
@@ -20,28 +20,27 @@ export interface Mt940ParseResult {
   movimientos: MovimientoMt940Raw[];
   errores: string[];
   iban?: string;
+  divisa?: string;
   numeroExtracto?: string;
   saldoInicial?: number;
   saldoFinal?: number;
   referenciaExtracto?: string;
 }
 
-function parseFechaMt940(fechaStr: string): string | null {
-  // YYMMDD
-  const m = fechaStr.match(/^(\d{2})(\d{2})(\d{2})$/);
+function fechaYYMMDD(valor: string): string | null {
+  const m = valor.match(/^(\d{2})(\d{2})(\d{2})$/);
   if (!m) return null;
-  let anio = parseInt(m[1], 10);
-  anio = anio < 50 ? 2000 + anio : 1900 + anio;
-  const mes = m[2];
-  const dia = m[3];
-  return `${anio}-${mes}-${dia}`;
+  const yy = Number(m[1]);
+  return normalizarFechaBancaria(`${yy < 50 ? 2000 + yy : 1900 + yy}-${m[2]}-${m[3]}`);
 }
 
-function parseImporteMt940(importeStr: string): number | null {
-  // Formato MT940: coma decimal, ej 123,45
-  const v = importeStr.replace(',', '.');
-  const n = Number(v);
-  return isNaN(n) ? null : n;
+function leerSaldo(linea: string, etiqueta: '60' | '62'): { importe?: number; divisa?: string; error?: string } {
+  const m = linea.match(new RegExp(`^:${etiqueta}[FM]:([CD])(\\d{6})([A-Z]{3})(\\d+(?:,\\d{1,2})?)$`));
+  if (!m) return { error: `MT940_SALDO_${etiqueta}_INVALIDO` };
+  const fecha = fechaYYMMDD(m[2]);
+  const importeRaw = parseImporteBancario(m[4]);
+  if (!fecha || importeRaw === null) return { error: `MT940_SALDO_${etiqueta}_INVALIDO` };
+  return { importe: m[1] === 'D' ? -Math.abs(importeRaw) : Math.abs(importeRaw), divisa: m[3] };
 }
 
 export function parseMT940(contenido: string): Mt940ParseResult {
@@ -51,115 +50,95 @@ export function parseMT940(contenido: string): Mt940ParseResult {
   let numeroExtracto: string | undefined;
   let saldoInicial: number | undefined;
   let saldoFinal: number | undefined;
+  let divisa: string | undefined;
   let referenciaExtracto: string | undefined;
-
-  const lineas = contenido.split(/\r?\n/).map(l => l.trim()).filter(l => l.length >0);
+  const lineas = String(contenido ?? '').replace(/^\uFEFF/, '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const tiene20 = lineas.some((x) => x.startsWith(':20:'));
+  const tiene25 = lineas.some((x) => x.startsWith(':25:'));
+  const tiene28 = lineas.some((x) => x.startsWith(':28C:') || x.startsWith(':28:'));
+  const tiene60 = lineas.some((x) => x.startsWith(':60F:') || x.startsWith(':60M:'));
+  const tiene62 = lineas.some((x) => x.startsWith(':62F:') || x.startsWith(':62M:'));
+  if (!tiene20 || !tiene25 || !tiene28 || !tiene60 || !tiene62) errores.push('MT940_CABECERA_O_SALDOS_INCOMPLETOS');
 
   let current61: string | null = null;
   let current86: string | null = null;
-
+  let numeroFila = 0;
   const flush = () => {
     if (!current61) return;
-    // Parse :61:
-    // Formato :61: YYMMDD[MMDD]D/C/RD/RC importe N referencia // referencia
-    // Ejemplo: :61:2001050105D123,45NTRFNONREF//123
-    const re61 = /^(\d{6})(\d{0,4})([C|D|RC|RD])([\d,]+)([A-Z]{1,4})([^\/]*)\/\/(.*)$/;
-    // Versión simplificada tolerante
-    const re61Simple = /^(\d{6})([C|D])([\d,]+)/;
-    const m = current61.match(/^(\d{6})(\d{4})?([C|D]|RC|RD)([\d,]+)(.*)$/);
+    numeroFila += 1;
+    const m = current61.match(/^(\d{6})(\d{4})?([CD]|RC|RD)(\d+(?:,\d{1,2})?)(?:[A-Z]{1,4})?(.*)$/);
     if (!m) {
-      errores.push(`Línea :61: inválida: ${current61}`);
-      current61 = null;
-      current86 = null;
-      return;
+      errores.push(`Fila ${numeroFila}: MT940_MOVIMIENTO_INVALIDO`);
+      current61 = null; current86 = null; return;
     }
-    const fechaValorStr = m[1];
-    const tipo = m[3] as 'C' | 'D' | 'RC' | 'RD';
-    const importeStr = m[4];
+    const fecha = fechaYYMMDD(m[1]);
+    const importeRaw = parseImporteBancario(m[4]);
+    const tipo = m[3] as MovimientoMt940Raw['tipo'];
+    if (!fecha || importeRaw === null || importeRaw === 0) {
+      errores.push(`Fila ${numeroFila}: MT940_FECHA_O_IMPORTE_INVALIDO`);
+      current61 = null; current86 = null; return;
+    }
+    const importe = tipo === 'D' || tipo === 'RD' ? -Math.abs(importeRaw) : Math.abs(importeRaw);
     const resto = m[5] || '';
-
-    const fecha = parseFechaMt940(fechaValorStr);
-    const importeRaw = parseImporteMt940(importeStr);
-    if (!fecha || importeRaw === null) {
-      errores.push(`Fecha o importe inválido en :61: ${current61}`);
-      current61 = null;
-      current86 = null;
-      return;
-    }
-
-    let importe = importeRaw;
-    if (tipo === 'D' || tipo === 'RD') importe = -Math.abs(importe);
-    else importe = Math.abs(importe);
-
-    // Referencia: buscar en resto
-    let referencia: string | undefined;
-    const refMatch = resto.match(/\/\/([^\/\n\r]+)/);
-    if (refMatch) referencia = refMatch[1].trim();
-    else {
-      const refMatch2 = resto.match(/([A-Z0-9]{6,})/);
-      if (refMatch2) referencia = refMatch2[1];
-    }
-
-    // Concepto desde :86: si existe
-    let concepto = current86 || resto || 'Movimiento MT940';
-    // Limpiar concepto: quitar códigos propietarios si existen, pero conservar texto
-    concepto = concepto.replace(/^\d{3}/, '').trim(); // a veces :86: empieza con código
-
+    const referencia = resto.match(/\/\/([^/\s]+)/)?.[1] || resto.match(/([A-Z0-9]{6,})/)?.[1];
+    const concepto = (current86 || resto).replace(/^\d{3}/, '').trim();
     movimientos.push({
-      fecha,
-      fechaValor: fecha,
-      importe,
-      tipo,
-      concepto: concepto.slice(0,500),
-      referencia,
-      identificador: referencia, // usar referencia como id estable si existe
+      fecha, importe, tipo, concepto,
+      ...(referencia ? { referencia, identificador: referencia } : {}),
+      ...(divisa ? { divisa } : {}),
+      fila: numeroFila,
       raw61: current61,
-      raw86: current86 || undefined,
+      ...(current86 ? { raw86: current86 } : {}),
     });
-
-    current61 = null;
-    current86 = null;
+    current61 = null; current86 = null;
   };
 
   for (const linea of lineas) {
-    if (linea.startsWith(':20:')) {
-      referenciaExtracto = linea.substring(4).trim();
-    } else if (linea.startsWith(':25:')) {
-      iban = linea.substring(4).trim();
-    } else if (linea.startsWith(':28C:') || linea.startsWith(':28:')) {
-      const parts = linea.split(':');
-      numeroExtracto = parts[2] || parts[1];
-    } else if (linea.startsWith(':60F:') || linea.startsWith(':60M:')) {
-      // Saldo inicial: :60F:C200101EUR1234,56
-      const m = linea.match(/:60[FM]:[CD](\d{6})[A-Z]{3}([\d,]+)/);
-      if (m) {
-        const imp = parseImporteMt940(m[2]);
-        if (imp !== null) saldoInicial = imp;
-      }
-    } else if (linea.startsWith(':62F:') || linea.startsWith(':62M:')) {
-      const m = linea.match(/:62[FM]:[CD](\d{6})[A-Z]{3}([\d,]+)/);
-      if (m) {
-        const imp = parseImporteMt940(m[2]);
-        if (imp !== null) saldoFinal = imp;
-      }
-    } else if (linea.startsWith(':61:')) {
-      // Si había uno previo sin :86:, flush
-      if (current61) flush();
-      current61 = linea.substring(4).trim();
-    } else if (linea.startsWith(':86:')) {
-      current86 = linea.substring(4).trim();
-      // :86: cierra el movimiento
+    if (linea.startsWith(':61:')) {
       flush();
-    } else {
-      // Continuación de :86: multilínea
-      if (current61 && !linea.startsWith(':')) {
-        if (current86) current86 += ' ' + linea;
-        else current86 = linea;
+      current61 = linea.slice(4).trim();
+      current86 = null;
+      continue;
+    }
+    if (current61 && linea.startsWith(':86:')) {
+      current86 = linea.slice(4).trim();
+      continue;
+    }
+    if (current61 && !linea.startsWith(':')) {
+      current86 = `${current86 || ''} ${linea}`.trim();
+      continue;
+    }
+    if (current61) flush();
+    if (linea.startsWith(':20:')) { referenciaExtracto = linea.slice(4).trim(); continue; }
+    if (linea.startsWith(':25:')) { iban = linea.slice(4).trim(); continue; }
+    if (linea.startsWith(':28C:') || linea.startsWith(':28:')) {
+      const index = linea.indexOf(':', 4); numeroExtracto = index >= 0 ? linea.slice(index + 1).trim() : linea.slice(4).trim(); continue;
+    }
+    if (linea.startsWith(':60F:') || linea.startsWith(':60M:')) {
+      const saldo = leerSaldo(linea, '60');
+      if (saldo.error) errores.push(saldo.error);
+      else { saldoInicial = saldo.importe; divisa = saldo.divisa; }
+      continue;
+    }
+    if (linea.startsWith(':62F:') || linea.startsWith(':62M:')) {
+      const saldo = leerSaldo(linea, '62');
+      if (saldo.error) errores.push(saldo.error);
+      else {
+        saldoFinal = saldo.importe;
+        if (divisa && saldo.divisa !== divisa) errores.push('MT940_DIVISAS_DE_SALDO_DISTINTAS');
+        else divisa = saldo.divisa;
       }
+      continue;
     }
   }
-  // Flush final si quedó
-  if (current61) flush();
-
-  return { movimientos, errores, iban, numeroExtracto, saldoInicial, saldoFinal, referenciaExtracto };
+  flush();
+  if (movimientos.length === 0) errores.push('MT940_SIN_MOVIMIENTOS');
+  return {
+    movimientos, errores,
+    ...(iban ? { iban } : {}), ...(divisa ? { divisa } : {}),
+    ...(numeroExtracto ? { numeroExtracto } : {}),
+    ...(saldoInicial !== undefined ? { saldoInicial } : {}),
+    ...(saldoFinal !== undefined ? { saldoFinal } : {}),
+    ...(referenciaExtracto ? { referenciaExtracto } : {}),
+  };
 }

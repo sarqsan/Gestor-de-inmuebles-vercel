@@ -1,10 +1,8 @@
-/**
- * CSV Parser — desacoplado, tolerante a variantes bancarias
- * Debe permitir mapear columnas cuando el banco utilice estructuras diferentes
- */
+/** Parser CSV bancario RFC4180 acotado: rechaza filas mal formadas y no expone valores en errores. */
+import { normalizarFechaBancaria, parseImporteBancario } from './validacionExtracto';
 
 export interface CsvMapping {
-  fecha?: string; // nombre columna
+  fecha?: string;
   fechaValor?: string;
   concepto?: string;
   descripcion?: string;
@@ -12,11 +10,19 @@ export interface CsvMapping {
   saldo?: string;
   referencia?: string;
   identificador?: string;
+  divisa?: string;
+  cuenta?: string;
+}
+
+export interface CsvFilaCruda extends Record<string, string> {
+  /** Línea lógica del archivo, solo en memoria. No se persiste el registro bruto. */
+  __filaOrigen?: string;
 }
 
 export interface CsvParseResult {
-  movimientosRaw: Record<string, string>[];
+  movimientosRaw: CsvFilaCruda[];
   errores: string[];
+  delimitador?: string;
 }
 
 export interface MovimientoCsvNormalizado {
@@ -27,6 +33,9 @@ export interface MovimientoCsvNormalizado {
   saldo?: number;
   referencia?: string;
   identificador?: string;
+  divisa?: string;
+  cuenta?: string;
+  fila: number;
   raw: Record<string, string>;
 }
 
@@ -38,166 +47,150 @@ const DEFAULT_CSV_HEADERS = {
   saldo: ['saldo', 'balance', 'saldo_actual'],
   referencia: ['referencia', 'reference', 'ref', 'num_ref', 'referencia_bancaria'],
   identificador: ['id', 'identificador', 'fitid', 'identificador_banco', 'id_bancario'],
+  divisa: ['divisa', 'moneda', 'currency', 'currency_code', 'cod_moneda'],
+  cuenta: ['cuenta', 'account', 'cuenta_bancaria', 'account_id'],
 };
 
 function normalizarHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_áéíóúñü]/g, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_áéíóúñü]/g, '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function encontrarColumna(headers: string[], candidatos: string[], mapping?: string): string | undefined {
   if (mapping) {
-    const mapped = headers.find(h => normalizarHeader(h) === normalizarHeader(mapping));
+    const mapped = headers.find((h) => normalizarHeader(h) === normalizarHeader(mapping));
     if (mapped) return mapped;
   }
   for (const cand of candidatos) {
-    const found = headers.find(h => normalizarHeader(h).includes(normalizarHeader(cand)) || normalizarHeader(cand).includes(normalizarHeader(h)));
+    const target = normalizarHeader(cand);
+    const found = headers.find((h) => normalizarHeader(h) === target);
     if (found) return found;
   }
   return undefined;
 }
 
-/** Exportado para reutilización del importador canónico (mismo parseo ES/EN, sin duplicar). */
+/** Alias mantenido porque también lo consume el importador general CSV del ERP. */
 export function parseImporteCSV(valor: string): number | null {
-  if (!valor) return null;
-  let v = valor.trim();
-  // Limpiar símbolos €, espacios, etc.
-  v = v.replace(/€/g, '').replace(/\s/g, '');
-  // Detectar formato español: 1.234,56 vs inglés 1,234.56
-  // Si contiene coma y punto, el último separador es decimal
-  const lastComma = v.lastIndexOf(',');
-  const lastDot = v.lastIndexOf('.');
-  if (lastComma !== -1 && lastDot !== -1) {
-    if (lastComma > lastDot) {
-      // Español: punto miles, coma decimal
-      v = v.replace(/\./g, '').replace(',', '.');
-    } else {
-      // Inglés: coma miles, punto decimal
-      v = v.replace(/,/g, '');
-    }
-  } else if (lastComma !== -1) {
-    // Solo coma: podría ser decimal español o miles inglés
-    // Si después de coma hay 2 dígitos, asumimos decimal
-    const afterComma = v.length - lastComma - 1;
-    if (afterComma === 2 || afterComma === 3) {
-      v = v.replace(',', '.');
-    } else {
-      v = v.replace(/,/g, '');
-    }
-  }
-  // Ahora solo puntos decimales
-  const num = Number(v);
-  return isNaN(num) ? null : num;
+  return parseImporteBancario(valor);
 }
 
 function parseFechaCSV(valor: string): string | null {
-  if (!valor) return null;
-  const v = valor.trim();
-  // Intentar formatos comunes: DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY, MM/DD/YYYY
-  // Normalizar separadores
-  // Primero intentar Date directo
-  const dDirect = new Date(v);
-  if (!isNaN(dDirect.getTime()) && v.includes('-') && v.length >= 8) {
-    // Si es YYYY-MM-DD, usar tal cual
-    if (/^\d{4}-\d{2}-\d{2}/.test(v)) {
-      return v.split('T')[0];
-    }
-  }
-  // DD/MM/YYYY
-  const m1 = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if (m1) {
-    let dia = parseInt(m1[1], 10);
-    let mes = parseInt(m1[2], 10);
-    let anio = parseInt(m1[3], 10);
-    if (anio < 100) anio += 2000;
-    // Validar mes/dia: si dia >12 y mes <=12, swap? Asumimos DD/MM
-    if (dia > 31 || mes > 12) {
-      // Intentar MM/DD
-      const tmp = dia;
-      dia = mes;
-      mes = tmp;
-    }
-    if (mes >=1 && mes <=12 && dia >=1 && dia <=31) {
-      return `${anio.toString().padStart(4,'0')}-${mes.toString().padStart(2,'0')}-${dia.toString().padStart(2,'0')}`;
-    }
-  }
-  // YYYYMMDD
-  const m2 = v.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (m2) {
-    return `${m2[1]}-${m2[2]}-${m2[3]}`;
-  }
-  const d = new Date(v);
-  if (!isNaN(d.getTime())) {
-    return d.toISOString().split('T')[0];
-  }
-  return null;
+  return normalizarFechaBancaria(valor);
 }
 
-export function parseCSV(contenido: string, mapping?: CsvMapping): CsvParseResult {
-  const lineas = contenido.split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lineas.length === 0) return { movimientosRaw: [], errores: ['CSV vacío'] };
+interface RegistroCSV {
+  campos: string[];
+  fila: number;
+}
+interface ParseoCSV {
+  registros: RegistroCSV[];
+  errores: string[];
+}
 
-  // Detectar delimitador: , ; \t |
-  const primera = lineas[0];
-  let delimitador = ',';
-  const candidatosDelim = [';', ',', '\t', '|'];
-  let maxCount = 0;
-  for (const d of candidatosDelim) {
-    const count = primera.split(d).length;
-    if (count > maxCount) {
-      maxCount = count;
-      delimitador = d;
-    }
-  }
-
-  const headers = primera.split(delimitador).map(h => h.trim().replace(/^"|"$/g, ''));
+function parsearRegistros(contenido: string, delimitador: string): ParseoCSV {
+  const registros: RegistroCSV[] = [];
   const errores: string[] = [];
-  const movimientosRaw: Record<string, string>[] = [];
+  let campos: string[] = [];
+  let campo = '';
+  let entreComillas = false;
+  let despuesDeComillas = false;
+  let numeroFila = 1;
+  let filaRegistro = 1;
+  let hayContenido = false;
 
-  for (let i = 1; i < lineas.length; i++) {
-    const linea = lineas[i];
-    // Manejo simple de comillas
-    const valores: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let j = 0; j < linea.length; j++) {
-      const char = linea[j];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === delimitador && !inQuotes) {
-        valores.push(current.trim().replace(/^"|"$/g, ''));
-        current = '';
+  const cerrarCampo = () => { campos.push(campo); campo = ''; despuesDeComillas = false; };
+  const cerrarRegistro = () => {
+    cerrarCampo();
+    if (campos.some((v) => v.trim() !== '')) registros.push({ campos, fila: filaRegistro });
+    campos = [];
+    hayContenido = false;
+    filaRegistro = numeroFila + 1;
+  };
+
+  for (let i = 0; i < contenido.length; i += 1) {
+    const caracter = contenido[i];
+    if (caracter === '"') {
+      if (entreComillas && contenido[i + 1] === '"') {
+        campo += '"'; i += 1; hayContenido = true;
+      } else if (entreComillas) {
+        entreComillas = false; despuesDeComillas = true;
+      } else if (!despuesDeComillas && campo.trim() === '') {
+        entreComillas = true; campo = ''; hayContenido = true;
       } else {
-        current += char;
+        errores.push(`Fila ${filaRegistro}: CSV_COMILLA_INVALIDA`);
       }
+      continue;
     }
-    valores.push(current.trim().replace(/^"|"$/g, ''));
-
-    if (valores.length !== headers.length) {
-      // Tolerante: si hay más/menos, intentar ajustar
-      if (valores.length < headers.length) {
-        // Rellenar vacíos
-        while (valores.length < headers.length) valores.push('');
-      } else {
-        // Truncar
-        valores.length = headers.length;
+    if (!entreComillas && caracter === delimitador) {
+      cerrarCampo(); hayContenido = true; continue;
+    }
+    if (caracter === '\r' || caracter === '\n') {
+      if (caracter === '\r' && contenido[i + 1] === '\n') i += 1;
+      if (entreComillas) {
+        campo += '\n'; numeroFila += 1; hayContenido = true; continue;
       }
+      cerrarRegistro(); numeroFila += 1; filaRegistro = numeroFila; continue;
     }
+    if (despuesDeComillas && !/\s/.test(caracter)) {
+      errores.push(`Fila ${filaRegistro}: CSV_TEXTO_TRAS_COMILLA`);
+      despuesDeComillas = false;
+    }
+    campo += caracter; hayContenido ||= caracter.trim() !== '';
+  }
+  if (entreComillas) errores.push(`Fila ${filaRegistro}: CSV_COMILLAS_SIN_CERRAR`);
+  else if (hayContenido || campos.length > 0 || campo.length > 0) cerrarRegistro();
+  return { registros, errores };
+}
 
-    const obj: Record<string, string> = {};
-    headers.forEach((h, idx) => {
-      obj[h] = valores[idx] || '';
+function detectarDelimitador(contenido: string): { delimitador: string; parseo: ParseoCSV } | null {
+  const candidatos = [',', ';', '\t', '|'];
+  const intentos = candidatos.map((delimitador) => ({ delimitador, parseo: parsearRegistros(contenido, delimitador) }))
+    .filter((x) => x.parseo.registros.length > 0)
+    .sort((a, b) => {
+      const aAncho = a.parseo.registros[0]?.campos.length || 0;
+      const bAncho = b.parseo.registros[0]?.campos.length || 0;
+      const aConsistente = a.parseo.registros.filter((r) => r.campos.length === aAncho).length;
+      const bConsistente = b.parseo.registros.filter((r) => r.campos.length === bAncho).length;
+      return bAncho - aAncho || bConsistente - aConsistente;
     });
+  const mejor = intentos[0];
+  if (!mejor || mejor.parseo.registros[0].campos.length < 2) return null;
+  return mejor;
+}
+
+export function parseCSV(contenido: string): CsvParseResult {
+  const limpio = String(contenido ?? '').replace(/^\uFEFF/, '');
+  if (!limpio.trim()) return { movimientosRaw: [], errores: ['CSV_VACIO'] };
+  const detectado = detectarDelimitador(limpio);
+  if (!detectado) return { movimientosRaw: [], errores: ['CSV_CABECERA_INVALIDA'] };
+  const { registros, errores: erroresParseo } = detectado.parseo;
+  if (registros.length < 2) return { movimientosRaw: [], errores: [...erroresParseo, 'CSV_SIN_MOVIMIENTOS'], delimitador: detectado.delimitador };
+
+  const headers = registros[0].campos.map((h) => h.trim());
+  const normalizados = headers.map(normalizarHeader);
+  const errores = [...erroresParseo];
+  if (headers.some((h) => !h) || new Set(normalizados).size !== normalizados.length) {
+    errores.push('CSV_CABECERA_DUPLICADA_O_VACIA');
+  }
+  const movimientosRaw: CsvFilaCruda[] = [];
+  for (const registro of registros.slice(1)) {
+    if (registro.campos.length !== headers.length) {
+      errores.push(`Fila ${registro.fila}: CSV_NUMERO_COLUMNAS_INVALIDO`);
+      continue;
+    }
+    const obj: CsvFilaCruda = {};
+    headers.forEach((h, idx) => { obj[h] = registro.campos[idx].trim(); });
+    Object.defineProperty(obj, '__filaOrigen', { value: String(registro.fila), enumerable: false });
     movimientosRaw.push(obj);
   }
-
-  return { movimientosRaw, errores };
+  return { movimientosRaw, errores, delimitador: detectado.delimitador };
 }
 
 export function normalizarMovimientosCSV(
-  raw: Record<string, string>[],
-  mapping?: CsvMapping
+  raw: CsvFilaCruda[],
+  mapping?: CsvMapping,
 ): { movimientos: MovimientoCsvNormalizado[]; errores: string[] } {
-  if (raw.length === 0) return { movimientos: [], errores: [] };
+  if (raw.length === 0) return { movimientos: [], errores: ['CSV_SIN_MOVIMIENTOS'] };
   const headers = Object.keys(raw[0]);
   const colFecha = encontrarColumna(headers, DEFAULT_CSV_HEADERS.fecha, mapping?.fecha);
   const colFechaValor = encontrarColumna(headers, DEFAULT_CSV_HEADERS.fechaValor, mapping?.fechaValor);
@@ -206,41 +199,42 @@ export function normalizarMovimientosCSV(
   const colSaldo = encontrarColumna(headers, DEFAULT_CSV_HEADERS.saldo, mapping?.saldo);
   const colRef = encontrarColumna(headers, DEFAULT_CSV_HEADERS.referencia, mapping?.referencia);
   const colId = encontrarColumna(headers, DEFAULT_CSV_HEADERS.identificador, mapping?.identificador);
-
+  const colDivisa = encontrarColumna(headers, DEFAULT_CSV_HEADERS.divisa, mapping?.divisa);
+  const colCuenta = encontrarColumna(headers, DEFAULT_CSV_HEADERS.cuenta, mapping?.cuenta);
   const errores: string[] = [];
   const movimientos: MovimientoCsvNormalizado[] = [];
+  if (!colFecha) errores.push('CSV_FALTA_COLUMNA_FECHA');
+  if (!colImporte) errores.push('CSV_FALTA_COLUMNA_IMPORTE');
 
-  if (!colFecha) errores.push('No se encontró columna de fecha');
-  if (!colImporte) errores.push('No se encontró columna de importe');
-
-  for (let i = 0; i < raw.length; i++) {
-    const r = raw[i];
-    const fechaRaw = colFecha ? r[colFecha] : '';
-    const importeRaw = colImporte ? r[colImporte] : '';
+  for (let i = 0; i < raw.length; i += 1) {
+    const fila = Number(raw[i].__filaOrigen) || i + 2;
+    const fechaRaw = colFecha ? raw[i][colFecha] : '';
+    const importeRaw = colImporte ? raw[i][colImporte] : '';
     const fecha = parseFechaCSV(fechaRaw);
     const importe = parseImporteCSV(importeRaw);
-
-    if (!fecha) {
-      errores.push(`Fila ${i+2}: fecha inválida "${fechaRaw}"`);
-      continue;
-    }
-    if (importe === null) {
-      errores.push(`Fila ${i+2}: importe inválido "${importeRaw}"`);
-      continue;
-    }
-
-    const concepto = colConcepto ? r[colConcepto] : (Object.values(r).join(' ').slice(0,200));
+    let invalida = false;
+    if (!fecha) { errores.push(`Fila ${fila}: FECHA_INVALIDA`); invalida = true; }
+    if (importe === null || importe === 0) { errores.push(`Fila ${fila}: IMPORTE_INVALIDO`); invalida = true; }
+    const fechaValorRaw = colFechaValor ? raw[i][colFechaValor] : '';
+    const fechaValor = fechaValorRaw ? parseFechaCSV(fechaValorRaw) : undefined;
+    if (fechaValorRaw && !fechaValor) { errores.push(`Fila ${fila}: FECHA_VALOR_INVALIDA`); invalida = true; }
+    const saldoRaw = colSaldo ? raw[i][colSaldo] : '';
+    const saldo = saldoRaw ? parseImporteCSV(saldoRaw) : undefined;
+    if (saldoRaw && saldo === null) { errores.push(`Fila ${fila}: SALDO_INVALIDO`); invalida = true; }
+    if (invalida || !fecha || importe === null) continue;
     movimientos.push({
       fecha,
-      fechaValor: colFechaValor ? parseFechaCSV(r[colFechaValor]) || undefined : undefined,
-      concepto: concepto || 'Sin concepto',
+      ...(fechaValor ? { fechaValor } : {}),
+      concepto: colConcepto ? raw[i][colConcepto].trim() : '',
       importe,
-      saldo: colSaldo ? parseImporteCSV(r[colSaldo]) || undefined : undefined,
-      referencia: colRef ? r[colRef] || undefined : undefined,
-      identificador: colId ? r[colId] || undefined : undefined,
-      raw: r,
+      ...(saldo !== undefined && saldo !== null ? { saldo } : {}),
+      ...(colRef && raw[i][colRef] ? { referencia: raw[i][colRef].trim() } : {}),
+      ...(colId && raw[i][colId] ? { identificador: raw[i][colId].trim() } : {}),
+      ...(colDivisa && raw[i][colDivisa] ? { divisa: raw[i][colDivisa].trim() } : {}),
+      ...(colCuenta && raw[i][colCuenta] ? { cuenta: raw[i][colCuenta].trim() } : {}),
+      fila,
+      raw: Object.fromEntries(Object.entries(raw[i]).filter(([key]) => key !== '__filaOrigen')),
     });
   }
-
   return { movimientos, errores };
 }

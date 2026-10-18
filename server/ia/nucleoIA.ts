@@ -36,17 +36,11 @@
  *     su respaldo heurístico, sin consumo del proveedor) y la respuesta lleva
  *     `X-IA-Registro: no-configurado`. Nunca hay consumo sin traza duradera.
  *
- * Reservado a fases posteriores: créditos y saldo, límites/cuotas por usuario,
- * permisos por rol y operación, y paneles de consumo/administración.
- *
- * FASE 2 — GOBIERNO DE USO (`server/ia/gobiernoIA.ts`): cuando el núcleo tiene
- * gobierno configurado, y SIEMPRE ANTES de crear el cliente del proveedor,
- * añade: perfil veraz del espejo de identidad (rechaza espejos ausentes,
- * inactivos o incoherentes con la ficha), permiso por rol y operación del
- * catálogo, y reserva atómica de cuotas y créditos por usuario. Las reservas
- * se reembolsan si la operación cierra sin ninguna llamada exitosa al
- * proveedor. Sin gobierno (modo NO_CONFIGURADO), el comportamiento es
- * EXACTAMENTE el de Fase 1.
+ * FASE 2 — GOBIERNO DE USO (`server/ia/gobiernoIA.ts`): el perfil y permiso del
+ * actor se comprueban antes de ejecutar; el saldo/cuota se reserva sobre el UID
+ * del titular contractual resuelto en servidor, nunca sobre el gestor/inquilino.
+ * Las reservas se reembolsan si no hay ninguna llamada exitosa al proveedor.
+ * Si falta gobierno y existe una llave utilizable, el núcleo falla cerrado.
  *
  * BLOQUEO PREVENTIVO (aprobación comercial): si la política vigente está
  * PENDIENTE de aprobación (origen POR_DEFECTO —sin IA_POLITICA_JSON— o sin
@@ -57,17 +51,14 @@
  * validada en servidor (IA_POLITICA_JSON con tarifas); nunca por existir la
  * clave de Gemini.
  *
- * FASE 9 — LLAVES DE USUARIO (Vía 2, `server/ia/llavesUsuarioIA.ts`): la
- * credencial del proveedor es la que cada usuario registró en el alta guiada,
- * custodiada cifrada por el servidor. Tras el permiso (y antes del registro y
- * de la reserva de uso) el núcleo resuelve la llave del uid del token: si está
- * disponible, el cliente del proveedor se crea con ESA llave; si no, en modo
- * RESPALDO el endpoint responde con su respaldo heurístico (sin consumo) y en
- * modo EXIGIR se rechaza con 428 LLAVE_USUARIO_REQUERIDA sin gastar clave de
- * idempotencia, cuota ni saldo. Toda respuesta lleva `X-IA-Llave-Usuario`
- * (activa | ausente | no-configurado). La clave compartida del entorno NO
- * interviene en ninguna operación de usuario. Clave maestra inválida ⇒ fallo
- * cerrado (503 LLAVES_CLAVE_MAESTRA_INVALIDA).
+ * ARQUITECTURA POR TITULAR: cada ruta debe inyectar `resolverTitularIA`, que
+ * rehidrata el contrato/activo y autoriza al actor dentro del ámbito. El UID
+ * que devuelve resuelve la llave cifrada y la cuenta de gobierno; el UID del
+ * token queda como actor/idempotencia. Sin resolver, se rechaza antes de leer
+ * llaves, reservar uso o crear cliente. La llave debe pertenecer al titular;
+ * sin llave no se consulta ninguna credencial global, aun en modo RESPALDO.
+ * `X-IA-Llave-Usuario` no identifica al titular. Clave maestra inválida ⇒
+ * fallo cerrado (503 LLAVES_CLAVE_MAESTRA_INVALIDA).
  */
 import type { CodigoErrorConfiguracionFirebase } from '../titularidades/configuracionFirebase.js';
 import { createHash } from 'node:crypto';
@@ -112,11 +103,26 @@ export interface ClienteProveedorIA {
 
 /** FASE 9 · contexto con el que se pide el cliente del proveedor (llave propia del usuario). */
 export interface ContextoProveedorIA {
+  /** UID del titular contractual que aporta la llave y asume la cuota. */
   uid: string;
+  /** UID del actor autenticado; nunca sustituye al UID del titular como pagador. */
+  actorUid?: string;
+  propietarioId?: string;
   operacion: IdOperacionIA;
-  /** Llave descifrada del usuario (sólo en memoria durante la petición; nunca se registra). */
+  /** Llave descifrada del titular (sólo en memoria durante la petición; nunca se registra). */
   llaveUsuario?: string;
 }
+
+export interface ContextoTitularResueltoIA {
+  propietarioUid: string;
+  propietarioId: string;
+  contratoId: string;
+  inmuebleId: string;
+}
+
+export type ResultadoResolverTitularNucleoIA =
+  | { estado: 'RESUELTO'; contexto: ContextoTitularResueltoIA }
+  | { estado: 'RECHAZADO'; codigo: 'PETICION_INVALIDA' | 'PERFIL_NO_VALIDO' | 'CONTRATO_NO_AUTORIZADO' | 'TITULAR_NO_RESUELTO' | 'FUENTE_NO_DISPONIBLE' };
 
 export type ModoRegistroIA = 'FIRESTORE' | 'MEMORIA' | 'NO_CONFIGURADO';
 
@@ -131,6 +137,10 @@ export type CodigoRechazoIA =
   | 'ERROR_NUCLEO_IA'
   | 'POLITICA_IA_INVALIDA'
   | 'APROBACION_COMERCIAL_PENDIENTE'
+  | 'TITULAR_IA_NO_RESUELTO'
+  | 'PERFIL_IA_NO_VALIDO'
+  | 'CONTRATO_IA_NO_AUTORIZADO'
+  | 'CONTEXTO_IA_INVALIDO'
   | CodigoRechazoGobiernoIA
   | CodigoRechazoLlavesIA
   | CodigoErrorConfiguracionFirebase;
@@ -164,6 +174,12 @@ export interface DependenciasNucleoIA {
   crearClienteProveedor: (contexto?: ContextoProveedorIA) => ClienteProveedorIA | null;
   /** FASE 9 · servicio de llaves de usuario (Vía 2); `null`/ausente ⇒ NO_CONFIGURADO. */
   llaves?: ServicioLlavesIA | null;
+  /**
+   * Resuelve en servidor el titular contractual de esta operación y verifica
+   * que el actor puede operar dentro de su contrato/cartera. Si falta o falla,
+   * el núcleo rechaza antes de leer llaves, reservar cuotas o crear proveedor.
+   */
+  resolverTitularIA?: (entrada: { uidActor: string; operacion: IdOperacionIA; request: Request }) => Promise<ResultadoResolverTitularNucleoIA | null>;
   /** FASE 9 · clave maestra presente pero inválida: fallo cerrado (503). */
   errorLlaves?: 'LLAVES_CLAVE_MAESTRA_INVALIDA';
   /** FASE 9 · qué hacer sin llave del usuario (por defecto RESPALDO). */
@@ -177,6 +193,8 @@ export interface EstadoNucleoIA {
   gobierno: ModoGobiernoIA;
   /** FASE 9 · estado del subsistema de llaves de usuario (sin secretos). */
   llaves: ModoLlavesIA;
+  /** `BLOQUEADA` hasta cablear una resolución contractual por operación. */
+  titularidad: 'POR_OPERACION' | 'BLOQUEADA';
   /** Presente sólo mientras el bloqueo preventivo de aprobación comercial está activo. */
   bloqueoComercial?: 'APROBACION_PENDIENTE';
   errorConfiguracion?: CodigoErrorConfiguracionFirebase;
@@ -206,7 +224,11 @@ interface MetricasProveedor {
 interface ContextoOperacionIA {
   operacion: IdOperacionIA;
   operacionId: string;
+  /** Actor autenticado; se usa para idempotencia y trazabilidad. */
   uid: string;
+  /** Titular contractual; se usa para llave, cuotas y coste. */
+  uidTitular: string;
+  propietarioId: string;
   cliente: ClienteProveedorIA | null;
 }
 
@@ -398,7 +420,9 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
   const sinLlave: ModoSinLlaveIA = deps.sinLlave ?? 'RESPALDO';
 
   return {
-    estado: () => ({ registro: modo, gobierno: modoGobierno, llaves: modoLlaves, autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length,
+    estado: () => ({ registro: modo, gobierno: modoGobierno, llaves: modoLlaves,
+      titularidad: deps.resolverTitularIA ? 'POR_OPERACION' as const : 'BLOQUEADA' as const,
+      autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length,
       ...(bloqueoComercial ? { bloqueoComercial: 'APROBACION_PENDIENTE' as const } : {}),
       ...(deps.errorConfiguracion ? { errorConfiguracion: deps.errorConfiguracion } : {}) }),
 
@@ -501,17 +525,98 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
             }
           }
 
-          // 3b) FASE 9 · Llave propia del usuario (Vía 2): tras el permiso y ANTES del
-          //     registro y de la reserva de uso. Sin servicio de llaves no hay nada que
-          //     resolver (los deps deciden el cliente, p. ej. el sandbox de Fase 8).
+          // 3b) Titular contractual: el actor no es automáticamente el pagador.
+          //     Sin una resolución server-side específica de la ruta se bloquea
+          //     ANTES de leer llaves, reservar cuotas/créditos o crear proveedor.
+          const rechazarTitularConAuditoria = async (
+            codigoHttp: number,
+            codigo: CodigoRechazoIA,
+            mensaje: string,
+          ): Promise<void> => {
+            const registro = deps.registro;
+            if (registro) {
+              let reserva;
+              try {
+                // Un rechazo de ámbito no conoce un pagador fiable: se audita sólo
+                // al actor autenticado, sin titular ni coste, y nunca se llama al modelo.
+                reserva = await registro.reservar({ id: operacionId, uid, operacion: id, ruta: definicion.ruta, iniciadaEn: inicio });
+              } catch {
+                rechazar(503, 'REGISTRO_NO_DISPONIBLE', 'No se pudo guardar la auditoría de la operación; no se ejecutó.', {}, { uid, operacionId });
+                return;
+              }
+              if (reserva.estado === 'DUPLICADA') {
+                rechazar(409, 'OPERACION_DUPLICADA', 'Esta operación de IA ya se recibió con la misma clave de idempotencia; no se vuelve a ejecutar.',
+                  { operacionId, estadoPrevio: reserva.previa?.estado ?? null }, { uid, operacionId });
+                return;
+              }
+              try {
+                await registro.completar(operacionId, construirCierre(
+                  codigoHttp, inicio, ahora(), metricasVacias(),
+                  gobierno ? { costeCreditos: 0, creditosReembolsados: 0 } : undefined,
+                ));
+              } catch {
+                log({ evento: 'CIERRE_NO_REGISTRADO', operacion: id, operacionId, uid, codigoHttp });
+                rechazar(503, 'REGISTRO_NO_DISPONIBLE', 'No se pudo cerrar la auditoría; no se ejecutó la operación.', {}, { uid, operacionId });
+                return;
+              }
+            }
+            rechazar(codigoHttp, codigo, mensaje, {}, { uid, operacionId });
+          };
+          let resultadoTitular: ResultadoResolverTitularNucleoIA | null = null;
+          try {
+            resultadoTitular = await deps.resolverTitularIA?.({ uidActor: uid, operacion: id, request: req }) ?? null;
+          } catch {
+            resultadoTitular = { estado: 'RECHAZADO', codigo: 'FUENTE_NO_DISPONIBLE' };
+          }
+          if (!resultadoTitular || resultadoTitular.estado === 'RECHAZADO') {
+            const codigoOrigen = resultadoTitular?.estado === 'RECHAZADO' ? resultadoTitular.codigo : 'FUENTE_NO_DISPONIBLE';
+            if (codigoOrigen === 'PETICION_INVALIDA') {
+              await rechazarTitularConAuditoria(400, 'CONTEXTO_IA_INVALIDO', 'La petición no identifica un contrato válido para esta operación.');
+            } else if (codigoOrigen === 'PERFIL_NO_VALIDO') {
+              await rechazarTitularConAuditoria(403, 'PERFIL_IA_NO_VALIDO', 'La identidad no tiene un perfil activo y verificable para esta operación.');
+            } else if (codigoOrigen === 'CONTRATO_NO_AUTORIZADO') {
+              await rechazarTitularConAuditoria(403, 'CONTRATO_IA_NO_AUTORIZADO', 'El actor no está autorizado para operar sobre el contrato indicado.');
+            } else {
+              await rechazarTitularConAuditoria(503, 'TITULAR_IA_NO_RESUELTO', 'No se ha podido verificar el titular contractual y su ámbito; la operación de IA no se ejecutó.');
+            }
+            return;
+          }
+          const titular = resultadoTitular.contexto;
+          if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/.test(titular.propietarioUid)
+            || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/.test(titular.propietarioId)
+            || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/.test(titular.contratoId)
+            || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/.test(titular.inmuebleId)) {
+            rechazar(503, 'TITULAR_IA_NO_RESUELTO', 'No se ha podido verificar el titular contractual y su ámbito; la operación de IA no se ejecutó.', {}, { uid, operacionId });
+            return;
+          }
+          const uidTitular = titular.propietarioUid;
+          if (llaves && deps.registro && !gobierno) {
+            rechazar(503, 'GOBIERNO_NO_DISPONIBLE', 'No se pudo verificar el coste y la cuota del titular; la operación de IA no se ejecutó.', {}, { uid, operacionId });
+            return;
+          }
+          if (gobierno) {
+            let perfilTitular;
+            try {
+              perfilTitular = await gobierno.perfilVeraz(uidTitular);
+            } catch {
+              perfilTitular = { estado: 'RECHAZADO' as const, codigo: 'GOBIERNO_NO_DISPONIBLE' as CodigoRechazoGobiernoIA };
+            }
+            if (perfilTitular.estado === 'RECHAZADO' || perfilTitular.perfil.tipoPerfil !== 'PROPIETARIO') {
+              rechazar(503, 'TITULAR_IA_NO_RESUELTO', 'No se ha podido verificar la cuenta IA del titular contractual; la operación no se ejecutó.', {}, { uid, operacionId });
+              return;
+            }
+          }
+
+          // 3c) La llave se resuelve por UID del TITULAR, nunca por el actor
+          //     gestor/inquilino. Sin servicio o sin llave no existe ruta de fallback compartido.
           let llaveUsuario: string | undefined;
           let estadoLlave: ValorCabeceraLlaveUsuarioIA = 'no-configurado';
           if (llaves) {
             let resolucion: Awaited<ReturnType<ServicioLlavesIA['resolverParaOperacion']>>;
             try {
-              resolucion = await llaves.resolverParaOperacion(uid);
+              resolucion = await llaves.resolverParaOperacion(uidTitular);
             } catch {
-              rechazar(503, 'LLAVES_NO_DISPONIBLES', 'No se ha podido acceder a tu llave de IA, así que la operación no se ha ejecutado. Inténtalo de nuevo en unos segundos.', {}, { uid, operacionId });
+              rechazar(503, 'LLAVES_NO_DISPONIBLES', 'No se ha podido acceder a la llave de IA del titular contractual, así que la operación no se ha ejecutado. Inténtalo de nuevo en unos segundos.', {}, { uid, operacionId });
               return;
             }
             if (resolucion.estado === 'DISPONIBLE') {
@@ -524,7 +629,7 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
                 rechazar(
                   428,
                   'LLAVE_USUARIO_REQUERIDA',
-                  'Para usar la IA necesitas registrar tu propia clave de Google AI Studio en Configuración → Llave de IA.',
+                  'El titular del contrato debe registrar su clave de Google AI Studio en Configuración → Llave de IA para usar esta operación.',
                   { altaGuiada: RUTA_LLAVE_USUARIO_IA },
                   { uid, operacionId },
                 );
@@ -541,11 +646,14 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
             // del proveedor; el endpoint responde con su respaldo heurístico.
             res.setHeader(CABECERA_REGISTRO_IA, 'no-configurado');
             log({ evento: 'SIN_REGISTRO', operacion: id, operacionId, uid });
-            contexto = { operacion: id, operacionId, uid, cliente: null };
+            contexto = { operacion: id, operacionId, uid, uidTitular, propietarioId: titular.propietarioId, cliente: null };
           } else {
             let reserva;
             try {
-              reserva = await registro.reservar({ id: operacionId, uid, operacion: id, ruta: definicion.ruta, iniciadaEn: inicio });
+              reserva = await registro.reservar({
+                id: operacionId, uid, operacion: id, ruta: definicion.ruta, iniciadaEn: inicio,
+                uidTitular, propietarioId: titular.propietarioId,
+              });
             } catch {
               rechazar(
                 503,
@@ -576,7 +684,7 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
             if (gobierno) {
               let uso: Awaited<ReturnType<GobiernoIA['reservarUso']>> | { estado: 'RECHAZADO'; codigo: 'GOBIERNO_NO_DISPONIBLE' };
               try {
-                uso = await gobierno.reservarUso({ uid, operacion: id, operacionId, ahora: ahora() });
+                uso = await gobierno.reservarUso({ uid: uidTitular, operacion: id, operacionId, ahora: ahora() });
               } catch {
                 uso = { estado: 'RECHAZADO', codigo: 'GOBIERNO_NO_DISPONIBLE' };
               }
@@ -596,12 +704,18 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
             }
 
             const metricas = metricasVacias();
-            // FASE 9 · con servicio de llaves, el cliente SOLO se crea con la llave del
-            // usuario; sin ella queda en null (respaldo) y no se consulta ninguna otra clave.
-            const real = llaves && !llaveUsuario
-              ? null
-              : deps.crearClienteProveedor({ uid, operacion: id, ...(llaveUsuario ? { llaveUsuario } : {}) });
-            contexto = { operacion: id, operacionId, uid, cliente: real ? instrumentarCliente(real, metricas) : null };
+            // Sin llave propia del titular no hay proveedor ni clave global compartida.
+            const real = llaves && llaveUsuario
+              ? deps.crearClienteProveedor({
+                  uid: uidTitular, actorUid: uid, propietarioId: titular.propietarioId,
+                  operacion: id, llaveUsuario,
+                })
+              : null;
+            contexto = {
+              operacion: id, operacionId, uid, uidTitular,
+              propietarioId: titular.propietarioId,
+              cliente: real ? instrumentarCliente(real, metricas) : null,
+            };
             const creditosReservados = costeCreditos;
             aplazarFinHastaRegistrar(res, async () => {
               const codigoHttp = res.statusCode;
@@ -611,7 +725,7 @@ export function crearNucleoIA(deps: DependenciasNucleoIA): NucleoIA {
               if (gobierno && creditosReservados > 0 && metricas.exitosas === 0) {
                 try {
                   const devuelto = await gobierno.reembolsar({
-                    uid,
+                    uid: uidTitular,
                     creditos: creditosReservados,
                     operacionId,
                     ventanaDiaClave,
@@ -678,7 +792,7 @@ export function contextoOperacionIA(res: Response): { operacion: IdOperacionIA; 
 }
 
 /** Cliente real de Gemini (antes `getGeminiClient` en server.ts). `null` sin clave. */
-export function crearClienteGemini(apiKey: string | undefined = process.env.GEMINI_API_KEY): ClienteProveedorIA | null {
+export function crearClienteGemini(apiKey: string | undefined): ClienteProveedorIA | null {
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     return null;
   }

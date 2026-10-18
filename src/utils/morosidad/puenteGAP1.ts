@@ -109,7 +109,7 @@ export function eventoMorosidadAEventoNotificacion(
     idempotencyKey,
     inmuebleId: e.inmuebleId,
     propietarioId: e.propietarioId,
-    // WHATSAPP no está implementado en GAP 1 (canal preparado): nunca se solicita.
+    // WhatsApp quedó descartado: este puente solo solicita canales operativos.
     canal: e.destinatarioTipo === 'ADMINISTRACION' ? 'INAPP' : email ? 'EMAIL' : 'INAPP',
     datos: datosPlantillaGAP1(e),
     destinatario: {
@@ -198,7 +198,7 @@ export interface DispatcherContexto {
   repositorio: RepositorioNotificaciones;
   /** Proveedor de email. `null` ⇒ sin transporte ⇒ el dispatcher marca el fallo. */
   emailProvider?: EmailProvider | null;
-  canales?: Partial<Record<'EMAIL' | 'INAPP' | 'WEBHOOK' | 'WHATSAPP', EnviadorCanal | null>>;
+  canales?: Partial<Record<'EMAIL' | 'INAPP' | 'WEBHOOK', EnviadorCanal | null>>;
 }
 
 export interface ResultadoPuenteGAP1 {
@@ -243,7 +243,7 @@ export async function despacharEventoMorosidadPorGAP1(
   const dispatcher = new DispatcherNotificaciones({
     autorizacion: ctx.autorizacion,
     repositorio: ctx.repositorio,
-    canales: canales as Record<'EMAIL' | 'INAPP' | 'WEBHOOK' | 'WHATSAPP', EnviadorCanal | null>,
+    canales: canales as Record<'EMAIL' | 'INAPP' | 'WEBHOOK', EnviadorCanal | null>,
   });
 
   if (sinContacto) {

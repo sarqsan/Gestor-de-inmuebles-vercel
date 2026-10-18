@@ -21,6 +21,7 @@ import {
   ResumenFiscalInmuebleAnual,
 } from '../../utils/cobrosEngine';
 import { uploadJustificanteCobro } from '../../lib/firebase';
+import { JustificantesCobroInbox } from './JustificantesCobroInbox';
 import {
   AlertCircle,
   Banknote,
@@ -413,6 +414,10 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
           </button>
         </div>
       </div>
+
+      {contratos.length > 0 && (
+        <JustificantesCobroInbox contratos={contratos} puedeEditarContrato={puedeEditarContrato} />
+      )}
 
       {/* Panel de Avisos y Seguimiento Automático (Fase 1.3) */}
       {avisos.length > 0 && (

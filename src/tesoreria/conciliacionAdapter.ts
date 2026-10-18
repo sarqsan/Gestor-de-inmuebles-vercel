@@ -8,12 +8,12 @@
  *  - marcar cobros como liquidados (retorna contratos actualizados con historial,
  *    reutilizando el patrón de trazabilidad de cobrosEngine sin modificarlo);
  *  - INTEGRACIÓN A (2026-09-20): conector de LECTURA sobre el motor de
- *    conciliación bancaria canónico (GAP6, `src/utils/conciliacion/*`):
- *    evidencia de pago de liquidación desde `MovimientoBancario` conciliado
- *    (`evidenciaPagoDesdeMovimientoBancario` / `movimientosBancariosParaLiquidacion`).
- *    No inventa conciliación automática: GAP6 es la fuente; aquí solo se
- *    selecciona evidencia de un pago ya conciliado (cadena:
- *    propietario→liquidación→orden de pago→PAIN.001→evidencia→conciliación).
+ *    conciliación bancaria canónico (GAP6/P3, `src/utils/conciliacion/*`):
+ *    el adaptador solo puede ofrecer un movimiento saliente ya CONCILIADO
+ *    manualmente como evidencia opcional; nunca concilia ni registra pagos.
+ *    La aceptación de un justificante o la importación de un extracto, por sí
+ *    solas, no cambian el estado bancario ni los cobros/saldos. El puente de
+ *    sesión de P3 permanece desconectado de esta vía.
  */
 import type { CobroPeriodo, ContratoFormalizacion } from '../types';
 import type { MovimientoBancario, PropuestaConciliacion } from '../types/conciliacion';
@@ -265,11 +265,10 @@ export function sugerirConciliacion(
 /**
  * INTEGRACIÓN A — CONECTOR GAP6 (solo lectura, no duplica el motor de conciliación).
  *
- * La evidencia de que una liquidación se ha PAGADO realment procede de un
- * `MovimientoBancario` ya conciliado/confirmado por el GAP6 canónico
- * (colección `movimientos_bancarios`). Sin conciliación automática: aquí solo
- * se expone qué movimientos bancarios pueden servir de evidencia para una
- * liquidación, y cómo se extraen de ellos la referencia y la fecha de pago.
+ * Este conector legacy no recibe las importaciones ni sugerencias de P3. Si una
+ * integración futura se habilita expresamente, solo un `MovimientoBancario`
+ * con decisión manual `CONCILIADO` podrá ofrecer evidencia; una propuesta o un
+ * justificante aceptado no equivalen a conciliación bancaria ni alteran cobros.
  */
 
 /** Evidencia de pago extraída de un movimiento bancario (GAP6). */
@@ -296,13 +295,10 @@ export function evidenciaPagoDesdeMovimientoBancario(mov: MovimientoBancario): E
 }
 
 /**
- * Lista los movimientos bancarios (GAP6) que pueden servir de EVIDENCIA de pago
- * de una liquidación: del propietario de la liquidación, con PROPUESTA DE
- * CONCILIACIÓN CONFIRMADA (estado 'CONFIRMADO' del GAP6, es decir, conciliado
- * y aplicado) y con importe negativo (salida de caja, es decir, abono real al
- * propietario). Ordenados por fecha de operación (recientes primero).
- *
- * NO inventa conciliación: la lista de confirmadas proviene del propio GAP6.
+ * Lista opcionalmente movimientos bancarios salientes ya conciliados a mano
+ * por el mismo propietario. Un justificante aceptado o una propuesta no bastan.
+ * P3 no publica importaciones a este puente de Tesorería; no se ejecutan pagos
+ * ni se modifican cobros/saldos desde esta función.
  */
 export function movimientosBancariosParaLiquidacion(
   movimientos: MovimientoBancario[],
@@ -310,7 +306,7 @@ export function movimientosBancariosParaLiquidacion(
   liquidacion: Pick<LiquidacionPropietario, 'propietarioId' | 'id'>,
 ): EvidenciaPagoBancaria[] {
   const conciliados = new Set(
-    propuestas.filter((p) => p.estado === 'CONFIRMADO').map((p) => p.movimientoId),
+    propuestas.filter((p) => p.propietarioId === liquidacion.propietarioId && p.estado === 'CONCILIADO').map((p) => p.movimientoId),
   );
   return movimientos
     .filter((m) => m.propietarioId === liquidacion.propietarioId)

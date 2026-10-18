@@ -21,10 +21,11 @@
  *   · lectura de Firestore → REST v1 (`get` y `runQuery`).
  *
  * No es funcionalidad "opcional": es la implementación completa. El único
- * requisito de despliegue es la credencial de servicio (variable de entorno),
- * exactamente igual que `GEMINI_API_KEY` para el resto de endpoints del
- * servidor. Sin credencial la respuesta es 503 CON instrucciones de
- * configuración; nunca se degrada en silencio hacia "sin autenticar".
+ * requisito de despliegue es la credencial de servicio (variable de entorno).
+ * Esta identidad de servidor es independiente de las llaves IA por titular:
+ * `GEMINI_API_KEY` global no autoriza Firestore ni se usa como llave compartida
+ * de proveedor. Sin credencial de Google la ruta protegida falla cerrada con
+ * instrucciones de configuración; nunca degrada en silencio hacia "sin autenticar".
  */
 import {
   createPrivateKey,
@@ -50,9 +51,9 @@ export interface CuentaServicio {
 export type ImplementacionFetch = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: string | Uint8Array;
   signal?: AbortSignal;
-}) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string>; headers?: { get(n: string): string | null } }>;
+}) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string>; arrayBuffer?: () => Promise<ArrayBuffer>; headers?: { get(n: string): string | null } }>;
 
 const TOKEN_URI_DEFECTO = 'https://oauth2.googleapis.com/token';
 const CERTIFICADOS_URI =
@@ -435,6 +436,17 @@ export interface DocumentoLeido {
   updateTime?: string;
 }
 
+export type PrecondicionEscrituraFirestore =
+  | { tipo: 'NO_EXISTE' }
+  | { tipo: 'VERSION'; updateTime: string };
+
+export interface EscrituraDocumentoFirestoreAtomica {
+  coleccion: string;
+  id: string;
+  datos: Record<string, unknown>;
+  precondicion: PrecondicionEscrituraFirestore;
+}
+
 export interface ClienteFirestoreOpciones {
   cuenta: CuentaServicio;
   fetchImpl?: ImplementacionFetch;
@@ -530,6 +542,56 @@ export class ClienteFirestoreRest {
   }
 
   /**
+   * Commit atómico con precondición en cada documento. Se usa para P4: anexo,
+   * aviso pendiente, auditoría, operación idempotente y control anual se crean
+   * juntos o ninguno queda persistido. `false` indica colisión/precondición.
+   */
+  async escribirAtomico(escrituras: readonly EscrituraDocumentoFirestoreAtomica[]): Promise<'COMMIT' | 'CONFLICTO'> {
+    if (!Array.isArray(escrituras) || escrituras.length === 0 || escrituras.length > 500) {
+      throw new Error('El commit Firestore requiere entre 1 y 500 escrituras.');
+    }
+    const rutas = new Set<string>();
+    const writes = escrituras.map((escritura) => {
+      if (!/^[A-Za-z0-9_-][A-Za-z0-9_-]{0,149}$/.test(escritura.coleccion)
+        || !escritura.id || escritura.id.includes('/') || escritura.id.length > 1500
+        || !escritura.datos || typeof escritura.datos !== 'object' || Array.isArray(escritura.datos)) {
+        throw new Error('Ruta o contenido no válido en commit Firestore.');
+      }
+      const ruta = `${escritura.coleccion}/${escritura.id}`;
+      if (rutas.has(ruta)) throw new Error('Un commit no puede escribir dos veces el mismo documento.');
+      rutas.add(ruta);
+      const campos = (codificarValor(escritura.datos) as { mapValue: { fields?: Record<string, ValorFirestore> } }).mapValue.fields || {};
+      const currentDocument = escritura.precondicion.tipo === 'NO_EXISTE'
+        ? { exists: false }
+        : escritura.precondicion.tipo === 'VERSION' && escritura.precondicion.updateTime
+          ? { updateTime: escritura.precondicion.updateTime }
+          : null;
+      if (!currentDocument) throw new Error('Precondición de escritura Firestore no válida.');
+      return {
+        update: { name: `${this.base}/${escritura.coleccion}/${encodeURIComponent(escritura.id)}`, fields: campos },
+        currentDocument,
+      };
+    });
+    const ejecutar = this.opciones.fetchImpl || fetchPorDefecto();
+    const respuesta = await withTimeout(async (signal) =>
+      ejecutar(`${this.base}:commit`, {
+        method: 'POST',
+        headers: await this.cabeceras(),
+        body: JSON.stringify({ writes }),
+        signal,
+      }) as Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> }>,
+    );
+    if (!respuesta.ok) {
+      const detalle = await respuesta.text().catch(() => '');
+      if (respuesta.status === 409 || (respuesta.status === 400 && /ALREADY_EXISTS|FAILED_PRECONDITION|ABORTED/i.test(detalle))) {
+        return 'CONFLICTO';
+      }
+      throw new Error(`Firestore ha rechazado el commit atómico (HTTP ${respuesta.status}). ${detalle}`.trim());
+    }
+    return 'COMMIT';
+  }
+
+  /**
    * Actualiza SOLO los campos indicados (`updateMask`) de un documento que debe
    * existir (`currentDocument.exists=true`): nunca crea documentos por la puerta
    * de atrás ni borra campos no enviados.
@@ -609,6 +671,8 @@ export class ClienteFirestoreRest {
       igualdades?: Array<[campo: string, valor: string]>;
       orden?: { campo: string; direccion: 'ASCENDING' | 'DESCENDING' };
       limite: number;
+      /** `runQuery` offset para continuar consultas acotadas y paginables. */
+      offset?: number;
     },
   ): Promise<DocumentoLeido[]> {
     const ejecutar = this.opciones.fetchImpl || fetchPorDefecto();
@@ -623,6 +687,9 @@ export class ClienteFirestoreRest {
           : {}),
         ...(consulta.orden ? { orderBy: [{ field: { fieldPath: consulta.orden.campo }, direction: consulta.orden.direccion }] } : {}),
         limit: Math.max(1, Math.min(100, consulta.limite)),
+        ...(Number.isInteger(consulta.offset) && (consulta.offset || 0) > 0
+          ? { offset: Math.min(5000, consulta.offset as number) }
+          : {}),
       },
     };
     const respuesta = await withTimeout(async (signal) =>

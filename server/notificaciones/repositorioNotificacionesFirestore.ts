@@ -84,6 +84,25 @@ export function crearRepositorioNotificacionesFirestore(
       return leerNotificacion(idDeNotificacion(idempotencyKey));
     },
 
+    async reclamarIntento(notificacion) {
+      const creado = await puerto.crearDocumento(
+        COLECCION_ENTREGAS_NOTIFICACIONES,
+        idDeIntentoEntrega(notificacion),
+        {
+          notificacionId: notificacion.id,
+          idempotencyKey: notificacion.idempotencyKey,
+          origen: notificacion.origen,
+          tipo: notificacion.tipo,
+          entidadId: notificacion.entidadId,
+          canal: notificacion.canal,
+          estado: 'ENVIANDO',
+          intentos: notificacion.intentos,
+          registradoEn: new Date().toISOString(),
+        },
+      );
+      return creado === 'CREADO';
+    },
+
     async guardar(notificacion) {
       const creado = await puerto.crearDocumento(COLECCION_NOTIFICACIONES, notificacion.id, { ...notificacion });
       if (creado === 'YA_EXISTE') {

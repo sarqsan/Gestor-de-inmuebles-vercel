@@ -4,9 +4,9 @@
  *
  * REGLA DURA (FASE 7): el registro de un compromiso NUNCA modifica un
  * `CobroPeriodo`. Las cuotas solo se dan por «cubiertas» cuando referencian
- * importes YA cobrados en la fuente económica oficial (`cobrosEngine.
- * registrarPagoPeriodo`, alimentada a su vez por GAP6). Por tanto el compromiso
- * es una capa de SEGUIMIENTO, no un segundo libro de cobros.
+ * importes ya registrados por la vía económica oficial (`cobrosEngine.registrarPagoPeriodo`).
+ * Una importación/conciliación bancaria P3 no alimenta ese registro. El compromiso
+ * es una capa de seguimiento, no un segundo libro de cobros.
  */
 
 import type { CompromisoPago, CuotaCompromiso, EstadoCompromiso, EstadoCuotaCompromiso, PiezaDeuda } from '../../types/morosidad';

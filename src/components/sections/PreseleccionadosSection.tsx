@@ -4,7 +4,6 @@ import {
   Building2,
   Search,
   Filter,
-  MessageSquare,
   Copy,
   ExternalLink,
   Calendar,
@@ -36,7 +35,6 @@ import {
   SolicitudDocumentacion,
   ContratoFormalizacion,
 } from '../../types';
-import { ConfirmWhatsappSentModal } from '../ConfirmWhatsappSentModal';
 import { getSolicitudDocEstadoInfo } from '../../utils/documentTemplates';
 import { getFormalizacionEstadoInfo } from '../../utils/contratoEngine';
 
@@ -76,9 +74,6 @@ export const PreseleccionadosSection: React.FC<PreseleccionadosSectionProps> = (
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
   
-  // WhatsApp confirm modal state
-  const [activeWhatsappInv, setActiveWhatsappInv] = useState<InvitacionVisita | null>(null);
-  const [activeWhatsappUrl, setActiveWhatsappUrl] = useState<string | undefined>(undefined);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -150,67 +145,12 @@ export const PreseleccionadosSection: React.FC<PreseleccionadosSectionProps> = (
     return newInv;
   };
 
-  // WhatsApp link generator & handler
-  const handleOpenWhatsapp = (candidate: Candidato) => {
-    const inv = getOrCreateInvitacion(candidate);
-
-    // Build unique visit URL
-    const publicOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-    const visitUrl = `${publicOrigin}/#visita/${inv.token}`;
-
-    // Clean phone number (remove spaces, plus sign for WhatsApp API)
-    const cleanPhone = candidate.telefono.replace(/\s+/g, '').replace('+', '');
-
-    // Standardized personalized message template
-    const messageText = `Hola ${candidate.nombre.split(' ')[0]}.
-
-Has sido preseleccionado para visitar la vivienda de ${candidate.inmuebleNombre}.
-
-Puedes consultar los días y horarios disponibles y elegir el que mejor te venga en el siguiente enlace:
-
-${visitUrl}
-
-Los horarios se actualizan en tiempo real, por lo que te recomendamos elegir cuanto antes.
-
-Si finalmente no puedes asistir a la visita que reserves, por favor avísanos para poder liberar el horario.
-
-Un saludo.`;
-
-    const encodedText = encodeURIComponent(messageText);
-    const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
-
-    // If status is still PENDIENTE DE ENVIAR, change to ENLACE GENERADO
-    if (inv.status === 'PENDIENTE DE ENVIAR') {
-      onSaveInvitacion({ ...inv, status: 'ENLACE GENERADO' });
-    }
-
-    // Open WhatsApp
-    window.open(waUrl, '_blank');
-
-    // Trigger confirm modal
-    setActiveWhatsappInv(inv);
-    setActiveWhatsappUrl(waUrl);
-  };
-
   const handleCopyLink = (candidate: Candidato) => {
     const inv = getOrCreateInvitacion(candidate);
     const publicOrigin = typeof window !== 'undefined' ? window.location.origin : '';
     const visitUrl = `${publicOrigin}/#visita/${inv.token}`;
     navigator.clipboard.writeText(visitUrl);
     showToast(`Enlace de visita copiado para ${candidate.nombre}`);
-  };
-
-  const handleConfirmWhatsappSent = (invitacionId: string) => {
-    const inv = invitaciones.find((i) => i.id === invitacionId) || activeWhatsappInv;
-    if (inv) {
-      const updated: InvitacionVisita = {
-        ...inv,
-        status: 'ENVIADO',
-        sentAt: new Date().toISOString(),
-      };
-      onSaveInvitacion(updated);
-      showToast(`Invitación marcada como ENVIADA a ${inv.candidateNombre}`);
-    }
   };
 
   // Bulk preparation of invitations
@@ -285,7 +225,7 @@ Un saludo.`;
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-            ENVIADO
+            ENVIADO · HISTÓRICO
           </span>
         );
       case 'ENLACE GENERADO':
@@ -367,7 +307,7 @@ Un saludo.`;
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
-          <span className="text-[11px] font-medium text-blue-600 uppercase tracking-wider block">Enviadas</span>
+          <span className="text-[11px] font-medium text-blue-600 uppercase tracking-wider block">Con actividad</span>
           <span className="text-2xl font-bold text-blue-600 block mt-1">{invitacionesEnviadasCount}</span>
         </div>
 
@@ -431,7 +371,7 @@ Un saludo.`;
               <option value="todos">📌 Todos los estados</option>
               <option value="PENDIENTE DE ENVIAR">🟡 Pendiente de enviar</option>
               <option value="ENLACE GENERADO">🟡 Enlace generado</option>
-              <option value="ENVIADO">🔵 Enviado</option>
+              <option value="ENVIADO">🔵 Enviado (histórico)</option>
               <option value="ABIERTO">🟣 Abierto</option>
               <option value="HORARIO RESERVADO">🟢 Horario reservado</option>
               <option value="CANCELADO">⚪ Cancelado</option>
@@ -587,7 +527,7 @@ Un saludo.`;
                         {renderInvitationStatusBadge(status)}
                         {inv?.sentAt && (
                           <div className="text-[10px] text-slate-400 mt-1">
-                            Enviado: {new Date(inv.sentAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                            Registro histórico: {new Date(inv.sentAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         )}
                         {inv?.openedAt && status === 'ABIERTO' && (
@@ -669,16 +609,6 @@ Un saludo.`;
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {/* WhatsApp button */}
-                          <button
-                            onClick={() => handleOpenWhatsapp(cand)}
-                            title="Enviar invitacion por WhatsApp"
-                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors flex items-center gap-1"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                            <span>WhatsApp</span>
-                          </button>
-
                           {/* Copy Link button */}
                           <button
                             onClick={() => handleCopyLink(cand)}
@@ -864,13 +794,6 @@ Un saludo.`;
                       <span>Ver</span>
                     </button>
 
-                    <button
-                      onClick={() => handleOpenWhatsapp(cand)}
-                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>WhatsApp</span>
-                    </button>
                   </div>
                 </div>
               );
@@ -879,16 +802,6 @@ Un saludo.`;
         </div>
       )}
 
-      {/* WHATSAPP CONFIRMATION MODAL */}
-      <ConfirmWhatsappSentModal
-        invitacion={activeWhatsappInv}
-        whatsappUrl={activeWhatsappUrl}
-        onConfirmSent={handleConfirmWhatsappSent}
-        onClose={() => {
-          setActiveWhatsappInv(null);
-          setActiveWhatsappUrl(undefined);
-        }}
-      />
     </div>
   );
 };

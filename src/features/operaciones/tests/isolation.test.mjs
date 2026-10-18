@@ -9,20 +9,15 @@ import { ejecutarRecorridoFicticio } from '../demo/recorrido.mjs';
 import { POLITICA_ESTADOS } from '../index.ts';
 const modulo = fileURLToPath(new URL('../', import.meta.url));
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
-const custodia = '46bb9f79b43949d833acf00e9557e575769d039a';
-// BLOQUE 5 — CUSTODIA: la base histórica puede no existir en este clon
-// (incidencia de infraestructura, no del bloque). Cuando existe, la comprobación
-// original se ejecuta sin cambios; cuando no, se compara contra la referencia
-// verificable más próxima (el commit del que parte el bloque) exigiendo lo mismo:
-// los ficheros patrimoniales byte a byte y el registro solo con inserciones.
-const REFERENCIA_LOCAL_BLOQUE_5 = '46bb9f79b43949d833acf00e9557e575769d039a';
+// Custodia histórica de archivos del port B+C (46bb) y base efectiva del worktree (f782).
+const BASE_PATRIMONIAL_B = '46bb9f79b43949d833acf00e9557e575769d039a';
+const BASE_CHECKOUT = 'f782e53ed3beefa4cdcae4e839457480f9cfd995';
 const excepcion = 'src/features/patrimonial/tests/isolation.test.mjs';
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
 function existeCommit(sha) { try { git('cat-file', '-e', `${sha}^{commit}`); return true; } catch { return false; } }
 function referenciaCustodia(base) {
   if (existeCommit(base)) return { sha: base, historica: true };
-  if (existeCommit(REFERENCIA_LOCAL_BLOQUE_5)) return { sha: REFERENCIA_LOCAL_BLOQUE_5, historica: false };
-  return null;
+  return null; // La falta del OID exacto bloquea; no se sustituye por otro ancestro.
 }
 /** Superficie EXACTA del BLOQUE 5 (nunca `src/utils` completo). */
 const SUPERFICIE_BLOQUE_5 = [
@@ -63,6 +58,146 @@ const SUPERFICIE_REPARACION_FIN_MES = [
   'src/utils/mantenimientoEngine.ts',
   'src/utils/mantenimientoEngine.test.ts',
   'docs/REPARACION-FINAL-INTEGRACION-BLOQUES-3-9-2026-09.md',
+];
+
+// Integración selectiva de la sesión 2026-10-17: excepciones por fichero, no
+// por directorio. Cada grupo conserva su propietario funcional, fase, alcance
+// y prueba local; el resto del diff (en particular Rules/UI/persistencia P3)
+// continúa fuera de alcance y mantiene roja la guardia hasta decisión posterior.
+const SUPERFICIE_P1_DEC_01 = [
+  // Avisos: correo/bandeja fail-closed, sin probar entrega SMTP real. 136/136.
+  'server/notificaciones/repositorioNotificacionesFirestore.ts',
+  'server/notificaciones/rutasCronAvisos.ts',
+  'src/components/sections/PreseleccionadosSection.tsx',
+  'src/lib/bandejaAvisos.ts',
+  'src/notificaciones/canales.ts',
+  'src/notificaciones/dispatcher.ts',
+  'src/notificaciones/resolucion.ts',
+  'src/seguimiento/incidencias.ts',
+  'src/types/morosidad.ts',
+  'src/types/notificaciones.ts',
+  'src/utils/documentTemplates.ts',
+  'src/utils/morosidad/puenteGAP1.ts',
+  'tests/financiacion.test.ts',
+  'tests/notificaciones-fase-a.test.ts',
+  'tests/notificaciones.test.ts',
+  'tests/seguimiento-incidencias.test.ts',
+  'tests/smtp-aceptacion-regresion.test.ts',
+];
+const SUPERFICIE_P2_P4 = [
+  // Justificantes y actualización de renta: pruebas con puertos/mocks; sin I/O real.
+  'server.ts',
+  'server/titularidades/googleBackend.ts',
+  'server/actualizacionRenta/rutasActualizacionRenta.test.ts',
+  'server/actualizacionRenta/rutasActualizacionRenta.ts',
+  'server/actualizacionRenta/servicioActualizacionRenta.test.ts',
+  'server/actualizacionRenta/servicioActualizacionRenta.ts',
+  'server/cobros/almacenGoogleStorage.test.ts',
+  'server/cobros/almacenGoogleStorage.ts',
+  'server/cobros/justificantesCobro.test.ts',
+  'server/cobros/justificantesCobro.ts',
+  'server/cobros/rutasJustificantesCobro.ts',
+  'src/components/ActualizacionRentaPreviewPanel.test.tsx',
+  'src/components/ActualizacionRentaPreviewPanel.tsx',
+  'src/components/portal-inquilino/PortalRecibos.tsx',
+  'src/components/portal-inquilino/PresentarJustificanteCobro.ui.test.tsx',
+  'src/components/portal-inquilino/PresentarJustificanteCobro.tsx',
+  'src/components/sections/JustificantesCobroInbox.ui.test.tsx',
+  'src/components/sections/JustificantesCobroInbox.tsx',
+  'src/lib/actualizacionRentaApi.ts',
+  'src/lib/justificantesCobroApi.ts',
+  'src/utils/actualizacionRentaEngine.test.ts',
+  'src/utils/actualizacionRentaEngine.ts',
+  'tests/justificantes-cobro-reglas.test.ts',
+];
+const SUPERFICIE_IA_POR_TITULAR = [
+  // IA: pagador/llave/cuota por titular y actor separado; 341/341 con dobles.
+  'firestore.indexes.json',
+  'server/ia/configuracionIA.ts',
+  'server/ia/contextoTitularIA.ts',
+  'server/ia/gobiernoIA.ts',
+  'server/ia/nucleoIA.ts',
+  'server/ia/registroOperacionesIA.ts',
+  'server/ia/validacionEntornoIA.ts',
+  'src/components/ia/PanelGobiernoIA.test.tsx',
+  'src/components/ia/PanelGobiernoIA.tsx',
+  'src/ia/gobiernoIAContrato.ts',
+  'tests/ia-contexto-titular.test.ts',
+  'tests/ia-fase1-arranque-seguro.test.ts',
+  'tests/ia-fase1-integracion-server.test.ts',
+  'tests/ia-fase1-nucleo.test.ts',
+  'tests/ia-fase1-registro-firestore.test.ts',
+  'tests/ia-fase2-aislamiento-usuarios.test.ts',
+  'tests/ia-fase2-bloqueo-consumo.test.ts',
+  'tests/ia-fase2-gobierno-firestore.test.ts',
+  'tests/ia-fase2-gobierno.test.ts',
+  'tests/ia-fase7-gobierno-permisos-costes.test.ts',
+  'tests/ia-fase9-llaves-usuario.test.ts',
+];
+const SUPERFICIE_P3_DOMINIO_SIN_PERSISTENCIA = [
+  // Conciliación: validación/matching/decisión local; no UI, Firestore ni Rules.
+  // Prueba: tests/conciliacion-p3 + legacy (40/40); Norma 43 sigue fail-closed.
+  'src/types/conciliacion.ts',
+  'src/tests/tests_conciliacion.ts',
+  'src/utils/conciliacion/conciliacionEngine.ts',
+  'src/utils/conciliacion/csvParser.ts',
+  'src/utils/conciliacion/idempotencia.ts',
+  'src/utils/conciliacion/importEngine.ts',
+  'src/utils/conciliacion/matchingEngine.ts',
+  'src/utils/conciliacion/mt940Parser.ts',
+  'src/utils/conciliacion/norma43Parser.ts',
+  'src/utils/conciliacion/normalizador.ts',
+  'src/utils/conciliacion/ofxParser.ts',
+  'src/utils/conciliacion/validacionExtracto.ts',
+  'tests/conciliacion-legacy.test.ts',
+  'tests/conciliacion-p3.test.ts',
+];
+const SUPERFICIE_DOCS_AUDITORIA = [
+  // Custodia, 79 fichas y evidencia local; no son validación productiva.
+  'docs/COMPROBACION-MAIN-MAPA-2026-10-16.md',
+  'docs/CONTINUIDAD-ARENA.md',
+  'docs/CONTINUIDAD-FASE-A-RONDA-2026-10-16.md',
+  'docs/ESTADO-GIT-ERP.md',
+  'docs/FASE-A-PUESTA-EN-MARCHA-AVISOS.md',
+  'docs/MAPA-MAESTRO-ERP-ACTUAL.md',
+  'docs/PLAN-CAPACIDADES-DECISIONES-2026-10-16.md',
+  'docs/P2-JUSTIFICANTES-COBRO-VALIDACION-LOCAL.md',
+  'docs/P4-ACTUALIZACION-RENTA-VALIDACION-LOCAL.md',
+  'docs/anexos/MAPA-MAESTRO-ERP-INVENTARIO-2026-10-16.md',
+  'docs/anexos/MAPA-MAESTRO-ERP-RAMAS-2026-10-16.md',
+  'scripts/validar-inventario-capacidades.mjs',
+];
+const SUPERFICIE_SESION_AUDITADA = [
+  ...SUPERFICIE_P1_DEC_01,
+  ...SUPERFICIE_P2_P4,
+  ...SUPERFICIE_IA_POR_TITULAR,
+  ...SUPERFICIE_P3_DOMINIO_SIN_PERSISTENCIA,
+  ...SUPERFICIE_DOCS_AUDITORIA,
+];
+const ELIMINACIONES_DEC_01 = ['src/components/ConfirmWhatsappSentModal.tsx'];
+// P3 pendiente: estas rutas no se autorizan por coincidencias heredadas de la
+// superficie UX; el gate conserva explícitamente la UI/persistencia/Rules fuera
+// de la integración selectiva mientras falten Norma 43 normativa y emulator real.
+const P3_NO_INTEGRAR_SIN_GUARDIAS = [
+  'firestore.rules',
+  'scripts/test-bloque-b.ts',
+  'scripts/test-bloque-e.ts',
+  'src/components/modals/MorosidadDetalleModal.tsx',
+  'src/components/sections/ConciliacionBancariaSection.tsx',
+  'src/components/sections/FacturaElectronicaB2BPanel.tsx',
+  'src/components/sections/FacturacionSection.tsx',
+  'src/components/sections/MorosidadSection.tsx',
+  'src/components/sections/TesoreriaSection.tsx',
+  'src/lib/conciliacionFirestore.ts',
+  'src/lib/conciliacionSession.ts',
+  'src/tesoreria/conciliacionAdapter.ts',
+  'src/utils/facturaElectronicaB2BEngine.ts',
+  'src/utils/morosidad/compromisos.ts',
+  'src/utils/morosidad/morosidadEngine.test.ts',
+  'src/utils/morosidad/morosidadEngine.ts',
+  'src/utils/morosidad/morosidadStore.ts',
+  'tests/conciliacion-p3-rules.test.ts',
+  'tests/conciliacion-persistencia.test.ts',
 ];
 function archivos(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => ['tests','persistence','ui'].includes(e.name) ? [] : e.isDirectory() ? archivos(resolve(dir, e.name)) : [resolve(dir, e.name)]);
@@ -111,26 +246,25 @@ test('política default profundamente inmutable; extensiones mediante contexto s
 // Reconciliación B+C: la custodia patrimonial y el diff se comparan con el padre
 // exacto de la integración (Arena B ya reparada, antes de incorporar C). El port
 // no toca archivos patrimoniales productivos ni nada fuera del alcance autorizado.
-const BASE='46bb9f79b43949d833acf00e9557e575769d039a';
+const BASE=BASE_PATRIMONIAL_B;
 const excepcionRegistro='src/features/patrimonial/tests/isolation.test.mjs';
 test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimonial',()=>{
   const referencia=referenciaCustodia(BASE);
-  assert.ok(referencia,'CUSTODIA: no hay referencia verificable (base B ni commit de partida del bloque)');
+  assert.ok(referencia,'CUSTODIA: base patrimonial histórica 46bb no resoluble');
   const paths=git('ls-tree','-r','--name-only',referencia.sha,'--','src/features/patrimonial').split('\n').filter((p)=>p&&p!==excepcionRegistro);
   assert.equal(paths.length,28,`archivos patrimoniales productivos: ${paths.length}`); // 29 en la base menos el registro
   for(const path of paths)assert.deepEqual(readFileSync(resolve(repo,path)),execFileSync('git',['show',`${referencia.sha}:${path}`],{cwd:repo}),path);
-  // Único fichero patrimonial que cambia: su propio registro de superficie de
-  // integración. Solo admite el reemplazo exacto del baseline de reconciliación;
-  // todas las demás líneas del registro quedan idénticas.
-  const previo=git('show',`${referencia.sha}:${excepcionRegistro}`);
+  // Único fichero patrimonial que cambia: su propio registro de superficie. El
+  // hash exacto conserva DEC-01 (WhatsApp retirado) y la reconciliación de las
+  // guardias con la base efectiva f782; el checkpoint 46bb queda histórico y
+  // nunca sustituye la referencia exacta si esta no está disponible.
   const actual=readFileSync(resolve(repo,excepcionRegistro),'utf8');
-  // El registro se actualiza para fijar la superficie combinada B+C. Se pinnea
-  // su contenido exacto y se verifica el baseline; los demás archivos del módulo
-  // siguen exigiéndose idénticos byte a byte más arriba.
   const shaRegistro=createHash('sha256').update(actual).digest('hex');
-  assert.equal(shaRegistro,'6ad1333425b6f741cdd4fc40504040e2606ee22a8e2ab861439e5366591572ba','registro de custodia actualizado fuera de la superficie revisada');
-  assert.match(actual,/const BASE_INTEGRACION = '46bb9f79b43949d833acf00e9557e575769d039a';/);
-  assert.match(actual,/const REFERENCIA_LOCAL_BLOQUE_5 = '46bb9f79b43949d833acf00e9557e575769d039a';/);
+  assert.equal(shaRegistro,'c3077ade2cdbb8c4a50731c7f14a958b63523ad4c6fb1bfae84e1b8c423f7122','registro patrimonial: solo se aceptan las decisiones y baselines exactos documentados');
+  assert.match(actual,/const BASE_CHECKOUT = 'f782e53ed3beefa4cdcae4e839457480f9cfd995';/);
+  assert.match(actual,/46bb9f79/);
+  assert.match(actual,/No caer a una base histórica distinta/);
+  assert.match(actual,/DEC-01/);
   assert.match(actual,/test:bloque-5/);
   assert.match(actual,/test:bloque-7/);
 });
@@ -179,7 +313,6 @@ const SUPERFICIE_BLOQUES_POST_B = [
   'src/components/ComparadorCandidatos.tsx',
   'src/components/ConfiguracionAseguradorasModal.tsx',
   'src/components/ConfirmDeleteModal.tsx',
-  'src/components/ConfirmWhatsappSentModal.tsx',
   'src/components/CrearAgendaVisitasModal.tsx',
   'src/components/CrearEnlaceSolicitudModal.tsx',
   'src/components/CrearSolicitudDocModal.tsx',
@@ -309,10 +442,10 @@ const SUPERFICIE_BLOQUES_POST_B = [
   'docs/DICTAMEN-PRE-MERGE-FINAL.md', // §11 de la orden final: dictamen pre-merge
 ];
 const permitidaPostB=(path)=>SUPERFICIE_BLOQUES_POST_B.some((p)=>(p.endsWith('/')?path.startsWith(p):path===p));
-test('diff completo desde la base B permite solo el port y la conexión aditiva documentada',()=>{
+test('diff local desde el checkout f782 permite solo la superficie documentada',()=>{
   const permitida=(path)=>path.startsWith('src/features/operaciones/')||path==='docs/operaciones/alcance.md'
     ||path==='src/lib/auditoria.ts'||path==='src/components/inmueble/CentroOperativoInmueblePanel.tsx'
-    ||path==='firestore.rules'||path==='vite.config.ts'
+    ||path==='vite.config.ts'
     ||path==='tests/fase14-espejo-identidad.test.ts'||path==='tests/helpers/evaluadorReglasFirestore.ts'
     ||path===excepcionRegistro
     // superficie EXACTA y mínima del BLOQUE 5 (Operaciones → Fiscalidad)
@@ -323,10 +456,16 @@ test('diff completo desde la base B permite solo el port y la conexión aditiva 
     ||SUPERFICIE_REPARACION_FIN_MES.includes(path)
     // BLOQUES 10-12: superficie EXACTA revisada en esos bloques (declarada
     // fichero a fichero; nunca directorios preexistentes completos).
-    ||permitidaPostB(path);
-  const referencia=referenciaCustodia(BASE);
-  assert.ok(referencia,'CUSTODIA: no hay referencia verificable (base B ni commit de partida del bloque)');
+    ||permitidaPostB(path)
+    // Integración selectiva de la sesión: excepciones exactas con evidencia
+    // focal; la lista no incluye UI/persistencia/Rules P3 ni el resto del diff.
+    ||SUPERFICIE_SESION_AUDITADA.includes(path)
+    ||ELIMINACIONES_DEC_01.includes(path);
+  const referencia=referenciaCustodia(BASE_CHECKOUT);
+  assert.ok(referencia,'CUSTODIA: no hay referencia verificable (referencia exacta f782)');
   const paths=[...git('diff','--name-only',referencia.sha,'--','.').split('\n'),...git('ls-files','--others','--exclude-standard').split('\n')].filter(Boolean);
+  const p3Pendiente=paths.filter((path)=>P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path));
+  assert.deepEqual(p3Pendiente,[],`P3 permanece fuera de integración por Norma 43/persistencia/Rules: ${p3Pendiente.join(', ')}`);
   assert.ok(paths.every(permitida),`Fuera de alcance: ${paths.filter((p)=>!permitida(p)).join(', ')}`);
   // `src/types.ts` y `package.json` son ficheros compartidos: solo se admiten
   // ADICIONES (la ampliación del modelo y la línea del script del bloque). Ninguna

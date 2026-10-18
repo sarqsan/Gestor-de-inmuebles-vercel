@@ -1,27 +1,28 @@
 /**
- * Conciliación Engine — propuestas, confirmación, aplicación, trazabilidad
- * Regla: NO modificar silenciosamente contabilidad operativa
- * Detectada → Propuesta → Validada → Aplicada → Trazable
+ * Motor P3 — matching asistido y decisiones manuales con historial.
+ * Las propuestas no se confirman solas y ninguna transición modifica cobros, gastos o saldos.
+ * Solo el adaptador Firestore autoriza y persiste la decisión junto a su evento.
  */
 
-import { MovimientoBancario, PropuestaConciliacion, CandidatoConciliacion, EstadoMovimientoBancario, HistorialConciliacionItem, ConfiguracionMatching, DEFAULT_CONFIG_MATCHING, ResultadoMatching } from '../../types/conciliacion';
-import { CobroPeriodo, Gasto, ContratoFormalizacion, UsuarioApp } from '../../types';
+import { MovimientoBancario, PropuestaConciliacion, CandidatoConciliacion, EstadoMovimientoBancario, HistorialConciliacionItem, ConfiguracionMatching, DEFAULT_CONFIG_MATCHING, ResultadoMatching, EventoConciliacionBancaria } from '../../types/conciliacion';
+import { CobroPeriodo, Gasto, ContratoFormalizacion, UsuarioApp, Inmueble } from '../../types';
 import { buscarCandidatos } from './matchingEngine';
-import { registrarPagoPeriodo } from '../cobrosEngine';
+import { redactarTextoBancario } from './validacionExtracto';
 
 function generarIdConciliacion(movimientoId: string): string {
-  return `conc_${movimientoId}_${Date.now()}_${Math.random().toString(36).substring(2,6)}`;
+  return `conc_${movimientoId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 }
 
-function crearHistorial(accion: HistorialConciliacionItem['accion'], estadoAnterior?: EstadoMovimientoBancario, estadoNuevo?: EstadoMovimientoBancario, usuario?: string, detalle?: string): HistorialConciliacionItem {
+function crearHistorial(
+  accion: HistorialConciliacionItem['accion'],
+  estadoAnterior?: EstadoMovimientoBancario,
+  estadoNuevo?: EstadoMovimientoBancario,
+  usuario?: string,
+  detalle?: string,
+): HistorialConciliacionItem {
   return {
-    id: `hist_${Date.now()}_${Math.random().toString(36).substring(2,6)}`,
-    fecha: new Date().toISOString(),
-    accion,
-    estadoAnterior,
-    estadoNuevo,
-    usuario,
-    detalle,
+    id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+    fecha: new Date().toISOString(), accion, estadoAnterior, estadoNuevo, usuario, detalle,
   };
 }
 
@@ -29,55 +30,59 @@ export function crearPropuestasParaMovimientos(
   movimientos: MovimientoBancario[],
   cobros: CobroPeriodo[],
   gastos: Gasto[],
-  inmuebles: any[],
+  inmuebles: Inmueble[],
   contratos: ContratoFormalizacion[],
-  config: ConfiguracionMatching = DEFAULT_CONFIG_MATCHING
+  config: ConfiguracionMatching = DEFAULT_CONFIG_MATCHING,
+  propuestasExistentes: PropuestaConciliacion[] = [],
 ): PropuestaConciliacion[] {
-  const propuestas: PropuestaConciliacion[] = [];
-
-  for (const mov of movimientos) {
-    const resultados = buscarCandidatos(mov, cobros, gastos, inmuebles, contratos, config);
-    const mejor = resultados.length>0 ? resultados[0] : undefined;
-    const alternativos = resultados.slice(1,5).map(r=>r.candidato);
-
-    let estado: EstadoMovimientoBancario = 'PENDIENTE';
-    let confianza = mejor?.confianza || 'SIN_MATCH';
-    let puntuacion = mejor?.puntuacion || 0;
-
-    if (mejor && confianza !== 'SIN_MATCH') {
-      estado = 'PROPUESTO';
-    }
-
+  return movimientos.map((mov) => {
+    const resultados = buscarCandidatos(mov, cobros, gastos, inmuebles, contratos, config, propuestasExistentes);
+    const resultadosRelevantes = resultados.filter((resultado) => resultado.puntuacion >= config.umbralBaja && resultado.confianza !== 'SIN_MATCH');
+    const mejor = resultadosRelevantes[0];
+    const segundo = resultadosRelevantes[1];
+    const ambigua = Boolean(mejor && segundo && !mejor.candidato.yaConciliado && !segundo.candidato.yaConciliado
+      && mejor.puntuacion >= config.umbralMedia && Math.abs(mejor.puntuacion - segundo.puntuacion) < 8);
+    const requiereRevision = mov.estadoValidacion === 'REQUIERE_REVISION';
+    const candidatoBloqueado = Boolean(mejor?.candidato.yaConciliado);
+    const candidato = !ambigua && !requiereRevision && !candidatoBloqueado ? mejor?.candidato : undefined;
+    const alternativos = resultadosRelevantes.slice(ambigua || requiereRevision || candidatoBloqueado ? 0 : 1, 5).map((r) => r.candidato);
+    const confianza = candidato ? mejor?.confianza || 'SIN_MATCH' : ambigua ? 'MEDIA' : 'SIN_MATCH';
+    const puntuacion = candidato ? mejor?.puntuacion || 0 : ambigua ? mejor?.puntuacion || 0 : 0;
+    const estado: EstadoMovimientoBancario = candidato || ambigua ? 'PROPUESTO' : 'PENDIENTE';
+    const historial = crearHistorial('PROPUESTA', undefined, estado, 'SISTEMA',
+      requiereRevision ? 'Movimiento marcado para revisión de datos.'
+        : ambigua ? 'Hay varios candidatos próximos; requiere selección humana.'
+          : candidatoBloqueado ? 'El mejor candidato ya tiene una conciliación activa.'
+            : `Sugerencia ${confianza} ${puntuacion}pts; no confirmada.`);
     const propuesta: PropuestaConciliacion = {
       id: generarIdConciliacion(mov.idMovimiento),
       movimientoId: mov.idMovimiento,
       idImportacion: mov.idImportacion,
       propietarioId: mov.propietarioId,
-      candidato: mejor?.candidato,
+      ...(candidato ? { candidato } : {}),
       candidatosAlternativos: alternativos,
       puntuacion,
       confianza,
-      factores: mejor?.factores || [],
+      factores: candidato ? mejor?.factores || [] : [],
       estado,
       importeMovimiento: mov.importe,
-      importeCandidato: mejor?.candidato.importe,
-      diferenciaImporte: mejor?.diferenciaImporte,
-      esDiscrepancia: mejor?.esDiscrepancia || false,
+      ...(candidato ? { importeCandidato: candidato.importe, diferenciaImporte: mejor?.diferenciaImporte } : {}),
+      esDiscrepancia: candidato ? Boolean(mejor?.esDiscrepancia) : false,
       toleranciaAplicada: config.toleranciaImporteExacto,
       ventanaDias: config.ventanaDiasMedia,
-      fechaPropuesta: new Date().toISOString(),
+      fechaPropuesta: mov.fechaImportacion,
       propuestaPor: 'SISTEMA',
-      historial: [crearHistorial('PROPUESTA', undefined, estado, 'SISTEMA', `Propuesta ${confianza} ${puntuacion}pts`)],
+      historial: [historial],
       aplicado: false,
       reversible: true,
+      revision: 0,
+      ...(ambigua ? { ambigua: true } : {}),
     };
-
-    propuestas.push(propuesta);
-  }
-
-  return propuestas;
+    return propuesta;
+  });
 }
 
+/** @deprecated Transición legacy de GAP6; P3 usa `decidirConciliacionManual` y exige actor+motivo en Firestore. */
 export function confirmarPropuesta(
   propuesta: PropuestaConciliacion,
   usuario?: UsuarioApp | null,
@@ -154,8 +159,8 @@ export function cambiarCandidato(
 }
 
 /**
- * Aplicar conciliación — solo para coincidencias inequívocas según umbrales
- * Valida: candidato existe, no ya conciliado, movimiento no duplicado, no modificado desde propuesta
+ * @deprecated Compatibilidad de la suite GAP6 histórica; la UI P3 no llama esta ruta.
+ * No modifica cobros/gastos/saldos. P3 usa `decidirConciliacionManual` más la transacción auditada.
  */
 export function aplicarConciliacion(
   propuesta: PropuestaConciliacion,
@@ -163,98 +168,188 @@ export function aplicarConciliacion(
   gastos: Gasto[],
   contratos: ContratoFormalizacion[],
   movimientos: MovimientoBancario[],
-  usuario?: UsuarioApp | null
+  usuario?: UsuarioApp | null,
 ): { propuestaActualizada: PropuestaConciliacion; contratoActualizado?: ContratoFormalizacion; error?: string } {
-  // Validaciones
-  if (propuesta.estado !== 'CONFIRMADO') {
-    return { propuestaActualizada: propuesta, error: 'Solo se puede aplicar propuesta CONFIRMADA' };
+  if (propuesta.estado !== 'CONFIRMADO') return { propuestaActualizada: propuesta, error: 'Solo se puede aplicar una propuesta confirmada.' };
+  if (!propuesta.candidato) return { propuestaActualizada: propuesta, error: 'Sin candidato.' };
+  if (propuesta.aplicado) return { propuestaActualizada: propuesta, error: 'La propuesta ya fue aplicada.' };
+  if (propuesta.candidato.yaConciliado) return { propuestaActualizada: propuesta, error: 'El candidato ya está conciliado.' };
+  const movimiento = movimientos.find((m) => m.idMovimiento === propuesta.movimientoId);
+  if (!movimiento || movimiento.propietarioId !== propuesta.propietarioId) {
+    return { propuestaActualizada: propuesta, error: 'Movimiento fuera del ámbito o inexistente.' };
   }
-  if (!propuesta.candidato) {
-    return { propuestaActualizada: propuesta, error: 'Sin candidato' };
+  if (propuesta.candidato.propietarioId !== propuesta.propietarioId) {
+    return { propuestaActualizada: propuesta, error: 'Candidato fuera del ámbito del titular.' };
   }
-  if (propuesta.aplicado) {
-    return { propuestaActualizada: propuesta, error: 'Ya aplicado' };
+  if (propuesta.confianza !== 'ALTA') {
+    return { propuestaActualizada: propuesta, error: 'La propuesta requiere revisión y decisión manual.' };
   }
-
-  // Candidato sigue existiendo
   if (propuesta.candidato.tipo === 'COBRO') {
-    const cobro = cobros.find(c=>c.id===propuesta.candidato!.id);
-    if (!cobro) return { propuestaActualizada: propuesta, error: 'Cobro candidato ya no existe' };
-    // No ya conciliado (verificar si tiene movimiento asociado en metadatos)
-    // Simplificación: si estado es PAGADO/VERIFICADO ya cobrado, no debería volver a conciliar
-    // Pero permitimos si es discrepancia? No, si ya está conciliado, no aplicar automáticamente
-    if (propuesta.candidato.yaConciliado) {
-      return { propuestaActualizada: propuesta, error: 'Candidato ya conciliado' };
+    const cobro = cobros.find((item) => item.id === propuesta.candidato!.id);
+    if (!cobro || (cobro.propietarioId && cobro.propietarioId !== propuesta.propietarioId)) {
+      return { propuestaActualizada: propuesta, error: 'Cobro fuera del ámbito o inexistente.' };
     }
-
-    // Buscar contrato
-    const contrato = contratos.find(c=>c.id===cobro.contratoId);
-    if (!contrato) return { propuestaActualizada: propuesta, error: 'Contrato no encontrado' };
-
-    // NO modificar importe histórico, NO cambiar fecha devengo, solo asociar movimiento y registrar trazabilidad
-    // Actualizar únicamente estado necesario según modelo existente, conservar importe original
-    // Si hay diferencia importe, es discrepancia, no modificación silenciosa
-
-    // Aplicar: registrar pago solo si importe recibido 0 y estado pendiente? Pero regla dice no marcar como cobrado únicamente por coincidencia probabilística
-    // Solo aplicar si confianza ALTA y usuario confirmó
-    if (propuesta.confianza !== 'ALTA') {
-      return { propuestaActualizada: propuesta, error: 'Solo ALTA confianza puede aplicarse automáticamente, requiere revisión' };
+    if (cobro.contratoId) {
+      const contrato = contratos.find((item) => item.id === cobro.contratoId);
+      if (!contrato || contrato.propietarioId !== propuesta.propietarioId || contrato.inmuebleId !== cobro.inmuebleId) {
+        return { propuestaActualizada: propuesta, error: 'Contrato fuera del ámbito o inexistente.' };
+      }
     }
-
-    // Crear contrato actualizado con trazabilidad de conciliación
-    // No cambiar importe original del recibo, solo asociar movimiento bancario en historial
-    const contratoActualizado = registrarPagoPeriodo(
-      contrato,
-      cobro.id,
-      {
-        importeRecibido: cobro.importeRecibido >0 ? cobro.importeRecibido : Math.abs(propuesta.importeMovimiento),
-        fechaPago: new Date().toISOString().split('T')[0],
-        metodoPago: 'transferencia',
-        observaciones: `Conciliado bancariamente mov ${propuesta.movimientoId} importe banco ${propuesta.importeMovimiento}€ vs recibo ${cobro.importePrevisto}€ diff ${propuesta.diferenciaImporte?.toFixed(2)}€`,
-      },
-      usuario
-    );
-
-    // Añadir metadato de conciliación en historial del cobro (ya lo hace registrarPagoPeriodo)
-    // Pero además, si hay discrepancia, no modificar importe original, generar discrepancia
-
-    const historialAplicada = crearHistorial('APLICADA', 'CONFIRMADO', 'CONCILIADO', usuario?.nombre || 'Usuario', `Aplicado mov ${propuesta.movimientoId} a cobro ${cobro.id}`);
-
-    const propuestaActualizada: PropuestaConciliacion = {
-      ...propuesta,
-      estado: 'CONCILIADO',
-      aplicado: true,
-      fechaAplicacion: new Date().toISOString(),
-      aplicadoPor: usuario?.id || usuario?.email || 'Usuario',
-      historial: [...propuesta.historial, historialAplicada],
-    };
-
-    return { propuestaActualizada, contratoActualizado };
   } else {
-    // GASTO
-    const gasto = gastos.find(g=>g.id===propuesta.candidato!.id);
-    if (!gasto) return { propuestaActualizada: propuesta, error: 'Gasto candidato ya no existe' };
-
-    if (propuesta.confianza !== 'ALTA') {
-      return { propuestaActualizada: propuesta, error: 'Solo ALTA confianza para gastos' };
+    const gasto = gastos.find((item) => item.id === propuesta.candidato!.id);
+    if (!gasto || (gasto.propietarioId && gasto.propietarioId !== propuesta.propietarioId)) {
+      return { propuestaActualizada: propuesta, error: 'Gasto fuera del ámbito o inexistente.' };
     }
-
-    // Para gastos: asociar movimiento, mantener importe original, registrar usuario, conservar historial
-    // No alterar gasto automáticamente si importe no coincide
-
-    const historialAplicada = crearHistorial('APLICADA', 'CONFIRMADO', 'CONCILIADO', usuario?.nombre || 'Usuario', `Aplicado mov ${propuesta.movimientoId} a gasto ${gasto.id}`);
-
-    const propuestaActualizada: PropuestaConciliacion = {
+  }
+  const ahora = new Date().toISOString();
+  return {
+    propuestaActualizada: {
       ...propuesta,
       estado: 'CONCILIADO',
-      aplicado: true,
-      fechaAplicacion: new Date().toISOString(),
-      aplicadoPor: usuario?.id || 'Usuario',
-      historial: [...propuesta.historial, historialAplicada],
-    };
+      aplicado: false,
+      fechaAplicacion: ahora,
+      aplicadoPor: usuario?.authUid || usuario?.uid || usuario?.id || 'USUARIO_AUTORIZADO',
+      historial: [...propuesta.historial, crearHistorial('APLICADA', 'CONFIRMADO', 'CONCILIADO', usuario?.nombre || 'Usuario', 'Decisión bancaria registrada; la contabilidad operativa no se modificó.')],
+    },
+  };
+}
 
-    return { propuestaActualizada };
+export interface OpcionesDecisionConciliacion {
+  accion: EventoConciliacionBancaria['accion'];
+  actor: UsuarioApp;
+  motivo: string;
+  operacionId: string;
+  candidato?: CandidatoConciliacion;
+  fecha?: string;
+}
+
+function validarActorDecision(propuesta: PropuestaConciliacion, actor: UsuarioApp): string {
+  const actorUid = actor.authUid || actor.uid;
+  if (!actorUid) throw new Error('No se puede registrar la decisión sin UID autenticado.');
+  if (actor.tipoPerfil !== 'ADMINISTRADOR' && actor.tipoPerfil !== 'PROPIETARIO') {
+    throw new Error('Perfil no autorizado para decisiones de conciliación.');
   }
+  if (actor.tipoPerfil === 'PROPIETARIO' && actor.propietarioId !== propuesta.propietarioId) {
+    throw new Error('La propuesta no pertenece al ámbito del titular autenticado.');
+  }
+  return actorUid;
+}
+
+function validarMotivo(motivo: string): string {
+  const limpio = motivo.trim().replace(/[\u0000-\u001f\u007f]/g, ' ');
+  if (limpio.length < 5 || limpio.length > 500) throw new Error('El motivo debe tener entre 5 y 500 caracteres.');
+  const compacto = limpio.replace(/[^A-Z0-9]/gi, '');
+  if (/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/i.test(compacto) || /\d{10,}/.test(compacto)) {
+    throw new Error('El motivo contiene una secuencia bancaria o numérica que no debe almacenarse.');
+  }
+  return redactarTextoBancario(limpio, 500);
+}
+
+function validarCandidatoManual(propuesta: PropuestaConciliacion, candidato: CandidatoConciliacion): void {
+  const tipoEsperado = propuesta.importeMovimiento >= 0 ? 'COBRO' : 'GASTO';
+  if (candidato.propietarioId !== propuesta.propietarioId) throw new Error('El candidato pertenece a otro titular.');
+  if (!candidato.inmuebleId) throw new Error('El candidato no tiene un inmueble verificable.');
+  if (candidato.tipo !== tipoEsperado) throw new Error('El tipo de candidato no coincide con el sentido del movimiento.');
+  if (candidato.yaConciliado) throw new Error('El candidato ya tiene una conciliación activa.');
+}
+
+/** Transición pura; la autorización real y la escritura atómica corresponden al adaptador Firestore. */
+export function decidirConciliacionManual(
+  propuesta: PropuestaConciliacion,
+  opciones: OpcionesDecisionConciliacion,
+): { propuestaActualizada: PropuestaConciliacion; evento: EventoConciliacionBancaria } {
+  const actorUid = validarActorDecision(propuesta, opciones.actor);
+  const motivo = validarMotivo(opciones.motivo);
+  const operacionId = opciones.operacionId.trim();
+  if (!/^[A-Za-z0-9._:-]{1,119}$/.test(operacionId)) throw new Error('Identificador de operación inválido.');
+  const fecha = opciones.fecha ? new Date(opciones.fecha) : new Date();
+  if (!Number.isFinite(fecha.getTime())) throw new Error('Fecha de decisión inválida.');
+  const fechaIso = fecha.toISOString();
+  const accion = opciones.accion;
+  const estadoAnterior = propuesta.estado;
+  const candidatoAnterior = propuesta.candidato;
+  let candidatoNuevo = candidatoAnterior;
+  let estadoNuevo: EstadoMovimientoBancario;
+
+  if (accion === 'CONCILIAR') {
+    if (!['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].includes(estadoAnterior)) throw new Error('La propuesta no está disponible para conciliar.');
+    candidatoNuevo = opciones.candidato || candidatoAnterior;
+    if (!candidatoNuevo) throw new Error('Seleccione un cobro o gasto antes de conciliar.');
+    validarCandidatoManual(propuesta, candidatoNuevo);
+    estadoNuevo = 'CONCILIADO';
+  } else if (accion === 'RECHAZAR') {
+    if (!['PENDIENTE', 'PROPUESTO', 'CONFIRMADO'].includes(estadoAnterior)) throw new Error('La propuesta no está disponible para rechazar.');
+    estadoNuevo = 'RECHAZADO';
+  } else if (accion === 'REVERSAR') {
+    if (estadoAnterior !== 'CONCILIADO' || !candidatoAnterior) throw new Error('Solo se puede revertir una conciliación activa.');
+    estadoNuevo = 'REVERSADO';
+  } else {
+    if (estadoAnterior !== 'CONCILIADO' || !candidatoAnterior) throw new Error('Solo se puede corregir una conciliación activa.');
+    if (!opciones.candidato) throw new Error('Seleccione el candidato correcto.');
+    validarCandidatoManual(propuesta, opciones.candidato);
+    if (opciones.candidato.tipo === candidatoAnterior.tipo && opciones.candidato.id === candidatoAnterior.id) {
+      throw new Error('El candidato corregido debe ser distinto del actual.');
+    }
+    candidatoNuevo = opciones.candidato;
+    estadoNuevo = 'CONCILIADO';
+  }
+
+  const idEvento = `conc_evt_${operacionId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+  const evento: EventoConciliacionBancaria = {
+    id: idEvento,
+    propietarioId: propuesta.propietarioId,
+    propuestaId: propuesta.id,
+    movimientoId: propuesta.movimientoId,
+    accion,
+    fecha: fechaIso,
+    actorUid,
+    actorUsuarioId: opciones.actor.id,
+    motivo,
+    estadoAnterior,
+    estadoNuevo,
+    ...(candidatoAnterior ? { candidatoAnteriorId: `${candidatoAnterior.tipo}:${candidatoAnterior.id}` } : {}),
+    ...(candidatoNuevo ? { candidatoNuevoId: `${candidatoNuevo.tipo}:${candidatoNuevo.id}` } : {}),
+    operacionId,
+  };
+  const accionHistorial = ({
+    CONCILIAR: 'APLICADA', RECHAZAR: 'RECHAZADA', REVERSAR: 'REVERSADA', CORREGIR: 'CORREGIDA',
+  } as const)[accion];
+  const historialItem: HistorialConciliacionItem = {
+    id: idEvento, fecha: fechaIso, accion: accionHistorial, usuario: opciones.actor.nombre,
+    actorUid, motivo, estadoAnterior, estadoNuevo,
+    ...(evento.candidatoAnteriorId ? { candidatoAnteriorId: evento.candidatoAnteriorId } : {}),
+    ...(evento.candidatoNuevoId ? { candidatoNuevoId: evento.candidatoNuevoId } : {}),
+  };
+  const candidatoCambiado = Boolean(candidatoNuevo && (!candidatoAnterior
+    || candidatoNuevo.tipo !== candidatoAnterior.tipo || candidatoNuevo.id !== candidatoAnterior.id));
+  const diferenciaImporte = candidatoNuevo
+    ? Math.abs(propuesta.importeMovimiento) - Math.abs(candidatoNuevo.importe)
+    : undefined;
+  const tolerancia = propuesta.toleranciaAplicada ?? DEFAULT_CONFIG_MATCHING.toleranciaImporteExacto;
+  const propuestaActualizada: PropuestaConciliacion = {
+    ...propuesta,
+    estado: estadoNuevo,
+    candidato: candidatoNuevo,
+    revision: (propuesta.revision || 0) + 1,
+    ultimoEventoId: idEvento,
+    motivoDecision: motivo,
+    historial: [...propuesta.historial, historialItem],
+    ...(accion === 'CONCILIAR' || accion === 'CORREGIR' ? {
+      ambigua: false,
+      importeCandidato: candidatoNuevo?.importe,
+      diferenciaImporte,
+      esDiscrepancia: diferenciaImporte !== undefined && Math.abs(diferenciaImporte) > tolerancia,
+      ...(candidatoCambiado ? { confianza: 'SIN_MATCH' as const, puntuacion: 0, factores: [] } : {}),
+    } : {}),
+    ...(accion === 'CONCILIAR' ? {
+      aplicado: false, fechaConfirmacion: fechaIso,
+      confirmadoPor: actorUid, fechaAplicacion: undefined, aplicadoPor: undefined,
+    } : {}),
+    ...(accion === 'RECHAZAR' ? { fechaRechazo: fechaIso, rechazadoPor: actorUid } : {}),
+    ...(accion === 'REVERSAR' ? { fechaReversion: fechaIso, revertidoPor: actorUid, motivoReversion: motivo } : {}),
+    ...(accion === 'CORREGIR' ? { ambigua: false, aplicado: false, fechaConfirmacion: fechaIso, confirmadoPor: actorUid } : {}),
+  };
+  return { propuestaActualizada, evento };
 }
 
 export function calcularResumenConciliacion(propuestas: PropuestaConciliacion[]): import('../../types/conciliacion').ResumenConciliacion {

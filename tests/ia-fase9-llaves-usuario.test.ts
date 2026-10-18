@@ -62,8 +62,8 @@ import type { IdentidadVerificada } from '../server/titularidades/googleBackend'
 
 const RAIZ = resolve(__dirname, '..');
 const AHORA = new Date('2026-10-16T10:00:00.000Z');
-const LLAVE_ANA = 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q'; // 39 caracteres, forma válida
-const LLAVE_LUIS = 'AIzaSyZ9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J';
+const LLAVE_ANA = ['AIza', 'SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q'].join(''); // fixture sintético de formato, no es una credencial
+const LLAVE_LUIS = ['AIza', 'SyZ9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J'].join(''); // fixture sintético de formato, no es una credencial
 const CLAVE_MAESTRA_B64 = generarClaveMaestraLlaves();
 const claveMaestra = () => {
   const r = resolverClaveMaestraLlaves({ IA_LLAVES_CLAVE_MAESTRA: CLAVE_MAESTRA_B64 });
@@ -139,7 +139,7 @@ describe('IA Fase 9 · contrato puro (forma de la clave y DTO sin secretos)', ()
       ['', 'VACIA'],
       [undefined, 'VACIA'],
       [MARCADOR_LLAVE_GEMINI, 'MARCADOR_DE_POSICION'],
-      ['sk-1234567890123456789012345678901234567', 'PREFIJO'],
+      [['sk-', 'test-fixture'].join(''), 'PREFIJO'],
       ['AIzaCorta', 'LONGITUD'],
       [`${LLAVE_ANA}X`, 'LONGITUD'],
       [LLAVE_ANA.slice(0, -1) + '!', 'CARACTERES'],
@@ -389,6 +389,9 @@ interface OpcionesMontaje {
 
 async function montar(opciones: OpcionesMontaje = {}) {
   const { registro, gobierno } = gobiernoDePrueba();
+  for (const uid of ['uid-ana', 'uid-luis']) {
+    gobierno.fijarPerfil(`owner-${uid}`, { usuarioId: `usuario-owner-${uid}`, tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' }, { authUid: `owner-${uid}`, tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO' });
+  }
   const llaves = opciones.llaves === undefined ? crearServicioLlavesMemoria(claveMaestra()) : opciones.llaves;
   const eventos: EventoLlavesIA[] = [];
   const eventosNucleo: EventoNucleoIA[] = [];
@@ -413,6 +416,13 @@ async function montar(opciones: OpcionesMontaje = {}) {
     llaves,
     ...(opciones.errorLlaves ? { errorLlaves: opciones.errorLlaves } : {}),
     ...(opciones.sinLlave ? { sinLlave: opciones.sinLlave } : {}),
+    resolverTitularIA: async ({ uidActor }) => ({
+      estado: 'RESUELTO' as const,
+      contexto: {
+        propietarioUid: `owner-${uidActor}`, propietarioId: `prop-${uidActor}`,
+        contratoId: `contract-${uidActor}`, inmuebleId: `asset-${uidActor}`,
+      },
+    }),
     crearClienteProveedor: (contexto) => {
       contextosProveedor.push(contexto);
       if (opciones.proveedor) return opciones.proveedor(contexto);
@@ -587,12 +597,15 @@ describe('IA Fase 9 · núcleo con Vía 2 (la llave del usuario crea el cliente 
 
   it('con llave: el cliente se crea con ESA llave (y sólo con ella), cabecera activa y registro PROVEEDOR', async () => {
     const m = await montar();
-    await m.llaves!.registrar({ uid: 'uid-ana', valor: LLAVE_ANA, claveIdempotencia: 'alta-ana', ahora: AHORA });
+    await m.llaves!.registrar({ uid: 'owner-uid-ana', valor: LLAVE_ANA, claveIdempotencia: 'alta-ana', ahora: AHORA });
     const r = await operar(m, 'token-ana', 'op-00002');
     expect(r.status).toBe(200);
     expect(r.headers.get(CABECERA_LLAVE_USUARIO_IA.toLowerCase())).toBe('activa');
     expect(await r.json()).toEqual({ motor: 'proveedor', texto: `respuesta-con-${LLAVE_ANA}` });
-    expect(m.contextosProveedor).toEqual([{ uid: 'uid-ana', operacion: 'REDACTAR_CLAUSULA', llaveUsuario: LLAVE_ANA }]);
+    expect(m.contextosProveedor).toEqual([{
+      uid: 'owner-uid-ana', actorUid: 'uid-ana', propietarioId: 'prop-uid-ana',
+      operacion: 'REDACTAR_CLAUSULA', llaveUsuario: LLAVE_ANA,
+    }]);
     expect(m.registro.listar().at(-1)).toMatchObject({ origenRespuesta: 'PROVEEDOR', llamadasProveedor: 1 });
     // El registro no guarda la llave.
     expect(JSON.stringify(m.registro.listar())).not.toContain(LLAVE_ANA);
@@ -611,7 +624,7 @@ describe('IA Fase 9 · núcleo con Vía 2 (la llave del usuario crea el cliente 
     expect(await r.json()).toMatchObject({ codigo: 'LLAVE_USUARIO_REQUERIDA', altaGuiada: RUTA_LLAVE_USUARIO_IA });
     expect(m.registro.listar()).toHaveLength(0); // nada reservado
     expect(m.eventosNucleo.at(-1)).toMatchObject({ evento: 'RECHAZADA', codigo: 'LLAVE_USUARIO_REQUERIDA', codigoHttp: 428, uid: 'uid-ana' });
-    await m.llaves!.registrar({ uid: 'uid-ana', valor: LLAVE_ANA, claveIdempotencia: 'alta-ana', ahora: AHORA });
+    await m.llaves!.registrar({ uid: 'owner-uid-ana', valor: LLAVE_ANA, claveIdempotencia: 'alta-ana', ahora: AHORA });
     // La misma clave de idempotencia sigue disponible: el 428 no la consumió.
     const ok = await operar(m, 'token-ana', 'op-00001');
     expect(ok.status).toBe(200);
@@ -637,7 +650,7 @@ describe('IA Fase 9 · núcleo con Vía 2 (la llave del usuario crea el cliente 
     expect(await r.json()).toMatchObject({ codigo: 'LLAVES_CLAVE_MAESTRA_INVALIDA' });
   });
 
-  it('estado del núcleo: USUARIO con servicio, NO_CONFIGURADO sin él (y entonces los deps deciden el cliente, como el sandbox de Fase 8)', async () => {
+  it('estado del núcleo: USUARIO con servicio; sin servicio nunca crea cliente compartido ni ejecuta proveedor', async () => {
     const con = await montar();
     expect(con.nucleo.estado().llaves).toBe('USUARIO');
     let pedidos = 0;
@@ -646,8 +659,8 @@ describe('IA Fase 9 · núcleo con Vía 2 (la llave del usuario crea el cliente 
     const r = await operar(sin, 'token-ana', 'op-00001');
     expect(r.headers.get(CABECERA_LLAVE_USUARIO_IA.toLowerCase())).toBe('no-configurado');
     expect(await r.json()).toEqual({ motor: 'respaldo' });
-    expect(pedidos).toBe(1);
-    expect(sin.contextosProveedor[0]).toEqual({ uid: 'uid-ana', operacion: 'REDACTAR_CLAUSULA' });
+    expect(pedidos).toBe(0);
+    expect(sin.contextosProveedor).toEqual([]);
   });
 
   it('el permiso se evalúa ANTES que la llave: un perfil sin permiso no dispara lecturas del almacén', async () => {

@@ -5,8 +5,9 @@
  *
  * Este módulo NO crea un segundo circuito de cobros:
  *  - lee el estado/importe del cobro canónico;
- *  - nunca escribe en `registroCobros` (eso solo lo hacen `registrarPagoPeriodo`
- *    y la conciliación GAP6, que a su vez usa `registrarPagoPeriodo`);
+ *  - nunca escribe en `registroCobros` (la vía oficial de registro es
+ *    `registrarPagoPeriodo`; P3 bancario solo documenta una conciliación manual
+ *    y no crea/actualiza cobros);
  *  - deriva deuda, abre expediente y lo sincroniza cuando la fuente cambia.
  */
 
@@ -56,7 +57,8 @@ export function fechaHoyISO(fechaRef?: string): string {
  *
  * Reglas anti-falsos-positivos:
  *  - ANULADO/DEVUELTO → no reclamable (nunca se abre expediente por un recibo anulado);
- *  - RECIBIDO/VERIFICADO/PAGADO con saldo cubierto → pagada (VERIFICADO = conciliado GAP6);
+ *  - RECIBIDO/VERIFICADO/PAGADO con saldo cubierto → pagada según registro canónico;
+ *    VERIFICADO no implica conciliación bancaria P3;
  *  - INCIDENCIA → en disputa (no recobrable automáticamente);
  *  - un recibo existente PERO no vencido no es morosidad;
  *  - días de gracia configurables (por defecto 2, coherente con
@@ -308,7 +310,7 @@ export function construirExpediente(entrada: EntradaExpediente): {
 }
 
 // ==========================================================================
-// 3) SINCRONIZACIÓN CON LA FUENTE CANÓNICA (cobros / GAP6 / BLOQUE B)
+// 3) SINCRONIZACIÓN DE SOLO LECTURA CON COBROS CANÓNICOS / BLOQUE B
 // ==========================================================================
 
 export interface ResultadoSincronizar {
@@ -328,8 +330,8 @@ export interface ResultadoSincronizar {
 
 /**
  * Vuelve a derivar la deuda del expediente contra los cobros canónicos.
- *  - un cobro que pasa a RECIBIDO/VERIFICADO (pago registrado o conciliado por
- *    GAP6 ⇒ `registrarPagoPeriodo`) marca el tramo como PAGADA y baja el saldo;
+ *  - un cobro que pasa a RECIBIDO/VERIFICADO conforme al registro canónico
+ *    marca el tramo como PAGADA y baja el saldo; P3 no escribe en el cobro;
  *  - un cobro anulado/devuelto se RETIRA de la reclamación con nota (no se borra);
  *  - un cobro nuevo vencido se AÑADE al expediente existente (misma ocurrencia);
  *  - NUNCA se toca el cobro: el sentido de la integración es solo lectura.

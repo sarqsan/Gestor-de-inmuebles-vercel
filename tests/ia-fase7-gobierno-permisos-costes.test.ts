@@ -28,6 +28,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { clienteIA, crearNucleoIA, generateGeminiWithRetry, type ClienteProveedorIA, type EventoNucleoIA } from '../server/ia/nucleoIA';
 import { CAMPOS_REGISTRO_IA, crearRegistroMemoria, type RegistroOperacionesIAMemoria } from '../server/ia/registroOperacionesIA';
 import { crearGobiernoMemoria, type GobiernoMemoriaIA } from '../server/ia/gobiernoIA';
+import type { ResultadoResolverTitularNucleoIA } from '../server/ia/nucleoIA';
+import type { ServicioLlavesIA } from '../server/ia/llavesUsuarioIA';
 import { OPERACIONES_IA, type IdOperacionIA } from '../src/ia/catalogoOperacionesIA';
 import {
   CUOTAS_IA_REFERENCIA,
@@ -106,15 +108,33 @@ async function montar(opciones: OpcionesMontaje = {}) {
   const politica = opciones.politica ?? (opciones.porDefecto ? desdeEntorno({}).politica : plantillaCosteCero());
   const registro: RegistroOperacionesIAMemoria = crearRegistroMemoria();
   const gobierno: GobiernoMemoriaIA = crearGobiernoMemoria(politica, { listarOperaciones: () => registro.listar() });
+  const fijarPerfil = (uid: string, tipoPerfil: string) => gobierno.fijarPerfil(
+    uid,
+    { usuarioId: `usr-${uid}`, tipoPerfil, estado: 'ACTIVO' },
+    { authUid: uid, tipoPerfil, estado: 'ACTIVO' },
+  );
   for (const { uid, tipoPerfil } of PERFILES) {
-    gobierno.fijarPerfil(uid, { usuarioId: `usr-${uid}`, tipoPerfil, estado: 'ACTIVO' }, { authUid: uid, tipoPerfil, estado: 'ACTIVO' });
+    fijarPerfil(uid, tipoPerfil);
+    fijarPerfil(`owner-${uid}`, 'PROPIETARIO');
   }
+  const llaves = {
+    resolverParaOperacion: async (uid: string) => ({ estado: 'DISPONIBLE' as const, valor: `mock-key-${uid}`, sufijo: 'MOCK' }),
+  } as unknown as ServicioLlavesIA;
+  const resolverTitularIA = async ({ uidActor }: { uidActor: string }): Promise<ResultadoResolverTitularNucleoIA> => ({
+    estado: 'RESUELTO',
+    contexto: {
+      propietarioUid: `owner-${uidActor}`, propietarioId: `prop-${uidActor}`,
+      contratoId: `contract-${uidActor}`, inmuebleId: `asset-${uidActor}`,
+    },
+  });
   const { cliente, llamadas } = proveedorFalso();
   const eventos: EventoNucleoIA[] = [];
   const nucleo = crearNucleoIA({
     verificarToken: async (token) => TOKENS[token] ?? null,
     registro,
     gobierno,
+    llaves,
+    resolverTitularIA,
     ...(opciones.errorGobierno ? { errorGobierno: opciones.errorGobierno } : {}),
     crearClienteProveedor: () => (opciones.proveedor === null ? null : opciones.proveedor ?? cliente),
     log: (evento) => eventos.push(evento),
@@ -349,10 +369,10 @@ describe('IA Fase 7 · créditos, idempotencia, reembolso y registro de consumo'
 
   it('la operación nueva cobra su tarifa declarada y el registro lo refleja (lista blanca)', async () => {
     const m = await montar({ politica: construirPoliticaIACompleta({ costeCreditosPorOperacion: tarifas }) });
-    await m.gobierno.ajustarCredito({ uid: 'uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-1', creditos: 5, motivo: 'prueba', ahora: new Date() });
+    await m.gobierno.ajustarCredito({ uid: 'owner-uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-1', creditos: 5, motivo: 'prueba', ahora: new Date() });
     const r = await m.llamar(OP_NUEVA, m.autenticado('token-inquilino', 'f7-cobra-nueva-01'));
     expect(r.status).toBe(200);
-    const cuenta = await m.gobierno.cuenta('uid-inquilino');
+    const cuenta = await m.gobierno.cuenta('owner-uid-inquilino');
     expect(cuenta).toMatchObject({ saldoCreditos: 3, totalOperaciones: 1, totalCreditosConsumidos: 2, ventanaDiaUsos: 1, ventanaMesUsos: 1 });
     const [registro] = m.registro.listar();
     expect(registro).toMatchObject({ uid: 'uid-inquilino', operacion: OP_NUEVA, estado: 'COMPLETADA', codigoHttp: 200, costeCreditos: 2 });
@@ -363,10 +383,10 @@ describe('IA Fase 7 · créditos, idempotencia, reembolso y registro de consumo'
   it('la operación histórica conserva su tarifa (ANALIZAR_INCIDENCIA del profesional)', async () => {
     const m = await montar({ politica: construirPoliticaIACompleta({ costeCreditosPorOperacion: tarifas }) });
     expect((await m.llamar(OP_HISTORICA, m.autenticado('token-inquilino', 'f7-hist-sin-permiso'))).status).toBe(403); // el inquilino no puede
-    await m.gobierno.ajustarCredito({ uid: 'uid-admin', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-2', creditos: 3, motivo: 'prueba', ahora: new Date() });
+    await m.gobierno.ajustarCredito({ uid: 'owner-uid-admin', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-2', creditos: 3, motivo: 'prueba', ahora: new Date() });
     const r = await m.llamar(OP_HISTORICA, m.autenticado('token-admin', 'f7-hist-admin-01'));
     expect(r.status).toBe(200);
-    const cuenta = await m.gobierno.cuenta('uid-admin');
+    const cuenta = await m.gobierno.cuenta('owner-uid-admin');
     expect(cuenta).toMatchObject({ saldoCreditos: 0, totalCreditosConsumidos: 3 });
     expect(m.registro.listar()).toHaveLength(1);
     expect(m.registro.listar()[0]).toMatchObject({ operacion: OP_HISTORICA, uid: 'uid-admin', costeCreditos: 3, estado: 'COMPLETADA' });
@@ -374,14 +394,14 @@ describe('IA Fase 7 · créditos, idempotencia, reembolso y registro de consumo'
 
   it('misma clave de idempotencia ⇒ 409 OPERACION_DUPLICADA y un único descuento', async () => {
     const m = await montar({ politica: construirPoliticaIACompleta({ costeCreditosPorOperacion: tarifas }) });
-    await m.gobierno.ajustarCredito({ uid: 'uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-3', creditos: 5, motivo: 'prueba', ahora: new Date() });
+    await m.gobierno.ajustarCredito({ uid: 'owner-uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-3', creditos: 5, motivo: 'prueba', ahora: new Date() });
     const cabeceras = m.autenticado('token-inquilino', 'f7-idempotente-01');
     const primera = await m.llamar(OP_NUEVA, cabeceras);
     const segunda = await m.llamar(OP_NUEVA, cabeceras);
     expect(primera.status).toBe(200);
     expect(segunda.status).toBe(409);
     expect(await segunda.json()).toMatchObject({ codigo: 'OPERACION_DUPLICADA', operacionId: primera.headers.get('x-ia-operacion-id') });
-    const cuenta = await m.gobierno.cuenta('uid-inquilino');
+    const cuenta = await m.gobierno.cuenta('owner-uid-inquilino');
     expect(cuenta).toMatchObject({ saldoCreditos: 3, totalOperaciones: 1 });
     expect(m.registro.listar()).toHaveLength(1);
     expect(m.llamadas).toHaveLength(1);
@@ -390,10 +410,10 @@ describe('IA Fase 7 · créditos, idempotencia, reembolso y registro de consumo'
   it('proveedor sin éxito ⇒ reembolso íntegro de la tarifa declarada de la operación nueva', async () => {
     const { cliente } = proveedorFalso({ fallos: 5 });
     const m = await montar({ politica: construirPoliticaIACompleta({ costeCreditosPorOperacion: { [OP_NUEVA]: 3 } }), proveedor: cliente });
-    await m.gobierno.ajustarCredito({ uid: 'uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-4', creditos: 3, motivo: 'prueba', ahora: new Date() });
+    await m.gobierno.ajustarCredito({ uid: 'owner-uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-carga-4', creditos: 3, motivo: 'prueba', ahora: new Date() });
     const r = await m.llamar(OP_NUEVA, m.autenticado('token-inquilino', 'f7-reembolso-01'));
     expect(r.status).toBe(200); // el manejador cae a su respaldo determinista
-    const cuenta = await m.gobierno.cuenta('uid-inquilino');
+    const cuenta = await m.gobierno.cuenta('owner-uid-inquilino');
     expect(cuenta).toMatchObject({ saldoCreditos: 3, totalCreditosConsumidos: 0 });
     const [registro] = m.registro.listar();
     expect(registro).toMatchObject({ origenRespuesta: 'RESPALDO', costeCreditos: 3, creditosReembolsados: 3 });
@@ -417,7 +437,7 @@ describe('IA Fase 7 · créditos, idempotencia, reembolso y registro de consumo'
 
   it('cuenta bloqueada y aislamiento entre usuarios siguen intactos', async () => {
     const m = await montar({ politica: plantillaCosteCero() });
-    await m.gobierno.bloquear({ uid: 'uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-bloqueo-1', bloqueado: true, motivo: 'abuso', ahora: new Date() });
+    await m.gobierno.bloquear({ uid: 'owner-uid-inquilino', adminUid: 'uid-admin', claveIdempotencia: 'f7-bloqueo-1', bloqueado: true, motivo: 'abuso', ahora: new Date() });
     const bloqueada = await m.llamar(OP_NUEVA, m.autenticado('token-inquilino', 'f7-bloq-1'));
     expect(bloqueada.status).toBe(403);
     expect(await bloqueada.json()).toMatchObject({ codigo: 'CUENTA_BLOQUEADA' });

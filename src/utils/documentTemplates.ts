@@ -309,35 +309,6 @@ export function buildSolicitudDocumentacion(
 }
 
 /**
- * Genera el texto del mensaje de WhatsApp para enviar la solicitud de documentación
- */
-export function generarMensajeWhatsappSolicitud(solicitud: SolicitudDocumentacion): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const urlPublica = `${origin}/#documentacion/${solicitud.token}`;
-  const primerNombre = solicitud.candidatoNombre.split(' ')[0];
-
-  const totalObligatorios = solicitud.documentos.filter((d) => d.obligatorio).length;
-
-  let texto = `Hola ${primerNombre}.\n\n`;
-  texto += `Tras la visita a la vivienda en *${solicitud.inmuebleNombre}*, para poder avanzar en el proceso de alquiler y tramitar la preselección formal, necesitamos que nos aportes la siguiente documentación:\n\n`;
-
-  solicitud.documentos.forEach((doc, idx) => {
-    texto += `${idx + 1}. *${doc.nombre}*${doc.obligatorio ? ' (Obligatorio)' : ' (Opcional)'}\n`;
-  });
-
-  texto += `\nPuedes subir los documentos cómodamente desde tu móvil u ordenador a través de este enlace seguro privado (sin necesidad de crear cuenta ni registrarte):\n\n`;
-  texto += `${urlPublica}\n\n`;
-
-  if (solicitud.mensajePropietario) {
-    texto += `*Nota del propietario:* ${solicitud.mensajePropietario}\n\n`;
-  }
-
-  texto += `Los archivos se reciben directamente en la plataforma. Si tienes cualquier consulta, no dudes en escribirnos por aquí.\n\nUn saludo.`;
-
-  return texto;
-}
-
-/**
  * Helper para obtener estilos e información de estado de la Solicitud de Documentación
  */
 export function getSolicitudDocEstadoInfo(estado: SolicitudDocEstado) {

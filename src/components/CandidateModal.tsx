@@ -385,7 +385,7 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
             </div>
           </div>
 
-          {/* Preseleccionado Banner & WhatsApp Action */}
+          {/* Preseleccionado: enlace de visita */}
           {(candidato.estado === 'preseleccionado' || candidato.estado === 'visita_reservada') && (
             <div className="bg-amber-50/90 border border-amber-300/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
               <div className="space-y-0.5">
@@ -396,25 +396,11 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-amber-800">
-                  El candidato está preseleccionado. Envíale su invitación por WhatsApp para que elija su horario de cita.
+                  El candidato está preseleccionado. Copia y comparte el enlace individual de visita.
                 </p>
               </div>
 
               <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                <button
-                  onClick={() => {
-                    const token = candidato.cuestionarioToken || `vst-${candidato.id}`;
-                    const visitUrl = `${window.location.origin}/#visita/${token}`;
-                    const cleanPhone = candidato.telefono.replace(/\s+/g, '').replace('+', '');
-                    const messageText = `Hola ${candidato.nombre.split(' ')[0]}.\n\nHas sido preseleccionado para visitar la vivienda de ${candidato.inmuebleNombre}.\n\nPuedes elegir tu horario de visita en el siguiente enlace:\n\n${visitUrl}\n\nUn saludo.`;
-                    window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(messageText)}`, '_blank');
-                  }}
-                  className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-xs"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>Enviar por WhatsApp</span>
-                </button>
-
                 <button
                   onClick={() => {
                     const token = candidato.cuestionarioToken || `vst-${candidato.id}`;

@@ -403,15 +403,6 @@ export const SolicitudDetailModal: React.FC<SolicitudDetailModalProps> = ({
         {/* Modal Action Bar */}
         <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2">
-            <a
-              href={`https://wa.me/${solicitud.candidatoTelefono.replace(/\s+/g, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs"
-            >
-              <Phone className="w-3.5 h-3.5" /> Contactar
-            </a>
-
             <button
               onClick={handleRunAiAnalysis}
               disabled={isAnalyzing}

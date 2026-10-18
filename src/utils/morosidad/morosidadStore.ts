@@ -10,9 +10,9 @@
  *    (ids deterministas + clave de idempotencia GAP 1);
  *  - histórico append-only: todo cambio de estado genera un documento propio en
  *    `expedientes_morosidad_hist`, que nunca se reescribe;
- *  - CERO escritura en cobros: la única vía para «registrar un pago» es
- *    `cobrosEngine.registrarPagoPeriodo` (interfaz oficial, compartida con GAP 6
- *    y con el BLOQUE B). Nunca se marca «pagado» a mano en el expediente.
+ *  - CERO escritura en cobros desde este expediente: la vía operativa para
+ *    registrar un pago es `cobrosEngine.registrarPagoPeriodo`; P3 bancario no
+ *    lo llama ni marca el expediente como pagado.
  */
 
 import type { CobroPeriodo, ContratoFormalizacion, UsuarioApp } from '../../types';
@@ -614,8 +614,8 @@ export interface ResultadoRegistrarPago {
 /**
  * Registra un pago en el cobro canónico usando EXCLUSIVAMENTE
  * `cobrosEngine.registrarPagoPeriodo`, y después re-sincroniza el expediente.
- * Si el cobro ya está conciliado (GAP 6) el pago no se repite: `registrarPagoPeriodo`
- * sobrescribe con el mismo valor (trazable) y la sincronización concluye saldo 0.
+ * Una conciliación bancaria P3 no modifica el cobro canónico ni hace que el
+ * expediente quede pagado; esta vía operativa requiere registrar el pago.
  */
 export async function registrarPago(
   contrato: ContratoFormalizacion,

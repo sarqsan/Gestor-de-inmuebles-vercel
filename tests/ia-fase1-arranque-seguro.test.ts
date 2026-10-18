@@ -58,7 +58,7 @@ describe('app real: un proyecto incompatible no derriba HTTP ni permite operacio
     const json = await respuesta.json();
     expect(json).toEqual({
       status: 'ok', geminiKeyConfigured: false,
-      ia: { registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: 12, errorConfiguracion: 'FIREBASE_PROYECTO_INCOMPATIBLE' },
+      ia: { registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', titularidad: 'BLOQUEADA', autenticacion: 'TOKEN_FIREBASE', operaciones: 12, errorConfiguracion: 'FIREBASE_PROYECTO_INCOMPATIBLE' },
       // FASE A · estado del transporte de avisos y del reloj, sin secretos.
       notificaciones: { email: { modo: 'MODO_SEGURO', proveedor: null }, cron: { configurado: false } },
     });
@@ -147,7 +147,7 @@ describe('defensa del middleware y configuración válida', () => {
       expect(deps.configuracion).toMatchObject({ proyectoId: config.projectId, baseDatosId: config.firestoreDatabaseId, modoRegistro: 'FIRESTORE' });
       // Sin IA_POLITICA_JSON la política es POR_DEFECTO ⇒ aprobación comercial
       // pendiente ⇒ el estado expone el bloqueo preventivo (503 en operaciones).
-      expect(crearNucleoIA(deps).estado()).toEqual({ registro: 'FIRESTORE', gobierno: 'FIRESTORE', llaves: 'NO_CONFIGURADO', bloqueoComercial: 'APROBACION_PENDIENTE', autenticacion: 'TOKEN_FIREBASE', operaciones: 12 });
+      expect(crearNucleoIA(deps).estado()).toEqual({ registro: 'FIRESTORE', gobierno: 'FIRESTORE', llaves: 'NO_CONFIGURADO', titularidad: 'POR_OPERACION', bloqueoComercial: 'APROBACION_PENDIENTE', autenticacion: 'TOKEN_FIREBASE', operaciones: 12 });
     } finally {
       spy.mockRestore();
     }

@@ -35,14 +35,21 @@ test('transiciones persistentes coinciden exactamente con el motor',()=>{
  for(const [tipo,flow]of Object.entries(POLITICA_ESTADOS))assert.deepEqual(data[tipo],flow.transiciones);
 });
 test('contadores verificados impiden cierre pendiente y cancelación de autorización utilizada',()=>{for(const c of ['abiertasPorIncidencia','abiertasPorAveria','presupuestosEnUso']){assert.ok(fn(rules,'opContadores').includes(c));assert.ok(fn(rules,'opInvariantes').includes(c));}assert.match(fn(rules,'opContador'),/diff\(antes\)\.affectedKeys\(\)\.hasOnly/);});
-test('relación de ámbito inmutable y vinculación documental acotada',()=>{for(const s of ["e.get('ambito',null) == b.get('ambito',null)","e.get('propietarioId',null) == b.get('propietarioId',null)","opRef(p,'documento',r.documento,i)"])assert.ok(fn(rules,'opCambio').includes(s));});
+// En f782 opCambio recibe el inmueble validado como argumento `i`; el evento
+// lo enlaza con `data.idAfectado`, y opDominio lo propaga sin resolver otro ámbito.
+test('relación de ámbito inmutable y vinculación documental acotada',()=>{
+ const cambio=fn(rules,'opCambio'), dominio=fn(rules,'opDominio'), evento=fn(rules,'opEventoValido');
+ for(const s of ["e.get('ambito',null) == b.get('ambito',null)","e.get('propietarioId',null) == b.get('propietarioId',null)","opRef(p,'documento',r.documento,i)"])assert.ok(cambio.includes(s));
+ assert.ok(dominio.includes('opCambio(p,e,antes,existeAntes,cmd,i,r)'));
+ assert.ok(evento.includes('opDominio(p,e,antes,existeVieja,cmd,data.idAfectado,h)'));
+});
 // ADAPTACIÓN B: el borrado de inmuebles en B es master-only y el bloque de operaciones no
 // declara permisos sobre inmuebles/propietarios/usuarios. (El update de B no fija
 // propietarioPrincipalId: comportamiento previo de B, no alterado por este port.)
 test('no transferencias ni borrado de titularidad desde operaciones',()=>{assert.doesNotMatch(bloque,/match \/inmuebles|match \/propietarios|match \/usuarios/);const s=rulesFull.slice(rulesFull.indexOf('match /inmuebles/'),rulesFull.indexOf('// 3. CANDIDATOS'));assert.match(s,/allow delete: if isMasterAdmin\(\);/);});
 // ADAPTACIÓN B: firebase.json de B usa forma array y sus índices preexisten; se comprueba
 // que el port no añade ningún índice para las colecciones de operaciones.
-test('firebase.json despliega el archivo real; el port no añade índices',()=>{const c=JSON.parse(readFileSync(new URL('../../../../firebase.json',import.meta.url)));assert.equal(c.firestore[0].rules,'firestore.rules');const idx=JSON.parse(readFileSync(new URL('../../../../firestore.indexes.json',import.meta.url))).indexes;assert.ok(idx.length>0);assert.ok(!JSON.stringify(idx).includes('operaciones'));});
+test('firebase.json despliega el archivo real; el port no añade índices',()=>{const c=JSON.parse(readFileSync(new URL('../../../../firebase.json',import.meta.url)));assert.equal(c.firestore[0].rules,'firestore.rules');const idx=JSON.parse(readFileSync(new URL('../../../../firestore.indexes.json',import.meta.url))).indexes;assert.ok(idx.length>0);assert.equal(idx.filter((index)=>index.collectionGroup === 'operaciones').length,0);});
 // ADAPTACIÓN B: el binding de B tiene su propio contrato (lectura propia + D3
 // anti-autoasignación de carterasL/E). Mismo propósito: operaciones no puede ampliar su
 // propia identidad ni redefinir el binding.
@@ -52,7 +59,7 @@ test('campos de los nueve modelos siguen siendo los del núcleo',()=>{
  assert.deepEqual(Object.fromEntries(branches.map(([,k,v])=>[k,JSON.parse(v.replaceAll("'",'"'))])),CAMPOS);
 });
 test('versión de negocio append-only ligada al audit canónico, sin copia de eventos auditados',()=>{
- const s=fn(rules,'opEventoValido');for(const x of ['fila.versiones == (vieja == null ? [] : vieja.versiones).concat([version])','data.usuarioId == usuarioId','data.registradoEn == request.time','opComando(e,antes,cmd,campos,cambios)'])assert.ok(s.includes(x),x);
+ const s=fn(rules,'opEventoValido');for(const x of ['fila.versiones == (existeVieja ? vieja.versiones : []).concat([version])','data.usuarioId == usuarioId','data.registradoEn == request.time','opComando(e,antes,cmd,campos,cambios)'])assert.ok(s.includes(x),x);
  assert.doesNotMatch(s,/detalles\.evento/);
 });
 test('suma exacta de los diez conceptos máximos y enteros seguros',()=>{const c=fn(rules,'opConceptos');assert.ok(c.includes('c.size() <= 10'));for(let i=0;i<10;i++){assert.ok(c.includes(`opConcepto(c,${i})`));assert.ok(c.includes(`opImporte(c,${i})`));}assert.ok(fn(rules,'opDinero').includes('9007199254740991'));});
@@ -63,35 +70,45 @@ test('CREAR no sobrescribe y gestor E no crea titulares',()=>{assert.ok(fn(rules
 // Guardas de estructura, NO certifican el presupuesto de expresiones del Emulator.
 function acoplamiento(text) {
  const h=fn(text,'opCabeceraValida')+fn(text,'opCabeceraEnlazada'), f=fn(text,'opFilaValida'), evento=fn(text,'opEventoValido');
- for(const x of ["getAfter(path).data", "fila.registro.version is int", "fila.auditId == n.ultimoEventoId", "fila.registro.version == (vieja == null ? 0 : vieja.registro.version) + 1", "n.revision == (a == null ? 0 : a.revision) + 1", "opContadores(a == null ? {} : a,n,{'antes':vieja == null ? null : vieja.registro,'despues':fila.registro})"])assert.ok(h.includes(x),x);
- for(const x of ['h.revision is int','h.revision == (anterior == null ? 0 : anterior.revision) + 1','!exists(auditPath)','opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,vieja,usuarioId)'])assert.ok(f.includes(x),x);
+ for(const x of ["getAfter(path).data", "fila.registro.version is int", "fila.auditId == n.ultimoEventoId", "fila.registro.version == (existeVieja ? vieja.registro.version : 0) + 1", "n.revision == (existeA ? a.revision : 0) + 1", "opContadores(a,n,{'antes':existeVieja ? vieja.registro : {},'existeAntes':existeVieja,'despues':fila.registro})"])assert.ok(h.includes(x),x);
+ for(const x of ['h.revision is int','h.revision == (existeAnterior ? anterior.revision : 0) + 1','!exists(auditPath)',"opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,{'existe':existeVieja,'vieja':vieja},usuarioId)"])assert.ok(f.includes(x),x);
  for(const x of ['h.ultimoEventoId == id','fila.auditId == id','cmd.revisionEsperada == h.revision - 1','data.registradoEn == request.time'])assert.ok(evento.includes(x),x);
 }
 test('acoplamiento exige cambios observables en ambas direcciones y audit nuevo',()=>acoplamiento(rules));
 test('guardas fallan al quitar cualquiera de los testigos de atomicidad',()=>{
- for(const x of ['fila.registro.version == (vieja == null ? 0 : vieja.registro.version) + 1','h.revision == (anterior == null ? 0 : anterior.revision) + 1','!exists(auditPath)','fila.auditId == n.ultimoEventoId'])assert.throws(()=>acoplamiento(rules.replace(x,'true')),{code:'ERR_ASSERTION'},x);
+ for(const x of ['fila.registro.version == (existeVieja ? vieja.registro.version : 0) + 1','h.revision == (existeAnterior ? anterior.revision : 0) + 1','!exists(auditPath)','fila.auditId == n.ultimoEventoId'])assert.throws(()=>acoplamiento(rules.replace(x,'true')),{code:'ERR_ASSERTION'},x);
 });
+// La implementación de f782 evalúa el dominio desde la entidad/evento una sola
+// vez; el argumento de dominio es el inmueble de la evidencia, no el Set de cambios.
 test('evento completo una sola ruta de evaluación: entidad, no cabecera',()=>{
+ const evento=fn(rules,'opEventoValido'), dominio=fn(rules,'opDominio');
  assert.doesNotMatch(fn(rules,'opCabeceraValida'),/opEventoValido|opEsquema|opComando|opCambio|opInvariantes|opEconomia/);
  assert.equal([...rules.matchAll(/opEventoValido\(/g)].length,2); // definición + único llamador
- for(const x of ['opEsquema(e,campos)','opComando(e,antes,cmd,campos,cambios)','opDominio(p,e,antes,cmd,data.idAfectado,cambios,h)'])assert.ok(fn(rules,'opEventoValido').includes(x),x);
- for(const x of ['opCambio(p,e,antes,cmd,i,cambios,r)','opRelaciones(p,e,i,r)','opInvariantes(p,e,h,r)','opEconomia(p,e,r)'])assert.ok(fn(rules,'opDominio').includes(x),x);
+ for(const x of ['opEsquema(e,campos)','opComando(e,antes,cmd,campos,cambios)','opDominio(p,e,antes,existeVieja,cmd,data.idAfectado,h)'])assert.ok(evento.includes(x),x);
+ for(const x of ['opCambio(p,e,antes,existeAntes,cmd,i,r)','opRelaciones(p,e,i,r)','opInvariantes(e,h,r)','opEconomia(e,r)'])assert.ok(dominio.includes(x),x);
 });
 test('autorización sigue en ambas entradas; no bypass por quitar duplicación interior',()=>{
  const s=rules.slice(rules.indexOf('match /operaciones/'));
  assert.equal([...s.matchAll(/allow create, update: if opEscritura\(propietarioId\)/g)].length,1);
  assert.ok(s.includes('allow create, update: if isSignedIn()'));
  assert.match(fn(rules,'opFilaAutorizada'),/return \(isMasterAdmin\(\) \|\| opAcceso\(p,c,true\)\)/);
- assert.ok(fn(rules,'opFilaAutorizada').includes('opFilaValida(p,fila,vieja,c.usuarioId)'));
- assert.ok(s.includes('opCabeceraValida(propietarioId,resource == null ? null : resource.data,incoming())'));
- assert.ok(s.includes('opFilaAutorizada(propietarioId,entidadKey,incoming(),resource == null ? null : resource.data)'));
+ assert.ok(fn(rules,'opFilaAutorizada').includes('opFilaValida(p,fila,existeVieja,vieja,c.usuarioId)'));
+ assert.ok(s.includes('opCabeceraValida(propietarioId,resource != null,resource == null ? {} : resource.data,incoming())'));
+ assert.ok(s.includes('opFilaAutorizada(propietarioId,entidadKey,incoming(),resource != null,resource == null ? {} : resource.data)'));
  assert.ok(fn(rules,'opEventoValido').includes('opActual(p,data.idAfectado)'));
 });
-test('campos y diferencias se calculan una vez, sin relectura de entidad anterior',()=>{
- const e=fn(rules,'opEventoValido');assert.ok(e.includes('let campos = opCampos(e.tipo)'));
- assert.ok(e.includes('let cambios = antes == null ? null : e.diff(antes).affectedKeys()'));
+// La versión verificable de f782 calcula el diff de evento en opEventoValido y
+// el diff de mutación en opCambio. La guardia comprueba que ambos usan el snapshot
+// recibido y no introducen lecturas Firestore ocultas; no afirma que exista una sola
+// evaluación del diff a través de ambas capas.
+test('campos y diferencias usan los snapshots recibidos, sin relectura Firestore',()=>{
+ const e=fn(rules,'opEventoValido'), cambio=fn(rules,'opCambio');
+ assert.ok(e.includes('let campos = opCampos(e.tipo)'));
+ assert.ok(e.includes('let cambios = e.diff(antes).affectedKeys()'));
+ assert.ok(cambio.includes('let cambios = e.diff(b).affectedKeys()'));
  assert.doesNotMatch(e,/exists\(|get\(path\)/);
- for(const f of ['opEsquema','opComando','opCambio'])assert.doesNotMatch(fn(rules,f),/opCampos\(|e\.diff\(b\)\.affectedKeys/);
+ for(const f of ['opEsquema','opComando'])assert.doesNotMatch(fn(rules,f),/opCampos\(|e\.diff\(b\)\.affectedKeys/);
+ assert.equal([...cambio.matchAll(/e\.diff\(b\)\.affectedKeys\(\)/g)].length,1);
 });
 test('esquema de cabecera y contadores no se sustituyen por simple existencia',()=>{
  const s=fn(rules,'opCabeceraValida');assert.ok(s.includes("n.keys().hasOnly(['propietarioId','revision','ultimoEventoId','abiertasPorIncidencia','abiertasPorAveria','presupuestosEnUso'])"));

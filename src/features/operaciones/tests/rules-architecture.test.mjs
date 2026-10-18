@@ -74,7 +74,7 @@ test('arquitectura: autorización no encadena propietarios/carteras que relean e
   for(const forbidden of ['ownsPropietario','activeUser','isPropietarioRole','carterasLectura','carterasEscritura'])assert.ok(!path.includes(forbidden),name+' -> '+forbidden);
  }
  assert.ok(body('opFilaAutorizada').includes('let c = me();'));
- assert.ok(body('opFilaAutorizada').includes('opFilaValida(p,fila,vieja,c.usuarioId)'));
+ assert.ok(body('opFilaAutorizada').includes('opFilaValida(p,fila,existeVieja,vieja,c.usuarioId)'));
  assert.ok(body('opEventoValido').includes('data.usuarioId == usuarioId'));
 });
 test('arquitectura: carga condicional, una expresión get por cada referencia y sin exists',()=>{
@@ -104,7 +104,7 @@ test('arquitectura: solo se seleccionan los campos y transiciones del tipo pedid
 });
 test('arquitectura: delta de abiertas una sola vez para ambos contadores',()=>{
  assert.equal(calls(body('opContadores')).filter(x=>x==='opAbierta').length,2); // una evaluación por snapshot
- assert.ok(body('opContadores').includes('let delta = opAbierta(e)-opAbierta(b)'));
+ assert.ok(body('opContadores').includes('let delta = opAbierta(e,true)-opAbierta(b,existeAntes)'));
  assert.equal((body('opContadores').match(/,delta\)/g)??[]).length,2);
 });
 
@@ -140,11 +140,11 @@ const obligations={
  opInvariantes:["h.abiertasPorIncidencia.get(e.id,0) == 0","h.abiertasPorAveria.get(e.id,0) == 0","h.presupuestosEnUso.get(e.id,0) == 0","r.incidencia.estado in ['CERRADA','CANCELADA']",'e.fechaFin >= e.fechaInicio','e.resultado.size()>0','e.costeCentimos >= 0'],
  opCambio:["e.get('ambito',null) == b.get('ambito',null)","e.get('propietarioId',null) == b.get('propietarioId',null)","e.estado in opDestinos(e.tipo,b.estado)","opRef(p,'documento',r.documento,i)",'r.proveedor.activo == true',"r.averia.estado in ['RESUELTA','CANCELADA']",'e.version == b.version + 1'],
  opPresupuesto:["e.tipo in ['reparacion','factura']","opRef(p,'presupuesto',q,i)",'q.proveedorId == e.proveedorId','e.vinculo != null','q.vinculo.incidenciaId == e.vinculo.incidenciaId','q.vinculo.incidenciaId == e.incidenciaId',"q.vinculo.get('averiaId',e.vinculo.get('averiaId','')) == e.vinculo.get('averiaId','')","q.vinculo.get('reparacionId',e.vinculo.get('reparacionId','')) == e.vinculo.get('reparacionId','')","q.vinculo.get('averiaId',e.get('averiaId','')) == e.get('averiaId','')","q.vinculo.get('reparacionId',e.id) == e.id","e.tipo != 'reparacion' || !(e.estado in ['EN_CURSO','FINALIZADA']) || q.estado == 'APROBADO'"],
- opDominio:['opRelaciones(p,e,i,r)','opCambio(p,e,antes,cmd,i,cambios,r)','opInvariantes(p,e,h,r)','opEconomia(p,e,r)'],
- opCabeceraValida:['n.propietarioId == p','n.revision == (a == null ? 0 : a.revision) + 1','opCabeceraEnlazada(p,a,n)'],
- opCabeceraEnlazada:['fila.auditId == n.ultimoEventoId','fila.registro.version == (vieja == null ? 0 : vieja.registro.version) + 1','opContadores(',"audit.accion in ['OPERACIONES_ANOTAR','OPERACIONES_VINCULAR_DOCUMENTO'] || !('presupuestoId' in fila.registro)",'opPresupuestoEnlazado(p,fila.registro,audit.detalles.inmuebleId)'],
- opFilaValida:['h.revision == (anterior == null ? 0 : anterior.revision) + 1','!exists(auditPath)','opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,vieja,usuarioId)'],
- opEventoValido:['data.usuarioId == usuarioId','cmd.actor == request.auth.uid','data.registradoEn == request.time','h.ultimoEventoId == id','cmd.revisionEsperada == h.revision - 1','fila.versiones == (vieja == null ? [] : vieja.versiones).concat([version])',"version.ambito == {'propietarioId':p,'inmuebleId':data.idAfectado}",'opActual(p,data.idAfectado)','opEsquema(e,campos)','opComando(e,antes,cmd,campos,cambios)'],
+  opDominio:['opRelaciones(p,e,i,r)','opCambio(p,e,antes,existeAntes,cmd,i,r)','opInvariantes(e,h,r)','opEconomia(e,r)'],
+ opCabeceraValida:['n.propietarioId == p','n.revision == (existeA ? a.revision : 0) + 1','opCabeceraEnlazada(p,a,n)'],
+ opCabeceraEnlazada:['fila.auditId == n.ultimoEventoId','fila.registro.version == (existeVieja ? vieja.registro.version : 0) + 1','opContadores(',"audit.accion in ['OPERACIONES_ANOTAR','OPERACIONES_VINCULAR_DOCUMENTO'] || !('presupuestoId' in fila.registro)",'opPresupuestoEnlazado(p,fila.registro,audit.detalles.inmuebleId)'],
+ opFilaValida:['h.revision == (existeAnterior ? anterior.revision : 0) + 1','!exists(auditPath)',"opEventoValido(p,fila.auditId,getAfter(auditPath).data,h,fila,{'existe':existeVieja,'vieja':vieja},usuarioId)"],
+ opEventoValido:['data.usuarioId == usuarioId','cmd.actor == request.auth.uid','data.registradoEn == request.time','h.ultimoEventoId == id','cmd.revisionEsperada == h.revision - 1','fila.versiones == (existeVieja ? vieja.versiones : []).concat([version])',"version.ambito == {'propietarioId':p,'inmuebleId':data.idAfectado}",'opActual(p,data.idAfectado)','opEsquema(e,campos)','opComando(e,antes,cmd,campos,cambios)'],
 };
 function required(text) {
  const fs=functions(text);
@@ -204,10 +204,9 @@ test('plan estático: máximo cuatro referencias de negocio por esquema de entid
  assert.ok(body('opReferencias').includes("let negocio = !(cmd.accion in ['ANOTAR','VINCULAR_DOCUMENTO'])"));
 });
 
-// CUSTODIA (ADAPTACIÓN B): la base git de C no existe en este repositorio; los cuerpos
-// portados quedan fijados con SHA-256 calculado sobre C 1686b8e8. Cualquier desvío falla
-// el test — mismo propósito anti-drift que la comparación original.
-const PINNED = {
+// CUSTODIA: los 35 pines originales son los cuerpos del Rules C verificado
+// (sarqsan/Gestor-alquileres-vercel@1686b8e8). Se conservan sin cambios.
+const PINNED_C = {
   opAbierta: '53472b2bcd0e269345feb84867008ea1b8b42cd1bc07411d9b419f975536721b',
   opAcceso: '60cc67a204e8063e748e2c30ccff9661bcb7ad2b0e92ccaec908bc634c607bba',
   opActual: '6b077a5c851ff2948486f1c0add7d31ea52bac227b05e0c0a2d6550b46e91c49',
@@ -244,8 +243,31 @@ const PINNED = {
   opUso: 'f5abd4adbebcfa1498fbbe37f2dd166844eb5a0c3c89c97dcb7daf44fdd9a79b',
   opVinculo: 'd38a3493ced407f48f6b66dc4fdca3680481b43b209bce1ff864c43711dd3338',
 };
-test('custodia: los 35 cuerpos portados están fijados byte a byte contra C 1686b8e8',()=>{
+
+// Adaptaciones canónicas incorporadas en c44e23aaf2f41d88c3c3653fc0392bd302bc95b7,
+// verificado por comparación como antecesor de HEAD. Solo se aceptan estas 11 diferencias;
+// los otros 24 cuerpos siguen sujetos al pin original C.
+const PINNED_CANONICO_C44 = {
+  opAbierta: '87ad0a10b04341aefd65c5eb3fcdf740cbf00c2098eaaf10ef6e7c31bd2648ca',
+  opCabeceraEnlazada: 'a6d01392e1ed0b7c470a4d82af5ca9c113b14d75b793e54c3018fc75c4a24855',
+  opCabeceraValida: '0a5dee0fe4979edfdc187acac5e795ee9a14dcd72b92afbdc7eaef588fc348b7',
+  opCambio: '60c9940a612393765830fc427bed87fefbedd9446cf72947f13c180350f4169b',
+  opContadores: 'e81b8d69fb5065e73a9e0e531fc2d8449d68934bf4300efbf93c235546490461',
+  opDominio: 'ac5d17ebdfbcb2239ec903346861ff64a2fc40692bcf00611d8faa9cf4183d8f',
+  opEventoValido: 'a41952c8b6dd76c128e190ba50452cf5d0d1cff08a03287aa7142cb9407590bb',
+  opFilaAutorizada: '7ef2e7877be7ce3f915d304a4dd6a2a1923b67cf09fa0cc257ae4bb31093f67e',
+  opFilaValida: '790ab593021ef031a4226e8e3aef2c506777588a3580ddcf4fea5d16ed2549c8',
+  opInvariantes: 'e23485e04b981019496acb0dfe1c22b879aa57900e9d00062377f0f36d85cf63',
+  opUso: '7df65cbd6197f6c7ffcb5f4fc5f6e4936e5cc298e1f03cdab0d8399d862c8986',
+};
+test('custodia: conserva los 35 pines de C y fija aparte las 11 adaptaciones canónicas verificadas',()=>{
  const sha=(x)=>createHash('sha256').update(x).digest('hex');
- assert.equal(Object.keys(PINNED).length,35);
- for(const [name,esperado] of Object.entries(PINNED))assert.equal(sha(body(name).replace(/\s+/g,'')),esperado,name);
+ assert.equal(Object.keys(PINNED_C).length,35);
+ assert.equal(Object.keys(PINNED_CANONICO_C44).length,11);
+ assert.ok(Object.keys(PINNED_CANONICO_C44).every(name=>name in PINNED_C));
+ for(const [name,original] of Object.entries(PINNED_C)) {
+  const esperado=PINNED_CANONICO_C44[name]??original;
+  assert.equal(sha(body(name).replace(/\s+/g,'')),esperado,name);
+ }
+ for(const [name,adaptado] of Object.entries(PINNED_CANONICO_C44))assert.notEqual(adaptado,PINNED_C[name],`${name}: la adaptación canónica debe diferir del pin C`);
 });

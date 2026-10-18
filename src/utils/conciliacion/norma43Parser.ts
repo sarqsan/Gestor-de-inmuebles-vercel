@@ -20,17 +20,15 @@ export interface MovimientoNorma43Raw {
   referencia1?: string;
   referencia2?: string;
   conceptoAdicional: string[]; // registros 23 concatenados
-  raw22: string;
-  raw23: string[];
+  fila?: number;
+  divisa?: string;
 }
 
 export interface Norma43ParseResult {
   movimientos: MovimientoNorma43Raw[];
   errores: string[];
-  iban?: string;
   entidad?: string;
   oficina?: string;
-  cuenta?: string;
   fechaInicial?: string;
   fechaFinal?: string;
 }
@@ -43,6 +41,8 @@ function parseFechaNorma43(yyMMdd: string): string | null {
   const yyyy = yy < 50 ? 2000 + yy : 1900 + yy;
   if (parseInt(mm,10) <1 || parseInt(mm,10) >12) return null;
   if (parseInt(dd,10) <1 || parseInt(dd,10) >31) return null;
+  const fecha = new Date(Date.UTC(yyyy, Number(mm) - 1, Number(dd)));
+  if (fecha.getUTCFullYear() !== yyyy || fecha.getUTCMonth() !== Number(mm) - 1 || fecha.getUTCDate() !== Number(dd)) return null;
   return `${yyyy}-${mm}-${dd}`;
 }
 
@@ -59,10 +59,8 @@ function parseImporteNorma43(importeStr: string): number | null {
 export function parseNorma43(contenido: string): Norma43ParseResult {
   const errores: string[] = [];
   const movimientos: MovimientoNorma43Raw[] = [];
-  let iban: string | undefined;
   let entidad: string | undefined;
   let oficina: string | undefined;
-  let cuenta: string | undefined;
   let fechaInicial: string | undefined;
   let fechaFinal: string | undefined;
 
@@ -90,21 +88,17 @@ export function parseNorma43(contenido: string): Norma43ParseResult {
       if (linea.length >= 32) {
         entidad = linea.substring(2,6).trim();
         oficina = linea.substring(6,10).trim();
-        cuenta = linea.substring(10,20).trim();
         const fIni = linea.substring(20,26);
         const fFin = linea.substring(26,32);
         fechaInicial = parseFechaNorma43(fIni) || undefined;
         fechaFinal = parseFechaNorma43(fFin) || undefined;
       }
-      // Intentar extraer IBAN si viene en campo libre
-      const ibanMatch = linea.match(/[A-Z]{2}\d{2}[A-Z0-9]{10,30}/);
-      if (ibanMatch) iban = ibanMatch[0];
     } else if (tipo === '22') {
       // Nuevo movimiento, flush anterior
       flushMov();
 
       if (linea.length < 80) {
-        errores.push(`Registro 22 demasiado corto: ${linea}`);
+        errores.push('REGISTRO_22_DEMASIADO_CORTO');
         continue;
       }
       // Estructura 22:
@@ -137,21 +131,23 @@ export function parseNorma43(contenido: string): Norma43ParseResult {
       const importeRaw = parseImporteNorma43(importeStr);
 
       if (!fechaOp) {
-        errores.push(`Fecha operación inválida Norma43: ${fechaOpStr} en ${linea}`);
+        errores.push('REGISTRO_22_FECHA_OPERACION_INVALIDA');
         continue;
       }
       if (!fechaVal) {
-        errores.push(`Fecha valor inválida Norma43: ${fechaValStr} en ${linea}`);
+        errores.push('REGISTRO_22_FECHA_VALOR_INVALIDA');
         continue;
       }
       if (importeRaw === null) {
-        errores.push(`Importe inválido Norma43: ${importeStr} en ${linea}`);
+        errores.push('REGISTRO_22_IMPORTE_INVALIDO');
         continue;
       }
 
-      let importe = importeRaw;
-      if (debeHaber === '01') importe = -Math.abs(importe); // debe = cargo = gasto
-      else importe = Math.abs(importe); // haber = ingreso
+      if (debeHaber !== '01' && debeHaber !== '02') {
+        errores.push('REGISTRO_22_SIGNO_INVALIDO');
+        continue;
+      }
+      const importe = debeHaber === '01' ? -Math.abs(importeRaw) : Math.abs(importeRaw);
 
       currentMov = {
         fechaOperacion: fechaOp,
@@ -163,20 +159,17 @@ export function parseNorma43(contenido: string): Norma43ParseResult {
         referencia1: ref1 || undefined,
         referencia2: ref2 || undefined,
         conceptoAdicional: [],
-        raw22: linea,
-        raw23: [],
       };
       current23 = [];
     } else if (tipo === '23') {
       // Concepto adicional
       if (!currentMov) {
-        errores.push(`Registro 23 sin movimiento previo: ${linea}`);
+        errores.push('REGISTRO_23_SIN_MOVIMIENTO_PREVIO');
         continue;
       }
       // Pos 2-4 concepto adicional, 4-80 texto
       const texto = linea.length > 4 ? linea.substring(4,80).trim() : '';
       if (texto) current23.push(texto);
-      currentMov.raw23.push(linea);
     } else if (tipo === '33') {
       // Equivalente divisa, ignorar por ahora pero conservar para auditoría
       continue;
@@ -191,5 +184,5 @@ export function parseNorma43(contenido: string): Norma43ParseResult {
   }
   flushMov();
 
-  return { movimientos, errores, iban, entidad, oficina, cuenta, fechaInicial, fechaFinal };
+  return { movimientos, errores, entidad, oficina, fechaInicial, fechaFinal };
 }

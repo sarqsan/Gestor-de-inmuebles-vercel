@@ -7,7 +7,7 @@ import { generarHashIdempotencia, normalizarDesdeCSV, normalizarDesdeOFX } from 
 import { detectarDuplicados, generarIdImportacion } from '../utils/conciliacion/idempotencia';
 import { buscarCandidatos, evaluarCandidato } from '../utils/conciliacion/matchingEngine';
 import { crearPropuestasParaMovimientos, confirmarPropuesta, aplicarConciliacion, calcularResumenConciliacion } from '../utils/conciliacion/conciliacionEngine';
-import { importarDesdeCSV, detectarFormato } from '../utils/conciliacion/importEngine';
+import { detectarFormato, prepararImportacionBancaria } from '../utils/conciliacion/importEngine';
 import { MovimientoBancario, DEFAULT_CONFIG_MATCHING, ConfiguracionMatching, ConfianzaMatch } from '../types/conciliacion';
 import { Gasto, Inmueble, ContratoFormalizacion, CobroPeriodo } from '../types';
 
@@ -171,13 +171,16 @@ describe('GAP6 parsers CSV/OFX/MT940/Norma43', () => {
     expect(res.movimientos[0].concepto).toContain('ALQUILER');
   });
 
-  it('Norma43 parser registros 11/22/23/88', () => {
+  it('Norma43 descarta el fixture legacy no validado y no devuelve datos de cuenta ni líneas originales', () => {
     const linea11 = '11' + '1234' + '5678' + '12' + '1234567890' + '260501' + '260506' + '00' + '00000000000000' + '000000' + '00000000000000' + '000000' + '                    ';
     const linea22 = '22' + '1234' + '5678' + '12' + '260505' + '260505' + '01' + '01' + '00000000100000' + '0001' + '1234567890123456' + '01' + '123456789012' + 'ALQUILER MAYO';
     const linea88 = '88' + '1234' + '5678' + '12' + '00000000000002' + '00000000100000' + '00000000000000' + '00000000000000' + '00000000100000' + '00000000000000' + '                    ';
     const contenido = [linea11, linea22, linea88].join('\n');
     const res = parseNorma43(contenido);
-    expect(res.movimientos.length).toBeGreaterThanOrEqual(1);
+    expect(res.movimientos).toHaveLength(0);
+    expect(res.errores).toContain('REGISTRO_22_SIGNO_INVALIDO');
+    expect(JSON.stringify(res)).not.toContain('1234567890');
+    expect(JSON.stringify(res)).not.toContain(linea22);
   });
 });
 
@@ -225,14 +228,15 @@ describe('GAP6 idempotencia doble importación', () => {
     expect(id1).toBe(id2);
   });
 
-  it('importarDesdeCSV segunda vez detecta duplicados', () => {
-    const csv = `fecha,concepto,importe
-2026-05-05,Alquiler Juan,1000`;
-    const res1 = importarDesdeCSV(csv, 'prop_A', [], {}, 'test.csv');
-    expect(res1.nuevos.length).toBe(1);
-    const res2 = importarDesdeCSV(csv, 'prop_A', res1.nuevos, {}, 'test.csv');
-    expect(res2.nuevos.length).toBe(0);
-    expect(res2.duplicados.length).toBe(1);
+  it('prepararImportacionBancaria en replay reconoce el mismo movimiento sin duplicarlo', async () => {
+    const csv = `fecha,concepto,importe\n2026-05-05,Alquiler Juan,1000`;
+    const opciones = { divisaDeclarada: 'EUR', cuentaAlias: 'cuenta alquiler', nombreFichero: 'test.csv' };
+    const res1 = await prepararImportacionBancaria({ contenido: csv, formato: 'CSV', propietarioId: 'prop_A', existentes: [], opciones });
+    expect(res1.confirmable).toBe(true);
+    expect(res1.nuevos).toHaveLength(1);
+    const res2 = await prepararImportacionBancaria({ contenido: csv, formato: 'CSV', propietarioId: 'prop_A', existentes: res1.nuevos, opciones });
+    expect(res2.nuevos).toHaveLength(0);
+    expect(res2.duplicados).toHaveLength(1);
   });
 });
 
@@ -501,13 +505,13 @@ describe('GAP6 conciliación confirmar/rechazar/cambiar/doble/candidato ya conci
       esDiscrepancia: false,
     };
     const res = aplicarConciliacion(propuestaBaja as any, contrato.registroCobros!, [], [contrato], [mov], { email: 'test@test.es' } as any);
-    expect(res.error).toContain('ALTA');
+    expect(res.error).toContain('revisión');
   });
 });
 
 // ===== COBROS/GASTOS HISTÓRICO INTACTO =====
 describe('GAP6 cobros/gastos histórico intacto/discrepancia', () => {
-  it('aplicarConciliacion conserva importe/fecha devengo original, solo asocia movimiento', () => {
+  it('aplicarConciliacion no registra pagos ni modifica cobros o saldos', () => {
     const mov: MovimientoBancario = {
       idMovimiento: 'mov_1',
       idImportacion: 'imp_1',
@@ -532,10 +536,11 @@ describe('GAP6 cobros/gastos histórico intacto/discrepancia', () => {
     p.puntuacion = 95;
     const confirmada = confirmarPropuesta(p, { email: 'test@test.es' } as any);
     const res = aplicarConciliacion(confirmada, contrato.registroCobros!, [], [contrato], [mov], { email: 'test@test.es' } as any);
-    expect(res.contratoActualizado).toBeDefined();
-    const cobroActualizado = res.contratoActualizado!.registroCobros!.find(c=>c.id===p.candidato!.id);
-    expect(cobroActualizado!.importePrevisto).toBe(1000);
-    expect(cobroActualizado!.fechaVencimiento).toBe('2026-05-05');
+    expect(res.contratoActualizado).toBeUndefined();
+    expect(res.propuestaActualizada.estado).toBe('CONCILIADO');
+    expect(contrato.registroCobros![0].estado).toBe('PENDIENTE');
+    expect(contrato.registroCobros![0].importeRecibido).toBe(0);
+    expect(contrato.registroCobros![0].fechaVencimiento).toBe('2026-05-05');
   });
 
   it('discrepancia importe se marca sin modificar histórico', () => {

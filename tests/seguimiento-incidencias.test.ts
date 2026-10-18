@@ -607,8 +607,7 @@ describe('Fase 6 · avisos por el dispatcher canónico', () => {
             INAPP: { canal: 'INAPP', async enviar() { return { ok: true, provider: 'inapp', externalId: 'msg-1', enviadoEn: AHORA.toISOString() }; } },
             EMAIL: null,
             WEBHOOK: null,
-            WHATSAPP: null,
-          },
+                },
         });
       },
     });
@@ -637,8 +636,7 @@ describe('Fase 6 · avisos por el dispatcher canónico', () => {
           INAPP: { canal: 'INAPP', async enviar() { envios += 1; return { ok: true, provider: 'inapp', externalId: `msg-${envios}`, enviadoEn: AHORA.toISOString() }; } },
           EMAIL: null,
           WEBHOOK: null,
-          WHATSAPP: null,
-        },
+            },
       });
     const notificador = crearNotificadorIncidencias({ crearDispatcher });
     const uno = await notificador(aviso({ destinos: ['INQUILINO'], contactos: { inquilino: { usuarioId: 'usuario-ines' }, propietario: {}, profesional: {} } }));
@@ -649,12 +647,43 @@ describe('Fase 6 · avisos por el dispatcher canónico', () => {
     expect(envios).toBe(1);
   });
 
+  it('dos despachos concurrentes en Firestore reservan el intento una sola vez', async () => {
+    const { puerto, store } = puertoNotificacionesFalso();
+    const repo = crearRepositorioNotificacionesFirestore(puerto);
+    let envios = 0;
+    const canal = {
+      canal: 'INAPP' as const,
+      async enviar() {
+        envios += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return { ok: true, provider: 'inapp', externalId: 'msg-concurrente', enviadoEn: AHORA.toISOString() };
+      },
+    };
+    const notificador = crearNotificadorIncidencias({
+      crearDispatcher: (autorizacion) => new DispatcherNotificaciones({
+        autorizacion,
+        repositorio: repo,
+        canales: { INAPP: canal, EMAIL: null, WEBHOOK: null },
+      }),
+    });
+    const mismaEntrada = aviso({
+      destinos: ['INQUILINO'],
+      contactos: { inquilino: { usuarioId: 'usuario-ines' }, propietario: {}, profesional: {} },
+    });
+
+    const [uno, dos] = await Promise.all([notificador(mismaEntrada), notificador(mismaEntrada)]);
+    expect(envios).toBe(1);
+    expect([uno.estado, dos.estado].sort()).toEqual(['DUPLICADA', 'ENVIADA']);
+    expect(store.get('notificaciones/not_ev_incidencia_nueva_inc_1')?.fields.estado).toBe('ENVIADA');
+    expect([...store.keys()].filter((ruta) => ruta === 'notificaciones_entregas/not_ev_incidencia_nueva_inc_1__1__enviando')).toHaveLength(1);
+  });
+
   it('sin canal disponible el aviso queda NO_ENVIADA con su motivo (nunca «enviado»)', async () => {
     const { puerto } = puertoNotificacionesFalso();
     const repo = crearRepositorioNotificacionesFirestore(puerto);
     const notificador = crearNotificadorIncidencias({
       crearDispatcher: (autorizacion) =>
-        new DispatcherNotificaciones({ autorizacion, repositorio: repo, canales: { INAPP: null, EMAIL: null, WEBHOOK: null, WHATSAPP: null } }),
+        new DispatcherNotificaciones({ autorizacion, repositorio: repo, canales: { INAPP: null, EMAIL: null, WEBHOOK: null } }),
     });
     const entrega = await notificador(aviso({ destinos: ['INQUILINO'], contactos: { inquilino: { usuarioId: 'usuario-ines' }, propietario: {}, profesional: {} } }));
     expect(entrega.estado).toBe('NO_ENVIADA');
@@ -709,8 +738,7 @@ describe('Fase 6 · avisos por el dispatcher canónico', () => {
             },
             EMAIL: null,
             WEBHOOK: null,
-            WHATSAPP: null,
-          },
+                },
         }),
     });
     const entrega = await notificador(

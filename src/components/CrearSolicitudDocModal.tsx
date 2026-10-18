@@ -11,14 +11,12 @@ import {
   generarDocumentosSugeridos,
   buildSolicitudDocumentacion,
   PRESET_DOCUMENTOS,
-  generarMensajeWhatsappSolicitud,
 } from '../utils/documentTemplates';
 import {
   X,
   FileCheck2,
   Plus,
   Trash2,
-  MessageSquare,
   Copy,
   Check,
   Calendar,
@@ -40,7 +38,6 @@ interface CrearSolicitudDocModalProps {
   invitacion?: InvitacionVisita;
   onClose: () => void;
   onSaveSolicitud: (solicitud: SolicitudDocumentacion) => Promise<void>;
-  onOpenWhatsapp?: (url: string) => void;
 }
 
 export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
@@ -49,7 +46,6 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
   invitacion,
   onClose,
   onSaveSolicitud,
-  onOpenWhatsapp,
 }) => {
   const { refDialogo, propsDialogo } = useDialogoAccesible(
     { abierto: true, onCerrar: onClose },
@@ -69,7 +65,6 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
   const [saving, setSaving] = useState<boolean>(false);
   const [createdSolicitud, setCreatedSolicitud] = useState<SolicitudDocumentacion | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
-  const [copiedMsg, setCopiedMsg] = useState<boolean>(false);
 
   const esDosTitulares = candidato.numTitularesContrato === 2 || !!candidato.cotitular;
 
@@ -188,28 +183,6 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
     setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  const handleCopyWhatsappText = () => {
-    if (!createdSolicitud) return;
-    const msg = generarMensajeWhatsappSolicitud(createdSolicitud);
-    navigator.clipboard.writeText(msg);
-    setCopiedMsg(true);
-    setTimeout(() => setCopiedMsg(false), 2500);
-  };
-
-  const handleOpenWhatsappClick = () => {
-    if (!createdSolicitud) return;
-    const msg = generarMensajeWhatsappSolicitud(createdSolicitud);
-    const cleanPhone = candidato.telefono.replace(/[^0-9]/g, '');
-    const phoneWithPrefix = cleanPhone.startsWith('34') ? cleanPhone : `34${cleanPhone}`;
-    const whatsappUrl = `https://wa.me/${phoneWithPrefix}?text=${encodeURIComponent(msg)}`;
-
-    if (onOpenWhatsapp) {
-      onOpenWhatsapp(whatsappUrl);
-    } else {
-      window.open(whatsappUrl, '_blank');
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 md:p-6 overflow-y-auto">
       <div ref={refDialogo} {...propsDialogo}
@@ -285,39 +258,6 @@ export const CrearSolicitudDocModal: React.FC<CrearSolicitudDocModalProps> = ({
                   >
                     {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedLink ? 'Copiado' : 'Copiar Enlace'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* WhatsApp Action */}
-              <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h5 className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-                      <MessageSquare className="w-4 h-4 text-emerald-600" />
-                      Enviar Solicitud al Candidato por WhatsApp
-                    </h5>
-                    <p className="text-[11px] text-emerald-800 mt-0.5">
-                      Teléfono: <span className="font-semibold">{candidato.telefono}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <button
-                    onClick={handleOpenWhatsappClick}
-                    className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>Abrir WhatsApp con Mensaje Predefinido</span>
-                  </button>
-
-                  <button
-                    onClick={handleCopyWhatsappText}
-                    className="py-2.5 px-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                  >
-                    {copiedMsg ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
-                    <span>{copiedMsg ? 'Mensaje Copiado' : 'Copiar Texto'}</span>
                   </button>
                 </div>
               </div>

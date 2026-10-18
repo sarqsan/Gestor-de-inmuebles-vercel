@@ -47,6 +47,45 @@ export interface RepositorioNotificaciones {
   buscarPorId(id: string): Promise<Notificacion | null>;
   buscarPorIdempotencia(idempotencyKey: string): Promise<Notificacion | null>;
   guardar(notificacion: Notificacion): Promise<void>;
+  /**
+   * Reserva atómicamente un intento ENVIANDO. Firestore debe implementarlo
+   * con create-if-absent para coordinar instancias serverless; los repositorios
+   * de desarrollo/tests usan la reserva local del dispatcher.
+   */
+  reclamarIntento?(notificacionEnviando: Notificacion): Promise<boolean>;
+}
+
+const intentosReclamadosEnMemoria = new WeakMap<object, Set<string>>();
+
+function reclamarIntentoEnMemoria(repo: RepositorioNotificaciones, notificacion: Notificacion): boolean {
+  let claves = intentosReclamadosEnMemoria.get(repo);
+  if (!claves) {
+    claves = new Set();
+    intentosReclamadosEnMemoria.set(repo, claves);
+  }
+  const clave = `${notificacion.id}:${notificacion.intentos}`;
+  if (claves.has(clave)) return false;
+  claves.add(clave);
+  return true;
+}
+
+function respuestaDuplicada(notificacion: Notificacion): EnviarNotificacionResponse {
+  const entregada = notificacion.estado === 'ENVIADA';
+  return {
+    ok: entregada,
+    notificacion,
+    entregada,
+    estado: notificacion.estado,
+    canal: notificacion.canal,
+    provider: notificacion.provider,
+    externalId: notificacion.externalId,
+    duplicada: true,
+    ...(notificacion.estado === 'ENVIANDO'
+      ? { error: 'envio_en_curso' }
+      : notificacion.estado === 'FALLIDA' && notificacion.error
+        ? { error: notificacion.error }
+        : {}),
+  };
 }
 
 /** Origen de sesión/autorización resuelto por el backend. */
@@ -85,13 +124,12 @@ export class DispatcherNotificaciones {
     const idempotencyKey = evento.idempotencyKey;
     const plantilla = seleccionarPlantilla(evento.tipoEvento, PLANTILLAS);
     const canal = seleccionarCanal(
-      plantilla || { id: evento.tipoEvento, asunto: '', cuerpo: '', canalesPermitidos: ['INAPP', 'EMAIL', 'WEBHOOK', 'WHATSAPP'] },
+      plantilla || { id: evento.tipoEvento, asunto: '', cuerpo: '', canalesPermitidos: ['INAPP', 'EMAIL', 'WEBHOOK'] },
       evento.canal,
       {
         email: !!this.ctx.canales.EMAIL,
         inapp: !!this.ctx.canales.INAPP,
         webhook: !!this.ctx.canales.WEBHOOK,
-        whatsapp: !!this.ctx.canales.WHATSAPP,
       }
     );
     const { asunto, cuerpo } = plantilla
@@ -193,29 +231,24 @@ export class DispatcherNotificaciones {
         email: !!this.ctx.canales.EMAIL,
         inapp: !!this.ctx.canales.INAPP,
         webhook: !!this.ctx.canales.WEBHOOK,
-        whatsapp: !!this.ctx.canales.WHATSAPP,
       }
     );
     if (!canal) {
       return { ok: false, error: 'canal_no_disponible', motivoDenegacion: plantilla.canalesPermitidos.join(', ') };
     }
 
-    // 5. Reintento si ya estaba FALLIDA o PENDIENTE pendiente de entrega
+    // 5. Un intento ENVIANDO puede pertenecer a otra instancia/cron en curso.
+    // No reintentar a ciegas: SMTP no ofrece semántica exactly-once y un timeout
+    // tras la aceptación podría duplicar un mensaje que sí llegó al transporte.
+    if (existente?.estado === 'ENVIANDO') return respuestaDuplicada(existente);
+
+    // 6. Reintento si ya estaba FALLIDA o PENDIENTE pendiente de entrega.
     if (existente && existente.estado !== 'ENVIADA' && existente.estado !== 'CANCELADA') {
       return await this.intentarEntrega(existente);
     }
     if (existente) {
-      // ENVIADA o CANCELADA ⇒ idempotente
-      return {
-        ok: existente.estado === 'ENVIADA',
-        notificacion: existente,
-        entregada: existente.estado === 'ENVIADA',
-        estado: existente.estado,
-        canal: existente.canal,
-        provider: existente.provider,
-        externalId: existente.externalId,
-        duplicada: true,
-      };
+      // ENVIADA o CANCELADA ⇒ idempotente.
+      return respuestaDuplicada(existente);
     }
 
     // 6. Crear la notificación (PENDIENTE / PROGRAMADA)
@@ -272,6 +305,19 @@ export class DispatcherNotificaciones {
     }
 
     const enEnvio = conAudit({ ...notificacion, estado: 'ENVIANDO', intentos: notificacion.intentos + 1 }, 'intento_envio');
+    const reclamado = this.ctx.repositorio.reclamarIntento
+      ? await this.ctx.repositorio.reclamarIntento(enEnvio)
+      : reclamarIntentoEnMemoria(this.ctx.repositorio, enEnvio);
+    if (!reclamado) {
+      const actual =
+        (await this.ctx.repositorio.buscarPorId(enEnvio.id)) ??
+        (await this.ctx.repositorio.buscarPorIdempotencia(enEnvio.idempotencyKey));
+      const respuesta = actual && !['PENDIENTE', 'PROGRAMADA'].includes(actual.estado)
+        ? actual
+        : { ...(actual ?? enEnvio), estado: 'ENVIANDO' as const };
+      return respuestaDuplicada(respuesta);
+    }
+
     await this.ctx.repositorio.guardar(enEnvio);
 
     let resultado: ResultadoCanal;
@@ -329,14 +375,18 @@ export class DispatcherNotificaciones {
   }
 
   async reintentar(notificacion: Notificacion): Promise<EnviarNotificacionResponse> {
-    if (notificacion.estado === 'ENVIADA') {
-      return { ok: true, notificacion, entregada: true, estado: 'ENVIADA', duplicada: true };
+    const actual =
+      (await this.ctx.repositorio.buscarPorId(notificacion.id)) ??
+      (await this.ctx.repositorio.buscarPorIdempotencia(notificacion.idempotencyKey));
+    const base = actual ?? notificacion;
+    if (base.estado === 'ENVIADA') return respuestaDuplicada(base);
+    if (base.estado === 'CANCELADA') {
+      return { ok: false, notificacion: base, estado: 'CANCELADA', error: 'cancelada' };
     }
-    if (notificacion.estado === 'CANCELADA') {
-      return { ok: false, notificacion, estado: 'CANCELADA', error: 'cancelada' };
-    }
+    if (base.estado === 'ENVIANDO') return respuestaDuplicada(base);
+
     const reseteada: Notificacion = conAudit(
-      { ...notificacion, estado: 'PENDIENTE', error: undefined },
+      { ...base, estado: 'PENDIENTE', error: undefined },
       'reintento'
     );
     return this.intentarEntrega(reseteada);

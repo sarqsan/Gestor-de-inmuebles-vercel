@@ -15,6 +15,7 @@
 
 import type {
   CanalNotificacion,
+  CanalNotificacionHistorico,
   DestinatarioNotificacion,
   EnviarNotificacionPayload,
   EventoNotificacion,
@@ -35,7 +36,6 @@ export interface CapacidadesCanales {
   email: boolean;
   inapp: boolean;
   webhook: boolean;
-  whatsapp: boolean;
 }
 
 /** Valida un payload de envío contra el contrato del modelo. */
@@ -94,19 +94,19 @@ export function seleccionarPlantilla(
 // ---------------------------------------------------------------------------
 
 /**
- * Orden de preferencia: EMAIL → INAPP → WEBHOOK → WHATSAPP(futuro).
- * Devuelve el primer canal permitido por la plantilla y disponible en el
- * entorno (los canales no disponibles se saltan sin fallar el dispatch).
+ * Canales operativos y orden de preferencia: EMAIL → INAPP → WEBHOOK.
+ * WHATSAPP se conserva solo para interpretar registros históricos: nunca se
+ * selecciona ni se considera disponible en una operación nueva.
  */
 export function seleccionarCanal(
   plantilla: PlantillaNotificacion,
-  preferido: CanalNotificacion | undefined,
+  preferido: CanalNotificacionHistorico | undefined,
   capacidades: CapacidadesCanales
 ): CanalNotificacion | null {
-  const ranking: CanalNotificacion[] = ['EMAIL', 'INAPP', 'WEBHOOK', 'WHATSAPP'];
+  const ranking: CanalNotificacion[] = ['EMAIL', 'INAPP', 'WEBHOOK'];
   const opciones: CanalNotificacion[] = [];
 
-  if (preferido) opciones.push(preferido);
+  if (preferido && preferido !== 'WHATSAPP') opciones.push(preferido);
   for (const canal of ranking) {
     if (!opciones.includes(canal)) opciones.push(canal);
   }
@@ -116,8 +116,7 @@ export function seleccionarCanal(
     const disponible =
       (canal === 'EMAIL' && capacidades.email) ||
       (canal === 'INAPP' && capacidades.inapp) ||
-      (canal === 'WEBHOOK' && capacidades.webhook) ||
-      (canal === 'WHATSAPP' && capacidades.whatsapp);
+      (canal === 'WEBHOOK' && capacidades.webhook);
     if (disponible) return canal;
   }
 

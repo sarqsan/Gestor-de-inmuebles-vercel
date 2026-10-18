@@ -6,9 +6,10 @@
  *
  *   · Exige `CRON_SECRET` en el servidor. Sin la variable **no se ejecuta nada**
  *     (503 `cron_no_configurado`): fallo cerrado, nunca un barrido anónimo.
- *   · Autorización por `Authorization: Bearer <CRON_SECRET>` (lo que envía
- *     Vercel Cron) o `?secret=<CRON_SECRET>` para una ejecución manual
- *     controlada. Comparación en tiempo constante.
+ *   · Autorización exclusivamente por `Authorization: Bearer <CRON_SECRET>`
+ *     (lo que envía Vercel Cron). No se acepta el secreto en query string, para
+ *     evitar filtrarlo en logs, historial o cabeceras Referer. Comparación en
+ *     tiempo constante.
  *   · Idempotente: el motor usa claves de idempotencia deterministas, así que
  *     repetir la llamada el mismo día no duplica avisos ni reenvía correos.
  *   · El resultado es un resumen trazable (procesadas, emitidas, fallidas,
@@ -59,7 +60,8 @@ export function montarRutaCronAvisos(app: Express, deps: DependenciasCronAvisos)
         return;
       }
 
-      const presentado = tokenDe(req) || (typeof req.query?.secret === 'string' ? req.query.secret : '');
+      const authorization = req.headers?.authorization;
+      const presentado = typeof authorization === 'string' && /^Bearer\s+/i.test(authorization) ? tokenDe(req) : '';
       if (!presentado || !igualesEnTiempoConstante(presentado, secreto)) {
         res.status(401).json({ ok: false, error: 'no_autorizado', motivoDenegacion: 'Secreto de cron ausente o inválido.' });
         return;

@@ -32,6 +32,10 @@ import {
   crearRegistroMemoria,
   type RegistroOperacionesIA,
 } from '../server/ia/registroOperacionesIA';
+import { crearGobiernoMemoria } from '../server/ia/gobiernoIA';
+import { construirPoliticaIACompleta, OPERACIONES_IA_IDS } from '../src/ia/gobiernoIAContrato';
+import type { ResultadoResolverTitularNucleoIA } from '../server/ia/nucleoIA';
+import type { ServicioLlavesIA } from '../server/ia/llavesUsuarioIA';
 import { OPERACIONES_IA, PATRON_CLAVE_IDEMPOTENCIA_IA } from '../src/ia/catalogoOperacionesIA';
 import { reiniciarCacheCertificados, verificarIdToken, type IdentidadVerificada } from '../server/titularidades/googleBackend';
 import { solicitarIA } from '../src/lib/clienteIA';
@@ -75,15 +79,43 @@ interface OpcionesMontaje {
   proveedor?: ClienteProveedorIA | null;
   manejador?: (req: Request, res: Response) => unknown;
   verificarToken?: (token: string) => Promise<IdentidadVerificada | null>;
+  resolverTitularIA?: ((entrada: { uidActor: string; operacion: 'REDACTAR_CLAUSULA'; request: Request }) => Promise<ResultadoResolverTitularNucleoIA | null>) | null;
 }
 
 async function montar(opciones: OpcionesMontaje = {}) {
   const memoria = crearRegistroMemoria();
   const registro = opciones.registro === undefined ? memoria : opciones.registro;
+  const politicaMock = construirPoliticaIACompleta({
+    permisos: { PROPIETARIO: OPERACIONES_IA_IDS, PROFESIONAL: OPERACIONES_IA_IDS, INQUILINO: OPERACIONES_IA_IDS, ADMINISTRADOR: OPERACIONES_IA_IDS },
+    costeCreditosPorOperacion: Object.fromEntries(OPERACIONES_IA_IDS.map((id) => [id, 0])) as Record<(typeof OPERACIONES_IA_IDS)[number], number>,
+  });
+  const gobierno = crearGobiernoMemoria(politicaMock, { listarOperaciones: () => memoria.listar() });
+  const fijarPerfil = (uid: string, tipoPerfil: string) => gobierno.fijarPerfil(
+    uid,
+    { usuarioId: `test-${uid}`, tipoPerfil, estado: 'ACTIVO' },
+    { authUid: uid, tipoPerfil, estado: 'ACTIVO' },
+  );
+  for (const uid of ['uid-ana', 'uid-luis', 'uid-real']) fijarPerfil(uid, 'ADMINISTRADOR');
+  const llaves = {
+    resolverParaOperacion: async (uid: string) => ({ estado: 'DISPONIBLE' as const, valor: `mock-key-for-${uid}`, sufijo: 'MOCK' }),
+  } as unknown as ServicioLlavesIA;
+  const resolverTitularIA = opciones.resolverTitularIA === null
+    ? undefined
+    : opciones.resolverTitularIA ?? (async ({ uidActor }: { uidActor: string }) => {
+        const propietarioUid = `owner-${uidActor}`;
+        fijarPerfil(propietarioUid, 'PROPIETARIO');
+        return {
+          estado: 'RESUELTO',
+          contexto: { propietarioUid, propietarioId: `prop-${uidActor}`, contratoId: `contract-${uidActor}`, inmuebleId: `asset-${uidActor}` },
+        };
+      });
   const eventos: EventoNucleoIA[] = [];
   const nucleo = crearNucleoIA({
     verificarToken: opciones.verificarToken ?? (async (token) => TOKENS[token] ?? null),
     registro,
+    gobierno,
+    ...(registro ? { llaves } : {}),
+    ...(resolverTitularIA ? { resolverTitularIA } : {}),
     crearClienteProveedor: () => opciones.proveedor ?? null,
     log: (evento) => eventos.push(evento),
   });
@@ -388,7 +420,24 @@ describe('IA Fase 1 · dependencias inyectadas sin registro (no configuración r
     expect(r.headers.get(CABECERA_REGISTRO_IA)).toBe('no-configurado');
     expect(llamadas).toHaveLength(0);
     expect(m.eventos).toContainEqual(expect.objectContaining({ evento: 'SIN_REGISTRO', uid: 'uid-ana' }));
-    expect(m.nucleo.estado()).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length });
+    expect(m.nucleo.estado()).toEqual({ registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', titularidad: 'POR_OPERACION', autenticacion: 'TOKEN_FIREBASE', operaciones: OPERACIONES_IA.length });
+  });
+});
+
+describe('IA · fail-closed de titularidad contractual', () => {
+  it('sin resolver de contrato rechaza y audita sólo al actor, antes de leer llave, crear proveedor o ejecutar handler', async () => {
+    const { cliente, llamadas } = proveedorFalso();
+    const m = await montar({ proveedor: cliente, resolverTitularIA: null });
+    const r = await m.llamar(m.autenticado());
+    expect(r.status).toBe(503);
+    expect(await r.json()).toMatchObject({ codigo: 'TITULAR_IA_NO_RESUELTO' });
+    expect(m.memoria.listar()).toHaveLength(1);
+    expect(m.memoria.listar()[0]).toMatchObject({ uid: 'uid-ana', estado: 'FALLIDA', codigoHttp: 503, origenRespuesta: 'ERROR', costeCreditos: 0 });
+    expect(m.memoria.listar()[0]).not.toHaveProperty('uidTitular');
+    expect(m.memoria.listar()[0]).not.toHaveProperty('propietarioId');
+    expect(m.ejecuciones).toHaveLength(0);
+    expect(llamadas).toHaveLength(0);
+    expect(m.nucleo.estado().titularidad).toBe('BLOQUEADA');
   });
 });
 

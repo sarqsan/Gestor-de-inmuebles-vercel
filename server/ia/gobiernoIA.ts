@@ -295,6 +295,8 @@ function aResumenOperacion(id: string, datos: Record<string, unknown>): Operacio
   return {
     id,
     uid: String(datos.uid ?? ''),
+    ...(typeof datos.uidTitular === 'string' ? { uidTitular: datos.uidTitular } : {}),
+    ...(typeof datos.propietarioId === 'string' ? { propietarioId: datos.propietarioId } : {}),
     operacion: datos.operacion as IdOperacionIA,
     estado: String(datos.estado ?? ''),
     ...(datos.codigoHttp !== undefined ? { codigoHttp: entero(datos.codigoHttp) } : {}),
@@ -512,12 +514,30 @@ export function crearGobiernoFirestore(puerto: PuertoGobiernoFirestoreIA, politi
     },
 
     async operacionesDeUsuario(uid, limite = 25) {
-      const filas = await puerto.consultarIgualdadesOrden('ia_operaciones', {
-        igualdades: [['uid', uid]],
-        orden: { campo: 'iniciadaEn', direccion: 'DESCENDING' },
-        limite,
-      });
-      return filas.map((f) => aResumenOperacion(f.id, f.datos));
+      const [porTitular, legadoPorActor] = await Promise.all([
+        puerto.consultarIgualdadesOrden('ia_operaciones', {
+          igualdades: [['uidTitular', uid]],
+          orden: { campo: 'iniciadaEn', direccion: 'DESCENDING' },
+          limite,
+        }),
+        puerto.consultarIgualdadesOrden('ia_operaciones', {
+          igualdades: [['uid', uid]],
+          orden: { campo: 'iniciadaEn', direccion: 'DESCENDING' },
+          limite,
+        }),
+      ]);
+      const porId = new Map<string, { id: string; datos: Record<string, unknown> }>();
+      for (const fila of [...porTitular, ...legadoPorActor]) {
+        // La segunda consulta conserva histórico anterior al campo uidTitular;
+        // un registro actual sólo cuenta para el UID que el servidor resolvió.
+        if (fila.datos.uidTitular === uid || (fila.datos.uidTitular === undefined && fila.datos.uid === uid)) {
+          porId.set(fila.id, fila);
+        }
+      }
+      return [...porId.values()]
+        .sort((a, b) => String(b.datos.iniciadaEn ?? '').localeCompare(String(a.datos.iniciadaEn ?? '')))
+        .slice(0, limite)
+        .map((f) => aResumenOperacion(f.id, f.datos));
     },
 
     async operacionesRecientes(limite = 25) {
@@ -651,7 +671,7 @@ export function crearGobiernoMemoria(
 
     async operacionesDeUsuario(uid, limite = 25) {
       const operaciones = (opciones.listarOperaciones?.() ?? [])
-        .filter((o) => o.uid === uid)
+        .filter((o) => o.uidTitular === uid || (o.uidTitular === undefined && o.uid === uid))
         .sort((a, b) => (a.iniciadaEn < b.iniciadaEn ? 1 : -1))
         .slice(0, limite);
       return operaciones.map((o) => aResumenOperacion(o.id, o as unknown as Record<string, unknown>));

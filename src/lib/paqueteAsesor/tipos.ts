@@ -54,6 +54,14 @@ export interface SolicitudPaqueteAsesor {
   inmuebleIds?: readonly string[];
   /** Ejercicios (años); vacío/ausente = todos (con aviso en el manifest). */
   ejercicios?: readonly number[];
+  /**
+   * Meses concretos `YYYY-MM` (continuación aislada). Semántica en `motor.ts`:
+   * refinan los ejercicios (intersección, como el exportador canónico);
+   * si un mes pertenece a un año fuera de `ejercicios`, la solicitud se
+   * deniega por contradictoria en vez de producir un paquete vacío en silencio.
+   * Vacío/ausente = sin filtro mensual.
+   */
+  meses?: readonly string[];
   /** Entidades documentales opcionales a incluir cuando haya datos. */
   incluirPolizas?: boolean; // por defecto true («y PÓLIZA si procede»)
   incluirLiquidaciones?: boolean; // por defecto true
@@ -67,8 +75,10 @@ export interface VeredictoAmbitoPaquete {
   propietariosEfectivos: string[];
   /** null = todos los inmuebles de los propietarios efectivos. */
   inmueblesEfectivos: string[] | null;
-  /** Ejercicios efectivos ordenados; null = sin filtro temporal. */
+  /** Ejercicios efectivos ordenados; null = sin filtro anual. */
   ejerciciosEfectivos: number[] | null;
+  /** Meses efectivos `YYYY-MM` ordenados; null = sin filtro mensual. */
+  mesesEfectivos: string[] | null;
   avisos: string[];
 }
 
@@ -107,9 +117,19 @@ export interface LineaLibroAsesor {
   origenDeducibilidad: string;
   fuenteTipo: 'COBRO' | 'GASTO';
   fuenteId: string;
-  /** Nombre del documento referenciado (sin binario en v1); '' si no consta. */
+  /**
+   * Nombre del documento REFERENCIADO (sin binario en v1); '' si no consta.
+   * Una referencia por nombre NO prueba que el original exista ni que esté
+   * disponible: cada línea con referencia genera además la incidencia
+   * `DOCUMENTO_SIN_BINARIO_VERIFICABLE`.
+   */
   documentoNombre: string;
-  desgloseFiscal: 'SIN_DESGLOSE_EN_ORIGEN' | 'FACTURA_VINCULADA';
+  /**
+   * `FACTURA_INCONSISTENTE`: hay factura vinculada pero su desglose no cuadra
+   * (`base + IVA - retención != importeTotal`, fórmula del motor de
+   * facturación del ERP) o no es utilizable; base/IVA quedan a null.
+   */
+  desgloseFiscal: 'SIN_DESGLOSE_EN_ORIGEN' | 'FACTURA_VINCULADA' | 'FACTURA_INCONSISTENTE';
 }
 
 export interface IncidenciaPaqueteAsesor {
@@ -131,6 +151,18 @@ export interface TotalesEjercicioAsesor {
   resultado: number; // ingresos - gastos
 }
 
+/** Mismos agregados que por ejercicio, agrupados por `YYYY-MM` de la fecha del libro. */
+export interface TotalesMesAsesor {
+  mes: string; // YYYY-MM
+  numIngresos: number;
+  numGastos: number;
+  totalIngresos: number;
+  totalGastos: number;
+  totalGastosDeducibles: number;
+  totalGastosNoDeducibles: number;
+  resultado: number; // ingresos - gastos
+}
+
 export interface TotalesPaqueteAsesor {
   totalIngresos: number;
   totalGastos: number;
@@ -138,6 +170,8 @@ export interface TotalesPaqueteAsesor {
   totalGastosNoDeducibles: number;
   resultado: number;
   porEjercicio: TotalesEjercicioAsesor[];
+  /** Desglose mensual (derivada de `fecha` de cada línea; recalculable por el verificador). */
+  porMes: TotalesMesAsesor[];
   /** Suma informativa de netos de liquidación incluidos (NO entra en el libro). */
   totalNetoLiquidacionesIncluidas: number;
 }
@@ -160,6 +194,12 @@ export interface ManifestPaqueteAsesor {
   propietariosEfectivos: string[];
   inmueblesEfectivos: string[] | null;
   ejerciciosEfectivos: number[] | null;
+  /**
+   * Meses efectivos `YYYY-MM` (campo aditivo de la continuación; los paquetes
+   * generados por el commit `60bb0c5` no lo traen y el verificador los trata
+   * como `null` con advertencia de manifiesto heredado).
+   */
+  mesesEfectivos: string[] | null;
   conteos: Record<string, number>;
   totales: TotalesPaqueteAsesor;
   verificaciones: VerificacionCuadre[];

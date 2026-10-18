@@ -10,7 +10,10 @@
  * añade (lo que el plan §4.3/§5 declara ausente en v1):
  *  · paquete multi-entidad en un solo ZIP (hoy: una entidad por operación),
  *  · entidades FACTURA / LIQUIDACIÓN / PÓLIZA en el paquete,
- *  · filtro temporal de CONTRATO por vigencia («vigentes en el ejercicio N»),
+ *  · filtro temporal de CONTRATO por vigencia («vigentes en el ejercicio N»)
+ *    y filtro mensual `YYYY-MM` (intersección con los ejercicios, fail-closed),
+ *  · duplicados de movimientos y discrepancias fiscales/documentales
+ *    identificados (nunca fusionados ni corregidos en silencio),
  *  · libro de ingresos y gastos por fecha con cuadre verificado.
  *
  * Determinismo: mismo input + mismo `generatedAt` ⇒ mismo ZIP byte a byte
@@ -33,6 +36,7 @@ import {
   type ResultadoEmpaquetadoAsesor,
   type SolicitudPaqueteAsesor,
   type TotalesEjercicioAsesor,
+  type TotalesMesAsesor,
   type TotalesPaqueteAsesor,
   type VeredictoAmbitoPaquete,
   type VerificacionCuadre,
@@ -108,6 +112,80 @@ function anioDeFechaIso(fecha: string): number {
   return Number(fecha.slice(0, 4));
 }
 
+const RE_MES = /^(\d{4})-(\d{2})$/;
+
+/** true solo para `YYYY-MM` con año plausible (1900–9999) y mes 01–12. */
+export function esMesValido(valor: unknown): valor is string {
+  if (typeof valor !== 'string') return false;
+  const m = RE_MES.exec(valor);
+  if (!m) return false;
+  const anio = Number(m[1]); const mes = Number(m[2]);
+  return anio >= 1900 && anio <= 9999 && mes >= 1 && mes <= 12;
+}
+
+/** Último día (ISO) de un mes `YYYY-MM` válido, sin zona horaria local. */
+export function ultimoDiaDeMes(mes: string): string {
+  const anio = Number(mes.slice(0, 4));
+  const numMes = Number(mes.slice(5, 7));
+  // Día 0 del mes siguiente = último día de este mes (UTC, bisiestos incluidos).
+  const dia = new Date(Date.UTC(anio, numMes, 0)).getUTCDate();
+  return `${mes}-${String(dia).padStart(2, '0')}`;
+}
+
+function mesDeFechaIso(fecha: string): string {
+  return fecha.slice(0, 7);
+}
+
+/** `YYYY-MM` de una factura desde su fecha declarada (nunca del solo ejercicio). */
+function mesDeFactura(f: {
+  fechaExpedicion?: unknown; fechaExpedicionUtc?: unknown;
+}): string | null {
+  if (typeof f.fechaExpedicion === 'string') {
+    const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(f.fechaExpedicion);
+    if (dmy) {
+      const iso = `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+      return esFechaIsoValida(iso) ? `${dmy[3]}-${dmy[2]}` : null;
+    }
+    if (esFechaIsoValida(f.fechaExpedicion)) return mesDeFechaIso(f.fechaExpedicion);
+  }
+  if (typeof f.fechaExpedicionUtc === 'string' && esFechaIsoValida(f.fechaExpedicionUtc.slice(0, 10))) {
+    return f.fechaExpedicionUtc.slice(0, 7);
+  }
+  return null;
+}
+
+/**
+ * Mes contable de un cobro: `periodoMesAnio` válido manda (semántica del
+ * exportador canónico); si falta o es ilegible se deriva de `anio`+`mes`.
+ */
+function mesDeCobro(c: CobroPeriodo): string | null {
+  if (esMesValido(c.periodoMesAnio)) return c.periodoMesAnio;
+  if (typeof c.anio === 'number' && Number.isInteger(c.anio)
+    && typeof c.mes === 'number' && Number.isInteger(c.mes) && c.mes >= 1 && c.mes <= 12) {
+    const candidato = `${c.anio}-${String(c.mes).padStart(2, '0')}`;
+    return esMesValido(candidato) ? candidato : null;
+  }
+  return null;
+}
+
+/** Mes contable de un gasto: `periodoMesAnio` válido, o el de su fecha. */
+function mesDeGasto(g: Gasto): string | null {
+  if (esMesValido(g.periodoMesAnio)) return g.periodoMesAnio;
+  const fecha = fechaGasto(g);
+  return fecha ? mesDeFechaIso(fecha) : null;
+}
+
+/** Mes de una liquidación: `periodo` (`YYYY-MM` por contrato), o `anio`+`mes`. */
+function mesDeLiquidacion(l: { periodo?: unknown; anio?: unknown; mes?: unknown }): string | null {
+  if (esMesValido(l.periodo)) return l.periodo;
+  if (typeof l.anio === 'number' && Number.isInteger(l.anio)
+    && typeof l.mes === 'number' && Number.isInteger(l.mes) && l.mes >= 1 && l.mes <= 12) {
+    const candidato = `${l.anio}-${String(l.mes).padStart(2, '0')}`;
+    return esMesValido(candidato) ? candidato : null;
+  }
+  return null;
+}
+
 /**
  * Ejercicio de una factura: campo `ejercicio` si es entero plausible; si no,
  * se deriva de `fechaExpedicion` en su formato declarado `dd-mm-aaaa` (o ISO)
@@ -164,11 +242,41 @@ function ordenarPorId<T extends { id?: unknown }>(arr: readonly T[]): T[] {
   return [...arr].sort((a, b) => texto(a.id).localeCompare(texto(b.id)));
 }
 
+/**
+ * Agrupa por `id` conservando el orden ya ordenado. Solo devuelve grupos con
+ * más de una aparición (los duplicados se identifican; nunca se fusionan).
+ */
+function gruposDuplicadosPorId<T extends { id?: unknown }>(
+  arr: readonly T[],
+): { id: string; elementos: T[] }[] {
+  const grupos = new Map<string, T[]>();
+  for (const el of arr) {
+    const id = texto(el.id);
+    if (id === '') continue;
+    const grupo = grupos.get(id) ?? [];
+    grupo.push(el);
+    grupos.set(id, grupo);
+  }
+  return [...grupos.entries()]
+    .filter(([, elementos]) => elementos.length > 1)
+    .map(([id, elementos]) => ({ id, elementos }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 /** Solape de un intervalo [inicio, fin|∞) con alguno de los ejercicios. */
 function solapaEjercicios(inicio: string, fin: string | null, ejercicios: readonly number[]): boolean {
   return ejercicios.some((ej) => {
     const desde = `${ej}-01-01`;
     const hasta = `${ej}-12-31`;
+    return inicio <= hasta && (fin === null || fin >= desde);
+  });
+}
+
+/** Solape de un intervalo [inicio, fin|∞) con alguno de los meses `YYYY-MM`. */
+function solapaMeses(inicio: string, fin: string | null, meses: readonly string[]): boolean {
+  return meses.some((mes) => {
+    const desde = `${mes}-01`;
+    const hasta = ultimoDiaDeMes(mes);
     return inicio <= hasta && (fin === null || fin >= desde);
   });
 }
@@ -193,6 +301,22 @@ export function contratoVigenteEnEjercicios(
   );
 }
 
+/** Igual que por ejercicios, con meses `YYYY-MM` (bordes inclusivos). */
+export function contratoVigenteEnMeses(
+  contrato: Pick<ContratoFormalizacion, 'fechaInicioContrato' | 'fechaFinContrato'>,
+  meses: readonly string[],
+): boolean {
+  if (meses.length === 0) return true;
+  if (!esFechaIsoValida(contrato.fechaInicioContrato)) return false;
+  const fin = contrato.fechaFinContrato;
+  if (fin !== undefined && fin !== null && fin !== '' && !esFechaIsoValida(fin)) return false;
+  return solapaMeses(
+    contrato.fechaInicioContrato,
+    fin && esFechaIsoValida(fin) ? fin : null,
+    meses,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Ámbito (mismas reglas que el exportador v1, versión multi-entidad)
 // ---------------------------------------------------------------------------
@@ -210,7 +334,8 @@ export function validarAmbitoPaquete(
 ): VeredictoAmbitoPaquete {
   const avisos: string[] = [];
   const denegar = (error: string): VeredictoAmbitoPaquete => ({
-    ok: false, error, propietariosEfectivos: [], inmueblesEfectivos: [], ejerciciosEfectivos: null, avisos,
+    ok: false, error, propietariosEfectivos: [], inmueblesEfectivos: [],
+    ejerciciosEfectivos: null, mesesEfectivos: null, avisos,
   });
 
   const ejercicios = [...new Set((solicitado.ejercicios ?? []).filter(
@@ -218,6 +343,18 @@ export function validarAmbitoPaquete(
   ))].sort((a, b) => a - b);
   if ((solicitado.ejercicios?.length ?? 0) !== ejercicios.length) {
     return denegar('ejercicios inválidos (se esperaban años enteros sin duplicados)');
+  }
+
+  const meses = [...new Set((solicitado.meses ?? []).filter((m) => esMesValido(m)))]
+    .sort((a, b) => a.localeCompare(b));
+  if ((solicitado.meses?.length ?? 0) !== meses.length) {
+    return denegar("meses inválidos (se esperaban valores 'YYYY-MM' sin duplicados)");
+  }
+  if (ejercicios.length > 0 && meses.length > 0) {
+    const fuera = meses.filter((m) => !ejercicios.includes(Number(m.slice(0, 4))));
+    if (fuera.length > 0) {
+      return denegar(`meses fuera de los ejercicios solicitados: ${fuera.join(', ')} (solicitud contradictoria)`);
+    }
   }
 
   const legibles = autorizado.propietarioIdsLegibles; // null = master
@@ -253,8 +390,13 @@ export function validarAmbitoPaquete(
     inmueblesEfectivos = [...solicitado.inmuebleIds];
   }
   const ejerciciosEfectivos = ejercicios.length > 0 ? ejercicios : null;
-  if (ejerciciosEfectivos === null) avisos.push('sin ejercicios: paquete sin filtro temporal');
-  return { ok: true, propietariosEfectivos, inmueblesEfectivos, ejerciciosEfectivos, avisos };
+  const mesesEfectivos = meses.length > 0 ? meses : null;
+  if (ejerciciosEfectivos === null && mesesEfectivos === null) {
+    avisos.push('sin ejercicios ni meses: paquete sin filtro temporal');
+  }
+  return {
+    ok: true, propietariosEfectivos, inmueblesEfectivos, ejerciciosEfectivos, mesesEfectivos, avisos,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,9 +423,13 @@ export function generarPaqueteAsesor(
 
   const props = new Set(veredicto.propietariosEfectivos);
   const inms = veredicto.inmueblesEfectivos ? new Set(veredicto.inmueblesEfectivos) : null;
-  const ejercicios = veredicto.ejerciciosEfectivos; // null = sin filtro
+  const ejercicios = veredicto.ejerciciosEfectivos; // null = sin filtro anual
+  const meses = veredicto.mesesEfectivos; // null = sin filtro mensual
+  const hayFiltroTemporal = ejercicios !== null || meses !== null;
   const enEjercicios = (anio: number | null): boolean =>
     ejercicios === null || (anio !== null && ejercicios.includes(anio));
+  const enMeses = (mes: string | null): boolean =>
+    meses === null || (mes !== null && meses.includes(mes));
 
   const incidencias: IncidenciaPaqueteAsesor[] = [];
   const incidencia = (i: IncidenciaPaqueteAsesor) => { incidencias.push(i); };
@@ -309,6 +455,8 @@ export function generarPaqueteAsesor(
 
   // -- Contratos vigentes en el ejercicio (novedad §4.3.3) ------------------
   const contratosAmbito: ContratoFormalizacion[] = [];
+  /** Propietario efectivo acreditado por contrato (para cruzar con sus cobros). */
+  const propietarioDeContrato = new Map<string, string>();
   for (const c of ordenarPorId(entrada.contratos)) {
     const pid = c.propietarioId ?? titularDeInmueble.get(c.inmuebleId) ?? null;
     if (!pid || !props.has(pid)) {
@@ -323,14 +471,15 @@ export function generarPaqueteAsesor(
     }
     if (!inmuebleEnAmbito(c.inmuebleId)) continue;
     contratosAmbito.push(c);
+    propietarioDeContrato.set(c.id, pid);
   }
   const contratosIncluidos: ContratoFormalizacion[] = [];
   for (const c of contratosAmbito) {
-    if (ejercicios !== null) {
+    if (hayFiltroTemporal) {
       if (!esFechaIsoValida(c.fechaInicioContrato)) {
         incidencia({
           codigo: 'CONTRATO_SIN_FECHA_INICIO', severidad: 'CRITICA',
-          descripcion: `Contrato ${c.id} sin fechaInicioContrato válida: no se puede acreditar vigencia; excluido de contratos.csv (sus cobros se filtran por su propio año)`,
+          descripcion: `Contrato ${c.id} sin fechaInicioContrato válida: no se puede acreditar vigencia; excluido de contratos.csv (sus cobros se filtran por su propio año/mes)`,
           entidad: 'contrato', id: c.id,
         });
         continue;
@@ -344,7 +493,8 @@ export function generarPaqueteAsesor(
         });
         continue;
       }
-      if (!contratoVigenteEnEjercicios(c, ejercicios)) continue;
+      if (ejercicios !== null && !contratoVigenteEnEjercicios(c, ejercicios)) continue;
+      if (meses !== null && !contratoVigenteEnMeses(c, meses)) continue;
     }
     contratosIncluidos.push(c);
   }
@@ -352,13 +502,57 @@ export function generarPaqueteAsesor(
     contratosAmbito.map((c) => [c.id, c.candidatoNombre ?? '']),
   );
 
-  // -- Cobros (aplanados desde los contratos, filtrados por su propio año) --
+  // -- Cobros (aplanados; filtrados por su propio año y mes contables) -------
   const cobrosIncluidos: CobroPeriodo[] = [];
   for (const c of contratosAmbito) {
+    const pidContrato = propietarioDeContrato.get(c.id);
     for (const cobro of ordenarPorId(c.registroCobros ?? [])) {
       if (!props.has(cobro.propietarioId)) continue;
       if (!inmuebleEnAmbito(cobro.inmuebleId)) continue;
+      // Consistencia contrato↔cobro: una discrepancia no se silencia ni se
+      // atribuye al ámbito equivocado; el cobro queda fuera e identificado.
+      if (pidContrato !== undefined && cobro.propietarioId !== pidContrato) {
+        incidencia({
+          codigo: 'COBRO_PROPIETARIO_DISTINTO_CONTRATO', severidad: 'CRITICA',
+          descripcion: `Cobro ${cobro.id} declara propietario ${texto(cobro.propietarioId)} pero su contrato ${c.id} acredita ${pidContrato}: excluido`,
+          entidad: 'cobro', id: cobro.id,
+        });
+        continue;
+      }
+      if (texto(cobro.inmuebleId) !== '' && texto(c.inmuebleId) !== ''
+        && cobro.inmuebleId !== c.inmuebleId) {
+        incidencia({
+          codigo: 'COBRO_INMUEBLE_DISTINTO_CONTRATO', severidad: 'CRITICA',
+          descripcion: `Cobro ${cobro.id} declara inmueble ${texto(cobro.inmuebleId)} pero está anidado en el contrato ${c.id} del inmueble ${texto(c.inmuebleId)}: excluido`,
+          entidad: 'cobro', id: cobro.id,
+        });
+        continue;
+      }
       if (!enEjercicios(typeof cobro.anio === 'number' ? cobro.anio : null)) continue;
+      if (meses !== null) {
+        const mes = mesDeCobro(cobro);
+        if (mes === null) {
+          incidencia({
+            codigo: 'COBRO_SIN_MES', severidad: 'AVISO',
+            descripcion: `Cobro ${cobro.id} sin periodoMesAnio válido ni anio/mes legibles: excluido del paquete por meses`,
+            entidad: 'cobro', id: cobro.id,
+          });
+          continue;
+        }
+        // periodoMesAnio manda; si contradice anio+mes, no se adivina cuál vale.
+        if (esMesValido(cobro.periodoMesAnio)
+          && typeof cobro.anio === 'number' && typeof cobro.mes === 'number'
+          && esMesValido(`${cobro.anio}-${String(cobro.mes).padStart(2, '0')}`)
+          && cobro.periodoMesAnio !== `${cobro.anio}-${String(cobro.mes).padStart(2, '0')}`) {
+          incidencia({
+            codigo: 'COBRO_PERIODO_INCONSISTENTE', severidad: 'CRITICA',
+            descripcion: `Cobro ${cobro.id} con periodoMesAnio ${cobro.periodoMesAnio} contradictorio con anio/mes ${cobro.anio}/${cobro.mes}: excluido del paquete por meses`,
+            entidad: 'cobro', id: cobro.id,
+          });
+          continue;
+        }
+        if (!enMeses(mes)) continue;
+      }
       cobrosIncluidos.push(cobro);
     }
   }
@@ -380,6 +574,18 @@ export function generarPaqueteAsesor(
         continue;
       }
       if (!ejercicios.includes(ej)) continue;
+    }
+    if (meses !== null) {
+      const mes = mesDeGasto(g);
+      if (mes === null) {
+        incidencia({
+          codigo: 'GASTO_SIN_MES', severidad: 'AVISO',
+          descripcion: `Gasto ${g.id} sin periodoMesAnio válido ni fecha legible: excluido del paquete por meses`,
+          entidad: 'gasto', id: g.id,
+        });
+        continue;
+      }
+      if (!enMeses(mes)) continue;
     }
     gastosIncluidos.push(g);
   }
@@ -412,9 +618,54 @@ export function generarPaqueteAsesor(
       continue;
     }
     if (!enEjercicios(ej)) continue;
+    if (meses !== null) {
+      const mes = mesDeFactura(f);
+      if (mes === null) {
+        incidencia({
+          codigo: 'FACTURA_SIN_MES', severidad: 'AVISO',
+          descripcion: `Factura ${f.id} sin fecha de expedición legible para atribuirle un mes: excluida del paquete por meses`,
+          entidad: 'factura', id: f.id,
+        });
+        continue;
+      }
+      if (!enMeses(mes)) continue;
+    }
     facturasIncluidas.push({ factura: f, ejercicio: ej });
   }
   const facturaPorId = new Map(facturasIncluidas.map(({ factura }) => [factura.id, factura]));
+
+  // Discrepancia fiscal interna de cada factura incluida (se identifica, no
+  // se corrige): fórmula del propio motor de facturación del ERP
+  // (`importeTotal = baseImponible + cuotaIva - cuotaRetencion`, a céntimos).
+  const facturasDesgloseInconsistente = new Set<string>();
+  for (const { factura: f } of facturasIncluidas) {
+    const base = f.baseImponible;
+    const iva = f.cuotaIva;
+    const total = f.importeTotal;
+    if (typeof base === 'number' && Number.isFinite(base)
+      && typeof iva === 'number' && Number.isFinite(iva)
+      && typeof total === 'number' && Number.isFinite(total)) {
+      const retencion = typeof f.cuotaRetencion === 'number' && Number.isFinite(f.cuotaRetencion)
+        ? f.cuotaRetencion : 0;
+      const esperado = redondear2(base + iva - retencion);
+      if (esperado !== redondear2(total)) {
+        facturasDesgloseInconsistente.add(f.id);
+        incidencia({
+          codigo: 'FACTURA_DESGLOSE_NO_COINCIDE', severidad: 'AVISO',
+          descripcion: `Factura ${f.id}: base ${base} + IVA ${iva} - retención ${retencion} = ${esperado}, pero importeTotal declara ${total}: se conserva tal cual y su desglose no alimenta el libro`,
+          entidad: 'factura', id: f.id,
+        });
+      }
+    }
+  }
+  for (const grupo of gruposDuplicadosPorId(facturasIncluidas.map(({ factura }) => factura))) {
+    facturasDesgloseInconsistente.add(grupo.id);
+    incidencia({
+      codigo: 'FACTURA_DUPLICADA', severidad: 'CRITICA',
+      descripcion: `La factura ${grupo.id} aparece ${grupo.elementos.length} veces en la entrada: datos/facturas.csv las conserva todas y ningún gasto usa su desglose (vínculo ambiguo)`,
+      entidad: 'factura', id: grupo.id,
+    });
+  }
 
   // -- Liquidaciones (agregaciones; contraste, no libro) --------------------
   const incluirLiquidaciones = solicitado.incluirLiquidaciones !== false;
@@ -423,6 +674,18 @@ export function generarPaqueteAsesor(
   ).filter((liq) => {
     if (!props.has(liq.propietarioId)) return false;
     if (!enEjercicios(typeof liq.anio === 'number' ? liq.anio : null)) return false;
+    if (meses !== null) {
+      const mes = mesDeLiquidacion(liq);
+      if (mes === null) {
+        incidencia({
+          codigo: 'LIQUIDACION_SIN_MES', severidad: 'AVISO',
+          descripcion: `Liquidación ${liq.id} sin periodo 'YYYY-MM' ni anio/mes legibles: excluida del paquete por meses`,
+          entidad: 'liquidacion', id: liq.id,
+        });
+        return false;
+      }
+      if (!enMeses(mes)) return false;
+    }
     if (inms !== null && !(liq.inmuebleIds ?? []).some((id) => inms.has(id))) return false;
     return true;
   });
@@ -435,17 +698,119 @@ export function generarPaqueteAsesor(
     if (!props.has(p.propietarioId)) return false;
     if (p.inmuebleId && !inmuebleEnAmbito(p.inmuebleId)) return false;
     if (!p.inmuebleId && inms !== null) return false;
-    if (ejercicios === null) return true;
+    if (!hayFiltroTemporal) return true;
     if (!esFechaIsoValida(p.fechaInicio) || !esFechaIsoValida(p.fechaVencimiento)) {
       incidencia({
         codigo: 'POLIZA_FECHA_INVALIDA', severidad: 'AVISO',
-        descripcion: `Póliza ${p.id} con vigencia ilegible: excluida del paquete por ejercicios`,
+        descripcion: `Póliza ${p.id} con vigencia ilegible: excluida del paquete por filtro temporal`,
         entidad: 'poliza', id: p.id,
       });
       return false;
     }
-    return solapaEjercicios(p.fechaInicio, p.fechaVencimiento, ejercicios);
+    if (ejercicios !== null && !solapaEjercicios(p.fechaInicio, p.fechaVencimiento, ejercicios)) return false;
+    if (meses !== null && !solapaMeses(p.fechaInicio, p.fechaVencimiento, meses)) return false;
+    return true;
   });
+
+  // -- Duplicados de movimientos (se identifican; el libro no dobla) ---------
+  // datos/*.csv conserva TODAS las filas fuente. En el libro:
+  //  · réplicas exactas del mismo id computan UNA vez (réplica = mismo
+  //    movimiento leído dos veces; contarlo dos veces falsearía el total);
+  //  · mismo id con datos distintos = conflicto irresoluble: no computa
+  //    ninguna copia (no se elige una «verdadera» en silencio);
+  //  · posibles duplicados de negocio con ids distintos se conservan y se
+  //    señalan (precedente DUP_ORIGEN del expediente B6).
+  const huellaCobro = (c: CobroPeriodo): string => jsonEstable({
+    contratoId: c.contratoId, inmuebleId: c.inmuebleId, propietarioId: c.propietarioId,
+    anio: c.anio, mes: c.mes, periodoMesAnio: c.periodoMesAnio,
+    importePrevisto: c.importePrevisto, importeRecibido: c.importeRecibido,
+    estado: c.estado, fechaPago: c.fechaPago ?? null, fechaVencimiento: c.fechaVencimiento,
+  });
+  const huellaGasto = (g: Gasto): string => jsonEstable({
+    inmuebleId: g.inmuebleId, propietarioId: g.propietarioId, contratoId: g.contratoId ?? null,
+    importe: g.importe, estado: g.estado, categoria: g.categoria, concepto: g.concepto,
+    fechaDevengo: g.fechaDevengo ?? null, fechaPago: g.fechaPago ?? null, fecha: g.fecha ?? null,
+    ejercicioFiscal: g.ejercicioFiscal ?? null, periodoMesAnio: g.periodoMesAnio ?? null,
+    facturaId: g.facturaId ?? null, origen: g.origen ?? null, origenId: g.origenId ?? null,
+  });
+  const cobrosDuplicadosExactos = new Set<string>();
+  const cobrosIdConflictivo = new Set<string>();
+  for (const grupo of gruposDuplicadosPorId(cobrosIncluidos)) {
+    const exactos = new Set(grupo.elementos.map(huellaCobro)).size === 1;
+    if (exactos) {
+      cobrosDuplicadosExactos.add(grupo.id);
+      incidencia({
+        codigo: 'COBRO_DUPLICADO_EXACTO', severidad: 'CRITICA',
+        descripcion: `Cobro ${grupo.id} aparece ${grupo.elementos.length} veces idéntico: datos/cobros.csv conserva todas y el libro computa solo una`,
+        entidad: 'cobro', id: grupo.id,
+      });
+    } else {
+      cobrosIdConflictivo.add(grupo.id);
+      incidencia({
+        codigo: 'COBRO_ID_CONFLICTIVO', severidad: 'CRITICA',
+        descripcion: `Cobro ${grupo.id} aparece ${grupo.elementos.length} veces con datos distintos: ninguna copia computa en el libro (no se elige una en silencio)`,
+        entidad: 'cobro', id: grupo.id,
+      });
+    }
+  }
+  const gastosDuplicadosExactos = new Set<string>();
+  const gastosIdConflictivo = new Set<string>();
+  for (const grupo of gruposDuplicadosPorId(gastosIncluidos)) {
+    const exactos = new Set(grupo.elementos.map(huellaGasto)).size === 1;
+    if (exactos) {
+      gastosDuplicadosExactos.add(grupo.id);
+      incidencia({
+        codigo: 'GASTO_DUPLICADO_EXACTO', severidad: 'CRITICA',
+        descripcion: `Gasto ${grupo.id} aparece ${grupo.elementos.length} veces idéntico: datos/gastos.csv conserva todas y el libro computa solo una`,
+        entidad: 'gasto', id: grupo.id,
+      });
+    } else {
+      gastosIdConflictivo.add(grupo.id);
+      incidencia({
+        codigo: 'GASTO_ID_CONFLICTIVO', severidad: 'CRITICA',
+        descripcion: `Gasto ${grupo.id} aparece ${grupo.elementos.length} veces con datos distintos: ninguna copia computa en el libro (no se elige una en silencio)`,
+        entidad: 'gasto', id: grupo.id,
+      });
+    }
+  }
+  // Posibles duplicados de negocio (ids distintos): se conservan y se señalan.
+  const cobrosPorPeriodo = new Map<string, string[]>();
+  for (const c of cobrosIncluidos) {
+    if (cobrosIdConflictivo.has(c.id)) continue;
+    const mes = mesDeCobro(c);
+    if (mes === null) continue;
+    const clave = `${c.contratoId}|${mes}`;
+    const ids = cobrosPorPeriodo.get(clave) ?? [];
+    if (!ids.includes(c.id)) ids.push(c.id);
+    cobrosPorPeriodo.set(clave, ids);
+  }
+  for (const [clave, ids] of [...cobrosPorPeriodo.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (ids.length > 1) {
+      incidencia({
+        codigo: 'COBRO_PERIODO_DUPLICADO', severidad: 'AVISO',
+        descripcion: `Cobros distintos comparten contrato y periodo (${clave}): ${ids.join(', ')}; se conservan todos para revisión humana`,
+        entidad: 'cobro', id: ids[ids.length - 1],
+      });
+    }
+  }
+  const gastosPorOrigen = new Map<string, string[]>();
+  for (const g of gastosIncluidos) {
+    if (gastosIdConflictivo.has(g.id)) continue;
+    if (!g.origenId) continue;
+    const clave = `${texto(g.origen)}|${g.origenId}|${texto(g.concepto)}|${redondear2(typeof g.importe === 'number' ? g.importe : Number.NaN)}`;
+    const ids = gastosPorOrigen.get(clave) ?? [];
+    if (!ids.includes(g.id)) ids.push(g.id);
+    gastosPorOrigen.set(clave, ids);
+  }
+  for (const [clave, ids] of [...gastosPorOrigen.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (ids.length > 1) {
+      incidencia({
+        codigo: 'GASTO_POSIBLE_DUPLICADO_ORIGEN', severidad: 'AVISO',
+        descripcion: `Gastos distintos comparten origen/concepto/importe (${clave}): ${ids.join(', ')}; se conservan todos para revisión humana`,
+        entidad: 'gasto', id: ids[ids.length - 1],
+      });
+    }
+  }
 
   // -- Libro de ingresos y gastos --------------------------------------------
   const libro: LineaLibroAsesor[] = [];
@@ -454,7 +819,13 @@ export function generarPaqueteAsesor(
   let numIngresosComputables = 0;
   let numGastosComputables = 0;
 
+  const cobrosYaComputados = new Set<string>();
   for (const cobro of cobrosIncluidos) {
+    if (cobrosIdConflictivo.has(cobro.id)) continue;
+    if (cobrosDuplicadosExactos.has(cobro.id)) {
+      if (cobrosYaComputados.has(cobro.id)) continue;
+      cobrosYaComputados.add(cobro.id);
+    }
     // Mismo criterio que el expediente fiscal B6 (precedente del ERP).
     if (cobro.estado === 'ANULADO') continue;
     if (cobro.estado === 'IMPAGADO') {
@@ -485,6 +856,20 @@ export function generarPaqueteAsesor(
       });
       continue;
     }
+    const documentoCobroNombre = cobro.justificante?.nombreArchivo ?? '';
+    if (cobro.justificante && !documentoCobroNombre) {
+      incidencia({
+        codigo: 'DOCUMENTO_SIN_NOMBRE', severidad: 'AVISO',
+        descripcion: `Cobro ${cobro.id} referencia un justificante sin nombre de fichero: no hay referencia documental utilizable`,
+        entidad: 'cobro', id: cobro.id,
+      });
+    } else if (documentoCobroNombre) {
+      incidencia({
+        codigo: 'DOCUMENTO_SIN_BINARIO_VERIFICABLE', severidad: 'AVISO',
+        descripcion: `Cobro ${cobro.id} referencia «${documentoCobroNombre}» solo por nombre: el paquete no incluye ni verifica el binario y la referencia no prueba que el original esté disponible`,
+        entidad: 'cobro', id: cobro.id,
+      });
+    }
     libro.push({
       fecha,
       ejercicio: anioDeFechaIso(fecha),
@@ -500,14 +885,20 @@ export function generarPaqueteAsesor(
       origenDeducibilidad: '',
       fuenteTipo: 'COBRO',
       fuenteId: cobro.id,
-      documentoNombre: cobro.justificante?.nombreArchivo ?? '',
+      documentoNombre: documentoCobroNombre,
       desgloseFiscal: 'SIN_DESGLOSE_EN_ORIGEN',
     });
     sumaIngresosComputables += cobro.importeRecibido;
     numIngresosComputables += 1;
   }
 
+  const gastosYaComputados = new Set<string>();
   for (const g of gastosIncluidos) {
+    if (gastosIdConflictivo.has(g.id)) continue;
+    if (gastosDuplicadosExactos.has(g.id)) {
+      if (gastosYaComputados.has(g.id)) continue;
+      gastosYaComputados.add(g.id);
+    }
     if (g.estado === 'ANULADO') continue;
     if (!importeValido(g.importe)) {
       incidencia({
@@ -539,22 +930,86 @@ export function generarPaqueteAsesor(
           descripcion: `Gasto ${g.id} referencia la factura ${g.facturaId}, que no está en el paquete (fuera de ámbito/no aportada): sin desglose`,
           entidad: 'gasto', id: g.id,
         });
+      } else if (facturasDesgloseInconsistente.has(factura.id)) {
+        desgloseFiscal = 'FACTURA_INCONSISTENTE';
+        incidencia({
+          codigo: 'GASTO_FACTURA_INCONSISTENTE', severidad: 'AVISO',
+          descripcion: `Gasto ${g.id} vinculado a la factura ${factura.id}, cuyo desglose ya quedó identificado como inconsistente/duplicado: no alimenta el libro`,
+          entidad: 'gasto', id: g.id,
+        });
+      } else if (factura.propietarioId !== g.propietarioId) {
+        desgloseFiscal = 'FACTURA_INCONSISTENTE';
+        incidencia({
+          codigo: 'GASTO_FACTURA_PROPIETARIO_DISTINTO', severidad: 'CRITICA',
+          descripcion: `Gasto ${g.id} (propietario ${g.propietarioId}) vinculado a la factura ${factura.id} de ${texto(factura.propietarioId)}: sin desglose`,
+          entidad: 'gasto', id: g.id,
+        });
+      } else if (factura.inmuebleId !== undefined && factura.inmuebleId !== null && factura.inmuebleId !== ''
+        && factura.inmuebleId !== g.inmuebleId) {
+        desgloseFiscal = 'FACTURA_INCONSISTENTE';
+        incidencia({
+          codigo: 'GASTO_FACTURA_INMUEBLE_DISTINTO', severidad: 'CRITICA',
+          descripcion: `Gasto ${g.id} (inmueble ${texto(g.inmuebleId)}) vinculado a la factura ${factura.id} del inmueble ${factura.inmuebleId}: sin desglose`,
+          entidad: 'gasto', id: g.id,
+        });
+      } else if (factura.gastoId !== undefined && factura.gastoId !== null && factura.gastoId !== ''
+        && factura.gastoId !== g.id) {
+        desgloseFiscal = 'FACTURA_INCONSISTENTE';
+        incidencia({
+          codigo: 'GASTO_FACTURA_VINCULO_CRUZADO', severidad: 'CRITICA',
+          descripcion: `Gasto ${g.id} reclama la factura ${factura.id}, pero esta declara pertenecer al gasto ${factura.gastoId}: sin desglose`,
+          entidad: 'gasto', id: g.id,
+        });
+      } else if (factura.estado === 'ANULADA' || factura.estado === 'BORRADOR') {
+        desgloseFiscal = 'FACTURA_INCONSISTENTE';
+        incidencia({
+          codigo: 'GASTO_FACTURA_ESTADO_NO_FINAL', severidad: 'AVISO',
+          descripcion: `Gasto ${g.id} vinculado a la factura ${factura.id} en estado ${factura.estado}: no aporta desglose fiscal`,
+          entidad: 'gasto', id: g.id,
+        });
       } else {
-        base = typeof factura.baseImponible === 'number' ? factura.baseImponible : null;
-        iva = typeof factura.cuotaIva === 'number' ? factura.cuotaIva : null;
-        retencion = typeof factura.cuotaRetencion === 'number' ? factura.cuotaRetencion : null;
-        desgloseFiscal = 'FACTURA_VINCULADA';
-        if (typeof factura.importeTotal === 'number'
-          && redondear2(factura.importeTotal) !== redondear2(g.importe)) {
+        const baseFinita = typeof factura.baseImponible === 'number' && Number.isFinite(factura.baseImponible);
+        const ivaFinita = typeof factura.cuotaIva === 'number' && Number.isFinite(factura.cuotaIva);
+        const retencionFinita = factura.cuotaRetencion === undefined
+          || (typeof factura.cuotaRetencion === 'number' && Number.isFinite(factura.cuotaRetencion));
+        if (!baseFinita || !ivaFinita || !retencionFinita) {
+          desgloseFiscal = 'FACTURA_INCONSISTENTE';
           incidencia({
-            codigo: 'GASTO_FACTURA_IMPORTE_NO_COINCIDE', severidad: 'AVISO',
-            descripcion: `Gasto ${g.id} (${g.importe}) no coincide con su factura ${factura.id} (${factura.importeTotal}): se conservan ambos importes, sin corregir ninguno`,
+            codigo: 'GASTO_FACTURA_DESGLOSE_INVALIDO', severidad: 'AVISO',
+            descripcion: `Gasto ${g.id} vinculado a la factura ${factura.id} con base/IVA/retención no finitos: sin desglose`,
             entidad: 'gasto', id: g.id,
           });
+        } else {
+          base = factura.baseImponible;
+          iva = factura.cuotaIva;
+          retencion = typeof factura.cuotaRetencion === 'number' ? factura.cuotaRetencion : null;
+          desgloseFiscal = 'FACTURA_VINCULADA';
+          if (typeof factura.importeTotal === 'number' && Number.isFinite(factura.importeTotal)
+            && redondear2(factura.importeTotal) !== redondear2(g.importe)) {
+            incidencia({
+              codigo: 'GASTO_FACTURA_IMPORTE_NO_COINCIDE', severidad: 'AVISO',
+              descripcion: `Gasto ${g.id} (${g.importe}) no coincide con su factura ${factura.id} (${factura.importeTotal}): se conservan ambos importes, sin corregir ninguno`,
+              entidad: 'gasto', id: g.id,
+            });
+          }
         }
       }
     }
     const docRef = g.documento || (g.documentos && g.documentos[0]);
+    const documentoGastoNombre = docRef?.nombre ?? '';
+    if (docRef && !documentoGastoNombre) {
+      incidencia({
+        codigo: 'DOCUMENTO_SIN_NOMBRE', severidad: 'AVISO',
+        descripcion: `Gasto ${g.id} referencia un documento sin nombre de fichero: no hay referencia documental utilizable`,
+        entidad: 'gasto', id: g.id,
+      });
+    } else if (documentoGastoNombre) {
+      incidencia({
+        codigo: 'DOCUMENTO_SIN_BINARIO_VERIFICABLE', severidad: 'AVISO',
+        descripcion: `Gasto ${g.id} referencia «${documentoGastoNombre}» solo por nombre (sin URL: la ruta interna no viaja): el paquete no incluye ni verifica el binario y la referencia no prueba que el original esté disponible`,
+        entidad: 'gasto', id: g.id,
+      });
+    }
     libro.push({
       fecha,
       ejercicio: anioDeFechaIso(fecha),
@@ -570,7 +1025,7 @@ export function generarPaqueteAsesor(
       origenDeducibilidad: origenDecision,
       fuenteTipo: 'GASTO',
       fuenteId: g.id,
-      documentoNombre: docRef?.nombre ?? '',
+      documentoNombre: documentoGastoNombre,
       desgloseFiscal,
     });
     sumaGastosComputables += g.importe;
@@ -615,6 +1070,40 @@ export function generarPaqueteAsesor(
       totalGastosNoDeducibles: redondear2(f.totalGastosNoDeducibles),
       resultado: redondear2(f.totalIngresos - f.totalGastos),
     }));
+  const porMesMapa = new Map<string, TotalesMesAsesor>();
+  const filaMes = (mes: string): TotalesMesAsesor => {
+    const existente = porMesMapa.get(mes);
+    if (existente) return existente;
+    const nueva: TotalesMesAsesor = {
+      mes, numIngresos: 0, numGastos: 0,
+      totalIngresos: 0, totalGastos: 0,
+      totalGastosDeducibles: 0, totalGastosNoDeducibles: 0, resultado: 0,
+    };
+    porMesMapa.set(mes, nueva);
+    return nueva;
+  };
+  for (const linea of libro) {
+    // El mes de la línea es el de su FECHA en el libro (devengo/pago según la
+    // regla de construcción), no una re-derivación distinta: verificable.
+    const f = filaMes(linea.fecha.slice(0, 7));
+    if (linea.tipo === 'INGRESO') {
+      f.numIngresos += 1; f.totalIngresos += linea.total;
+    } else {
+      f.numGastos += 1; f.totalGastos += linea.total;
+      if (linea.deducible === true) f.totalGastosDeducibles += linea.total;
+      else f.totalGastosNoDeducibles += linea.total;
+    }
+  }
+  const porMes = [...porMesMapa.values()]
+    .sort((a, b) => a.mes.localeCompare(b.mes))
+    .map((f) => ({
+      ...f,
+      totalIngresos: redondear2(f.totalIngresos),
+      totalGastos: redondear2(f.totalGastos),
+      totalGastosDeducibles: redondear2(f.totalGastosDeducibles),
+      totalGastosNoDeducibles: redondear2(f.totalGastosNoDeducibles),
+      resultado: redondear2(f.totalIngresos - f.totalGastos),
+    }));
   const totalIngresos = redondear2(libro.filter((l) => l.tipo === 'INGRESO').reduce((s, l) => s + l.total, 0));
   const totalGastos = redondear2(libro.filter((l) => l.tipo === 'GASTO').reduce((s, l) => s + l.total, 0));
   const totales: TotalesPaqueteAsesor = {
@@ -624,6 +1113,7 @@ export function generarPaqueteAsesor(
     totalGastosNoDeducibles: redondear2(libro.filter((l) => l.tipo === 'GASTO' && l.deducible !== true).reduce((s, l) => s + l.total, 0)),
     resultado: redondear2(totalIngresos - totalGastos),
     porEjercicio,
+    porMes,
     totalNetoLiquidacionesIncluidas: redondear2(
       liquidacionesIncluidas.reduce((s, l) => s + (typeof l.netoPropietario === 'number' ? l.netoPropietario : 0), 0),
     ),
@@ -735,11 +1225,14 @@ export function generarPaqueteAsesor(
   if (libro.length === 0) advertencias.push('El ámbito seleccionado no contiene líneas de libro.');
 
   // Identificador reproducible del CONTENIDO (sin generatedAt ni generatedBy).
+  // `meses` solo forma parte de la huella cuando hay filtro mensual, para no
+  // cambiar la identidad de paquetes sin filtro mensual generados antes.
   const paqueteId = sha256Hex(jsonEstable({
     schema: PAQUETE_ASESOR_SCHEMA,
     propietarios: veredicto.propietariosEfectivos,
     inmuebles: veredicto.inmueblesEfectivos,
     ejercicios: veredicto.ejerciciosEfectivos,
+    ...(veredicto.mesesEfectivos !== null ? { meses: veredicto.mesesEfectivos } : {}),
     conteos,
     libro,
     filas: {
@@ -759,6 +1252,7 @@ export function generarPaqueteAsesor(
       propietariosEfectivos: veredicto.propietariosEfectivos,
       inmueblesEfectivos: veredicto.inmueblesEfectivos,
       ejerciciosEfectivos: veredicto.ejerciciosEfectivos,
+      mesesEfectivos: veredicto.mesesEfectivos,
       conteos,
       totales,
       verificaciones,
@@ -821,7 +1315,8 @@ function informeTxt(paquete: PaqueteAsesorGenerado): string {
     'ÁMBITO',
     `  Propietarios: ${m.propietariosEfectivos.join(', ')}`,
     `  Inmuebles: ${m.inmueblesEfectivos ? m.inmueblesEfectivos.join(', ') : '(todos los de los propietarios)'}`,
-    `  Ejercicios: ${m.ejerciciosEfectivos ? m.ejerciciosEfectivos.join(', ') : '(sin filtro temporal)'}`,
+    `  Ejercicios: ${m.ejerciciosEfectivos ? m.ejerciciosEfectivos.join(', ') : '(sin filtro anual)'}`,
+    `  Meses: ${m.mesesEfectivos ? m.mesesEfectivos.join(', ') : '(sin filtro mensual)'}`,
     '',
     'CONTENIDO',
     ...Object.entries(m.conteos).map(([k, v]) => `  ${k}: ${v}`),

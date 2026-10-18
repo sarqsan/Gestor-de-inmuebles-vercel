@@ -7,7 +7,8 @@
 > ese mismo SHA; árbol limpio al arrancar). **Arena principal detectada:**
 > `arena/d2bfa306-gestor-de-inmuebles-vercel` @ `13c0159…` (6 commits por
 > delante de `main`, 107 ficheros). Este trabajo **no modifica ningún fichero
-> existente** y por tanto ningún fichero de esos 107.
+> preexistente de `main`** (solo los creados por esta propia fase) y por
+> tanto ningún fichero de esos 107.
 >
 > **Qué es este documento:** trazabilidad requisito → código → prueba →
 > resultado de lo implementado, qué queda pendiente y cómo integrarlo.
@@ -39,8 +40,10 @@
 | Fichero | Contenido |
 |---|---|
 | `src/lib/paqueteAsesor/tipos.ts` | Contrato v1 (`erp-paquete-asesor-v1`), ámbito, libro, totales, manifest. Límites declarados en cabecera |
-| `src/lib/paqueteAsesor/motor.ts` | Motor puro: ámbito fail-closed, filtros, libro, cuadre, CSV, ZIP con hashes |
-| `src/lib/paqueteAsesor/paqueteAsesor.test.ts` | 21 pruebas (fixtures sintéticas) |
+| `src/lib/paqueteAsesor/motor.ts` | Motor puro: ámbito fail-closed, filtros (ejercicio y mensual), libro, cuadre, CSV, ZIP con hashes |
+| `src/lib/paqueteAsesor/verificador.ts` | Verificador INDEPENDIENTE del ZIP (CRC/SHA-256, conteos, totales y cuadre recalculados; no importa el motor) |
+| `src/lib/paqueteAsesor/paqueteAsesor.test.ts` | 30 pruebas (fixtures sintéticas) |
+| `src/lib/paqueteAsesor/verificador.test.ts` | 12 pruebas (manipulación de bytes/manifiesto y cuadre) |
 | `docs/FASE-F-PAQUETE-ASESOR-NUCLEO-AISLADO.md` | Este informe |
 
 Reutilización sin tocar lo existente: `analizarDeducibilidad`
@@ -51,7 +54,40 @@ Reutilización sin tocar lo existente: `analizarDeducibilidad`
 - `validarAmbitoPaquete(solicitud, autorizado, catalogoInmuebles)`
 - `generarPaqueteAsesor(entrada, solicitud, autorizado, { generatedAt, generatedBy? })`
 - `empaquetarPaqueteAsesor(paquete)` → `{ zip, sha256Zip, entradas[] }`
-- `contratoVigenteEnEjercicios(contrato, ejercicios)` · `libroACsv` · `filasACsv`
+- `contratoVigenteEnEjercicios(contrato, ejercicios)` ·
+  `contratoVigenteEnMeses(contrato, meses)` · `esMesValido` · `ultimoDiaDeMes`
+  · `libroACsv` · `filasACsv`
+- `verificarPaqueteAsesorZip(zip, { paqueteIdEsperado? })` →
+  `{ ok, paqueteId, schema, numEntradasZip, problemas[] }` (nunca muta)
+- `leerEntradasZipPaqueteAsesor(zip)` (lector ZIP STORE exportado)
+
+Contrato de entrada/salida (continuación 2026-10-18):
+
+- **Entrada:** `EntradaPaqueteAsesor` (registros ya leídos por el llamante
+  con sus Rules) + `SolicitudPaqueteAsesor` (propietarios obligatorios según
+  ámbito, ejercicios y/o meses opcionales) + `AmbitoAutorizado` +
+  `generatedAt` explícito. El núcleo no lee, no pide red ni consulta reloj.
+- **Filtro mensual:** `meses: ['2024-01']` (`YYYY-MM` estricto, sin
+  duplicados; intersección con `ejercicios`: un mes fuera de los ejercicios
+  solicitados deniega, no vacía en silencio). Mes contable: cobro =
+  `periodoMesAnio` válido (si contradice `anio`+`mes` se excluye e
+  identifica) o derivado de `anio`+`mes`; gasto = `periodoMesAnio` válido o
+  mes de su fecha; factura = de `fechaExpedicion` (nunca del solo ejercicio);
+  liquidación = `periodo` o `anio`+`mes`; contratos/pólizas = solape del
+  intervalo [primer día, último día] del mes. Sin mes acreditable con filtro
+  activo ⇒ excluido con incidencia identificadora.
+- **Salida:** `PaqueteAsesorGenerado` (manifiesto con ámbito efectivo incl.
+  `mesesEfectivos`, totales globales/por ejercicio/por mes, verificaciones,
+  libro, filas proyectadas e incidencias) y ZIP determinista de 12 entradas
+  con SHA-256 por entrada. Paquetes anteriores sin `mesesEfectivos`:
+  el verificador los trata como `null` con advertencia heredada.
+- **Verificación:** `verificarPaqueteAsesorZip` parsea el ZIP (EOCD,
+  directorio central, CRC-32, tamaños, cobertura sin huecos), contrasta los
+  SHA-256 del manifiesto y RECÁLCULA en céntimos desde los CSV: conteos,
+  totales (global/porEjercicio/porMes) y cuadre libro↔`datos/cobros|gastos.csv`.
+  Exige incidencia identificadora para cada discrepancia detectable:
+  duplicados, desglose de factura que no suma el total y referencias
+  documentales. No repara ni reconstruye: reporta errores y advertencias.
 
 ## 3. Trazabilidad PLAN §5-F → código → prueba
 
@@ -60,9 +96,12 @@ Reutilización sin tocar lo existente: `analizarDeducibilidad`
 | Multi-entidad en un solo ZIP | `empaquetarPaqueteAsesor` (12 entradas) | «entradas esperadas…» |
 | Entidades FACTURA / LIQUIDACIÓN (+PÓLIZA) | `COLUMNAS_FACTURA/LIQUIDACION/POLIZA_PAQUETE` + filtros | «solo incluye el ámbito p1/2024», «factura sin ejercicio deriva…» |
 | Filtro temporal en contratos | `contratoVigenteEnEjercicios` (solape, bordes, sin fecha ⇒ fuera) | «vigencia por solape», «solo incluye…» (c2 fuera) |
+| Selección por meses concretos (continuación) | `meses` `YYYY-MM` + `contratoVigenteEnMeses` + mes contable por entidad | «valida formato…», «filtro 2024-01…», «solo mensual 2025-01…», «periodo contradictorio…» |
 | Libro de ingresos y gastos (fecha, concepto, inmueble, contraparte, base, IVA, total, categoría, deducibilidad) | `LineaLibroAsesor` + `libroACsv` | «incluye cobro recibido…», «deducibilidad…», «base/IVA solo…», «ordenado por fecha» |
 | Índice con hashes + informe | `manifest.json` (hash por entrada, excluyéndose) + `informe.txt` | «índice declara el hash de cada entrada» |
 | Puerta: «ZIP que el asesor pueda cuadrar» | `verificaciones[]` (5 cuadres) + `totales.json` | «cuadre: verificaciones en verde…» |
+| Verificación por tercero (continuación) | `verificarPaqueteAsesorZip` (sin importar `motor.ts`) | `verificador.test.ts`: 12 casos incl. byte manipulado, manifiesto inflado, línea eliminada, entradas ausentes, ZIP truncado |
+| Discrepancias identificadas (continuación) | duplicados exactos/conflictivos, desglose que no suma, vínculos cruzados, documentos sin binario | «duplicados: exacto computa una vez…», «factura cuyo desglose no suma…», «toda referencia documental…» |
 
 Reglas honradas (con su prueba):
 
@@ -81,7 +120,19 @@ Reglas honradas (con su prueba):
   («ZIP reproducible»).
 - **Fail-closed:** fuera de ámbito / master sin explicitar / sin
   `generatedAt` ⇒ denegado («ámbito fail-closed», 4 pruebas).
+- **Duplicados de movimientos:** `datos/*.csv` conserva todas las filas; en
+  el libro, la réplica exacta del mismo id computa una vez y el id con datos
+  distintos no computa ninguna copia. Posibles duplicados de negocio (mismo
+  contrato+periodo, mismo origen+concepto+importe) se conservan señalados.
+- **Discrepancias fiscales:** la factura cuyo `base+IVA−retención` no iguala
+  su total (fórmula del propio ERP) queda identificada y su desglose no
+  alimenta el libro; igual con factura ajena al propietario/inmueble del
+  gasto, vínculo cruzado, duplicada, ANULADA o BORRADOR. Sin corregir importes.
+- **Referencia ≠ disponibilidad:** cada línea con `documentoNombre` lleva su
+  incidencia `DOCUMENTO_SIN_BINARIO_VERIFICABLE`; el paquete no incluye ni
+  verifica binarios y la referencia no prueba que el original exista.
 - **Frontera:** sin Firebase/red/reloj/aleatorio (guardia sobre el código).
+  El verificador no importa el motor (guardia específica en su test).
 
 ## 4. Criterios de aceptación
 
@@ -89,7 +140,11 @@ Reglas honradas (con su prueba):
 FACTURA/LIQUIDACIÓN/PÓLIZA exportables dentro del paquete; contratos por
 vigencia; libro por fecha con base/IVA honesto y deducibilidad de la fuente
 única; índice SHA-256; cuadre libro==fuentes computables; aislamiento entre
-propietarios (p2 nunca aparece con ámbito p1); determinismo byte a byte.
+propietarios (p2 nunca aparece con ámbito p1); determinismo byte a byte;
+**filtro mensual `YYYY-MM`** con intersección fail-closed y totales por mes;
+**verificador independiente** que recalcula conteos/totales/cuadre desde los
+bytes del ZIP y exige incidencia para duplicados, desgloses incoherentes y
+referencias documentales.
 
 **Pendientes (no parte de esta entrega; no se finge su cierre):**
 
@@ -108,20 +163,33 @@ propietarios (p2 nunca aparece con ámbito p1); determinismo byte a byte.
    `fechaInicioContrato`/`fechaFinContrato`), que aquí se evita pero no se toca.
 4. **Mapeo a programa contable** (A3/Holded/Odoo) y formato Excel del libro:
    decisión §7.5 del plan, sin respuesta registrada; no se inventa.
-5. **Meses concretos** (`YYYY-MM`) y selección por parte de ejercicios más
-   fina: v1 del paquete filtra por ejercicios completos.
+5. ~~**Meses concretos** (`YYYY-MM`)~~ **RESUELTO en la continuación
+   2026-10-18** (filtro mensual + totales por mes + verificador; ver §2).
+   Quedan fuera: rangos «de mes X a mes Y» como azúcar sintáctico (salen
+   solos de enumerar la lista) y la selección por parte de mes.
+6. **Alias `fecha` de gasto no serializado en `datos/gastos.csv`**
+   (contrato CSV v1): si la línea del libro de un gasto solo depende de ese
+   alias, su cuadre no es re-derivable al céntimo desde el ZIP; el
+   verificador lo declara como advertencia. Resolverlo toca el contrato v1:
+   trabajo de integración, no de este núcleo.
+7. **`paqueteId` no recomputable desde el ZIP** (huella del contenido
+   tipado): el verificador lo contrasta por formato/informe/esperado y lo
+   declara como advertencia; nunca finge re-derivarlo.
 
 ## 5. Integración posterior (cuando la principal cierre P1–P4)
 
 1. Leer este fichero y `tipos.ts` (límites). Actualizar la rama de integración
-   y ejecutar: `npx vitest run src/lib/paqueteAsesor/paqueteAsesor.test.ts`,
+   y ejecutar: `npx vitest run src/lib/paqueteAsesor/`,
    `npx tsc --noEmit` y la suite completa. Conflicto textual esperado con
-   P1–P4: **ninguno** (cuatro ficheros nuevos, cero editados). Conflicto
-   semántico a revisar: si P3 (conciliación) cambia tipos de
-   `CobroPeriodo`/`Gasto`, recompilarán estos tests y lo dirán.
+   P1–P4: **ninguno** (seis ficheros de esta fase, cero preexistentes
+   editados). Conflicto semántico a revisar: si P3 (conciliación) cambia
+   tipos de `CobroPeriodo`/`Gasto`, recompilarán estos tests y lo dirán.
 2. Cablear la UI (punto 1 de pendientes) reutilizando las `fuentes` del panel
    y un lector de facturas/liquidaciones/pólizas acotado por ámbito; registrar
-   el `sha256Zip` devuelto como evidencia de la exportación.
+   el `sha256Zip` devuelto como evidencia de la exportación. Tras descargar,
+   la propia app puede ejecutar `verificarPaqueteAsesorZip(zip)` como
+   auto-check (es puro y sin motor) y mostrar sus problemas; el asesor
+   puede ejecutarlo fuera para auditar el paquete recibido.
 3. Decidir binarios (resolver Storage) y exportador v2 **antes** de anunciar
    «paquete completo con documentos» a ningún asesor.
 4. No mergear este núcleo sobre un `main` distinto de `f782e53…` sin

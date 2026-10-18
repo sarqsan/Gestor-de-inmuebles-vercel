@@ -16,11 +16,14 @@ import type { LiquidacionPropietario } from '../../tesoreria/tipos';
 import { sha256Hex } from '../importacion/hash';
 import {
   contratoVigenteEnEjercicios,
+  contratoVigenteEnMeses,
   empaquetarPaqueteAsesor,
   esFechaIsoValida,
+  esMesValido,
   filasACsv,
   generarPaqueteAsesor,
   libroACsv,
+  ultimoDiaDeMes,
   validarAmbitoPaquete,
 } from './motor';
 import type { AmbitoAutorizado, EntradaPaqueteAsesor } from './tipos';
@@ -396,6 +399,169 @@ describe('Fase F · empaquetado ZIP determinista con hashes', () => {
       base: null, iva: null, desgloseFiscal: 'SIN_DESGLOSE_EN_ORIGEN',
     });
     expect(sinFac.incidencias.some((i) => i.codigo === 'GASTO_FACTURA_NO_EN_PAQUETE')).toBe(true);
+  });
+});
+
+describe('Fase F · filtro mensual YYYY-MM y discrepancias identificadas', () => {
+  it('valida formato, duplicados y contradicción mes/ejercicio (fail-closed)', () => {
+    expect(esMesValido('2024-01')).toBe(true);
+    expect(esMesValido('2024-13')).toBe(false);
+    expect(esMesValido('2024-1')).toBe(false);
+    expect(esMesValido(202401)).toBe(false);
+    expect(ultimoDiaDeMes('2024-02')).toBe('2024-02-29'); // bisiesto
+    expect(ultimoDiaDeMes('2025-02')).toBe('2025-02-28');
+    expect(validarAmbitoPaquete(
+      { propietarioIds: ['p1'], meses: ['2024-01', '2024-01'] }, AUT_P1, inmuebles,
+    ).ok).toBe(false);
+    expect(validarAmbitoPaquete(
+      { propietarioIds: ['p1'], meses: ['2024/01'] }, AUT_P1, inmuebles,
+    ).ok).toBe(false);
+    const contradictorio = validarAmbitoPaquete(
+      { propietarioIds: ['p1'], ejercicios: [2024], meses: ['2025-01'] }, AUT_P1, inmuebles,
+    );
+    expect(contradictorio.ok).toBe(false);
+    expect(contradictorio.error).toContain('contradictoria');
+    const ok = validarAmbitoPaquete(
+      { propietarioIds: ['p1'], ejercicios: [2024, 2025], meses: ['2025-02', '2024-01'] },
+      AUT_P1, inmuebles,
+    );
+    expect(ok.mesesEfectivos).toEqual(['2024-01', '2025-02']); // ordenados
+  });
+
+  it('vigencia mensual de contratos: bordes inclusivos a primero/último día', () => {
+    const c = (fi: string, ff?: string) =>
+      ({ fechaInicioContrato: fi, fechaFinContrato: ff } as ContratoFormalizacion);
+    expect(contratoVigenteEnMeses(c('2023-01-01', '2024-01-01'), ['2024-01'])).toBe(true);
+    expect(contratoVigenteEnMeses(c('2024-02-29'), ['2024-02'])).toBe(true);
+    expect(contratoVigenteEnMeses(c('2024-03-01'), ['2024-02'])).toBe(false);
+    expect(contratoVigenteEnMeses(c('2024-03-01'), [])).toBe(true); // sin filtro
+    expect(contratoVigenteEnMeses(c(''), ['2024-01'])).toBe(false); // sin acreditar
+  });
+
+  it('filtro 2024-01: cobros/gastos/facturas/liquidaciones por mes y totales porMes', () => {
+    const p = generarPaqueteAsesor(
+      entrada,
+      { propietarioIds: ['p1'], ejercicios: [2024], meses: ['2024-01'] },
+      AUT_P1, { generatedAt: GENERADO_EN },
+    );
+    expect(p.manifest.mesesEfectivos).toEqual(['2024-01']);
+    expect(p.filas.cobros.map((r) => r['id'])).toEqual(['cob1']); // cob2=02, cob4=03
+    expect(p.filas.gastos.map((r) => r['id'])).toEqual([]); // todos devengan 06/07
+    expect(p.filas.facturas.map((r) => r['id'])).toEqual([]); // fac1=07
+    expect(p.filas.liquidaciones.map((r) => r['id'])).toEqual(['liq1']); // periodo 2024-01
+    expect(p.filas.polizas.map((r) => r['id'])).toEqual(['pol1']);
+    expect(p.libro.map((l) => l.fuenteId)).toEqual(['cob1']);
+    expect(p.manifest.totales.porMes).toEqual([{
+      mes: '2024-01', numIngresos: 1, numGastos: 0, totalIngresos: 600, totalGastos: 0,
+      totalGastosDeducibles: 0, totalGastosNoDeducibles: 0, resultado: 600,
+    }]);
+  });
+
+  it('filtro solo mensual (sin ejercicios) 2025-01 selecciona cruzando el año', () => {
+    const p = generarPaqueteAsesor(
+      entrada,
+      { propietarioIds: ['p1'], meses: ['2025-01'] },
+      AUT_P1, { generatedAt: GENERADO_EN },
+    );
+    expect(p.manifest.ejerciciosEfectivos).toBeNull();
+    expect(p.filas.cobros.map((r) => r['id'])).toEqual(['cob3']);
+    expect(p.filas.gastos.map((r) => r['id'])).toEqual(['g4']);
+    expect(p.filas.facturas.map((r) => r['id'])).toEqual(['fac2']);
+    expect(p.manifest.totales.totalIngresos).toBe(615);
+    expect(p.manifest.totales.totalGastos).toBe(50);
+  });
+
+  it('periodo contradictorio de cobro y gasto sin mes se identifican, no se adivina', () => {
+    const conInconsistente: EntradaPaqueteAsesor = {
+      inmuebles,
+      contratos: [{
+        ...(contratos[0] as unknown as Record<string, unknown>),
+        registroCobros: [cobro({
+          id: 'cob-inc', anio: 2024, mes: 1, periodoMesAnio: '2024-02',
+          fechaPago: '2024-02-03', fechaVencimiento: '2024-02-05',
+        })],
+      }] as unknown as ContratoFormalizacion[],
+      gastos: [gasto({
+        id: 'g-sinmes', fechaDevengo: undefined, fechaPago: undefined,
+        fecha: undefined, ejercicioFiscal: 2024,
+      })],
+    };
+    const p = generarPaqueteAsesor(
+      conInconsistente,
+      { propietarioIds: ['p1'], meses: ['2024-02'] },
+      AUT_P1, { generatedAt: GENERADO_EN },
+    );
+    expect(p.filas.cobros.map((r) => r['id'])).toEqual([]);
+    expect(p.incidencias.some((i) => i.codigo === 'COBRO_PERIODO_INCONSISTENTE' && i.id === 'cob-inc')).toBe(true);
+    expect(p.incidencias.some((i) => i.codigo === 'GASTO_SIN_MES' && i.id === 'g-sinmes')).toBe(true);
+  });
+
+  it('duplicados: exacto computa una vez; id conflictivo no computa; las fuentes conservan todo', () => {
+    const p = generarPaqueteAsesor(
+      {
+        inmuebles, contratos: [],
+        gastos: [
+          gasto({ id: 'g-dup', importe: 30 }),
+          gasto({ id: 'g-dup', importe: 30 }),
+          gasto({ id: 'g-conf', importe: 10 }),
+          gasto({ id: 'g-conf', importe: 99 }),
+        ],
+      },
+      { propietarioIds: ['p1'], ejercicios: [2024] },
+      AUT_P1, { generatedAt: GENERADO_EN },
+    );
+    expect(p.filas.gastos.map((r) => r['id'])).toEqual(['g-conf', 'g-conf', 'g-dup', 'g-dup']);
+    expect(p.libro.map((l) => l.fuenteId)).toEqual(['g-dup']);
+    expect(p.manifest.totales.totalGastos).toBe(30);
+    expect(p.incidencias.some((i) => i.codigo === 'GASTO_DUPLICADO_EXACTO' && i.id === 'g-dup')).toBe(true);
+    expect(p.incidencias.some((i) => i.codigo === 'GASTO_ID_CONFLICTIVO' && i.id === 'g-conf')).toBe(true);
+    expect(p.manifest.verificaciones.every((v) => v.ok)).toBe(true);
+  });
+
+  it('factura cuyo desglose no suma el total: identificada y sin alimentar el libro', () => {
+    const p = generarPaqueteAsesor(
+      {
+        inmuebles, contratos: [],
+        gastos: [gasto({ id: 'g2', importe: 121, facturaId: 'fac-mal' })],
+        facturas: [{
+          ...(facturas[0] as unknown as Record<string, unknown>),
+          id: 'fac-mal', gastoId: 'g2', importeTotal: 999,
+        }] as unknown as Factura[],
+      },
+      { propietarioIds: ['p1'], ejercicios: [2024] },
+      AUT_P1, { generatedAt: GENERADO_EN },
+    );
+    expect(p.incidencias.some((i) => i.codigo === 'FACTURA_DESGLOSE_NO_COINCIDE' && i.id === 'fac-mal')).toBe(true);
+    expect(p.libro.find((l) => l.fuenteId === 'g2')).toMatchObject({
+      base: null, iva: null, desgloseFiscal: 'FACTURA_INCONSISTENTE', total: 121,
+    });
+  });
+
+  it('vínculo cruzado gasto→factura no aporta desglose', () => {
+    const p = generarPaqueteAsesor(
+      {
+        inmuebles, contratos: [],
+        gastos: [gasto({ id: 'g-otro', importe: 121, facturaId: 'fac1' })],
+        facturas: [facturas[0]], // fac1 declara gastoId g2
+      },
+      { propietarioIds: ['p1'], ejercicios: [2024] },
+      AUT_P1, { generatedAt: GENERADO_EN },
+    );
+    expect(p.incidencias.some((i) => i.codigo === 'GASTO_FACTURA_VINCULO_CRUZADO' && i.id === 'g-otro')).toBe(true);
+    expect(p.libro.find((l) => l.fuenteId === 'g-otro')).toMatchObject({ base: null, desgloseFiscal: 'FACTURA_INCONSISTENTE' });
+  });
+
+  it('toda referencia documental queda identificada como sin binario verificable', () => {
+    const p = generar2024();
+    const conDocumento = p.libro.filter((l) => l.documentoNombre !== '');
+    expect(conDocumento.map((l) => l.fuenteId)).toContain('g1');
+    for (const linea of conDocumento) {
+      expect(p.incidencias.some(
+        (i) => i.codigo === 'DOCUMENTO_SIN_BINARIO_VERIFICABLE' && i.id === linea.fuenteId,
+      )).toBe(true);
+    }
+    // La ruta interna del documento no viaja: solo el nombre.
+    expect(JSON.stringify(p.libro)).not.toContain('storagePath');
   });
 });
 

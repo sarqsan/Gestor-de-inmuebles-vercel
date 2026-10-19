@@ -10,14 +10,15 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { deleteObject, getBlob, getMetadata, ref, uploadBytes } from 'firebase/storage';
+import { deleteObject, getBytes, getMetadata, ref, uploadBytes } from 'firebase/storage';
 import { auth, db, registrarAuditoriaFirestore, storage } from '../firebase';
 import { construirAuditoriaExpediente } from './auditoria';
+import { evaluarIntegridad, type ResultadoVerificacion } from './documentosProfesionales';
 import {
-  calcularSha256Archivo,
   crearDocumentoPatrimonial,
   ErrorDocumentoPatrimonial,
   generarIdDocumentoPatrimonial,
+  sha256DeBytes,
   validarRelacionesDocumento,
   validarTransicionDocumento,
   type FuenteRelacionada,
@@ -62,7 +63,7 @@ function actorActual() {
 
 function adjuntarAuditoria(
   actor: { id?: string; email?: string; nombre: string },
-  accion: 'EXPEDIENTE_DOCUMENTO_INCORPORADO' | 'EXPEDIENTE_DOCUMENTO_MODIFICADO' | 'EXPEDIENTE_DOCUMENTO_DESCARGADO' | 'EXPEDIENTE_DOCUMENTO_ELIMINADO' | 'EXPEDIENTE_INCIDENCIA',
+  accion: 'EXPEDIENTE_DOCUMENTO_INCORPORADO' | 'EXPEDIENTE_DOCUMENTO_SUSTITUIDO' | 'EXPEDIENTE_DOCUMENTO_MODIFICADO' | 'EXPEDIENTE_DOCUMENTO_DESCARGADO' | 'EXPEDIENTE_DOCUMENTO_ELIMINADO' | 'EXPEDIENTE_INCIDENCIA',
   documento: DocumentoPatrimonial,
   resultado: 'EXITO' | 'ERROR',
   descripcion: string
@@ -144,8 +145,11 @@ export async function subirDocumentoPatrimonial(input: SubirDocumentoPatrimonial
   const actor = actorActual();
   const nombre = input.nombre || (typeof File !== 'undefined' && input.archivo instanceof File ? input.archivo.name : 'documento');
   const mimeType = input.archivo.type || 'application/octet-stream';
-  const tamanoBytes = input.archivo.size;
-  const sha256 = await calcularSha256Archivo(input.archivo);
+  // P3: los bytes se leen UNA vez; la huella y la subida usan exactamente el
+  // mismo contenido (Uint8Array: válido en navegador y en Node/emulador).
+  const bytes = new Uint8Array(await input.archivo.arrayBuffer());
+  const tamanoBytes = bytes.byteLength;
+  const sha256 = await sha256DeBytes(bytes);
   const relaciones = input.relaciones || {};
   const { propietarioId } = await cargarContexto(input.inmuebleId, relaciones);
   let version = 1;
@@ -208,10 +212,16 @@ export async function subirDocumentoPatrimonial(input: SubirDocumentoPatrimonial
         await adjuntarAuditoria({ id: actor.id, email: actor.email, nombre: input.actorNombre || actor.nombre }, 'EXPEDIENTE_DOCUMENTO_INCORPORADO', actual, 'EXITO', `Documento patrimonial recuperado tras confirmación interrumpida: ${actual.nombre}`);
         return { documento: actual, duplicado: true };
       } catch (error) {
-        if ((error as { code?: string })?.code !== 'storage/object-not-found') throw error;
+        // P3: con las reglas reales el `get` de un objeto PENDIENTE_STORAGE se
+        // deniega (`storage/unauthorized`): no es verificable desde el cliente,
+        // así que se re-sube el MISMO contenido (la regla `create` ata tamaño,
+        // MIME y huella a los metadatos; sobrescribir con idéntico contenido es
+        // idempotente). Cualquier otro error se propaga.
+        const code = (error as { code?: string })?.code;
+        if (code !== 'storage/object-not-found' && code !== 'storage/unauthorized') throw error;
       }
     }
-    await uploadBytes(storageRef, input.archivo, {
+    await uploadBytes(storageRef, bytes, {
       contentType: actual.mimeType,
       customMetadata: { documentoId: actual.id, inmuebleId: actual.inmuebleId, sha256: actual.sha256 },
     });
@@ -219,7 +229,9 @@ export async function subirDocumentoPatrimonial(input: SubirDocumentoPatrimonial
     const actualizadoEl = new Date().toISOString();
     await updateDoc(metadataRef, { estado: 'DISPONIBLE', actualizadoEl });
     actual = { ...actual, estado: 'DISPONIBLE', actualizadoEl };
-    await adjuntarAuditoria({ id: actor.id, email: actor.email, nombre: input.actorNombre || actor.nombre }, 'EXPEDIENTE_DOCUMENTO_INCORPORADO', actual, 'EXITO', `Documento patrimonial incorporado: ${actual.nombre}`);
+    await adjuntarAuditoria({ id: actor.id, email: actor.email, nombre: input.actorNombre || actor.nombre },
+      actual.sustituyeA ? 'EXPEDIENTE_DOCUMENTO_SUSTITUIDO' : 'EXPEDIENTE_DOCUMENTO_INCORPORADO', actual, 'EXITO',
+      actual.sustituyeA ? `Documento patrimonial v${actual.version} sustituye explícitamente a ${actual.sustituyeA}: ${actual.nombre}` : `Documento patrimonial incorporado: ${actual.nombre}`);
     return { documento: actual, duplicado: false };
   } catch (error) {
     await adjuntarAuditoria({ id: actor.id, email: actor.email, nombre: input.actorNombre || actor.nombre }, 'EXPEDIENTE_INCIDENCIA', actual, 'ERROR', `Falló la incorporación del documento ${actual.id}; el registro pendiente se conserva para reintento.`);
@@ -251,7 +263,22 @@ export async function actualizarMetadatosDocumentoPatrimonial(
   await adjuntarAuditoria({ id: actor.id, email: actor.email, nombre: actorNombre || actor.nombre }, 'EXPEDIENTE_DOCUMENTO_MODIFICADO', { ...actual, ...cambios, actualizadoEl }, 'EXITO', `Metadatos modificados: ${actual.nombre}`);
 }
 
-export async function descargarDocumentoPatrimonial(inmuebleId: string, documentoId: string): Promise<{ blob: Blob; nombre: string; mimeType: string }> {
+/**
+ * P3: registra la pérdida/alteración del objeto (DISPONIBLE → ERROR_STORAGE)
+ * para que el expediente no lo siga presentando como disponible. Si el actor
+ * no tiene ámbito de escritura, el estado no cambia pero la incidencia se audita.
+ */
+async function marcarNoDisponible(documento: DocumentoPatrimonial): Promise<boolean> {
+  try {
+    validarTransicionDocumento(documento.estado, 'ERROR_STORAGE');
+    await updateDoc(refDocumento(documento.inmuebleId, documento.id), { estado: 'ERROR_STORAGE', actualizadoEl: new Date().toISOString() });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function descargarDocumentoPatrimonial(inmuebleId: string, documentoId: string): Promise<{ blob: Blob; nombre: string; mimeType: string; verificacion: Extract<ResultadoVerificacion, { estado: 'VERIFICADO' }> }> {
   actorActual();
   const snap = await getDoc(refDocumento(inmuebleId, documentoId));
   if (!snap.exists()) throw new ErrorDocumentoPatrimonial('DOCUMENTO_INEXISTENTE', 'El documento no existe o no tienes acceso.');
@@ -261,13 +288,39 @@ export async function descargarDocumentoPatrimonial(inmuebleId: string, document
   }
   const actor = auth.currentUser!;
   const auditor = { id: actor.uid, email: actor.email || '', nombre: actor.displayName || actor.email || actor.uid };
+  let bytes: Uint8Array;
   try {
-    const blob = await getBlob(ref(storage, documento.storagePath));
-    await adjuntarAuditoria(auditor, 'EXPEDIENTE_DOCUMENTO_DESCARGADO', documento, 'EXITO', `Documento patrimonial recuperado: ${documento.nombre}`);
-    return { blob, nombre: documento.nombre, mimeType: documento.mimeType };
+    bytes = new Uint8Array(await getBytes(ref(storage, documento.storagePath)));
   } catch (error) {
+    if ((error as { code?: string })?.code === 'storage/object-not-found') {
+      const marcado = await marcarNoDisponible(documento);
+      await adjuntarAuditoria(auditor, 'EXPEDIENTE_DOCUMENTO_DESCARGADO', marcado ? { ...documento, estado: 'ERROR_STORAGE' } : documento, 'ERROR', `El objeto de ${documento.id} no existe en Storage; ${marcado ? 'marcado ERROR_STORAGE' : 'sin ámbito para marcarlo'}.`);
+      throw new ErrorDocumentoPatrimonial('OBJETO_AUSENTE', 'El archivo no existe en el almacenamiento aunque su registro sí; queda marcado como no disponible.');
+    }
     await adjuntarAuditoria(auditor, 'EXPEDIENTE_DOCUMENTO_DESCARGADO', documento, 'ERROR', `Falló la recuperación del documento ${documento.id}`);
     throw error;
+  }
+  // P3: la huella SHA-256 detecta alteraciones respecto al alta; no es firma
+  // digital ni prueba de procedencia externa.
+  const verificacion = evaluarIntegridad(documento, { sha256: await sha256DeBytes(bytes), tamanoBytes: bytes.byteLength });
+  if (verificacion.estado !== 'VERIFICADO') {
+    const marcado = await marcarNoDisponible(documento);
+    await adjuntarAuditoria(auditor, 'EXPEDIENTE_DOCUMENTO_DESCARGADO', marcado ? { ...documento, estado: 'ERROR_STORAGE' } : documento, 'ERROR', `La huella recuperada de ${documento.id} no coincide con la registrada.`);
+    throw new ErrorDocumentoPatrimonial('INTEGRIDAD_DISCREPANTE', 'El contenido recuperado no coincide con la huella registrada; no se entrega.');
+  }
+  await adjuntarAuditoria(auditor, 'EXPEDIENTE_DOCUMENTO_DESCARGADO', documento, 'EXITO', `Documento patrimonial recuperado y huella verificada: ${documento.nombre}`);
+  return { blob: new Blob([bytes], { type: documento.mimeType }), nombre: documento.nombre, mimeType: documento.mimeType, verificacion };
+}
+
+/** P3: verificación explícita de disponibilidad e integridad (no entrega el contenido). */
+export async function verificarDocumentoPatrimonial(inmuebleId: string, documentoId: string): Promise<ResultadoVerificacion> {
+  try {
+    return (await descargarDocumentoPatrimonial(inmuebleId, documentoId)).verificacion;
+  } catch (error) {
+    const codigo = (error as { codigo?: string; code?: string }).codigo;
+    if (codigo === 'OBJETO_AUSENTE') return { estado: 'OBJETO_AUSENTE' };
+    if (codigo === 'INTEGRIDAD_DISCREPANTE') return { estado: 'INTEGRIDAD_DISCREPANTE' };
+    return { estado: 'NO_VERIFICABLE', motivo: codigo || (error as { code?: string }).code || 'desconocido' };
   }
 }
 

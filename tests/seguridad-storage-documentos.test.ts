@@ -516,6 +516,8 @@ describe('E · update (metadatos) y delete por ruta — decisiones específicas,
       '/documentos_solicitados/{solicitudDocId}/{fileName}',
       '/inmuebles/{inmuebleId}/{fileName}',
       '/inmuebles/{inmuebleId}/documentos_patrimoniales/{documentoId}/{fileName}',
+      // P3: documentos de profesionales — nombre único por documentoId, sin update.
+      '/profesionales/{profesionalId}/documentos/{documentoId}/{fileName}',
       '/recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName}',
       '/incidencias_fotos/{propietarioId}/{incidenciaId}/{fileName}',
       '/reformas_documentos/{propietarioId}/{proyectoId}/{fileName}',

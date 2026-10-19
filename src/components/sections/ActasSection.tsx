@@ -304,12 +304,13 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
       const blob = docPdf.output('blob');
       const { uploadPdfActaStorage } = await import('../../lib/firebaseActas');
       const fileName = `Acta_${acta.tipo}_${acta.fechaActo}_v${acta.version}_${acta.id.slice(0,8)}.pdf`;
-      const { url, storagePath } = await uploadPdfActaStorage(acta.ownerId, acta.id, blob, fileName);
+      const { url, storagePath, sha256: pdfSha256 } = await uploadPdfActaStorage(acta.ownerId, acta.id, blob, fileName);
       // Guardar referencia persistente en Firestore — flujo completo generar → upload → guardar referencia → auditoría
       const actaConPdf: Acta = {
         ...acta,
         pdfUrl: url,
         pdfStoragePath: storagePath,
+        pdfSha256,
         pdfVersion: acta.version,
         pdfFechaGeneracion: new Date().toISOString(),
         fechaActualizacion: new Date().toISOString(),
@@ -341,7 +342,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         entidadAfectada: 'inmueble' as any,
         idAfectado: acta.propertyId,
         resultado: 'EXITO',
-        detalles: { actaId: acta.id, version: acta.version, pdfUrl: url, storagePath },
+        detalles: { actaId: acta.id, version: acta.version, pdfUrl: url, storagePath, sha256: pdfSha256 },
       });
     } catch (e:any) {
       // Fallback descarga local si falla Storage, pero auditar error
@@ -406,7 +407,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
 
   const handleUploadEvidencia = async (acta: Acta, file: File) => {
     try {
-      const { url, storagePath } = await uploadEvidenciaActaStorage(acta.ownerId, acta.id, file, file.name);
+      const { url, storagePath, sha256, tamanoBytes } = await uploadEvidenciaActaStorage(acta.ownerId, acta.id, file, file.name);
       const evidencia: EvidenciaActa = {
         id: `ev_${acta.id}_${Date.now()}`,
         actaId: acta.id,
@@ -421,7 +422,8 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         descripcion: file.name,
         nombreArchivo: file.name,
         mimeType: file.type,
-        tamanoBytes: file.size,
+        tamanoBytes,
+        sha256,
         subidoPor: currentUser?.nombre,
       };
       await saveEvidenciaActaFirestore(evidencia);
@@ -437,7 +439,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
         entidadAfectada: 'inmueble' as any,
         idAfectado: acta.propertyId,
         resultado: 'EXITO',
-        detalles: { actaId: acta.id, evidenciaId: evidencia.id, storagePath },
+        detalles: { actaId: acta.id, evidenciaId: evidencia.id, storagePath, sha256 },
       });
     } catch (e:any) {
       avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido subir la evidencia.') });

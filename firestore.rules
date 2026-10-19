@@ -1201,8 +1201,10 @@ service cloud.firestore {
             && request.resource.data.nombre.size() <= 200;
         }
         function transicionCargaValida() {
-          return resource.data.estado in ['PENDIENTE_STORAGE', 'ERROR_STORAGE']
-            && request.resource.data.estado in ['DISPONIBLE', 'ERROR_STORAGE', 'PENDIENTE_STORAGE']
+          return ((resource.data.estado in ['PENDIENTE_STORAGE', 'ERROR_STORAGE']
+              && request.resource.data.estado in ['DISPONIBLE', 'ERROR_STORAGE', 'PENDIENTE_STORAGE'])
+            // P3: pérdida o alteración detectada del objeto → no disponible.
+            || (resource.data.estado == 'DISPONIBLE' && request.resource.data.estado == 'ERROR_STORAGE'))
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'actualizadoEl']);
         }
         function transicionBorradoValida() {
@@ -2408,9 +2410,113 @@ service cloud.firestore {
       // rompería ese flujo). Re-endurecer exige una vía de delegación.
       // R-3: el titular crea y edita SOLO sus profesionales (`creadoPorPropietarioId` = su titularidad).
       allow create: if isStaff() || (isPropietarioRole() && incoming().creadoPorPropietarioId == myPropId());
-      allow update: if isStaff() || (isPropietarioRole()
+      // P3 (trazabilidad documental): `creadoPorPropietarioId` es la clave de
+      // ámbito de los documentos del profesional (subcolección y Storage). El
+      // personal no administrativo (p. ej. un PROFESIONAL) conserva la edición
+      // de la ficha pero ya NO puede reasignar ese ámbito a otra cartera.
+      allow update: if (isStaff() && (esAdminInmuebles() || mismoCampoOpcional('creadoPorPropietarioId'))) || (isPropietarioRole()
         && resource.data.creadoPorPropietarioId == myPropId() && incoming().creadoPorPropietarioId == myPropId());
       allow delete: if isMasterAdmin();
+
+      // =======================================================================
+      // P3 — DOCUMENTOS ACREDITATIVOS DEL PROFESIONAL (metadatos documentales).
+      // Mismo sistema que `documentos_patrimoniales` (BLOQUE 6): metadatos con
+      // huella SHA-256 + binario privado en Storage
+      // `profesionales/{id}/documentos/{documentoId}/{nombreStorage}`.
+      // Ámbito resuelto EN CADA acceso (no se almacena ni se confía en la UI):
+      //  · administración (master/ADMINISTRADOR): todo;
+      //  · el propio profesional (espejo veraz con profesionalId == id): lee y sube;
+      //  · cartera del titular que lo creó (`creadoPorPropietarioId` de la ficha):
+      //    titular y gestor de cartera completa L/E leen; titular y gestor E suben;
+      //    sólo titular/administración eliminan.
+      // Conocer IDs o rutas no autoriza. Sin borrado físico del metadato.
+      // =======================================================================
+      match /documentos_profesionales/{documentoId} {
+        function fichaProf() {
+          return get(/databases/$(database)/documents/profesionales/$(profesionalId)).data;
+        }
+        function pidFichaProf() {
+          return ('creadoPorPropietarioId' in fichaProf() && fichaProf().creadoPorPropietarioId is string
+            && fichaProf().creadoPorPropietarioId.size() > 0) ? fichaProf().creadoPorPropietarioId : '';
+        }
+        function soyEseProfesional() {
+          return isProfesionalRole() && 'profesionalId' in me() && myProfId() == profesionalId;
+        }
+        function docProfLectura() {
+          return esAdminInmuebles() || soyEseProfesional()
+            || (pidFichaProf() != '' && activeUser() && pidEnAmbitoLectura(pidFichaProf()));
+        }
+        function docProfEscritura() {
+          return esAdminInmuebles() || soyEseProfesional()
+            || (pidFichaProf() != '' && activeUser() && pidEnAmbitoEscritura(pidFichaProf()));
+        }
+        function docProfBorrado() {
+          return esAdminInmuebles() || (pidFichaProf() != '' && ownsPropietario(pidFichaProf()));
+        }
+        function formaDocProf(d) {
+          return d.keys().hasOnly([
+            'id', 'profesionalId', 'tipo', 'nombre', 'nombreStorage', 'mimeType', 'tamanoBytes',
+            'sha256', 'storagePath', 'fechaIncorporacion', 'actorId', 'actorNombre', 'version',
+            'sustituyeA', 'estado', 'motivoError', 'actualizadoEl', 'eliminadoEl'
+          ])
+          && d.id == documentoId && documentoId.matches('^dpr_[a-f0-9]{64}$')
+          && d.profesionalId == profesionalId
+          && d.tipo in ['SEGURO_RC', 'ALTA_IAE', 'PREVENCION_RIESGOS', 'CERTIFICADO_CONTRATISTA', 'TITULO_OFICIAL', 'OTRO']
+          && d.nombre is string && d.nombre.size() > 0 && d.nombre.size() <= 200
+          && d.nombreStorage is string && d.nombreStorage.matches('^[A-Za-z0-9][A-Za-z0-9._-]{0,149}$')
+          && d.mimeType in ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+          && d.tamanoBytes is int && d.tamanoBytes > 0 && d.tamanoBytes <= 20971520
+          && d.sha256 is string && d.sha256.matches('^[a-f0-9]{64}$')
+          && d.storagePath == 'profesionales/' + profesionalId + '/documentos/' + documentoId + '/' + d.nombreStorage
+          && d.fechaIncorporacion is string && d.actorNombre is string
+          && d.version is int && d.version > 0;
+        }
+        function sustitucionDocProfValida(d) {
+          return (!('sustituyeA' in d) && d.version == 1)
+            || (d.sustituyeA is string && d.sustituyeA != documentoId
+              && exists(/databases/$(database)/documents/profesionales/$(profesionalId)/documentos_profesionales/$(d.sustituyeA))
+              && get(/databases/$(database)/documents/profesionales/$(profesionalId)/documentos_profesionales/$(d.sustituyeA)).data.profesionalId == profesionalId
+              && get(/databases/$(database)/documents/profesionales/$(profesionalId)/documentos_profesionales/$(d.sustituyeA)).data.estado == 'DISPONIBLE'
+              && d.version == get(/databases/$(database)/documents/profesionales/$(profesionalId)/documentos_profesionales/$(d.sustituyeA)).data.version + 1);
+        }
+        function soloCambian(claves) {
+          return request.resource.data.diff(resource.data).affectedKeys().hasOnly(claves);
+        }
+        function motivoErrorValido() {
+          return !('motivoError' in request.resource.data)
+            || request.resource.data.motivoError in ['SUBIDA_FALLIDA', 'OBJETO_AUSENTE', 'INTEGRIDAD_DISCREPANTE'];
+        }
+        // Carga/recuperación: PENDIENTE|ERROR → DISPONIBLE|ERROR|PENDIENTE.
+        // Pérdida detectada: DISPONIBLE → ERROR_STORAGE (no se oculta tras metadatos).
+        function transicionCargaProf() {
+          return ((resource.data.estado in ['PENDIENTE_STORAGE', 'ERROR_STORAGE']
+                && request.resource.data.estado in ['DISPONIBLE', 'ERROR_STORAGE', 'PENDIENTE_STORAGE'])
+              || (resource.data.estado == 'DISPONIBLE' && request.resource.data.estado == 'ERROR_STORAGE'
+                && 'motivoError' in request.resource.data))
+            && soloCambian(['estado', 'actualizadoEl', 'motivoError'])
+            && (request.resource.data.estado == 'ERROR_STORAGE' || !('motivoError' in request.resource.data))
+            && motivoErrorValido();
+        }
+        function transicionBorradoProf() {
+          return docProfBorrado()
+            && ((resource.data.estado in ['DISPONIBLE', 'PENDIENTE_STORAGE', 'ERROR_STORAGE']
+                 && request.resource.data.estado == 'PENDIENTE_ELIMINACION'
+                 && soloCambian(['estado', 'actualizadoEl']))
+              || (resource.data.estado == 'PENDIENTE_ELIMINACION'
+                 && request.resource.data.estado == 'ELIMINADO'
+                 && soloCambian(['estado', 'eliminadoEl', 'actualizadoEl'])));
+        }
+
+        allow get, list: if docProfLectura();
+        // El actor registrado es la identidad autenticada (no falsificable).
+        allow create: if docProfEscritura() && formaDocProf(request.resource.data)
+          && request.resource.data.estado == 'PENDIENTE_STORAGE'
+          && request.resource.data.actorId == request.auth.uid
+          && !('motivoError' in request.resource.data)
+          && sustitucionDocProfValida(request.resource.data);
+        allow update: if docProfEscritura() && (transicionCargaProf() || transicionBorradoProf());
+        allow delete: if false; // tombstone conservado; sólo se borra el binario.
+      }
     }
 
     // =========================================================================
@@ -3458,18 +3564,36 @@ service cloud.firestore {
       }
       allow get: if isMasterAdmin() || (isPropietarioRole() && evidenciaVisible(existing()));
       allow list: if isMasterAdmin() || (isPropietarioRole() && evidenciaEsMia(resource.data));
+      // P3: la referencia documental no puede apuntar a un objeto de otro
+      // expediente: la ruta debe ser `actas_fotos/{ownerId}/{actaId}/{fichero}`
+      // y el acta debe existir con el mismo titular e inmueble.
+      function evidenciaVinculadaASuActa(d) {
+        return d.storagePath is string
+          && d.storagePath.split('/').size() == 4
+          && d.storagePath.split('/')[0] == 'actas_fotos'
+          && d.storagePath.split('/')[1] == d.ownerId
+          && d.storagePath.split('/')[2] == d.actaId
+          && exists(/databases/$(database)/documents/actas/$(d.actaId))
+          && get(/databases/$(database)/documents/actas/$(d.actaId)).data.ownerId == d.ownerId
+          && get(/databases/$(database)/documents/actas/$(d.actaId)).data.propertyId == d.propertyId
+          && (!('sha256' in d) || (d.sha256 is string && d.sha256.matches('^[a-f0-9]{64}$')));
+      }
       allow create: if isMasterAdmin() || (
         isPropietarioRole()
         && 'ownerId' in incoming() && incoming().ownerId == myPropId()
         && 'actaId' in incoming() && incoming().actaId is string
         && 'propertyId' in incoming() && incoming().propertyId is string
         && 'storagePath' in incoming()
+        && evidenciaVinculadaASuActa(incoming())
       ) && sinBase64();
       allow update: if isMasterAdmin() || (
         isPropietarioRole()
         && 'ownerId' in existing() && existing().ownerId == myPropId()
         && 'ownerId' in incoming() && incoming().ownerId == myPropId()
         && 'actaId' in incoming() && incoming().actaId == existing().actaId
+        // P3: ni la ruta del objeto ni su huella se reasignan tras el alta.
+        && incoming().storagePath == existing().storagePath
+        && (('sha256' in incoming() ? incoming().sha256 : '') == ('sha256' in existing() ? existing().sha256 : ''))
       ) && sinBase64();
       allow delete: if isMasterAdmin() || (
         isPropietarioRole()

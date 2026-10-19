@@ -23,7 +23,9 @@ export type AccionDocumental =
   | 'EXPEDIENTE_ASOCIACION'
   | 'EXPEDIENTE_DESASOCIACION';
 
-export type EntidadExpedienteAuditada = 'documento_expediente' | 'expediente_fiscal';
+// P3: 'profesional' reutiliza la entidad ya existente en AuditLog para los
+// documentos acreditativos de profesionales (mismo libro audit_logs).
+export type EntidadExpedienteAuditada = 'documento_expediente' | 'expediente_fiscal' | 'profesional';
 
 export interface PayloadAuditoriaExpediente {
   usuarioId: string;

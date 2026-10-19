@@ -127,6 +127,8 @@ export interface EvidenciaActa {
   mimeType?: string;
   tamanoBytes?: number;
   subidoPor?: string;
+  /** P3: huella SHA-256 (hex) del contenido subido. Detecta alteraciones; no es firma ni sello de tiempo. */
+  sha256?: string;
 }
 
 export type EstadoIncidenciaActa = 'ABIERTA' | 'EN_VALORACION' | 'RESUELTA' | 'CERRADA' | 'CANCELADA';
@@ -339,6 +341,8 @@ export interface Acta {
   fechaCierre?: string;
   pdfUrl?: string;
   pdfStoragePath?: string;
+  /** P3: huella SHA-256 (hex) del PDF persistido para esta versión. */
+  pdfSha256?: string;
   pdfVersion?: number;
   pdfFechaGeneracion?: string; // fecha generación PDF vinculada a versión
   notasInternas?: string;

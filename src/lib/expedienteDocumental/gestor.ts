@@ -81,6 +81,15 @@ export function validarArchivoDocumento(input: Pick<ArchivoDocumentoInput, 'nomb
   return mime;
 }
 
+/** Huella SHA-256 (hex minúsculas) de bytes ya leídos. Navegador y Node ≥ 18. */
+export async function sha256DeBytes(bytes: Uint8Array): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new ErrorDocumentoPatrimonial('CRYPTO_NO_DISPONIBLE', 'El entorno no permite calcular la huella del archivo.');
+  }
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export async function calcularSha256Archivo(file: Blob): Promise<string> {
   if (!globalThis.crypto?.subtle) {
     throw new ErrorDocumentoPatrimonial('CRYPTO_NO_DISPONIBLE', 'El navegador no permite verificar la huella del archivo.');
@@ -165,7 +174,8 @@ export function crearDocumentoPatrimonial(input: ArchivoDocumentoInput): Documen
 
 const TRANSICIONES: Record<EstadoDocumentoPatrimonial, readonly EstadoDocumentoPatrimonial[]> = {
   PENDIENTE_STORAGE: ['DISPONIBLE', 'ERROR_STORAGE', 'PENDIENTE_ELIMINACION'],
-  DISPONIBLE: ['PENDIENTE_ELIMINACION'],
+  // P3: la pérdida/alteración detectada del objeto no se oculta tras metadatos.
+  DISPONIBLE: ['ERROR_STORAGE', 'PENDIENTE_ELIMINACION'],
   ERROR_STORAGE: ['PENDIENTE_STORAGE', 'PENDIENTE_ELIMINACION'],
   PENDIENTE_ELIMINACION: ['ELIMINADO'],
   ELIMINADO: [],

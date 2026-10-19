@@ -1,12 +1,14 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Download, FilePlus2, Pencil, Trash2 } from 'lucide-react';
+import { Download, FilePlus2, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
 import type { ContratoFormalizacion, Gasto, GarantiaReparacion, Incidencia, Inmueble, PolizaSeguro, TareaMantenimiento, UsuarioApp } from '../../types';
 import {
   actualizarMetadatosDocumentoPatrimonial,
   descargarDocumentoPatrimonial,
   eliminarDocumentoPatrimonial,
   subirDocumentoPatrimonial,
+  verificarDocumentoPatrimonial,
 } from '../../lib/expedienteDocumental/gestorFirebase';
+import { presentarEstadoDocumentoProfesional } from '../../lib/expedienteDocumental/documentosProfesionales';
 import type { DocumentoPatrimonial, TipoDocumentoExpediente } from '../../lib/expedienteDocumental/tipos';
 import { confirmar } from '../../feedback/confirmacion';
 import { avisarOperacion } from '../../feedback/canalFeedback';
@@ -115,6 +117,16 @@ export const DocumentosPatrimonialesPanel: React.FC<Props> = (props) => {
     } catch (e) { setError(mensajeDeErrorUsuario(e, 'No se pudo recuperar el archivo.')); }
   };
 
+  // P3: comprobación explícita de disponibilidad e integridad (huella SHA-256).
+  const verificar = async (documento: DocumentoPatrimonial) => {
+    setError(''); setMensaje('');
+    const resultado = await verificarDocumentoPatrimonial(props.inmueble.id, documento.id);
+    if (resultado.estado === 'VERIFICADO') setMensaje(`«${documento.nombre}»: integridad verificada (el contenido coincide con la huella registrada).`);
+    else if (resultado.estado === 'OBJETO_AUSENTE') setError(`«${documento.nombre}»: el archivo no existe en el almacenamiento; ya no se presenta como disponible.`);
+    else if (resultado.estado === 'INTEGRIDAD_DISCREPANTE') setError(`«${documento.nombre}»: el contenido no coincide con la huella registrada; ya no se presenta como disponible.`);
+    else setError(`«${documento.nombre}»: no se pudo verificar (sin acceso o sin conexión).`);
+  };
+
   const editar = async (documento: DocumentoPatrimonial) => {
     const { confirmado: confirmarReferencia, texto: nuevaReferencia } = await confirmar({
       titulo: 'Editar documento',
@@ -214,11 +226,12 @@ export const DocumentosPatrimonialesPanel: React.FC<Props> = (props) => {
     <div className="space-y-1.5">
       {props.documentos.length === 0 ? <p className="text-[11px] text-slate-400">Todavía no hay documentos del gestor.</p> : props.documentos.map((d) => <div key={d.id} className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 bg-white rounded-lg border border-slate-100">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap gap-1.5 items-center"><span className="text-xs font-bold text-slate-700 truncate">{d.nombre}</span><span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-bold">{d.tipo}</span><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${d.estado === 'DISPONIBLE' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{d.estado}</span></div>
+          <div className="flex flex-wrap gap-1.5 items-center"><span className="text-xs font-bold text-slate-700 truncate">{d.nombre}</span><span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-bold">{d.tipo}</span><span title={d.estado} className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${d.estado === 'DISPONIBLE' ? 'bg-emerald-50 text-emerald-700' : d.estado === 'ERROR_STORAGE' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>{presentarEstadoDocumentoProfesional(d).etiqueta}</span></div>
           <div className="text-[10px] text-slate-400 mt-0.5">{d.fechaDocumental || d.fechaIncorporacion.slice(0, 10)} · {(d.tamanoBytes / 1024).toFixed(1)} KB · {d.mimeType}{d.referencia ? ` · ${d.referencia}` : ''}</div>
         </div>
         <div className="flex gap-1 shrink-0">
           {d.estado === 'DISPONIBLE' && <button type="button" aria-label={`Descargar ${d.nombre}`} onClick={() => void descargar(d)} className="p-2 rounded-lg hover:bg-slate-100 text-indigo-700"><Download className="w-4 h-4" /></button>}
+          {d.estado === 'DISPONIBLE' && <button type="button" aria-label={`Verificar integridad de ${d.nombre}`} onClick={() => void verificar(d)} className="p-2 rounded-lg hover:bg-slate-100 text-emerald-700"><ShieldCheck className="w-4 h-4" /></button>}
           {d.estado === 'DISPONIBLE' && <button type="button" aria-label={`Editar metadatos de ${d.nombre}`} onClick={() => void editar(d)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"><Pencil className="w-4 h-4" /></button>}
           {d.estado !== 'ELIMINADO' && <button type="button" aria-label={`Eliminar ${d.nombre}`} onClick={() => void eliminar(d)} className="p-2 rounded-lg hover:bg-rose-50 text-rose-600"><Trash2 className="w-4 h-4" /></button>}
         </div>

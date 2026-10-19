@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Wrench,
@@ -39,7 +39,14 @@ import {
   ESTADO_PRESUPUESTO_LABELS,
   calcularMetricasProfesional,
 } from '../../utils/profesionalesEngine';
-import { uploadProfesionalDocumentoStorage, saveProfesionalFirestore } from '../../lib/firebase';
+import { documentosProfesionales } from '../../lib/expedienteDocumental/documentosProfesionalesCliente';
+import {
+  clasificarDocumentoProfesionalHeredado,
+  presentarEstadoDocumentoProfesional,
+  type DocumentoProfesionalAlmacenado,
+  type TipoDocumentoProfesional,
+} from '../../lib/expedienteDocumental/documentosProfesionales';
+import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
@@ -76,9 +83,26 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('general');
   const [uploadingDoc, setUploadingDoc] = useState(false);
-  const [tipoDocSeleccionado, setTipoDocSeleccionado] = useState<DocumentoProfesional['tipo']>('SEGURO_RC');
+  const [tipoDocSeleccionado, setTipoDocSeleccionado] = useState<TipoDocumentoProfesional>('SEGURO_RC');
   const [nombreDoc, setNombreDoc] = useState('');
   const [uploadError, setUploadError] = useState('');
+  const [uploadInfo, setUploadInfo] = useState('');
+  const [archivoSeleccionado, setArchivoSeleccionado] = useState<File | null>(null);
+  const [sustituyeA, setSustituyeA] = useState('');
+  // P3: documentos con almacenamiento autorizado (subcolección del profesional).
+  const [docsAlmacenados, setDocsAlmacenados] = useState<DocumentoProfesionalAlmacenado[]>([]);
+  const [docsError, setDocsError] = useState('');
+  const [verificaciones, setVerificaciones] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!isOpen || !profesional?.id) return undefined;
+    setDocsError('');
+    return documentosProfesionales.subscribe(
+      profesional.id,
+      setDocsAlmacenados,
+      () => setDocsError('No se pudo consultar la documentación almacenada (sin acceso o sin conexión).')
+    );
+  }, [isOpen, profesional?.id]);
 
   // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
   // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
@@ -94,46 +118,74 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
   const tipoInfo = TIPO_PROFESIONAL_LABELS[profesional.tipo] || TIPO_PROFESIONAL_LABELS.AUTONOMO;
   const estadoInfo = ESTADO_PROFESIONAL_LABELS[profesional.estado || 'ACTIVO'] || ESTADO_PROFESIONAL_LABELS.ACTIVO;
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const nombreActor = currentUser?.nombre ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim() : undefined;
+  const documentosHeredados: DocumentoProfesional[] = profesional.documentos || [];
+  const totalDocumentos = docsAlmacenados.length + documentosHeredados.length;
 
+  const handleFileUpload = async () => {
+    const file = archivoSeleccionado;
+    if (!file || uploadingDoc) return;
+    setUploadingDoc(true);
+    setUploadError('');
+    setUploadInfo('');
     try {
-      setUploadingDoc(true);
-      setUploadError('');
-      const docName = nombreDoc.trim() || file.name;
-      const { downloadUrl, storagePath } = await uploadProfesionalDocumentoStorage(
-        profesional.id,
-        file,
-        docName,
-        tipoDocSeleccionado
-      );
-
-      const nuevoDoc: DocumentoProfesional = {
-        id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        nombre: docName,
+      const { duplicado, documento } = await documentosProfesionales.subir({
+        profesionalId: profesional.id,
         tipo: tipoDocSeleccionado,
-        tamano: file.size,
-        storagePath,
-        downloadUrl,
-        fechaSubida: new Date().toISOString(),
-        subidoPor: currentUser?.nombre ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim() : 'Administrador',
-      };
-
-      const documentosActualizados = [...(profesional.documentos || []), nuevoDoc];
-      const profActualizado: Profesional = {
-        ...profesional,
-        documentos: documentosActualizados,
-        updatedAt: new Date().toISOString(),
-      };
-
-      await saveProfesionalFirestore(profActualizado);
+        archivo: file,
+        nombre: nombreDoc.trim() || file.name,
+        sustituyeA: sustituyeA || undefined,
+        actorNombre: nombreActor,
+      });
+      setUploadInfo(duplicado
+        ? `Este archivo ya constaba almacenado (huella ${documento.sha256.slice(0, 12)}…); no se ha duplicado.`
+        : `Documento almacenado en Storage privado. Huella SHA-256 registrada: ${documento.sha256.slice(0, 12)}…`);
       setNombreDoc('');
-    } catch (err: any) {
-      console.error('Error uploading doc:', err);
-      setUploadError('Error al subir el documento. Revisa tu conexión.');
+      setSustituyeA('');
+      setArchivoSeleccionado(null);
+    } catch (err) {
+      // Nunca se presenta como guardado: el registro queda en error/pendiente.
+      setUploadError(mensajeDeErrorUsuario(err, 'No se pudo almacenar el documento. NO ha quedado guardado; inténtalo de nuevo con el mismo archivo.'));
     } finally {
       setUploadingDoc(false);
+    }
+  };
+
+  const handleDescargar = async (documento: DocumentoProfesionalAlmacenado) => {
+    setUploadError('');
+    try {
+      const resultado = await documentosProfesionales.descargar(profesional.id, documento.id, nombreActor);
+      const url = URL.createObjectURL(new Blob([resultado.bytes], { type: resultado.mimeType }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = resultado.nombre;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setVerificaciones((prev) => ({ ...prev, [documento.id]: 'Huella verificada al descargar' }));
+    } catch (err) {
+      setUploadError(mensajeDeErrorUsuario(err, 'No se pudo recuperar el documento.'));
+    }
+  };
+
+  const handleVerificar = async (documento: DocumentoProfesionalAlmacenado) => {
+    const resultado = await documentosProfesionales.verificar(profesional.id, documento.id, nombreActor);
+    const texto = resultado.estado === 'VERIFICADO'
+      ? 'Integridad verificada: el contenido coincide con la huella registrada'
+      : resultado.estado === 'OBJETO_AUSENTE'
+        ? 'El archivo no existe en Storage'
+        : resultado.estado === 'INTEGRIDAD_DISCREPANTE'
+          ? 'El contenido NO coincide con la huella registrada'
+          : 'No se pudo verificar (sin acceso o sin conexión)';
+    setVerificaciones((prev) => ({ ...prev, [documento.id]: texto }));
+  };
+
+  const handleEliminar = async (documento: DocumentoProfesionalAlmacenado) => {
+    setUploadError('');
+    try {
+      await documentosProfesionales.eliminar(profesional.id, documento.id, nombreActor);
+      setUploadInfo('Documento eliminado; se conserva su traza de auditoría.');
+    } catch (err) {
+      setUploadError(mensajeDeErrorUsuario(err, 'No se pudo eliminar el documento (requiere ser titular o administración).'));
     }
   };
 
@@ -259,7 +311,7 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
                 : 'border-transparent text-slate-600 hover:text-slate-900'
             }`}
           >
-            Documentación ({profesional.documentos?.length || 0})
+            Documentación ({totalDocumentos})
           </button>
           <button
             onClick={() => setActiveTab('trabajos')}
@@ -464,17 +516,16 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
                 <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Añadir Documento Acreditativo o Seguro RC (Almacenamiento Seguro Firebase)</span>
+                  <span>Añadir documento acreditativo (Storage privado con huella SHA-256)</span>
                 </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
                   <div>
                     <label htmlFor="campo-tipo-de-documento" className="text-xs font-medium text-slate-600 block mb-1">Tipo de Documento</label>
                     <select
                       value={tipoDocSeleccionado}
-                      onChange={(e) => setTipoDocSeleccionado(e.target.value as any)}
+                      onChange={(e) => setTipoDocSeleccionado(e.target.value as TipoDocumentoProfesional)}
                       className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-
-                       id="campo-tipo-de-documento">
+                      id="campo-tipo-de-documento">
                       <option value="SEGURO_RC">Póliza de Seguro de RC</option>
                       <option value="ALTA_IAE">Alta IAE / Autónomos</option>
                       <option value="PREVENCION_RIESGOS">Prevención Riesgos Laborales</option>
@@ -487,66 +538,129 @@ export const DetalleProfesionalModal: React.FC<DetalleProfesionalModalProps> = (
                     <label htmlFor="campo-nombre-descriptivo" className="text-xs font-medium text-slate-600 block mb-1">Nombre Descriptivo</label>
                     <input
                       type="text"
-                      placeholder="Ej: Seguro RC Mapfre 2025"
+                      placeholder="Ej: Seguro RC 2026"
                       value={nombreDoc}
                       onChange={(e) => setNombreDoc(e.target.value)}
                       className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-
-                       id="campo-nombre-descriptivo"/>
+                      id="campo-nombre-descriptivo"/>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-600 block mb-1">Seleccionar Archivo (PDF / JPG)</label>
-                    <label className="w-full flex items-center justify-center space-x-1.5 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium cursor-pointer transition-colors">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>{uploadingDoc ? 'Subiendo...' : 'Subir Documento'}</span>
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={handleFileUpload}
-                        disabled={uploadingDoc}
-                        className="hidden"
-                      />
-                    </label>
+                    <label htmlFor="campo-archivo-profesional" className="text-xs font-medium text-slate-600 block mb-1">Archivo (PDF / JPG / PNG / WEBP, máx. 20 MB)</label>
+                    <input
+                      id="campo-archivo-profesional"
+                      type="file"
+                      accept="application/pdf,image/jpeg,image/png,image/webp"
+                      onChange={(e) => { setArchivoSeleccionado(e.target.files?.[0] || null); setUploadInfo(''); setUploadError(''); }}
+                      disabled={uploadingDoc}
+                      className="w-full text-[11px]"
+                    />
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleFileUpload}
+                    disabled={!archivoSeleccionado || uploadingDoc}
+                    className="w-full flex items-center justify-center space-x-1.5 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{uploadingDoc ? 'Almacenando…' : 'Subir y almacenar'}</span>
+                  </button>
                 </div>
-                {uploadError && <p className="text-xs text-rose-600 font-medium">{uploadError}</p>}
+                {docsAlmacenados.some((d) => d.estado === 'DISPONIBLE') && (
+                  <div>
+                    <label htmlFor="campo-sustituye-a" className="text-xs font-medium text-slate-600 block mb-1">Sustituye explícitamente a (opcional)</label>
+                    <select id="campo-sustituye-a" value={sustituyeA} onChange={(e) => setSustituyeA(e.target.value)} className="w-full sm:w-1/2 text-xs p-2 border border-slate-300 rounded-lg bg-white">
+                      <option value="">No sustituye a ningún documento</option>
+                      {docsAlmacenados.filter((d) => d.estado === 'DISPONIBLE').map((d) => (
+                        <option key={d.id} value={d.id}>{d.nombre} (v{d.version})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {archivoSeleccionado && !uploadingDoc && (
+                  <p className="text-xs text-amber-700" role="status">Seleccionado, pendiente de subir: {archivoSeleccionado.name}. Aún no está almacenado.</p>
+                )}
+                {uploadInfo && <p className="text-xs text-emerald-700 font-medium" role="status">{uploadInfo}</p>}
+                {uploadError && <p className="text-xs text-rose-600 font-medium" role="alert">{uploadError}</p>}
               </div>
 
-              {/* Documents List */}
+              {/* Documentos con almacenamiento autorizado */}
               <div className="space-y-2">
-                {profesional.documentos && profesional.documentos.length > 0 ? (
-                  profesional.documentos.map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="p-3.5 border border-slate-200 rounded-xl flex items-center justify-between hover:bg-slate-50 transition-colors"
-                    >
+                {docsError && <p className="text-xs text-rose-600" role="alert">{docsError}</p>}
+                {docsAlmacenados.map((doc) => {
+                  const presentacion = presentarEstadoDocumentoProfesional(doc);
+                  const sustituido = docsAlmacenados.some((otro) => otro.sustituyeA === doc.id && otro.estado === 'DISPONIBLE');
+                  const tono = presentacion.tono === 'ok' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : presentacion.tono === 'error' ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200';
+                  return (
+                    <div key={doc.id} className="p-3.5 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-2 hover:bg-slate-50 transition-colors">
                       <div className="flex items-center space-x-3">
                         <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
                           <FileText className="w-5 h-5" />
                         </div>
                         <div>
                           <span className="text-xs font-bold text-slate-800">{doc.nombre}</span>
-                          <div className="flex items-center space-x-2 text-[11px] text-slate-500 mt-0.5">
-                            <span className="px-1.5 py-0.2 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">
-                              {doc.tipo}
+                          <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500 mt-0.5">
+                            <span className="px-1.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">{doc.tipo}</span>
+                            <span className={`px-1.5 border rounded text-[10px] font-semibold ${tono}`}>{presentacion.etiqueta}</span>
+                            {sustituido && <span className="px-1.5 border rounded text-[10px] bg-slate-100 text-slate-600">Sustituido por una versión posterior</span>}
+                            <span>v{doc.version} • {new Date(doc.fechaIncorporacion).toLocaleDateString('es-ES')} por {doc.actorNombre}</span>
+                            <span className="font-mono" title={doc.sha256}>SHA-256 {doc.sha256.slice(0, 12)}…</span>
+                          </div>
+                          {verificaciones[doc.id] && <p className="text-[11px] text-slate-600 mt-0.5" role="status">{verificaciones[doc.id]}</p>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {presentacion.descargable && (
+                          <>
+                            <button type="button" onClick={() => handleDescargar(doc)} className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-medium rounded-lg">Descargar</button>
+                            <button type="button" onClick={() => handleVerificar(doc)} className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-medium rounded-lg">Verificar integridad</button>
+                          </>
+                        )}
+                        {doc.estado !== 'ELIMINADO' && (
+                          <button type="button" onClick={() => handleEliminar(doc)} className="px-3 py-1.5 bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-medium rounded-lg">Eliminar</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Entradas heredadas (anteriores a P3): no se modifican, sólo se clasifican. */}
+                {documentosHeredados.map((doc) => {
+                  const clase = clasificarDocumentoProfesionalHeredado(doc);
+                  return (
+                    <div key={doc.id} className="p-3.5 border border-dashed border-slate-300 rounded-xl flex items-center justify-between bg-slate-50/50">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 bg-slate-100 text-slate-500 rounded-lg">
+                          <AlertCircle className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-slate-700">{doc.nombre}</span>
+                          <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500 mt-0.5">
+                            <span className="px-1.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">{doc.tipo}</span>
+                            <span className={`px-1.5 border rounded text-[10px] font-semibold ${clase === 'NO_ALMACENADO' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                              {clase === 'NO_ALMACENADO' ? 'Registro heredado sin archivo en Storage: vuelve a subirlo' : 'Referencia heredada sin huella: no verificada'}
                             </span>
-                            <span>• Subido el {new Date(doc.fechaSubida).toLocaleDateString('es-ES')}</span>
-                            {doc.subidoPor && <span>por {doc.subidoPor}</span>}
+                            <span>Registrado el {new Date(doc.fechaSubida).toLocaleDateString('es-ES')}</span>
                           </div>
                         </div>
                       </div>
-                      <a
-                        href={doc.downloadUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-medium rounded-lg transition-colors"
-                      >
-                        <span>Ver Documento</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      {clase === 'REFERENCIA_NO_VERIFICADA' && (
+                        <a
+                          href={doc.downloadUrl || doc.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-medium rounded-lg"
+                        >
+                          <span>Abrir referencia</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
                     </div>
-                  ))
-                ) : (
+                  );
+                })}
+
+                {totalDocumentos === 0 && (
                   <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
                     No se ha adjuntado documentación técnica ni pólizas de RC aún.
                   </div>

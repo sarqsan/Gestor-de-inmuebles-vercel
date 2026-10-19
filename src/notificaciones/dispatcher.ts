@@ -28,7 +28,7 @@ import {
   validarPayload,
 } from './resolucion.js';
 import { PLANTILLAS } from './plantillas.js';
-import { idDeNotificacion, idempotenciaDeEvento } from '../types/notificaciones.js';
+import { esEntregaInciera, idDeNotificacion, idempotenciaDeEvento } from '../types/notificaciones.js';
 
 export const MAX_REINTENTOS = 3;
 // ---------------------------------------------------------------------------
@@ -67,6 +67,22 @@ function reclamarIntentoEnMemoria(repo: RepositorioNotificaciones, notificacion:
   if (claves.has(clave)) return false;
   claves.add(clave);
   return true;
+}
+
+/**
+ * Entrega incierta (P1): el proveedor no confirmó la aceptación
+ * y SMTP no garantiza deduplicación. El reintento automático
+ * podría DUPLICAR el mensaje real, así que la respuesta expone
+ * la causa y no envía nada nuevo. La recuperación pasa por
+ * revisión humana (o un reintento explícitamente forzado).
+ */
+function respuestaEntregaInciera(notificacion: Notificacion): EnviarNotificacionResponse {
+  return {
+    ok: false,
+    notificacion,
+    estado: 'FALLIDA',
+    error: 'entrega_incierta:sin_reintento_automatico',
+  };
 }
 
 function respuestaDuplicada(notificacion: Notificacion): EnviarNotificacionResponse {
@@ -244,6 +260,12 @@ export class DispatcherNotificaciones {
 
     // 6. Reintento si ya estaba FALLIDA o PENDIENTE pendiente de entrega.
     if (existente && existente.estado !== 'ENVIADA' && existente.estado !== 'CANCELADA') {
+      // Entrega incierta previa: el reintento automático está
+      // bloqueado (riesgo de duplicado real). Solo un operador
+      // puede forzarlo, asumiendo el riesgo.
+      if (existente.estado === 'FALLIDA' && esEntregaInciera(existente.error)) {
+        return respuestaEntregaInciera(existente);
+      }
       return await this.intentarEntrega(existente);
     }
     if (existente) {
@@ -374,7 +396,18 @@ export class DispatcherNotificaciones {
     };
   }
 
-  async reintentar(notificacion: Notificacion): Promise<EnviarNotificacionResponse> {
+  /**
+   * Reintenta una notificación. Por defecto, una entrega
+   * incierta (error `entrega_incierta:*`) NO se reenvía
+   * automáticamente: el contrato del proveedor no permite
+   * deduplicar y un reintento podría duplicar el mensaje
+   * real. Con `forzarEntregaInciera` un operador asume
+   * explícitamente ese riesgo y queda auditoría de ello.
+   */
+  async reintentar(
+    notificacion: Notificacion,
+    opciones?: { forzarEntregaInciera?: boolean },
+  ): Promise<EnviarNotificacionResponse> {
     const actual =
       (await this.ctx.repositorio.buscarPorId(notificacion.id)) ??
       (await this.ctx.repositorio.buscarPorIdempotencia(notificacion.idempotencyKey));
@@ -384,10 +417,24 @@ export class DispatcherNotificaciones {
       return { ok: false, notificacion: base, estado: 'CANCELADA', error: 'cancelada' };
     }
     if (base.estado === 'ENVIANDO') return respuestaDuplicada(base);
+    if (base.estado === 'FALLIDA' && esEntregaInciera(base.error) && !opciones?.forzarEntregaInciera) {
+      const marcada = conAudit(
+        base,
+        'entrega_incierta_bloqueada',
+        'Reintento automático bloqueado: el proveedor no confirmó la aceptación; requiere revisión humana',
+      );
+      await this.ctx.repositorio.guardar(marcada);
+      return { ok: false, notificacion: marcada, estado: 'FALLIDA', error: 'entrega_incierta:revision_humana' };
+    }
 
     const reseteada: Notificacion = conAudit(
       { ...base, estado: 'PENDIENTE', error: undefined },
-      'reintento'
+      opciones?.forzarEntregaInciera && base.estado === 'FALLIDA' && esEntregaInciera(base.error)
+        ? 'reintento_forzado_entrega_incierta'
+        : 'reintento',
+      opciones?.forzarEntregaInciera && esEntregaInciera(base.error)
+        ? 'El operador asume el riesgo de duplicado ante entrega incierta previa'
+        : undefined,
     );
     return this.intentarEntrega(reseteada);
   }

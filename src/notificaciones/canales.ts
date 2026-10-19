@@ -128,7 +128,14 @@ export class EmailProviderHTTP implements EmailProvider {
           return { ok: false, error: `resend_http_${respuesta.status}` };
         }
         const cuerpo = (await respuesta.json().catch(() => null)) as { id?: string } | null;
-        return { ok: true, ...(cuerpo?.id ? { externalId: String(cuerpo.id) } : {}) };
+        // Un 2xx SIN identificador de mensaje no demuestra que
+        // ÉSTE mensaje fuese aceptado (puede ser una respuesta
+        // vacía de proxy o reintento): se trata como entrega
+        // INCIERTA, nunca como confirmada.
+        if (!cuerpo?.id) {
+          return { ok: false, error: 'entrega_incierta:resend_respuesta_sin_id' };
+        }
+        return { ok: true, externalId: String(cuerpo.id) };
       }
 
       const respuesta = await ejecutar('https://api.sendgrid.com/v3/mail/send', {
@@ -146,10 +153,15 @@ export class EmailProviderHTTP implements EmailProvider {
         }),
       });
       if (!respuesta.ok) {
-        return { ok: false, error: `sendgrid_http_${respuesta.status}` };
-      }
-      const idMensaje = respuesta.headers?.get?.('x-message-id') || undefined;
-      return { ok: true, ...(idMensaje ? { externalId: idMensaje } : {}) };
+          return { ok: false, error: `sendgrid_http_${respuesta.status}` };
+        }
+        const idMensaje = respuesta.headers?.get?.('x-message-id') || undefined;
+        // Igual que con Resend: un 2xx sin id de mensaje es
+        // una respuesta ambigua, no una entrega confirmada.
+        if (!idMensaje) {
+          return { ok: false, error: 'entrega_incierta:sendgrid_respuesta_sin_id' };
+        }
+        return { ok: true, externalId: idMensaje };
     } catch (err) {
       return { ok: false, error: `proveedor_email_error: ${err instanceof Error ? err.message : String(err)}` };
     }

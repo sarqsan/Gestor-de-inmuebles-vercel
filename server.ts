@@ -40,6 +40,7 @@ import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorB
 // panel de administración (server/ia/gobiernoIA.ts y server/ia/adminIA.ts).
 import { clienteIA, contextoOperacionIA, crearNucleoIA, crearVerificadorGeminiReal, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
 import { crearDependenciasNucleoIA } from './server/ia/configuracionIA.js';
+import { ejecutarAnalisisRespuestaAseguradora } from './server/ia/respuestaAseguradora.js';
 import {
   crearAsistenteIncidenciasIA,
   crearFuenteAutorizadaInquilinoIA,
@@ -809,46 +810,13 @@ Devuelve ÚNICAMENTE un JSON con:
 // Analizar la respuesta por correo recibida de una aseguradora mediante Gemini
 app.post('/api/analizar-respuesta-aseguradora', nucleoIA.operacion('ANALIZAR_RESPUESTA_ASEGURADORA'), async (req, res) => {
   try {
-    const { emailTexto, emailAsunto, aseguradoraNombre, rentaMensual } = req.body;
+    const { emailTexto, emailAsunto, aseguradoraNombre, rentaMensual } = req.body ?? {};
 
-    if (!emailTexto) {
+    if (typeof emailTexto !== 'string' || !emailTexto.trim()) {
       return res.status(400).json({ error: 'No se proporcionó el texto de la respuesta de la aseguradora.' });
     }
 
     const ai = clienteIA(res);
-
-    if (!ai) {
-      // Fallback response simulator
-      const lower = emailTexto.toLowerCase();
-      let dictamen = 'FAVORABLE';
-      let dictamenTexto = 'Operación Aprobada / Favorable';
-      let score = 95;
-
-      if (lower.includes('denegad') || lower.includes('rechazad') || lower.includes('no viable') || lower.includes('desfavorable')) {
-        dictamen = 'DESFAVORABLE';
-        dictamenTexto = 'Operación No Aceptada / Desfavorable';
-        score = 25;
-      } else if (lower.includes('condicion') || lower.includes('aval') || lower.includes('garantía extra')) {
-        dictamen = 'FAVORABLE_CONDICIONADO';
-        dictamenTexto = 'Aprobado Condicionado a Aval / Documentación';
-        score = 70;
-      } else if (lower.includes('falta') || lower.includes('requiere') || lower.includes('aportar') || lower.includes('solicitamos')) {
-        dictamen = 'DOCUMENTACION_REQUERIDA';
-        dictamenTexto = 'Documentación Adicional Requerida';
-        score = 60;
-      }
-
-      return res.json({
-        dictamen,
-        dictamenTexto,
-        importeMaximoAsegurable: rentaMensual || 1200,
-        condiciones: ['Póliza estándar de 12 meses de impago', 'Franquicia 0 meses', 'Defensa jurídica hasta 3.000 €'],
-        documentosRequeridos: dictamen === 'DOCUMENTACION_REQUERIDA' ? ['Última nómina actualizada', 'Vida laboral completa'] : [],
-        resumenEjecutivo: `La aseguradora ${aseguradoraNombre || 'consultada'} ha emitido dictamen ${dictamen}. ${dictamenTexto}.`,
-        requiereAtencionPropietario: dictamen !== 'FAVORABLE',
-      });
-    }
-
     const promptText = `
 Eres un analista de seguros de impago de alquiler en España.
 Tu tarea es analizar el correo de respuesta recibido de la aseguradora (${aseguradoraNombre || 'Aseguradora'}) y extraer los datos estructurados.
@@ -886,17 +854,27 @@ Responde ÚNICAMENTE en JSON válido con este formato:
 }
 `;
 
-    const response = await generateGeminiWithRetry(ai, {
-      model: 'gemini-3.7-flash',
-      contents: { parts: [{ text: promptText }] },
-      config: { responseMimeType: 'application/json' },
-    });
+    const resultado = await ejecutarAnalisisRespuestaAseguradora(
+      ai,
+      {
+        model: 'gemini-3.7-flash',
+        contents: { parts: [{ text: promptText }] },
+        config: { responseMimeType: 'application/json' },
+      },
+      (cliente, parametros) => generateGeminiWithRetry(cliente, parametros),
+    );
 
-    const parsed = JSON.parse(response?.text || '{}');
-    return res.json(parsed);
-  } catch (err: any) {
+    if (resultado.ok === false) {
+      console.warn('Análisis de respuesta de aseguradora no completado:', resultado.codigo);
+      return res.status(resultado.status).json({ error: resultado.error, codigo: resultado.codigo });
+    }
+    return res.json(resultado.datos);
+  } catch (err: unknown) {
     console.error('Error analizando respuesta de aseguradora:', err);
-    return res.status(500).json({ error: 'Error analizando respuesta de la aseguradora.' });
+    return res.status(502).json({
+      error: 'No se pudo obtener ni validar un dictamen de aseguradora.',
+      codigo: 'RESPUESTA_IA_INVALIDA',
+    });
   }
 });
 

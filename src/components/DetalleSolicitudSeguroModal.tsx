@@ -3,7 +3,6 @@ import {
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
   SolicitudSeguroEstado,
-  DictamenAseguradora,
   DecisionFinalPropietarioSeguro,
   GmailIntegracionConfig,
 } from '../types';
@@ -43,6 +42,18 @@ import { avisarOperacion } from '../feedback/canalFeedback';
 import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
 import { solicitarIA } from '../lib/clienteIA';
+import { esAnalisisRespuestaAseguradoraValido } from '../ia/analisisRespuestaAseguradora';
+
+function esResultadoEnvioGmailVerificable(
+  resultado: unknown,
+): resultado is { id: string; threadId: string } {
+  if (typeof resultado !== 'object' || resultado === null || Array.isArray(resultado)) return false;
+  const mensaje = resultado as Record<string, unknown>;
+  return (
+    typeof mensaje.id === 'string' && mensaje.id.trim().length > 0 &&
+    typeof mensaje.threadId === 'string' && mensaje.threadId.trim().length > 0
+  );
+}
 
 interface DetalleSolicitudSeguroModalProps {
   solicitud: SolicitudSeguroImpago;
@@ -99,6 +110,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
   const [sendSuccessMsg, setSendSuccessMsg] = useState<string | null>(null);
+  const [sendErrorMsg, setSendErrorMsg] = useState<string | null>(null);
 
   // Response simulation / test state / Gmail search
   const [incomingResponseText, setIncomingResponseText] = useState<string>(
@@ -107,6 +119,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   const [isAnalyzingResponse, setIsAnalyzingResponse] = useState(false);
   const [isCheckingGmail, setIsCheckingGmail] = useState(false);
   const [gmailStatusNotice, setGmailStatusNotice] = useState<string | null>(null);
+  const [responseProcessingError, setResponseProcessingError] = useState<string | null>(null);
 
   // Owner decision state
   const [ownerDecision, setOwnerDecision] = useState<DecisionFinalPropietarioSeguro>(
@@ -134,91 +147,97 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
     }
   };
 
+  const guardarBorradorSinConfirmar = async () => {
+    const updated: SolicitudSeguroImpago = {
+      ...sol,
+      emailAsunto,
+      emailCuerpo,
+      fechaActualizacion: new Date().toISOString(),
+    };
+    setSol(updated);
+    try {
+      await onUpdateSolicitud(updated);
+    } catch (error) {
+      console.error('No se pudo persistir el borrador del correo:', error);
+    }
+  };
+
   // Enviar correo a la aseguradora directamente por Gmail API con adjuntos
   const handleSendEmail = async () => {
     setIsSendingEmail(true);
     setSendSuccessMsg(null);
+    setSendErrorMsg(null);
+    let envioConfirmado = false;
 
     try {
-      let token = await getAccessToken();
+      let token = (await getAccessToken())?.trim() || null;
       if (!token) {
-        // Intenta conectar cuenta Google si no está en memoria
+        // La cancelación/error del popup se propaga al catch; no equivale a un envío manual.
         const authRes = await googleSignIn();
-        token = authRes?.accessToken || null;
+        token = authRes?.accessToken?.trim() || null;
+      }
+      if (!token) {
+        throw new Error('Google no devolvió un token de acceso; no se puede confirmar el envío.');
       }
 
-      if (token) {
-        // Preparar adjuntos verificados
-        const attachmentsToSend = sol.documentosAdjuntos
-          .filter((d) => d.verificado && d.base64Data)
-          .map((d) => ({
-            filename: d.nombre || 'documento.pdf',
-            mimeType: 'application/pdf',
-            base64Data: d.base64Data || '',
-          }));
+      // Preparar adjuntos verificados
+      const attachmentsToSend = sol.documentosAdjuntos
+        .filter((d) => d.verificado && d.base64Data)
+        .map((d) => ({
+          filename: d.nombre || 'documento.pdf',
+          mimeType: 'application/pdf',
+          base64Data: d.base64Data || '',
+        }));
 
-        // Construir MIME RFC 2822 y enviar por Gmail REST API
-        const rawMime = buildRawEmailWithAttachments({
-          to: sol.aseguradoraEmail,
-          subject: emailAsunto,
-          bodyText: emailCuerpo,
-          attachments: attachmentsToSend,
-        });
+      // Construir MIME RFC 2822 y enviar por Gmail REST API
+      const rawMime = buildRawEmailWithAttachments({
+        to: sol.aseguradoraEmail,
+        subject: emailAsunto,
+        bodyText: emailCuerpo,
+        attachments: attachmentsToSend,
+      });
 
-        const sendResult = await sendGmailMessage(token, rawMime);
-
-        const updated: SolicitudSeguroImpago = {
-          ...sol,
-          estado: 'CORREO_ENVIADO',
-          metodoEnvio: 'GMAIL_API',
-          emailAsunto: emailAsunto,
-          emailCuerpo: emailCuerpo,
-          fechaEnvio: new Date().toISOString(),
-          fechaActualizacion: new Date().toISOString(),
-          historial: [
-            ...sol.historial,
-            {
-              id: `hist_${Date.now()}`,
-              fecha: new Date().toISOString(),
-              autor: 'gmail',
-              accion: 'Solicitud enviada exitosamente vía Gmail API',
-              detalle: `Enviado a ${sol.aseguradoraEmail} (ID Mensaje: ${sendResult.id}) con ${attachmentsToSend.length} archivos adjuntos.`,
-            },
-          ],
-        };
-
-        setSol(updated);
-        onUpdateSolicitud(updated);
-        setSendSuccessMsg(`¡Correo enviado a ${sol.aseguradoraEmail} con éxito vía Gmail!`);
-        setActiveTab('respuesta');
-      } else {
-        // Modo simulación si el usuario canceló el popup de Google
-        const updated: SolicitudSeguroImpago = {
-          ...sol,
-          estado: 'CORREO_ENVIADO',
-          metodoEnvio: 'MANUAL',
-          emailAsunto: emailAsunto,
-          emailCuerpo: emailCuerpo,
-          fechaEnvio: new Date().toISOString(),
-          fechaActualizacion: new Date().toISOString(),
-          historial: [
-            ...sol.historial,
-            {
-              id: `hist_${Date.now()}`,
-              fecha: new Date().toISOString(),
-              autor: 'propietario',
-              accion: 'Solicitud registrada como enviada',
-              detalle: `Marcada como enviada a ${sol.aseguradoraEmail} con referencia [${sol.referenciaUnica}].`,
-            },
-          ],
-        };
-        setSol(updated);
-        onUpdateSolicitud(updated);
-        setActiveTab('respuesta');
+      const sendResult: unknown = await sendGmailMessage(token, rawMime);
+      if (!esResultadoEnvioGmailVerificable(sendResult)) {
+        throw new Error('Gmail no devolvió un identificador de mensaje verificable; no se puede confirmar el envío.');
       }
-    } catch (err: any) {
+      envioConfirmado = true;
+
+      const ahora = new Date().toISOString();
+      const updated: SolicitudSeguroImpago = {
+        ...sol,
+        estado: 'CORREO_ENVIADO',
+        metodoEnvio: 'GMAIL_API',
+        emailAsunto,
+        emailCuerpo,
+        fechaEnvio: ahora,
+        fechaActualizacion: ahora,
+        historial: [
+          ...sol.historial,
+          {
+            id: `hist_${Date.now()}`,
+            fecha: ahora,
+            autor: 'gmail',
+            accion: 'Solicitud enviada exitosamente vía Gmail API',
+            detalle: `Enviado a ${sol.aseguradoraEmail} (ID Mensaje: ${sendResult.id}) con ${attachmentsToSend.length} archivos adjuntos.`,
+          },
+        ],
+      };
+
+      setSol(updated);
+      await onUpdateSolicitud(updated);
+      setSendSuccessMsg(`¡Correo enviado a ${sol.aseguradoraEmail} con éxito vía Gmail!`);
+      setActiveTab('respuesta');
+    } catch (err: unknown) {
       console.error('Error enviando con Gmail API:', err);
-      avisarOperacion({ tipo: 'error', mensaje: `${mensajeDeErrorUsuario(err, 'No se ha podido enviar el correo automáticamente.')} Puedes copiar el borrador o abrir tu cliente de correo.` });
+      if (!envioConfirmado) await guardarBorradorSinConfirmar();
+
+      const detalle = mensajeDeErrorUsuario(err, 'No se ha podido confirmar el envío automáticamente.');
+      const mensaje = envioConfirmado
+        ? 'Gmail confirmó el envío, pero no se pudo guardar su estado en el expediente. Revisa el historial antes de volver a intentarlo.'
+        : `${detalle} No se pudo confirmar el envío: el expediente no se marcará como enviado y el borrador se conserva.`;
+      setSendErrorMsg(mensaje);
+      avisarOperacion({ tipo: 'error', mensaje });
     } finally {
       setIsSendingEmail(false);
     }
@@ -277,6 +296,35 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   const handleAnalyzeSpecificText = async (textToAnalyze: string) => {
     if (!textToAnalyze.trim()) return;
     setIsAnalyzingResponse(true);
+    setResponseProcessingError(null);
+    let analisisValido = false;
+
+    const registrarPendienteRevision = async () => {
+      const ahora = new Date().toISOString();
+      const actualizado: SolicitudSeguroImpago = {
+        ...sol,
+        estado: 'ERROR_PROCESAMIENTO',
+        emailRespuestaRaw: textToAnalyze,
+        procesadoConIA: false,
+        fechaActualizacion: ahora,
+        historial: [
+          ...sol.historial,
+          {
+            id: `hist_${Date.now()}`,
+            fecha: ahora,
+            autor: 'sistema_ia',
+            accion: 'Respuesta de aseguradora pendiente de revisión humana',
+            detalle: 'No se obtuvo un análisis automático válido. Se conserva el texto recibido para revisión humana.',
+          },
+        ],
+      };
+      setSol(actualizado);
+      try {
+        await onUpdateSolicitud(actualizado);
+      } catch (error) {
+        console.error('No se pudo persistir la respuesta pendiente de revisión:', error);
+      }
+    };
 
     try {
       const res = await solicitarIA('/api/analizar-respuesta-aseguradora', {
@@ -286,23 +334,23 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
         rentaMensual: sol.rentaMensual,
       });
 
-      let parsedAI = {
-        dictamen: 'FAVORABLE' as DictamenAseguradora,
-        dictamenTexto: 'Operación Aprobada / Favorable',
-        importeMaximoAsegurable: sol.rentaMensual,
-        condiciones: ['Cobertura de 12 meses', 'Defensa jurídica hasta 3.000 €'],
-        documentosRequeridos: [] as string[],
-        resumenEjecutivo: 'La aseguradora ha emitido resolución favorable sin condiciones adicionales.',
-        requiereAtencionPropietario: false,
-      };
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.dictamen) {
-          parsedAI = data;
-        }
+      if (!res.ok) {
+        const errorRemoto = await res.json().catch(() => null);
+        const mensaje =
+          typeof errorRemoto?.error === 'string'
+            ? errorRemoto.error
+            : `El análisis automático respondió con HTTP ${res.status}.`;
+        throw new Error(mensaje);
       }
 
+      const datos: unknown = await res.json();
+      if (!esAnalisisRespuestaAseguradoraValido(datos)) {
+        throw new Error('La respuesta automática no contiene un dictamen válido.');
+      }
+      const parsedAI = datos;
+      analisisValido = true;
+
+      const ahora = new Date().toISOString();
       const updated: SolicitudSeguroImpago = {
         ...sol,
         estado: 'RESPUESTA_PROCESADA',
@@ -312,14 +360,14 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
         documentosSolicitadosExtra: parsedAI.documentosRequeridos,
         resumenProcesadoIA: parsedAI.resumenEjecutivo,
         emailRespuestaRaw: textToAnalyze,
-        fechaRecepcionRespuesta: new Date().toISOString(),
+        fechaRecepcionRespuesta: ahora,
         procesadoConIA: true,
-        fechaActualizacion: new Date().toISOString(),
+        fechaActualizacion: ahora,
         historial: [
           ...sol.historial,
           {
             id: `hist_${Date.now()}`,
-            fecha: new Date().toISOString(),
+            fecha: ahora,
             autor: 'sistema_ia',
             accion: 'Dictamen de aseguradora analizado por IA',
             detalle: `Resultado: ${parsedAI.dictamen} - ${parsedAI.resumenEjecutivo}`,
@@ -328,9 +376,19 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
       };
 
       setSol(updated);
-      onUpdateSolicitud(updated);
-    } catch (e) {
-      console.error('Error analizando respuesta:', e);
+      await onUpdateSolicitud(updated);
+    } catch (error) {
+      console.error('Error analizando respuesta:', error);
+      if (!analisisValido) {
+        await registrarPendienteRevision();
+        setResponseProcessingError(
+          'El análisis automático no se pudo completar. El texto recibido se conserva y el expediente queda pendiente de revisión humana.',
+        );
+      } else {
+        setResponseProcessingError(
+          'El análisis válido se completó, pero no se pudo guardar en el expediente. Revisa la conexión antes de continuar.',
+        );
+      }
     } finally {
       setIsAnalyzingResponse(false);
     }
@@ -688,9 +746,15 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
               </div>
 
               {sendSuccessMsg && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-bold flex items-center gap-2 animate-in fade-in" role="status">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>{sendSuccessMsg}</span>
+                </div>
+              )}
+              {sendErrorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs font-semibold flex items-center gap-2" role="alert">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{sendErrorMsg}</span>
                 </div>
               )}
 
@@ -834,6 +898,12 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-950 text-xs font-medium flex items-center gap-2">
                   <Info className="w-4 h-4 text-indigo-600 shrink-0" />
                   <span>{gmailStatusNotice}</span>
+                </div>
+              )}
+              {responseProcessingError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs font-semibold flex items-center gap-2" role="alert">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{responseProcessingError}</span>
                 </div>
               )}
 

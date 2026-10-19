@@ -249,6 +249,34 @@ export function idDeNotificacion(idempotencyKey: string): string {
   return `not_${normalizarClave(idempotencyKey)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Entrega incierta (P1 — cierre de aceptación operativa)
+// ---------------------------------------------------------------------------
+
+/**
+ * Prefijo canónico de error para entrega INCIERTA: el proveedor no
+ * confirmó si el mensaje fue aceptado (p. ej. la conexión se cerró
+ * durante la transferencia de datos, o un 2xx sin identificador de
+ * mensaje). SMTP no ofrece semántica exactly-once, por lo que
+ * reintentar automáticamente podría DUPLICAR un mensaje que sí
+ * llegó al transporte.
+ *
+ * Convención (contrato compartido proveedor → dispatcher → reloj):
+ * todo `error` que empiece por este prefijo marca una notificación
+ * que NUNCA se reintentará automáticamente: requiere revisión
+ * humana (o un reintento explícitamente forzado por un operador,
+ * que asume el riesgo de duplicado y queda auditado).
+ */
+export const PREFIJO_ENTREGA_INCIERA = 'entrega_incierta:';
+
+/** ¿El error indica una entrega incierta (el proveedor no confirmó)? */
+export function esEntregaInciera(error: string | undefined): boolean {
+  return (
+    typeof error === 'string' &&
+    error.trim().toLowerCase().startsWith(PREFIJO_ENTREGA_INCIERA)
+  );
+}
+
 /** Hash corto (FNV-1a) para separar por propietario en colecciones shardeadas si hiciera falta. */
 export function hashCorto(texto: string): number {
   let hash = 0x811c9dc5;

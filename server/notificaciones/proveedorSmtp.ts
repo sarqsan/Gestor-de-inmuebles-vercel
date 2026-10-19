@@ -38,6 +38,14 @@ export interface ConfigSmtp {
 
 /** Opciones mínimas que usamos de nodemailer (facilita inyectar un doble en pruebas). */
 export interface TransporteSmtp {
+  /**
+   * Verifica conectividad y autenticación SIN enviar correo
+   * (greeting + EHLO [+ AUTH] + cierre). La fábrica real de
+   * nodemailer la expone; los dobles de prueba pueden no
+   * implementarla (en ese caso no se aplica la política de
+   * entrega incierta basada en fase).
+   */
+  verify?(): Promise<void>;
   sendMail(opciones: { from: string; to: string; subject: string; text: string; replyTo?: string }): Promise<{ messageId?: string; accepted?: Array<string | { address: string }>; rejected?: Array<string | { address: string }>; pending?: Array<string | { address: string }> }>;
 }
 
@@ -77,13 +85,54 @@ export function configuracionSmtpValida(url: string, from: string): boolean {
   } catch { return false; }
 }
 
-/** Sólo códigos acotados: un error del proveedor puede contener secretos sin URL. */
-function errorSmtpSeguro(err: unknown, url: string): string {
+/**
+ * Códigos de error que conllevan respuesta explícita del servidor
+ * (o son de una fase previa a la entrega del contenido): el
+ * destino NO aceptó el mensaje, por lo que el fallo es concreto
+ * y reintentar es seguro.
+ */
+const CODIGOS_DE_ERROR_EXPLICITO = ['EAUTH', 'EENVELOPE', 'EMESSAGE', 'EDNS'];
+
+/** Códigos de error acotados (lista blanca; un error puede contener secretos sin URL). */
+const CODIGOS_DE_ERROR_SMTP = ['EAUTH', 'ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'EDNS', 'EENVELOPE', 'EMESSAGE', 'EPROTOCOL', 'ETLS'];
+
+/**
+ * Clasifica un fallo de transporte en una causa acotada y sin
+ * secretos, distinguiendo tres casos:
+ *
+ *   · El servidor RESPONDIÓ (responseCode o código de fase
+ *     explícito: EAUTH/EENVELOPE/EMESSAGE/EDNS) ⇒ `smtp_error`
+ *     concreto: el destino no aceptó el mensaje; reintento
+ *     seguro.
+ *   · La sesión se verificó (conexión, saludo y EHLO correctos)
+ *     y aun así falla el envío SIN respuesta del servidor
+ *     (cierre o timeout durante la transferencia) ⇒
+ *     `entrega_incierta`: el mensaje PUDO ser aceptado y el
+ *     contrato SMTP no permite deduplicación. Reintentar
+ *     automáticamente podría DUPLICAR el correo real: el
+ *     dispatcher y el reloj bloquean el reintento y exigen
+ *     revisión humana.
+ *   · No hubo verificación previa (doble de pruebas sin
+ *     `verify`) ⇒ no se puede saber la fase: se conserva la
+ *     clasificación histórica `smtp_error` reintentable.
+ */
+function errorSmtpSeguro(err: unknown, url: string, sesionVerificada: boolean): string {
   const dato = err as { code?: unknown; responseCode?: unknown } | null;
-  const permitidos = ['EAUTH', 'ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'EDNS', 'EENVELOPE', 'EMESSAGE', 'EPROTOCOL', 'ETLS'];
-  const codigo = typeof dato?.code === 'string' && permitidos.includes(dato.code) ? dato.code : 'ENVIO_FALLIDO';
+  const codigo = typeof dato?.code === 'string' && CODIGOS_DE_ERROR_SMTP.includes(dato.code) ? dato.code : undefined;
   const respuesta = typeof dato?.responseCode === 'number' && Number.isInteger(dato.responseCode) && dato.responseCode >= 400 && dato.responseCode <= 599 ? ` (${dato.responseCode})` : '';
-  return `smtp_error: ${new URL(url).hostname}: ${codigo}${respuesta}`;
+  const host = new URL(url).hostname;
+  if (respuesta || (codigo && CODIGOS_DE_ERROR_EXPLICITO.includes(codigo))) {
+    return `smtp_error: ${host}: ${codigo ?? 'ENVIO_FALLIDO'}${respuesta}`;
+  }
+  if (sesionVerificada) {
+    return `entrega_incierta:smtp_respuesta_ambigua:${host}${codigo ? `:${codigo}` : ''}`;
+  }
+  return `smtp_error: ${host}: ${codigo ?? 'ENVIO_FALLIDO'}${respuesta}`;
+}
+
+/** ¿El error de transporte indica una entrega incierta (prefijo canónico)? */
+export function esEntregaIncieraSmtp(error: string | undefined): boolean {
+  return typeof error === 'string' && error.trim().toLowerCase().startsWith('entrega_incierta:');
 }
 
 export class EmailProviderSMTP implements EmailProvider {
@@ -97,8 +146,19 @@ export class EmailProviderSMTP implements EmailProvider {
     if (!this.config.url || !this.config.from) return { ok: false, error: 'smtp_sin_credenciales' };
     if (!configuracionSmtpValida(this.config.url, this.config.from)) return { ok: false, error: 'smtp_configuracion_invalida' };
     const responderA = emailValido(message.replyTo) ? message.replyTo.trim() : emailValido(this.config.responderA) ? this.config.responderA.trim() : undefined;
+    // La sesión se verifica (conexión + saludo + EHLO [+ AUTH])
+    // ANTES de entregar el mensaje: un fallo en la verificación
+    // no puede haber aceptado nada y es seguro reintentar.
+    // Si el transporte no ofrece `verify` (doble de pruebas),
+    // no se aplica esta fase.
+    let sesionVerificada = false;
     try {
-      const info = await this.crearTransporte(this.config.url).sendMail({
+      const transporte = this.crearTransporte(this.config.url);
+      if (typeof transporte.verify === 'function') {
+        await transporte.verify();
+        sesionVerificada = true;
+      }
+      const info = await transporte.sendMail({
         from: this.config.from,
         to: message.to,
         subject: message.subject,
@@ -114,7 +174,7 @@ export class EmailProviderSMTP implements EmailProvider {
       if (!aceptada || rechazada) return { ok: false, error: 'smtp_destinatario_no_aceptado' };
       return { ok: true, ...(info?.messageId ? { externalId: String(info.messageId) } : {}) };
     } catch (err) {
-      return { ok: false, error: errorSmtpSeguro(err, this.config.url) };
+      return { ok: false, error: errorSmtpSeguro(err, this.config.url, sesionVerificada) };
     }
   }
 }

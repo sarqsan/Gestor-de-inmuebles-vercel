@@ -19,6 +19,7 @@
     "test:patrimonial": "node --import tsx --test \"src/features/patrimonial/tests/*.test.mjs\"",
     "test:integracion": "npm run test:operaciones && npm run test:patrimonial",
     "test:emulador:operaciones": "node --import tsx --test src/features/operaciones/tests/emulator/operaciones.emulator.mjs",
+    "test:p1-avisos": "vitest run tests/p1-avisos-cierre-aceptacion.test.ts tests/notificaciones-fase-a.test.ts tests/smtp-aceptacion-regresion.test.ts tests/prueba-smtp-aislada.test.ts tests/notificaciones.test.ts tests/notificaciones-plantillas.test.ts",
     "test:emulador:reglas": "NODE_ENV=test GCLOUD_PROJECT=demo-gestor-reglas npx --yes firebase-tools@15.33.0 emulators:exec --only auth,firestore,storage --project demo-gestor-reglas \"NODE_ENV=test GCLOUD_PROJECT=demo-gestor-reglas FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1:9199 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 npx vitest run --config vitest.emulador.config.ts --reporter=default --reporter=json --outputFile.json=emulador-resultados.json\"",
     "ia:verificar-politica": "tsx scripts/verificar-politica-ia.mts",
     "ia:validar-entorno": "tsx scripts/validar-ia-entorno-no-productivo.mts",

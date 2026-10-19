@@ -46,6 +46,7 @@ export type EtapaDiagnosticoSmtp =
   | 'conexion'
   | 'autenticacion'
   | 'rechazo_smtp'
+  | 'entrega_incierta'
   | 'aceptado_smtp';
 
 export interface DependenciasPruebaSmtp {
@@ -107,10 +108,16 @@ export function resolverDestinatariosAutorizados(opciones: {
  * técnica acotada y sin datos sensibles (lista blanca de códigos).
  */
 export function clasificarErrorSmtp(error: string | undefined): {
-  etapa: 'configuracion' | 'conexion' | 'autenticacion' | 'rechazo_smtp';
+  etapa: 'configuracion' | 'conexion' | 'autenticacion' | 'rechazo_smtp' | 'entrega_incierta';
   codigo: string;
 } {
   const texto = enmascararCredenciales(String(error || '').trim());
+  // Entrega incierta: el proveedor no confirmó la aceptación
+  // (p. ej. corte durante la transferencia). Nunca equivale
+  // a envío confirmado; requiere revisión humana.
+  if (texto.startsWith('entrega_incierta')) {
+    return { etapa: 'entrega_incierta' as const, codigo: texto };
+  }
   if (
     texto === 'smtp_sin_credenciales' ||
     texto === 'smtp_configuracion_invalida' ||

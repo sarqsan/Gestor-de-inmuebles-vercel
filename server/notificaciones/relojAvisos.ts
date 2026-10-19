@@ -29,7 +29,7 @@
 
 import type { CobroPeriodo, ContratoFormalizacion } from '../../src/types.js';
 import type { ContextoAutorizacion, Notificacion } from '../../src/types/notificaciones.js';
-import { idempotenciaDeEvento } from '../../src/types/notificaciones.js';
+import { esEntregaInciera, idempotenciaDeEvento } from '../../src/types/notificaciones.js';
 import type { DispatcherNotificaciones } from '../../src/notificaciones/dispatcher.js';
 import { MAX_REINTENTOS } from '../../src/notificaciones/dispatcher.js';
 import { generarPeriodosParaContrato } from '../../src/utils/cobrosEngine.js';
@@ -250,6 +250,12 @@ export async function ejecutarRelojAvisos(dependencias: DependenciasRelojAvisos)
         if (Number.isNaN(cuando) || cuando > ahora.getTime()) continue;
       }
       if (estado === 'FALLIDA' && (notificacion.intentos || 0) >= MAX_REINTENTOS) continue;
+      // Entrega incierta (p. ej. el servidor SMTP aceptó el
+      // mensaje pero la confirmación se perdió): el reintento
+      // automático podría DUPLICAR un correo real. Queda en
+      // FALLIDA con su causa, visible en la bandeja, y solo
+      // un operador puede forzar el reenvío (dispatcher).
+      if (estado === 'FALLIDA' && esEntregaInciera(notificacion.error)) continue;
 
       resumen.pendientesProcesadas += 1;
       try {

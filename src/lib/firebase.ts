@@ -3889,32 +3889,12 @@ export async function saveValoracionProfesionalFirestore(valoracion: ValoracionP
   }
 }
 
-export async function uploadProfesionalDocumentoStorage(
-  profesionalId: string,
-  file: File | Blob,
-  nombreArchivo: string,
-  _tipoDoc?: string
-): Promise<{ downloadUrl: string; storagePath: string }> {
-  const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `profesionales/${profesionalId}/documentos/${Date.now()}_${sanitizedName}`;
-  const fileRef = ref(storage, storagePath);
-
-  try {
-    const mimeType = file.type || 'application/pdf';
-    await uploadBytes(fileRef, file, { contentType: mimeType });
-    const downloadUrl = await getDownloadURL(fileRef);
-    return { downloadUrl, storagePath };
-  } catch (err) {
-    console.warn('Firebase Storage upload failed for profesional document, using local fallback:', err);
-    const downloadUrl = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    });
-    return { downloadUrl, storagePath };
-  }
-}
+// P3 — `uploadProfesionalDocumentoStorage` RETIRADA. Su fallback convertía un
+// fallo de Storage en un falso éxito (data-URL persistida en Firestore como si
+// fuera el documento almacenado). Los documentos de profesionales usan ahora el
+// adaptador del expediente documental (`expedienteDocumental/
+// documentosProfesionalesCliente.ts`): metadatos con huella SHA-256 + Storage
+// privado autorizado por reglas, y error explícito si el almacenamiento falla.
 
 export async function uploadPresupuestoDocumentoStorage(
   presupuestoId: string,

@@ -50,7 +50,8 @@ vi.mock('firebase/storage', () => {
   const ref = (_storage: unknown, path: string) => ({ path });
   return {
     ref,
-    uploadBytes: async (storageRef: { path: string }, blob: Blob, metadata: Record<string, unknown>) => {
+    uploadBytes: async (storageRef: { path: string }, datos: Blob | Uint8Array, metadata: Record<string, unknown>) => {
+      const blob = datos instanceof Blob ? datos : new Blob([datos as BlobPart]);
       mocks.storage.set(storageRef.path, {
         blob,
         metadata: { size: blob.size, contentType: metadata.contentType, customMetadata: metadata.customMetadata },
@@ -62,10 +63,10 @@ vi.mock('firebase/storage', () => {
       if (!stored) throw Object.assign(new Error('not-found'), { code: 'storage/object-not-found' });
       return stored.metadata;
     },
-    getBlob: async (storageRef: { path: string }) => {
+    getBytes: async (storageRef: { path: string }) => {
       const stored = mocks.storage.get(storageRef.path);
       if (!stored) throw Object.assign(new Error('not-found'), { code: 'storage/object-not-found' });
-      return stored.blob;
+      return await new Blob([stored.blob as BlobPart]).arrayBuffer();
     },
     deleteObject: async (storageRef: { path: string }) => {
       if (!mocks.storage.delete(storageRef.path)) throw Object.assign(new Error('not-found'), { code: 'storage/object-not-found' });
@@ -78,6 +79,7 @@ import {
   descargarDocumentoPatrimonial,
   eliminarDocumentoPatrimonial,
   subirDocumentoPatrimonial,
+  verificarDocumentoPatrimonial,
 } from '../src/lib/expedienteDocumental/gestorFirebase';
 
 const pdf = () => new Blob(['%PDF-1.7\ncontenido de prueba'], { type: 'application/pdf' });
@@ -154,5 +156,29 @@ describe('Gestor Firebase documental — orquestación de Storage, metadatos y a
     expect(metadata?.eliminadoEl).toBeTypeOf('string');
     expect(mocks.storage.size).toBe(0);
     expect(mocks.auditoria.at(-1)).toMatchObject({ accion: 'EXPEDIENTE_DOCUMENTO_ELIMINADO', resultado: 'EXITO' });
+  });
+
+  // P3 — integridad y disponibilidad. DOBLES (harness con mocks identificados):
+  // prueban la lógica de orquestación; la certificación con reglas y Storage
+  // reales está en tests/emulador/documentos-p3.emulador.test.ts.
+  it('P3: verifica la huella al descargar; un objeto alterado no se entrega y queda ERROR_STORAGE', async () => {
+    const alta = await subirDocumentoPatrimonial({ inmuebleId: 'inm_42', tipo: 'OTRO', archivo: pdf(), nombre: 'integro.pdf', actorNombre: 'Titular' });
+    expect(await verificarDocumentoPatrimonial('inm_42', alta.documento.id)).toMatchObject({ estado: 'VERIFICADO', sha256: alta.documento.sha256 });
+    const stored = mocks.storage.get(alta.documento.storagePath)!;
+    mocks.storage.set(alta.documento.storagePath, { ...stored, blob: new Blob(['%PDF-1.7\nALTERADO']) });
+    await expect(descargarDocumentoPatrimonial('inm_42', alta.documento.id)).rejects.toMatchObject({ codigo: 'INTEGRIDAD_DISCREPANTE' });
+    expect(mocks.firestore.get(`${propertyRef}/documentos_patrimoniales/${alta.documento.id}`)?.estado).toBe('ERROR_STORAGE');
+    expect(mocks.auditoria.at(-1)).toMatchObject({ accion: 'EXPEDIENTE_DOCUMENTO_DESCARGADO', resultado: 'ERROR' });
+  });
+
+  it('P3: la pérdida del objeto no se oculta tras metadatos y se recupera re-subiendo el mismo archivo', async () => {
+    const alta = await subirDocumentoPatrimonial({ inmuebleId: 'inm_42', tipo: 'OTRO', archivo: pdf(), nombre: 'perdido.pdf', actorNombre: 'Titular' });
+    mocks.storage.delete(alta.documento.storagePath);
+    expect(await verificarDocumentoPatrimonial('inm_42', alta.documento.id)).toEqual({ estado: 'OBJETO_AUSENTE' });
+    expect(mocks.firestore.get(`${propertyRef}/documentos_patrimoniales/${alta.documento.id}`)?.estado).toBe('ERROR_STORAGE');
+    const recuperado = await subirDocumentoPatrimonial({ inmuebleId: 'inm_42', tipo: 'OTRO', archivo: pdf(), nombre: 'perdido.pdf', actorNombre: 'Titular' });
+    expect(recuperado.documento.id).toBe(alta.documento.id);
+    expect(recuperado.documento.estado).toBe('DISPONIBLE');
+    expect(await verificarDocumentoPatrimonial('inm_42', alta.documento.id)).toMatchObject({ estado: 'VERIFICADO' });
   });
 });

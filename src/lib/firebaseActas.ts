@@ -11,7 +11,9 @@ import {
   type QuerySnapshot,
 } from 'firebase/firestore';
 import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, getBytes } from 'firebase/storage';
+import { sha256DeBytes } from './expedienteDocumental/gestor';
+import { evaluarIntegridad, type ResultadoVerificacion } from './expedienteDocumental/documentosProfesionales';
 import { db, storage, sanitizeObjectForFirestore, type DataAccessScope } from './firebase';
 import type {
   Acta,
@@ -288,12 +290,15 @@ export async function getOtpActaFirestore(otpId: string): Promise<OtpActa | null
 }
 
 // ---- STORAGE EVIDENCIAS ----
+// P3: la evidencia y el PDF se suben con su huella SHA-256 (también como
+// metadato personalizado del objeto) para poder verificar después que el
+// contenido almacenado es el que se registró. Sin fallback: un fallo propaga.
 export async function uploadEvidenciaActaStorage(
   ownerId: string,
   actaId: string,
   file: File | Blob,
   fileName: string
-): Promise<{ url: string; storagePath: string }> {
+): Promise<{ url: string; storagePath: string; sha256: string; tamanoBytes: number }> {
   const ownerSeg = (ownerId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
   const actaSeg = (actaId || 'acta').replace(/[^a-zA-Z0-9._-]/g, '_');
   const safeName = (fileName || 'evidencia.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -302,9 +307,11 @@ export async function uploadEvidenciaActaStorage(
 
   const fileRef = ref(storage, storagePath);
   const mime = (file as File).type || (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const sha256 = await sha256DeBytes(bytes);
 
   const uploadWork = (async () => {
-    await uploadBytes(fileRef, file, { contentType: mime });
+    await uploadBytes(fileRef, bytes, { contentType: mime, customMetadata: { sha256, actaId: actaSeg } });
     return getDownloadURL(fileRef);
   })();
 
@@ -313,7 +320,29 @@ export async function uploadEvidenciaActaStorage(
   if (!url || typeof url !== 'string') {
     throw new Error('La subida de la evidencia ha tardado demasiado. Revisa la conexión e inténtalo de nuevo.');
   }
-  return { url, storagePath };
+  return { url, storagePath, sha256, tamanoBytes: bytes.byteLength };
+}
+
+/**
+ * P3: recupera los bytes de un archivo de acta con la sesión actual (reglas de
+ * Storage) y compara su huella con la registrada. No modifica el acta.
+ */
+export async function verificarArchivoActaStorage(
+  storagePath: string,
+  esperado: { sha256?: string; tamanoBytes?: number }
+): Promise<ResultadoVerificacion> {
+  if (!esperado.sha256) return { estado: 'NO_VERIFICABLE', motivo: 'SIN_HUELLA_REGISTRADA' };
+  try {
+    const bytes = new Uint8Array(await getBytes(ref(storage, storagePath)));
+    return evaluarIntegridad(
+      { sha256: esperado.sha256, tamanoBytes: esperado.tamanoBytes ?? bytes.byteLength },
+      { sha256: await sha256DeBytes(bytes), tamanoBytes: bytes.byteLength }
+    );
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === 'storage/object-not-found') return { estado: 'OBJETO_AUSENTE' };
+    return { estado: 'NO_VERIFICABLE', motivo: code || 'desconocido' };
+  }
 }
 
 export async function deleteEvidenciaActaStorage(storagePath?: string): Promise<void> {
@@ -339,14 +368,16 @@ export async function uploadPdfActaStorage(
   actaId: string,
   pdfBlob: Blob,
   fileName: string
-): Promise<{ url: string; storagePath: string }> {
+): Promise<{ url: string; storagePath: string; sha256: string; tamanoBytes: number }> {
   const ownerSeg = (ownerId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
   const actaSeg = (actaId || 'acta').replace(/[^a-zA-Z0-9._-]/g, '_');
   const safeName = (fileName || 'acta.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `actas_pdfs/${ownerSeg}/${actaSeg}/${safeName}`;
 
   const fileRef = ref(storage, storagePath);
-  await uploadBytes(fileRef, pdfBlob, { contentType: 'application/pdf' });
+  const bytes = new Uint8Array(await pdfBlob.arrayBuffer());
+  const sha256 = await sha256DeBytes(bytes);
+  await uploadBytes(fileRef, bytes, { contentType: 'application/pdf', customMetadata: { sha256, actaId: actaSeg } });
   const url = await getDownloadURL(fileRef);
-  return { url, storagePath };
+  return { url, storagePath, sha256, tamanoBytes: bytes.byteLength };
 }

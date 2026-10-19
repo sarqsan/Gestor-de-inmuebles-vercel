@@ -29,6 +29,11 @@ service firebase.storage {
     //     existen en el cliente pero NO tienen bloque: caen en la denegación
     //     por defecto y el cliente degrada a data-URL (sin cambio: afectaría al
     //     módulo Operaciones).
+    //     P3 (trazabilidad documental) cierra SOLO la parte profesional con el
+    //     esquema nuevo `profesionales/{id}/documentos/{documentoId}/{fichero}`
+    //     (bloque P3 más abajo, sin fallback en el cliente). La ruta plana
+    //     heredada `profesionales/{id}/documentos/{fichero}`, `presupuestos/` y
+    //     `trabajos/` siguen en la denegación por defecto.
     // =========================================================================
 
     function isSignedIn() {
@@ -447,6 +452,72 @@ service firebase.storage {
       allow delete: if ambitoInmuebleBorrado(inmuebleId)
         && metadataStorageDocumentoCoherente(inmuebleId, documentoId, fileName)
         && metadataDocumentoPatrimonial(inmuebleId, documentoId).estado == 'PENDIENTE_ELIMINACION';
+    }
+
+    // P3 — DOCUMENTOS ACREDITATIVOS DE PROFESIONALES.
+    // Metadatos canónicos en profesionales/{id}/documentos_profesionales/{docId}
+    // (Firestore). Ámbito resuelto en cada petición contra el espejo:
+    // administración, el propio profesional (espejo ACTIVO con su profesionalId)
+    // o la cartera del titular que creó la ficha (`creadoPorPropietarioId`):
+    // titular/cartera L/E leen, titular/cartera E suben, titular/admin borran.
+    // Subida sólo con metadato PENDIENTE_STORAGE coherente (ruta, nombre, MIME,
+    // tamaño y huella SHA-256); descarga sólo DISPONIBLE; sin list ni update.
+    // Los objetos NO son públicos: el cliente lee bytes con su sesión (getBytes),
+    // nunca persiste downloadURL con token.
+    function fichaProfesional(profesionalId) {
+      return firestore.get(/databases/(default)/documents/profesionales/$(profesionalId)).data;
+    }
+    function profesionalConCartera(profesionalId) {
+      return firestore.exists(/databases/(default)/documents/profesionales/$(profesionalId))
+        && 'creadoPorPropietarioId' in fichaProfesional(profesionalId)
+        && fichaProfesional(profesionalId).creadoPorPropietarioId is string
+        && fichaProfesional(profesionalId).creadoPorPropietarioId.size() > 0;
+    }
+    function soyProfesional(profesionalId) {
+      return espejoActivo() && espejo().tipoPerfil == 'PROFESIONAL'
+        && 'profesionalId' in espejo() && espejo().profesionalId == profesionalId;
+    }
+    function ambitoProfesionalLectura(profesionalId) {
+      return adminStorage() || soyProfesional(profesionalId)
+        || (profesionalConCartera(profesionalId) && ambitoPidLectura(fichaProfesional(profesionalId).creadoPorPropietarioId));
+    }
+    function ambitoProfesionalEscritura(profesionalId) {
+      return adminStorage() || soyProfesional(profesionalId)
+        || (profesionalConCartera(profesionalId) && ambitoPidEscritura(fichaProfesional(profesionalId).creadoPorPropietarioId));
+    }
+    function ambitoProfesionalBorrado(profesionalId) {
+      return adminStorage()
+        || (profesionalConCartera(profesionalId) && ambitoPidBorrado(fichaProfesional(profesionalId).creadoPorPropietarioId));
+    }
+    function metadataDocProfesional(profesionalId, documentoId) {
+      return firestore.get(/databases/(default)/documents/profesionales/$(profesionalId)/documentos_profesionales/$(documentoId)).data;
+    }
+    function metadataDocProfesionalCoherente(profesionalId, documentoId, fileName) {
+      return firestore.exists(/databases/(default)/documents/profesionales/$(profesionalId)/documentos_profesionales/$(documentoId))
+        && metadataDocProfesional(profesionalId, documentoId).id == documentoId
+        && metadataDocProfesional(profesionalId, documentoId).profesionalId == profesionalId
+        && metadataDocProfesional(profesionalId, documentoId).nombreStorage == fileName
+        && metadataDocProfesional(profesionalId, documentoId).storagePath == 'profesionales/' + profesionalId + '/documentos/' + documentoId + '/' + fileName;
+    }
+    match /profesionales/{profesionalId}/documentos/{documentoId}/{fileName} {
+      allow get: if ambitoProfesionalLectura(profesionalId)
+        && metadataDocProfesionalCoherente(profesionalId, documentoId, fileName)
+        && metadataDocProfesional(profesionalId, documentoId).estado == 'DISPONIBLE';
+      allow list: if false;
+      allow create: if ambitoProfesionalEscritura(profesionalId)
+        && metadataDocProfesionalCoherente(profesionalId, documentoId, fileName)
+        && metadataDocProfesional(profesionalId, documentoId).estado == 'PENDIENTE_STORAGE'
+        && metadataDocProfesional(profesionalId, documentoId).mimeType == request.resource.contentType
+        && metadataDocProfesional(profesionalId, documentoId).tamanoBytes == request.resource.size
+        && request.resource.metadata.documentoId == documentoId
+        && request.resource.metadata.profesionalId == profesionalId
+        && request.resource.metadata.sha256 == metadataDocProfesional(profesionalId, documentoId).sha256
+        && isDocumentoPatrimonialValido()
+        && hasSafeObjectName();
+      allow update: if false;
+      allow delete: if ambitoProfesionalBorrado(profesionalId)
+        && metadataDocProfesionalCoherente(profesionalId, documentoId, fileName)
+        && metadataDocProfesional(profesionalId, documentoId).estado == 'PENDIENTE_ELIMINACION';
     }
 
     // R3 — ADJUNTOS DE INVENTARIO (documentación interna de trabajo).

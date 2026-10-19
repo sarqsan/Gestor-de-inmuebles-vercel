@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   db: {} as Record<string, any>, seq: 0, version: 0, failure: false, retries: 0,
   actor: { currentUser: { uid: 'master', email: 'sarqsan2.com', emailVerified: true } as any },
   authorize: null as null | ((before: Record<string, any>, after: Record<string, any>, writes: string[]) => void),
+  transactionBarrier: null as null | { arrivals: number; versions: number[]; wait: Promise<void>; release: () => void },
 }));
 vi.mock('../src/lib/firebase', () => ({ auth: m.actor, db: {}, sanitizeObjectForFirestore: (v: unknown) => JSON.parse(JSON.stringify(v)) }));
 vi.mock('../src/lib/authService', () => ({ syncAuthIndex: vi.fn() }));
@@ -35,6 +36,13 @@ vi.mock('firebase/firestore', () => {
           set: (ref: any, data: any) => { writing = true; after[ref.path] = data; writes.push(ref.path); },
           update: (ref: any, data: any) => { writing = true; if (!before[ref.path]) throw Error('Missing update'); after[ref.path] = { ...before[ref.path], ...data }; writes.push(ref.path); },
         });
+        const barrier = retry === 0 ? m.transactionBarrier : null;
+        if (barrier) {
+          barrier.arrivals++;
+          barrier.versions.push(version);
+          if (barrier.arrivals === 2) barrier.release();
+          await barrier.wait;
+        }
         await new Promise(resolve => setTimeout(resolve, 1));
         if (version !== m.version) { m.retries++; continue; }
         if (m.failure) { m.failure = false; throw Error('Injected network failure'); }
@@ -72,7 +80,7 @@ const can = (col: string, op: 'get'|'list'|'create'|'update'|'delete', id: strin
 });
 beforeEach(() => {
   vi.stubGlobal('window', { location: { origin: 'https://test.local' } });
-  m.db = {}; m.seq = 0; m.version = 0; m.failure = false; m.retries = 0; master(); vi.clearAllMocks();
+  m.db = {}; m.seq = 0; m.version = 0; m.failure = false; m.retries = 0; m.transactionBarrier = null; master(); vi.clearAllMocks();
   m.authorize = (db, after, writes) => {
     for (const path of writes) {
       const [col, docId] = path.split('/');
@@ -101,7 +109,19 @@ describe('ROADMAP-02 · onboarding y transacciones verificadas con Rules locales
     await expect(prepararOnboardingPropietarioFirestore({ propietarioId: 'otro', nombre: 'Ana', email: 'ana@example.es' })).rejects.toThrow(/identidad/);
   });
   it('doble alta concurrente serializa identidad por email/owner', async () => {
-    const [a, b] = await Promise.all([alta(), alta()]); expect(a).toEqual(b); expect(auditCount()).toBe(1); expect(m.retries).toBeGreaterThan(0);
+    let release!: () => void;
+    const wait = new Promise<void>(resolve => { release = resolve; });
+    const barrier = { arrivals: 0, versions: [] as number[], wait, release };
+    m.transactionBarrier = barrier;
+
+    const [a, b] = await Promise.all([alta(), alta()]);
+    m.transactionBarrier = null;
+
+    expect(barrier.arrivals).toBe(2);
+    expect(barrier.versions).toEqual([0, 0]);
+    expect(a).toEqual(b);
+    expect(auditCount()).toBe(1);
+    expect(m.retries).toBeGreaterThan(0);
   });
   it('fallo Firestore deja cero huérfanos y se recupera con los mismos IDs', async () => {
     m.failure = true; await expect(alta()).rejects.toThrow(/network/); expect(m.db).toEqual({}); await alta(); expect(auditCount()).toBe(1);

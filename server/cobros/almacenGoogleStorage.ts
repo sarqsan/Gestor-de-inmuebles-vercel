@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { obtenerTokenAcceso, type CuentaServicio, type ImplementacionFetch } from '../titularidades/googleBackend.js';
+import { obtenerTokenAcceso, validarDestinoEmuladorP2, type CuentaServicio, type ImplementacionFetch } from '../titularidades/googleBackend.js';
 
 export interface AlmacenJustificantes {
   guardar(path: string, bytes: Uint8Array, tipoMime: string): Promise<'CREADO' | 'YA_EXISTE'>;
@@ -22,6 +22,8 @@ export interface OpcionesAlmacenGoogleStorage {
   fetchImpl?: ImplementacionFetch;
   ahora?: () => Date;
   timeoutMs?: number;
+  /** Opt-in de pruebas P2: GCS JSON API del emulador oficial, validado como demo+loopback. */
+  usarEmuladorFirebase?: boolean;
 }
 
 export class ErrorAlmacenGoogleStorage extends Error {
@@ -44,14 +46,19 @@ function validarNombreObjeto(path: string): boolean {
 export class ClienteGoogleStorageRest implements AlmacenJustificantes {
   private readonly ejecutar: ImplementacionFetch;
   private readonly timeoutMs: number;
+  private readonly baseUrl: string;
 
   constructor(private readonly opciones: OpcionesAlmacenGoogleStorage) {
     if (!validarSegmento(opciones.bucket)) throw new Error('STORAGE_BUCKET_INVALIDO');
+    this.baseUrl = opciones.usarEmuladorFirebase
+      ? validarDestinoEmuladorP2('storage', opciones.cuenta.project_id)
+      : 'https://storage.googleapis.com';
     this.ejecutar = opciones.fetchImpl || (fetch as unknown as ImplementacionFetch);
     this.timeoutMs = Math.max(1000, Math.min(30000, opciones.timeoutMs || 12000));
   }
 
   private async token(): Promise<string> {
+    if (this.opciones.usarEmuladorFirebase) return 'owner';
     try {
       return await obtenerTokenAcceso(this.opciones.cuenta, {
         fetchImpl: this.ejecutar,
@@ -84,7 +91,7 @@ export class ClienteGoogleStorageRest implements AlmacenJustificantes {
       name: path,
       ifGenerationMatch: '0',
     });
-    const url = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(this.opciones.bucket)}/o?${query.toString()}`;
+    const url = `${this.baseUrl}/upload/storage/v1/b/${encodeURIComponent(this.opciones.bucket)}/o?${query.toString()}`;
     const response = await this.peticion((signal) => this.ejecutar(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': tipoMime },
@@ -108,7 +115,7 @@ export class ClienteGoogleStorageRest implements AlmacenJustificantes {
   async leer(path: string): Promise<Uint8Array | null> {
     if (!validarNombreObjeto(path)) throw new ErrorAlmacenGoogleStorage('STORAGE_RESPUESTA_INVALIDA');
     const token = await this.token();
-    const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(this.opciones.bucket)}/o/${encodeURIComponent(path)}?alt=media`;
+    const url = `${this.baseUrl}/storage/v1/b/${encodeURIComponent(this.opciones.bucket)}/o/${encodeURIComponent(path)}?alt=media`;
     const response = await this.peticion((signal) => this.ejecutar(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },

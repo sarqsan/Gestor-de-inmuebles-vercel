@@ -62,6 +62,27 @@ const ALCANCES = ['https://www.googleapis.com/auth/datastore', 'https://www.goog
 const MS_ANTELACION = 60_000;
 const MS_TIMEOUT = 10_000;
 
+/** Guardarraíl para los transportes locales de aceptación P2; nunca resuelve destinos por defecto. */
+export function validarDestinoEmuladorP2(
+  producto: 'firestore' | 'storage',
+  proyectoId: string,
+  entorno: NodeJS.ProcessEnv = process.env,
+): string {
+  const variable = producto === 'firestore' ? 'FIRESTORE_EMULATOR_HOST' : 'FIREBASE_STORAGE_EMULATOR_HOST';
+  const puerto = producto === 'firestore' ? '8080' : '9199';
+  const fuentesCredenciales = ['FIREBASE_SERVICE_ACCOUNT', 'FIREBASE_SERVICE_ACCOUNT_B64',
+    'FIREBASE_SERVICE_ACCOUNT_PATH', 'GOOGLE_APPLICATION_CREDENTIALS'];
+  const host = entorno[variable];
+  if (entorno.NODE_ENV !== 'test' || entorno.VERCEL || entorno.VERCEL_ENV
+    || !proyectoId.startsWith('demo-') || entorno.GCLOUD_PROJECT !== proyectoId
+    || fuentesCredenciales.some((fuente) => entorno[fuente] !== undefined)
+    || typeof host !== 'string' || !/^(?:127\.0\.0\.1|localhost):\d+$/.test(host)
+    || host.slice(host.lastIndexOf(':') + 1) !== puerto) {
+    throw new Error('P2_EMULADOR_DESTINO_NO_SEGURO');
+  }
+  return `http://${host}`;
+}
+
 // ---------------------------------------------------------------------------
 // Utilidades
 // ---------------------------------------------------------------------------
@@ -457,6 +478,8 @@ export interface ClienteFirestoreOpciones {
    * nombre en la que vive la aplicación (`firebase-applet-config.json`).
    */
   baseDatosId?: string;
+  /** Opt-in exclusivo de aceptación P2 con demo project y emulador local validado. */
+  usarEmuladorFirebase?: boolean;
 }
 
 /** Ruta de campo para `updateMask`: identificadores simples tal cual; el resto, entre comillas invertidas. */
@@ -470,7 +493,10 @@ export class ClienteFirestoreRest {
 
   constructor(private readonly opciones: ClienteFirestoreOpciones) {
     const baseDatos = encodeURIComponent(opciones.baseDatosId || '(default)');
-    this.base = `https://firestore.googleapis.com/v1/projects/${opciones.cuenta.project_id}/databases/${baseDatos}/documents`;
+    const baseApi = opciones.usarEmuladorFirebase
+      ? validarDestinoEmuladorP2('firestore', opciones.cuenta.project_id)
+      : 'https://firestore.googleapis.com';
+    this.base = `${baseApi}/v1/projects/${opciones.cuenta.project_id}/databases/${baseDatos}/documents`;
   }
 
   get projectId(): string {
@@ -482,6 +508,11 @@ export class ClienteFirestoreRest {
   }
 
   private async cabeceras(): Promise<Record<string, string>> {
+    // Firestore Emulator acepta el token de propietario para el transporte REST.
+    // Este camino sólo se habilita con el guardarraíl P2 demo+loopback.
+    if (this.opciones.usarEmuladorFirebase) {
+      return { Authorization: 'Bearer owner', 'Content-Type': 'application/json' };
+    }
     const token = await obtenerTokenAcceso(this.opciones.cuenta, {
       fetchImpl: this.opciones.fetchImpl,
       ahora: this.opciones.ahora,

@@ -32,9 +32,10 @@
  *   · FIRESTORE      — credencial de servicio configurada (producción).
  *   · MEMORIA        — sólo desarrollo local/pruebas, sin credencial.
  *   · NO_CONFIGURADO — producción sin credencial: se exige igualmente la
- *     autenticación, pero `clienteIA` devuelve null (los endpoints responden con
- *     su respaldo heurístico, sin consumo del proveedor) y la respuesta lleva
- *     `X-IA-Registro: no-configurado`. Nunca hay consumo sin traza duradera.
+ *     autenticación, pero `clienteIA` devuelve null (cada endpoint aplica sólo
+ *     su respaldo permitido o falla de forma cerrada, sin consumo del proveedor)
+ *     y la respuesta lleva `X-IA-Registro: no-configurado`. Nunca hay consumo
+ *     sin traza duradera.
  *
  * FASE 2 — GOBIERNO DE USO (`server/ia/gobiernoIA.ts`): el perfil y permiso del
  * actor se comprueban antes de ejecutar; el saldo/cuota se reserva sobre el UID

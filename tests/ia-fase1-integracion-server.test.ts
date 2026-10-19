@@ -524,6 +524,8 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/titularidades/googleBackend.ts',
       'src/titularidades/busquedaTitulares.ts',
       'server/ia/nucleoIA.ts',
+      'server/ia/respuestaAseguradora.ts',
+      'src/ia/analisisRespuestaAseguradora.ts',
       'server/ia/contextoTitularIA.ts',
       'server/ia/configuracionIA.ts',
       'server/cobros/almacenGoogleStorage.ts',
@@ -824,8 +826,12 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       }
       expect(documentosFirestore.size).toBe(tamAntes);
 
-      // 3, 4, 8, 9) Token válido: uid sale siempre del token (nunca del body), pasa por el núcleo,
-      // registra COMPLETADA en Firestore y no guarda datos sensibles.
+      // 3, 4, 8, 9) Token válido: uid sale siempre del token (nunca del body) y pasa por el núcleo.
+      // El análisis de dictamen es una excepción deliberada: sin cliente/proveedor IA debe fallar
+      // cerrado (503), mientras las demás rutas conservan su respaldo sin consumo.
+      const respuestaSinIA = id === 'ANALIZAR_RESPUESTA_ASEGURADORA';
+      const estadoEsperado = respuestaSinIA ? 'FALLIDA' : 'COMPLETADA';
+      const httpEsperado = respuestaSinIA ? 503 : 200;
       const claveOk = `${claveBase}-ok-ana-01`;
       const rOk = await fetchReal(`${baseVercel}${ruta}`, {
         method: 'POST',
@@ -836,7 +842,8 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
         },
         body: JSON.stringify(cuerpoBase),
       });
-      expect(rOk.status).toBe(200);
+      expect(rOk.status).toBe(httpEsperado);
+      if (respuestaSinIA) expect(await rOk.json()).toMatchObject({ codigo: 'IA_NO_DISPONIBLE' });
       const opIdAna = rOk.headers.get('x-ia-operacion-id');
       expect(opIdAna).toMatch(/^iaop_[0-9a-f]{40}$/);
       const docGuardado = documentosFirestore.get(`ia_operaciones/${opIdAna}`);
@@ -847,9 +854,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
         uid: identidad.uid,
         operacion: id,
         ruta,
-        estado: 'COMPLETADA',
-        codigoHttp: 200,
-        origenRespuesta: 'RESPALDO',
+        estado: estadoEsperado,
+        codigoHttp: httpEsperado,
+        origenRespuesta: respuestaSinIA ? 'ERROR' : 'RESPALDO',
         llamadasProveedor: 0,
       });
       expect(datosReg.uid).not.toBe('uid-atacante-body');
@@ -895,7 +902,7 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
         ),
       );
       const codigosConc = respuestasConc.map((r) => r.status).sort();
-      expect(codigosConc).toEqual([200, 409, 409, 409]);
+      expect(codigosConc).toEqual(respuestaSinIA ? [409, 409, 409, 503] : [200, 409, 409, 409]);
 
       // 7) Aislamiento entre usuarios: misma clave de idempotencia con otro usuario -> 200 e id distinto
       const tokenLuis = firmarToken({ sub: identidad.uidPar, email: identidad.emailPar });
@@ -932,12 +939,13 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
         },
         body: JSON.stringify(cuerpoPar),
       });
-      expect(rLuis.status).toBe(200);
+      expect(rLuis.status).toBe(httpEsperado);
+      if (respuestaSinIA) expect(await rLuis.json()).toMatchObject({ codigo: 'IA_NO_DISPONIBLE' });
       const opIdLuis = rLuis.headers.get('x-ia-operacion-id');
       expect(opIdLuis).toMatch(/^iaop_[0-9a-f]{40}$/);
       expect(opIdLuis).not.toBe(opIdAna);
       const datosLuis = decodificarCampos((documentosFirestore.get(`ia_operaciones/${opIdLuis}`)?.fields || {}) as never);
-      expect(datosLuis).toMatchObject({ id: opIdLuis, uid: identidad.uidPar, operacion: id, estado: 'COMPLETADA' });
+      expect(datosLuis).toMatchObject({ id: opIdLuis, uid: identidad.uidPar, operacion: id, estado: estadoEsperado, codigoHttp: httpEsperado });
 
       // 5) Fallo de registro obligatorio -> 503 REGISTRO_NO_DISPONIBLE y no ejecuta la operación
       falloFirestoreRest = true;

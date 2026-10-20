@@ -492,6 +492,17 @@ function acumular(
 const RE_FECHA_ISO_V = /^\d{4}-\d{2}-\d{2}$/;
 const RE_PAQUETE_ID = /^[0-9a-f]{64}$/;
 
+/** Serialización canónica local (claves ordenadas) para comparar JSON. */
+function canonicoVerificador(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicoVerificador).join(',')}]`;
+  if (v !== null && typeof v === 'object') {
+    const obj = v as Record<string, unknown>;
+    return `{${Object.keys(obj).sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicoVerificador(obj[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+}
+
 /**
  * Verifica un paquete del asesor desde sus bytes. Pura y síncrona; no muta
  * la entrada ni reconstruye nada. `ok` es false en cuanto existe UN error
@@ -538,6 +549,7 @@ export function verificarPaqueteAsesorZip(
     inmuebles: Set<string> | null;
     ejercicios: Set<number> | null;
     meses: Set<string> | null;
+    rango: { desde: string; hasta: string } | null;
   } | null = null;
   const textoManifest = textoDe('manifest.json');
   if (textoManifest === null) {
@@ -588,24 +600,37 @@ export function verificarPaqueteAsesorZip(
         ? [...new Set(mRec.ejerciciosEfectivos as number[])] : null;
     const mesesAmbito = mRec.mesesEfectivos === null || mRec.mesesEfectivos === undefined
       ? null : idsTexto(mRec.mesesEfectivos);
+    // P6 — intervalo de fechas (aditivo; ausente en paquetes anteriores).
+    const rangoRec = mRec.rangoFechasEfectivo;
+    const rangoAmbito = rangoRec === null || rangoRec === undefined
+      ? null
+      : esObjetoPlano(rangoRec) && esFechaReal(rangoRec.desde) && esFechaReal(rangoRec.hasta)
+        && (rangoRec.desde as string) <= (rangoRec.hasta as string)
+        ? { desde: rangoRec.desde as string, hasta: rangoRec.hasta as string }
+        : undefined;
     if (propietariosAmbito === null || propietariosAmbito.length === 0
       || (mRec.inmueblesEfectivos !== null && inmueblesAmbito === null)
       || (mRec.ejerciciosEfectivos !== null && ejerciciosAmbito === null)
-      || (mRec.mesesEfectivos !== null && mRec.mesesEfectivos !== undefined && mesesAmbito === null)) {
-      error('AMBITO_MANIFEST_INVALIDO', 'El ámbito declarado en el manifiesto (propietarios/inmuebles/ejercicios/meses efectivos) no es legible');
+      || (mRec.mesesEfectivos !== null && mRec.mesesEfectivos !== undefined && mesesAmbito === null)
+      || rangoAmbito === undefined) {
+      error('AMBITO_MANIFEST_INVALIDO', 'El ámbito declarado en el manifiesto (propietarios/inmuebles/ejercicios/meses/rango de fechas efectivos) no es legible');
     } else {
       ambitoManifest = {
         propietarios: new Set(propietariosAmbito),
         inmuebles: inmueblesAmbito === null ? null : new Set(inmueblesAmbito),
         ejercicios: ejerciciosAmbito === null ? null : new Set(ejerciciosAmbito),
         meses: mesesAmbito === null ? null : new Set(mesesAmbito),
+        rango: rangoAmbito,
       };
     }
     if (manifest.schemaVersion !== PAQUETE_ASESOR_SCHEMA) {
       error('SCHEMA_NO_SOPORTADO', `Esquema '${manifest.schemaVersion}' ≠ '${PAQUETE_ASESOR_SCHEMA}'`);
     }
-    if (manifest.formatoOficialAEAT !== false || manifest.incluyeBinariosDocumentales !== false) {
-      error('BANDERAS_MANIFEST_INVALIDAS', 'El manifiesto no declara formatoOficialAEAT=false e incluyeBinariosDocumentales=false (declaración de honestidad obligatoria)');
+    if (manifest.formatoOficialAEAT !== false) {
+      error('BANDERAS_MANIFEST_INVALIDAS', 'El manifiesto no declara formatoOficialAEAT=false (declaración de honestidad obligatoria)');
+    }
+    if (typeof manifest.incluyeBinariosDocumentales !== 'boolean') {
+      error('BANDERAS_MANIFEST_INVALIDAS', 'El manifiesto no declara incluyeBinariosDocumentales como booleano');
     }
     if (manifest.escrituras !== 0) {
       error('BANDERAS_MANIFEST_INVALIDAS', 'El manifiesto no declara escrituras=0');
@@ -629,12 +654,265 @@ export function verificarPaqueteAsesorZip(
       manifest = { ...manifest, mesesEfectivos: null };
     }
     const nombresZip = entradas.map((e) => e.nombre);
-    const esperado = [...ENTRADAS_ESPERADAS];
-    if (JSON.stringify(nombresZip) !== JSON.stringify(esperado)) {
-      error('ENTRADAS_ZIP_DISTINTAS', `Las entradas del ZIP no son las 12 del contrato en su orden (leídas: ${nombresZip.join(', ') || 'ninguna'})`);
-    }
+    const baseEsperada = [...ENTRADAS_ESPERADAS];
     const hashes: Record<string, string> = esObjetoPlano(manifest.hashes)
       ? manifest.hashes : {};
+
+    // ---------------------------------------------------------------------
+    // P6 — DOCUMENTOS ORIGINALES: índice, hashes, tamaños y correspondencia
+    // con las entradas `documentos/...` del ZIP. Un índice inflado, un
+    // binario huérfano o una huella distinta producen error nombrado.
+    // ---------------------------------------------------------------------
+    const mRecDocs = mRec.documentos;
+    if (mRecDocs !== undefined && !Array.isArray(mRecDocs)) {
+      error('DOCUMENTOS_MANIFEST_INVALIDO', 'manifest.documentos no es un array');
+    }
+    const listaDocumentos: Record<string, unknown>[] = Array.isArray(mRecDocs)
+      ? mRecDocs.filter((d): d is Record<string, unknown> => esObjetoPlano(d))
+      : [];
+    if (Array.isArray(mRecDocs) && listaDocumentos.length !== mRecDocs.length) {
+      error('DOCUMENTOS_MANIFEST_INVALIDO', 'manifest.documentos contiene elementos que no son objetos');
+    }
+    const estadosDocumento = new Set([
+      'PENDIENTE_BINARIO', 'INCLUIDO', 'NO_DISPONIBLE', 'SIN_HASH', 'NO_ACCESIBLE', 'INTEGRIDAD_DUDOSA',
+    ]);
+    const idsDocumento = new Set<string>();
+    const rutasDeclaradas = new Set<string>();
+    let documentosIncluidos = 0;
+    const dentroDeRangoVerificador = (fecha: string): boolean =>
+      ambitoManifest === null || ambitoManifest.rango === null
+      || (fecha >= ambitoManifest.rango.desde && fecha <= ambitoManifest.rango.hasta);
+    for (const [indice, documento] of listaDocumentos.entries()) {
+      const id = documento.documentoId;
+      if (typeof id !== 'string' || id.trim() === '') {
+        error('DOCUMENTOS_MANIFEST_INVALIDO', `manifest.documentos[${indice}] sin documentoId textual`);
+        continue;
+      }
+      if (idsDocumento.has(id)) {
+        error('DOCUMENTO_DUPLICADO_EN_INDICE', `El documento ${id} aparece más de una vez en el índice`);
+      }
+      idsDocumento.add(id);
+      if (typeof documento.estado !== 'string' || !estadosDocumento.has(documento.estado)) {
+        error('DOCUMENTOS_MANIFEST_INVALIDO', `Documento ${id}: estado '${String(documento.estado)}' fuera del contrato`);
+      }
+      if (ambitoManifest !== null) {
+        if (typeof documento.inmuebleId !== 'string' || documento.inmuebleId === ''
+          || (ambitoManifest.inmuebles !== null && !ambitoManifest.inmuebles.has(documento.inmuebleId))) {
+          error('AMBITO_INMUEBLE_FUERA_DE_MANIFEST', `Documento ${id}: inmueble '${String(documento.inmuebleId)}' fuera de inmueblesEfectivos`, { id });
+        }
+        if (typeof documento.propietarioId === 'string' && documento.propietarioId !== ''
+          && !ambitoManifest.propietarios.has(documento.propietarioId)) {
+          error('AMBITO_PROPIETARIO_FUERA_DE_MANIFEST', `Documento ${id}: propietario '${documento.propietarioId}' fuera de propietariosEfectivos`, { id });
+        }
+      }
+      const sha = documento.sha256;
+      const shaIncluido = documento.sha256Incluido;
+      if (sha !== null && sha !== undefined && (typeof sha !== 'string' || !/^[0-9a-f]{64}$/.test(sha))) {
+        error('DOCUMENTO_HASH_INVALIDO', `Documento ${id}: sha256 registrado no es un SHA-256 hex`, { id });
+      }
+      if (shaIncluido !== null && shaIncluido !== undefined
+        && (typeof shaIncluido !== 'string' || !/^[0-9a-f]{64}$/.test(shaIncluido))) {
+        error('DOCUMENTO_HASH_INVALIDO', `Documento ${id}: sha256Incluido no es un SHA-256 hex`, { id });
+      }
+      if (documento.fechaDocumental !== null && documento.fechaDocumental !== undefined) {
+        if (!esFechaReal(documento.fechaDocumental)) {
+          error('DOCUMENTO_FECHA_INVALIDA', `Documento ${id}: fechaDocumental '${String(documento.fechaDocumental)}' no es una fecha real`, { id });
+        } else if (!dentroDeRangoVerificador(documento.fechaDocumental)) {
+          error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `Documento ${id}: fecha documental ${documento.fechaDocumental} fuera del rango declarado`, { id });
+        }
+      }
+      if (documento.estado === 'INCLUIDO') {
+        documentosIncluidos += 1;
+        const ruta = documento.rutaZip;
+        if (typeof ruta !== 'string' || esNombreEntradaInseguro(ruta) || !ruta.startsWith('documentos/')) {
+          error('DOCUMENTO_RUTA_INVALIDA', `Documento ${id}: rutaZip '${String(ruta)}' no es una ruta relativa segura bajo documentos/`, { id });
+        } else {
+          rutasDeclaradas.add(ruta);
+          const entradaDoc = porNombre.get(ruta);
+          if (!entradaDoc) {
+            error('DOCUMENTO_DECLARADO_AUSENTE', `Documento ${id}: declara INCLUIDO en '${ruta}' pero la entrada no está en el ZIP`, { entrada: ruta, id });
+          } else {
+            const real = sha256Hex(entradaDoc.bytes);
+            if (sha === null || shaIncluido !== sha) {
+              error('DOCUMENTO_INTEGRIDAD_NO_DECLARADA', `Documento ${id}: INCLUIDO sin sha256 = sha256Incluido (la huella del original debe quedar acreditada)`, { id });
+            }
+            if (real !== shaIncluido) {
+              error('DOCUMENTO_HASH_NO_COINCIDE', `Documento ${id}: SHA-256 del binario ${real.slice(0, 16)}… ≠ declarado ${String(shaIncluido).slice(0, 16)}…`, { entrada: ruta, id });
+            }
+            if (hashes[ruta] !== undefined && hashes[ruta] !== real) {
+              error('DOCUMENTO_HASH_NO_COINCIDE', `Documento ${id}: manifest.hashes de '${ruta}' no coincide con los bytes`, { entrada: ruta, id });
+            }
+            if (typeof documento.tamanoBytes === 'number' && documento.tamanoBytes !== entradaDoc.bytes.length) {
+              error('DOCUMENTO_TAMANO_NO_COINCIDE', `Documento ${id}: tamaño declarado ${documento.tamanoBytes} ≠ ${entradaDoc.bytes.length} bytes del ZIP`, { id });
+            }
+          }
+        }
+      } else {
+        // PENDIENTE_BINARIO puede declarar la ruta PLANIFICADA (segura y bajo
+        // documentos/); los demás estados no pueden tener ni ruta ni huella.
+        if (documento.estado === 'PENDIENTE_BINARIO') {
+          if (documento.rutaZip !== null && documento.rutaZip !== undefined
+            && (typeof documento.rutaZip !== 'string' || esNombreEntradaInseguro(documento.rutaZip)
+              || !documento.rutaZip.startsWith('documentos/'))) {
+            error('DOCUMENTO_RUTA_INVALIDA', `Documento ${id}: rutaZip planificada '${String(documento.rutaZip)}' no segura`, { id });
+          }
+        } else if (documento.rutaZip !== null && documento.rutaZip !== undefined) {
+          error('DOCUMENTO_NO_INCLUIDO_CON_RUTA', `Documento ${id}: estado ${String(documento.estado)} no puede declarar rutaZip`, { id });
+        }
+        if (shaIncluido !== null && shaIncluido !== undefined) {
+          error('DOCUMENTO_NO_INCLUIDO_CON_HUELLA', `Documento ${id}: estado ${String(documento.estado)} no puede declarar sha256Incluido`, { id });
+        }
+      }
+    }
+    const rutasEnZip = nombresZip.filter((n) => n.startsWith('documentos/'));
+    for (const ruta of rutasEnZip) {
+      if (!rutasDeclaradas.has(ruta)) {
+        error('DOCUMENTO_ZIP_NO_DECLARADO', `La entrada '${ruta}' está en el ZIP pero ningún documento del índice la declara INCLUIDO`, { entrada: ruta });
+      }
+    }
+    const documentosJson = textoDe('documentos.json');
+    if (listaDocumentos.length > 0 || documentosJson !== null) {
+      if (documentosJson === null) {
+        error('DOCUMENTOS_INDICE_AUSENTE', 'El manifiesto declara documentos pero falta documentos.json');
+      } else {
+        try {
+          const parsed = JSON.parse(documentosJson) as unknown;
+          if (canonicoVerificador(parsed) !== canonicoVerificador(listaDocumentos)) {
+            error('DOCUMENTOS_INDICE_DISTINTO', 'documentos.json no coincide con manifest.documentos');
+          }
+        } catch {
+          error('DOCUMENTOS_INDICE_ILEGIBLE', 'documentos.json no es JSON válido');
+        }
+      }
+    }
+    if (typeof manifest.incluyeBinariosDocumentales === 'boolean'
+      && manifest.incluyeBinariosDocumentales !== (documentosIncluidos > 0)) {
+      error('BANDERAS_MANIFEST_INVALIDAS', `incluyeBinariosDocumentales=${manifest.incluyeBinariosDocumentales} pero hay ${documentosIncluidos} documento(s) INCLUIDO en el índice`);
+    }
+    if (esObjetoPlano(mRec.conteos) && typeof mRec.conteos.documentos === 'number'
+      && mRec.conteos.documentos !== listaDocumentos.length) {
+      error('DOCUMENTOS_CONTEO_NO_COINCIDE', `manifest.conteos.documentos ${mRec.conteos.documentos} ≠ ${listaDocumentos.length} entradas en el índice`);
+    }
+    const numDocumentosIncluidos = mRec.numDocumentosIncluidos;
+    const numDocumentosNoIncluidos = mRec.numDocumentosNoIncluidos;
+    if (numDocumentosIncluidos !== undefined && numDocumentosIncluidos !== documentosIncluidos) {
+      error('DOCUMENTOS_CONTEO_NO_COINCIDE', `numDocumentosIncluidos ${String(numDocumentosIncluidos)} ≠ ${documentosIncluidos} incluidos en el índice`);
+    }
+    if (numDocumentosNoIncluidos !== undefined
+      && numDocumentosNoIncluidos !== listaDocumentos.length - documentosIncluidos) {
+      error('DOCUMENTOS_CONTEO_NO_COINCIDE', `numDocumentosNoIncluidos ${String(numDocumentosNoIncluidos)} ≠ ${listaDocumentos.length - documentosIncluidos} no incluidos`);
+    }
+
+    // P6 — resumen estructurado (si está declarado).
+    const resumenTxt = textoDe('resumen.json');
+    if (resumenTxt !== null) {
+      if (manifest.incluyeResumenEstructurado !== true) {
+        error('RESUMEN_NO_DECLARADO', 'resumen.json está en el ZIP pero el manifiesto no lo declara');
+      }
+      try {
+        const resumen = JSON.parse(resumenTxt) as unknown;
+        if (!esObjetoPlano(resumen)) {
+          error('RESUMEN_ILEGIBLE', 'resumen.json no contiene un objeto');
+        } else {
+          const ambitoResumen = resumen.ambito;
+          if (!esObjetoPlano(ambitoResumen) || ambitoManifest === null) {
+            error('RESUMEN_ILEGIBLE', 'resumen.json sin ámbito legible');
+          } else {
+            const propietariosResumen = idsTexto(ambitoResumen.propietarios);
+            const inmueblesResumen = ambitoResumen.inmuebles === null ? null : idsTexto(ambitoResumen.inmuebles);
+            const rangoResumen = ambitoResumen.rangoFechas;
+            const rangoIgual = rangoResumen === null
+              ? ambitoManifest.rango === null
+              : esObjetoPlano(rangoResumen) && ambitoManifest.rango !== null
+                && rangoResumen.desde === ambitoManifest.rango.desde
+                && rangoResumen.hasta === ambitoManifest.rango.hasta;
+            if (propietariosResumen === null
+              || canonicoVerificador([...propietariosResumen].sort()) !== canonicoVerificador([...ambitoManifest.propietarios].sort())
+              || (inmueblesResumen === null) !== (ambitoManifest.inmuebles === null)
+              || (inmueblesResumen !== null && ambitoManifest.inmuebles !== null
+                && canonicoVerificador([...inmueblesResumen].sort()) !== canonicoVerificador([...ambitoManifest.inmuebles].sort()))
+              || !rangoIgual) {
+              error('RESUMEN_AMBITO_DISTINTO', 'resumen.json declara un ámbito distinto del manifiesto');
+            }
+          }
+          const inmueblesResumen = Array.isArray(resumen.inmuebles)
+            ? resumen.inmuebles.filter((i): i is Record<string, unknown> => esObjetoPlano(i)) : null;
+          if (inmueblesResumen === null) {
+            error('RESUMEN_ILEGIBLE', 'resumen.json sin lista de inmuebles');
+          } else if (ambitoManifest !== null && ambitoManifest.inmuebles !== null) {
+            const idsFichas = inmueblesResumen.map((i) => String(i.id ?? '')).sort();
+            if (canonicoVerificador(idsFichas) !== canonicoVerificador([...ambitoManifest.inmuebles].sort())) {
+              error('RESUMEN_INMUEBLES_DISTINTOS', 'resumen.json no describe exactamente los inmuebles del ámbito');
+            }
+          }
+          if (esObjetoPlano(resumen.conteos)
+            && canonicoVerificador(resumen.conteos) !== canonicoVerificador(mRec.conteos)) {
+            error('RESUMEN_CONTEO_NO_COINCIDE', 'resumen.json: conteos distintos de manifest.conteos');
+          }
+          if (esObjetoPlano(resumen.totales)
+            && canonicoVerificador(resumen.totales) !== canonicoVerificador(mRec.totales)) {
+            error('RESUMEN_TOTALES_DISTINTOS', 'resumen.json: totales distintos de manifest.totales');
+          }
+          const idsTitularidadesResumen = new Set<string>();
+          if (Array.isArray(resumen.titularidades)) {
+            for (const t of resumen.titularidades) {
+              if (!esObjetoPlano(t)) { error('RESUMEN_ILEGIBLE', 'titularidad no es un objeto'); continue; }
+              if (typeof t.id !== 'string' || t.id.trim() === '') {
+                error('RESUMEN_ILEGIBLE', 'titularidad sin id en resumen.json');
+              } else if (idsTitularidadesResumen.has(t.id)) {
+                error('TITULARIDAD_DUPLICADA', `La titularidad ${t.id} aparece más de una vez en resumen.json`);
+              } else {
+                idsTitularidadesResumen.add(t.id);
+              }
+              if (t.origen !== 'TITULARIDAD_REGISTRADA') {
+                error('TITULARIDAD_ORIGEN_INVALIDO', `Titularidad ${String(t.id)}: origen '${String(t.origen)}' ≠ TITULARIDAD_REGISTRADA`);
+              }
+              if (ambitoManifest !== null && typeof t.inmuebleId === 'string'
+                && ambitoManifest.inmuebles !== null && !ambitoManifest.inmuebles.has(t.inmuebleId)) {
+                error('AMBITO_INMUEBLE_FUERA_DE_MANIFEST', `Titularidad ${String(t.id)}: inmueble fuera del ámbito`);
+              }
+              if (ambitoManifest !== null && typeof t.propietarioId === 'string'
+                && !ambitoManifest.propietarios.has(t.propietarioId)) {
+                error('AMBITO_PROPIETARIO_FUERA_DE_MANIFEST', `Titularidad ${String(t.id)}: propietario fuera del ámbito`);
+              }
+              const porcentaje = t.porcentajeTitularidad;
+              if (porcentaje !== null && (typeof porcentaje !== 'number' || !(porcentaje >= 0) || !(porcentaje <= 100))) {
+                error('TITULARIDAD_PORCENTAJE_INVALIDO', `Titularidad ${String(t.id)}: porcentaje '${String(porcentaje)}' fuera de 0..100`);
+              }
+            }
+          }
+          if (esObjetoPlano(resumen.conteos)
+            && typeof resumen.conteos.titularidades === 'number'
+            && Array.isArray(resumen.titularidades)
+            && resumen.conteos.titularidades !== resumen.titularidades.length) {
+            error('RESUMEN_CONTEO_NO_COINCIDE', 'resumen.json: conteo de titularidades distinto de la lista');
+          }
+          const docsResumen = esObjetoPlano(resumen.documentos) ? resumen.documentos.indice : undefined;
+          if (canonicoVerificador(docsResumen ?? []) !== canonicoVerificador(listaDocumentos)) {
+            error('RESUMEN_DOCUMENTOS_DISTINTOS', 'resumen.json no describe el mismo índice documental del manifiesto');
+          }
+          if (!Array.isArray(resumen.limitaciones) || resumen.limitaciones.length === 0) {
+            error('RESUMEN_SIN_LIMITACIONES', 'resumen.json debe declarar sus limitaciones');
+          }
+        }
+      } catch {
+        error('RESUMEN_ILEGIBLE', 'resumen.json no es JSON válido');
+      }
+    } else if (manifest.incluyeResumenEstructurado === true) {
+      error('RESUMEN_AUSENTE', 'El manifiesto declara incluyeResumenEstructurado pero falta resumen.json');
+    }
+
+    // Entradas contractuales = 12 base + opcionales P6 declaradas.
+    const opcionales: string[] = [];
+    if (manifest.incluyeResumenEstructurado === true) opcionales.push('resumen.json');
+    if (listaDocumentos.length > 0 || documentosJson !== null) opcionales.push('documentos.json');
+    opcionales.push(...rutasDeclaradas);
+    const esperado = [...baseEsperada, ...opcionales].sort((a, b) => a.localeCompare(b));
+    const leidas = [...nombresZip].sort((a, b) => a.localeCompare(b));
+    if (new Set(nombresZip).size !== nombresZip.length
+      || JSON.stringify(leidas) !== JSON.stringify(esperado)) {
+      error('ENTRADAS_ZIP_DISTINTAS', `Las entradas del ZIP no son las contractuales (12 base + opcionales P6 en su orden) (leídas: ${nombresZip.join(', ') || 'ninguna'})`);
+    }
     for (const nombre of esperado) {
       if (nombre === 'manifest.json') {
         if ('manifest.json' in hashes) {
@@ -658,7 +936,7 @@ export function verificarPaqueteAsesorZip(
       }
     }
     for (const nombre of Object.keys(hashes)) {
-      if (!(esperado as readonly string[]).includes(nombre)) {
+      if (!esperado.includes(nombre)) {
         error('HASH_DE_ENTRADA_INESPERADA', `El manifiesto declara hash de una entrada no contractual: '${nombre}'`);
       }
     }
@@ -682,6 +960,10 @@ export function verificarPaqueteAsesorZip(
       if (!manifestHeredadoSinMeses) {
         esperadoInforme.push(['Meses', ambitoManifest.meses === null
           ? '(sin filtro mensual)' : [...ambitoManifest.meses].join(', ')]);
+      }
+      if (mRec.rangoFechasEfectivo !== undefined) {
+        esperadoInforme.push(['Rango de fechas', ambitoManifest.rango === null
+          ? '(sin filtro por fechas)' : `${ambitoManifest.rango.desde}..${ambitoManifest.rango.hasta}`]);
       }
       for (const [etiqueta, valorEsperado] of esperadoInforme) {
         if (valorInforme(etiqueta) !== valorEsperado) {
@@ -765,6 +1047,21 @@ export function verificarPaqueteAsesorZip(
     if (dmy && esFechaReal(`${dmy[3]}-${dmy[2]}-${dmy[1]}`)) return `${dmy[3]}-${dmy[2]}`;
     return '';
   };
+  const fechaIsoFlexible = (v: string): string => {
+    if (esFechaReal(v)) return v;
+    const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(v);
+    if (dmy) {
+      const iso = `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+      return esFechaReal(iso) ? iso : '';
+    }
+    return '';
+  };
+  const ultimoDiaDeMesVerificador = (mes: string): string => {
+    const anio = Number(mes.slice(0, 4));
+    const numMes = Number(mes.slice(5, 7));
+    const dia = new Date(Date.UTC(anio, numMes, 0)).getUTCDate();
+    return `${mes}-${String(dia).padStart(2, '0')}`;
+  };
   const enteroDeTexto = (v: string): number | null =>
     /^-?\d+$/.test(v.trim()) ? Number(v) : null;
   for (const [nombre, csv] of csvs) {
@@ -831,6 +1128,48 @@ export function verificarPaqueteAsesorZip(
           && !ambitoManifest.meses.has(mesFila)) {
           error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id || '(sin id)'} del mes ${mesFila}, fuera de mesesEfectivos`, { entrada: nombre, id });
         }
+        // P6 — contraste con el intervalo de fechas declarado. Solo se exige
+        // cuando la fecha es DERIVABLE de los campos serializados; si no
+        // (p. ej. un gasto cuyo alias `fecha` no viaja en el CSV v1), se
+        // declara la limitación en vez de inventar una fecha.
+        const rango = ambitoManifest.rango;
+        if (rango !== null) {
+          const fueraDeRango = (fecha: string): boolean => fecha < rango.desde || fecha > rango.hasta;
+          const advertirNoDerivable = (motivo: string): void =>
+            advertencia('FECHA_NO_DERIVABLE_PARA_RANGO', `'${nombre}' fila ${id || '(sin id)'}: ${motivo}; no se puede contrastar con el rango de fechas`, { entrada: nombre, id });
+          if (nombre === 'datos/cobros.csv') {
+            const fecha = primeraFechaReal(fila.fechaPago, fila.fechaVencimiento);
+            if (!fecha) advertirNoDerivable('sin fechaPago ni fechaVencimiento reales');
+            else if (fueraDeRango(fecha)) error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id}: fecha ${fecha} fuera del rango ${rango.desde}..${rango.hasta}`, { entrada: nombre, id });
+          } else if (nombre === 'datos/gastos.csv') {
+            const fecha = primeraFechaReal(fila.fechaDevengo, fila.fechaPago);
+            if (!fecha) advertirNoDerivable('el CSV v1 no serializa el alias `fecha` del gasto');
+            else if (fueraDeRango(fecha)) error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id}: fecha ${fecha} fuera del rango ${rango.desde}..${rango.hasta}`, { entrada: nombre, id });
+          } else if (nombre === 'datos/facturas.csv') {
+            const fecha = fechaIsoFlexible(fila.fechaExpedicion ?? '');
+            if (!fecha) advertirNoDerivable('fecha de expedición no legible');
+            else if (fueraDeRango(fecha)) error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id}: fecha de expedición ${fecha} fuera del rango ${rango.desde}..${rango.hasta}`, { entrada: nombre, id });
+          } else if (nombre === 'datos/liquidaciones.csv') {
+            if (!mesTextoValido(mesFila)) advertirNoDerivable('periodo de liquidación no legible');
+            else if (`${mesFila}-01` > rango.hasta || ultimoDiaDeMesVerificador(mesFila) < rango.desde) {
+              error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id}: periodo ${mesFila} fuera del rango ${rango.desde}..${rango.hasta}`, { entrada: nombre, id });
+            }
+          } else if (nombre === 'datos/contratos.csv') {
+            const inicio = primeraFechaReal(fila.fechaInicioContrato);
+            const fin = primeraFechaReal(fila.fechaFinContrato);
+            if (!inicio) advertirNoDerivable('contrato sin fecha de inicio real');
+            else if (inicio > rango.hasta || (fin !== '' && fin < rango.desde)) {
+              error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id}: vigencia ${inicio}..${fin || 'abierta'} no solapa el rango ${rango.desde}..${rango.hasta}`, { entrada: nombre, id });
+            }
+          } else if (nombre === 'datos/polizas.csv') {
+            const inicio = primeraFechaReal(fila.fechaInicio);
+            const fin = primeraFechaReal(fila.fechaVencimiento);
+            if (!inicio || !fin) advertirNoDerivable('póliza con vigencia no legible');
+            else if (inicio > rango.hasta || fin < rango.desde) {
+              error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `'${nombre}' fila ${id}: vigencia ${inicio}..${fin} no solapa el rango ${rango.desde}..${rango.hasta}`, { entrada: nombre, id });
+            }
+          }
+        }
       }
     }
     const codigoDuplicado = duplicadoEsperado[nombre];
@@ -872,12 +1211,17 @@ export function verificarPaqueteAsesorZip(
         continue;
       }
       if (ambitoManifest !== null) {
-        // Sin contraste temporal aquí: la fecha del libro es pago/devengo,
-        // mientras el filtro contractual usa el periodo contable de la
-        // fuente (un cobro de febrero puede pagarse en marzo).
+        // El filtro por EJERCICIO/MES se contrasta con el periodo contable de
+        // la fuente (un cobro de febrero puede pagarse en marzo). El rango de
+        // FECHAS, en cambio, se aplica a la fecha del libro: toda línea debe
+        // caer dentro del intervalo solicitado.
         if (ambitoManifest.inmuebles !== null
           && !ambitoManifest.inmuebles.has(fila.inmuebleId ?? '')) {
           error('AMBITO_INMUEBLE_FUERA_DE_MANIFEST', `Línea (${fila.fuenteTipo} ${id}) del inmueble '${fila.inmuebleId ?? ''}', fuera de inmueblesEfectivos`, { entrada: 'libro-ingresos-gastos.csv', id });
+        }
+        if (ambitoManifest.rango !== null
+          && (fila.fecha < ambitoManifest.rango.desde || fila.fecha > ambitoManifest.rango.hasta)) {
+          error('AMBITO_TEMPORAL_FUERA_DE_MANIFEST', `Línea (${fila.fuenteTipo} ${id}) con fecha ${fila.fecha} fuera del rango ${ambitoManifest.rango.desde}..${ambitoManifest.rango.hasta}`, { entrada: 'libro-ingresos-gastos.csv', id });
         }
       }
       // Dominios por clase de línea: un ingreso no es «deducible» y un gasto

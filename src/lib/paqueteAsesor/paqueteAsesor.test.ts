@@ -572,7 +572,11 @@ describe('Fase F · aislamiento del núcleo (guardia de frontera)', () => {
       .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
       .map((f) => readFileSync(join(dir, f), 'utf8'))
       .join('\n');
-    expect(fuentes).not.toMatch(/from\s+['"][^'"]*firebase/);
+    // `import type` se borra al compilar: no crea dependencia de runtime. El
+    // adaptador puro solo necesita el TIPO del ámbito; la implementación que
+    // toca Firebase vive fuera de este directorio (`../paqueteAsesorFirebase`).
+    const soloRuntime = fuentes.replace(/import\s+type\s[\s\S]*?from\s+['"][^'"]*['"]\s*;/g, '');
+    expect(soloRuntime).not.toMatch(/from\s+['"][^'"]*firebase/);
     expect(fuentes).not.toMatch(/\bfetch\(|XMLHttpRequest/);
     expect(fuentes).not.toMatch(/Date\.now\(|Math\.random\(|new Date\(\)/);
   });

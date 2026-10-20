@@ -15,3 +15,6 @@ emulador-resultados.json
 resumen-emulador.md
 vitest-resultados.json
 resumen-verificacion.md
+
+# Caché local de trabajo (registros y JSON de pruebas del sandbox; no versionar)
+.cache/

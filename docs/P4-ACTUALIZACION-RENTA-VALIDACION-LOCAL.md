@@ -1,3 +1,5 @@
+> **P4-B · 2026-10-20:** para la implementación actual de persistencia efectiva condicionada, prevalece [P4-B-ACTUALIZACION-EFECTIVA.md](P4-B-ACTUALIZACION-EFECTIVA.md). Se conservan los bloqueos normativos; el contenido siguiente es histórico y no acredita el cierre actual ni el estado de Git.
+
 > **Nota de reparación controlada P3 — 2026-10-18**: documento histórico recuperado del parche. No describe el estado vigente tras la reparación. La importación manual de extractos está deshabilitada por alcance conservador (E-07), la generación SEPA pain.001/pain.008 se conserva (E-06 del inventario), y las decisiones P3 requieren evento append-only con motivo y actor autenticado. Para el estado actual, prevalece el informe final de esta reparación y el código en main.
 
 # P4 — actualización contractual anual de renta

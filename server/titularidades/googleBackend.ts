@@ -462,6 +462,8 @@ export type PrecondicionEscrituraFirestore =
   | { tipo: 'VERSION'; updateTime: string };
 
 export interface EscrituraDocumentoFirestoreAtomica {
+  /** Parche de campos explícitos; evita recodificar campos ajenos al actualizar renta P4. */
+  camposActualizar?: readonly string[];
   coleccion: string;
   id: string;
   datos: Record<string, unknown>;
@@ -598,9 +600,17 @@ export class ClienteFirestoreRest {
           ? { updateTime: escritura.precondicion.updateTime }
           : null;
       if (!currentDocument) throw new Error('Precondición de escritura Firestore no válida.');
+      const mascara = escritura.camposActualizar;
+      if (mascara && (escritura.precondicion.tipo !== 'VERSION' || mascara.length === 0
+        || new Set(mascara).size !== mascara.length
+        || mascara.some((campo) => typeof campo !== 'string' || !campo || !Object.hasOwn(campos, campo))
+        || Object.keys(campos).some((campo) => !mascara.includes(campo)))) {
+        throw new Error('Máscara de actualización atómica no válida.');
+      }
       return {
         update: { name: `${this.base}/${escritura.coleccion}/${encodeURIComponent(escritura.id)}`, fields: campos },
         currentDocument,
+        ...(mascara ? { updateMask: { fieldPaths: mascara.map(rutaCampo) } } : {}),
       };
     });
     const ejecutar = this.opciones.fetchImpl || fetchPorDefecto();

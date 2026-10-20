@@ -311,3 +311,66 @@ describe('Firestore REST', () => {
     expect(decodificarValor({ nullValue: null })).toBeNull();
   });
 });
+
+// P4-B: contrato del transporte existente. fetch/OAuth son dobles; NO prueba Firestore real.
+describe('P4-B · commit REST con renta canónica e historial', () => {
+  const escrituras = [
+    { coleccion: 'contratos_formalizacion', id: 'contrato-fixture', datos: { rentaMensual: 1224 }, camposActualizar: ['rentaMensual'],
+      precondicion: { tipo: 'VERSION' as const, updateTime: '2026-10-01T00:00:00.000Z' } },
+    ...['anexos_actualizacion_renta', 'avisos_actualizacion_renta', 'auditoria_actualizacion_renta',
+      'actualizacion_renta_operaciones', 'actualizacion_renta_controles'].map((coleccion) => ({
+      coleccion, id: 'fixture', datos: { contratoId: 'contrato-fixture', fechaEfectividad: '2026-10-01' },
+      precondicion: { tipo: 'NO_EXISTE' as const },
+    })),
+  ];
+
+  it('envía las seis escrituras en una única llamada commit, con CAS y create-only', async () => {
+    const commits: Record<string, any>[] = [];
+    const fetchImpl = comoFetch(async (url, init) => {
+      if (url === 'https://oauth2.googleapis.com/token') return respuesta({ access_token: 'fixture', expires_in: 3600 });
+      expect(url).toContain('/databases/p4-fixture/documents:commit');
+      expect(init?.method).toBe('POST');
+      commits.push(JSON.parse(init!.body!));
+      return respuesta({ writeResults: escrituras.map(() => ({ updateTime: '2026-10-01T12:00:00Z' })) });
+    });
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl, baseDatosId: 'p4-fixture' });
+    await expect(cliente.escribirAtomico(escrituras)).resolves.toBe('COMMIT');
+    expect(commits).toHaveLength(1);
+    expect(commits[0].writes).toHaveLength(6);
+    expect(commits[0].writes[0].currentDocument).toEqual({ updateTime: '2026-10-01T00:00:00.000Z' });
+    expect(commits[0].writes[0].updateMask).toEqual({ fieldPaths: ['rentaMensual'] });
+    expect(decodificarCampos(commits[0].writes[0].update.fields)).toEqual({ rentaMensual: 1224 });
+    for (const write of commits[0].writes.slice(1)) {
+      expect(write.currentDocument).toEqual({ exists: false });
+      expect(write.updateMask).toBeUndefined();
+    }
+  });
+
+  it('propaga fallo o conflicto del commit sin confirmación falsa ni escrituras separadas', async () => {
+    for (const status of [400, 409, 503]) {
+      let commits = 0;
+      const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: comoFetch(async (url) => {
+        if (url === 'https://oauth2.googleapis.com/token') return respuesta({ access_token: 'fixture', expires_in: 3600 });
+        expect(url.endsWith('/documents:commit')).toBe(true);
+        commits++;
+        return respuesta('FAILED_PRECONDITION', { status });
+      }) });
+      if (status === 503) await expect(cliente.escribirAtomico(escrituras)).rejects.toThrow('503');
+      else await expect(cliente.escribirAtomico(escrituras)).resolves.toBe('CONFLICTO');
+      expect(commits).toBe(1);
+    }
+  });
+
+  it('rechaza máscaras que borrarían campos o carecen de CAS antes de acceder a la red', async () => {
+    const fetchImpl = vi.fn();
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: comoFetch(fetchImpl) });
+    for (const escritura of [
+      { ...escrituras[0], camposActualizar: [] },
+      { ...escrituras[0], camposActualizar: ['inexistente'] },
+      { ...escrituras[0], datos: { rentaMensual: undefined } },
+      { ...escrituras[0], precondicion: { tipo: 'NO_EXISTE' as const } },
+    ]) await expect(cliente.escribirAtomico([escritura])).rejects.toThrow('Máscara');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+});

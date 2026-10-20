@@ -158,7 +158,9 @@ export interface PreviewActualizacionRenta {
   fechaCelebracion?: string;
   fechaInicioContrato?: string;
   fechaAniversario?: string;
-  fechaEfectividad: null;
+  fechaEfectividad: string | null;
+  versionCalculo?: string;
+  evidenciaComunicacion?: { fecha: string; referenciaDocumental: string; declaradaPorActor: true };
   rentaActual?: number;
   porcentajeAplicado?: number;
   importeIncremento?: number;

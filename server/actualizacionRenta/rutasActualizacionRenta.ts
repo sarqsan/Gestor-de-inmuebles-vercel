@@ -1,7 +1,7 @@
 import type { Express, RequestHandler, Response } from 'express';
 import { tokenDe } from '../titularidades/manejadorBuscarTitulares.js';
 import type { IdentidadVerificada } from '../titularidades/googleBackend.js';
-import { ErrorActualizacionRenta, type ServicioActualizacionRenta } from './servicioActualizacionRenta.js';
+import { ErrorActualizacionRenta, type ServicioActualizacionRenta, type EvidenciaComunicacionP4 } from './servicioActualizacionRenta.js';
 
 export interface DependenciasRutasActualizacionRenta {
   verificarToken: (token: string) => Promise<IdentidadVerificada | null>;
@@ -9,12 +9,19 @@ export interface DependenciasRutasActualizacionRenta {
   servicio: ServicioActualizacionRenta | null;
 }
 
-function bodyEsValido(body: unknown): body is { contratoId: string } {
+function evidenciaValida(valor: unknown): valor is EvidenciaComunicacionP4 {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return false;
+  const e = valor as Record<string, unknown>;
+  return Object.keys(e).sort().join(',') === 'declaradaPorActor,fecha,referenciaDocumental'
+    && e.declaradaPorActor === true && typeof e.fecha === 'string' && typeof e.referenciaDocumental === 'string';
+}
+
+function bodyEsValido(body: unknown): body is { contratoId: string; evidenciaComunicacion?: EvidenciaComunicacionP4 } {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return false;
   const datos = body as Record<string, unknown>;
-  return Object.keys(datos).length === 1
-    && Object.keys(datos)[0] === 'contratoId'
-    && typeof datos.contratoId === 'string';
+  return typeof datos.contratoId === 'string'
+    && (Object.keys(datos).sort().join(',') === 'contratoId'
+      || (Object.keys(datos).sort().join(',') === 'contratoId,evidenciaComunicacion' && evidenciaValida(datos.evidenciaComunicacion)));
 }
 
 function bodyConfirmacionEsValido(body: unknown): body is {
@@ -22,25 +29,28 @@ function bodyConfirmacionEsValido(body: unknown): body is {
   huellaPreview: string;
   fechaProgramadaAviso: string;
   confirmacionExplicita: boolean;
+  evidenciaComunicacion: EvidenciaComunicacionP4;
 } {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return false;
   const datos = body as Record<string, unknown>;
   const claves = Object.keys(datos).sort();
-  return claves.length === 4
-    && claves.join(',') === 'confirmacionExplicita,contratoId,fechaProgramadaAviso,huellaPreview'
+  return claves.length === 5
+    && claves.join(',') === 'confirmacionExplicita,contratoId,evidenciaComunicacion,fechaProgramadaAviso,huellaPreview'
     && typeof datos.contratoId === 'string'
     && typeof datos.huellaPreview === 'string'
     && typeof datos.fechaProgramadaAviso === 'string'
-    && typeof datos.confirmacionExplicita === 'boolean';
+    && typeof datos.confirmacionExplicita === 'boolean' && evidenciaValida(datos.evidenciaComunicacion);
 }
 
 function errorHTTP(res: Response, error: unknown): void {
   if (error instanceof ErrorActualizacionRenta) {
     const mensajes: Record<string, string> = {
+      EVIDENCIA_COMUNICACION_REQUERIDA: 'Indica fecha y referencia de comunicación ya realizada y declara expresamente su evidencia.',
+      FECHA_EFECTIVIDAD_NO_APLICABLE: 'La efectividad debe haber llegado y no puede preceder a la anualidad. No se ha aplicado la renta.',
       PETICION_INVALIDA: 'La solicitud de P4 no es válida.',
       PERFIL_NO_VALIDO: 'La cuenta no está activa o no tiene un perfil verificable.',
       CONTRATO_NO_AUTORIZADO: 'No hay autorización para este contrato.',
-      FUENTE_NO_DISPONIBLE: 'La fuente durable no está disponible; no se confirmó ni programó nada.',
+      FUENTE_NO_DISPONIBLE: 'No se pudo verificar el resultado de la operación. Reintenta con la misma clave para recuperar una posible confirmación sin duplicarla.',
       CONFIRMACION_EXPLICITA_REQUERIDA: 'La confirmación expresa del actor es obligatoria.',
       FECHA_PROGRAMADA_INVALIDA: 'Indica una fecha de comunicación programada válida, hoy o futura.',
       IDEMPOTENCY_KEY_INVALIDA: 'Falta una clave de idempotencia válida.',
@@ -86,6 +96,7 @@ export function montarRutasActualizacionRenta(app: Express, deps: DependenciasRu
       const resultado = await deps.servicio!.previsualizar({
         uid: String(res.locals.uidActualizacionRenta || ''),
         contratoId: req.body.contratoId,
+        ...(req.body.evidenciaComunicacion ? { evidenciaComunicacion: req.body.evidenciaComunicacion } : {}),
       });
       res.status(200).json({ ok: true, ...resultado });
     } catch (error) {
@@ -101,6 +112,7 @@ export function montarRutasActualizacionRenta(app: Express, deps: DependenciasRu
       const resultado = await deps.servicio!.confirmar({
         uid: String(res.locals.uidActualizacionRenta || ''),
         contratoId: req.body.contratoId,
+        ...(req.body.evidenciaComunicacion ? { evidenciaComunicacion: req.body.evidenciaComunicacion } : {}),
         huellaPreview: req.body.huellaPreview,
         fechaProgramadaAviso: req.body.fechaProgramadaAviso,
         confirmacionExplicita: req.body.confirmacionExplicita,
@@ -109,7 +121,7 @@ export function montarRutasActualizacionRenta(app: Express, deps: DependenciasRu
       res.status(resultado.estado === 'CREADA' ? 201 : 200).json({
         ok: true,
         ...resultado,
-        nota: 'Registro durable creado; PENDIENTE_ENVIO no acredita envío, recepción ni fecha de efectividad.',
+        nota: 'Consulta estadoActualizacion y fechaEfectividad del registro; PENDIENTE_ENVIO no acredita envío ni recepción.',
       });
     } catch (error) {
       errorHTTP(res, error);

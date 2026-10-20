@@ -9,6 +9,10 @@
  * Existe porque la identidad del proyecto activo estaba escrita a mano en la pantalla
  * de Configuración (y en la documentación de despliegue) y NO coincidía con la
  * configuración real: quien publica `firestore.rules` necesita saber el destino exacto.
+ *
+ * AG-03.2 (2026-10-20): la ÚNICA base Firestore de la arquitectura es la base CON
+ * NOMBRE declarada en la configuración. Este módulo ya no ofrece ningún valor de
+ * respaldo que pudiera señalar otra base: si falta el identificador, lo dice.
  */
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -17,36 +21,35 @@ const cfg = firebaseConfig as { projectId?: string; firestoreDatabaseId?: string
 /** `projectId` con el que la app inicializa Firebase (el destino de `firebase deploy --project`). */
 export const FIREBASE_PROYECTO_ID: string = cfg.projectId || '(sin projectId)';
 
-/** Base de datos Firestore (`(default)` si la configuración no declara una con nombre). */
-export const FIREBASE_BASE_DATOS_ID: string = cfg.firestoreDatabaseId || '(default)';
-
-/**
- * Base de datos Firestore que las reglas de Cloud Storage pueden consultar con
- * `firestore.get()` / `firestore.exists()`. Según la documentación de Firebase
- * (Storage Security Rules · «Cloud Firestore data»), cuando un proyecto tiene
- * varias bases de datos las reglas de Storage SÓLO acceden a la base por defecto;
- * `storage.rules` de este repositorio escribe literalmente `/databases/(default)/…`.
- */
-export const BASE_DATOS_ACCESIBLE_DESDE_STORAGE_RULES = '(default)';
-
-/**
- * AG-03 · Diagnóstico de topología (sin red): `true` cuando la aplicación opera
- * sobre una base Firestore CON NOMBRE mientras `storage.rules` resuelve el
- * ámbito (espejo de identidad, inmuebles, carteras…) contra `(default)`.
- *
- * Consecuencia en ese caso: salvo que el espejo exista también en `(default)`,
- * toda operación de Storage con ámbito se deniega para cualquier cuenta que no
- * sea la maestra (que las reglas reconocen por correo). Si realmente ocurre en
- * el proyecto desplegado sólo puede confirmarse con una prueba autorizada
- * (V — pendiente de verificación); esta función solo deja constancia de la
- * discrepancia de configuración que la haría inevitable.
- */
-export function custodiaStorageDependeDeBaseDistinta(): boolean {
-  return FIREBASE_BASE_DATOS_ID !== BASE_DATOS_ACCESIBLE_DESDE_STORAGE_RULES;
+/** Identificador estructuralmente válido de base Firestore con nombre. */
+export function esBaseDatosConNombre(valor: unknown): valor is string {
+  return typeof valor === 'string' && /^[a-z][a-z0-9-]{2,61}[a-z0-9]$/.test(valor);
 }
 
-/** Texto para la pantalla de Configuración (sin datos sensibles). */
+/** `true` si la configuración declara la base con nombre (requisito de arranque de `firebase.ts`). */
+export const FIREBASE_BASE_DATOS_CONFIGURADA: boolean = esBaseDatosConNombre(cfg.firestoreDatabaseId);
+
+/**
+ * Base de datos Firestore con nombre de la aplicación. Si la configuración no la
+ * declara, el valor es un texto de aviso (nunca el nombre de otra base).
+ */
+export const FIREBASE_BASE_DATOS_ID: string = FIREBASE_BASE_DATOS_CONFIGURADA
+  ? (cfg.firestoreDatabaseId as string)
+  : '(sin base de datos con nombre: configuración incompleta)';
+
+/**
+ * AG-03.2 · Diagnóstico de topología (sin red). Las reglas de Cloud Storage de
+ * este repositorio ya NO consultan Firestore (ninguna base): la autorización
+ * documental la resuelve el servidor contra la base con nombre. Por tanto la
+ * custodia no depende de ninguna base distinta de la de la aplicación; el único
+ * estado anómalo es que la configuración no declare la base con nombre.
+ */
+export function custodiaStorageDependeDeBaseDistinta(): boolean {
+  return false;
+}
+
+/** Texto para la pantalla de Configuración (sin datos sensibles); `null` si no hay nada que avisar. */
 export function avisoTopologiaCustodia(): string | null {
-  if (!custodiaStorageDependeDeBaseDistinta()) return null;
-  return `La aplicación opera sobre la base de datos «${FIREBASE_BASE_DATOS_ID}», pero las reglas de almacenamiento de documentos sólo pueden comprobar permisos en la base «${BASE_DATOS_ACCESIBLE_DESDE_STORAGE_RULES}». Si esa base no contiene la ficha de usuarios, inmuebles y carteras, la custodia de documentos quedará denegada a toda cuenta que no sea la maestra (pendiente de verificación autorizada en el proyecto real).`;
+  if (FIREBASE_BASE_DATOS_CONFIGURADA) return null;
+  return 'La configuración de la aplicación no declara la base de datos con nombre. La aplicación no arranca contra ninguna otra base: revisa «firestoreDatabaseId» en la configuración versionada antes de publicar.';
 }

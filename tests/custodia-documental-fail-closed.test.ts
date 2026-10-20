@@ -1,20 +1,25 @@
 /**
  * ORDEN 1 · AG-04 — CUSTODIA DOCUMENTAL FAIL-CLOSED (sin almacén efímero)
+ * ORDEN AG-03.2 — mismo contrato sobre el motor MEDIADO POR EL SERVIDOR
  * =========================================================================
  * Qué demuestra (sin red, sin Firebase real, con dobles explícitos):
- *  A. `subirBinarioDuradero`: sólo devuelve éxito cuando el objeto queda en
- *     Storage y se obtiene su URL; denegación, sesión caducada, red o plazo
- *     agotado producen `ErrorCustodiaDocumento` con código estable y mensaje
- *     apto para la persona usuaria; el plazo CANCELA la tarea.
+ *  A. `subirBinarioDuradero`: sólo devuelve éxito cuando el servidor ha
+ *     confirmado el objeto y se dispone de su URL; denegación, sesión caducada,
+ *     red o plazo agotado producen `ErrorCustodiaDocumento` con código estable
+ *     y mensaje apto para la persona usuaria; el plazo CANCELA el envío.
  *  B. Los tres `upload*` legados de `src/lib/firebase.ts` (facturas de gasto,
- *     justificantes de cobro, documentos aportados) ya no llaman a
- *     `/api/upload-document`, no devuelven `server_*`/`local_*` ni base64 y
- *     fallan de forma explícita sin titular o cuando Storage deniega.
+ *     justificantes de cobro, documentos aportados) recorren el motor REAL
+ *     `almacenServidor.ts` contra un servidor sintético de `/api/documentos/*`
+ *     y un Cloud Storage sintético: inicio → PUT directo → confirmación. Nunca
+ *     llaman a `/api/upload-document`, no devuelven `server_*`/`local_*` ni
+ *     base64 y fallan de forma explícita sin titular o cuando el servidor deniega.
  *  C. La parte pura del adjunto de póliza (`evaluarAdjuntoInlinePoliza`).
- *  D. Invariantes de código: ningún cliente vuelve a usar el almacén retirado.
+ *  D. Invariantes de código: ningún cliente vuelve a usar el almacén retirado
+ *     ni el SDK de Storage para subir/leer/borrar documentos.
  *
- * Qué NO demuestra: el comportamiento de las reglas en el proyecto real
- * (AG-03) — eso queda como V (pendiente de verificación autorizada).
+ * Qué NO demuestra: la autorización real del servidor con cuentas del proyecto
+ * (eso lo cubre `server/documentos/*.test.ts` con dobles y queda como V en el
+ * proyecto real) ni la política CORS de la URI de sesión de Cloud Storage.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -23,72 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // ---------------------------------------------------------------------------
 // Dobles de Firebase para poder importar `src/lib/firebase.ts` sin red.
 // ---------------------------------------------------------------------------
-const estado = vi.hoisted(() => ({
-  /** Comportamiento de la próxima subida: 'ok' | 'denegada' | 'sin-sesion' | 'colgada' | 'red'. */
-  modo: 'ok' as 'ok' | 'denegada' | 'sin-sesion' | 'colgada' | 'red',
-  subidas: [] as Array<{ path: string; contentType?: string; bytes: number }>,
-  cancelaciones: 0,
-  urlsPedidas: [] as string[],
-}));
-
-class ErrorStorageFalso extends Error {
-  constructor(readonly code: string) {
-    super(`Firebase Storage: ${code}`);
-  }
-}
-
-function crearTareaFalsa(path: string) {
-  let rechazar: (e: unknown) => void = () => undefined;
-  let resolver: () => void = () => undefined;
-  let terminada = false;
-  const promesa = new Promise<void>((res, rej) => {
-    resolver = () => { terminada = true; res(); };
-    rechazar = (e) => { terminada = true; rej(e); };
-  });
-  switch (estado.modo) {
-    case 'ok':
-      resolver();
-      break;
-    case 'denegada':
-      rechazar(new ErrorStorageFalso('storage/unauthorized'));
-      break;
-    case 'sin-sesion':
-      rechazar(new ErrorStorageFalso('storage/unauthenticated'));
-      break;
-    case 'red':
-      rechazar(new ErrorStorageFalso('storage/retry-limit-exceeded'));
-      break;
-    case 'colgada':
-      // nunca termina por sí sola: sólo `cancel()` la cierra
-      break;
-  }
-  return {
-    snapshot: { ref: { fullPath: path } },
-    then: (ok?: (v: void) => unknown, ko?: (e: unknown) => unknown) => promesa.then(ok, ko),
-    cancel: () => {
-      estado.cancelaciones += 1;
-      if (terminada) return false;
-      rechazar(new ErrorStorageFalso('storage/canceled'));
-      return true;
-    },
-    on: () => () => undefined,
-  };
-}
-
-vi.mock('firebase/storage', () => ({
-  getStorage: () => ({ __storage: true }),
-  ref: (_s: unknown, path: string) => ({ fullPath: path }),
-  uploadBytes: async () => { throw new Error('uploadBytes no debe usarse en los flujos AG-04'); },
-  uploadBytesResumable: (r: { fullPath: string }, datos: Blob, md?: { contentType?: string }) => {
-    estado.subidas.push({ path: r.fullPath, contentType: md?.contentType, bytes: datos.size });
-    return crearTareaFalsa(r.fullPath);
-  },
-  getDownloadURL: async (r: { fullPath: string }) => {
-    estado.urlsPedidas.push(r.fullPath);
-    return `https://firebasestorage.googleapis.com/v0/b/bucket/o/${encodeURIComponent(r.fullPath)}?alt=media&token=t`;
-  },
-  deleteObject: async () => undefined,
-}));
+vi.mock('firebase/storage', () => ({ getStorage: () => ({ __storage: true }) }));
 
 vi.mock('firebase/firestore', () => ({
   getFirestore: () => ({}),
@@ -123,6 +63,12 @@ import {
   type MotorStorage,
 } from '../src/lib/custodiaDocumental/subidaDirecta';
 import {
+  ErrorAlmacenServidor,
+  PLAZO_ENVIO_BYTES_MS,
+  configurarAlmacenServidor,
+  type ConfiguracionAlmacenServidor,
+} from '../src/lib/custodiaDocumental/almacenServidor';
+import {
   TAMANO_MAX_ADJUNTO_POLIZA_BYTES,
   bytesDataUrlEstimados,
   evaluarAdjuntoInlinePoliza,
@@ -139,19 +85,109 @@ const leer = (rel: string) => readFileSync(resolve(RAIZ, rel), 'utf8');
 
 const pdf = (bytes = 1200, nombre = 'factura.pdf') => new File([new Uint8Array(bytes)], nombre, { type: 'application/pdf' });
 
-let fetchEspia: ReturnType<typeof vi.fn>;
+// ---------------------------------------------------------------------------
+// Servidor sintético de /api/documentos/* + Cloud Storage sintético (sesión).
+// Reproduce el CONTRATO del servidor real (server/documentos/rutasDocumentos.ts).
+// ---------------------------------------------------------------------------
+type Modo = 'ok' | 'denegada' | 'sin-sesion' | 'colgada' | 'red' | 'incompleta' | 'sin-url';
+
+const SESION_BASE = 'https://storage.googleapis.com/upload/storage/v1/b/bucket-test/o?upload_id=';
+
+const estado = {
+  modo: 'ok' as Modo,
+  token: 'id-token-prueba' as string | null,
+  /** Peticiones JSON al servidor, en orden. */
+  llamadas: [] as Array<{ ruta: string; cuerpo: Record<string, unknown>; autorizado: boolean }>,
+  /** PUTs a la URI de sesión. */
+  envios: [] as Array<{ sesionUri: string; contentType: string; bytes: number; abortado: boolean }>,
+  /** Objetos materializados tras el PUT. */
+  objetos: new Map<string, { contentType: string; size: number }>(),
+  sesiones: new Map<string, { storagePath: string; contentType: string; tamanoBytes: number }>(),
+  contador: 0,
+  reset() {
+    this.modo = 'ok'; this.token = 'id-token-prueba'; this.llamadas.length = 0; this.envios.length = 0;
+    this.objetos.clear(); this.sesiones.clear(); this.contador = 0;
+  },
+};
+
+function json(status: number, cuerpo: unknown): Response {
+  return new Response(JSON.stringify(cuerpo), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+const fetchSintetico: typeof fetch = async (entrada, init) => {
+  const url = typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url;
+  const metodo = init?.method || 'GET';
+
+  // --- Cloud Storage: PUT de un solo tramo a la URI de sesión -------------
+  if (url.startsWith(SESION_BASE) && metodo === 'PUT') {
+    const sesion = estado.sesiones.get(url);
+    const contentType = String((init?.headers as Record<string, string>)?.['Content-Type'] || '');
+    const bytes = init?.body instanceof Blob ? init.body.size : 0;
+    const registro = { sesionUri: url, contentType, bytes, abortado: false };
+    estado.envios.push(registro);
+    if (estado.modo === 'colgada') {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          registro.abortado = true;
+          reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+        });
+      });
+    }
+    if (estado.modo === 'red') throw new TypeError('Failed to fetch');
+    if (!sesion) return new Response('', { status: 404 });
+    if (estado.modo === 'incompleta') return new Response('', { status: 308 });
+    estado.objetos.set(sesion.storagePath, { contentType, size: bytes });
+    return json(200, { name: sesion.storagePath, size: String(bytes) });
+  }
+
+  if (url.startsWith('/api/upload-document') || url.startsWith('/api/documents/')) {
+    throw new Error(`fetch a ${url}: el almacén temporal está retirado y NO debe usarse`);
+  }
+  if (!url.startsWith('/api/documentos/')) throw new Error(`fetch inesperado: ${metodo} ${url}`);
+
+  const cuerpo = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
+  const autorizado = String((init?.headers as Record<string, string>)?.Authorization || '').startsWith('Bearer ');
+  estado.llamadas.push({ ruta: url, cuerpo, autorizado });
+  const publico = url.startsWith('/api/documentos/publico/');
+  if (!publico && !autorizado) return json(401, { ok: false, codigo: 'NO_AUTENTICADO', error: 'Inicia sesión para continuar.' });
+  if (publico && !cuerpo.token) return json(400, { ok: false, codigo: 'PETICION_INVALIDA', error: 'Falta el token.' });
+  if (estado.modo === 'denegada') return json(403, { ok: false, codigo: 'SIN_PERMISO', error: 'Sin permiso.', motivo: 'AMBITO_PROPIETARIO_ESCRITURA' });
+  if (estado.modo === 'sin-sesion') return json(401, { ok: false, codigo: 'NO_AUTENTICADO', error: 'Sesión caducada.' });
+
+  const storagePath = String(cuerpo.storagePath || '');
+  if (url.endsWith('/subidas')) {
+    const sesionUri = `${SESION_BASE}${++estado.contador}`;
+    estado.sesiones.set(sesionUri, { storagePath, contentType: String(cuerpo.contentType), tamanoBytes: Number(cuerpo.tamanoBytes) });
+    return json(200, { ok: true, estado: 'SESION', sesionUri, storagePath });
+  }
+  if (url.endsWith('/confirmar')) {
+    const objeto = estado.objetos.get(storagePath);
+    if (!objeto) return json(409, { ok: false, codigo: 'OBJETO_INCOMPLETO', error: 'El archivo no llegó completo.' });
+    const metadatos = { storagePath, tamanoBytes: objeto.size, contentType: objeto.contentType, generation: '1', customMetadata: {} };
+    if (estado.modo === 'sin-url') return json(200, { ok: true, storagePath, metadatos });
+    return json(200, { ok: true, storagePath, metadatos, url: `https://firebasestorage.googleapis.com/v0/b/bucket-test/o/${encodeURIComponent(storagePath)}?alt=media&token=t` });
+  }
+  if (url.endsWith('/acceso')) {
+    if (estado.modo === 'sin-url') return json(403, { ok: false, codigo: 'SIN_PERMISO', error: 'Sin permiso.' });
+    return json(200, { ok: true, storagePath, url: `https://firebasestorage.googleapis.com/v0/b/bucket-test/o/${encodeURIComponent(storagePath)}?alt=media&token=t`, metadatos: {} });
+  }
+  return json(404, { ok: false, codigo: 'NO_ENCONTRADO' });
+};
+
+let configuracionPrevia: ConfiguracionAlmacenServidor;
+let fetchGlobalEspia: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  estado.modo = 'ok';
-  estado.subidas.length = 0;
-  estado.urlsPedidas.length = 0;
-  estado.cancelaciones = 0;
-  fetchEspia = vi.fn(async () => { throw new Error('fetch no debe usarse: el almacén temporal está retirado'); });
-  vi.stubGlobal('fetch', fetchEspia);
+  estado.reset();
+  configuracionPrevia = configurarAlmacenServidor({ fetchImpl: fetchSintetico, obtenerToken: async () => estado.token });
+  // Nada debe usar el `fetch` global: ni el almacén retirado ni atajos.
+  fetchGlobalEspia = vi.fn(async () => { throw new Error('fetch global no debe usarse'); });
+  vi.stubGlobal('fetch', fetchGlobalEspia);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
+  configurarAlmacenServidor(configuracionPrevia);
   vi.unstubAllGlobals();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -167,113 +203,107 @@ async function capturar(promesa: Promise<unknown>): Promise<ErrorCustodiaDocumen
   throw new Error('se esperaba un ErrorCustodiaDocumento y la promesa resolvió');
 }
 
+const rutasLlamadas = () => estado.llamadas.map((l) => l.ruta);
+
 // ---------------------------------------------------------------------------
-// A · Núcleo: subirBinarioDuradero
+// A · Núcleo: subirBinarioDuradero (motor real contra el servidor sintético)
 // ---------------------------------------------------------------------------
-describe('A · subirBinarioDuradero — éxito sólo con objeto + URL; fallos explícitos', () => {
+describe('A · subirBinarioDuradero — éxito sólo con objeto confirmado + URL; fallos explícitos', () => {
   const storage = { __storage: true } as never;
 
-  function motor(opciones: { modo?: typeof estado.modo; urlFalla?: boolean } = {}): MotorStorage & { tareas: ReturnType<typeof crearTareaFalsa>[] } {
-    const tareas: ReturnType<typeof crearTareaFalsa>[] = [];
-    return {
-      tareas,
-      ref: (_s, path) => ({ fullPath: path }) as never,
-      uploadBytesResumable: (r) => {
-        const previo = estado.modo;
-        if (opciones.modo) estado.modo = opciones.modo;
-        const t = crearTareaFalsa((r as unknown as { fullPath: string }).fullPath);
-        estado.modo = previo;
-        tareas.push(t);
-        return t as never;
-      },
-      getDownloadURL: async (r) => {
-        if (opciones.urlFalla) throw new ErrorStorageFalso('storage/unauthorized');
-        return `https://firebasestorage.googleapis.com/v0/b/b/o/${encodeURIComponent((r as unknown as { fullPath: string }).fullPath)}?alt=media`;
-      },
-    };
-  }
-
-  it('A1 · éxito: devuelve la URL y la ruta real; nunca toca el servidor', async () => {
-    const m = motor();
+  it('A1 · éxito: inicio → PUT directo a la sesión → confirmación; devuelve URL y ruta real; nunca el almacén retirado', async () => {
     const r = await subirBinarioDuradero(storage, {
       storagePath: 'gastos_facturas/prop_A/g1/1_f.pdf',
       datos: pdf(),
       contentType: 'application/pdf',
       limite: LIMITES_PREFIJO.gastos_facturas,
-    }, m);
+    });
     expect(r.storagePath).toBe('gastos_facturas/prop_A/g1/1_f.pdf');
     expect(r.url).toMatch(/^https:\/\/firebasestorage\.googleapis\.com\//);
     expect(r.bytes).toBe(1200);
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect(rutasLlamadas()).toEqual(['/api/documentos/subidas', '/api/documentos/subidas/confirmar']);
+    expect(estado.llamadas[0].cuerpo).toMatchObject({ storagePath: 'gastos_facturas/prop_A/g1/1_f.pdf', contentType: 'application/pdf', tamanoBytes: 1200 });
+    expect(estado.envios).toHaveLength(1);
+    expect(estado.envios[0].contentType).toBe('application/pdf');
+    expect(fetchGlobalEspia).not.toHaveBeenCalled();
   });
 
-  it('A2 · denegación de las reglas → SIN_PERMISO con mensaje de negocio (sin «storage/», sin «Firebase»)', async () => {
+  it('A2 · denegación del servidor → SIN_PERMISO con mensaje de negocio (sin «storage/», sin «Firebase»); sin PUT', async () => {
+    estado.modo = 'denegada';
     const e = await capturar(subirBinarioDuradero(storage, {
       storagePath: 'gastos_facturas/prop_A/g1/1_f.pdf', datos: pdf(), contentType: 'application/pdf',
-    }, motor({ modo: 'denegada' })));
+    }));
     expect(e.codigo).toBe('SIN_PERMISO');
     expect(e.storagePath).toBe('gastos_facturas/prop_A/g1/1_f.pdf');
     expect(esMensajeTecnico(e.message)).toBe(false);
     expect(mensajeDeErrorUsuario(e, 'contexto')).toBe(MENSAJES_CUSTODIA.SIN_PERMISO);
-    expect((e.causa as ErrorStorageFalso).code).toBe('storage/unauthorized');
+    expect((e.causa as ErrorAlmacenServidor).code).toBe('storage/unauthorized');
+    expect((e.causa as ErrorAlmacenServidor).codigoServidor).toBe('SIN_PERMISO');
+    expect(estado.envios).toHaveLength(0);
   });
 
-  it('A3 · sesión caducada → NO_AUTENTICADO; red agotada → RED', async () => {
-    const sinSesion = await capturar(subirBinarioDuradero(storage, {
-      storagePath: 'p/x.pdf', datos: pdf(), contentType: 'application/pdf',
-    }, motor({ modo: 'sin-sesion' })));
-    expect(sinSesion.codigo).toBe('NO_AUTENTICADO');
-    const red = await capturar(subirBinarioDuradero(storage, {
-      storagePath: 'p/x.pdf', datos: pdf(), contentType: 'application/pdf',
-    }, motor({ modo: 'red' })));
+  it('A3 · sin sesión (token nulo) y sesión caducada (401) → NO_AUTENTICADO; red caída → RED', async () => {
+    estado.token = null;
+    const sinToken = await capturar(subirBinarioDuradero(storage, { storagePath: 'gastos_facturas/prop_A/g1/x.pdf', datos: pdf(), contentType: 'application/pdf' }));
+    expect(sinToken.codigo).toBe('NO_AUTENTICADO');
+    expect(estado.llamadas).toHaveLength(0); // ni siquiera se llama al servidor sin sesión
+    estado.token = 'id-token-prueba';
+    estado.modo = 'sin-sesion';
+    const caducada = await capturar(subirBinarioDuradero(storage, { storagePath: 'gastos_facturas/prop_A/g1/x.pdf', datos: pdf(), contentType: 'application/pdf' }));
+    expect(caducada.codigo).toBe('NO_AUTENTICADO');
+    estado.modo = 'red';
+    const red = await capturar(subirBinarioDuradero(storage, { storagePath: 'gastos_facturas/prop_A/g1/x.pdf', datos: pdf(), contentType: 'application/pdf' }));
     expect(red.codigo).toBe('RED');
   });
 
-  it('A4 · plazo agotado: la tarea se CANCELA (no queda subida huérfana) y el error es TIEMPO_AGOTADO', async () => {
+  it('A4 · plazo agotado: el envío se CANCELA (AbortSignal) sin confirmar y el error es TIEMPO_AGOTADO', async () => {
     vi.useFakeTimers();
-    const m = motor({ modo: 'colgada' });
+    estado.modo = 'colgada';
     const promesa = subirBinarioDuradero(storage, {
-      storagePath: 'p/colgada.pdf', datos: pdf(), contentType: 'application/pdf', plazoMs: 5_000,
-    }, m);
+      storagePath: 'gastos_facturas/prop_A/g1/colgada.pdf', datos: pdf(), contentType: 'application/pdf', plazoMs: 5_000,
+    });
     const captura = capturar(promesa);
     await vi.advanceTimersByTimeAsync(4_999);
-    expect(estado.cancelaciones).toBe(0);
+    expect(estado.envios[0]?.abortado ?? false).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     const e = await captura;
     expect(e.codigo).toBe('TIEMPO_AGOTADO');
-    expect(estado.cancelaciones).toBe(1);
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect(estado.envios[0].abortado).toBe(true);
+    expect(rutasLlamadas()).toEqual(['/api/documentos/subidas']); // sin confirmación ⇒ sin éxito
   });
 
-  it('A5 · el plazo por defecto es generoso (facturas de varios MB en móvil) pero finito', () => {
+  it('A5 · el plazo por defecto es generoso (facturas de varios MB en móvil) pero finito, y coincide con el del motor', () => {
     expect(PLAZO_SUBIDA_MS).toBeGreaterThanOrEqual(60_000);
     expect(PLAZO_SUBIDA_MS).toBeLessThanOrEqual(180_000);
+    expect(PLAZO_ENVIO_BYTES_MS).toBe(PLAZO_SUBIDA_MS);
   });
 
-  it('A6 · si el objeto se subió pero no se obtiene URL, NO se declara éxito', async () => {
-    const e = await capturar(subirBinarioDuradero(storage, {
-      storagePath: 'p/x.pdf', datos: pdf(), contentType: 'application/pdf',
-    }, motor({ urlFalla: true })));
-    expect(e.codigo).toBe('SIN_PERMISO');
+  it('A6 · si el objeto se subió pero no se obtiene URL, NO se declara éxito; si el almacén no recibió todo (308), tampoco', async () => {
+    estado.modo = 'sin-url';
+    const sinUrl = await capturar(subirBinarioDuradero(storage, { storagePath: 'gastos_facturas/prop_A/g1/x.pdf', datos: pdf(), contentType: 'application/pdf' }));
+    expect(sinUrl.codigo).toBe('SIN_PERMISO');
+    estado.modo = 'incompleta';
+    const incompleta = await capturar(subirBinarioDuradero(storage, { storagePath: 'gastos_facturas/prop_A/g1/y.pdf', datos: pdf(), contentType: 'application/pdf' }));
+    expect(incompleta.codigo).toBe('RED');
+    expect(rutasLlamadas().filter((r) => r.endsWith('/confirmar'))).toHaveLength(1); // sólo el caso sin-url llegó a confirmar
   });
 
   it('A7 · validación previa con los límites de la regla: tamaño/tipo fuera de rango no toca la red', async () => {
-    const m = motor();
     const grande = await capturar(subirBinarioDuradero(storage, {
       storagePath: 'gastos_facturas/prop_A/g1/1_f.pdf',
       datos: new File([new Uint8Array(12 * 1024 * 1024)], 'f.pdf', { type: 'application/pdf' }),
       contentType: 'application/pdf',
       limite: LIMITES_PREFIJO.gastos_facturas,
-    }, m));
+    }));
     expect(grande.codigo).toBe('TIPO_O_TAMANO');
     const texto = await capturar(subirBinarioDuradero(storage, {
       storagePath: 'gastos_facturas/prop_A/g1/1_f.txt',
       datos: new File(['hola'], 'f.txt', { type: 'text/plain' }),
       contentType: 'text/plain',
       limite: LIMITES_PREFIJO.gastos_facturas,
-    }, m));
+    }));
     expect(texto.codigo).toBe('TIPO_O_TAMANO');
-    expect(m.tareas).toHaveLength(0);
+    expect(estado.llamadas).toHaveLength(0);
     expect(() => validarPrevio(new File([new Uint8Array(1)], 'a.pdf'), 'application/pdf', LIMITES_PREFIJO.documentos_solicitados, 'x')).not.toThrow();
   });
 
@@ -286,8 +316,12 @@ describe('A · subirBinarioDuradero — éxito sólo con objeto + URL; fallos ex
   });
 
   it('A9 · clasificación de errores y mensajes: todos pasan el filtro UX-3', () => {
-    expect(clasificarErrorStorage(new ErrorStorageFalso('storage/canceled')).codigo).toBe('CANCELADO');
-    expect(clasificarErrorStorage(new ErrorStorageFalso('storage/invalid-argument')).codigo).toBe('TIPO_O_TAMANO');
+    const errorMotor = (code: ConstructorParameters<typeof ErrorAlmacenServidor>[0], motivo?: string) => new ErrorAlmacenServidor(code, 'x', { motivo });
+    expect(clasificarErrorStorage(errorMotor('storage/canceled')).codigo).toBe('CANCELADO');
+    expect(clasificarErrorStorage(errorMotor('storage/canceled', 'PLAZO')).codigo).toBe('TIEMPO_AGOTADO');
+    expect(clasificarErrorStorage(errorMotor('storage/invalid-argument')).codigo).toBe('TIPO_O_TAMANO');
+    expect(clasificarErrorStorage(errorMotor('storage/server-file-wrong-size')).codigo).toBe('RED');
+    expect(clasificarErrorStorage(errorMotor('storage/retry-limit-exceeded')).codigo).toBe('RED');
     expect(clasificarErrorStorage(new Error('cualquier cosa')).codigo).toBe('DESCONOCIDO');
     expect(clasificarErrorStorage(null).codigo).toBe('DESCONOCIDO');
     const propio = new ErrorCustodiaDocumento('SIN_TITULAR');
@@ -302,34 +336,50 @@ describe('A · subirBinarioDuradero — éxito sólo con objeto + URL; fallos ex
     expect(esReferenciaSinCustodia('gastos_facturas/p/g/f.pdf')).toBe(false);
     expect(esReferenciaSinCustodia(undefined)).toBe(false);
   });
+
+  it('A10 · reintento tras una subida completada: el servidor reconoce el mismo contenido (YA_EXISTE) y no se re-envía', async () => {
+    const motor: MotorStorage = {
+      uploadBytes: async (referencia) => ({
+        ref: referencia, yaExistia: true, url: 'https://firebasestorage.googleapis.com/v0/b/b/o/x?alt=media&token=t',
+        metadata: { fullPath: referencia.fullPath, name: referencia.name, size: 1200, contentType: 'application/pdf', generation: '1', customMetadata: {} },
+      }),
+      getDownloadURL: async () => { throw new Error('no debe pedirse: la respuesta ya trae URL'); },
+      subirDocumentoPublico: async () => { throw new Error('no aplica'); },
+    };
+    const r = await subirBinarioDuradero(storage, { storagePath: 'gastos_facturas/prop_A/g1/1_f.pdf', datos: pdf(), contentType: 'application/pdf' }, motor);
+    expect(r.url).toContain('token=t');
+    expect(estado.envios).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
 // B · Los tres upload* legados de src/lib/firebase.ts
 // ---------------------------------------------------------------------------
-describe('B · upload* legados — Storage o error; nunca servidor efímero, server_*, local_* ni base64', () => {
-  it('B1 · uploadFacturaGasto: éxito sólo con la ruta real por titular; sin fetch', async () => {
+describe('B · upload* legados — servidor + Storage o error; nunca servidor efímero, server_*, local_* ni base64', () => {
+  it('B1 · uploadFacturaGasto: éxito sólo con la ruta real por titular; sesión Bearer; sin almacén retirado', async () => {
     const r = await uploadFacturaGasto('g1', pdf(), 'Factura luz.pdf', 'prop_A');
     expect(r.storagePath).toMatch(/^gastos_facturas\/prop_A\/g1\/\d+_Factura_luz\.pdf$/);
     expect(r.url).toMatch(/^https:\/\/firebasestorage\.googleapis\.com\//);
-    expect(estado.subidas).toHaveLength(1);
-    expect(estado.subidas[0].contentType).toBe('application/pdf');
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect(rutasLlamadas()).toEqual(['/api/documentos/subidas', '/api/documentos/subidas/confirmar']);
+    expect(estado.llamadas.every((l) => l.autorizado)).toBe(true);
+    expect(estado.envios).toHaveLength(1);
+    expect(estado.envios[0].contentType).toBe('application/pdf');
+    expect(fetchGlobalEspia).not.toHaveBeenCalled();
   });
 
-  it('B2 · uploadFacturaGasto sin propietarioId: SIN_TITULAR, sin tocar Storage ni servidor', async () => {
+  it('B2 · uploadFacturaGasto sin propietarioId: SIN_TITULAR, sin tocar servidor ni Storage', async () => {
     const e = await capturar(uploadFacturaGasto('g1', pdf(), 'f.pdf', undefined));
     expect(e.codigo).toBe('SIN_TITULAR');
-    expect(estado.subidas).toHaveLength(0);
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect(estado.llamadas).toHaveLength(0);
+    expect(estado.envios).toHaveLength(0);
   });
 
-  it('B3 · uploadFacturaGasto denegado por las reglas (p. ej. AG-03): error explícito, sin respaldo', async () => {
+  it('B3 · uploadFacturaGasto denegado por el servidor (ámbito de la base con nombre): error explícito, sin respaldo', async () => {
     estado.modo = 'denegada';
     const e = await capturar(uploadFacturaGasto('g1', pdf(), 'f.pdf', 'prop_A'));
     expect(e.codigo).toBe('SIN_PERMISO');
-    expect(fetchEspia).not.toHaveBeenCalled();
-    expect(estado.urlsPedidas).toHaveLength(0);
+    expect(estado.envios).toHaveLength(0);
+    expect(rutasLlamadas()).toEqual(['/api/documentos/subidas']);
   });
 
   it('B4 · uploadJustificanteCobro: por contrato → recibos/…; por titular → cobros_justificantes/…; sin ninguno → SIN_TITULAR', async () => {
@@ -339,37 +389,53 @@ describe('B · upload* legados — Storage o error; nunca servidor efímero, ser
     expect(porTitular.storagePath).toMatch(/^cobros_justificantes\/prop_A\/cob1\/\d+_just\.pdf$/);
     const e = await capturar(uploadJustificanteCobro('cob1', pdf(), 'just.pdf'));
     expect(e.codigo).toBe('SIN_TITULAR');
-    expect(estado.subidas.some((s) => s.path.includes('sin_asignar'))).toBe(false);
-    expect(estado.subidas).toHaveLength(2);
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect([...estado.objetos.keys()].some((p) => p.includes('sin_asignar'))).toBe(false);
+    expect(estado.envios).toHaveLength(2);
+    expect(fetchGlobalEspia).not.toHaveBeenCalled();
   });
 
-  it('B5 · uploadJustificanteCobro con Storage colgado: TIEMPO_AGOTADO y tarea cancelada (antes: respaldo efímero a los 8 s)', async () => {
+  it('B5 · uploadJustificanteCobro con Storage colgado: TIEMPO_AGOTADO y envío cancelado (antes: respaldo efímero a los 8 s)', async () => {
     vi.useFakeTimers();
     estado.modo = 'colgada';
     const captura = capturar(uploadJustificanteCobro('cob1', pdf(), 'just.pdf', 'prop_A'));
     await vi.advanceTimersByTimeAsync(PLAZO_SUBIDA_MS + 1);
     const e = await captura;
     expect(e.codigo).toBe('TIEMPO_AGOTADO');
-    expect(estado.cancelaciones).toBe(1);
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect(estado.envios[0].abortado).toBe(true);
+    expect(rutasLlamadas()).toEqual(['/api/documentos/subidas']);
   });
 
-  it('B6 · uploadDocumentoAportadoFile (portal anónimo): ruta PLANA admitida por la regla, sin base64 ni local_', async () => {
-    const r = await uploadDocumentoAportadoFile('sol-1', 'item-dni', pdf(2000, 'DNI frontal.pdf'), 'DNI frontal.pdf');
+  it('B6 · uploadDocumentoAportadoFile (portal con token): ruta PLANA, vía pública con el token de la solicitud, sin base64 ni local_', async () => {
+    estado.token = null; // el candidato no tiene sesión
+    const r = await uploadDocumentoAportadoFile('sol-1', 'item-dni', pdf(2000, 'DNI frontal.pdf'), 'DNI frontal.pdf', 'tok-sol-1-abcdef');
     expect(r.storagePath).toMatch(/^documentos_solicitados\/sol-1\/item-dni_\d+_DNI_frontal\.pdf$/);
     expect(r.storagePath.split('/')).toHaveLength(3);
     expect(r.downloadURL).toMatch(/^https:\/\//);
     expect((r as Record<string, unknown>).base64Data).toBeUndefined();
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect(rutasLlamadas()).toEqual(['/api/documentos/publico/subidas', '/api/documentos/publico/subidas/confirmar']);
+    expect(estado.llamadas[0].cuerpo).toMatchObject({ solicitudDocId: 'sol-1', token: 'tok-sol-1-abcdef' });
+    expect(estado.llamadas.every((l) => !l.autorizado)).toBe(true);
   });
 
-  it('B7 · uploadDocumentoAportadoFile con Storage denegado: error explícito (antes: data-URL con éxito aparente)', async () => {
+  it('B6b · uploadDocumentoAportadoFile con sesión y sin token: vía ordinaria (ámbito de la cuenta)', async () => {
+    const r = await uploadDocumentoAportadoFile('sol-1', 'item-dni', pdf(), 'dni.pdf');
+    expect(r.storagePath).toMatch(/^documentos_solicitados\/sol-1\//);
+    expect(rutasLlamadas()).toEqual(['/api/documentos/subidas', '/api/documentos/subidas/confirmar']);
+  });
+
+  it('B7 · uploadDocumentoAportadoFile con el servidor denegando: error explícito (antes: data-URL con éxito aparente)', async () => {
     estado.modo = 'denegada';
-    const e = await capturar(uploadDocumentoAportadoFile('sol-1', 'item-dni', pdf(), 'dni.pdf'));
+    const e = await capturar(uploadDocumentoAportadoFile('sol-1', 'item-dni', pdf(), 'dni.pdf', 'tok-sol-1-abcdef'));
     expect(e.codigo).toBe('SIN_PERMISO');
     expect(esMensajeTecnico(e.message)).toBe(false);
-    expect(fetchEspia).not.toHaveBeenCalled();
+    expect(estado.envios).toHaveLength(0);
+  });
+
+  it('B8 · sin sesión y sin token (portal puramente anónimo): NO_AUTENTICADO sin llamar al servidor', async () => {
+    estado.token = null;
+    const e = await capturar(uploadDocumentoAportadoFile('sol-1', 'item-dni', pdf(), 'dni.pdf'));
+    expect(e.codigo).toBe('NO_AUTENTICADO');
+    expect(estado.llamadas).toHaveLength(0);
   });
 });
 
@@ -397,9 +463,9 @@ describe('C · evaluarAdjuntoInlinePoliza — cabe o se rechaza con motivo claro
 });
 
 // ---------------------------------------------------------------------------
-// D · Invariantes de código: ningún consumidor vuelve al almacén retirado
+// D · Invariantes de código: ningún consumidor vuelve al almacén retirado ni al SDK
 // ---------------------------------------------------------------------------
-describe('D · ningún flujo cliente usa ya el almacén temporal ni fabrica referencias sin custodia', () => {
+describe('D · ningún flujo cliente usa ya el almacén temporal, el SDK de Storage ni fabrica referencias sin custodia', () => {
   const FICHEROS = [
     'src/lib/firebase.ts',
     'src/components/modals/GastoModal.tsx',
@@ -407,12 +473,11 @@ describe('D · ningún flujo cliente usa ya el almacén temporal ni fabrica refe
     'src/components/PortalDocumentacionPublicaView.tsx',
     'src/components/modals/DetallePolizaModal.tsx',
   ];
+  const sinComentarios = (f: string) => leer(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
   it('D1 · ninguna llamada a /api/upload-document fuera de comentarios; sin `server_${` ni `local_${itemId}`', () => {
     for (const f of FICHEROS) {
-      const codigo = leer(f)
-        .split('\n')
-        .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-        .join('\n');
+      const codigo = sinComentarios(f);
       expect(codigo, f).not.toMatch(/fetch\((['"`])\/api\/upload-document/);
       expect(codigo, f).not.toContain('server_${');
       expect(codigo, f).not.toContain('local_${itemId}');
@@ -426,5 +491,17 @@ describe('D · ningún flujo cliente usa ya el almacén temporal ni fabrica refe
     const src = leer('src/components/sections/CobrosSection.tsx');
     expect(src).not.toMatch(/tipo:\s*'exito',\s*mensaje:\s*mensajeDeErrorUsuario\(upErr/);
     expect(src).toMatch(/tipo:\s*'error',\s*\n?\s*mensaje:\s*`\$\{mensajeDeErrorUsuario\(upErr/);
+  });
+  it('D4 · AG-03.2: en src/ sólo `getStorage` procede de firebase/storage; subidas, lecturas y borrados van por el motor del servidor', () => {
+    const { execSync } = require('node:child_process') as typeof import('node:child_process');
+    const salida = execSync("grep -rn \"from 'firebase/storage'\" src --include=*.ts --include=*.tsx || true", { cwd: RAIZ, encoding: 'utf8' });
+    const lineas = salida.split('\n').filter((l) => l && !/\.test\.tsx?:|\/test\//.test(l) && !/import type /.test(l));
+    expect(lineas).toHaveLength(1);
+    expect(lineas[0]).toMatch(/src\/lib\/firebase\.ts:\d+:import \{ getStorage \} from 'firebase\/storage';/);
+    const motor = sinComentarios('src/lib/custodiaDocumental/almacenServidor.ts');
+    for (const ruta of ['/api/documentos/subidas', '/api/documentos/subidas/confirmar', '/api/documentos/acceso', '/api/documentos/borrar', '/api/documentos/publico/subidas']) {
+      expect(motor).toContain(`'${ruta}'`);
+    }
+    expect(motor).not.toMatch(/['"`]data:|base64|localStorage|sessionStorage/);
   });
 });

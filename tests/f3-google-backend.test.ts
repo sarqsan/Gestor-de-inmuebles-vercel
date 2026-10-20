@@ -50,6 +50,8 @@ const CUENTA: CuentaServicio = {
   private_key: privadaPem,
   private_key_id: 'kid-demo',
 };
+/** AG-03.2: el cliente REST exige SIEMPRE una base con nombre (no existe selección por omisión). */
+const BASE_DATOS_PRUEBA = 'base-de-prueba';
 
 function respuesta(datos: unknown, opciones: { status?: number; headers?: Record<string, string> } = {}) {
   const status = opciones.status ?? 200;
@@ -249,7 +251,7 @@ describe('Firestore REST', () => {
   const fetchToken = vi.fn(async () => respuesta({ access_token: 'tok', expires_in: 3600 })) as never;
 
   it('lee un documento y decodifica los campos', async () => {
-    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: comoFetch(async (url: string, init?: { signal?: AbortSignal }) => {
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS_PRUEBA, fetchImpl: comoFetch(async (url: string, init?: { signal?: AbortSignal }) => {
       if (String(url).includes('oauth2')) return respuesta({ access_token: 'tok', expires_in: 3600 });
       if (String(url).endsWith('/inmuebles/inm-1')) {
         return respuesta({
@@ -267,7 +269,7 @@ describe('Firestore REST', () => {
 
   it('la consulta por prefijo va LIMITADA y acotada por el término', async () => {
     let cuerpoEnviado = '';
-    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: comoFetch(async (url: string, init?: { body?: string }) => {
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS_PRUEBA, fetchImpl: comoFetch(async (url: string, init?: { body?: string }) => {
       if (String(url).includes('oauth2')) return respuesta({ access_token: 'tok', expires_in: 3600 });
       cuerpoEnviado = init?.body || '';
       return respuesta([{ document: { name: 'projects/p/databases/(default)/documents/propietarios/p1', fields: { nombre: { stringValue: 'Ana' } } } }]);
@@ -281,12 +283,12 @@ describe('Firestore REST', () => {
   });
 
   it('sin prefijo no se consulta nada (sin enumeración global)', async () => {
-    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: fetchToken });
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS_PRUEBA, fetchImpl: fetchToken });
     await expect(cliente.consultarPrefijo('propietarios', 'nombre', '', 25)).resolves.toEqual([]);
   });
 
   it('propaga los errores de Firestore', async () => {
-    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: async () => respuesta('denegado', { status: 403 }) } as never);
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS_PRUEBA, fetchImpl: async () => respuesta('denegado', { status: 403 }) } as never);
     await expect(cliente.leer('inmuebles', 'x')).rejects.toThrow(/403/);
   });
 
@@ -349,7 +351,7 @@ describe('P4-B · commit REST con renta canónica e historial', () => {
   it('propaga fallo o conflicto del commit sin confirmación falsa ni escrituras separadas', async () => {
     for (const status of [400, 409, 503]) {
       let commits = 0;
-      const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: comoFetch(async (url) => {
+      const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS_PRUEBA, fetchImpl: comoFetch(async (url) => {
         if (url === 'https://oauth2.googleapis.com/token') return respuesta({ access_token: 'fixture', expires_in: 3600 });
         expect(url.endsWith('/documents:commit')).toBe(true);
         commits++;
@@ -363,7 +365,7 @@ describe('P4-B · commit REST con renta canónica e historial', () => {
 
   it('rechaza máscaras que borrarían campos o carecen de CAS antes de acceder a la red', async () => {
     const fetchImpl = vi.fn();
-    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: comoFetch(fetchImpl) });
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS_PRUEBA, fetchImpl: comoFetch(fetchImpl) });
     for (const escritura of [
       { ...escrituras[0], camposActualizar: [] },
       { ...escrituras[0], camposActualizar: ['inexistente'] },

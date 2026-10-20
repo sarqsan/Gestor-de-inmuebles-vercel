@@ -17,13 +17,11 @@ import {
   type Unsubscribe,
   type QuerySnapshot,
 } from 'firebase/firestore';
-import {
-  getStorage,
-  ref,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-} from 'firebase/storage';
+import { getStorage } from 'firebase/storage';
+// AG-03.2: toda operación documental pasa por el motor mediado por el servidor
+// (`/api/documentos/*`), que autoriza contra la base Firestore con nombre. El
+// objeto `storage` del SDK se conserva sólo por compatibilidad de firmas.
+import { ref, uploadBytes, getDownloadURL, deleteObject } from './custodiaDocumental/almacenServidor';
 import firebaseConfig from '../../firebase-applet-config.json';
 import {
   Candidato,
@@ -136,10 +134,14 @@ import {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
+// AG-03.2: la ÚNICA base Firestore de la aplicación es la base CON NOMBRE
+// declarada en `firebase-applet-config.json`. Sin ella no se selecciona ninguna
+// otra (`(default)` no forma parte de la arquitectura): fallo explícito.
 const firestoreDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-export const db = firestoreDbId
-  ? getFirestore(app, firestoreDbId)
-  : getFirestore(app);
+if (typeof firestoreDbId !== 'string' || !/^[a-z][a-z0-9-]{2,61}[a-z0-9]$/.test(firestoreDbId)) {
+  throw new Error('FIREBASE_BASE_DATOS_AUSENTE: firebase-applet-config.json debe declarar `firestoreDatabaseId` (base con nombre).');
+}
+export const db = getFirestore(app, firestoreDbId);
 
 export const storage = getStorage(app);
 export const auth = getAuth(app);
@@ -2814,8 +2816,10 @@ export async function saveGmailConfigFirestore(config: GmailIntegracionConfig) {
 
 /**
  * Sube un documento aportado por el candidato (portal público) a
- * `documentos_solicitados/{solicitudDocId}/{itemId}_{ts}_{nombre}` — la ruta
- * PLANA en la que `storage.rules` admite la creación anónima (PDF/imagen, < 15 MB).
+ * `documentos_solicitados/{solicitudDocId}/{itemId}_{ts}_{nombre}` (PDF/imagen,
+ * < 15 MB). AG-03.2: la subida la autoriza el SERVIDOR — con sesión, por el
+ * ámbito de la cuenta; sin sesión, por el token de la solicitud verificado en
+ * la base Firestore con nombre. Las reglas de Storage ya no admiten subida anónima.
  *
  * AG-04 (2026-10-20): fail-closed. Antes enviaba PRIMERO el binario al almacén
  * efímero del servidor (`/api/upload-document`, RAM), después corría 2,5 s
@@ -2828,7 +2832,13 @@ export async function uploadDocumentoAportadoFile(
   solicitudDocId: string,
   itemId: string,
   fileOrBlob: File | Blob,
-  fileName: string
+  fileName: string,
+  /**
+   * AG-03.2: token de la solicitud (portal público sin sesión). El servidor lo
+   * verifica en la base con nombre antes de abrir la subida; con sesión activa
+   * se aplica el ámbito de la cuenta.
+   */
+  tokenAcceso?: string
 ): Promise<{ downloadURL: string; storagePath: string }> {
   const sanitizedName = sanearSegmento(fileName, 'documento.pdf');
   let targetBlob: Blob = fileOrBlob;
@@ -2842,13 +2852,16 @@ export async function uploadDocumentoAportadoFile(
     }
   }
 
-  const storagePath = `documentos_solicitados/${solicitudDocId}/${itemId}_${Date.now()}_${sanitizedName}`;
+  const solSeg = sanearSegmento(solicitudDocId, 'solicitud');
+  const storagePath = `documentos_solicitados/${solSeg}/${sanearSegmento(itemId, 'item')}_${Date.now()}_${sanitizedName}`;
   const contentType = tipoContenidoDe(targetBlob, sanitizedName);
+  const tokenLimpio = String(tokenAcceso || '').trim();
   const { url } = await subirBinarioDuradero(storage, {
     storagePath,
     datos: targetBlob,
     contentType,
     limite: LIMITES_PREFIJO.documentos_solicitados,
+    ...(tokenLimpio ? { accesoPublico: { solicitudDocId: solSeg, token: tokenLimpio } } : {}),
   });
   return { downloadURL: url, storagePath };
 }

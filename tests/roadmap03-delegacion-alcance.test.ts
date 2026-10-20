@@ -3,13 +3,12 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { crearEvaluadorReglas, type Peticion } from './harness/firestoreRulesEval';
 import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
-import { crearEvaluadorStorage } from './harness/storageRulesEval';
+// AG-03.2: Storage se autoriza en el servidor (base con nombre), no en `storage.rules`.
+import { permiteServidor } from './helpers/autorizacionDocumentalHarness';
 
 const root = resolve(__dirname, '..');
 const firestoreRules = readFileSync(resolve(root, 'firestore.rules'), 'utf8');
-const storageRules = readFileSync(resolve(root, 'storage.rules'), 'utf8');
 const { permite } = crearEvaluadorReglas(firestoreRules);
-const { permiteStorage } = crearEvaluadorStorage(storageRules, firestoreRules);
 
 const gestion = {
   id: 'gestion_parcial_X', propietarioId: 'titular_X', gestorUsuarioId: 'usuario_gestor',
@@ -48,51 +47,51 @@ function firestoreSuministro(verbo: 'get' | 'update', inmuebleId: string, actor 
   });
 }
 function storage(verbo: 'get' | 'create', inmuebleId: string, actor = auth) {
-  return permiteStorage(verbo, {
+  return permiteServidor(verbo, {
     auth: actor, db, path: `inmuebles/${inmuebleId}/inventario/evidencia.jpg`,
     metadata: { size: 2000, contentType: 'image/jpeg', name: `inmuebles/${inmuebleId}/inventario/evidencia.jpg` },
   });
 }
 
 describe('ROADMAP-03 · enforcement de delegación parcial por inmueble', () => {
-  it('permite titularidad propia y mantiene la delegación parcial acotada', () => {
+  it('permite titularidad propia y mantiene la delegación parcial acotada', async () => {
     expect(firestore('get', 'inmueble_X1', db['inmuebles/inmueble_X1']!)).toBe(true);
     expect(firestore('update', 'inmueble_X1', db['inmuebles/inmueble_X1']!)).toBe(true);
     expect(firestoreSuministro('get', 'inmueble_X1')).toBe(true);
     expect(firestoreSuministro('update', 'inmueble_X1')).toBe(true);
-    expect(storage('get', 'inmueble_X1')).toBe(true);
-    expect(storage('create', 'inmueble_X1')).toBe(true);
+    expect(await storage('get', 'inmueble_X1')).toBe(true);
+    expect(await storage('create', 'inmueble_X1')).toBe(true);
   });
 
-  it('el titular accede a su cartera propia sin heredar la de terceros', () => {
+  it('el titular accede a su cartera propia sin heredar la de terceros', async () => {
     expect(firestore('get', 'inmueble_X1', db['inmuebles/inmueble_X1']!, titularAuth)).toBe(true);
     expect(firestore('get', 'inmueble_X2', db['inmuebles/inmueble_X2']!, titularAuth)).toBe(true);
     expect(firestore('get', 'inmueble_Y1', db['inmuebles/inmueble_Y1']!, titularAuth)).toBe(false);
   });
 
-  it('conserva la cartera completa y limita escritura al permiso y responsable vigentes', () => {
+  it('conserva la cartera completa y limita escritura al permiso y responsable vigentes', async () => {
     db[`gestiones_cartera/${gestion.id}`] = { ...gestion, inmuebleIds: [] };
     expect(firestore('get', 'inmueble_X2', db['inmuebles/inmueble_X2']!)).toBe(true);
-    expect(storage('get', 'inmueble_X2')).toBe(true);
-    expect(storage('create', 'inmueble_X2')).toBe(true);
+    expect(await storage('get', 'inmueble_X2')).toBe(true);
+    expect(await storage('create', 'inmueble_X2')).toBe(true);
     db[`gestiones_cartera/${gestion.id}`] = { ...gestion, permiso: 'LECTURA', inmuebleIds: ['inmueble_X1'] };
     expect(firestore('get', 'inmueble_X1', db['inmuebles/inmueble_X1']!)).toBe(true);
     expect(firestore('update', 'inmueble_X1', db['inmuebles/inmueble_X1']!)).toBe(false);
-    expect(storage('get', 'inmueble_X1')).toBe(true);
-    expect(storage('create', 'inmueble_X1')).toBe(false);
+    expect(await storage('get', 'inmueble_X1')).toBe(true);
+    expect(await storage('create', 'inmueble_X1')).toBe(false);
     db[`gestiones_cartera/${gestion.id}`] = gestion;
   });
 
-  it('niega un inmueble del mismo titular pero fuera de inmuebleIds aunque se conozcan los IDs', () => {
+  it('niega un inmueble del mismo titular pero fuera de inmuebleIds aunque se conozcan los IDs', async () => {
     expect(firestore('get', 'inmueble_X2', db['inmuebles/inmueble_X2']!)).toBe(false);
     expect(firestore('update', 'inmueble_X2', db['inmuebles/inmueble_X2']!)).toBe(false);
     expect(firestoreSuministro('get', 'inmueble_X2')).toBe(false);
     expect(firestoreSuministro('update', 'inmueble_X2')).toBe(false);
-    expect(storage('get', 'inmueble_X2')).toBe(false);
-    expect(storage('create', 'inmueble_X2')).toBe(false);
+    expect(await storage('get', 'inmueble_X2')).toBe(false);
+    expect(await storage('create', 'inmueble_X2')).toBe(false);
   });
 
-  it('niega sin relación vigente y niega acceso a otro titular/listado global por conocer IDs', () => {
+  it('niega sin relación vigente y niega acceso a otro titular/listado global por conocer IDs', async () => {
     expect(firestore('get', 'inmueble_X1', db['inmuebles/inmueble_X1']!, sinRelacionAuth)).toBe(false);
     expect(firestore('get', 'inmueble_Y1', db['inmuebles/inmueble_Y1']!)).toBe(false);
     expect(firestore('list', 'inmueble_X1', db['inmuebles/inmueble_X1']!)).toBe(false);
@@ -105,14 +104,14 @@ describe('ROADMAP-03 · enforcement de delegación parcial por inmueble', () => 
     ['otro gestor', { ...gestion, gestorUsuarioId: 'usuario_ajeno' }],
     ['titular incoherente', { ...gestion, propietarioId: 'titular_Y' }],
     ['inmueble retirado del alcance parcial', { ...gestion, inmuebleIds: ['inmueble_X2'] }],
-  ])('deniega con relación %s', (_caso, relacion) => {
+  ])('deniega con relación %s', async (_caso, relacion) => {
     db[`gestiones_cartera/${gestion.id}`] = relacion;
     expect(firestore('get', 'inmueble_X1', db['inmuebles/inmueble_X1']!)).toBe(false);
-    expect(storage('get', 'inmueble_X1')).toBe(false);
+    expect(await storage('get', 'inmueble_X1')).toBe(false);
     db[`gestiones_cartera/${gestion.id}`] = gestion;
   });
 
-  it('deniega con índice ausente o referencia manipulada', () => {
+  it('deniega con índice ausente o referencia manipulada', async () => {
     const mirror = db['usuarios_auth/uid_gestor']!;
     delete mirror.gestionesPorPropietario;
     expect(firestore('get', 'inmueble_X1', db['inmuebles/inmueble_X1']!)).toBe(false);

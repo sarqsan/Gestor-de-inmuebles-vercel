@@ -10,7 +10,8 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { deleteObject, getBytes, getMetadata, ref, uploadBytes } from 'firebase/storage';
+// AG-03.2: motor mediado por el servidor (autoriza contra la base Firestore con nombre).
+import { deleteObject, getBytes, getMetadata, ref, uploadBytes } from '../custodiaDocumental/almacenServidor';
 import { auth, db, registrarAuditoriaFirestore, storage } from '../firebase';
 import { construirAuditoriaExpediente } from './auditoria';
 import { evaluarIntegridad, type ResultadoVerificacion } from './documentosProfesionales';

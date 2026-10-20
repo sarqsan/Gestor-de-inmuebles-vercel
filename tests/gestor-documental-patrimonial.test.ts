@@ -107,13 +107,16 @@ describe('BLOQUE 6 — gestor documental patrimonial', () => {
     expect(index.estadisticas.disponibles).toBe(1);
   });
 
-  it('las reglas exigen metadata contextual y estado para descargar/subir/borrar (comprobación estática; no Emulator)', () => {
-    const storageRules = readFileSync('storage.rules', 'utf8');
+  it('el servidor exige metadata contextual y estado para descargar/subir/borrar; las reglas Firestore conservan sus invariantes (comprobación estática; no Emulator)', () => {
+    // AG-03.2: la decisión sobre el binario vive en server/documentos/autorizacionDocumental.ts
+    // (storage.rules ya no consulta Firestore: sólo puede leer la base `(default)`).
+    const autorizador = readFileSync('server/documentos/autorizacionDocumental.ts', 'utf8');
     const firestoreRules = readFileSync('firestore.rules', 'utf8');
-    expect(storageRules).toMatch(/match \/inmuebles\/\{inmuebleId\}\/documentos_patrimoniales\/\{documentoId\}\/\{fileName\}/);
-    expect(storageRules).toMatch(/allow get: if ambitoInmuebleLectura\(inmuebleId\)[\s\S]*?estado == 'DISPONIBLE'/);
-    expect(storageRules).toMatch(/allow create: if ambitoInmuebleEscritura\(inmuebleId\)[\s\S]*?estado == 'PENDIENTE_STORAGE'/);
-    expect(storageRules).toMatch(/allow delete: if ambitoInmuebleBorrado\(inmuebleId\)[\s\S]*?estado == 'PENDIENTE_ELIMINACION'/);
+    expect(autorizador).toMatch(/inmuebles\/\(\?<inmuebleId>[^)]*\)\/documentos_patrimoniales\/\(\?<documentoId>/);
+    expect(autorizador).toMatch(/case 'INMUEBLE_DOCUMENTO_PATRIMONIAL'[\s\S]*?ambitoInmuebleLectura\(inm\)[\s\S]*?md\.estado === 'DISPONIBLE'/);
+    expect(autorizador).toMatch(/case 'INMUEBLE_DOCUMENTO_PATRIMONIAL'[\s\S]*?ambitoInmuebleEscritura\(inm\)[\s\S]*?contenidoCoherenteConMetadata/);
+    expect(autorizador).toMatch(/md\.estado !== 'PENDIENTE_STORAGE'\) return 'METADATA_NO_PENDIENTE'/);
+    expect(autorizador).toMatch(/case 'INMUEBLE_DOCUMENTO_PATRIMONIAL'[\s\S]*?ambitoInmuebleBorrado\(inm\)[\s\S]*?md\.estado === 'PENDIENTE_ELIMINACION'/);
     expect(firestoreRules).toMatch(/match \/documentos_patrimoniales\/\{documentoId\}/);
     expect(firestoreRules).toMatch(/function relacionesDocumentoValidas\(d\)/);
     expect(firestoreRules).toMatch(/function facturaEnInmueble\(d\)/);

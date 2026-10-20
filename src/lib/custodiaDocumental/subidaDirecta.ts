@@ -22,19 +22,21 @@
  *    un mensaje en lenguaje de la persona usuaria (compatible con el filtro de
  *    `mensajeDeErrorUsuario`, UX-3). El detalle técnico viaja en `causa`.
  *
- * Qué NO resuelve: si las reglas de Storage deniegan al titular legítimo porque
- * resuelven el ámbito contra una base Firestore distinta de la que usa la app
- * (AG-03), aquí se verá como `SIN_PERMISO` explícito — nunca como un éxito.
+ * AG-03.2 (2026-10-20): el transporte ya no es el SDK de Firebase Storage sino
+ * el motor mediado por el servidor (`almacenServidor.ts`): el servidor autoriza
+ * contra la base Firestore con nombre, el navegador envía los bytes directamente
+ * a Cloud Storage y el servidor confirma el objeto. El contrato de este módulo
+ * (códigos, mensajes, plazo con cancelación, ausencia total de respaldo) no cambia.
  */
 import {
-  getDownloadURL,
-  ref,
-  uploadBytesResumable,
-  type FirebaseStorage,
-  type StorageReference,
-  type UploadMetadata,
-  type UploadTask,
-} from 'firebase/storage';
+  getDownloadURL as getDownloadURLServidor,
+  subirDocumentoPublico as subirDocumentoPublicoServidor,
+  uploadBytes as uploadBytesServidor,
+  type MetadatosSubida,
+  type OpcionesSubida,
+  type ReferenciaAlmacen,
+  type ResultadoSubida,
+} from './almacenServidor';
 
 // ---------------------------------------------------------------------------
 // Errores
@@ -107,10 +109,11 @@ function codigoSdk(error: unknown): string {
   return typeof codigo === 'string' ? codigo : '';
 }
 
-/** Traduce un fallo del SDK de Storage a un error de custodia con código estable. */
+/** Traduce un fallo del almacén (motor servidor o SDK) a un error de custodia con código estable. */
 export function clasificarErrorStorage(error: unknown, storagePath?: string): ErrorCustodiaDocumento {
   if (esErrorCustodiaDocumento(error)) return error;
   const codigo = codigoSdk(error);
+  const motivo = typeof error === 'object' && error !== null ? (error as { motivo?: unknown }).motivo : undefined;
   const sinConexion = typeof navigator !== 'undefined' && navigator && navigator.onLine === false;
   let clasificado: CodigoErrorCustodia;
   switch (codigo) {
@@ -121,7 +124,8 @@ export function clasificarErrorStorage(error: unknown, storagePath?: string): Er
       clasificado = 'NO_AUTENTICADO';
       break;
     case 'storage/canceled':
-      clasificado = 'CANCELADO';
+      // El motor servidor marca `motivo: 'PLAZO'` cuando la cancelación la provocó el plazo máximo.
+      clasificado = motivo === 'PLAZO' ? 'TIEMPO_AGOTADO' : 'CANCELADO';
       break;
     case 'storage/retry-limit-exceeded':
     case 'storage/server-file-wrong-size':
@@ -197,23 +201,38 @@ export function validarPrevio(file: Blob, contentType: string, limite: LimitePre
 /** Plazo por defecto de una subida antes de cancelarla (facturas de varios MB en redes móviles). */
 export const PLAZO_SUBIDA_MS = 90_000;
 
+/**
+ * Motor de almacén: la superficie mínima que necesita la subida duradera.
+ * Inyectable en pruebas para no depender de red. Por defecto, el motor
+ * mediado por el servidor (`almacenServidor.ts`).
+ */
 export interface MotorStorage {
-  ref: (storage: FirebaseStorage, path: string) => StorageReference;
-  uploadBytesResumable: (referencia: StorageReference, datos: Blob, metadata?: UploadMetadata) => UploadTask;
-  getDownloadURL: (referencia: StorageReference) => Promise<string>;
+  uploadBytes: (
+    referencia: ReferenciaAlmacen,
+    datos: Blob,
+    metadata: MetadatosSubida,
+    opciones: OpcionesSubida,
+  ) => Promise<ResultadoSubida>;
+  getDownloadURL: (referencia: ReferenciaAlmacen) => Promise<string>;
+  subirDocumentoPublico: (
+    peticion: { storagePath: string; datos: Blob; contentType: string; solicitudDocId: string; token: string },
+    opciones: OpcionesSubida,
+  ) => Promise<ResultadoSubida>;
 }
 
 /**
- * Implementación real (SDK). Inyectable en tests para no depender de red. Las
- * funciones del SDK se resuelven en el momento de la llamada (no al cargar el
- * módulo) para que los dobles parciales de `firebase/storage` de otras suites
- * no tengan que conocer `uploadBytesResumable`.
+ * Implementación real. Las funciones del motor se resuelven en el momento de
+ * la llamada (no al cargar el módulo) para que los dobles parciales de otras
+ * suites no tengan que conocer toda la superficie.
  */
-export const MOTOR_STORAGE_SDK: MotorStorage = {
-  ref: (storage, path) => ref(storage, path),
-  uploadBytesResumable: (referencia, datos, metadata) => uploadBytesResumable(referencia, datos, metadata),
-  getDownloadURL: (referencia) => getDownloadURL(referencia),
+export const MOTOR_STORAGE_SERVIDOR: MotorStorage = {
+  uploadBytes: (referencia, datos, metadata, opciones) => uploadBytesServidor(referencia, datos, metadata, opciones),
+  getDownloadURL: (referencia) => getDownloadURLServidor(referencia),
+  subirDocumentoPublico: (peticion, opciones) => subirDocumentoPublicoServidor(peticion, opciones),
 };
+
+/** @deprecated Nombre histórico (ORDEN 1); el motor ya no es el SDK. Se conserva por compatibilidad. */
+export const MOTOR_STORAGE_SDK: MotorStorage = MOTOR_STORAGE_SERVIDOR;
 
 export interface PeticionSubidaDuradera {
   storagePath: string;
@@ -223,6 +242,11 @@ export interface PeticionSubidaDuradera {
   limite?: LimitePrefijo;
   plazoMs?: number;
   customMetadata?: Record<string, string>;
+  /**
+   * Portal público de candidatos (sin sesión): el servidor autoriza la subida
+   * por el token de la solicitud, verificado en la base Firestore con nombre.
+   */
+  accesoPublico?: { solicitudDocId: string; token: string };
 }
 
 export interface ResultadoSubidaDuradera {
@@ -233,49 +257,49 @@ export interface ResultadoSubidaDuradera {
   contentType: string;
 }
 
+function referenciaDe(storagePath: string): ReferenciaAlmacen {
+  return { fullPath: storagePath, name: storagePath.slice(storagePath.lastIndexOf('/') + 1) };
+}
+
 /**
- * Sube un binario a Storage y devuelve `{ url, storagePath }` SOLO si el objeto
- * ha quedado escrito y su URL se ha obtenido. Cualquier otro desenlace lanza
- * `ErrorCustodiaDocumento`. Al agotarse el plazo la tarea se CANCELA.
+ * Sube un binario y devuelve `{ url, storagePath }` SOLO si el servidor ha
+ * confirmado el objeto (bytes verificados) y se dispone de su URL de descarga.
+ * Cualquier otro desenlace lanza `ErrorCustodiaDocumento`. Al agotarse el plazo
+ * el envío se CANCELA (`TIEMPO_AGOTADO`). El primer parámetro se mantiene por
+ * compatibilidad de firma (`storage` del SDK) y se ignora.
  */
 export async function subirBinarioDuradero(
-  storage: FirebaseStorage,
+  _storage: unknown,
   peticion: PeticionSubidaDuradera,
-  motor: MotorStorage = MOTOR_STORAGE_SDK,
+  motor: MotorStorage = MOTOR_STORAGE_SERVIDOR,
 ): Promise<ResultadoSubidaDuradera> {
   const { storagePath, datos, contentType } = peticion;
   if (peticion.limite) validarPrevio(datos, contentType, peticion.limite, storagePath);
 
-  const referencia = motor.ref(storage, storagePath);
-  const metadata: UploadMetadata = { contentType };
-  if (peticion.customMetadata) metadata.customMetadata = peticion.customMetadata;
-  const tarea = motor.uploadBytesResumable(referencia, datos, metadata);
+  const referencia = referenciaDe(storagePath);
   const plazoMs = peticion.plazoMs ?? PLAZO_SUBIDA_MS;
+  const metadata: MetadatosSubida = { contentType };
+  if (peticion.customMetadata) metadata.customMetadata = peticion.customMetadata;
 
-  await new Promise<void>((resolver, rechazar) => {
-    let agotado = false;
-    const temporizador = setTimeout(() => {
-      agotado = true;
-      // `cancel()` devuelve false si la tarea ya había terminado: en ese caso
-      // la promesa de la tarea resuelve y la subida cuenta como correcta.
-      try { tarea.cancel(); } catch { /* la promesa de la tarea decide */ }
-    }, plazoMs);
-    tarea.then(
-      () => { clearTimeout(temporizador); resolver(); },
-      (error: unknown) => {
-        clearTimeout(temporizador);
-        rechazar(agotado
-          ? new ErrorCustodiaDocumento('TIEMPO_AGOTADO', { storagePath, causa: error })
-          : clasificarErrorStorage(error, storagePath));
-      },
-    );
-  });
-
-  let url: string;
+  let resultado: ResultadoSubida;
   try {
-    url = await motor.getDownloadURL(referencia);
+    resultado = peticion.accesoPublico
+      ? await motor.subirDocumentoPublico(
+          { storagePath, datos, contentType, solicitudDocId: peticion.accesoPublico.solicitudDocId, token: peticion.accesoPublico.token },
+          { plazoMs },
+        )
+      : await motor.uploadBytes(referencia, datos, metadata, { plazoMs });
   } catch (error) {
     throw clasificarErrorStorage(error, storagePath);
+  }
+
+  let url: string | undefined = resultado && typeof resultado.url === 'string' && resultado.url ? resultado.url : undefined;
+  if (!url) {
+    try {
+      url = await motor.getDownloadURL(referencia);
+    } catch (error) {
+      throw clasificarErrorStorage(error, storagePath);
+    }
   }
   if (typeof url !== 'string' || url.length === 0) {
     throw new ErrorCustodiaDocumento('DESCONOCIDO', { storagePath });

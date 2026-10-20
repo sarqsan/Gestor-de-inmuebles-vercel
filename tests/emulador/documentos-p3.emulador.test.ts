@@ -23,10 +23,24 @@
  * proyecto `demo-gestor-reglas`, hosts 127.0.0.1 exactos, sin credenciales de
  * servicio). Datos 100 % sintéticos (`*.invalid`).
  *
- * Límite conocido (heredado, ver storage-ambitos): las reglas de Storage leen
- * Firestore `(default)`; esta suite siembra `(default)`. No acredita la base
- * con nombre declarada en firebase.json.
+ * ESTADO AG-03.2 (2026-10-20) — SUITE SUPERSEDIDA, PENDIENTE DE RE-ADAPTACIÓN.
+ * Esta suite se escribió cuando el cliente subía/leía con el SDK de Storage y
+ * `storage.rules` consultaba Firestore `(default)`. Desde AG-03.2:
+ *  · el código de la app (adaptador de profesionales, expediente, actas) ya no
+ *    usa el SDK: pasa por el motor mediado por el servidor (`/api/documentos/*`),
+ *    que autoriza contra la base Firestore CON NOMBRE;
+ *  · `storage.rules` ya no concede acceso directo a ningún prefijo privado, por
+ *    lo que las expectativas «SDK del titular permitido / ajeno denegado» de
+ *    esta suite dejaron de describir la arquitectura.
+ * El flujo mediado se certifica en `documentos-servidor.emulador.test.ts` y las
+ * reglas en `storage-ambitos.emulador.test.ts`. Hasta re-adaptar esta suite
+ * (servidor en proceso + token activo por sesión), se detiene en voz alta en
+ * lugar de fallar con errores de red engañosos. No se omite en silencio.
  */
+if (!process.env.P3_EMULADOR_FORZAR) {
+  throw new Error('P3_EMULADOR_SUPERSEDIDA_AG03_2: esta suite describe la custodia por SDK anterior a AG-03.2; '
+    + 'usa documentos-servidor.emulador.test.ts y storage-ambitos.emulador.test.ts (P3_EMULADOR_FORZAR=1 para ejecutarla igualmente).');
+}
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';

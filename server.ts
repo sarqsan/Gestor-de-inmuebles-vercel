@@ -53,6 +53,8 @@ import { crearServicioJustificantesCobro } from './server/cobros/justificantesCo
 import { montarRutasJustificantesCobro } from './server/cobros/rutasJustificantesCobro.js';
 import { crearServicioActualizacionRenta } from './server/actualizacionRenta/servicioActualizacionRenta.js';
 import { montarRutasActualizacionRenta } from './server/actualizacionRenta/rutasActualizacionRenta.js';
+import { crearServicioDocumentos } from './server/documentos/servicioDocumentos.js';
+import { montarRutasDocumentos } from './server/documentos/rutasDocumentos.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -258,6 +260,13 @@ const servicioSeguimientoIncidencias = dependenciasIA.firestore
 // Storage/IAM no se instala un backend en memoria ni se finge la persistencia.
 const servicioJustificantesCobro = dependenciasIA.firestore && dependenciasIA.storage
   ? crearServicioJustificantesCobro({ puerto: dependenciasIA.firestore, almacen: dependenciasIA.storage })
+  : null;
+
+// AG-03.2 — custodia documental autorizada en servidor contra la base Firestore
+// con nombre (las reglas de Storage no pueden leerla). Sin Firestore o Storage/IAM
+// las rutas responden 503: ningún documento se acepta en memoria ni se finge.
+const servicioDocumentos = dependenciasIA.firestore && dependenciasIA.storage
+  ? crearServicioDocumentos({ puerto: dependenciasIA.firestore, almacen: dependenciasIA.storage })
   : null;
 
 // P4 · preview + confirmación explícita del actor autorizado. Las mutaciones se
@@ -2739,6 +2748,11 @@ montarRutasJustificantesCobro(app, {
 montarRutasActualizacionRenta(app, {
   verificarToken: dependenciasIA.verificarToken,
   servicio: servicioActualizacionRenta,
+});
+
+montarRutasDocumentos(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  servicio: servicioDocumentos,
 });
 
 montarRutasAdminIA(app, {

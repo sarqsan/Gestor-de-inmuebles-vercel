@@ -1,13 +1,20 @@
 /**
  * R2 — Persistencia real en Firebase Storage de evidencias de morosidad.
  * Suite auto-contenida:
- *  - lógica cliente con `firebase/storage` mockeado (sin red/credenciales);
- *  - invariantes textuales de `storage.rules` (patrón del bloque C: si alguien
- *    relaja la regla R2, el test falla).
+ *  - lógica cliente con el motor de almacén mediado por el servidor
+ *    (`custodiaDocumental/almacenServidor`, AG-03.2) mockeado (sin red);
+ *  - invariantes de autorización del destino `morosidad_evidencias` sobre el
+ *    autorizador REAL del servidor (AG-03.2: la decisión ya no vive en
+ *    `storage.rules`, que sólo puede leer la base `(default)`); si alguien
+ *    relaja la regla R2 (master-only, append-only, 10 MB, PDF/imagen), el
+ *    test falla.
  */
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EMAIL_MASTER } from '../server/titularidades/backendTitulares';
+import { DESTINOS, validarContenido } from '../server/documentos/autorizacionDocumental';
+import { permiteServidor, type PeticionServidor } from './helpers/autorizacionDocumentalHarness';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -34,7 +41,7 @@ const getDownloadURLMock = vi.hoisted(() =>
   vi.fn(async (r: { __path: string }) => `https://descarga.test/${r.__path}`),
 );
 
-vi.mock('firebase/storage', () => ({
+vi.mock('../src/lib/custodiaDocumental/almacenServidor', () => ({
   ref: refMock,
   uploadBytes: uploadBytesMock,
   getDownloadURL: getDownloadURLMock,
@@ -199,47 +206,58 @@ describe('R2 obtenerUrlEvidenciaMorosidad', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Invariantes textuales de storage.rules (red de seguridad R2)
+// Invariantes de autorización del destino morosidad_evidencias (red de seguridad R2)
 // ---------------------------------------------------------------------------
 const RULES_SRC = readFileSync(resolve(__dirname, '../storage.rules'), 'utf8');
 
-function bloqueMatch(inicio: string): string {
-  const pos = RULES_SRC.indexOf(inicio);
-  if (pos < 0) throw new Error(`No existe «${inicio}» en storage.rules`);
-  let nivel = 0;
-  for (let i = RULES_SRC.indexOf('{', RULES_SRC.indexOf('\n', pos)); i < RULES_SRC.length; i++) {
-    if (RULES_SRC[i] === '{') nivel++;
-    else if (RULES_SRC[i] === '}') {
-      nivel--;
-      if (nivel === 0) return RULES_SRC.slice(pos, i + 1);
+describe('R2 autorización del servidor: destino morosidad_evidencias', () => {
+  const RUTA = 'morosidad_evidencias/prop_A/mor_1/1700000000000_ab12_req.pdf';
+  const DB: PeticionServidor['db'] = {
+    'usuarios_auth/uid_propA': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'prop_A' },
+    'usuarios_auth/uid_gestorE': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', propietarioId: '', carterasE: ['prop_A'] },
+    'usuarios/uid_admin': { tipoPerfil: 'ADMINISTRADOR', estado: 'ACTIVO', authUid: 'uid_admin' },
+  };
+  const AUTH = {
+    master: { uid: 'uid_master', token: { email: EMAIL_MASTER } },
+    admin: { uid: 'uid_admin', token: { email: 'admin@test.local' } },
+    propA: { uid: 'uid_propA', token: { email: 'a@test.local' } },
+    gestorE: { uid: 'uid_gestorE', token: { email: 'g@test.local' } },
+    anon: null,
+  };
+  const pdf = (size = 1024, contentType = 'application/pdf') => ({ size, contentType, name: RUTA });
+  const op = (verbo: 'get' | 'list' | 'create' | 'update' | 'delete', quien: keyof typeof AUTH, metadata?: ReturnType<typeof pdf>) =>
+    permiteServidor(verbo, { auth: AUTH[quien], db: DB, path: RUTA, metadata: metadata ?? null });
+
+  it('existe el destino con segmentos propietario + expediente + fichero', () => {
+    const destino = DESTINOS.find((d) => d.clave === 'MOROSIDAD_EVIDENCIA')!;
+    expect(destino).toBeDefined();
+    expect(destino.patron.test(RUTA)).toBe(true);
+    expect(destino.patron.test('morosidad_evidencias/prop_A/req.pdf')).toBe(false);
+    expect(destino.patron.test('morosidad_evidencias/prop_A/mor_1/sub/req.pdf')).toBe(false);
+    expect(destino.sobrescribible).toBe(false);
+  });
+
+  it('solo la administración maestra lee y crea (ni el titular, ni cartera E, ni el perfil ADMINISTRADOR)', async () => {
+    expect(await op('get', 'master')).toBe(true);
+    expect(await op('create', 'master', pdf())).toBe(true);
+    for (const quien of ['admin', 'propA', 'gestorE', 'anon'] as const) {
+      expect(await op('get', quien), quien).toBe(false);
+      expect(await op('create', quien, pdf()), quien).toBe(false);
     }
-  }
-  throw new Error(`Bloque «${inicio}» sin cerrar`);
-}
-
-describe('R2 storage.rules: bloque morosidad_evidencias', () => {
-  const BLOQUE = 'match /morosidad_evidencias/{propietarioId}/{expedienteId}/{fileName}';
-
-  it('existe el bloque con segmentos propietario + expediente + fichero', () => {
-    expect(RULES_SRC).toContain(BLOQUE);
   });
 
-  it('solo la administración maestra lee y crea (espejo de Firestore §34)', () => {
-    const b = bloqueMatch(BLOQUE);
-    expect(b).toContain('allow read: if isMasterAdmin();');
-    expect(b).toContain('allow create: if isMasterAdmin() && esEvidenciaValida();');
-    expect(b).not.toContain('internalUser()');
-    expect(b).not.toContain('isTenant()');
+  it('append-only: sin update ni delete (tampoco el master)', async () => {
+    expect(await op('update', 'master', pdf())).toBe(false);
+    expect(await op('delete', 'master')).toBe(false);
+    expect(await op('list', 'master')).toBe(false);
   });
 
-  it('append-only: sin update ni delete', () => {
-    const b = bloqueMatch(BLOQUE);
-    expect(b).toContain('allow update, delete: if false;');
-  });
-
-  it('el bloque vive antes del catch-all y el catch-all sigue siendo el último', () => {
+  it('storage.rules ya no decide: no consulta Firestore y el catch-all deny sigue siendo el último', () => {
+    const sinComentarios = RULES_SRC.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    expect(sinComentarios).not.toMatch(/firestore\.(get|exists)\(/);
+    expect(sinComentarios).not.toContain('morosidad_evidencias');
     const catchAll = RULES_SRC.indexOf('match /{allPaths=**}');
-    expect(catchAll).toBeGreaterThan(RULES_SRC.indexOf(BLOQUE));
+    expect(catchAll).toBeGreaterThan(0);
     expect(RULES_SRC.slice(catchAll)).toContain('allow read, write: if false;');
     expect(RULES_SRC.indexOf('match /', catchAll + 10)).toBe(-1);
   });
@@ -250,14 +268,19 @@ describe('R2 storage.rules: bloque morosidad_evidencias', () => {
     expect(abre).toBe(cierra);
   });
 
-  it('paridad cliente↔regla: 10 MB y los mismos MIME en esEvidenciaValida()', () => {
+  it('paridad cliente↔servidor: 10 MB y los mismos MIME que esEvidenciaValida()', async () => {
     expect(TAMANO_MAX_EVIDENCIA_BYTES).toBe(10 * 1024 * 1024);
-    const helper = RULES_SRC.slice(RULES_SRC.indexOf('function esEvidenciaValida()'), RULES_SRC.indexOf('function isPdfOrImage()'));
-    expect(helper).toContain('request.resource.size < 10 * 1024 * 1024');
-    expect(helper).toContain('application/pdf|image/(jpeg|jpg|png|webp)');
+    const destino = DESTINOS.find((d) => d.clave === 'MOROSIDAD_EVIDENCIA')!;
+    expect(destino.contenido?.maxBytes).toBe(10 * 1024 * 1024);
+    expect(validarContenido(destino, 'application/pdf', 10 * 1024 * 1024).permitido).toBe(false); // estricto (<)
+    expect(validarContenido(destino, 'application/pdf', 10 * 1024 * 1024 - 1).permitido).toBe(true);
     for (const mime of TIPOS_MIME_PERMITIDOS_EVIDENCIA) {
-      const token = mime.includes('/') ? mime.split('/')[1] : mime;
-      expect(helper).toContain(token === 'pdf' ? 'application/pdf' : token);
+      expect(validarContenido(destino, mime, 1024).permitido, mime).toBe(true);
     }
+    for (const mime of ['image/gif', 'image/svg+xml', 'text/plain', 'application/octet-stream', 'video/mp4']) {
+      expect(validarContenido(destino, mime, 1024).permitido, mime).toBe(false);
+    }
+    expect(await op('create', 'master', pdf(10 * 1024 * 1024))).toBe(false);
+    expect(await op('create', 'master', pdf(1024, 'image/gif'))).toBe(false);
   });
 });

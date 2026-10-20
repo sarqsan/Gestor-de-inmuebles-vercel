@@ -475,13 +475,19 @@ export interface ClienteFirestoreOpciones {
   fetchImpl?: ImplementacionFetch;
   ahora?: Date;
   /**
-   * Base de datos Firestore. Por defecto `(default)` (comportamiento histórico,
-   * el que usa la búsqueda de titulares). El núcleo de IA pasa la base con
-   * nombre en la que vive la aplicación (`firebase-applet-config.json`).
+   * Base de datos Firestore CON NOMBRE en la que vive la aplicación
+   * (`firebase-applet-config.json`). AG-03.2: obligatoria; el cliente no
+   * selecciona ninguna base por omisión (`(default)` no forma parte de la
+   * arquitectura y construirlo sin base explícita lanza error).
    */
-  baseDatosId?: string;
+  baseDatosId: string;
   /** Opt-in exclusivo de aceptación P2 con demo project y emulador local validado. */
   usarEmuladorFirebase?: boolean;
+}
+
+/** Identificador de base Firestore con nombre (mismo criterio que `configuracionFirebase.ts`). */
+export function esBaseDatosConNombre(valor: unknown): valor is string {
+  return typeof valor === 'string' && /^[a-z][a-z0-9-]{2,61}[a-z0-9]$/.test(valor);
 }
 
 /** Ruta de campo para `updateMask`: identificadores simples tal cual; el resto, entre comillas invertidas. */
@@ -494,7 +500,8 @@ export class ClienteFirestoreRest {
   private readonly base: string;
 
   constructor(private readonly opciones: ClienteFirestoreOpciones) {
-    const baseDatos = encodeURIComponent(opciones.baseDatosId || '(default)');
+    if (!esBaseDatosConNombre(opciones.baseDatosId)) throw new Error('FIRESTORE_BASE_DATOS_REQUERIDA');
+    const baseDatos = encodeURIComponent(opciones.baseDatosId);
     const baseApi = opciones.usarEmuladorFirebase
       ? validarDestinoEmuladorP2('firestore', opciones.cuenta.project_id)
       : 'https://firestore.googleapis.com';
@@ -506,7 +513,7 @@ export class ClienteFirestoreRest {
   }
 
   get baseDatosId(): string {
-    return this.opciones.baseDatosId || '(default)';
+    return this.opciones.baseDatosId;
   }
 
   private async cabeceras(): Promise<Record<string, string>> {

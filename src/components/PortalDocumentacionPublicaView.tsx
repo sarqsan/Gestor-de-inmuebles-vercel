@@ -106,7 +106,9 @@ export const PortalDocumentacionPublicaView: React.FC<PortalDocumentacionPublica
       // AG-04: subida directa y duradera a Storage (o error explícito). Nunca
       // se guarda base64 ni una referencia efímera/local en la solicitud.
       const solId = (solicitud as any).id || `sol-${solicitud.token}`;
-      const uploadRes = await uploadDocumentoAportadoFile(solId, itemId, file, file.name);
+      // AG-03.2: el token de la solicitud autoriza la subida en el servidor
+      // (verificado en la base con nombre); sin sesión no hay otra vía.
+      const uploadRes = await uploadDocumentoAportadoFile(solId, itemId, file, file.name, solicitud.token);
 
       const nuevoArchivo: ArchivoAportado = {
         id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,

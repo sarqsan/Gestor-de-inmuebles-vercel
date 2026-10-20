@@ -484,7 +484,9 @@ describe('R3 firestore.rules: inmuebles ya no públicos + espejo mínimo', () =>
 });
 
 // ---------------------------------------------------------------------------
-// D. storage.rules: inventario interno, R2 intacto
+// D. storage.rules + autorización del servidor: catálogo público, inventario interno, R2 intacto
+//    (AG-03.2: las decisiones de ámbito viven en server/documentos/autorizacionDocumental.ts;
+//    storage.rules sólo conserva el `get` público del catálogo y el deny-all.)
 // ---------------------------------------------------------------------------
 const ST_SRC = readFileSync(resolve(__dirname, '../storage.rules'), 'utf8');
 
@@ -492,35 +494,55 @@ describe('R3 storage.rules: catálogo público, inventario interno', () => {
   it('catálogo: solo el primer segmento es público', () => {
     expect(ST_SRC).toContain('match /inmuebles/{inmuebleId}/{fileName} {');
     expect(ST_SRC).not.toContain('match /inmuebles/{inmuebleId}/{allFiles=**} {');
+    const ini = ST_SRC.indexOf('match /inmuebles/{inmuebleId}/{fileName} {');
+    const zona = ST_SRC.slice(ini, ST_SRC.indexOf('\n    }\n', ini) + 6);
+    expect(zona).toContain('allow get: if true;');
+    expect(zona).toContain('allow list: if false;');
+    expect(zona).toContain('allow create, update, delete: if false;');
   });
 
-  it('inventario: lectura/escritura solo en ámbito del inmueble (D3; sin `if true`)', () => {
-    const ini = ST_SRC.indexOf('match /inmuebles/{inmuebleId}/inventario/{allFiles=**}');
-    expect(ini).toBeGreaterThan(0);
-    // La zona es EXACTAMENTE el cuerpo del match (hasta su llave de cierre).
-    const zonaInventario = ST_SRC.slice(ini, ST_SRC.indexOf('\n    }\n', ini) + 6);
-    // D3 (§7): el criterio laxo `internalUser()` (cualquier cuenta
-    // autenticada, R-1) se sustituye por el ámbito del inmueble.
-    expect(zonaInventario).toContain('allow read: if ambitoInmuebleLectura(inmuebleId);');
-    expect(zonaInventario).toContain('allow delete: if ambitoInmuebleBorrado(inmuebleId);');
-    expect(zonaInventario).not.toContain('if true');
-    expect(zonaInventario).not.toContain('internalUser()');
+  it('inventario: lectura/escritura solo en ámbito del inmueble (D3; sin `if true`) — autorizador del servidor', async () => {
+    const { permiteServidor } = await import('./helpers/autorizacionDocumentalHarness');
+    const db = {
+      'usuarios_auth/uid_propA': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'prop_A' },
+      'usuarios_auth/uid_otro': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'prop_B' },
+      'inmuebles/inm_A': { propietarioId: 'prop_A' },
+    };
+    const inventario = 'inmuebles/inm_A/inventario/doc_1/1_frigorifico.png';
+    const img = { size: 1024, contentType: 'image/png', name: inventario };
+    expect(await permiteServidor('get', { auth: null, db, path: inventario })).toBe(false); // nunca público
+    expect(await permiteServidor('get', { auth: { uid: 'uid_otro', token: {} }, db, path: inventario })).toBe(false); // R-1: no basta estar autenticado
+    expect(await permiteServidor('get', { auth: { uid: 'uid_propA', token: {} }, db, path: inventario })).toBe(true);
+    expect(await permiteServidor('create', { auth: { uid: 'uid_propA', token: {} }, db, path: inventario, metadata: img })).toBe(true);
+    expect(await permiteServidor('delete', { auth: { uid: 'uid_propA', token: {} }, db, path: inventario })).toBe(true);
+    expect(await permiteServidor('delete', { auth: { uid: 'uid_otro', token: {} }, db, path: inventario })).toBe(false);
+    // Y las reglas no conceden nada sobre el inventario (ni lo mencionan).
+    expect(ST_SRC).not.toContain('inventario/{allFiles=**}');
   });
 
-  it('R2 intacto: bloque morosidad_evidencias sin cambios', () => {
-    expect(ST_SRC).toContain('match /morosidad_evidencias/{propietarioId}/{expedienteId}/{fileName} {');
-    expect(ST_SRC).toContain('allow read: if isMasterAdmin();');
-    expect(ST_SRC).toContain('allow create: if isMasterAdmin() && esEvidenciaValida();');
-    expect(ST_SRC).toContain('allow update, delete: if false;');
+  it('R2 intacto: morosidad_evidencias master-only y append-only (autorizador del servidor)', async () => {
+    const { permiteServidor } = await import('./helpers/autorizacionDocumentalHarness');
+    const { EMAIL_MASTER } = await import('../server/titularidades/backendTitulares');
+    const db = { 'usuarios_auth/uid_propA': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'prop_A' } };
+    const ruta = 'morosidad_evidencias/prop_A/exp_1/1_req.pdf';
+    const pdf = { size: 1024, contentType: 'application/pdf', name: ruta };
+    const master = { uid: 'uid_master', token: { email: EMAIL_MASTER } };
+    expect(await permiteServidor('get', { auth: master, db, path: ruta })).toBe(true);
+    expect(await permiteServidor('create', { auth: master, db, path: ruta, metadata: pdf })).toBe(true);
+    expect(await permiteServidor('update', { auth: master, db, path: ruta, metadata: pdf })).toBe(false);
+    expect(await permiteServidor('delete', { auth: master, db, path: ruta })).toBe(false);
+    expect(await permiteServidor('get', { auth: { uid: 'uid_propA', token: {} }, db, path: ruta })).toBe(false);
   });
 
-  it('catch-all último y fichero balanceado', () => {
+  it('catch-all último y fichero balanceado; sin lecturas de Firestore desde las reglas', () => {
     const abre = (ST_SRC.match(/{/g) || []).length;
     const cierra = (ST_SRC.match(/}/g) || []).length;
     expect(abre).toBe(cierra);
     const catchAll = ST_SRC.indexOf('match /{allPaths=**}');
     expect(ST_SRC.slice(catchAll)).toContain('allow read, write: if false;');
     expect(ST_SRC.indexOf('match /', catchAll + 10)).toBe(-1);
+    const sinComentarios = ST_SRC.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    expect(sinComentarios).not.toMatch(/firestore\.(get|exists)\(/);
   });
 });
 

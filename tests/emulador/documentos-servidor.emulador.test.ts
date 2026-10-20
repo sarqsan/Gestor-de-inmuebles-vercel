@@ -25,9 +25,12 @@
  * proyecto demo, hosts 127.0.0.1 exactos, sin credenciales de servicio). Ningún
  * request sale de los emuladores (`fetchSoloEmuladores`). Datos 100 % sintéticos.
  *
- * Estado: escrita en AG-03.2 SIN emulador disponible en el entorno de desarrollo
- * (V — pendiente de ejecución con `npm run test:emulador:reglas`). Se apoya en
- * las mismas utilidades que la suite P2 ya ejecutada contra emuladores.
+ * Estado: escrita en AG-03.2 SIN emulador disponible en el entorno de desarrollo;
+ * ejecutada en AG-03.3 por GitHub Actions (`npm run test:emulador:reglas`). La
+ * primera ejecución reveló un defecto del propio arnés (el enrutador del motor
+ * pasaba el servidor en proceso por el fetch cerrado de emuladores), corregido
+ * aquí sin tocar el código de la app. Se apoya en las mismas utilidades que la
+ * suite P2 ya ejecutada contra emuladores.
  * Límite conocido: el emulador v15.33.0 sólo registra `PATCH` de metadatos en
  * `/b/{bucket}/o/{objeto}` (no bajo `/storage/v1/`), por lo que los destinos con
  * token ROTATORIO (patrimoniales/profesionales) no se cubren aquí: su
@@ -105,11 +108,21 @@ async function identidad(cuenta: CuentaAuthEmulador, usuarioId: string, tipoPerf
 
 const como = (cuenta: CuentaAuthEmulador | null) => { tokenActivo = cuenta ? cuenta.idToken : null; };
 
-/** Enrutador del motor cliente: rutas relativas → servidor en proceso; absolutas → sólo emuladores. */
+const ORIGEN_NAVEGADOR = 'http://localhost:5173';
+
+/**
+ * Enrutador del motor cliente: rutas relativas → servidor de custodia EN PROCESO
+ * (loopback propio, no es red externa: `fetchSoloEmuladores` sólo admite los
+ * tres hosts de los emuladores y rechazaría nuestro puerto — AG-03.3); URLs
+ * absolutas (sesión reanudable, descarga por token) → sólo emuladores.
+ */
 const fetchMotor: typeof fetch = async (entrada, init) => {
   const url = typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url;
-  const destino = url.startsWith('/') ? `http://127.0.0.1:${puerto}${url}` : url;
-  return await fetchSoloEmuladores(destino, init as never) as unknown as Response;
+  if (url.startsWith('/')) {
+    const cabeceras = init?.headers instanceof Headers ? Object.fromEntries([...init.headers.entries()]) : { ...(init?.headers as Record<string, string> | undefined) };
+    return fetch(`http://127.0.0.1:${puerto}${url}`, { ...init, headers: { ...cabeceras, Origin: ORIGEN_NAVEGADOR } });
+  }
+  return await fetchSoloEmuladores(url, init as never) as unknown as Response;
 };
 
 async function llamarServidor(ruta: string, cuerpo: unknown, cuenta: CuentaAuthEmulador | null): Promise<{ status: number; json: Record<string, unknown> }> {

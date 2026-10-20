@@ -23,7 +23,8 @@
  * - Los segmentos de ruta se sanean (sin `/`, sin `..`, sin vacío).
  * - Los errores se propagan al llamador (UI); este módulo nunca los silencia.
  */
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+// AG-03.2: motor mediado por el servidor (autoriza contra la base Firestore con nombre).
+import { getDownloadURL, ref, uploadBytes } from './custodiaDocumental/almacenServidor';
 import { storage } from './firebase';
 
 /** Raíz Storage de evidencias de morosidad (ver regla R2 en `storage.rules`). */

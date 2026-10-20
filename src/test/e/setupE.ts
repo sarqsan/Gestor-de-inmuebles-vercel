@@ -65,17 +65,32 @@ export const storageSintetico = {
 
 vi.mock('firebase/storage', () => ({
   getStorage: () => ({ __storage: 'memoria' }),
-  ref: (_s: unknown, ruta: string) => ({ __ruta: ruta }),
-  uploadBytes: async (r: { __ruta: string }, blob: Blob) => {
+}));
+
+// AG-03.2: los módulos de la sección E ya no hablan con el SDK de Storage sino
+// con el motor mediado por el servidor (`custodiaDocumental/almacenServidor`).
+// Mismo doble en memoria, misma superficie.
+vi.mock('../../lib/custodiaDocumental/almacenServidor', () => ({
+  ref: (_s: unknown, ruta: string) => ({ __ruta: ruta, fullPath: ruta }),
+  uploadBytes: async (r: { __ruta: string }, blob: Blob, meta?: { contentType?: string }) => {
     if (storageSintetico.denegadas.has(r.__ruta)) throw new Error('storage/unauthorized (simulado)');
     storageSintetico.subidas.push({ ruta: r.__ruta, tipo: blob.type, bytes: blob.size });
-    return { ref: r };
+    return { ref: r, metadata: { fullPath: r.__ruta, size: blob.size, contentType: meta?.contentType || blob.type, customMetadata: {} }, yaExistia: false };
   },
   getDownloadURL: async (r: { __ruta: string }) => {
     if (storageSintetico.denegadas.has(r.__ruta)) throw new Error('storage/unauthorized (simulado)');
     const existe = storageSintetico.subidas.some((s) => s.ruta === r.__ruta);
     if (!existe) throw new Error('storage/object-not-found (simulado)');
     return `https://storage.test/${encodeURIComponent(r.__ruta)}`;
+  },
+  getMetadata: async (r: { __ruta: string }) => {
+    const subida = storageSintetico.subidas.find((s) => s.ruta === r.__ruta);
+    if (!subida) throw new Error('storage/object-not-found (simulado)');
+    return { fullPath: r.__ruta, size: subida.bytes, contentType: subida.tipo, customMetadata: {} };
+  },
+  getBytes: async (r: { __ruta: string }) => {
+    if (!storageSintetico.subidas.some((s) => s.ruta === r.__ruta)) throw new Error('storage/object-not-found (simulado)');
+    return new ArrayBuffer(0);
   },
   deleteObject: async (r: { __ruta: string }) => {
     storageSintetico.subidas = storageSintetico.subidas.filter((s) => s.ruta !== r.__ruta);

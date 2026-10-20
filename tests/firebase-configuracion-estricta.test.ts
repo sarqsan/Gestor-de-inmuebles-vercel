@@ -220,10 +220,13 @@ describe('matriz HTTP: servidor real con lectores reales, sin red externa', () =
       const titulares = await fetchHttp(`${base}/api/titulares/buscar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inmuebleId: 'prueba', termino: 'prueba' }) });
       expect(titulares.status).toBe(caso.error ? 503 : 401);
       expect((await titulares.json()).codigoConfiguracion).toBe(caso.error);
+      // AG-04 (2026-10-20): el almacén temporal de documentos está retirado en
+      // cualquier configuración: nunca se acepta ni se sirve un binario desde RAM.
       const carga = await fetchHttp(`${base}/api/upload-document`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: 'prueba.txt', mimeType: 'text/plain', fileBase64: Buffer.from('solo memoria local').toString('base64') }) });
-      expect(carga.status).toBe(200);
-      const descarga = await fetchHttp(`${base}${(await carga.json()).url}`);
-      expect(await descarga.text()).toBe('solo memoria local');
+      expect(carga.status).toBe(410);
+      expect((await carga.json()).codigo).toBe('ALMACEN_TEMPORAL_RETIRADO');
+      const descarga = await fetchHttp(`${base}/api/documents/doc_00000000000000000000000000000000`);
+      expect(descarga.status).toBe(410);
       expect(prohibido).not.toHaveBeenCalled();
       expect(red).not.toHaveBeenCalled();
       for (const secreto of [privada, cuenta.client_email, 'ruta sensible', 'proyecto-ajeno']) {

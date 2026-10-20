@@ -11,7 +11,8 @@ import {
   type QuerySnapshot,
 } from 'firebase/firestore';
 import { reportarErrorGuardado, reportarErrorLectura } from '../estadoDatos/canalIncidencias';
-import { ref, uploadBytes, getDownloadURL, deleteObject, getBytes } from 'firebase/storage';
+// AG-03.2: motor mediado por el servidor (autoriza contra la base Firestore con nombre).
+import { ref, uploadBytes, getDownloadURL, deleteObject, getBytes } from './custodiaDocumental/almacenServidor';
 import { sha256DeBytes } from './expedienteDocumental/gestor';
 import { evaluarIntegridad, type ResultadoVerificacion } from './expedienteDocumental/documentosProfesionales';
 import { db, storage, sanitizeObjectForFirestore, type DataAccessScope } from './firebase';

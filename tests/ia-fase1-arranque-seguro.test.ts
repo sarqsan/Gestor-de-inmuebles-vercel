@@ -65,29 +65,36 @@ describe('app real: un proyecto incompatible no derriba HTTP ni permite operacio
     for (const secreto of secretos) expect(JSON.stringify(json)).not.toContain(secreto);
   });
 
-  it('las rutas independientes de documentos siguen atendiendo sus validaciones', async () => {
+  it('AG-04: el almacén temporal de documentos está retirado — ninguna ruta acepta ni sirve binarios (410 explícito)', async () => {
     const descarga = await fetchHttp(`${base}/api/documents/no-existe-prueba`);
-    expect(descarga.status).toBe(404);
-    const carga = await fetchHttp(`${base}/api/upload-document`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
-    });
-    expect(carga.status).toBe(400);
-  });
+    expect(descarga.status).toBe(410);
+    expect(await descarga.json()).toMatchObject({ ok: false, codigo: 'ALMACEN_TEMPORAL_RETIRADO' });
 
-  it('carga y descarga un documento sintético en memoria sin Firebase', async () => {
     const texto = 'Documento sintetico de prueba local';
     const carga = await fetchHttp(`${base}/api/upload-document`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileBase64: Buffer.from(texto).toString('base64'), filename: 'prueba.txt', mimeType: 'text/plain' }),
     });
-    expect(carga.status).toBe(200);
+    expect(carga.status).toBe(410);
     const json = await carga.json();
-    expect(json.success).toBe(true);
-    const descarga = await fetchHttp(`${base}${json.url}`);
-    expect(descarga.status).toBe(200);
-    expect(await descarga.text()).toBe(texto);
+    expect(json).toMatchObject({ ok: false, codigo: 'ALMACEN_TEMPORAL_RETIRADO' });
+    // Nunca vuelve a fabricarse una referencia `server_*` ni una URL de capacidad.
+    expect(json.url).toBeUndefined();
+    expect(json.storagePath).toBeUndefined();
+    expect(json.success).toBeUndefined();
     expect(acceso).not.toHaveBeenCalled();
     expect(llamadasGoogle).not.toHaveBeenCalled();
+  });
+
+  it('AG-04: el análisis IA sólo descarga documentos desde el host oficial de Storage (nunca es un proxy genérico)', async () => {
+    const { esUrlDescargaStorageFirebase } = await import('../server');
+    expect(esUrlDescargaStorageFirebase('https://firebasestorage.googleapis.com/v0/b/bucket/o/x.pdf?alt=media&token=t')).toBe(true);
+    expect(esUrlDescargaStorageFirebase('https://storage.googleapis.com/bucket/x.pdf')).toBe(true);
+    expect(esUrlDescargaStorageFirebase('http://firebasestorage.googleapis.com/v0/b/bucket/o/x.pdf')).toBe(false);
+    expect(esUrlDescargaStorageFirebase('https://evil.example/firebasestorage.googleapis.com/x.pdf')).toBe(false);
+    expect(esUrlDescargaStorageFirebase('https://169.254.169.254/latest/meta-data/')).toBe(false);
+    expect(esUrlDescargaStorageFirebase('/api/documents/doc_0000')).toBe(false);
+    expect(esUrlDescargaStorageFirebase(undefined)).toBe(false);
   });
 
   it.each(OPERACIONES_IA)('$ruta rechaza antes del manejador, incluso con token e idempotencia', async ({ ruta }) => {

@@ -65,7 +65,9 @@ React 19 / TypeScript / Vite — App.tsx, navegación, secciones, portales
        ├─ 11 operaciones IA → server/ia (ID token, idempotencia, registro,
        │                     política de uso; Gemini solo si autorizado/configurado)
        ├─ Catastro (OVC público) / búsqueda de titulares (REST Google con cuenta de servicio)
-       ├─ documentos efímeros por URL de capacidad (RAM; NO Storage)
+       ├─ (retirado 2026-10-20 · ORDEN 1 AG-04) almacén efímero de documentos:
+       │   /api/upload-document y /api/documents/:id responden 410; los
+       │   clientes suben directamente a Storage o fallan de forma explícita
        └─ notificaciones (resolver sin verificador, repositorio RAM)
 ```
 
@@ -2154,9 +2156,11 @@ mezclarse nunca:
     colecciones de morosidad/histórico; adicionalmente `registros_patrimoniales`
     y `gestiones_cartera` con update/delete reservados al master, y
     `propietarios`/`inmuebles` con delete sólo master.
-  - `documentosServidor.ts` es un almacén **efímero en memoria** del proceso
-    de servicio (sin imports de Firebase): su TTL interno no afecta a la
-    persistencia de Firestore/Storage.
+  - `documentosServidor.ts` (almacén **efímero en memoria** del proceso de
+    servicio) fue **retirado el 2026-10-20** (ORDEN 1 · AG-04): producía
+    pérdida de binarios con apariencia de éxito. Las referencias `server_*`
+    heredadas no tienen binario; ver
+    `docs/ORDEN-1-CUSTODIA-DOCUMENTAL-AG03-AG04-2026-10-20.md`.
 - 🟡 **CUSTODIA/RETENCIÓN DE INFRAESTRUCTURA GCP A LARGO PLAZO**
   (dependencia operativa futura): la conservación **física** a 5+ años depende
   de la administración del proyecto Firebase/GCP (ciclo de vida del bucket de

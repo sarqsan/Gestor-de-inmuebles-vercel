@@ -7,6 +7,8 @@ on:
   push:
     branches:
       - arena/b18a36de-gestor-de-inmuebles-vercel
+      # AG-03.3: aceptación en emuladores oficiales de la rama de la sesión (sin secretos ni despliegue).
+      - arena/8ed3381d-gestor-de-inmuebles-vercel
   workflow_dispatch:
 
 permissions:
@@ -38,6 +40,20 @@ jobs:
       - name: Suite de reglas contra los emuladores oficiales de Firestore y Storage
         id: emulador
         run: npm run test:emulador:reglas
+
+      # AG-03.3: resultados legibles sin descargar el log (anotaciones del check-run + resumen + artefacto).
+      - name: Resultados legibles (anotaciones y resumen)
+        if: always()
+        run: node scripts/ci/resumen-resultados-vitest.mjs emulador-resultados.json emulador
+
+      - name: Artefacto con los resultados del emulador
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulador-resultados
+          path: emulador-resultados.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Resumen para la pull request
         if: always() && github.event_name == 'pull_request'
@@ -98,6 +114,20 @@ jobs:
       - name: Suite completa (vitest, sin la guardia A-04 de sandbox)
         id: suite
         run: npx vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=default --reporter=json --outputFile.json=vitest-resultados.json
+
+      # AG-03.3: resultados legibles sin descargar el log (anotaciones del check-run + resumen + artefacto).
+      - name: Resultados legibles (anotaciones y resumen)
+        if: always()
+        run: node scripts/ci/resumen-resultados-vitest.mjs vitest-resultados.json suite-completa
+
+      - name: Artefacto con los resultados de la suite
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-resultados
+          path: vitest-resultados.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Resumen de la suite para la pull request
         if: always() && github.event_name == 'pull_request'

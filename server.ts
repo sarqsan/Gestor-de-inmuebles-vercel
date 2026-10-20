@@ -17,19 +17,6 @@ import { crearFuentePerfilFirestore } from './server/notificaciones/perfilUsuari
 import { ejecutarRelojAvisos } from './server/notificaciones/relojAvisos.js';
 import { montarRutaCronAvisos } from './server/notificaciones/rutasCronAvisos.js';
 import { montarRutaPruebaSmtp } from './server/notificaciones/rutaPruebaSmtp.js';
-// Auditoría de acceso a documentos (2026-09-22): id inenumerable, tipos de
-// contenido seguros, cabeceras anti-caché y almacén acotado para los documentos
-// que sirve este propio servidor (fuera del alcance de las reglas de Storage).
-import {
-  AlmacenDocumentosEfimeros,
-  cabecerasDocumento,
-  decodificarBase64Documento,
-  generarIdDocumento,
-  idDeDocumentoValido,
-  nombreMostrable,
-  normalizarTipoContenido,
-} from './src/lib/documentosServidor.js';
-import type { DocumentoAlmacenado } from './src/lib/documentosServidor';
 import { idempotenciaDeEvento } from './src/types/notificaciones.js';
 import { construirPromptAsistente, normalizarCuerpoInterpretar, parsearRespuestaModelo } from './src/experiencia/proveedorGemini.js';
 import { crearLimitadorVentana } from './src/experiencia/limites.js';
@@ -66,6 +53,8 @@ import { crearServicioJustificantesCobro } from './server/cobros/justificantesCo
 import { montarRutasJustificantesCobro } from './server/cobros/rutasJustificantesCobro.js';
 import { crearServicioActualizacionRenta } from './server/actualizacionRenta/servicioActualizacionRenta.js';
 import { montarRutasActualizacionRenta } from './server/actualizacionRenta/rutasActualizacionRenta.js';
+import { crearServicioDocumentos } from './server/documentos/servicioDocumentos.js';
+import { montarRutasDocumentos } from './server/documentos/rutasDocumentos.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -168,90 +157,61 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ---------------------------------------------------------------------------
-// Almacén EFÍMERO y ACOTADO de los documentos que sirve esta ruta. NO es
-// Firebase Storage (las reglas de Storage no aplican aquí): la única defensa es
-// un id inenumerable, tipos de contenido seguros y cabeceras anti-caché.
-// Justificación y hallazgos: src/lib/documentosServidor.ts y
-// docs/AUDITORIA-SEGURIDAD-STORAGE-DOCUMENTOS-2026-09-22.md.
-// Se conserva la semántica original: el documento ya era volátil (se perdía al
-// reiniciar el proceso) y seguía sirviéndose por URL de capacidad.
+// ALMACÉN TEMPORAL DE DOCUMENTOS — RETIRADO (AG-04 · 2026-10-20)
+// Hasta esta fecha `/api/upload-document` guardaba el binario en la RAM de la
+// función (sin autenticación) y `/api/documents/:fileId` lo servía por URL de
+// capacidad. En Vercel cada reciclado de la función vaciaba el almacén: los
+// registros con referencia `server_*` perdían el documento con apariencia de
+// éxito. Los clientes ya no usan estas rutas (suben directamente a Firebase
+// Storage o fallan de forma explícita). Se mantienen las rutas SOLO para que
+// cualquier cliente antiguo o referencia heredada reciba un error inequívoco en
+// lugar de un 404 ambiguo: nunca se vuelve a aceptar ni servir un binario aquí.
 // ---------------------------------------------------------------------------
-const documentsStore = new AlmacenDocumentosEfimeros();
+export const AVISO_ALMACEN_TEMPORAL_RETIRADO =
+  'El almacén temporal de documentos se retiró el 2026-10-20: ningún documento se custodia en el servidor. '
+  + 'Adjunta de nuevo el documento desde la aplicación para guardarlo de forma duradera.';
 
-// Endpoint to upload and store documents reliably
-app.post('/api/upload-document', async (req, res) => {
+function responderAlmacenTemporalRetirado(res: express.Response) {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(410).json({
+    ok: false,
+    codigo: 'ALMACEN_TEMPORAL_RETIRADO',
+    error: AVISO_ALMACEN_TEMPORAL_RETIRADO,
+  });
+}
+
+app.post('/api/upload-document', (_req, res) => responderAlmacenTemporalRetirado(res));
+app.get('/api/documents/:fileId', (_req, res) => responderAlmacenTemporalRetirado(res));
+
+/**
+ * Descarga el contenido de un documento custodiado en Firebase Storage a
+ * partir de su URL de descarga (capability URL). Sólo admite el host oficial
+ * de Storage (no es un proxy genérico) y acota el tamaño.
+ */
+const HOSTS_STORAGE_FIREBASE = new Set(['firebasestorage.googleapis.com', 'storage.googleapis.com']);
+const MAX_BYTES_DOCUMENTO_ANALISIS = 15 * 1024 * 1024;
+
+export function esUrlDescargaStorageFirebase(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
   try {
-    const { fileBase64, filename, mimeType, itemId, solicitudId } = req.body;
-
-    // S-4: nada de `Buffer.from` a ciegas sobre una cadena arbitraria ni de
-    // reservar memoria sin límite: se valida la forma y el tamaño primero.
-    const decodificado = decodificarBase64Documento(fileBase64);
-    if (!decodificado.ok) {
-      return res.status(400).json({ error: decodificado.error || 'Documento no válido' });
-    }
-    const buffer = decodificado.buffer as Buffer;
-    // S-1: el Content-Type declarado por el cliente no se sirve tal cual.
-    const { tipo, permitirInline } = normalizarTipoContenido(mimeType, filename);
-    const safeFilename = nombreMostrable(filename || (tipo === 'application/pdf' ? 'documento.pdf' : 'documento'));
-
-    // S-3: 128 bits criptográficos en lugar de fecha + Math.random(): un id
-    //      basado en el reloj y en un generador predecible era enumerable a fuerza bruto.
-    const fileId = generarIdDocumento();
-
-    const guardado = documentsStore.set(fileId, {
-      buffer,
-      mimeType: tipo,
-      filename: safeFilename,
-      uploadedAt: new Date().toISOString(),
-      permitirInline,
-      bytes: buffer.length,
-    });
-    if (!guardado.ok) {
-      // El cliente degrada con elegancia: intenta Firebase Storage y si no, vista local.
-      return res
-        .status(503)
-        .json({ error: `Almacén de documentos no disponible (${guardado.motivo}). Reintenta en unos minutos.` });
-    }
-
-    const fileUrl = `/api/documents/${fileId}`;
-
-    return res.json({
-      success: true,
-      fileId,
-      url: fileUrl,
-      downloadURL: fileUrl,
-      storagePath: `server_${fileId}`,
-      filename: safeFilename,
-      mimeType: tipo,
-      size: buffer.length,
-    });
-  } catch (err: any) {
-    console.error('Error saving document in /api/upload-document:', err);
-    return res.status(500).json({ error: 'Error procesando el documento.' });
+    const u = new URL(url);
+    return u.protocol === 'https:' && HOSTS_STORAGE_FIREBASE.has(u.hostname);
+  } catch {
+    return false;
   }
-});
+}
 
-// Endpoint to retrieve and display stored documents.
-// Documentación PRIVADA: se sirve a quien posee la URL de capacidad, nunca a
-// cachés compartidos (S-2) y nunca con un tipo que el navegador pueda ejecutar
-// desde el origen de la aplicación (S-1).
-app.get('/api/documents/:fileId', (req, res) => {
-  const { fileId } = req.params;
-  // S-3bis: forma estricta del identificador (sondeos y rutas arbitrarias → 404).
-  if (!idDeDocumentoValido(fileId)) {
-    return res.status(404).send('Documento no encontrado.');
-  }
-  const item = documentsStore.get(fileId);
-  if (!item) {
-    return res.status(404).send('Documento no encontrado o sesión expirada.');
-  }
-
-  const cabeceras = cabecerasDocumento(item.mimeType, item.permitirInline === true, item.filename);
-  for (const [cabecera, valor] of Object.entries(cabeceras)) {
-    res.setHeader(cabecera, valor);
-  }
-  res.send(item.buffer);
-});
+async function descargarDocumentoCustodiado(url: string): Promise<{ base64: string; mimeType: string } | null> {
+  if (!esUrlDescargaStorageFirebase(url)) return null;
+  const resp = await fetch(url);
+  if (!resp.ok) return null;
+  const declarado = Number(resp.headers.get('content-length') || 0);
+  if (declarado > MAX_BYTES_DOCUMENTO_ANALISIS) return null;
+  const arrayBuf = await resp.arrayBuffer();
+  if (arrayBuf.byteLength > MAX_BYTES_DOCUMENTO_ANALISIS) return null;
+  const mimeType = (resp.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
+  return { base64: Buffer.from(arrayBuf).toString('base64'), mimeType };
+}
 
 // ---------------------------------------------------------------------------
 // IA · FASE 1 — NÚCLEO DE IA CENTRALIZADO (server/ia/nucleoIA.ts)
@@ -302,6 +262,13 @@ const servicioJustificantesCobro = dependenciasIA.firestore && dependenciasIA.st
   ? crearServicioJustificantesCobro({ puerto: dependenciasIA.firestore, almacen: dependenciasIA.storage })
   : null;
 
+// AG-03.2 — custodia documental autorizada en servidor contra la base Firestore
+// con nombre (las reglas de Storage no pueden leerla). Sin Firestore o Storage/IAM
+// las rutas responden 503: ningún documento se acepta en memoria ni se finge.
+const servicioDocumentos = dependenciasIA.firestore && dependenciasIA.storage
+  ? crearServicioDocumentos({ puerto: dependenciasIA.firestore, almacen: dependenciasIA.storage })
+  : null;
+
 // P4 · preview + confirmación explícita del actor autorizado. Las mutaciones se
 // escriben en un commit Firestore atómico, idempotente y append-only en colecciones
 // propias; el aviso queda PENDIENTE_ENVIO. No se conecta al cron ni a transportes,
@@ -317,25 +284,25 @@ app.post('/api/analizar-documento', nucleoIA.operacion('ANALIZAR_DOCUMENTO'), as
     let rawBase64 = '';
     let docMime = mimeType || 'application/pdf';
 
-    // Check if document was uploaded via /api/documents/:fileId
-    if (documentUrl && documentUrl.startsWith('/api/documents/')) {
-      const fileId = documentUrl.replace('/api/documents/', '');
-      const stored = documentsStore.get(fileId);
-      if (stored) {
-        rawBase64 = stored.buffer.toString('base64');
-        docMime = stored.mimeType || docMime;
-      }
-    } else if (documentBase64 && documentBase64.startsWith('/api/documents/')) {
-      const fileId = documentBase64.replace('/api/documents/', '');
-      const stored = documentsStore.get(fileId);
-      if (stored) {
-        rawBase64 = stored.buffer.toString('base64');
-        docMime = stored.mimeType || docMime;
-      }
-    } else if (documentBase64) {
+    const referenciaAlmacenRetirado = (valor: unknown) =>
+      typeof valor === 'string' && valor.startsWith('/api/documents/');
+
+    if (referenciaAlmacenRetirado(documentUrl) || referenciaAlmacenRetirado(documentBase64)) {
+      // AG-04: la referencia apunta al almacén temporal retirado; el binario no existe.
+      return res.status(410).json({ codigo: 'ALMACEN_TEMPORAL_RETIRADO', error: AVISO_ALMACEN_TEMPORAL_RETIRADO });
+    }
+
+    if (documentBase64 && typeof documentBase64 === 'string' && !documentBase64.startsWith('http')) {
       rawBase64 = documentBase64;
       if (documentBase64.includes(';base64,')) {
         rawBase64 = documentBase64.split(';base64,')[1];
+      }
+    } else if (esUrlDescargaStorageFirebase(documentUrl)) {
+      // Documento custodiado en Firebase Storage: se descarga por su URL de descarga.
+      const descargado = await descargarDocumentoCustodiado(documentUrl);
+      if (descargado) {
+        rawBase64 = descargado.base64;
+        if (!mimeType) docMime = descargado.mimeType;
       }
     }
 
@@ -1549,11 +1516,9 @@ async function resolverImagenFoto(item: any): Promise<{ data: string; mimeType: 
     if (b64.includes(';base64,')) b64 = b64.split(';base64,')[1];
     if (b64) return { data: b64, mimeType: item.mimeType || 'image/jpeg' };
   }
-  // 2) Documento servido por esta misma función (almacén en memoria)
+  // 2) Referencia al almacén temporal retirado (AG-04): el binario no existe.
   const url: string = item?.imageUrl || '';
   if (url.startsWith('/api/documents/')) {
-    const stored = documentsStore.get(url.replace('/api/documents/', ''));
-    if (stored) return { data: stored.buffer.toString('base64'), mimeType: stored.mimeType };
     return null;
   }
   // 3) URL remota (p. ej. downloadURL firmada de Firebase Storage). El
@@ -2783,6 +2748,11 @@ montarRutasJustificantesCobro(app, {
 montarRutasActualizacionRenta(app, {
   verificarToken: dependenciasIA.verificarToken,
   servicio: servicioActualizacionRenta,
+});
+
+montarRutasDocumentos(app, {
+  verificarToken: dependenciasIA.verificarToken,
+  servicio: servicioDocumentos,
 });
 
 montarRutasAdminIA(app, {

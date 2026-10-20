@@ -7,8 +7,10 @@
  *      `documentosProfesionalesFirebase.ts` con Firestore/Storage en memoria.
  *      Prueba la LÓGICA (no hay éxito ficticio, estados, auditoría); NO
  *      certifica almacenamiento ni autorización real.
- *  C · REGLAS DE STORAGE con el intérprete local (tests/helpers/
- *      evaluadorReglasStorage.ts) sobre el TEXTO REAL de storage.rules.
+ *  C · AUTORIZACIÓN DOCUMENTAL DEL SERVIDOR (AG-03.2: la decisión ya no vive
+ *      en storage.rules, que sólo puede leer la base `(default)`; se evalúa el
+ *      autorizador real `server/documentos/autorizacionDocumental.ts` con el
+ *      harness tests/helpers/autorizacionDocumentalHarness.ts).
  *  D · REGLAS DE FIRESTORE con el intérprete local (tests/harness/
  *      firestoreRulesEval.ts) sobre el TEXTO REAL de firestore.rules.
  * La certificación con los emuladores oficiales (Auth + Firestore + Storage)
@@ -20,7 +22,8 @@ import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// B · DOBLES de firebase/firestore y firebase/storage (sólo para la sección B).
+// B · DOBLES de firebase/firestore y del motor de almacén mediado por el
+//     servidor (`custodiaDocumental/almacenServidor`, AG-03.2) — sólo sección B.
 // ---------------------------------------------------------------------------
 const mem = vi.hoisted(() => ({
   firestore: new Map<string, Record<string, unknown>>(),
@@ -60,12 +63,17 @@ vi.mock('firebase/firestore', () => {
   };
 });
 
-vi.mock('firebase/storage', () => ({
-  ref: (_s: unknown, path: string) => ({ path }),
+vi.mock('../src/lib/custodiaDocumental/almacenServidor', () => ({
+  ref: (_s: unknown, path: string) => ({ path, fullPath: path }),
   uploadBytes: async (r: { path: string }, bytes: Uint8Array, meta: { contentType?: string; customMetadata?: Record<string, string> }) => {
     if (mem.storageCaido) throw Object.assign(new Error('Storage no disponible'), { code: 'storage/retry-limit-exceeded' });
     mem.storage.set(r.path, { bytes: new Uint8Array(bytes), contentType: meta.contentType, customMetadata: meta.customMetadata });
-    return {};
+    return { ref: r, metadata: { fullPath: r.path, size: bytes.byteLength, contentType: meta.contentType, customMetadata: meta.customMetadata || {} }, yaExistia: false };
+  },
+  getMetadata: async (r: { path: string }) => {
+    const obj = mem.storage.get(r.path);
+    if (!obj) throw Object.assign(new Error('not-found'), { code: 'storage/object-not-found' });
+    return { fullPath: r.path, size: obj.bytes.byteLength, contentType: obj.contentType, customMetadata: obj.customMetadata || {} };
   },
   getBytes: async (r: { path: string }) => {
     const obj = mem.storage.get(r.path);
@@ -87,12 +95,14 @@ import {
   validarTransicionDocumentoProfesional,
 } from '../src/lib/expedienteDocumental/documentosProfesionales';
 import { crearAdaptadorDocumentosProfesionales } from '../src/lib/expedienteDocumental/documentosProfesionalesFirebase';
-import { permitido, parsearReglas, type ContextoPeticion, type Metodo } from './helpers/evaluadorReglasStorage';
+import { EMAIL_MASTER } from '../server/titularidades/backendTitulares';
+import { permiteServidor, type PeticionServidor, type RecursoEntrante, type Verbo } from './helpers/autorizacionDocumentalHarness';
+/** Verbos de reglas Firestore (misma forma que los del autorizador documental). */
+type Metodo = Verbo;
 import { crearEvaluadorReglas, type Peticion } from './harness/firestoreRulesEval';
 import { completarPerfilesSinteticos } from './harness/perfilesSinteticos';
 
 const RAIZ = resolve(__dirname, '..');
-const STORAGE_RULES = readFileSync(resolve(RAIZ, 'storage.rules'), 'utf8');
 const FIRESTORE_RULES = readFileSync(resolve(RAIZ, 'firestore.rules'), 'utf8');
 const sha = (texto: string | Uint8Array) => createHash('sha256').update(texto).digest('hex');
 
@@ -232,10 +242,9 @@ describe('B · adaptador de documentos profesionales con DOBLES en memoria (lóg
 });
 
 // ===========================================================================
-// C · STORAGE RULES (intérprete local sobre el texto real)
+// C · AUTORIZACIÓN DEL SERVIDOR (autorizador real con mini-base en memoria)
 // ===========================================================================
-describe('C · storage.rules — profesionales/{id}/documentos/{docId}/{fichero} (intérprete local)', () => {
-  const REGLAS = parsearReglas(STORAGE_RULES);
+describe('C · autorización del servidor — profesionales/{id}/documentos/{docId}/{fichero}', () => {
   const H = 'c'.repeat(64);
   const DOC_P = `dpr_${'1'.repeat(64)}`; // PENDIENTE_STORAGE
   const DOC_D = `dpr_${'2'.repeat(64)}`; // DISPONIBLE
@@ -262,69 +271,69 @@ describe('C · storage.rules — profesionales/{id}/documentos/{docId}/{fichero}
     [`profesionales/PRO_1/documentos_profesionales/${DOC_E}`]: meta('PRO_1', DOC_E, 'PENDIENTE_ELIMINACION'),
     [`profesionales/PRO_CAT/documentos_profesionales/${DOC_CAT}`]: meta('PRO_CAT', DOC_CAT, 'DISPONIBLE'),
   };
-  const AUTH: Record<string, ContextoPeticion['auth']> = {
+  const AUTH: Record<string, PeticionServidor['auth']> = {
     anonimo: null,
-    admin: { uid: 'uid_admin', token: { email: 'sarqsan2@gmail.com', email_verified: true } },
+    admin: { uid: 'uid_admin', token: { email: EMAIL_MASTER, email_verified: true } },
     titularA: { uid: 'uid_a', token: {} }, titularB: { uid: 'uid_b', token: {} },
     gestorL: { uid: 'uid_l', token: {} }, gestorE: { uid: 'uid_e', token: {} },
     prof1: { uid: 'uid_p1', token: {} }, prof2: { uid: 'uid_p2', token: {} },
     bloqueado: { uid: 'uid_bloq', token: {} }, sinEspejo: { uid: 'uid_x', token: {} },
   };
-  const puede = (actor: string, metodo: Metodo, r: string, resource?: ContextoPeticion['resource']) =>
-    permitido(REGLAS, r, metodo, { auth: AUTH[actor], firestore: FS, resource });
-  const carga = (prof: string, id: string, extra: Partial<NonNullable<ContextoPeticion['resource']>> = {}) => ({
+  const puede = (actor: string, metodo: Verbo, r: string, resource?: RecursoEntrante) =>
+    permiteServidor(metodo, { auth: AUTH[actor], db: FS, path: r, metadata: resource ?? null });
+  const carga = (prof: string, id: string, extra: Partial<RecursoEntrante> = {}): RecursoEntrante => ({
     name: ruta(prof, id), size: 2048, contentType: 'application/pdf',
     metadata: { documentoId: id, profesionalId: prof, sha256: H }, ...extra,
   });
 
-  it('subida PERMITIDA: titular de la cartera, gestor E, el propio profesional y administración', () => {
-    for (const actor of ['titularA', 'gestorE', 'prof1', 'admin']) expect(puede(actor, 'create', ruta('PRO_1', DOC_P), carga('PRO_1', DOC_P)), actor).toBe(true);
+  it('subida PERMITIDA: titular de la cartera, gestor E, el propio profesional y administración', async () => {
+    for (const actor of ['titularA', 'gestorE', 'prof1', 'admin']) expect(await puede(actor, 'create', ruta('PRO_1', DOC_P), carga('PRO_1', DOC_P)), actor).toBe(true);
   });
 
-  it('subida DENEGADA: otra cartera, lector L, otro profesional, bloqueado, sin espejo, anónimo', () => {
+  it('subida DENEGADA: otra cartera, lector L, otro profesional, bloqueado, sin espejo, anónimo', async () => {
     for (const actor of ['titularB', 'gestorL', 'prof2', 'bloqueado', 'sinEspejo', 'anonimo']) {
-      expect(puede(actor, 'create', ruta('PRO_1', DOC_P), carga('PRO_1', DOC_P)), actor).toBe(false);
+      expect(await puede(actor, 'create', ruta('PRO_1', DOC_P), carga('PRO_1', DOC_P)), actor).toBe(false);
     }
   });
 
-  it('subida DENEGADA si el objeto no coincide con su metadato (huella, tamaño, MIME, vínculo, estado, ruta)', () => {
+  it('subida DENEGADA si el objeto no coincide con su metadato (huella, tamaño, MIME, vínculo, estado, ruta)', async () => {
     const r = ruta('PRO_1', DOC_P);
-    expect(puede('titularA', 'create', r, carga('PRO_1', DOC_P, { size: 2049 }))).toBe(false);
-    expect(puede('titularA', 'create', r, carga('PRO_1', DOC_P, { contentType: 'image/png' }))).toBe(false);
-    expect(puede('titularA', 'create', r, carga('PRO_1', DOC_P, { metadata: { documentoId: DOC_P, profesionalId: 'PRO_1', sha256: 'd'.repeat(64) } }))).toBe(false);
-    expect(puede('titularA', 'create', r, carga('PRO_1', DOC_P, { metadata: { documentoId: DOC_P, profesionalId: 'PRO_2', sha256: H } }))).toBe(false);
+    expect(await puede('titularA', 'create', r, carga('PRO_1', DOC_P, { size: 2049 }))).toBe(false);
+    expect(await puede('titularA', 'create', r, carga('PRO_1', DOC_P, { contentType: 'image/png' }))).toBe(false);
+    expect(await puede('titularA', 'create', r, carga('PRO_1', DOC_P, { metadata: { documentoId: DOC_P, profesionalId: 'PRO_1', sha256: 'd'.repeat(64) } }))).toBe(false);
+    expect(await puede('titularA', 'create', r, carga('PRO_1', DOC_P, { metadata: { documentoId: DOC_P, profesionalId: 'PRO_2', sha256: H } }))).toBe(false);
     // sustitución del binario de un documento ya DISPONIBLE: denegada
-    expect(puede('titularA', 'create', ruta('PRO_1', DOC_D), carga('PRO_1', DOC_D))).toBe(false);
+    expect(await puede('titularA', 'create', ruta('PRO_1', DOC_D), carga('PRO_1', DOC_D))).toBe(false);
     // vincular el archivo bajo OTRO profesional reutilizando el metadato: denegado
-    expect(puede('titularA', 'create', ruta('PRO_2', DOC_P), carga('PRO_2', DOC_P))).toBe(false);
+    expect(await puede('titularA', 'create', ruta('PRO_2', DOC_P), carga('PRO_2', DOC_P))).toBe(false);
     // otro nombre de fichero bajo el mismo documento: denegado
-    expect(puede('titularA', 'create', `profesionales/PRO_1/documentos/${DOC_P}/otro.pdf`, carga('PRO_1', DOC_P, { name: `profesionales/PRO_1/documentos/${DOC_P}/otro.pdf` }))).toBe(false);
+    expect(await puede('titularA', 'create', `profesionales/PRO_1/documentos/${DOC_P}/otro.pdf`, carga('PRO_1', DOC_P, { name: `profesionales/PRO_1/documentos/${DOC_P}/otro.pdf` }))).toBe(false);
   });
 
-  it('lectura/descarga: titular, L, E, el profesional y admin sí; otra cartera, otro profesional y anónimo no; nunca si no está DISPONIBLE', () => {
-    for (const actor of ['titularA', 'gestorL', 'gestorE', 'prof1', 'admin']) expect(puede(actor, 'get', ruta('PRO_1', DOC_D)), actor).toBe(true);
-    for (const actor of ['titularB', 'prof2', 'bloqueado', 'sinEspejo', 'anonimo']) expect(puede(actor, 'get', ruta('PRO_1', DOC_D)), actor).toBe(false);
-    expect(puede('titularA', 'get', ruta('PRO_1', DOC_P))).toBe(false);
-    expect(puede('admin', 'get', ruta('PRO_1', DOC_E))).toBe(false);
-    for (const actor of ['titularA', 'admin']) expect(puede(actor, 'list', ruta('PRO_1', DOC_D)), actor).toBe(false);
+  it('lectura/descarga: titular, L, E, el profesional y admin sí; otra cartera, otro profesional y anónimo no; nunca si no está DISPONIBLE', async () => {
+    for (const actor of ['titularA', 'gestorL', 'gestorE', 'prof1', 'admin']) expect(await puede(actor, 'get', ruta('PRO_1', DOC_D)), actor).toBe(true);
+    for (const actor of ['titularB', 'prof2', 'bloqueado', 'sinEspejo', 'anonimo']) expect(await puede(actor, 'get', ruta('PRO_1', DOC_D)), actor).toBe(false);
+    expect(await puede('titularA', 'get', ruta('PRO_1', DOC_P))).toBe(false);
+    expect(await puede('admin', 'get', ruta('PRO_1', DOC_E))).toBe(false);
+    for (const actor of ['titularA', 'admin']) expect(await puede(actor, 'list', ruta('PRO_1', DOC_D)), actor).toBe(false);
   });
 
-  it('profesional de catálogo (sin cartera): sólo él y administración leen; ningún titular', () => {
-    expect(puede('admin', 'get', ruta('PRO_CAT', DOC_CAT))).toBe(true);
-    for (const actor of ['titularA', 'titularB', 'gestorE', 'prof1']) expect(puede(actor, 'get', ruta('PRO_CAT', DOC_CAT)), actor).toBe(false);
+  it('profesional de catálogo (sin cartera): sólo él y administración leen; ningún titular', async () => {
+    expect(await puede('admin', 'get', ruta('PRO_CAT', DOC_CAT))).toBe(true);
+    for (const actor of ['titularA', 'titularB', 'gestorE', 'prof1']) expect(await puede(actor, 'get', ruta('PRO_CAT', DOC_CAT)), actor).toBe(false);
   });
 
-  it('update siempre denegado; borrado sólo titular/admin y sólo PENDIENTE_ELIMINACION', () => {
-    for (const actor of ['titularA', 'admin', 'prof1']) expect(puede(actor, 'update', ruta('PRO_1', DOC_D), carga('PRO_1', DOC_D)), actor).toBe(false);
-    expect(puede('titularA', 'delete', ruta('PRO_1', DOC_E))).toBe(true);
-    expect(puede('admin', 'delete', ruta('PRO_1', DOC_E))).toBe(true);
-    for (const actor of ['gestorE', 'prof1', 'titularB', 'anonimo']) expect(puede(actor, 'delete', ruta('PRO_1', DOC_E)), actor).toBe(false);
-    expect(puede('titularA', 'delete', ruta('PRO_1', DOC_D))).toBe(false);
+  it('update siempre denegado; borrado sólo titular/admin y sólo PENDIENTE_ELIMINACION', async () => {
+    for (const actor of ['titularA', 'admin', 'prof1']) expect(await puede(actor, 'update', ruta('PRO_1', DOC_D), carga('PRO_1', DOC_D)), actor).toBe(false);
+    expect(await puede('titularA', 'delete', ruta('PRO_1', DOC_E))).toBe(true);
+    expect(await puede('admin', 'delete', ruta('PRO_1', DOC_E))).toBe(true);
+    for (const actor of ['gestorE', 'prof1', 'titularB', 'anonimo']) expect(await puede(actor, 'delete', ruta('PRO_1', DOC_E)), actor).toBe(false);
+    expect(await puede('titularA', 'delete', ruta('PRO_1', DOC_D))).toBe(false);
   });
 
-  it('la ruta plana heredada sigue en la denegación por defecto', () => {
+  it('la ruta plana heredada sigue en la denegación por defecto', async () => {
     for (const actor of Object.keys(AUTH)) {
-      expect(puede(actor, 'create', 'profesionales/PRO_1/documentos/1_rc.pdf', { name: 'profesionales/PRO_1/documentos/1_rc.pdf', size: 10, contentType: 'application/pdf' }), actor).toBe(false);
+      expect(await puede(actor, 'create', 'profesionales/PRO_1/documentos/1_rc.pdf', { name: 'profesionales/PRO_1/documentos/1_rc.pdf', size: 10, contentType: 'application/pdf' }), actor).toBe(false);
     }
   });
 });

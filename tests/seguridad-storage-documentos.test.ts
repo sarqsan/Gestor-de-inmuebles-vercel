@@ -4,42 +4,41 @@
  * la canónica `c4cee78`. Documento: docs/AUDITORIA-SEGURIDAD-STORAGE-DOCUMENTOS-2026-09-22.md
  * ---------------------------------------------------------------------------
  * METODOLOGÍA (leer antes de dar por bueno ningún verde):
- *  · NO hay emulador de Firebase en este entorno (`firebase-tools`/Java no
- *    instalados, sin red). Las reglas se evalúan con un INTÉRPRETE PROPIO del
- *    subconjunto del lenguaje que usa `storage.rules`
- *    (tests/helpers/evaluadorReglasStorage.ts): parsea el texto real del
- *    fichero y decide cada operación con un contexto sintético (auth, documentos
- *    Firestore, recurso subido). Reproduce la semántica documentada (v2, OR de
- *    bloques solapados, `read`/`write` expandidos, error ⇒ denegado) pero NO es
- *    el motor de Google: la validación en emulador/proyecto queda PENDIENTE (NV).
- *  · `src/lib/documentosServidor.ts` (servidor de documentos de `server.ts`) sí
- *    se ejecuta de verdad.
- *  · Sección G: invariantes textuales mínimos (catch-all último, `server.ts`
- *    usa el módulo). No sustituyen a las secciones semánticas.
+ *  · 2026-10-20 (ORDEN AG-03.2): la decisión de acceso a documentos ya NO vive
+ *    en `storage.rules`. Las reglas de Storage sólo pueden consultar la base
+ *    Firestore `(default)`, que no forma parte de la arquitectura (la única
+ *    base es la base con nombre), así que toda regla con `firestore.get()`
+ *    denegaba a cualquier cuenta no maestra. La autorización se ejecuta en el
+ *    servidor (`server/documentos/autorizacionDocumental.ts`) con lecturas de
+ *    la base con nombre, y el navegador opera a través de `/api/documentos/*`.
+ *    Esta suite evalúa ESE autorizador real con una mini-base en memoria
+ *    (tests/helpers/autorizacionDocumentalHarness.ts). No es el motor de
+ *    Google ni el emulador: la aceptación con cuentas reales queda PENDIENTE.
+ *  · `storage.rules` queda reducido al catálogo público (`get` de
+ *    `inmuebles/{id}/{foto}`) y a la denegación total del resto: la sección G
+ *    lo comprueba sobre el texto real.
+ *  · `list`: la API del servidor no expone enumeración (ningún cliente usa
+ *    `listAll`); se deniega para TODOS, también para la administración.
+ *  · 2026-10-20 (ORDEN 1 · AG-04): el servidor de documentos efímero
+ *    (`src/lib/documentosServidor.ts`, `/api/upload-document`, `/api/documents/:id`)
+ *    se RETIRÓ: era un almacén en RAM de la función de Vercel que producía
+ *    pérdida de binarios con apariencia de éxito. La sección G comprueba que
+ *    `server.ts` ya no instancia ningún almacén y responde 410 en esas rutas.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { decidir, parsearReglas, permitido, type ContextoPeticion, type Metodo } from './helpers/evaluadorReglasStorage';
-import {
-  AlmacenDocumentosEfimeros,
-  MAX_BYTES_POR_DOCUMENTO,
-  cabecerasDocumento,
-  decodificarBase64Documento,
-  generarIdDocumento,
-  idDeDocumentoValido,
-  nombreMostrable,
-  normalizarTipoContenido,
-} from '../src/lib/documentosServidor';
+import { EMAIL_MASTER } from '../server/titularidades/backendTitulares';
+import { DESTINOS, esRutaSegura, resolverObjeto, validarContenido } from '../server/documentos/autorizacionDocumental';
+import { CLAVES_DESTINO, decidirEnServidor, permiteServidor, rutaEjemplo, type PeticionServidor, type RecursoEntrante, type Verbo } from './helpers/autorizacionDocumentalHarness';
 
 const raiz = (rel: string) => fileURLToPath(new URL(`../${rel}`, import.meta.url));
 const FUENTE = readFileSync(raiz('storage.rules'), 'utf8');
-const REGLAS = parsearReglas(FUENTE);
 
 // ---------------------------------------------------------------------------
 // Actores sintéticos
 // ---------------------------------------------------------------------------
-const ADMIN_EMAIL = 'sarqsan2@gmail.com';
+const ADMIN_EMAIL = EMAIL_MASTER;
 const DOC_PENDING_ID = `doc_${'a'.repeat(64)}`;
 const DOC_DELETE_ID = `doc_${'b'.repeat(64)}`;
 const DOC_AVAILABLE_ID = `doc_${'c'.repeat(64)}`;
@@ -55,8 +54,8 @@ const FS = {
   'usuarios/uid_propA': { tipoPerfil: 'PROPIETARIO', propietarioId: 'PROP_A' },
   'usuarios/uid_propB': { tipoPerfil: 'PROPIETARIO', propietarioId: 'PROP_B' },
   'usuarios/uid_prof': { tipoPerfil: 'PROFESIONAL' },
-  'usuarios/uid_inqA': { tipoPerfil: 'INQUILINO', contratoIds: ['CON_A'] },
-  'usuarios/uid_inqB': { tipoPerfil: 'INQUILINO', contratoIds: ['CON_B'] },
+  'usuarios/uid_inqA': { tipoPerfil: 'INQUILINO', estado: 'ACTIVO', authUid: 'uid_inqA', contratoIds: ['CON_A'] },
+  'usuarios/uid_inqB': { tipoPerfil: 'INQUILINO', estado: 'ACTIVO', authUid: 'uid_inqB', contratoIds: ['CON_B'] },
   'usuarios_auth/uid_propA': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'PROP_A', profesionalId: '', inmuebleIds: [] },
   'usuarios_auth/uid_propB': { tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', propietarioId: 'PROP_B', profesionalId: '', inmuebleIds: [] },
   'usuarios_auth/uid_managerL': { tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO', propietarioId: '', profesionalId: 'M_L', carterasL: ['PROP_A'] },
@@ -82,6 +81,9 @@ const FS = {
     id: DOC_DELETE_ID, inmuebleId: 'INM_A', propietarioId: 'PROP_A', estado: 'PENDIENTE_ELIMINACION',
     storagePath: STORAGE_DOC_DELETE, nombreStorage: 'factura.pdf', mimeType: 'application/pdf', tamanoBytes: 1024, sha256: 'b'.repeat(64),
   },
+  'solicitudes_documentacion/sol-1': { candidatoId: 'CAND_1', token: 'tok-sol-1-abcdef' },
+  'solicitudes_documentacion/sol-1758556800000': { candidatoId: 'CAND_1', token: 'tok-sol-ts-abcdef' },
+  'candidatos/CAND_1': { inmuebleId: 'INM_A' },
   'contratos_formalizacion/CON_A': { propietarioId: 'PROP_A', inmuebleId: 'INM_A' },
   'contratos_formalizacion/CON_B': { propietarioId: 'PROP_B' },
   'lecturas_suministro/LEC_A': { contratoId: 'CON_A' },
@@ -89,8 +91,12 @@ const FS = {
 
 type Actor = 'anonimo' | 'admin' | 'propietarioA' | 'propietarioB' | 'gestorL' | 'gestorE' | 'gestorParcial' | 'profesional' | 'inquilinoA' | 'inquilinoB' | 'autenticadoSinFicha';
 
-function ctx(actor: Actor, resource?: ContextoPeticion['resource']): ContextoPeticion {
-  const auth: Record<Actor, ContextoPeticion['auth']> = {
+type Recurso = RecursoEntrante & { name: string };
+const PORTAL = { solicitudDocId: 'sol-1', token: 'tok-sol-1-abcdef' };
+const TOKENS_PORTAL: Record<string, string> = { 'sol-1': 'tok-sol-1-abcdef', 'sol-1758556800000': 'tok-sol-ts-abcdef' };
+
+function ctx(actor: Actor, ruta: string, resource?: Recurso, publico?: PeticionServidor['publico']): PeticionServidor {
+  const auth: Record<Actor, PeticionServidor['auth']> = {
     anonimo: null,
     admin: { uid: 'uid_admin', token: { email: ADMIN_EMAIL, email_verified: true } },
     propietarioA: { uid: 'uid_propA', token: { email: 'a@example.com' } },
@@ -103,16 +109,26 @@ function ctx(actor: Actor, resource?: ContextoPeticion['resource']): ContextoPet
     inquilinoB: { uid: 'uid_inqB', token: { email: 'ib@example.com' } },
     autenticadoSinFicha: { uid: 'uid_sin_ficha', token: {} },
   };
-  return { auth: auth[actor], firestore: FS as unknown as Record<string, Record<string, unknown>>, resource };
+  return { auth: auth[actor], db: FS as unknown as Record<string, Record<string, unknown>>, path: ruta, metadata: resource ?? null, ...(publico ? { publico } : {}) };
 }
 
-const PDF = (name: string, size = 1024) => ({ name, size, contentType: 'application/pdf' });
-const JPG = (name: string, size = 1024) => ({ name, size, contentType: 'image/jpeg' });
+const PDF = (name: string, size = 1024): Recurso => ({ name, size, contentType: 'application/pdf' });
+const JPG = (name: string, size = 1024): Recurso => ({ name, size, contentType: 'image/jpeg' });
 const MB = 1024 * 1024;
 
-const puede = (actor: Actor, metodo: Metodo, ruta: string, recurso?: ContextoPeticion['resource']) =>
-  permitido(REGLAS, ruta, metodo, ctx(actor, recurso));
-const crea = (actor: Actor, recurso: NonNullable<ContextoPeticion['resource']>) => puede(actor, 'create', recurso.name, recurso);
+const puede = (actor: Actor, metodo: Verbo, ruta: string, recurso?: Recurso) =>
+  permiteServidor(metodo, ctx(actor, ruta, recurso));
+const crea = (actor: Actor, recurso: Recurso) => puede(actor, 'create', recurso.name, recurso);
+/** Portal de candidatos: subida con el token de la solicitud (sin sesión). */
+const creaPortal = (recurso: Recurso, publico: PeticionServidor['publico'] = PORTAL) =>
+  permiteServidor('create', ctx('anonimo', recurso.name, recurso, publico));
+const destinoDe = (ruta: string) => resolverObjeto(ruta)?.destino.clave ?? null;
+/** PDF si el destino lo admite; si sólo admite imagen, JPG (el tipo no debe decidir el ámbito). */
+function recursoAdmitido(ruta: string): Recurso {
+  const destino = resolverObjeto(ruta)?.destino;
+  if (destino && destino.contenido && !validarContenido(destino, 'application/pdf', 1024).permitido) return JPG(ruta);
+  return PDF(ruta);
+}
 
 const TODOS: Actor[] = ['anonimo', 'admin', 'propietarioA', 'propietarioB', 'profesional', 'inquilinoA', 'inquilinoB', 'autenticadoSinFicha'];
 const AUTENTICADOS: Actor[] = TODOS.filter((a) => a !== 'anonimo');
@@ -127,37 +143,37 @@ describe('BLOQUE 6 · documentos patrimoniales: path, metadata y aislamiento por
     metadata: { documentoId: DOC_PENDING_ID, inmuebleId: 'INM_A', sha256: 'a'.repeat(64) },
   };
 
-  it('sólo sube bajo metadata pendiente, MIME/tamaño iguales y titular/gestor con escritura del inmueble', () => {
-    expect(crea('propietarioA', carga)).toBe(true);
-    expect(crea('propietarioB', carga)).toBe(false);
-    expect(crea('anonimo', carga)).toBe(false);
-    expect(crea('propietarioA', { ...carga, size: 2048 })).toBe(false);
-    expect(crea('propietarioA', { ...carga, contentType: 'image/png' })).toBe(false);
-    expect(crea('propietarioA', { ...carga, metadata: { ...carga.metadata, inmuebleId: 'INM_B' } })).toBe(false);
+  it('sólo sube bajo metadata pendiente, MIME/tamaño iguales y titular/gestor con escritura del inmueble', async () => {
+    expect(await crea('propietarioA', carga)).toBe(true);
+    expect(await crea('propietarioB', carga)).toBe(false);
+    expect(await crea('anonimo', carga)).toBe(false);
+    expect(await crea('propietarioA', { ...carga, size: 2048 })).toBe(false);
+    expect(await crea('propietarioA', { ...carga, contentType: 'image/png' })).toBe(false);
+    expect(await crea('propietarioA', { ...carga, metadata: { ...carga.metadata, inmuebleId: 'INM_B' } })).toBe(false);
   });
 
-  it('honra carteras: L sólo lee, E escribe y los gestores no borran', () => {
-    expect(puede('gestorL', 'get', STORAGE_DOC_AVAILABLE)).toBe(true);
-    expect(crea('gestorL', carga)).toBe(false);
-    expect(crea('gestorE', carga)).toBe(true);
-    expect(puede('gestorE', 'delete', STORAGE_DOC_DELETE)).toBe(false);
+  it('honra carteras: L sólo lee, E escribe y los gestores no borran', async () => {
+    expect(await puede('gestorL', 'get', STORAGE_DOC_AVAILABLE)).toBe(true);
+    expect(await crea('gestorL', carga)).toBe(false);
+    expect(await crea('gestorE', carga)).toBe(true);
+    expect(await puede('gestorE', 'delete', STORAGE_DOC_DELETE)).toBe(false);
   });
 
-  it('descarga exige el ID referenciado en metadata disponible y acceso al inmueble; no admite enumerar Storage', () => {
-    expect(puede('propietarioA', 'get', STORAGE_DOC_AVAILABLE)).toBe(true);
-    expect(puede('propietarioB', 'get', STORAGE_DOC_AVAILABLE)).toBe(false);
-    expect(puede('anonimo', 'get', STORAGE_DOC_AVAILABLE)).toBe(false);
-    expect(puede('propietarioA', 'get', STORAGE_DOC_PENDING)).toBe(false);
-    expect(puede('propietarioA', 'get', 'inmuebles/INM_A/documentos_patrimoniales/doc_desconocido/factura.pdf')).toBe(false);
-    expect(puede('propietarioA', 'list', STORAGE_DOC_AVAILABLE)).toBe(false);
+  it('descarga exige el ID referenciado en metadata disponible y acceso al inmueble; no admite enumerar Storage', async () => {
+    expect(await puede('propietarioA', 'get', STORAGE_DOC_AVAILABLE)).toBe(true);
+    expect(await puede('propietarioB', 'get', STORAGE_DOC_AVAILABLE)).toBe(false);
+    expect(await puede('anonimo', 'get', STORAGE_DOC_AVAILABLE)).toBe(false);
+    expect(await puede('propietarioA', 'get', STORAGE_DOC_PENDING)).toBe(false);
+    expect(await puede('propietarioA', 'get', 'inmuebles/INM_A/documentos_patrimoniales/doc_desconocido/factura.pdf')).toBe(false);
+    expect(await puede('propietarioA', 'list', STORAGE_DOC_AVAILABLE)).toBe(false);
   });
 
-  it('sólo el titular/admin puede borrar el binario en estado PENDIENTE_ELIMINACION; nunca se actualiza ni se sobrescribe', () => {
-    expect(puede('propietarioA', 'delete', STORAGE_DOC_DELETE)).toBe(true);
-    expect(puede('propietarioB', 'delete', STORAGE_DOC_DELETE)).toBe(false);
-    expect(puede('profesional', 'delete', STORAGE_DOC_DELETE)).toBe(false);
-    expect(puede('propietarioA', 'update', STORAGE_DOC_AVAILABLE, PDF(STORAGE_DOC_AVAILABLE))).toBe(false);
-    expect(puede('propietarioA', 'delete', STORAGE_DOC_AVAILABLE)).toBe(false);
+  it('sólo el titular/admin puede borrar el binario en estado PENDIENTE_ELIMINACION; nunca se actualiza ni se sobrescribe', async () => {
+    expect(await puede('propietarioA', 'delete', STORAGE_DOC_DELETE)).toBe(true);
+    expect(await puede('propietarioB', 'delete', STORAGE_DOC_DELETE)).toBe(false);
+    expect(await puede('profesional', 'delete', STORAGE_DOC_DELETE)).toBe(false);
+    expect(await puede('propietarioA', 'update', STORAGE_DOC_AVAILABLE, PDF(STORAGE_DOC_AVAILABLE))).toBe(false);
+    expect(await puede('propietarioA', 'delete', STORAGE_DOC_AVAILABLE)).toBe(false);
   });
 });
 
@@ -165,7 +181,7 @@ describe('A · hasSafeObjectName(): nombre de objeto seguro (validado sobre el n
   // Nombres EXACTOS que construyen los clientes del repositorio (ver
   // src/lib/firebase.ts, firebaseActas.ts, suministrosFirestore.ts,
   // morosidadEvidenciasStorage.ts) tras su saneado `[^a-zA-Z0-9._-] → _`.
-  const LEGITIMOS: Array<[Actor, NonNullable<ContextoPeticion['resource']>]> = [
+  const LEGITIMOS: Array<[Actor, Recurso]> = [
     ['propietarioA', PDF('cobros_justificantes/PROP_A/cobro_c1_2026_01/1758556800000_justificante.pdf')],
     ['propietarioA', PDF('gastos_facturas/PROP_A/gasto_1/1758556800000_Factura_Luz_enero.pdf')],
     ['anonimo', PDF('documentos_solicitados/sol-1758556800000/req-preset-1758556800000_1758556800001_DNI_frontal.pdf')],
@@ -184,15 +200,21 @@ describe('A · hasSafeObjectName(): nombre de objeto seguro (validado sobre el n
     ['admin', PDF('morosidad_evidencias/PROP_A/mor_1/1758556800000_ab12_requerimiento.pdf')],
   ];
 
-  it('acepta el nombre que genera cada cliente real (ninguna subida legítima se rompe)', () => {
+  it('acepta el nombre que genera cada cliente real (ninguna subida legítima se rompe)', async () => {
     for (const [actor, recurso] of LEGITIMOS) {
-      expect(crea(actor, recurso), `${actor} → ${recurso.name}`).toBe(true);
+      if (actor === 'anonimo') {
+        // Portal de candidatos: la subida va con el token de la solicitud (AG-03.2).
+        const solicitudDocId = recurso.name.split('/')[1];
+        expect(await creaPortal(recurso, { solicitudDocId, token: TOKENS_PORTAL[solicitudDocId] }), `portal → ${recurso.name}`).toBe(true);
+        continue;
+      }
+      expect(await crea(actor, recurso), `${actor} → ${recurso.name}`).toBe(true);
     }
   });
 
-  it('acepta nombres sin extensión y con un solo carácter (el tipo lo gobierna contentType)', () => {
-    expect(crea('propietarioA', PDF('gastos_facturas/PROP_A/G1/x'))).toBe(true);
-    expect(crea('propietarioA', PDF('gastos_facturas/PROP_A/G1/1758556800000_factura'))).toBe(true);
+  it('acepta nombres sin extensión y con un solo carácter (el tipo lo gobierna contentType)', async () => {
+    expect(await crea('propietarioA', PDF('gastos_facturas/PROP_A/G1/x'))).toBe(true);
+    expect(await crea('propietarioA', PDF('gastos_facturas/PROP_A/G1/1758556800000_factura'))).toBe(true);
   });
 
   const HOSTILES: Array<[string, string]> = [
@@ -213,34 +235,38 @@ describe('A · hasSafeObjectName(): nombre de objeto seguro (validado sobre el n
     ['nombre completo > 1024', `gastos_facturas/${'P'.repeat(400)}/${'G'.repeat(400)}/${'a'.repeat(230)}.pdf`],
   ];
 
-  it('rechaza nombres hostiles aunque el actor esté autorizado y el tipo/tamaño sean válidos', () => {
+  it('rechaza nombres hostiles aunque el actor esté autorizado y el tipo/tamaño sean válidos', async () => {
     for (const [motivo, name] of HOSTILES) {
-      expect(crea('propietarioA', PDF(name)), motivo).toBe(false);
-      expect(crea('admin', PDF(name)), `${motivo} (admin)`).toBe(false);
+      expect(await crea('propietarioA', PDF(name)), motivo).toBe(false);
+      expect(await crea('admin', PDF(name)), `${motivo} (admin)`).toBe(false);
     }
   });
 
-  it('el límite de 255 del último segmento es exacto (255 pasa, 256 no)', () => {
-    expect(crea('propietarioA', PDF(`gastos_facturas/PROP_A/G1/${'a'.repeat(251)}.pdf`))).toBe(true); // 255
-    expect(crea('propietarioA', PDF(`gastos_facturas/PROP_A/G1/${'a'.repeat(252)}.pdf`))).toBe(false); // 256
+  it('el límite de 255 del último segmento es exacto (255 pasa, 256 no)', async () => {
+    expect(await crea('propietarioA', PDF(`gastos_facturas/PROP_A/G1/${'a'.repeat(251)}.pdf`))).toBe(true); // 255
+    expect(await crea('propietarioA', PDF(`gastos_facturas/PROP_A/G1/${'a'.repeat(252)}.pdf`))).toBe(false); // 256
   });
 
-  it('trayectos `..` se rechazan también en los árboles recursivos (`{file=**}`) y en el inventario', () => {
-    expect(crea('profesional', JPG('incidencias/INC_A/../INC_B/foto.jpg'))).toBe(false);
-    expect(crea('profesional', JPG('incidencias/INC_A/./foto.jpg'))).toBe(false);
-    expect(crea('profesional', JPG('incidencias/INC_A//foto.jpg'))).toBe(false);
-    expect(crea('inquilinoA', JPG('suministros/SUM_A/lecturas/LEC_A/../LEC_B/foto.jpg'))).toBe(false);
-    expect(crea('propietarioA', JPG('inmuebles/INM_A/inventario/../portada.jpg'))).toBe(false);
-    expect(crea('propietarioA', JPG('inmuebles/INM_A/inventario/INV1/.oculto.jpg'))).toBe(false);
+  it('trayectos `..` se rechazan también en los árboles recursivos (`{file=**}`) y en el inventario', async () => {
+    expect(await crea('profesional', JPG('incidencias/INC_A/../INC_B/foto.jpg'))).toBe(false);
+    expect(await crea('profesional', JPG('incidencias/INC_A/./foto.jpg'))).toBe(false);
+    expect(await crea('profesional', JPG('incidencias/INC_A//foto.jpg'))).toBe(false);
+    expect(await crea('inquilinoA', JPG('suministros/SUM_A/lecturas/LEC_A/../LEC_B/foto.jpg'))).toBe(false);
+    expect(await crea('propietarioA', JPG('inmuebles/INM_A/inventario/../portada.jpg'))).toBe(false);
+    expect(await crea('propietarioA', JPG('inmuebles/INM_A/inventario/INV1/.oculto.jpg'))).toBe(false);
   });
 
-  it('el helper está definido una sola vez y valida el nombre completo con las cuatro condiciones', () => {
-    const def = FUENTE.match(/function hasSafeObjectName\(\) \{[\s\S]*?\n\s*\}/g) || [];
-    expect(def).toHaveLength(1);
-    expect(def[0]).toContain('request.resource.name.size() <= 1024');
-    expect(def[0]).toContain("matches('.*//.*')");
-    expect(def[0]).toContain("matches('.*/[.]{1,2}/.*')");
-    expect(def[0]).toContain("[A-Za-z0-9._-]{0,253}[A-Za-z0-9_-])')");
+  it('la forma segura del nombre se valida en el servidor sobre la ruta completa (paridad con hasSafeObjectName)', async () => {
+    expect(esRutaSegura('gastos_facturas/PROP_A/G1/x')).toBe(true);
+    expect(esRutaSegura('a'.repeat(1025))).toBe(false);
+    expect(esRutaSegura('gastos_facturas/PROP_A//f.pdf')).toBe(false);
+    expect(esRutaSegura('gastos_facturas/PROP_A/./f.pdf')).toBe(false);
+    expect(esRutaSegura('gastos_facturas/PROP_A/../f.pdf')).toBe(false);
+    expect(esRutaSegura('gastos_facturas/PROP_A/G1/.oculto')).toBe(false);
+    expect(esRutaSegura(`gastos_facturas/PROP_A/G1/${'a'.repeat(255)}`)).toBe(true);
+    expect(esRutaSegura(`gastos_facturas/PROP_A/G1/${'a'.repeat(256)}`)).toBe(false);
+    // Una ruta insegura no tiene destino: ni la administración opera sobre ella.
+    for (const [, name] of HOSTILES) expect(destinoDe(name), name).toBeNull();
   });
 });
 
@@ -251,72 +277,70 @@ describe('B · aislamiento propietario A / B, enumeración y acceso anónimo', (
   const OBJ_A = 'gastos_facturas/PROP_A/G1/1_factura.pdf';
   const CARPETA_A = 'gastos_facturas/PROP_A/G1';
 
-  it('anónimo: nada en los árboles privados (get, list, create, update, delete)', () => {
+  it('anónimo: nada en los árboles privados (get, list, create, update, delete)', async () => {
     for (const ruta of [OBJ_A, 'cobros_justificantes/PROP_A/C1/1_j.pdf', 'cobros_justificantes/C1/1_j.pdf', 'reformas_documentos/PROP_A/P1/1_d.pdf', 'actas_pdfs/PROP_A/A1/Acta_v1.pdf', 'inmuebles/INM_A/inventario/I1/1_f.png', 'incidencias/INC_A/1_f.jpg', 'morosidad_evidencias/PROP_A/M1/1_r.pdf']) {
-      expect(puede('anonimo', 'get', ruta), `get ${ruta}`).toBe(false);
-      expect(puede('anonimo', 'list', ruta), `list ${ruta}`).toBe(false);
-      expect(puede('anonimo', 'create', ruta, PDF(ruta)), `create ${ruta}`).toBe(false);
-      expect(puede('anonimo', 'update', ruta, PDF(ruta)), `update ${ruta}`).toBe(false);
-      expect(puede('anonimo', 'delete', ruta), `delete ${ruta}`).toBe(false);
+      expect(await puede('anonimo', 'get', ruta), `get ${ruta}`).toBe(false);
+      expect(await puede('anonimo', 'list', ruta), `list ${ruta}`).toBe(false);
+      expect(await puede('anonimo', 'create', ruta, PDF(ruta)), `create ${ruta}`).toBe(false);
+      expect(await puede('anonimo', 'update', ruta, PDF(ruta)), `update ${ruta}`).toBe(false);
+      expect(await puede('anonimo', 'delete', ruta), `delete ${ruta}`).toBe(false);
     }
   });
 
-  it('enumeración cerrada: ninguna cuenta interna no-admin puede LISTAR un árbol privado; el admin sí', () => {
+  it('enumeración cerrada: la API del servidor no expone LISTAR ningún árbol privado (tampoco a la administración)', async () => {
     for (const carpeta of [CARPETA_A, 'cobros_justificantes/PROP_A/C1', 'cobros_justificantes/C1', 'documentos_solicitados/S1', 'recomercializacion_fotos/PROP_A/E1', 'incidencias_fotos/PROP_A/I1', 'reformas_documentos/PROP_A/P1', 'reformas_fotos/PROP_A/P1', 'actas_fotos/PROP_A/A1', 'actas_pdfs/PROP_A/A1']) {
       const objeto = `${carpeta}/x`;
-      for (const actor of INTERNOS_NO_ADMIN) expect(puede(actor, 'list', objeto), `${actor} list ${carpeta}`).toBe(false);
-      expect(puede('admin', 'list', objeto), `admin list ${carpeta}`).toBe(true);
+      for (const actor of INTERNOS_NO_ADMIN) expect(await puede(actor, 'list', objeto), `${actor} list ${carpeta}`).toBe(false);
+      expect(await puede('admin', 'list', objeto), `admin list ${carpeta}`).toBe(false);
     }
   });
 
-  it('D3 RESUELVE R-2: ni por nombre exacto hay lectura transversal (ámbito por espejo, sin custom claims)', () => {
-    expect(puede('propietarioB', 'get', OBJ_A)).toBe(false);
-    expect(puede('propietarioB', 'create', OBJ_A, PDF(OBJ_A))).toBe(false);
-    expect(puede('propietarioB', 'delete', OBJ_A)).toBe(false);
-    expect(puede('propietarioA', 'get', OBJ_A)).toBe(true);
-    expect(puede('propietarioB', 'list', OBJ_A)).toBe(false);
-    expect(puede('anonimo', 'get', OBJ_A)).toBe(false);
-    expect(FUENTE).toMatch(/RESUELTOS R-1\/R-2 sin custom claims/);
+  it('D3 RESUELVE R-2: ni por nombre exacto hay lectura transversal (ámbito por espejo, sin custom claims)', async () => {
+    expect(await puede('propietarioB', 'get', OBJ_A)).toBe(false);
+    expect(await puede('propietarioB', 'create', OBJ_A, PDF(OBJ_A))).toBe(false);
+    expect(await puede('propietarioB', 'delete', OBJ_A)).toBe(false);
+    expect(await puede('propietarioA', 'get', OBJ_A)).toBe(true);
+    expect(await puede('propietarioB', 'list', OBJ_A)).toBe(false);
+    expect(await puede('anonimo', 'get', OBJ_A)).toBe(false);
+    // El motivo es el ámbito del espejo de la base con nombre, no un custom claim.
+    expect((await decidirEnServidor('get', ctx('propietarioB', OBJ_A))).motivo).toBe('AMBITO_PROPIETARIO_LECTURA');
   });
 
-  it('D3 RESUELVE R-1: el inquilino (sin espejo) no entra en los árboles internos', () => {
-    expect(puede('inquilinoA', 'get', OBJ_A)).toBe(false);
-    expect(puede('inquilinoA', 'create', OBJ_A, PDF(OBJ_A))).toBe(false);
-    expect(puede('inquilinoA', 'delete', OBJ_A)).toBe(false);
-    expect(puede('inquilinoA', 'list', OBJ_A)).toBe(false);
-    expect(puede('autenticadoSinFicha', 'get', OBJ_A)).toBe(false);
-    expect(FUENTE).toMatch(/RESUELTOS R-1\/R-2 sin custom claims/);
+  it('D3 RESUELVE R-1: el inquilino (sin espejo) no entra en los árboles internos', async () => {
+    expect(await puede('inquilinoA', 'get', OBJ_A)).toBe(false);
+    expect(await puede('inquilinoA', 'create', OBJ_A, PDF(OBJ_A))).toBe(false);
+    expect(await puede('inquilinoA', 'delete', OBJ_A)).toBe(false);
+    expect(await puede('inquilinoA', 'list', OBJ_A)).toBe(false);
+    expect(await puede('autenticadoSinFicha', 'get', OBJ_A)).toBe(false);
   });
 
-  it('morosidad_evidencias (R2): sólo el master lee/crea; nadie actualiza ni borra; el propietario titular tampoco', () => {
+  it('morosidad_evidencias (R2): sólo el master lee/crea; nadie actualiza ni borra; el propietario titular tampoco', async () => {
     const r = 'morosidad_evidencias/PROP_A/M1/1_req.pdf';
-    expect(puede('admin', 'get', r)).toBe(true);
-    expect(puede('admin', 'list', r)).toBe(true);
-    expect(crea('admin', PDF(r))).toBe(true);
-    expect(crea('admin', { name: r, size: 1024, contentType: 'image/gif' })).toBe(false);
-    expect(crea('admin', PDF(r, 10 * MB))).toBe(false);
+    expect(await puede('admin', 'get', r)).toBe(true);
+    expect(await puede('admin', 'list', r)).toBe(false); // sin enumeración en la API
+    expect(await crea('admin', PDF(r))).toBe(true);
+    expect(await crea('admin', { name: r, size: 1024, contentType: 'image/gif' })).toBe(false);
+    expect(await crea('admin', PDF(r, 10 * MB))).toBe(false);
     for (const actor of ['propietarioA', 'propietarioB', 'profesional', 'inquilinoA', 'anonimo'] as Actor[]) {
-      expect(puede(actor, 'get', r), actor).toBe(false);
-      expect(crea(actor, PDF(r)), actor).toBe(false);
+      expect(await puede(actor, 'get', r), actor).toBe(false);
+      expect(await crea(actor, PDF(r)), actor).toBe(false);
     }
     for (const actor of TODOS) {
-      expect(puede(actor, 'update', r, PDF(r)), `${actor} update`).toBe(false);
-      expect(puede(actor, 'delete', r), `${actor} delete`).toBe(false);
+      expect(await puede(actor, 'update', r, PDF(r)), `${actor} update`).toBe(false);
+      expect(await puede(actor, 'delete', r), `${actor} delete`).toBe(false);
     }
   });
 
-  it('cualquier prefijo no declarado cae en la denegación por defecto para todos los actores', () => {
+  it('cualquier prefijo no declarado cae en la denegación por defecto para todos los actores', async () => {
     for (const ruta of ['otro/x.pdf', 'presupuestos/PRE1/1_p.pdf', 'trabajos/TRA1/1_t.pdf', 'profesionales/PRO1/documentos/1_c.pdf', 'gastos_facturas/x.pdf', 'inmuebles/x.jpg']) {
       for (const actor of TODOS) {
-        expect(puede(actor, 'get', ruta), `${actor} get ${ruta}`).toBe(false);
-        expect(puede(actor, 'create', ruta, PDF(ruta)), `${actor} create ${ruta}`).toBe(false);
-        expect(puede(actor, 'delete', ruta), `${actor} delete ${ruta}`).toBe(false);
+        expect(await puede(actor, 'get', ruta), `${actor} get ${ruta}`).toBe(false);
+        expect(await puede(actor, 'create', ruta, PDF(ruta)), `${actor} create ${ruta}`).toBe(false);
+        expect(await puede(actor, 'delete', ruta), `${actor} delete ${ruta}`).toBe(false);
       }
-      const d = decidir(REGLAS, ruta, 'get', ctx('admin'));
-      expect(d.casan).toEqual(['/{allPaths=**}']);
+      expect(destinoDe(ruta), ruta).toBeNull();
+      expect((await decidirEnServidor('get', ctx('admin', ruta))).motivo).toBe('SIN_DESTINO');
     }
-    // R-5 registrado en el propio fichero de reglas.
-    expect(FUENTE).toMatch(/R-5 `presupuestos\/`, `trabajos\/` y `profesionales\/\{id\}\/documentos\/`/);
   });
 });
 
@@ -327,95 +351,97 @@ describe('C · incidencias/{incidenciaId}/{file=**} (E.1) — aislamiento del in
   const EV_A = 'incidencias/INC_A/ev_1_fuga.jpg';
   const EV_B = 'incidencias/INC_B/ev_1_humedad.jpg';
 
-  it('existe exactamente un bloque para incidencias/ y NO se integró el `{fileName}` de la Arena C', () => {
-    const bloques = REGLAS.bloques.filter((b) => b.segmentos[0] === 'incidencias');
-    expect(bloques.map((b) => b.patron)).toEqual(['/incidencias/{incidenciaId}/{file=**}']);
-    expect(decidir(REGLAS, EV_A, 'get', ctx('inquilinoA')).casan).toEqual(['/incidencias/{incidenciaId}/{file=**}', '/{allPaths=**}']);
-  });
-
-  it('lectura: el inquilino sólo ve evidencias de incidencias de SUS contratos (intacto); el personal sólo las de SU ámbito (D3); anónimo nada', () => {
-    expect(puede('inquilinoA', 'get', EV_A)).toBe(true);
-    expect(puede('inquilinoA', 'get', EV_B)).toBe(false);
-    expect(puede('inquilinoB', 'get', EV_A)).toBe(false);
-    expect(puede('inquilinoB', 'get', EV_B)).toBe(true);
-    expect(puede('inquilinoA', 'get', 'incidencias/INC_SIN_CONTRATO/ev.jpg')).toBe(false);
-    expect(puede('inquilinoA', 'get', 'incidencias/INC_INEXISTENTE/ev.jpg')).toBe(false);
-    // D3: titular en lo suyo, profesional asignado en la suya, admin global.
-    expect(puede('admin', 'get', EV_A)).toBe(true);
-    expect(puede('admin', 'get', EV_B)).toBe(true);
-    expect(puede('propietarioA', 'get', EV_A)).toBe(true);
-    expect(puede('propietarioA', 'get', EV_B)).toBe(false);
-    expect(puede('propietarioB', 'get', EV_A)).toBe(false);
-    expect(puede('propietarioB', 'get', EV_B)).toBe(true);
-    expect(puede('profesional', 'get', EV_A)).toBe(true); // asignado a INC_A
-    expect(puede('profesional', 'get', EV_B)).toBe(false);
-    expect(puede('anonimo', 'get', EV_A)).toBe(false);
-  });
-
-  it('subida: inquilino sólo a su incidencia, con tipo permitido, < 10 MB y nombre seguro', () => {
-    expect(crea('inquilinoA', JPG(EV_A))).toBe(true);
-    expect(crea('inquilinoA', PDF('incidencias/INC_A/ev_1_informe.pdf'))).toBe(true);
-    expect(crea('inquilinoA', { name: 'incidencias/INC_A/ev_1_f.png', size: 10 * MB - 1, contentType: 'image/png' })).toBe(true);
-    // ajena
-    expect(crea('inquilinoA', JPG(EV_B))).toBe(false);
-    expect(crea('inquilinoB', JPG(EV_A))).toBe(false);
-    // incidencia inexistente / sin contrato
-    expect(crea('inquilinoA', JPG('incidencias/INC_INEXISTENTE/ev.jpg'))).toBe(false);
-    expect(crea('inquilinoA', JPG('incidencias/INC_SIN_CONTRATO/ev.jpg'))).toBe(false);
-    // tamaño y tipo (esEvidenciaValida)
-    expect(crea('inquilinoA', JPG(EV_A, 10 * MB))).toBe(false);
-    expect(crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'text/html' })).toBe(false);
-    expect(crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'image/svg+xml' })).toBe(false);
-    expect(crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'video/mp4' })).toBe(false);
-    expect(crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'application/octet-stream' })).toBe(false);
-    // nombre hostil
-    expect(crea('inquilinoA', JPG('incidencias/INC_A/../INC_B/ev.jpg'))).toBe(false);
-    expect(crea('inquilinoA', JPG('incidencias/INC_A/ev con espacio.jpg'))).toBe(false);
-  });
-
-  it('subida: el personal aporta SÓLO en su ámbito con evidencia válida (D3); anónimo nunca', () => {
-    for (const actor of ['admin', 'propietarioA', 'profesional'] as Actor[]) {
-      expect(crea(actor, JPG(EV_A)), actor).toBe(true);
-      expect(crea(actor, { name: EV_A, size: 1024, contentType: 'text/html' }), `${actor} html`).toBe(false);
-      expect(crea(actor, JPG(EV_A, 10 * MB)), `${actor} 10MB`).toBe(false);
+  it('existe exactamente un destino para incidencias/ (árbol recursivo) y NO se integró el `{fileName}` de la Arena C', async () => {
+    for (const ruta of [EV_A, 'incidencias/INC_A/adjuntos/2026/ev_1.jpg']) {
+      expect(DESTINOS.filter((d) => d.patron.test(ruta)).map((d) => d.clave), ruta).toEqual(['INCIDENCIA_EVIDENCIA']);
     }
-    expect(crea('admin', JPG(EV_B))).toBe(true);
-    expect(crea('propietarioA', JPG(EV_B))).toBe(false); // transversal
-    expect(crea('profesional', JPG(EV_B))).toBe(false); // no asignado a INC_B
-    expect(crea('propietarioB', JPG(EV_A))).toBe(false); // transversal
-    expect(crea('propietarioB', JPG(EV_B))).toBe(true);
-    expect(crea('anonimo', JPG(EV_A))).toBe(false);
+    expect(destinoDe(EV_A)).toBe('INCIDENCIA_EVIDENCIA');
+    expect(destinoDe('incidencias/INC_A/adjuntos/2026/ev_1.jpg')).toBe('INCIDENCIA_EVIDENCIA');
   });
 
-  it('borrado: nunca el inquilino ni el anónimo; titular en lo suyo y admin (D3: el profesional no borra)', () => {
-    expect(puede('inquilinoA', 'delete', EV_A)).toBe(false);
-    expect(puede('anonimo', 'delete', EV_A)).toBe(false);
-    expect(puede('admin', 'delete', EV_A)).toBe(true);
-    expect(puede('propietarioA', 'delete', EV_A)).toBe(true);
-    expect(puede('propietarioA', 'delete', EV_B)).toBe(false);
-    expect(puede('propietarioB', 'delete', EV_A)).toBe(false);
-    expect(puede('profesional', 'delete', EV_A)).toBe(false);
+  it('lectura: el inquilino sólo ve evidencias de incidencias de SUS contratos (intacto); el personal sólo las de SU ámbito (D3); anónimo nada', async () => {
+    expect(await puede('inquilinoA', 'get', EV_A)).toBe(true);
+    expect(await puede('inquilinoA', 'get', EV_B)).toBe(false);
+    expect(await puede('inquilinoB', 'get', EV_A)).toBe(false);
+    expect(await puede('inquilinoB', 'get', EV_B)).toBe(true);
+    expect(await puede('inquilinoA', 'get', 'incidencias/INC_SIN_CONTRATO/ev.jpg')).toBe(false);
+    expect(await puede('inquilinoA', 'get', 'incidencias/INC_INEXISTENTE/ev.jpg')).toBe(false);
+    // D3: titular en lo suyo, profesional asignado en la suya, admin global.
+    expect(await puede('admin', 'get', EV_A)).toBe(true);
+    expect(await puede('admin', 'get', EV_B)).toBe(true);
+    expect(await puede('propietarioA', 'get', EV_A)).toBe(true);
+    expect(await puede('propietarioA', 'get', EV_B)).toBe(false);
+    expect(await puede('propietarioB', 'get', EV_A)).toBe(false);
+    expect(await puede('propietarioB', 'get', EV_B)).toBe(true);
+    expect(await puede('profesional', 'get', EV_A)).toBe(true); // asignado a INC_A
+    expect(await puede('profesional', 'get', EV_B)).toBe(false);
+    expect(await puede('anonimo', 'get', EV_A)).toBe(false);
   });
 
-  it('el subárbol recursivo sigue cubierto (rutas más profundas heredan el mismo aislamiento, no la denegación)', () => {
+  it('subida: inquilino sólo a su incidencia, con tipo permitido, < 10 MB y nombre seguro', async () => {
+    expect(await crea('inquilinoA', JPG(EV_A))).toBe(true);
+    expect(await crea('inquilinoA', PDF('incidencias/INC_A/ev_1_informe.pdf'))).toBe(true);
+    expect(await crea('inquilinoA', { name: 'incidencias/INC_A/ev_1_f.png', size: 10 * MB - 1, contentType: 'image/png' })).toBe(true);
+    // ajena
+    expect(await crea('inquilinoA', JPG(EV_B))).toBe(false);
+    expect(await crea('inquilinoB', JPG(EV_A))).toBe(false);
+    // incidencia inexistente / sin contrato
+    expect(await crea('inquilinoA', JPG('incidencias/INC_INEXISTENTE/ev.jpg'))).toBe(false);
+    expect(await crea('inquilinoA', JPG('incidencias/INC_SIN_CONTRATO/ev.jpg'))).toBe(false);
+    // tamaño y tipo (esEvidenciaValida)
+    expect(await crea('inquilinoA', JPG(EV_A, 10 * MB))).toBe(false);
+    expect(await crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'text/html' })).toBe(false);
+    expect(await crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'image/svg+xml' })).toBe(false);
+    expect(await crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'video/mp4' })).toBe(false);
+    expect(await crea('inquilinoA', { name: EV_A, size: 1024, contentType: 'application/octet-stream' })).toBe(false);
+    // nombre hostil
+    expect(await crea('inquilinoA', JPG('incidencias/INC_A/../INC_B/ev.jpg'))).toBe(false);
+    expect(await crea('inquilinoA', JPG('incidencias/INC_A/ev con espacio.jpg'))).toBe(false);
+  });
+
+  it('subida: el personal aporta SÓLO en su ámbito con evidencia válida (D3); anónimo nunca', async () => {
+    for (const actor of ['admin', 'propietarioA', 'profesional'] as Actor[]) {
+      expect(await crea(actor, JPG(EV_A)), actor).toBe(true);
+      expect(await crea(actor, { name: EV_A, size: 1024, contentType: 'text/html' }), `${actor} html`).toBe(false);
+      expect(await crea(actor, JPG(EV_A, 10 * MB)), `${actor} 10MB`).toBe(false);
+    }
+    expect(await crea('admin', JPG(EV_B))).toBe(true);
+    expect(await crea('propietarioA', JPG(EV_B))).toBe(false); // transversal
+    expect(await crea('profesional', JPG(EV_B))).toBe(false); // no asignado a INC_B
+    expect(await crea('propietarioB', JPG(EV_A))).toBe(false); // transversal
+    expect(await crea('propietarioB', JPG(EV_B))).toBe(true);
+    expect(await crea('anonimo', JPG(EV_A))).toBe(false);
+  });
+
+  it('borrado: nunca el inquilino ni el anónimo; titular en lo suyo y admin (D3: el profesional no borra)', async () => {
+    expect(await puede('inquilinoA', 'delete', EV_A)).toBe(false);
+    expect(await puede('anonimo', 'delete', EV_A)).toBe(false);
+    expect(await puede('admin', 'delete', EV_A)).toBe(true);
+    expect(await puede('propietarioA', 'delete', EV_A)).toBe(true);
+    expect(await puede('propietarioA', 'delete', EV_B)).toBe(false);
+    expect(await puede('propietarioB', 'delete', EV_A)).toBe(false);
+    expect(await puede('profesional', 'delete', EV_A)).toBe(false);
+  });
+
+  it('el subárbol recursivo sigue cubierto (rutas más profundas heredan el mismo aislamiento, no la denegación)', async () => {
     const profunda = 'incidencias/INC_A/adjuntos/2026/ev_1.jpg';
-    expect(puede('inquilinoA', 'get', profunda)).toBe(true);
-    expect(puede('inquilinoB', 'get', profunda)).toBe(false);
-    expect(crea('inquilinoA', JPG(profunda))).toBe(true);
-    expect(crea('inquilinoB', JPG(profunda))).toBe(false);
+    expect(await puede('inquilinoA', 'get', profunda)).toBe(true);
+    expect(await puede('inquilinoB', 'get', profunda)).toBe(false);
+    expect(await crea('inquilinoA', JPG(profunda))).toBe(true);
+    expect(await crea('inquilinoB', JPG(profunda))).toBe(false);
   });
 
-  it('E.2 lecturas de contador: el inquilino sube sólo si su contrato es el activo del inmueble del suministro', () => {
+  it('E.2 lecturas de contador: el inquilino sube sólo si su contrato es el activo del inmueble del suministro', async () => {
     const foto = 'suministros/SUM_A/lecturas/LEC_A/foto_1_contador.jpg';
-    expect(crea('inquilinoA', JPG(foto))).toBe(true);
-    expect(crea('inquilinoB', JPG(foto))).toBe(false);
-    expect(crea('inquilinoA', JPG('suministros/SUM_INEXISTENTE/lecturas/L/foto.jpg'))).toBe(false);
-    expect(puede('inquilinoA', 'get', foto)).toBe(true);
-    expect(puede('inquilinoB', 'get', foto)).toBe(false);
-    expect(puede('inquilinoA', 'delete', foto)).toBe(false);
-    expect(puede('profesional', 'delete', foto)).toBe(false); // D3: el profesional no borra
-    expect(puede('propietarioA', 'delete', foto)).toBe(true); // titular del inmueble del suministro
-    expect(puede('propietarioB', 'delete', foto)).toBe(false);
+    expect(await crea('inquilinoA', JPG(foto))).toBe(true);
+    expect(await crea('inquilinoB', JPG(foto))).toBe(false);
+    expect(await crea('inquilinoA', JPG('suministros/SUM_INEXISTENTE/lecturas/L/foto.jpg'))).toBe(false);
+    expect(await puede('inquilinoA', 'get', foto)).toBe(true);
+    expect(await puede('inquilinoB', 'get', foto)).toBe(false);
+    expect(await puede('inquilinoA', 'delete', foto)).toBe(false);
+    expect(await puede('profesional', 'delete', foto)).toBe(false); // D3: el profesional no borra
+    expect(await puede('propietarioA', 'delete', foto)).toBe(true); // titular del inmueble del suministro
+    expect(await puede('propietarioB', 'delete', foto)).toBe(false);
   });
 });
 
@@ -426,34 +452,34 @@ describe('D · actas_pdfs / actas_fotos — flujo legítimo del PDF de acta', ()
   const PDF_ACTA = 'actas_pdfs/PROP_A/acta_1/Acta_SALIDA_2026-09-22_v2_1a2b3c4d.pdf';
   const FOTO_ACTA = 'actas_fotos/PROP_A/acta_1/1758556800000_x9k2_evidencia.jpg';
 
-  it('el personal sube el PDF con el nombre determinista que construye ActasSection.handleGenerarPdf', () => {
-    for (const actor of ['admin', 'propietarioA'] as Actor[]) expect(crea(actor, PDF(PDF_ACTA)), actor).toBe(true);
-    expect(crea('profesional', PDF(PDF_ACTA))).toBe(false); // D3: sin ámbito en PROP_A
-    expect(crea('propietarioB', PDF(PDF_ACTA))).toBe(false); // D3: transversal
-    expect(crea('anonimo', PDF(PDF_ACTA))).toBe(false);
-    expect(crea('propietarioA', PDF(PDF_ACTA, 20 * MB))).toBe(false);
-    expect(crea('propietarioA', { name: PDF_ACTA, size: 1024, contentType: 'text/html' })).toBe(false);
+  it('el personal sube el PDF con el nombre determinista que construye ActasSection.handleGenerarPdf', async () => {
+    for (const actor of ['admin', 'propietarioA'] as Actor[]) expect(await crea(actor, PDF(PDF_ACTA)), actor).toBe(true);
+    expect(await crea('profesional', PDF(PDF_ACTA))).toBe(false); // D3: sin ámbito en PROP_A
+    expect(await crea('propietarioB', PDF(PDF_ACTA))).toBe(false); // D3: transversal
+    expect(await crea('anonimo', PDF(PDF_ACTA))).toBe(false);
+    expect(await crea('propietarioA', PDF(PDF_ACTA, 20 * MB))).toBe(false);
+    expect(await crea('propietarioA', { name: PDF_ACTA, size: 1024, contentType: 'text/html' })).toBe(false);
   });
 
-  it('regenerar la misma versión (mismo nombre) sigue permitido: `update` interno conservado SÓLO en actas_pdfs', () => {
-    expect(puede('propietarioA', 'update', PDF_ACTA, PDF(PDF_ACTA))).toBe(true);
-    expect(puede('anonimo', 'update', PDF_ACTA, PDF(PDF_ACTA))).toBe(false);
+  it('regenerar la misma versión (mismo nombre) sigue permitido: `update` interno conservado SÓLO en actas_pdfs', async () => {
+    expect(await puede('propietarioA', 'update', PDF_ACTA, PDF(PDF_ACTA))).toBe(true);
+    expect(await puede('anonimo', 'update', PDF_ACTA, PDF(PDF_ACTA))).toBe(false);
     // Las fotos de acta llevan `Date.now()_rand_` → nombre único → sin update.
-    expect(crea('propietarioA', JPG(FOTO_ACTA))).toBe(true);
-    expect(puede('propietarioA', 'update', FOTO_ACTA, JPG(FOTO_ACTA))).toBe(false);
-    expect(puede('admin', 'update', FOTO_ACTA, JPG(FOTO_ACTA))).toBe(false);
+    expect(await crea('propietarioA', JPG(FOTO_ACTA))).toBe(true);
+    expect(await puede('propietarioA', 'update', FOTO_ACTA, JPG(FOTO_ACTA))).toBe(false);
+    expect(await puede('admin', 'update', FOTO_ACTA, JPG(FOTO_ACTA))).toBe(false);
   });
 
-  it('lectura en ámbito (D3), listado sólo admin, borrado titular/admin', () => {
-    for (const actor of ['admin', 'propietarioA'] as Actor[]) expect(puede(actor, 'get', PDF_ACTA), actor).toBe(true);
+  it('lectura en ámbito (D3), sin listado, borrado titular/admin', async () => {
+    for (const actor of ['admin', 'propietarioA'] as Actor[]) expect(await puede(actor, 'get', PDF_ACTA), actor).toBe(true);
     for (const actor of ['propietarioB', 'profesional', 'inquilinoA', 'inquilinoB', 'autenticadoSinFicha'] as Actor[]) {
-      expect(puede(actor, 'get', PDF_ACTA), actor).toBe(false);
+      expect(await puede(actor, 'get', PDF_ACTA), actor).toBe(false);
     }
-    for (const actor of INTERNOS_NO_ADMIN) expect(puede(actor, 'list', PDF_ACTA), actor).toBe(false);
-    expect(puede('admin', 'list', PDF_ACTA)).toBe(true);
-    expect(puede('propietarioA', 'delete', PDF_ACTA)).toBe(true);
-    expect(puede('propietarioB', 'delete', PDF_ACTA)).toBe(false);
-    expect(puede('anonimo', 'delete', PDF_ACTA)).toBe(false);
+    for (const actor of INTERNOS_NO_ADMIN) expect(await puede(actor, 'list', PDF_ACTA), actor).toBe(false);
+    expect(await puede('admin', 'list', PDF_ACTA)).toBe(false); // sin enumeración en la API
+    expect(await puede('propietarioA', 'delete', PDF_ACTA)).toBe(true);
+    expect(await puede('propietarioB', 'delete', PDF_ACTA)).toBe(false);
+    expect(await puede('anonimo', 'delete', PDF_ACTA)).toBe(false);
   });
 });
 
@@ -482,74 +508,76 @@ describe('E · update (metadatos) y delete por ruta — decisiones específicas,
     'recibos/CON_A/2026_01/recibo.pdf', // E.4 conservado
   ];
 
-  it('update denegado para TODOS los actores en las rutas de nombre único por subida', () => {
+  it('update denegado para TODOS los actores en las rutas de nombre único por subida', async () => {
     for (const ruta of SIN_UPDATE) for (const actor of TODOS) {
-      expect(puede(actor, 'update', ruta, PDF(ruta)), `${actor} update ${ruta}`).toBe(false);
+      expect(await puede(actor, 'update', ruta, PDF(ruta)), `${actor} update ${ruta}`).toBe(false);
     }
   });
 
-  it('update conservado (como en la canónica) sólo donde el flujo o el bloque validado lo requieren', () => {
+  it('update conservado (como en la canónica) sólo donde el flujo o el bloque validado lo requieren', async () => {
     for (const ruta of CON_UPDATE_INTERNO) {
-      expect(puede('propietarioA', 'update', ruta, PDF(ruta)), ruta).toBe(true);
-      expect(puede('anonimo', 'update', ruta, PDF(ruta)), ruta).toBe(false);
+      // La sobrescritura respeta el tipo del destino (el inventario sólo admite imagen).
+      expect(await puede('propietarioA', 'update', ruta, recursoAdmitido(ruta)), ruta).toBe(true);
+      expect(await puede('anonimo', 'update', ruta, recursoAdmitido(ruta)), ruta).toBe(false);
     }
+    expect(await puede('propietarioA', 'update', 'inmuebles/INM_A/inventario/I1/1_f.png', PDF('inmuebles/INM_A/inventario/I1/1_f.png'))).toBe(false);
     // E.1/E.2: update sujeto a la MISMA validación de evidencia y aislamiento que create.
-    expect(puede('inquilinoA', 'update', 'incidencias/INC_A/ev.jpg', JPG('incidencias/INC_A/ev.jpg'))).toBe(true);
-    expect(puede('inquilinoA', 'update', 'incidencias/INC_B/ev.jpg', JPG('incidencias/INC_B/ev.jpg'))).toBe(false);
-    expect(puede('inquilinoA', 'update', 'incidencias/INC_A/ev.jpg', { name: 'incidencias/INC_A/ev.jpg', size: 1, contentType: 'text/html' })).toBe(false);
+    expect(await puede('inquilinoA', 'update', 'incidencias/INC_A/ev.jpg', JPG('incidencias/INC_A/ev.jpg'))).toBe(true);
+    expect(await puede('inquilinoA', 'update', 'incidencias/INC_B/ev.jpg', JPG('incidencias/INC_B/ev.jpg'))).toBe(false);
+    expect(await puede('inquilinoA', 'update', 'incidencias/INC_A/ev.jpg', { name: 'incidencias/INC_A/ev.jpg', size: 1, contentType: 'text/html' })).toBe(false);
   });
 
-  it('el fichero no impone un `update: if false` global: la decisión es por bloque (semántica, no texto)', () => {
-    // Para cada bloque se evalúa `update` del admin sobre un objeto de ejemplo del propio patrón.
-    const ejemplo = (patron: string) => patron.replace(/^\//, '').replace(/\{\w+=\*\*\}/, 'a_1.pdf').replace(/\{\w+\}/g, 'x');
+  it('la sobrescritura no es una decisión global: es por destino (semántica, no texto)', async () => {
+    // Para cada destino se evalúa `update` (SOBRESCRIBIR) del admin sobre un objeto de ejemplo.
     const denegados: string[] = [];
     const concedidos: string[] = [];
-    for (const b of REGLAS.bloques) {
-      const ruta = ejemplo(b.patron);
-      (puede('admin', 'update', ruta, PDF(ruta)) ? concedidos : denegados).push(b.patron);
+    for (const clave of CLAVES_DESTINO) {
+      const ruta = rutaEjemplo(clave);
+      ((await puede('admin', 'update', ruta, recursoAdmitido(ruta))) ? concedidos : denegados).push(clave);
     }
-    expect(denegados).toEqual([
-      '/cobros_justificantes/{propietarioId}/{cobroPeriodoId}/{fileName}',
-      '/cobros_justificantes/{cobroPeriodoId}/{fileName}',
-      '/gastos_facturas/{propietarioId}/{gastoId}/{fileName}',
-      '/documentos_solicitados/{solicitudDocId}/{allFiles=**}',
-      '/documentos_solicitados/{solicitudDocId}/{fileName}',
-      '/inmuebles/{inmuebleId}/{fileName}',
-      '/inmuebles/{inmuebleId}/documentos_patrimoniales/{documentoId}/{fileName}',
+    expect(denegados.sort()).toEqual([
+      'COBROS_JUSTIFICANTES',
+      'COBROS_JUSTIFICANTES_LEGADO',
+      'GASTOS_FACTURAS',
+      'DOCUMENTOS_SOLICITADOS',
+      'DOCUMENTOS_SOLICITADOS_PROFUNDO',
+      'INMUEBLE_FOTO',
+      'INMUEBLE_DOCUMENTO_PATRIMONIAL',
       // P3: documentos de profesionales — nombre único por documentoId, sin update.
-      '/profesionales/{profesionalId}/documentos/{documentoId}/{fileName}',
-      '/recomercializacion_fotos/{propietarioId}/{expedienteId}/{fileName}',
-      '/incidencias_fotos/{propietarioId}/{incidenciaId}/{fileName}',
-      '/reformas_documentos/{propietarioId}/{proyectoId}/{fileName}',
-      '/reformas_fotos/{propietarioId}/{proyectoId}/{fileName}',
-      '/actas_fotos/{propietarioId}/{actaId}/{fileName}',
-      '/morosidad_evidencias/{propietarioId}/{expedienteId}/{fileName}',
-      '/{allPaths=**}',
-    ]);
-    expect(concedidos).toEqual([
-      '/inmuebles/{inmuebleId}/inventario/{allFiles=**}',
-      '/actas_pdfs/{propietarioId}/{actaId}/{fileName}',
-      '/incidencias/{incidenciaId}/{file=**}',
-      '/suministros/{suministroId}/lecturas/{lecturaId}/{file=**}',
-      '/contratos/{contratoId}/{file=**}',
-      '/recibos/{contratoId}/{claveCobro}/{file=**}',
-    ]);
+      'PROFESIONAL_DOCUMENTO',
+      'RECOMERCIALIZACION_FOTOS',
+      'INCIDENCIAS_FOTOS',
+      'REFORMAS_DOCUMENTOS',
+      'REFORMAS_FOTOS',
+      'ACTAS_FOTOS',
+      'MOROSIDAD_EVIDENCIA',
+    ].sort());
+    expect(concedidos.sort()).toEqual([
+      'INMUEBLE_INVENTARIO',
+      'ACTAS_PDFS',
+      'INCIDENCIA_EVIDENCIA',
+      'SUMINISTRO_LECTURA',
+      'CONTRATO_DOCUMENTO',
+      'RECIBO',
+    ].sort());
+    // Fuera de todo destino no hay sobrescritura posible.
+    expect(await puede('admin', 'update', 'otro/x.pdf', PDF('otro/x.pdf'))).toBe(false);
   });
 
-  it('delete: nunca anónimo; titular en lo suyo (D3: B no borra lo de A); nunca inquilino en E.1/E.2; nadie en morosidad', () => {
-    for (const ruta of [...SIN_UPDATE, ...CON_UPDATE_INTERNO]) expect(puede('anonimo', 'delete', ruta), ruta).toBe(false);
+  it('delete: nunca anónimo; titular en lo suyo (D3: B no borra lo de A); nunca inquilino en E.1/E.2; nadie en morosidad', async () => {
+    for (const ruta of [...SIN_UPDATE, ...CON_UPDATE_INTERNO]) expect(await puede('anonimo', 'delete', ruta), ruta).toBe(false);
     // D3: propietarioB no es titular de nada de la matriz (todo PROP_A/S1/INM_A/CON_A) ⇒ deny.
-    for (const ruta of SIN_UPDATE.filter((r) => !r.startsWith('morosidad_'))) expect(puede('propietarioB', 'delete', ruta), ruta).toBe(false);
+    for (const ruta of SIN_UPDATE.filter((r) => !r.startsWith('morosidad_'))) expect(await puede('propietarioB', 'delete', ruta), ruta).toBe(false);
     // ...mientras el titular sí borra lo suyo (sin pérdida de operativa legítima).
     for (const ruta of SIN_UPDATE.filter((r) => r.includes('/PROP_A/') && !r.startsWith('morosidad_'))) {
-      expect(puede('propietarioA', 'delete', ruta), ruta).toBe(true);
+      expect(await puede('propietarioA', 'delete', ruta), ruta).toBe(true);
     }
-    expect(puede('propietarioA', 'delete', 'inmuebles/INM_A/img_1_a.jpg')).toBe(true); // titular del inmueble
-    expect(puede('propietarioB', 'delete', 'inmuebles/INM_A/img_1_a.jpg')).toBe(false);
-    expect(puede('inquilinoA', 'delete', 'incidencias/INC_A/ev.jpg')).toBe(false);
-    expect(puede('inquilinoA', 'delete', 'contratos/CON_A/contrato.pdf')).toBe(false);
-    expect(puede('inquilinoA', 'delete', 'recibos/CON_A/k/recibo.pdf')).toBe(false);
-    expect(puede('admin', 'delete', 'morosidad_evidencias/PROP_A/M1/1_r.pdf')).toBe(false);
+    expect(await puede('propietarioA', 'delete', 'inmuebles/INM_A/img_1_a.jpg')).toBe(true); // titular del inmueble
+    expect(await puede('propietarioB', 'delete', 'inmuebles/INM_A/img_1_a.jpg')).toBe(false);
+    expect(await puede('inquilinoA', 'delete', 'incidencias/INC_A/ev.jpg')).toBe(false);
+    expect(await puede('inquilinoA', 'delete', 'contratos/CON_A/contrato.pdf')).toBe(false);
+    expect(await puede('inquilinoA', 'delete', 'recibos/CON_A/k/recibo.pdf')).toBe(false);
+    expect(await puede('admin', 'delete', 'morosidad_evidencias/PROP_A/M1/1_r.pdf')).toBe(false);
   });
 });
 
@@ -560,58 +588,72 @@ describe('F · documentos_solicitados (portal anónimo), catálogo público e in
   const PLANO = 'documentos_solicitados/sol-1/req-preset-1_2_dni.pdf';
   const ANIDADO = 'documentos_solicitados/sol-1/otra/carpeta/dni.pdf';
 
-  it('portal: el candidato anónimo sube UN objeto en la ruta plana, PDF/imagen, < 15 MB, nombre seguro', () => {
-    expect(crea('anonimo', PDF(PLANO))).toBe(true);
-    expect(crea('anonimo', JPG(PLANO))).toBe(true);
-    expect(crea('anonimo', { name: PLANO, size: 1024, contentType: 'application/octet-stream' })).toBe(true); // R-3 declarado
-    expect(crea('anonimo', PDF(PLANO, 15 * MB))).toBe(false);
-    expect(crea('anonimo', { name: PLANO, size: 1024, contentType: 'text/html' })).toBe(false);
-    expect(crea('anonimo', { name: PLANO, size: 1024, contentType: 'application/x-msdownload' })).toBe(false);
-    expect(crea('anonimo', PDF('documentos_solicitados/sol-1/dni con espacios.pdf'))).toBe(false);
+  it('portal: el candidato sube UN objeto en la ruta plana con el TOKEN de su solicitud, PDF/imagen, < 15 MB, nombre seguro', async () => {
+    // AG-03.2: sin token no hay subida anónima (antes la regla la admitía a cualquiera que conociera la ruta).
+    expect(await crea('anonimo', PDF(PLANO))).toBe(false);
+    expect(await creaPortal(PDF(PLANO))).toBe(true);
+    expect(await creaPortal(JPG(PLANO))).toBe(true);
+    expect(await creaPortal({ name: PLANO, size: 1024, contentType: 'application/octet-stream' })).toBe(true); // R-3 declarado
+    expect(await creaPortal(PDF(PLANO, 15 * MB))).toBe(false);
+    expect(await creaPortal({ name: PLANO, size: 1024, contentType: 'text/html' })).toBe(false);
+    expect(await creaPortal({ name: PLANO, size: 1024, contentType: 'application/x-msdownload' })).toBe(false);
+    expect(await creaPortal(PDF('documentos_solicitados/sol-1/dni con espacios.pdf'))).toBe(false);
+    // Token equivocado, de otra solicitud o ruta de otra solicitud: denegado.
+    expect(await creaPortal(PDF(PLANO), { solicitudDocId: 'sol-1', token: 'tok-equivocado-123' })).toBe(false);
+    expect(await creaPortal(PDF('documentos_solicitados/sol-2/dni.pdf'), PORTAL)).toBe(false);
+    // El token sólo CREA en la ruta plana: ni lee, ni borra, ni sube anidado.
+    expect(await creaPortal(PDF(ANIDADO))).toBe(false);
+    expect(await puede('anonimo', 'get', PLANO)).toBe(false);
   });
 
-  it('portal: la subida anónima anidada (antes admitida por `{allFiles=**}`) queda cerrada; ningún actor crea ahí', () => {
+  it('portal: la subida anónima anidada (antes admitida por `{allFiles=**}`) queda cerrada; ningún actor crea ahí', async () => {
     for (const actor of TODOS) {
-      expect(crea(actor, PDF(ANIDADO)), `${actor} create anidado`).toBe(false);
-      expect(puede(actor, 'update', ANIDADO, PDF(ANIDADO)), `${actor} update anidado`).toBe(false);
+      expect(await crea(actor, PDF(ANIDADO)), `${actor} create anidado`).toBe(false);
+      expect(await puede(actor, 'update', ANIDADO, PDF(ANIDADO)), `${actor} update anidado`).toBe(false);
     }
   });
 
-  it('portal: los objetos anidados YA EXISTENTES sólo en ámbito (D3: sol-1 no existe ⇒ sólo admin; sin pérdida donde hay solicitud)', () => {
-    // `sol-1` no existe en el FS sintético ⇒ sin ámbito derivado ⇒ deny,
-    // salvo el admin que opera huérfanos. Con solicitud real + espejo en
-    // ámbito, titular/carteras leen y borran (suite D3 §C).
-    expect(puede('admin', 'get', ANIDADO)).toBe(true);
-    expect(puede('admin', 'delete', ANIDADO)).toBe(true);
-    for (const actor of ['propietarioA', 'propietarioB', 'profesional', 'inquilinoA', 'inquilinoB', 'autenticadoSinFicha'] as Actor[]) {
-      expect(puede(actor, 'get', ANIDADO), `${actor} get`).toBe(false);
-      expect(puede(actor, 'delete', ANIDADO), `${actor} delete`).toBe(false);
+  it('portal: los objetos anidados YA EXISTENTES sólo en ámbito (solicitud → candidato → inmueble → titular; admin huérfanos)', async () => {
+    // `sol-1` deriva a INM_A/PROP_A: titular lee y borra; el resto no. Una
+    // solicitud inexistente sólo la opera la administración (huérfanos).
+    expect(await puede('admin', 'get', ANIDADO)).toBe(true);
+    expect(await puede('admin', 'delete', ANIDADO)).toBe(true);
+    expect(await puede('propietarioA', 'get', ANIDADO)).toBe(true);
+    expect(await puede('propietarioA', 'delete', ANIDADO)).toBe(true);
+    for (const actor of ['propietarioB', 'profesional', 'inquilinoA', 'inquilinoB', 'autenticadoSinFicha'] as Actor[]) {
+      expect(await puede(actor, 'get', ANIDADO), `${actor} get`).toBe(false);
+      expect(await puede(actor, 'delete', ANIDADO), `${actor} delete`).toBe(false);
     }
-    expect(puede('anonimo', 'get', ANIDADO)).toBe(false);
-    expect(puede('anonimo', 'get', PLANO)).toBe(false);
-    expect(puede('anonimo', 'delete', PLANO)).toBe(false);
-    for (const actor of INTERNOS_NO_ADMIN) expect(puede(actor, 'list', PLANO), actor).toBe(false);
-    expect(puede('admin', 'list', PLANO)).toBe(true);
+    const HUERFANO = 'documentos_solicitados/sol-inexistente/otra/dni.pdf';
+    expect(await puede('admin', 'get', HUERFANO)).toBe(true);
+    expect(await puede('propietarioA', 'get', HUERFANO)).toBe(false);
+    expect(await puede('anonimo', 'get', ANIDADO)).toBe(false);
+    expect(await puede('anonimo', 'get', PLANO)).toBe(false);
+    expect(await puede('anonimo', 'delete', PLANO)).toBe(false);
+    for (const actor of INTERNOS_NO_ADMIN) expect(await puede(actor, 'list', PLANO), actor).toBe(false);
+    expect(await puede('admin', 'list', PLANO)).toBe(false); // sin enumeración en la API
   });
 
-  it('catálogo: `get` público del objeto plano; `list` con sesión (excepción UX deliberada D3); el inventario nunca público', () => {
+  it('catálogo: `get` público del objeto plano (también en storage.rules); sin `list`; el inventario nunca público', async () => {
     const portada = 'inmuebles/inm-1/img_1_portada.jpg';
     const inventario = 'inmuebles/inm-1/inventario/doc_1/1_frigorifico.png';
-    expect(puede('anonimo', 'get', portada)).toBe(true);
-    expect(puede('anonimo', 'list', portada)).toBe(false);
-    // D3 endurece a master-only TODOS los listados SALVO este: listar la
-    // carpeta pública del catálogo con sesión es la única excepción (UX).
-    expect(puede('propietarioA', 'list', portada)).toBe(true);
-    expect(puede('admin', 'list', portada)).toBe(true);
-    expect(puede('anonimo', 'get', inventario)).toBe(false);
-    expect(puede('anonimo', 'list', inventario)).toBe(false);
-    expect(puede('propietarioA', 'get', inventario)).toBe(true);
-    expect(crea('anonimo', JPG(portada))).toBe(false);
-    expect(crea('propietarioA', JPG(portada))).toBe(true);
-    expect(crea('propietarioA', PDF(portada))).toBe(false); // sólo imagen
-    expect(crea('propietarioA', JPG(inventario))).toBe(true);
-    expect(crea('propietarioA', PDF(inventario))).toBe(false); // sólo imagen (F-7 de la auditoría, no ampliado)
-    expect(decidir(REGLAS, inventario, 'get', ctx('anonimo')).casan).toEqual(['/inmuebles/{inmuebleId}/inventario/{allFiles=**}', '/{allPaths=**}']);
+    expect(await puede('anonimo', 'get', portada)).toBe(true);
+    expect(await puede('anonimo', 'list', portada)).toBe(false);
+    // AG-03.2: la API no enumera; la antigua excepción UX (`list` con sesión) desaparece con el SDK.
+    expect(await puede('propietarioA', 'list', portada)).toBe(false);
+    expect(await puede('admin', 'list', portada)).toBe(false);
+    // Es la ÚNICA concesión que conserva storage.rules (lectura directa del catálogo por URL).
+    expect(FUENTE).toMatch(/match \/inmuebles\/\{inmuebleId\}\/\{fileName\} \{[^}]*allow get: if true;/);
+    expect(await puede('anonimo', 'get', inventario)).toBe(false);
+    expect(await puede('anonimo', 'list', inventario)).toBe(false);
+    expect(await puede('propietarioA', 'get', inventario)).toBe(true);
+    expect(await crea('anonimo', JPG(portada))).toBe(false);
+    expect(await crea('propietarioA', JPG(portada))).toBe(true);
+    expect(await crea('propietarioA', PDF(portada))).toBe(false); // sólo imagen
+    expect(await crea('propietarioA', JPG(inventario))).toBe(true);
+    expect(await crea('propietarioA', PDF(inventario))).toBe(false); // sólo imagen (F-7 de la auditoría, no ampliado)
+    expect(destinoDe(inventario)).toBe('INMUEBLE_INVENTARIO');
+    expect(destinoDe(portada)).toBe('INMUEBLE_FOTO');
   });
 });
 
@@ -619,107 +661,43 @@ describe('F · documentos_solicitados (portal anónimo), catálogo público e in
 // G · Estructura del fichero e integración de server.ts (invariantes mínimos)
 // ---------------------------------------------------------------------------
 describe('G · estructura de storage.rules e integración server.ts', () => {
-  it('rules_version 2, catch-all deny último, llaves balanceadas, sin match anidados', () => {
+  it('rules_version 2, catch-all deny último, llaves balanceadas, sin match anidados', async () => {
     expect(FUENTE.startsWith("rules_version = '2';")).toBe(true);
-    expect(REGLAS.bloques[REGLAS.bloques.length - 1].patron).toBe('/{allPaths=**}');
     expect((FUENTE.match(/{/g) || []).length).toBe((FUENTE.match(/}/g) || []).length);
     const catchAll = FUENTE.indexOf('match /{allPaths=**}');
+    expect(catchAll).toBeGreaterThan(0);
     expect(FUENTE.slice(catchAll)).toContain('allow read, write: if false;');
     expect(FUENTE.indexOf('match /', catchAll + 10)).toBe(-1);
   });
 
-  it('no hay ningún `list` público ni ningún `read: if true` en todo el bucket', () => {
-    for (const b of REGLAS.bloques) {
-      for (const ruta of [b.patron.replace(/^\//, '').replace(/\{\w+=\*\*\}/, 'a/b').replace(/\{\w+\}/g, 'x')]) {
-        expect(puede('anonimo', 'list', ruta), `list anónimo en ${b.patron}`).toBe(false);
-      }
-    }
+  it('AG-03.2: storage.rules no consulta Firestore (ninguna base) y sólo concede el `get` del catálogo', async () => {
+    const sinComentarios = FUENTE.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    expect(sinComentarios).not.toMatch(/firestore\.(get|exists)\(/);
+    expect(sinComentarios).not.toContain('/databases/');
+    expect(sinComentarios).not.toContain('(default)');
+    const concesiones = sinComentarios.match(/allow [a-z, ]+: if (?!false;)[^;]+;/g) || [];
+    expect(concesiones).toEqual(['allow get: if true;']);
     expect(FUENTE).not.toMatch(/allow read: if true/);
+    expect(FUENTE).not.toMatch(/allow list: if true/);
   });
 
-  it('server.ts usa el módulo de documentos y ya no sirve con caché pública ni id predecible', () => {
+  it('no hay ningún `list` público: ni en las reglas ni en el servidor', async () => {
+    for (const clave of CLAVES_DESTINO) {
+      expect(await puede('anonimo', 'list', rutaEjemplo(clave)), `list anónimo en ${clave}`).toBe(false);
+    }
+  });
+
+  it('AG-04: server.ts ya no instancia ningún almacén de documentos en memoria ni sirve binarios por URL de capacidad', async () => {
     const src = readFileSync(raiz('server.ts'), 'utf8');
-    expect(src).toContain("from './src/lib/documentosServidor'");
-    expect(src).toContain('new AlmacenDocumentosEfimeros()');
-    expect(src).toContain('generarIdDocumento()');
-    expect(src).toContain('idDeDocumentoValido(fileId)');
-    expect(src).toContain('cabecerasDocumento(');
-    expect(src).not.toMatch(/Cache-Control',\s*'public/);
-    expect(src).not.toMatch(/max-age=86400/);
+    expect(src).not.toContain('documentosServidor');
+    expect(src).not.toContain('AlmacenDocumentosEfimeros');
     expect(src).not.toMatch(/new Map<\s*string,\s*\{ buffer: Buffer/);
-    for (const clave of ['url: fileUrl', 'downloadURL: fileUrl', 'storagePath: `server_${fileId}`', 'mimeType: tipo', 'size: buffer.length']) {
-      expect(src, clave).toContain(clave);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// H · Servidor de documentos (ejecución real del módulo)
-// ---------------------------------------------------------------------------
-describe('H · documentosServidor.ts — lo que se ejecuta de verdad', () => {
-  it('S-1: sólo tipos visualizables van inline; HTML/SVG/JS/desconocidos se degradan a descarga', () => {
-    expect(normalizarTipoContenido('text/html', 'f.html')).toEqual({ tipo: 'application/octet-stream', permitirInline: false });
-    expect(normalizarTipoContenido('image/svg+xml', 'l.svg')).toEqual({ tipo: 'application/octet-stream', permitirInline: false });
-    expect(normalizarTipoContenido('application/javascript', 'x.js').permitirInline).toBe(false);
-    expect(normalizarTipoContenido('application/pdf', 'c.pdf')).toEqual({ tipo: 'application/pdf', permitirInline: true });
-    expect(normalizarTipoContenido('image/jpeg', 'c.jpg').permitirInline).toBe(true);
-    expect(normalizarTipoContenido('video/mp4', 'v.mp4')).toEqual({ tipo: 'video/mp4', permitirInline: false });
-    expect(normalizarTipoContenido(undefined, 'sin_tipo.pdf').tipo).toBe('application/pdf');
-    expect(normalizarTipoContenido(undefined, 'sin_tipo.html').tipo).toBe('application/octet-stream');
-    expect(normalizarTipoContenido('Image/PNG; charset=x', 'a').tipo).toBe('image/png');
-  });
-
-  it('S-2/S-5: cabeceras privadas, nosniff, sin CR/LF ni comillas inyectables', () => {
-    const h = cabecerasDocumento('application/pdf', true, 'x.pdf\r\nSet-Cookie: a=b"');
-    expect(h['Cache-Control']).toBe('private, no-store, max-age=0');
-    expect(h['X-Content-Type-Options']).toBe('nosniff');
-    expect(h['Referrer-Policy']).toBe('no-referrer');
-    for (const v of Object.values(h)) expect(v).not.toMatch(/[\r\n"]/);
-    expect(cabecerasDocumento('application/octet-stream', false, 'a.svg')['Content-Disposition']).toMatch(/^attachment;/);
-    expect(nombreMostrable('../../etc/passwd')).not.toMatch(/[\\/]/);
-    expect(nombreMostrable('')).toBe('documento');
-    expect(nombreMostrable('ñ'.repeat(300)).length).toBeLessThanOrEqual(120);
-  });
-
-  it('S-3: id de 128 bits con forma fija; la lectura rechaza cualquier otra forma', () => {
-    const ids = new Set(Array.from({ length: 500 }, generarIdDocumento));
-    expect(ids.size).toBe(500);
-    for (const id of ids) expect(id).toMatch(/^doc_[0-9a-f]{32}$/);
-    for (const malo of ['doc_1758556800000_ab12c', 'doc_' + 'g'.repeat(32), 'DOC_' + 'a'.repeat(32), '', '../x', 'server_doc_' + 'a'.repeat(32), 42, null, undefined]) {
-      expect(idDeDocumentoValido(malo), String(malo)).toBe(false);
-    }
-  });
-
-  it('S-4: base64 validado antes de reservar memoria; tope por documento', () => {
-    expect(decodificarBase64Documento('data:application/pdf;base64,JVBERi0=')).toMatchObject({ ok: true, bytes: 5 });
-    expect(decodificarBase64Documento('JVBERi0=')).toMatchObject({ ok: true, bytes: 5 });
-    expect(decodificarBase64Documento('data:text/plain,hola').ok).toBe(false);
-    expect(decodificarBase64Documento('%%% no base64').ok).toBe(false);
-    expect(decodificarBase64Documento('').ok).toBe(false);
-    expect(decodificarBase64Documento(123).ok).toBe(false);
-    expect(decodificarBase64Documento('A'.repeat(Math.ceil(((MAX_BYTES_POR_DOCUMENTO + 3) * 4) / 3) + 4)).ok).toBe(false);
-    expect(MAX_BYTES_POR_DOCUMENTO).toBe(15 * MB);
-  });
-
-  it('S-4: almacén acotado por entradas, bytes y TTL; inmutable por id; el rol no interviene (URL de capacidad)', () => {
-    let reloj = Date.parse('2026-09-22T00:00:00.000Z');
-    const a = new AlmacenDocumentosEfimeros({ maxEntradas: 2, maxBytes: 500, ttlMs: 60_000, ahora: () => reloj });
-    const id = (n: number) => `doc_${n.toString(16).padStart(32, '0')}`;
-    const doc = (bytes: number) => ({ buffer: Buffer.alloc(bytes), mimeType: 'application/pdf', filename: 'x.pdf', uploadedAt: new Date(reloj).toISOString(), permitirInline: true, bytes });
-    expect(a.set(id(1), doc(100)).ok).toBe(true);
-    expect(a.set(id(1), doc(100)).motivo).toBe('id_ya_existe');
-    expect(a.set('doc_x', doc(1)).motivo).toBe('id_no_valido');
-    expect(a.set(id(2), doc(600)).motivo).toBe('documento_demasiado_grande');
-    a.set(id(3), doc(100));
-    a.set(id(4), doc(100));
-    expect(a.tamano).toBe(2);
-    expect(a.get(id(1))).toBeNull(); // desalojado (LRU por inserción)
-    expect(a.get(id(4))).not.toBeNull();
-    a.set(id(5), doc(300)); // 100+100+300 > 500 → desaloja el más antiguo
-    expect(a.bytes).toBeLessThanOrEqual(500);
-    reloj += 61_000;
-    expect(a.get(id(5))).toBeNull(); // TTL
-    expect(a.purgar()).toBeGreaterThanOrEqual(0);
-    expect(a.tamano).toBe(0);
+    expect(src).not.toContain('storagePath: `server_${fileId}`');
+    expect(src).not.toMatch(/Cache-Control',\s*'public/);
+    // Las rutas antiguas siguen declaradas SOLO para responder 410 (retirada explícita).
+    expect(src).toMatch(/app\.post\('\/api\/upload-document',\s*\(_req, res\) => responderAlmacenTemporalRetirado\(res\)\)/);
+    expect(src).toMatch(/app\.get\('\/api\/documents\/:fileId',\s*\(_req, res\) => responderAlmacenTemporalRetirado\(res\)\)/);
+    expect(src).toContain("res.status(410)");
+    expect(src).toContain("codigo: 'ALMACEN_TEMPORAL_RETIRADO'");
   });
 });

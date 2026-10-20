@@ -42,6 +42,31 @@ describe('UX-3 · ejecutarOperacion', () => {
     expect(mensajes('error')).toEqual([]);
   });
 
+  it('AG-04 · `mensajeError` admite una función: el aviso distingue el fallo parcial del total', async () => {
+    class FalloParcial extends Error {}
+    const texto = (fallo: { motivo: string; error?: unknown }) =>
+      fallo.error instanceof FalloParcial ? 'El gasto se ha guardado, pero la factura no.' : 'No se ha podido guardar el gasto.';
+    const parcial = await ejecutarOperacion({
+      accion: async () => { throw new FalloParcial('factura'); },
+      mensajeExito: 'Gasto registrado correctamente.',
+      mensajeError: texto,
+    });
+    expect(parcial.ok).toBe(false);
+    expect(mensajes('error')).toEqual(['El gasto se ha guardado, pero la factura no.']);
+    expect(mensajes('exito')).toEqual([]);
+    reiniciarAvisosOperacion();
+    const total = await ejecutarOperacion({
+      accion: async () => { throw new Error('otro'); },
+      mensajeError: texto,
+    });
+    expect(total.ok).toBe(false);
+    expect(mensajes('error')).toEqual(['No se ha podido guardar el gasto.']);
+    reiniciarAvisosOperacion();
+    const booleano = await ejecutarOperacion({ accion: async () => false, mensajeError: texto });
+    expect(booleano.ok).toBe(false);
+    expect(mensajes('error')).toEqual(['No se ha podido guardar el gasto.']);
+  });
+
   it('excepción: nunca éxito y el error queda visible', async () => {
     const onFallo = vi.fn();
     const resultado = await ejecutarOperacion({

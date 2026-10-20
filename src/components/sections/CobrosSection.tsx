@@ -271,8 +271,14 @@ export const CobrosSection: React.FC<CobrosSectionProps> = ({
             url: subido.url,
           };
         } catch (upErr: any) {
+          // AG-04: la subida es fail-closed (Storage o error explícito; sin
+          // respaldo efímero). El pago NO se registra sin su justificante y el
+          // aviso es de ERROR (antes se emitía como «éxito»).
           console.error('Error subiendo justificante:', upErr);
-          avisarOperacion({ tipo: 'exito', mensaje: mensajeDeErrorUsuario(upErr, 'No se pudo subir el justificante. El pago no se ha guardado.') });
+          avisarOperacion({
+            tipo: 'error',
+            mensaje: `${mensajeDeErrorUsuario(upErr, 'No se ha podido custodiar el justificante.')} El pago no se ha guardado.`,
+          });
           setIsUploadingJust(false);
           setIsSavingPago(false);
           return;

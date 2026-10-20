@@ -17,13 +17,11 @@ import {
   type Unsubscribe,
   type QuerySnapshot,
 } from 'firebase/firestore';
-import {
-  getStorage,
-  ref,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-} from 'firebase/storage';
+import { getStorage } from 'firebase/storage';
+// AG-03.2: toda operación documental pasa por el motor mediado por el servidor
+// (`/api/documentos/*`), que autoriza contra la base Firestore con nombre. El
+// objeto `storage` del SDK se conserva sólo por compatibilidad de firmas.
+import { ref, uploadBytes, getDownloadURL, deleteObject } from './custodiaDocumental/almacenServidor';
 import firebaseConfig from '../../firebase-applet-config.json';
 import {
   Candidato,
@@ -84,6 +82,14 @@ import {
 } from '../estadoDatos/canalIncidencias';
 import { FIREBASE_BASE_DATOS_ID, FIREBASE_PROYECTO_ID } from './entornoFirebase';
 import {
+  LIMITES_PREFIJO,
+  esReferenciaSinCustodia,
+  exigirTitular,
+  sanearSegmento,
+  subirBinarioDuradero,
+  tipoContenidoDe,
+} from './custodiaDocumental/subidaDirecta';
+import {
   TRAZA_CARTERAS,
   ayudaUsuarioDeCausa,
   causaDeDenegacion,
@@ -128,10 +134,14 @@ import {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
+// AG-03.2: la ÚNICA base Firestore de la aplicación es la base CON NOMBRE
+// declarada en `firebase-applet-config.json`. Sin ella no se selecciona ninguna
+// otra (`(default)` no forma parte de la arquitectura): fallo explícito.
 const firestoreDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-export const db = firestoreDbId
-  ? getFirestore(app, firestoreDbId)
-  : getFirestore(app);
+if (typeof firestoreDbId !== 'string' || !/^[a-z][a-z0-9-]{2,61}[a-z0-9]$/.test(firestoreDbId)) {
+  throw new Error('FIREBASE_BASE_DATOS_AUSENTE: firebase-applet-config.json debe declarar `firestoreDatabaseId` (base con nombre).');
+}
+export const db = getFirestore(app, firestoreDbId);
 
 export const storage = getStorage(app);
 export const auth = getAuth(app);
@@ -2620,63 +2630,38 @@ export async function uploadReformaAdjuntoStorage(
 // Ruta: gastos_facturas/{propietarioId}/{gastoId}/{archivo}
 // ============================================================
 
+/**
+ * Sube la factura de un gasto a `gastos_facturas/{propietarioId}/{gastoId}/…`.
+ *
+ * AG-04 (2026-10-20): fail-closed. Antes hacía una carrera de 8 s contra
+ * Storage y, al perderla o ser denegada, enviaba el binario al almacén efímero
+ * del servidor (`/api/upload-document`, RAM) devolviendo `server_*` como si
+ * fuese una custodia real. Ahora sólo devuelve cuando el objeto está en Storage
+ * y, si no hay titular, no intenta nada (la regla deniega `sin_asignar`).
+ * Lanza `ErrorCustodiaDocumento` (mensaje apto para la persona usuaria).
+ */
 export async function uploadFacturaGasto(
   gastoId: string,
   file: File | Blob,
   fileName: string,
   propietarioId?: string
 ): Promise<{ url: string; storagePath: string }> {
-  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = sanearSegmento(fileName, 'factura.pdf');
+  const ownerSeg = sanearSegmento(exigirTitular(propietarioId, `gastos_facturas/sin_asignar/${gastoId}`), 'sin_asignar');
   const storagePath = `gastos_facturas/${ownerSeg}/${gastoId}/${Date.now()}_${safeName}`;
-  const mime =
-    (file as File).type ||
-    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
-
-  try {
-    const fileRef = ref(storage, storagePath);
-    const uploadWork = (async () => {
-      await uploadBytes(fileRef, file, { contentType: mime });
-      return await getDownloadURL(fileRef);
-    })();
-    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
-    const url = await Promise.race([uploadWork, timeoutGuard]);
-    if (url && typeof url === 'string') {
-      return { url, storagePath };
-    }
-    console.warn('Timeout subiendo la factura del gasto a Firebase Storage.');
-  } catch (err) {
-    console.warn('Firebase Storage no disponible para la factura del gasto:', err);
-  }
-
-  // Respaldo por el endpoint del servidor (igual que los justificantes de cobro).
-  try {
-    const dataURL = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string) || '');
-      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
-      reader.readAsDataURL(file);
-    });
-    const res = await fetch('/api/upload-document', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileBase64: dataURL, filename: fileName, mimeType: mime, itemId: gastoId }),
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.url) {
-        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
-      }
-    }
-  } catch (serverErr) {
-    console.warn('Falló también la subida de la factura por servidor:', serverErr);
-  }
-
-  throw new Error('No se ha podido almacenar la factura. Revisa la conexión e inténtalo de nuevo.');
+  const contentType = tipoContenidoDe(file, safeName);
+  const { url } = await subirBinarioDuradero(storage, {
+    storagePath,
+    datos: file,
+    contentType,
+    limite: LIMITES_PREFIJO.gastos_facturas,
+  });
+  return { url, storagePath };
 }
 
 export async function deleteFacturaGastoStorage(storagePath?: string): Promise<void> {
-  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+  if (!storagePath || esReferenciaSinCustodia(storagePath)) {
+    // Referencias heredadas del almacén efímero retirado o de data-URLs: no hay objeto que borrar.
     return;
   }
   try {
@@ -2830,97 +2815,55 @@ export async function saveGmailConfigFirestore(config: GmailIntegracionConfig) {
 }
 
 /**
- * Uploads a candidate-provided document file to server document store / Firebase Storage with resilient fallback.
- * Automatically optimizes and compresses image uploads for rapid saving and small payload footprint.
+ * Sube un documento aportado por el candidato (portal público) a
+ * `documentos_solicitados/{solicitudDocId}/{itemId}_{ts}_{nombre}` (PDF/imagen,
+ * < 15 MB). AG-03.2: la subida la autoriza el SERVIDOR — con sesión, por el
+ * ámbito de la cuenta; sin sesión, por el token de la solicitud verificado en
+ * la base Firestore con nombre. Las reglas de Storage ya no admiten subida anónima.
+ *
+ * AG-04 (2026-10-20): fail-closed. Antes enviaba PRIMERO el binario al almacén
+ * efímero del servidor (`/api/upload-document`, RAM), después corría 2,5 s
+ * contra Storage y, si todo fallaba, devolvía una data-URL con `local_*` como
+ * si se hubiese guardado. Ahora: Storage o error explícito; nunca `server_*`,
+ * `local_*` ni base64 en el registro. Las imágenes se siguen comprimiendo.
+ * Lanza `ErrorCustodiaDocumento` (mensaje apto para la persona usuaria).
  */
 export async function uploadDocumentoAportadoFile(
   solicitudDocId: string,
   itemId: string,
   fileOrBlob: File | Blob,
-  fileName: string
-): Promise<{ downloadURL: string; storagePath: string; base64Data?: string }> {
-  const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  let targetBlob = fileOrBlob;
-  let compressedDataUrl = '';
+  fileName: string,
+  /**
+   * AG-03.2: token de la solicitud (portal público sin sesión). El servidor lo
+   * verifica en la base con nombre antes de abrir la subida; con sesión activa
+   * se aplica el ámbito de la cuenta.
+   */
+  tokenAcceso?: string
+): Promise<{ downloadURL: string; storagePath: string }> {
+  const sanitizedName = sanearSegmento(fileName, 'documento.pdf');
+  let targetBlob: Blob = fileOrBlob;
 
   if (fileOrBlob instanceof File && fileOrBlob.type.startsWith('image/')) {
     try {
       const comp = await compressImageForUpload(fileOrBlob, 1400, 1400, 0.72);
       targetBlob = comp.blob;
-      compressedDataUrl = comp.dataUrl;
     } catch (e) {
-      console.warn('Image compression fallback:', e);
+      console.warn('No se pudo comprimir la imagen; se sube el original:', e);
     }
   }
 
-  const getDataUrlFallback = async (): Promise<string> => {
-    if (compressedDataUrl) return compressedDataUrl;
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string) || '');
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(targetBlob);
-    });
-  };
-
-  try {
-    const dataURL = await getDataUrlFallback();
-
-    // 1. Try uploading to server document store first (instant, works for large multi-page PDFs)
-    try {
-      const serverUploadRes = await fetch('/api/upload-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileBase64: dataURL,
-          filename: fileName,
-          mimeType: targetBlob.type || 'application/pdf',
-          solicitudId: solicitudDocId,
-          itemId,
-        }),
-      });
-
-      if (serverUploadRes.ok) {
-        const json = await serverUploadRes.json();
-        if (json.url) {
-          return {
-            downloadURL: json.url,
-            storagePath: json.storagePath || `server_${json.fileId}`,
-            base64Data: dataURL,
-          };
-        }
-      }
-    } catch (serverErr) {
-      console.warn('Server upload error, attempting Firebase Storage fallback:', serverErr);
-    }
-
-    // 2. Fallback to Firebase Storage if available
-    const storagePath = `documentos_solicitados/${solicitudDocId}/${itemId}_${Date.now()}_${sanitizedName}`;
-    const uploadWork = (async () => {
-      const fileRef = ref(storage, storagePath);
-      await uploadBytes(fileRef, targetBlob, {
-        contentType: targetBlob.type || 'application/pdf',
-      });
-      return await getDownloadURL(fileRef);
-    })();
-
-    // 2.5-second timeout guard for Cloud Storage
-    const timeoutGuard = new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), 2500);
-    });
-
-    const resultURL = await Promise.race([uploadWork, timeoutGuard]);
-
-    if (resultURL && typeof resultURL === 'string') {
-      return { downloadURL: resultURL, base64Data: dataURL, storagePath };
-    } else {
-      return { downloadURL: dataURL, base64Data: dataURL, storagePath: `local_${itemId}` };
-    }
-  } catch (err) {
-    console.warn('Document upload error fallback:', err);
-    const dataURL = await getDataUrlFallback();
-    return { downloadURL: dataURL, base64Data: dataURL, storagePath: `local_${itemId}` };
-  }
+  const solSeg = sanearSegmento(solicitudDocId, 'solicitud');
+  const storagePath = `documentos_solicitados/${solSeg}/${sanearSegmento(itemId, 'item')}_${Date.now()}_${sanitizedName}`;
+  const contentType = tipoContenidoDe(targetBlob, sanitizedName);
+  const tokenLimpio = String(tokenAcceso || '').trim();
+  const { url } = await subirBinarioDuradero(storage, {
+    storagePath,
+    datos: targetBlob,
+    contentType,
+    limite: LIMITES_PREFIJO.documentos_solicitados,
+    ...(tokenLimpio ? { accesoPublico: { solicitudDocId: solSeg, token: tokenLimpio } } : {}),
+  });
+  return { downloadURL: url, storagePath };
 }
 
 /**
@@ -3111,79 +3054,43 @@ export async function uploadJustificanteCobro(
   propietarioId?: string,
   contratoId?: string
 ): Promise<{ url: string; storagePath: string }> {
-  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  // FASE 1.4: se segmenta por propietario para que Storage Rules pueda aislar
-  // los justificantes (datos económicos). Si no hay propietarioId se usa la
-  // carpeta genérica "sin_asignar".
-  const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
-  const contractSeg = contratoId?.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = contractSeg
-    ? `recibos/${contractSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`
-    : `cobros_justificantes/${ownerSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
-  const mime =
-    (file as File).type ||
-    (safeName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+  // AG-04 (2026-10-20): fail-closed. Antes hacía una carrera de 8 s contra
+  // Storage y, al perderla o ser denegada, enviaba el binario al almacén efímero
+  // del servidor (`/api/upload-document`, RAM) devolviendo `server_*` como si
+  // fuese una custodia real. Ahora sólo devuelve cuando el objeto está en Storage.
+  // Lanza `ErrorCustodiaDocumento` (mensaje apto para la persona usuaria).
+  const safeName = sanearSegmento(fileName, 'justificante.pdf');
+  const contractSeg = contratoId ? sanearSegmento(contratoId, 'contrato') : '';
+  const contentType = tipoContenidoDe(file, safeName);
 
-  // 1) Firebase Storage
-  try {
-    const fileRef = ref(storage, storagePath);
-    const uploadWork = (async () => {
-      await uploadBytes(fileRef, file, { contentType: mime });
-      return await getDownloadURL(fileRef);
-    })();
-
-    const timeoutGuard = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
-    const url = await Promise.race([uploadWork, timeoutGuard]);
-
-    if (url && typeof url === 'string') {
-      return { url, storagePath };
-    }
-    console.warn('Timeout subiendo justificante a Firebase Storage; se intenta por servidor.');
-  } catch (err) {
-    console.warn('Firebase Storage no disponible para el justificante; se intenta por servidor:', err);
+  if (contractSeg) {
+    // `recibos/{contratoId}/{claveCobro}/…`: la regla resuelve el ámbito por el contrato.
+    const storagePath = `recibos/${contractSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
+    const { url } = await subirBinarioDuradero(storage, { storagePath, datos: file, contentType });
+    return { url, storagePath };
   }
 
-  // 2) Respaldo mediante el endpoint del servidor (almacén de proceso)
-  try {
-    const dataURL = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string) || '');
-      reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
-      reader.readAsDataURL(file);
-    });
-
-    const res = await fetch('/api/upload-document', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fileBase64: dataURL,
-        filename: fileName,
-        mimeType: mime,
-        itemId: cobroPeriodoId,
-      }),
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      if (json.url) {
-        return { url: json.url as string, storagePath: (json.storagePath as string) || storagePath };
-      }
-    }
-  } catch (serverErr) {
-    console.warn('Fallo también la subida del justificante por servidor:', serverErr);
-  }
-
-  throw new Error(
-    'No se ha podido almacenar el justificante. Revisa la conexión o Firebase Storage e inténtalo de nuevo.'
-  );
+  // FASE 1.4: segmentado por propietario para que Storage Rules aísle los
+  // justificantes (datos económicos). Sin titular la regla deniega siempre
+  // (`sin_asignar`), así que no se intenta: error explícito inmediato.
+  const ownerSeg = sanearSegmento(exigirTitular(propietarioId, `cobros_justificantes/sin_asignar/${cobroPeriodoId}`), 'sin_asignar');
+  const storagePath = `cobros_justificantes/${ownerSeg}/${cobroPeriodoId}/${Date.now()}_${safeName}`;
+  const { url } = await subirBinarioDuradero(storage, {
+    storagePath,
+    datos: file,
+    contentType,
+    limite: LIMITES_PREFIJO.cobros_justificantes,
+  });
+  return { url, storagePath };
 }
 
 /**
- * Elimina un justificante de Firebase Storage. Las referencias del almacén temporal
- * del servidor (server_*) no se eliminan de Storage.
+ * Elimina un justificante de Firebase Storage. Las referencias heredadas del
+ * almacén temporal retirado (`server_*`) o de data-URLs (`local_*`) no tienen
+ * objeto en Storage: no hay nada que borrar.
  */
 export async function deleteJustificanteCobro(storagePath?: string): Promise<void> {
-  if (!storagePath || storagePath.startsWith('local_') || storagePath.startsWith('server_')) {
+  if (!storagePath || esReferenciaSinCustodia(storagePath)) {
     return;
   }
   try {

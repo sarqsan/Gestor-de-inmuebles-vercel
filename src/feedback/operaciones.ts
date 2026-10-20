@@ -34,8 +34,12 @@ export interface OpcionesOperacion<T> {
   accion: () => Promise<T> | T;
   /** Mensaje de éxito. Ej. «Inmueble guardado correctamente.» */
   mensajeExito?: string | ((valor: T) => string);
-  /** Mensaje de fallo. Ej. «No se ha podido guardar el inmueble.» */
-  mensajeError: string;
+  /**
+   * Mensaje de fallo. Ej. «No se ha podido guardar el inmueble.» Admite una
+   * función para distinguir fallos parciales (p. ej. «el gasto se ha guardado,
+   * pero la factura no») de fallos totales: el aviso debe decir la verdad.
+   */
+  mensajeError: string | ((fallo: Extract<ResultadoOperacion<unknown>, { ok: false }>) => string);
   /**
    * Orígenes de datos implicados: si alguno registra un fallo de guardado durante
    * la operación, el resultado no puede presentarse como éxito.
@@ -64,13 +68,16 @@ export async function ejecutarOperacion<T>({
   avisarExito = true,
 }: OpcionesOperacion<T>): Promise<ResultadoOperacion<T>> {
   const fallosPrevios = fallosDe(origenesDatos);
+  const textoError = (fallo: Extract<ResultadoOperacion<T>, { ok: false }>): string =>
+    typeof mensajeError === 'function' ? mensajeError(fallo) : mensajeError;
   let valor: T;
   try {
     valor = await accion();
   } catch (error) {
-    console.error(`[UX-3] ${mensajeError}`, error);
-    avisarOperacion({ tipo: 'error', mensaje: mensajeError });
     const fallo: Extract<ResultadoOperacion<T>, { ok: false }> = { ok: false, motivo: 'excepcion', error };
+    const mensaje = textoError(fallo);
+    console.error(`[UX-3] ${mensaje}`, error);
+    avisarOperacion({ tipo: 'error', mensaje });
     onFallo?.(fallo);
     return fallo;
   }
@@ -80,9 +87,10 @@ export async function ejecutarOperacion<T>({
   // como éxito, aunque la promesa se haya resuelto.
   if (valor === false) {
     origenesDatos.forEach((origen) => reportarResultadoGuardado(origen, false));
-    console.error(`[UX-3] ${mensajeError} (la persistencia devolvió false).`);
-    avisarOperacion({ tipo: 'error', mensaje: mensajeError });
     const fallo: Extract<ResultadoOperacion<T>, { ok: false }> = { ok: false, motivo: 'persistencia' };
+    const mensaje = textoError(fallo);
+    console.error(`[UX-3] ${mensaje} (la persistencia devolvió false).`);
+    avisarOperacion({ tipo: 'error', mensaje });
     onFallo?.(fallo);
     return fallo;
   }
@@ -91,9 +99,10 @@ export async function ejecutarOperacion<T>({
   const huboFalloDePersistencia = fallosNuevos.some((id, i) => id !== fallosPrevios[i]);
   if (huboFalloDePersistencia) {
     // La promesa se resolvió, pero la persistencia no confirmó: no se puede decir «guardado».
-    console.error(`[UX-3] ${mensajeError} (la persistencia no confirmó el cambio).`);
-    avisarOperacion({ tipo: 'error', mensaje: mensajeError });
     const fallo: Extract<ResultadoOperacion<T>, { ok: false }> = { ok: false, motivo: 'persistencia' };
+    const mensaje = textoError(fallo);
+    console.error(`[UX-3] ${mensaje} (la persistencia no confirmó el cambio).`);
+    avisarOperacion({ tipo: 'error', mensaje });
     onFallo?.(fallo);
     return fallo;
   }

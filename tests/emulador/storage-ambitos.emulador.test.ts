@@ -1,11 +1,23 @@
 /**
- * Storage + Firestore oficiales, solo proyecto demo-gestor-reglas.
+ * Storage OFICIAL (emulador) · `storage.rules` de AG-03.2 — sólo proyecto demo-gestor-reglas.
  *
- * Esta matriz prueba las rutas que consultan Firestore usando `(default)`;
- * NO acredita que esas mismas lecturas funcionen con la base CON NOMBRE
- * declarada para la app en firebase.json. Esa discrepancia permanece abierta.
- * Sin FIREBASE_STORAGE_EMULATOR_HOST y FIRESTORE_EMULATOR_HOST se falla en voz
+ * Desde ORDEN AG-03.2 las reglas de Cloud Storage NO consultan Firestore
+ * (ninguna base: ni `(default)` ni la base con nombre). Toda la autorización
+ * documental la resuelve el servidor (`server/documentos/*`) contra la base
+ * Firestore con nombre; las reglas sólo conceden la lectura pública del
+ * catálogo de fotos (`inmuebles/{inmuebleId}/{fileName}`) y niegan todo lo demás
+ * al SDK de cliente, sea quien sea (titular, cartera, master, anónimo).
+ *
+ * Esta matriz certifica, con el MOTOR REAL de reglas del emulador:
+ *  · ningún prefijo documental privado es accesible por el SDK de cliente;
+ *  · la foto de catálogo se lee sin sesión pero no se escribe ni se enumera;
+ *  · el resultado NO depende de lo que haya en Firestore (con o sin espejo).
+ * Sin FIREBASE_STORAGE_EMULATOR_HOST y FIRESTORE_EMULATOR_HOST falla en voz
  * alta; ningún mock ni red de producción sustituye al motor de reglas.
+ *
+ * Estado: reescrita en AG-03.2 sin emulador disponible en el entorno de
+ * desarrollo (V — pendiente de ejecución con `npm run test:emulador:reglas`).
+ * El flujo mediado por el servidor se cubre en `documentos-servidor.emulador.test.ts`.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -17,10 +29,8 @@ const RAIZ = resolve(__dirname, '../..');
 const FIRESTORE = readFileSync(resolve(RAIZ, 'firestore.rules'), 'utf8');
 const STORAGE = readFileSync(resolve(RAIZ, 'storage.rules'), 'utf8');
 const PROYECTO = 'demo-gestor-reglas';
-const BASE_NOMBRADA = (JSON.parse(readFileSync(resolve(RAIZ, 'firebase.json'), 'utf8')) as {
-  firestore: { database: string }[];
-}).firestore[0].database;
 const BYTES = new Uint8Array([37, 80, 68, 70, 45, 49]);
+const MASTER: SesionSintetica = { uid: 'admin-sintetico', email: 'sarqsan2@gmail.com' };
 let env: RulesTestEnvironment;
 
 function hostYPort(envVar: 'FIRESTORE_EMULATOR_HOST' | 'FIREBASE_STORAGE_EMULATOR_HOST') {
@@ -37,6 +47,12 @@ const storage = (sesion?: SesionSintetica) => sesion
 const archivo = (ruta: string, sesion?: SesionSintetica) => storage(sesion).ref(ruta);
 const subir = (ruta: string, sesion?: SesionSintetica, contentType = 'application/pdf') =>
   Promise.resolve(archivo(ruta, sesion).put(BYTES, { contentType }));
+/** Siembra un objeto SIN reglas (como lo haría el servidor con la cuenta de servicio). */
+async function sembrarObjeto(ruta: string, contentType = 'application/pdf'): Promise<void> {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.storage().ref(ruta).put(BYTES, { contentType });
+  });
+}
 
 beforeAll(async () => {
   const firestore = hostYPort('FIRESTORE_EMULATOR_HOST');
@@ -51,6 +67,8 @@ afterAll(async () => { await env?.cleanup(); });
 beforeEach(async () => {
   await env.clearStorage();
   await env.clearFirestore();
+  // El espejo y las fichas EXISTEN en Firestore: las reglas ya no los miran, y
+  // el resultado debe ser idéntico al del caso sin espejo (ver última prueba).
   await env.withSecurityRulesDisabled(async (ctx) => {
     for (const [ruta, datos] of Object.entries(mundoSintetico())) {
       await ctx.firestore().doc(ruta).set(datos);
@@ -58,116 +76,77 @@ beforeEach(async () => {
   });
 });
 
-describe('Storage oficial · ámbitos y rutas (Firestore (default) sintético)', () => {
-  it('factura privada: titular autorizado sí; ajeno y anónimo ni leen ni crean', async () => {
-    const ruta = 'gastos_facturas/prop-a/gasto-1/justificante.pdf';
-    await assertFails(subir(ruta, TITULAR_B));
-    await assertFails(subir(ruta));
-    await assertSucceeds(subir(ruta, TITULAR_A));
-    expect((await assertSucceeds(archivo(ruta, TITULAR_A).getMetadata())).size).toBe(BYTES.length);
-    await assertFails(archivo(ruta, TITULAR_B).getMetadata());
-    await assertFails(archivo(ruta).getMetadata());
-  });
+const PRIVADAS = [
+  'gastos_facturas/prop-a/gasto-1/justificante.pdf',
+  'cobros_justificantes/prop-a/cobro-1/justificante.pdf',
+  'recibos/contrato-a/cobro-1/recibo.pdf',
+  'contratos/contrato-a/anexo.pdf',
+  'inmuebles/inm-a1/documentos_patrimoniales/doc-1/escritura.pdf',
+  'inmuebles/inm-a1/inventario/mueble.jpg',
+  'profesionales/pro-1/documentos/doc-1/seguro.pdf',
+  'documentos_solicitados/sol-1/dni.pdf',
+  'morosidad_evidencias/prop-a/contrato-a/evidencia.pdf',
+  'incidencias/inc-1/evidencias/foto.jpg',
+  'suministros/sum-1/lecturas/lectura.jpg',
+  'presupuestos/pres-1/factura.pdf',
+];
 
-  it('revocación del espejo y permisos L/E: lector no escribe; escritura solo para titular o cartera E', async () => {
-    const ruta = 'gastos_facturas/prop-a/gasto-2/justificante.pdf';
-    const lector = { uid: 'delegado-l', email: 'delegado-l@sintetico.invalid' };
-    const gestor = { uid: 'delegado-e', email: 'delegado-e@sintetico.invalid' };
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      const db = ctx.firestore();
-      for (const [sesion, cartera] of [[lector, 'carterasL'], [gestor, 'carterasE']] as const) {
-        await db.doc(`usuarios/${sesion.uid}`).set({ authUid: sesion.uid, estado: 'ACTIVO', tipoPerfil: 'PROFESIONAL' });
-        await db.doc(`usuarios_auth/${sesion.uid}`).set({
-          usuarioId: sesion.uid, tipoPerfil: 'PROFESIONAL', estado: 'ACTIVO',
-          propietarioId: 'prop-z', [cartera]: ['prop-a'],
-        });
+describe('Storage oficial · reglas AG-03.2 (sin consultas a Firestore)', () => {
+  it('ningún prefijo privado se crea desde el SDK de cliente: ni titular, ni ajeno, ni master, ni anónimo', async () => {
+    for (const ruta of PRIVADAS) {
+      for (const sesion of [TITULAR_A, TITULAR_B, MASTER, undefined]) {
+        await assertFails(subir(ruta, sesion, ruta.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
       }
-    });
-    await assertFails(subir(ruta, lector));
-    await assertSucceeds(subir(ruta, gestor));
-    await assertSucceeds(archivo(ruta, lector).getMetadata());
-    await assertFails(archivo(ruta, TITULAR_B).getMetadata());
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`usuarios_auth/${TITULAR_A.uid}`).update({ estado: 'BLOQUEADO' });
-    });
-    await assertFails(archivo(ruta, TITULAR_A).getMetadata());
-    await assertSucceeds(archivo(ruta, gestor).getMetadata());
+    }
   });
 
-  it('la foto de catálogo es pública; el inventario no lo es aunque se conozca su ruta', async () => {
+  it('ningún prefijo privado se lee, enumera ni borra desde el SDK de cliente aunque el objeto exista y se conozca la ruta (R-5)', async () => {
+    for (const ruta of PRIVADAS) {
+      await sembrarObjeto(ruta, ruta.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf');
+      for (const sesion of [TITULAR_A, TITULAR_B, MASTER, undefined]) {
+        await assertFails(archivo(ruta, sesion).getMetadata());
+        await assertFails(archivo(ruta, sesion).getDownloadURL());
+        await assertFails(archivo(ruta, sesion).delete());
+      }
+      const carpeta = ruta.slice(0, ruta.lastIndexOf('/'));
+      await assertFails(storage(TITULAR_A).ref(carpeta).listAll());
+      await assertFails(storage(MASTER).ref(carpeta).listAll());
+    }
+  });
+
+  it('la foto de catálogo se lee sin sesión; no se crea, sobrescribe, borra ni enumera desde el cliente', async () => {
     const foto = 'inmuebles/inm-a1/portada.jpg';
+    await sembrarObjeto(foto, 'image/jpeg');
+    expect((await assertSucceeds(archivo(foto).getMetadata())).size).toBe(BYTES.length);
+    await assertSucceeds(archivo(foto, TITULAR_B).getMetadata());
+    await assertFails(subir('inmuebles/inm-a1/otra.jpg', TITULAR_A, 'image/jpeg'));
+    await assertFails(subir(foto, TITULAR_A, 'image/jpeg'));
+    await assertFails(subir(foto, MASTER, 'image/jpeg'));
+    await assertFails(archivo(foto, TITULAR_A).delete());
+    await assertFails(storage().ref('inmuebles/inm-a1').listAll());
+    await assertFails(storage(TITULAR_A).ref('inmuebles/inm-a1').listAll());
+    // El inventario cuelga de `inmuebles/{id}/…` pero NO es el catálogo: privado.
     const privado = 'inmuebles/inm-a1/inventario/mueble.jpg';
-    await assertFails(subir(foto, TITULAR_B, 'image/jpeg'));
-    await assertSucceeds(subir(foto, TITULAR_A, 'image/jpeg'));
-    await assertSucceeds(archivo(foto).getMetadata());
-    await assertSucceeds(subir(privado, TITULAR_A, 'image/jpeg'));
+    await sembrarObjeto(privado, 'image/jpeg');
     await assertFails(archivo(privado).getMetadata());
-    await assertFails(archivo(privado, TITULAR_B).getMetadata());
-    await assertSucceeds(archivo(privado, TITULAR_A).getMetadata());
+    await assertFails(archivo(privado, TITULAR_A).getMetadata());
   });
 
-  it('documentación: create anónimo limitado a PDF/imagen y sin lectura anónima', async () => {
-    const ruta = 'documentos_solicitados/sol-1/dni.pdf';
-    await assertFails(subir(ruta, undefined, 'text/plain'));
-    await assertSucceeds(subir(ruta));
-    await assertFails(archivo(ruta).getMetadata());
-    const master = { uid: 'admin-sintetico', email: 'sarqsan2@gmail.com' };
-    await assertSucceeds(archivo(ruta, master).getMetadata());
+  it('el portal de candidatos ya no sube de forma anónima por reglas: la vía es el servidor con el token de la solicitud', async () => {
+    await assertFails(subir('documentos_solicitados/sol-1/dni.pdf'));
+    await assertFails(subir('documentos_solicitados/sol-1/dni.pdf', undefined, 'image/jpeg'));
     await assertFails(subir('documentos_solicitados/sol-1/nested/dni.pdf'));
   });
 
-  it('la ruta sin regla no se abre por autenticar al usuario (R-5)', async () => {
-    await assertFails(subir('presupuestos/pres-1/factura.pdf', TITULAR_A));
-    await assertFails(subir('trabajos/trab-1/factura.pdf', TITULAR_A));
-  });
-
-  it('no confunde documentos solo en la base con nombre con el espejo en (default)', async () => {
-    // REST del emulador, proyecto demo exclusivo. Authorization: owner es el
-    // marcador administrativo del emulador, NO una credencial de producción.
-    // Crear la ficha en la base nombrada y quitarla de (default) reproduce la
-    // topología configurada sin afirmar que los datos productivos sean iguales.
-    const [host, port] = process.env.FIRESTORE_EMULATOR_HOST!.split(':');
-    if (!['localhost', '127.0.0.1'].includes(host)) throw new Error('Se exige un emulador local para la base con nombre');
-    expect(BASE_NOMBRADA).not.toBe('(default)');
-    const url = `http://${host}:${port}/v1/projects/${PROYECTO}/databases/${BASE_NOMBRADA}/documents/usuarios_auth/${TITULAR_A.uid}`;
-    const response = await fetch(url, {
-      method: 'PATCH',
-      headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: {
-        estado: { stringValue: 'ACTIVO' }, propietarioId: { stringValue: 'prop-a' },
-        tipoPerfil: { stringValue: 'PROPIETARIO' },
-      } }),
-    });
-    if (!response.ok) throw new Error(`El emulador no aceptó la base con nombre: HTTP ${response.status}`);
-    const documento = await response.json() as { name: string };
-    expect(documento.name).toContain(`/databases/${BASE_NOMBRADA}/documents/usuarios_auth/${TITULAR_A.uid}`);
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`usuarios_auth/${TITULAR_A.uid}`).delete();
-    });
-    // La ruta pide /(default)/: los documentos sembrados SOLO en la base con
-    // nombre no deben hacer que una petición obtenga permisos por accidente.
-    const ruta = 'gastos_facturas/prop-a/gasto-n/justificante.pdf';
-    await assertFails(subir(ruta, TITULAR_A));
-
-    // Sonda DIAGNÓSTICA solo del emulador: una regla alternativa con base
-    // nombrada puede pasar aquí y NO estar admitida por Firebase publicado.
-    // Jamás autoriza sustituir las rutas productivas sin una prueba autorizada
-    // en entorno de aceptación y una decisión sobre los datos ya existentes.
-    // No se escribe la regla alternativa en storage.rules del repositorio.
-    const alterna = STORAGE.replaceAll('/databases/(default)/documents/', `/databases/${BASE_NOMBRADA}/documents/`);
-    expect(alterna).not.toBe(STORAGE);
-    const envNombrado = await initializeTestEnvironment({
-      projectId: PROYECTO,
-      firestore: { rules: FIRESTORE, ...hostYPort('FIRESTORE_EMULATOR_HOST') },
-      storage: { rules: alterna, ...hostYPort('FIREBASE_STORAGE_EMULATOR_HOST') },
-    });
-    try {
-      const cliente = envNombrado.authenticatedContext(TITULAR_A.uid, {
-        email: TITULAR_A.email, email_verified: true,
-      }).storage();
-      await assertSucceeds(Promise.resolve(cliente.ref(ruta).put(BYTES, { contentType: 'application/pdf' })));
-    } finally {
-      await envNombrado.cleanup();
-    }
+  it('las decisiones no dependen de Firestore: con la base vacía el resultado es el mismo', async () => {
+    await env.clearFirestore();
+    const foto = 'inmuebles/inm-a1/portada.jpg';
+    await sembrarObjeto(foto, 'image/jpeg');
+    await assertSucceeds(archivo(foto).getMetadata());
+    const privada = PRIVADAS[0];
+    await sembrarObjeto(privada);
+    await assertFails(subir(privada, TITULAR_A));
+    await assertFails(archivo(privada, TITULAR_A).getMetadata());
+    await assertFails(archivo(privada, MASTER).getMetadata());
   });
 });

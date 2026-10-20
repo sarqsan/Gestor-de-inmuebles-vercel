@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { uploadDocumentoAportadoFile } from '../lib/firebase';
 import { confirmar } from '../feedback/confirmacion';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface PortalDocumentacionPublicaViewProps {
   solicitud: SolicitudDocumentacion | SolicitudDocPublicData;
@@ -93,24 +94,27 @@ export const PortalDocumentacionPublicaView: React.FC<PortalDocumentacionPublica
       return;
     }
 
-    if (file.size > 25 * 1024 * 1024) {
-      setErrorMessage('El tamaño máximo permitido es 25MB.');
+    // Paridad con `storage.rules` (`documentos_solicitados/{sol}/{file}`: < 15 MB).
+    if (file.size >= 15 * 1024 * 1024) {
+      setErrorMessage('El tamaño máximo permitido es 15 MB.');
       return;
     }
 
     setUploadingItemId(itemId);
 
     try {
-      // Upload using resilient storage helper
+      // AG-04: subida directa y duradera a Storage (o error explícito). Nunca
+      // se guarda base64 ni una referencia efímera/local en la solicitud.
       const solId = (solicitud as any).id || `sol-${solicitud.token}`;
-      const uploadRes = await uploadDocumentoAportadoFile(solId, itemId, file, file.name);
+      // AG-03.2: el token de la solicitud autoriza la subida en el servidor
+      // (verificado en la base con nombre); sin sesión no hay otra vía.
+      const uploadRes = await uploadDocumentoAportadoFile(solId, itemId, file, file.name, solicitud.token);
 
       const nuevoArchivo: ArchivoAportado = {
         id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         nombreArchivo: file.name,
         mimeType: file.type || 'application/pdf',
         url: uploadRes.downloadURL,
-        base64Data: uploadRes.base64Data,
         storagePath: uploadRes.storagePath,
         tamañoBytes: file.size,
         fechaSubida: new Date().toLocaleDateString('es-ES'),
@@ -135,7 +139,9 @@ export const PortalDocumentacionPublicaView: React.FC<PortalDocumentacionPublica
       await onSubmit(updatedDocs, false);
     } catch (err) {
       console.error('Error uploading file:', err);
-      setErrorMessage('Error al subir el archivo. Inténtalo de nuevo.');
+      setErrorMessage(
+        mensajeDeErrorUsuario(err, 'El archivo no se ha guardado. Comprueba la conexión e inténtalo de nuevo.')
+      );
     } finally {
       setUploadingItemId(null);
     }

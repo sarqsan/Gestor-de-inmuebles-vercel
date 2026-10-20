@@ -25,7 +25,8 @@ import {
   onSnapshot,
   Unsubscribe,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+// AG-03.2: motor mediado por el servidor (autoriza contra la base Firestore con nombre).
+import { ref, uploadBytes, getDownloadURL, deleteObject } from './custodiaDocumental/almacenServidor';
 import { db, storage, saveAuditLogFirestore, subscribeColeccionPorAmbito, type DataAccessScope } from './firebase';
 import { reportarErrorLectura } from '../estadoDatos/canalIncidencias';
 import type {

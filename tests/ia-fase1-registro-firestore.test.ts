@@ -170,12 +170,17 @@ describe('IA Fase 1 · registro Firestore (REST)', () => {
     await expect(registro.completar(APERTURA.id, CIERRE)).rejects.toThrow(/403/);
   });
 
-  it('sin baseDatosId el cliente REST sigue usando (default): la búsqueda de titulares no cambia', async () => {
+  it('AG-03.2 · sin baseDatosId el cliente REST NO se construye: no existe selección de base por omisión', async () => {
     const fs = firestoreFalso();
-    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, fetchImpl: fs.fetchImpl });
-    expect(cliente.baseDatosId).toBe('(default)');
+    for (const baseDatosId of [undefined, '', '(default)', 'Base Mal']) {
+      expect(() => new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: baseDatosId as string, fetchImpl: fs.fetchImpl }))
+        .toThrow('FIRESTORE_BASE_DATOS_REQUERIDA');
+    }
+    expect(fs.peticiones).toHaveLength(0);
+    const cliente = new ClienteFirestoreRest({ cuenta: CUENTA, baseDatosId: BASE_DATOS, fetchImpl: fs.fetchImpl });
+    expect(cliente.baseDatosId).toBe(BASE_DATOS);
     await cliente.leer('inmuebles', 'inm-1');
-    expect(fs.peticiones[0].url).toBe('https://firestore.googleapis.com/v1/projects/proyecto-demo/databases/(default)/documents/inmuebles/inm-1');
+    expect(fs.peticiones[0].url).toBe(`https://firestore.googleapis.com/v1/projects/proyecto-demo/databases/${BASE_DATOS}/documents/inmuebles/inm-1`);
   });
 
   it('códec: Date ↔ timestampValue (y fecha inválida → null); rutas de campo especiales entre comillas', async () => {

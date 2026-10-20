@@ -16,7 +16,8 @@
  *    liquidaciones) se consultan SOLO con ámbito; para otros perfiles se
  *    declara la limitación en vez de forzar una consulta denegada.
  */
-import { getBytes, ref } from 'firebase/storage';
+// AG-03.2: motor mediado por el servidor (autoriza contra la base Firestore con nombre).
+import { getBytes, ref } from './custodiaDocumental/almacenServidor';
 import type { Inmueble, PolizaSeguro, Titularidad, UsuarioApp } from '../types';
 import type { Factura } from '../types/facturacion';
 import type { LiquidacionPropietario } from '../tesoreria/tipos';

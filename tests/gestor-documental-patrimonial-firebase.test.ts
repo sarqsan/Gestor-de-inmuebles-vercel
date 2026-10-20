@@ -46,17 +46,18 @@ vi.mock('firebase/firestore', () => {
   };
 });
 
-vi.mock('firebase/storage', () => {
-  const ref = (_storage: unknown, path: string) => ({ path });
+// AG-03.2: el gestor ya no usa el SDK de Storage; opera mediante el motor
+// mediado por el servidor (`custodiaDocumental/almacenServidor`), que aquí se
+// dobla en memoria con la misma superficie (ref/uploadBytes/getMetadata/getBytes/deleteObject).
+vi.mock('../src/lib/custodiaDocumental/almacenServidor', () => {
+  const ref = (_storage: unknown, path: string) => ({ path, fullPath: path });
   return {
     ref,
     uploadBytes: async (storageRef: { path: string }, datos: Blob | Uint8Array, metadata: Record<string, unknown>) => {
       const blob = datos instanceof Blob ? datos : new Blob([datos as BlobPart]);
-      mocks.storage.set(storageRef.path, {
-        blob,
-        metadata: { size: blob.size, contentType: metadata.contentType, customMetadata: metadata.customMetadata },
-      });
-      return {};
+      const guardado = { size: blob.size, contentType: metadata.contentType, customMetadata: metadata.customMetadata };
+      mocks.storage.set(storageRef.path, { blob, metadata: guardado });
+      return { ref: storageRef, metadata: { fullPath: storageRef.path, ...guardado }, yaExistia: false };
     },
     getMetadata: async (storageRef: { path: string }) => {
       const stored = mocks.storage.get(storageRef.path);

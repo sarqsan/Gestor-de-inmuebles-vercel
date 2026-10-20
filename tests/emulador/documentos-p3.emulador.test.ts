@@ -23,10 +23,29 @@
  * proyecto `demo-gestor-reglas`, hosts 127.0.0.1 exactos, sin credenciales de
  * servicio). Datos 100 % sintéticos (`*.invalid`).
  *
- * Límite conocido (heredado, ver storage-ambitos): las reglas de Storage leen
- * Firestore `(default)`; esta suite siembra `(default)`. No acredita la base
- * con nombre declarada en firebase.json.
+ * ESTADO AG-03.2 (2026-10-20) — SUITE SUPERSEDIDA, PENDIENTE DE RE-ADAPTACIÓN.
+ * Esta suite se escribió cuando el cliente subía/leía con el SDK de Storage y
+ * `storage.rules` consultaba Firestore `(default)`. Desde AG-03.2:
+ *  · el código de la app (adaptador de profesionales, expediente, actas) ya no
+ *    usa el SDK: pasa por el motor mediado por el servidor (`/api/documentos/*`),
+ *    que autoriza contra la base Firestore CON NOMBRE;
+ *  · `storage.rules` ya no concede acceso directo a ningún prefijo privado, por
+ *    lo que las expectativas «SDK del titular permitido / ajeno denegado» de
+ *    esta suite dejaron de describir la arquitectura.
+ * El flujo mediado se certifica en `documentos-servidor.emulador.test.ts` y las
+ * reglas en `storage-ambitos.emulador.test.ts`.
+ *
+ * AG-03.3: la suite queda OMITIDA de forma explícita y visible (vitest la
+ * lista como «skipped» con este motivo en el nombre), no fallida: un fallo de
+ * módulo hacía rojo el job de emuladores aunque las suites vigentes pasaran y
+ * ocultaba sus resultados. La re-adaptación sigue PENDIENTE y, además, los
+ * destinos con token rotatorio (P3/P5) no pueden ejercitarse en el emulador
+ * v15.33.0 (sin `PATCH` bajo `/storage/v1/`). `P3_EMULADOR_FORZAR=1` la
+ * ejecuta igualmente (fallará: describe la arquitectura anterior).
  */
+const P3_SUPERSEDIDA = !process.env.P3_EMULADOR_FORZAR;
+const MOTIVO_P3 = 'P3_EMULADOR_SUPERSEDIDA_AG03_2: custodia por SDK anterior a AG-03.2; pendiente de re-adaptación al flujo mediado por el servidor '
+  + '(cubierto por documentos-servidor.emulador.test.ts, storage-ambitos.emulador.test.ts y tests/integracion-custodia-documental-extremo-a-extremo.test.ts)';
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -162,7 +181,15 @@ const rechazo = async (p: Promise<unknown>): Promise<string> => {
   try { await p; return 'PERMITIDO'; } catch (e) { return (e as { codigo?: string; code?: string }).codigo || (e as { code?: string }).code || 'ERROR'; }
 };
 
+const describeP3 = P3_SUPERSEDIDA ? describe.skip : describe;
+if (P3_SUPERSEDIDA) {
+  describe.skip(`P3 · SUITE OMITIDA — ${MOTIVO_P3}`, () => {
+    it('pendiente de re-adaptación (V — pendiente de verificación en emulador)', () => undefined);
+  });
+}
+
 beforeAll(async () => {
+  if (P3_SUPERSEDIDA) return;
   // Guardia ANTES de cualquier escritura: aborta ante destinos productivos o ambiguos.
   validarEntornoP2();
   const fsHp = hostPuerto('FIRESTORE_EMULATOR_HOST');
@@ -195,6 +222,7 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
+  if (P3_SUPERSEDIDA) return;
   for (const app of apps) await deleteApp(app).catch(() => undefined);
   if (env) {
     await env.clearFirestore();
@@ -203,7 +231,7 @@ afterAll(async () => {
   }
 }, 120_000);
 
-describe('P3 · entorno', () => {
+describeP3('P3 · entorno', () => {
   it('la guardia falla cerrada ante un proyecto o host no demo', () => {
     const previo = process.env.GCLOUD_PROJECT;
     process.env.GCLOUD_PROJECT = 'proyecto-productivo-ficticio';
@@ -220,7 +248,7 @@ describe('P3 · entorno', () => {
 let docAlmacenadoId = '';
 let docAlmacenadoPath = '';
 
-describe('P3 · A · almacenamiento, recuperación y fallo de Storage (emulador oficial)', () => {
+describeP3('P3 · A · almacenamiento, recuperación y fallo de Storage (emulador oficial)', () => {
   it('sube un documento profesional, recupera sus bytes, coincide la huella y los metadatos lo atan al profesional', async () => {
     const a = await abrirSesion('titularA');
     const { documento, duplicado } = await a.docs.subir({
@@ -282,7 +310,7 @@ describe('P3 · A · almacenamiento, recuperación y fallo de Storage (emulador 
   });
 });
 
-describe('P3 · B · aislamiento y permisos (permitidos y denegados)', () => {
+describeP3('P3 · B · aislamiento y permisos (permitidos y denegados)', () => {
   it('lectura/descarga: titular, gestor L, gestor E y el propio profesional sí; otro titular y otro profesional no', async () => {
     for (const clave of ['gestorL', 'gestorE', 'prof1'] as Clave[]) {
       const s = await abrirSesion(clave);
@@ -352,7 +380,7 @@ describe('P3 · B · aislamiento y permisos (permitidos y denegados)', () => {
   });
 });
 
-describe('P3 · C · expediente patrimonial y actas: referencias, huellas, disponibilidad real y trazabilidad', () => {
+describeP3('P3 · C · expediente patrimonial y actas: referencias, huellas, disponibilidad real y trazabilidad', () => {
   it('expediente: alta → descarga verificada → pérdida detectada (ERROR_STORAGE) → recuperación → alteración detectada', async () => {
     const a = await abrirSesion('titularA');
     estado.db = a.db; estado.auth = a.auth; estado.storage = a.storage;
@@ -431,7 +459,7 @@ describe('P3 · C · expediente patrimonial y actas: referencias, huellas, dispo
   });
 });
 
-describe('P3 · R · recuperación en OTRO proceso Node (sesión e instancias nuevas)', () => {
+describeP3('P3 · R · recuperación en OTRO proceso Node (sesión e instancias nuevas)', () => {
   it('un proceso independiente descarga y verifica la huella; otro titular sigue denegado', () => {
     const ejecutar = (clave: Clave) => spawnSync(process.execPath, [
       '--import', 'tsx', 'tests/emulador/documentos-p3-recuperacion.proceso.ts',

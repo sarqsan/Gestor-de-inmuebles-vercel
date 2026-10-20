@@ -1,5 +1,5 @@
 import { inmueblesParaSeleccion } from '../../utils/bajaPatrimonialInmueble';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X,
   TrendingDown,
@@ -33,6 +33,7 @@ import { hayErrores, resumenErrores, validarFormulario } from '../../formularios
 import type { ErroresFormulario } from '../../formularios/validacion';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { useOperacionEnCurso } from '../../feedback/operaciones';
+import { MENSAJES_CUSTODIA } from '../../lib/custodiaDocumental/subidaDirecta';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 
 interface GastoModalProps {
@@ -46,6 +47,15 @@ interface GastoModalProps {
 
 const labelInmueble = (i: Inmueble): string =>
   `${i.direccion}${i.ciudad ? `, ${i.ciudad}` : ''}`;
+
+/** AG-04: el gasto se guardó, pero la factura no pudo custodiarse (Storage denegó, sin titular, plazo…). */
+class FacturaNoCustodiada extends Error {
+  constructor(readonly motivo: string) {
+    super(motivo);
+    this.name = 'FacturaNoCustodiada';
+  }
+}
+export const MENSAJE_GASTO_SIN_FACTURA = 'El gasto se ha guardado, pero la factura NO se ha podido custodiar.';
 
 export const GastoModal: React.FC<GastoModalProps> = ({
   gastoParaEditar,
@@ -97,6 +107,9 @@ export const GastoModal: React.FC<GastoModalProps> = ({
   );
   const [notas, setNotas] = useState<string>(gastoParaEditar?.notas || '');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  // AG-04: si el gasto se guardó pero la factura no pudo custodiarse, el modal
+  // sigue abierto; un reintento debe reutilizar el MISMO gasto (nunca duplicarlo).
+  const gastoPersistidoRef = useRef<Gasto | null>(null);
   // UX-3 §7: `idle → ejecutando → resultado`. El hook ignora una segunda pulsación
   // mientras la operación está en curso (bloqueo de doble envío sin estados globales).
   const { ejecutando: guardando, ejecutar } = useOperacionEnCurso();
@@ -171,7 +184,9 @@ export const GastoModal: React.FC<GastoModalProps> = ({
     }
     setErroresCampo({});
 
-    const base = gastoParaEditar
+    const base = gastoPersistidoRef.current
+      ? { ...gastoPersistidoRef.current }
+      : gastoParaEditar
       ? { ...gastoParaEditar }
       : crearGasto({
           inmuebleId,
@@ -216,6 +231,7 @@ export const GastoModal: React.FC<GastoModalProps> = ({
         //    devuelve el documento final, necesario para segmentar la factura).
         const guardado = (await onSave(normalizarGasto(gasto))) as Gasto | undefined;
         const referencia: Gasto = guardado || { ...normalizarGasto(gasto) };
+        gastoPersistidoRef.current = referencia;
 
         // 2) Sustituir/eliminar la factura anterior si se pidió.
         if (eliminarFactura && gastoParaEditar?.justificantePath) {
@@ -223,6 +239,10 @@ export const GastoModal: React.FC<GastoModalProps> = ({
         }
 
         // 3) Subir la nueva factura a Storage y guardar la URL resultante.
+        //    AG-04: la subida es fail-closed (Storage o error explícito; sin
+        //    respaldo efímero). Si falla, el gasto YA está guardado: se informa
+        //    exactamente de eso y se mantiene el modal abierto para reintentar
+        //    sobre el mismo gasto.
         if (facturaFile) {
           if (gastoParaEditar?.justificantePath && gastoParaEditar.justificantePath !== facturaPath) {
             await deleteFacturaGastoStorage(gastoParaEditar.justificantePath);
@@ -238,18 +258,27 @@ export const GastoModal: React.FC<GastoModalProps> = ({
             await onSave(
               normalizarGasto({ ...referencia, justificanteUrl: url, justificantePath: storagePath })
             );
+          } catch (err) {
+            throw new FacturaNoCustodiada(mensajeDeErrorUsuario(err, MENSAJES_CUSTODIA.DESCONOCIDO));
           } finally {
             setSubiendo(false);
           }
         }
       },
       mensajeExito: isEditing ? 'Gasto actualizado correctamente.' : 'Gasto registrado correctamente.',
-      mensajeError: 'No se ha podido guardar el gasto.',
+      mensajeError: (fallo) =>
+        fallo.error instanceof FacturaNoCustodiada
+          ? MENSAJE_GASTO_SIN_FACTURA
+          : 'No se ha podido guardar el gasto.',
       origenesDatos: ['gastos'],
       // Si falla no se cierra: no se pierde nada de lo introducido (§15).
       onExito: () => onClose(),
       onFallo: (fallo) =>
-        setErrorMsg(mensajeDeErrorUsuario(fallo.error, 'No se ha podido guardar el gasto.')),
+        setErrorMsg(
+          fallo.error instanceof FacturaNoCustodiada
+            ? `${MENSAJE_GASTO_SIN_FACTURA} ${fallo.error.motivo} Puedes volver a adjuntarla ahora o más tarde editando el gasto.`
+            : mensajeDeErrorUsuario(fallo.error, 'No se ha podido guardar el gasto.')
+        ),
     });
   };
 

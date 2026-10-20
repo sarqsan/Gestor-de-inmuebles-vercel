@@ -6,6 +6,19 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    build: {
+      rollupOptions: {
+        output: {
+          // El OCR y el renderizador PDF sólo se solicitan desde el escáner; no
+          // deben inflar ni descargarse con el arranque normal de la aplicación.
+          manualChunks(id) {
+            if (id.includes('/node_modules/tesseract.js/') || id.includes('/node_modules/tesseract.js-core/')
+              || id.includes('/node_modules/bmp-js/') || id.includes('/node_modules/zlibjs/')) return 'ocr-engine';
+            if (id.includes('/node_modules/pdfjs-dist/')) return 'pdf-renderer';
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

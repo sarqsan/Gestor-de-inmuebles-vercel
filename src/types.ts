@@ -1643,6 +1643,23 @@ export interface Gasto {
   ejercicioFiscal?: number;
   documento?: { id: string; nombre: string; url: string; storagePath?: string };
   documentos?: { id: string; nombre: string; url: string; storagePath?: string }[];
+  /** P5: extracción OCR trazable; campos reconocidos separados de lo confirmado por el usuario. */
+  facturaOcr?: {
+    version: 1;
+    sha256Documento: string;
+    claveDeduplicacion: string;
+    procesadoEl: string;
+    confianzaOcr: number;
+    camposReconocidos: Record<string, string>;
+    camposConfirmados: Record<string, string>;
+    documentoId?: string;
+    nifProveedor?: string;
+    numeroFactura?: string;
+    baseImponible?: number;
+    tipoIva?: number;
+    importeIva?: number;
+    otrosImpuestos?: number;
+  };
   inmuebleDireccion?: string;
 
   // Trazabilidad

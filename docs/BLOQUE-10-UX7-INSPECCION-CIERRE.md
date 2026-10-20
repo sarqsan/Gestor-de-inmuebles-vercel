@@ -136,3 +136,7 @@ En los diálogos con operación en curso se añadió `cerrableConEscape: !guarda
 ## 11. Resultado de la Fase 1
 
 La inspección no encontró funcionalidad que faltara: encontró **restos de coherencia** (nombres accesibles invertidos, capas de modal sin comportamiento de diálogo, un `prompt` nativo, un contador sin alimentar, tres textos con códigos internos) y **código muerto con uso cero demostrado**. Todo lo corregido pertenece a presentación, accesibilidad, textos y coherencia; ninguna corrección ha tocado reglas, permisos, motores ni contratos de datos.
+
+### Addendum P5 · modal OCR de facturas (2026-10-20)
+
+El escáner OCR de facturas añade una capa `fixed inset-0` y utiliza `useDialogoAccesible`; el inventario del árbol queda en **105 capas, 99 cubiertas y las mismas 6 capas clasificadas como visores/host**. El test de inventario se actualizó para contar esta nueva capa sin cambiar la clasificación UX-7.

@@ -18,6 +18,7 @@ import {
   Power,
   Eye,
   Wrench,
+  ScanLine,
 } from 'lucide-react';
 import type {
   CategoriaGasto,
@@ -42,6 +43,7 @@ import {
 } from '../../utils/gastosEngine';
 import { resumenPrestamo } from '../../utils/prestamosEngine';
 import { GastoModal } from '../modals/GastoModal';
+import { EscanerFacturaModal } from '../modals/EscanerFacturaModal';
 import { GastoRecurrenteModal } from '../modals/GastoRecurrenteModal';
 import { PrestamoModal } from '../modals/PrestamoModal';
 import { TablaAmortizacionModal } from '../modals/TablaAmortizacionModal';
@@ -116,6 +118,7 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
   const [busqueda, setBusqueda] = useState<string>('');
 
   const [showModal, setShowModal] = useState<boolean>(false);
+  const [showEscanerFactura, setShowEscanerFactura] = useState(false);
   const [gastoParaEditar, setGastoParaEditar] = useState<Gasto | null>(null);
   const [inmuebleIdInicial, setInmuebleIdInicial] = useState<string>('');
 
@@ -374,13 +377,22 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
               <Plus className="w-4 h-4" /> Nuevo préstamo
             </button>
           ) : vista === 'gastos' ? (
-            <button
-              onClick={abrirAlta}
-              disabled={inmuebles.length === 0}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
-            >
-              <Plus className="w-4 h-4" /> Nuevo gasto
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setShowEscanerFactura(true)}
+                disabled={inmuebles.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
+              >
+                <ScanLine className="w-4 h-4" /> Escanear factura
+              </button>
+              <button
+                onClick={abrirAlta}
+                disabled={inmuebles.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-sm transition"
+              >
+                <Plus className="w-4 h-4" /> Nuevo gasto
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
@@ -888,6 +900,17 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
         )}
       </div>
       </>
+      )}
+
+      {showEscanerFactura && (
+        <EscanerFacturaModal
+          gastos={gastos}
+          inmuebles={inmuebles}
+          currentUser={currentUser}
+          onSave={onSaveGasto}
+          onDelete={onDeleteGasto}
+          onClose={() => setShowEscanerFactura(false)}
+        />
       )}
 
       {showModal && (

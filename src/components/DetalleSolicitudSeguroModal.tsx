@@ -43,6 +43,13 @@ import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
 import { solicitarIA } from '../lib/clienteIA';
 import { esAnalisisRespuestaAseguradoraValido } from '../ia/analisisRespuestaAseguradora';
+import { esBorradorCorreoAseguradoraValido } from '../ia/borradorCorreoAseguradora';
+import {
+  clasesTonoEstadoSeguro,
+  normalizarDecisionPropietarioSeguro,
+  presentarDictamenSeguro,
+  presentarEstadoSolicitudSeguro,
+} from '../lib/seguroImpagoPresentacion';
 
 function esResultadoEnvioGmailVerificable(
   resultado: unknown,
@@ -111,6 +118,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   const [copiedEmail, setCopiedEmail] = useState(false);
   const [sendSuccessMsg, setSendSuccessMsg] = useState<string | null>(null);
   const [sendErrorMsg, setSendErrorMsg] = useState<string | null>(null);
+  const [emailGenerationNotice, setEmailGenerationNotice] = useState<
+    { tipo: 'info' | 'error'; mensaje: string } | null
+  >(null);
 
   // Response simulation / test state / Gmail search
   const [incomingResponseText, setIncomingResponseText] = useState<string>(
@@ -118,30 +128,76 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   );
   const [isAnalyzingResponse, setIsAnalyzingResponse] = useState(false);
   const [isCheckingGmail, setIsCheckingGmail] = useState(false);
-  const [gmailStatusNotice, setGmailStatusNotice] = useState<string | null>(null);
+  const [gmailStatus, setGmailStatus] = useState<
+    { tipo: 'info' | 'error'; mensaje: string } | null
+  >(null);
   const [responseProcessingError, setResponseProcessingError] = useState<string | null>(null);
+  // P7 · El texto de demostración nunca debe confundirse con una respuesta real.
+  const [textoSimulado, setTextoSimulado] = useState(false);
 
   // Owner decision state
   const [ownerDecision, setOwnerDecision] = useState<DecisionFinalPropietarioSeguro>(
-    sol.decisionFinalPropietario || 'PENDIENTE'
+    normalizarDecisionPropietarioSeguro(sol.decisionFinalPropietario)
   );
   const [ownerNotas, setOwnerNotas] = useState<string>(sol.notasPrivadasPropietario || '');
+  const [isSavingDecision, setIsSavingDecision] = useState(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
 
-  // Generar borrador formal con IA
+  // P7 · Presentación trazable: estado real, origen del dictamen y estimación local.
+  const estadoPresentado = presentarEstadoSolicitudSeguro(sol.estado);
+  const dictamenPresentado = presentarDictamenSeguro(sol);
+  const textoRespuestaConservado = (sol.emailRespuestaRaw || '').trim();
+
+  // Generar borrador formal con IA (P7: nunca se presenta como borrador de IA
+  // un texto que no lo sea, y un fallo del proveedor no se oculta).
   const handleGenerateAiEmail = async () => {
     setIsGeneratingEmail(true);
+    setEmailGenerationNotice(null);
     try {
       const res = await solicitarIA('/api/generar-correo-aseguradora', {
         solicitudSeguro: sol,
         aseguradora: aseguradora,
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.asunto) setEmailAsunto(data.asunto);
-        if (data.cuerpo) setEmailCuerpo(data.cuerpo);
+
+      if (!res.ok) {
+        const errorRemoto = await res.json().catch(() => null);
+        const detalle =
+          typeof errorRemoto?.error === 'string'
+            ? errorRemoto.error
+            : `El servicio respondió con HTTP ${res.status}.`;
+        setEmailGenerationNotice({
+          tipo: 'error',
+          mensaje: `${detalle} Se conserva el borrador actual y no se ha enviado nada.`,
+        });
+        return;
       }
+
+      const datos: unknown = await res.json();
+      if (!esBorradorCorreoAseguradoraValido(datos)) {
+        setEmailGenerationNotice({
+          tipo: 'error',
+          mensaje:
+            'El servicio no devolvió un borrador válido (asunto y cuerpo obligatorios). Se conserva el borrador actual.',
+        });
+        return;
+      }
+
+      const generadoConIA = (datos as { generadoConIA?: unknown }).generadoConIA === true;
+      setEmailAsunto(datos.asunto);
+      setEmailCuerpo(datos.cuerpo);
+      setEmailGenerationNotice({
+        tipo: 'info',
+        mensaje: generadoConIA
+          ? 'Borrador redactado por IA. Revísalo antes de enviarlo: es un texto de trabajo, no una comunicación enviada.'
+          : 'El servicio de IA no está disponible: se ha aplicado la plantilla estándar del ERP. Revísala antes de enviarla.',
+      });
     } catch (e) {
-      console.warn('Fallback al generar correo:', e);
+      console.error('No se pudo generar el borrador con IA:', e);
+      setEmailGenerationNotice({
+        tipo: 'error',
+        mensaje:
+          'No se pudo contactar con el servicio de IA. Se conserva el borrador actual y no se ha enviado nada.',
+      });
     } finally {
       setIsGeneratingEmail(false);
     }
@@ -164,6 +220,8 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
 
   // Enviar correo a la aseguradora directamente por Gmail API con adjuntos
   const handleSendEmail = async () => {
+    // Evita dobles envíos por doble clic mientras hay un envío en curso.
+    if (isSendingEmail) return;
     setIsSendingEmail(true);
     setSendSuccessMsg(null);
     setSendErrorMsg(null);
@@ -246,7 +304,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   // Buscar automáticamente respuestas en Gmail que contengan la referencia del expediente
   const handleCheckGmailResponses = async () => {
     setIsCheckingGmail(true);
-    setGmailStatusNotice(null);
+    setGmailStatus(null);
 
     try {
       let token = await getAccessToken();
@@ -256,7 +314,10 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
       }
 
       if (!token) {
-        setGmailStatusNotice('Inicia sesión con Google para buscar respuestas automáticas.');
+        setGmailStatus({
+          tipo: 'info',
+          mensaje: 'Inicia sesión con Google para buscar respuestas automáticas.',
+        });
         return;
       }
 
@@ -265,7 +326,10 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
       const messages = await searchGmailMessages(token, query);
 
       if (!messages || messages.length === 0) {
-        setGmailStatusNotice(`No se han encontrado correos nuevos con la referencia [${sol.referenciaUnica}].`);
+        setGmailStatus({
+          tipo: 'info',
+          mensaje: `No se han encontrado correos nuevos con la referencia [${sol.referenciaUnica}].`,
+        });
         return;
       }
 
@@ -273,13 +337,26 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
       const latestMsg = await getGmailMessageDetails(token, messages[0].id);
       if (latestMsg && latestMsg.body) {
         setIncomingResponseText(latestMsg.body);
-        setGmailStatusNotice(`¡Correo recibido de ${latestMsg.from} cargado automáticamente!`);
+        setGmailStatus({
+          tipo: 'info',
+          mensaje: `Correo localizado en Gmail y cargado en el expediente (remitente: ${latestMsg.from || 'no indicado'}). Pendiente de análisis y validación humana.`,
+        });
         // Analizar con IA de inmediato
         await handleAnalyzeSpecificText(latestMsg.body);
+      } else {
+        setGmailStatus({
+          tipo: 'error',
+          mensaje:
+            'Gmail devolvió un mensaje sin contenido legible. No se ha cargado ninguna respuesta; el expediente no cambia.',
+        });
       }
-    } catch (e: any) {
-      console.error('Error buscando respuestas en Gmail:', e);
-      setGmailStatusNotice(`Error al consultar Gmail: ${e.message}`);
+    } catch (e: unknown) {
+      console.error('No se pudo consultar Gmail:', e);
+      setGmailStatus({
+        tipo: 'error',
+        mensaje:
+          'No se pudo consultar Gmail. No se ha cargado ninguna respuesta ni se ha modificado el expediente.',
+      });
     } finally {
       setIsCheckingGmail(false);
     }
@@ -355,6 +432,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
         ...sol,
         estado: 'RESPUESTA_PROCESADA',
         dictamenAseguradora: parsedAI.dictamen,
+        dictamenTexto: parsedAI.dictamenTexto,
         importeMaximoAsegurable: parsedAI.importeMaximoAsegurable,
         condicionesEstipuladas: parsedAI.condiciones,
         documentosSolicitadosExtra: parsedAI.documentosRequeridos,
@@ -419,30 +497,47 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
     }
 
     setIncomingResponseText(mockText);
+    setTextoSimulado(true);
   };
 
-  // Guardar decisión final del propietario
-  const handleSaveOwnerDecision = () => {
+  // Guardar decisión final del propietario (P7: no cerrar el expediente como si
+  // se hubiera guardado cuando la persistencia falla).
+  const handleSaveOwnerDecision = async () => {
+    if (isSavingDecision) return;
+    setIsSavingDecision(true);
+    setDecisionError(null);
+    const ahora = new Date().toISOString();
     const updated: SolicitudSeguroImpago = {
       ...sol,
       decisionFinalPropietario: ownerDecision,
       notasPrivadasPropietario: ownerNotas,
-      fechaDecisionPropietario: new Date().toISOString(),
-      fechaActualizacion: new Date().toISOString(),
+      fechaDecisionPropietario: ahora,
+      fechaActualizacion: ahora,
       historial: [
         ...sol.historial,
         {
           id: `hist_${Date.now()}`,
-          fecha: new Date().toISOString(),
+          fecha: ahora,
           autor: 'propietario',
           accion: `Decisión final registrada: ${ownerDecision}`,
           detalle: ownerNotas || 'Sin notas adicionales.',
         },
       ],
     };
-    setSol(updated);
-    onUpdateSolicitud(updated);
-    onClose();
+
+    try {
+      await onUpdateSolicitud(updated);
+      setSol(updated);
+      onClose();
+    } catch (error) {
+      console.error('No se pudo guardar la decisión final del propietario:', error);
+      const mensaje =
+        'No se pudo guardar la decisión en el expediente. No se ha registrado ningún cambio; revisa la conexión e inténtalo de nuevo.';
+      setDecisionError(mensaje);
+      avisarOperacion({ tipo: 'error', mensaje });
+    } finally {
+      setIsSavingDecision(false);
+    }
   };
 
   return (
@@ -463,16 +558,12 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
                   {sol.referenciaUnica}
                 </span>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-black border ${
-                  sol.dictamenAseguradora === 'FAVORABLE'
-                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                    : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
-                    ? 'bg-amber-100 text-amber-800 border-amber-300'
-                    : sol.dictamenAseguradora === 'DESFAVORABLE'
-                    ? 'bg-rose-100 text-rose-800 border-rose-300'
-                    : 'bg-blue-100 text-blue-800 border-blue-300'
-                }`}>
-                  {sol.dictamenTexto || sol.dictamenAseguradora || 'En Trámite'}
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-black border ${clasesTonoEstadoSeguro(dictamenPresentado.tono)}`}
+                  title={dictamenPresentado.descripcion}
+                  data-testid="origen-dictamen-expediente"
+                >
+                  {dictamenPresentado.etiqueta}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -657,14 +748,21 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
               <div className="space-y-3">
                 <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
                   <div className="w-6 h-6 rounded-lg bg-purple-600 text-white flex items-center justify-center text-xs font-black">3</div>
-                  <h4 className="font-black text-slate-900 text-sm tracking-wide uppercase">ANÁLISIS IA Y ESTIMACIÓN DE RIESGO</h4>
+                  <h4 className="font-black text-slate-900 text-sm tracking-wide uppercase">ESTIMACIÓN LOCAL DE SOLVENCIA</h4>
+                  <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                    Cálculo del gestor
+                  </span>
                 </div>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Cálculo determinista del propio gestor a partir de ingresos, renta y ratio de esfuerzo.
+                  No es un dictamen, una garantía ni una valoración de la aseguradora.
+                </p>
 
                 <div className="bg-purple-50/70 border border-purple-200/90 rounded-2xl p-4 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-black">
-                        Scoring de Solvencia: {sol.scoreSolvenciaIA} / 100
+                        Estimación local: {sol.scoreSolvenciaIA} / 100
                       </div>
                       <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
                         sol.nivelRiesgoIA === 'Bajo'
@@ -725,18 +823,25 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
 
               {/* Status bar */}
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <span className="font-bold text-slate-600">Estado de Envío:</span>
-                  <span className={`px-2.5 py-0.5 rounded-full font-bold border ${
-                    sol.estado === 'CORREO_ENVIADO' || sol.estado === 'RESPUESTA_PROCESADA' || sol.estado === 'RESPUESTA_RECIBIDA'
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : 'bg-slate-200 text-slate-700 border-slate-300'
-                  }`}>
-                    {sol.estado}
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full font-bold border ${clasesTonoEstadoSeguro(estadoPresentado.tono)}`}
+                    data-testid="estado-solicitud-seguro"
+                  >
+                    {estadoPresentado.etiqueta}
                   </span>
                   <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
                     Candidato {numCandidato}
                   </span>
+                  <span className="text-[11px] font-medium text-slate-600" data-testid="detalle-estado-solicitud-seguro">
+                    {estadoPresentado.descripcion}
+                  </span>
+                  {sol.estado === 'CORREO_ENVIADO' && sol.fechaEnvio && (
+                    <span className="text-[11px] font-mono text-slate-500">
+                      Confirmado: {new Date(sol.fechaEnvio).toLocaleString('es-ES')}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 text-slate-500 font-mono text-[11px]">
@@ -755,6 +860,24 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs font-semibold flex items-center gap-2" role="alert">
                   <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>{sendErrorMsg}</span>
+                </div>
+              )}
+              {emailGenerationNotice && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    emailGenerationNotice.tipo === 'error'
+                      ? 'bg-rose-50 border border-rose-200 text-rose-900'
+                      : 'bg-sky-50 border border-sky-200 text-sky-900'
+                  }`}
+                  role={emailGenerationNotice.tipo === 'error' ? 'alert' : 'status'}
+                  data-testid="aviso-generacion-correo"
+                >
+                  {emailGenerationNotice.tipo === 'error' ? (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  ) : (
+                    <Info className="w-4 h-4 text-sky-600 shrink-0" />
+                  )}
+                  <span>{emailGenerationNotice.mensaje}</span>
                 </div>
               )}
 
@@ -894,10 +1017,21 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 </div>
               </div>
 
-              {gmailStatusNotice && (
-                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-950 text-xs font-medium flex items-center gap-2">
-                  <Info className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>{gmailStatusNotice}</span>
+              {gmailStatus && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-medium flex items-center gap-2 border ${
+                    gmailStatus.tipo === 'error'
+                      ? 'bg-rose-50 border-rose-200 text-rose-900'
+                      : 'bg-indigo-50 border-indigo-200 text-indigo-950'
+                  }`}
+                  role={gmailStatus.tipo === 'error' ? 'alert' : 'status'}
+                >
+                  {gmailStatus.tipo === 'error' ? (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  ) : (
+                    <Info className="w-4 h-4 text-indigo-600 shrink-0" />
+                  )}
+                  <span>{gmailStatus.mensaje}</span>
                 </div>
               )}
               {responseProcessingError && (
@@ -914,12 +1048,25 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 </label>
                 <textarea
                   value={incomingResponseText}
-                  onChange={(e) => setIncomingResponseText(e.target.value)}
+                  onChange={(e) => {
+                    setIncomingResponseText(e.target.value);
+                    setTextoSimulado(false);
+                  }}
                   placeholder="Pega aquí el contenido del correo recibido o haz clic en 'Buscar Respuesta en Gmail' para sincronizar automáticamente..."
                   rows={5}
                   className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-sky-500 outline-none text-slate-800"
 
                    id="campo-texto-del-correo-de-respuesta-recibido-d"/>
+                {textoSimulado && (
+                  <p
+                    className="mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2"
+                    role="note"
+                    data-testid="aviso-texto-simulado"
+                  >
+                    Texto de demostración: no lo ha enviado ninguna aseguradora. Si lo analizas, el expediente
+                    registrará una lectura automática de un texto simulado, no una respuesta real.
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end">
@@ -930,32 +1077,66 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                   className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-black rounded-xl transition-colors shadow-md shadow-sky-600/20 flex items-center gap-1.5"
                 >
                   <Sparkles className="w-4 h-4" />
-                  {isAnalyzingResponse ? 'Analizando con Gemini...' : 'Procesar Dictamen con IA'}
+                  {isAnalyzingResponse ? 'Analizando con IA...' : 'Analizar Respuesta con IA'}
                 </button>
               </div>
 
+              {/* P7 · Traza persistente: respuesta conservada sin análisis válido */}
+              {dictamenPresentado.origen === 'PENDIENTE_REVISION_HUMANA' && (
+                <div
+                  className="p-4 bg-amber-50 border border-amber-300 rounded-2xl space-y-2"
+                  role="status"
+                  data-testid="respuesta-pendiente-revision"
+                >
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span className="text-xs font-black text-amber-900 uppercase tracking-wide">
+                      Respuesta conservada · pendiente de revisión humana
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-900 font-medium">{dictamenPresentado.descripcion}</p>
+                  {textoRespuestaConservado && (
+                    <div className="bg-white border border-amber-200 rounded-xl p-3">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                        Texto original recibido (sin modificar):
+                      </span>
+                      <p
+                        className="text-xs text-slate-800 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto"
+                        data-testid="texto-respuesta-conservado"
+                      >
+                        {textoRespuestaConservado}
+                      </p>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-amber-900 font-medium">
+                    No se ha registrado ningún dictamen ni decisión automática. Puedes reintentar el análisis o
+                    revisar el texto y decidir manualmente en la pestaña de decisión del propietario.
+                  </p>
+                </div>
+              )}
+
               {/* Extracted Structured Results */}
               {sol.procesadoConIA && (
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4 animate-in fade-in duration-200">
+                <div
+                  className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4 animate-in fade-in duration-200"
+                  data-testid="lectura-automatica-respuesta"
+                >
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                     <span className="font-black text-xs text-slate-800 uppercase tracking-wider">
-                      Dictamen Oficial Extraído por IA
+                      Lectura automática del correo (extracción IA)
                     </span>
-                    <span className={`px-3 py-1 rounded-full text-xs font-black border ${
-                      sol.dictamenAseguradora === 'FAVORABLE'
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                        : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
-                        ? 'bg-amber-100 text-amber-800 border-amber-300'
-                        : sol.dictamenAseguradora === 'DESFAVORABLE'
-                        ? 'bg-rose-100 text-rose-800 border-rose-300'
-                        : 'bg-blue-100 text-blue-800 border-blue-300'
-                    }`}>
+                    <span className={`px-3 py-1 rounded-full text-xs font-black border ${clasesTonoEstadoSeguro('informativo')}`}>
                       {sol.dictamenAseguradora}
                     </span>
                   </div>
 
+                  <p className="text-[11px] text-slate-600 font-semibold bg-white p-3 rounded-xl border border-slate-200">
+                    Extracción automática del correo recibido. No es un dictamen oficial ni un certificado de
+                    {' '}{sol.aseguradoraNombre}: requiere validación humana antes de tomar decisiones.
+                  </p>
+
                   <p className="text-xs text-slate-800 font-semibold bg-white p-3 rounded-xl border border-slate-200">
-                    {sol.resumenProcesadoIA || 'Dictamen procesado correctamente.'}
+                    {sol.resumenProcesadoIA || 'Resumen automático no disponible.'}
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1026,9 +1207,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setOwnerDecision('ACEPTADO')}
+                      onClick={() => setOwnerDecision('ACEPTAR_CANDIDATO')}
                       className={`p-3 rounded-xl text-xs font-bold border transition-all flex items-center gap-2.5 text-left ${
-                        ownerDecision === 'ACEPTADO'
+                        ownerDecision === 'ACEPTAR_CANDIDATO'
                           ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                       }`}
@@ -1036,7 +1217,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                       <CheckCircle2 className="w-4 h-4 shrink-0" />
                       <div>
                         <span className="block font-black">Aceptar Candidato y Proceder a Firma</span>
-                        <span className={`text-[10px] ${ownerDecision === 'ACEPTADO' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                        <span className={`text-[10px] ${ownerDecision === 'ACEPTAR_CANDIDATO' ? 'text-emerald-100' : 'text-slate-500'}`}>
                           Aprobado con la aseguradora {sol.aseguradoraNombre}
                         </span>
                       </div>
@@ -1044,9 +1225,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
 
                     <button
                       type="button"
-                      onClick={() => setOwnerDecision('CONDICIONADO_AVAL')}
+                      onClick={() => setOwnerDecision('SOLICITAR_AVAL_EXTRA')}
                       className={`p-3 rounded-xl text-xs font-bold border transition-all flex items-center gap-2.5 text-left ${
-                        ownerDecision === 'CONDICIONADO_AVAL'
+                        ownerDecision === 'SOLICITAR_AVAL_EXTRA'
                           ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                       }`}
@@ -1054,7 +1235,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                       <AlertCircle className="w-4 h-4 shrink-0" />
                       <div>
                         <span className="block font-black">Condicionar a Aval / Fianza Extra</span>
-                        <span className={`text-[10px] ${ownerDecision === 'CONDICIONADO_AVAL' ? 'text-amber-100' : 'text-slate-500'}`}>
+                        <span className={`text-[10px] ${ownerDecision === 'SOLICITAR_AVAL_EXTRA' ? 'text-amber-100' : 'text-slate-500'}`}>
                           Exigir garantías complementarias antes de firmar
                         </span>
                       </div>
@@ -1062,9 +1243,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
 
                     <button
                       type="button"
-                      onClick={() => setOwnerDecision('RECHAZADO')}
+                      onClick={() => setOwnerDecision('RECHAZAR_CANDIDATO')}
                       className={`p-3 rounded-xl text-xs font-bold border transition-all flex items-center gap-2.5 text-left ${
-                        ownerDecision === 'RECHAZADO'
+                        ownerDecision === 'RECHAZAR_CANDIDATO'
                           ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                       }`}
@@ -1072,7 +1253,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                       <X className="w-4 h-4 shrink-0" />
                       <div>
                         <span className="block font-black">Rechazar Candidatura</span>
-                        <span className={`text-[10px] ${ownerDecision === 'RECHAZADO' ? 'text-rose-100' : 'text-slate-500'}`}>
+                        <span className={`text-[10px] ${ownerDecision === 'RECHAZAR_CANDIDATO' ? 'text-rose-100' : 'text-slate-500'}`}>
                           No cumple solvencia requerida
                         </span>
                       </div>
@@ -1117,21 +1298,34 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-colors"
-          >
-            Cerrar
-          </button>
+        <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-3">
+          {decisionError && (
+            <div
+              className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs font-semibold flex items-center gap-2"
+              role="alert"
+            >
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{decisionError}</span>
+            </div>
+          )}
 
-          <button
-            onClick={handleSaveOwnerDecision}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl transition-colors shadow-lg shadow-indigo-600/20 flex items-center gap-2"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            Guardar Decisión y Actualizar Expediente
-          </button>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-colors"
+            >
+              Cerrar
+            </button>
+
+            <button
+              onClick={handleSaveOwnerDecision}
+              disabled={isSavingDecision}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-black rounded-xl transition-colors shadow-lg shadow-indigo-600/20 flex items-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              {isSavingDecision ? 'Guardando decisión...' : 'Guardar Decisión y Actualizar Expediente'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -29,6 +29,11 @@ import { getTipoDocumentoLabel } from '../../utils/formatters';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
+import {
+  clasesTonoEstadoSeguro,
+  presentarDictamenSeguro,
+  presentarEstadoSolicitudSeguro,
+} from '../../lib/seguroImpagoPresentacion';
 
 interface SeguroImpagoSectionProps {
   solicitudesSeguro: SolicitudSeguroImpago[];
@@ -272,21 +277,27 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
               {/* Status and Action Badges */}
               <div className="flex items-center gap-2.5 shrink-0 w-full lg:w-auto justify-between lg:justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-black border ${
-                    sol.dictamenAseguradora === 'FAVORABLE'
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
-                      ? 'bg-amber-100 text-amber-800 border-amber-300'
-                      : sol.dictamenAseguradora === 'DESFAVORABLE'
-                      ? 'bg-rose-100 text-rose-800 border-rose-300'
-                      : 'bg-blue-50 text-blue-800 border-blue-200'
-                  }`}>
-                    {sol.dictamenTexto || sol.dictamenAseguradora}
-                  </span>
+                  {(() => {
+                    const dictamen = presentarDictamenSeguro(sol);
+                    const estado = presentarEstadoSolicitudSeguro(sol.estado);
+                    return (
+                      <>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-xs font-black border ${clasesTonoEstadoSeguro(dictamen.tono)}`}
+                          title={dictamen.descripcion}
+                        >
+                          {dictamen.etiqueta}
+                        </span>
 
-                  <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
-                    {sol.estado}
-                  </span>
+                        <span
+                          className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${clasesTonoEstadoSeguro(estado.tono)}`}
+                          title={estado.descripcion}
+                        >
+                          {estado.etiqueta}
+                        </span>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div className="flex items-center gap-1.5">

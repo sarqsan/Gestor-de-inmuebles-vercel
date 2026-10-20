@@ -42,4 +42,6 @@ No se encontró Tesseract, PDF.js ni otro motor OCR local ya instalado. Para no 
 
 ## Integración
 
-PR y resultado de merge se añadirán a esta sección tras verificar CI y el merge real; no se declara integrado en `main` antes de esa comprobación.
+- PR #53: https://github.com/sarqsan/Gestor-de-inmuebles-vercel/pull/53, desde la rama de sesión indicada.
+- En el commit de funcionalidad `f2699b638b517447762d03e36a83e8f3926fdf77`, controles de GitHub de tipos/suite/build, reglas Firestore/Storage y Vercel Preview: **todos pass**; `mergeable` fue `MERGEABLE`.
+- El merge normal queda sujeto a la repetición de controles sobre el último commit de esta documentación. El SHA efectivo del merge se informará tras verificar el resultado en GitHub; no se declara integrado en `main` antes de entonces.

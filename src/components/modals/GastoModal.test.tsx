@@ -17,7 +17,17 @@ vi.mock('../../lib/firebase', () => ({
   deleteFacturaGastoStorage: vi.fn(async () => undefined),
 }));
 
+vi.mock('../../lib/expedienteDocumental/gestorFirebase', () => ({
+  descargarDocumentoPatrimonial: vi.fn(async () => ({
+    blob: new Blob(['%PDF-falso'], { type: 'application/pdf' }),
+    nombre: 'factura-expediente.pdf',
+    mimeType: 'application/pdf',
+    verificacion: { estado: 'VERIFICADO' },
+  })),
+}));
+
 import { uploadFacturaGasto } from '../../lib/firebase';
+import { descargarDocumentoPatrimonial } from '../../lib/expedienteDocumental/gestorFirebase';
 import { ErrorCustodiaDocumento, MENSAJES_CUSTODIA } from '../../lib/custodiaDocumental/subidaDirecta';
 import { MENSAJE_GASTO_SIN_FACTURA } from './GastoModal';
 
@@ -203,5 +213,34 @@ describe('UX-4 · GastoModal', () => {
     const ids = new Set(guardados.map((g) => g.id));
     expect(ids.size).toBe(1);
     expect(guardados.at(-1)?.justificantePath).toBe('gastos_facturas/prop_A/x/1_factura.pdf');
+  });
+
+  it('P5.2-D · un gasto OCR muestra su factura del expediente y la descarga verificada', async () => {
+    const createObjectURLPrevio = URL.createObjectURL;
+    const revokePrevio = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:prueba') as typeof URL.createObjectURL;
+    URL.revokeObjectURL = vi.fn() as typeof URL.revokeObjectURL;
+    try {
+      const gastoOcr = {
+        id: 'gas_ocr_1', inmuebleId: 'inm-1', propietarioId: 'prop_A', tipo: 'EXPLOTACION', categoria: 'REPARACION',
+        concepto: 'Reparación de persiana', proveedor: 'ACME SL', importe: 121, estado: 'PENDIENTE',
+        fechaDevengo: '2026-03-14', aCargoDe: 'arrendador', deducible: false, origen: 'FACTURA',
+        createdAt: '2026-03-14T00:00:00.000Z', updatedAt: '2026-03-14T00:00:00.000Z',
+        documento: { id: 'doc_77', nombre: 'factura.pdf', url: '', storagePath: 'inmuebles/inm-1/documentos_patrimoniales/doc_77/factura.pdf' },
+        facturaOcr: { version: 1, sha256Documento: 'c'.repeat(64), claveDeduplicacion: 'k', procesadoEl: '2026-03-14', confianzaOcr: 90, camposReconocidos: {}, camposConfirmados: {}, documentoId: 'doc_77' },
+      } as Gasto;
+      render(
+        <>
+          <AvisosOperacion />
+          <GastoModal gastoParaEditar={gastoOcr} inmuebles={[INMUEBLE]} currentUser={USUARIO} onSave={vi.fn(async (g: Gasto) => g)} onClose={() => undefined} />
+        </>
+      );
+      expect(screen.getByText(/custodiada en el expediente del inmueble \(alta por escáner OCR\)/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /Descargar factura del expediente/ }));
+      await waitFor(() => expect(descargarDocumentoPatrimonial).toHaveBeenCalledWith('inm-1', 'doc_77'));
+    } finally {
+      URL.createObjectURL = createObjectURLPrevio;
+      URL.revokeObjectURL = revokePrevio;
+    }
   });
 });

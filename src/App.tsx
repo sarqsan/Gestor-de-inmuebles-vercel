@@ -148,6 +148,7 @@ import {
   saveAuditLogFirestore,
   saveModulosConfigFirestore,
 } from './lib/firebase';
+import { guardarGastoVerificado, eliminarGastoVerificado } from './lib/gastosPersistenciaVerificada';
 import { avisarOperacion } from './feedback/canalFeedback';
 import { darDeBajaInmuebleFirestore } from './lib/bajaPatrimonialInmuebleFirestore';
 import { puedeDarDeBajaInmueble, puedeLeerTitularidadesInmueble, tieneEscrituraInmueble, type AmbitoEscrituraInmuebles } from './utils/permisosInmueble';
@@ -2990,6 +2991,29 @@ export default function App() {
     await deleteGastoFirestore(gastoId);
   };
 
+  // P5.2-A — Variantes verificadas SOLO para el escáner OCR: persisten y
+  // confirman contra el servidor ANTES de tocar el estado local, y lanzan
+  // si Firestore deniega (las históricas de arriba absorben el error).
+  const handleSaveGastoVerificado = async (gasto: Gasto): Promise<Gasto> => {
+    const finalGasto: Gasto = {
+      ...gasto,
+      propietarioId: resolvePropietarioId(gasto.inmuebleId, gasto.propietarioId),
+    };
+    await guardarGastoVerificado(finalGasto);
+    setGastos((prev) => {
+      const exists = prev.some((g) => g.id === finalGasto.id);
+      return exists
+        ? prev.map((g) => (g.id === finalGasto.id ? finalGasto : g))
+        : [finalGasto, ...prev];
+    });
+    return finalGasto;
+  };
+
+  const handleDeleteGastoVerificado = async (gastoId: string): Promise<void> => {
+    await eliminarGastoVerificado(gastoId);
+    setGastos((prev) => prev.filter((g) => g.id !== gastoId));
+  };
+
   // FASE 2.2 — Plantillas de gastos recurrentes.
   const handleSaveRecurrente = async (plantilla: GastoRecurrente): Promise<void> => {
     const finalPlantilla: GastoRecurrente = {
@@ -4290,6 +4314,8 @@ export default function App() {
               currentUser={currentUser}
               onSaveGasto={handleSaveGasto}
               onDeleteGasto={handleDeleteGasto}
+              onSaveGastoVerificado={handleSaveGastoVerificado}
+              onDeleteGastoVerificado={handleDeleteGastoVerificado}
               onSaveRecurrente={handleSaveRecurrente}
               onDeleteRecurrente={handleDeleteRecurrente}
               onSavePrestamo={handleSavePrestamo}

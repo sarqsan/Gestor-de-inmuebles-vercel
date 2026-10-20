@@ -111,13 +111,24 @@ describe('P5 · confirmación y custodia documental', () => {
     expect(guardar).toHaveBeenCalledTimes(1);
   });
 
-  it('no oculta que la reversión también puede fallar', async () => {
+  it('si la reversión por borrado falla, neutraliza ANULANDO el gasto y lo dice (P5.2-A)', async () => {
     const falloStorage = new Error('STORAGE_NO_DISPONIBLE');
     const guardar = vi.fn(async (g: Gasto) => g);
     await expect(confirmarGastoConFactura({
       gasto, guardarGasto: guardar, subirDocumento: async () => { throw falloStorage; },
-      eliminarGasto: async () => { throw new Error('offline'); },
-    })).rejects.toThrow(/No se pudo guardar el documento ni revertir el gasto/);
+      eliminarGasto: async () => { throw new Error('permission-denied'); },
+    })).rejects.toThrow(/se ha ANULADO/);
+    const anulado = guardar.mock.calls.at(-1)?.[0];
+    expect(anulado?.estado).toBe('ANULADO');
+    expect(anulado?.notas).toMatch(/Alta OCR anulada automáticamente/);
+  });
+
+  it('si ni el borrado ni la anulación son posibles, ordena revisión manual sin fingir éxito (P5.2-A)', async () => {
+    const guardar = vi.fn().mockResolvedValueOnce(gasto).mockRejectedValueOnce(new Error('offline'));
+    await expect(confirmarGastoConFactura({
+      gasto, guardarGasto: guardar, subirDocumento: async () => { throw new Error('STORAGE_NO_DISPONIBLE'); },
+      eliminarGasto: async () => { throw new Error('permission-denied'); },
+    })).rejects.toThrow(/revísalo o elimínalo manualmente/);
   });
 
   it('si falla el segundo guardado conserva gasto y documento para completar el enlace por reintento', async () => {

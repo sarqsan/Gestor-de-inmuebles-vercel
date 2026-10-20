@@ -186,8 +186,10 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
     const timestamp = Date.now().toString().slice(-4);
     const refCode = `REF-IMPAGO-${new Date().getFullYear()}-${timestamp}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
 
-    const scoreAI = currentCandidato?.scoringTotal || (cumpleRatio ? 92 : 68);
-    const nivelRiesgoAI = ratioEsfuerzo <= 35 ? 'Bajo' : ratioEsfuerzo <= 42 ? 'Medio' : 'Alto';
+    const scoreCandidato = currentCandidato?.scoringTotal;
+    const scoreCandidatoDisponible =
+      typeof scoreCandidato === 'number' && Number.isFinite(scoreCandidato) &&
+      scoreCandidato >= 0 && scoreCandidato <= 100;
 
     const nuevaSolicitud: SolicitudSeguroImpago = {
       id: `sol_seguro_${Date.now()}`,
@@ -215,12 +217,9 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
       documentosAdjuntos: documentosAdjuntos,
       documentacionCompletaSegunAseguradora: documentosAdjuntos.filter((d) => d.verificado).length >= 3,
 
-      resumenSolvenciaIA: `Expediente preparado para ${titular1.nombre}. Ingresos conjuntos de ${totalIngresos} €/mes con ratio de esfuerzo del ${ratioEsfuerzo}% frente a renta de ${rentaMensual} €/mes. ${cumpleRatio ? 'Cumple holgadamente el criterio de riesgo de ' + currentAseguradora.nombre : 'Supera ligeramente el umbral estándar del ' + ratioMaximoAseguradora + '%.'}`,
-      scoreSolvenciaIA: scoreAI,
-      alertasDetectadasIA: cumpleRatio
-        ? []
-        : [`El ratio de esfuerzo (${ratioEsfuerzo}%) supera el máximo aconsejado del ${ratioMaximoAseguradora}% para ${currentAseguradora.nombre}. Se recomienda aportar avalista.`],
-      nivelRiesgoIA: nivelRiesgoAI,
+      ...(scoreCandidatoDisponible
+        ? { scoreSolvenciaIA: scoreCandidato, scoreSolvenciaFuente: 'PUNTUACION_CANDIDATO' as const }
+        : {}),
 
       estado: 'BORRADOR',
       metodoEnvio: 'GMAIL_API',
@@ -610,9 +609,12 @@ export const CrearSolicitudSeguroModal: React.FC<CrearSolicitudSeguroModalProps>
               <span className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
                 cumpleRatio ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
               }`}>
-                {cumpleRatio ? 'Ratio Favorable' : 'Ratio Elevado'}
+                {cumpleRatio ? 'Dentro del límite configurado' : 'Por encima del límite configurado'}
               </span>
             </div>
+            <p className="text-[11px] text-slate-300">
+              Cálculo aritmético local sobre los datos introducidos; no es una puntuación, análisis de solvencia ni dictamen de aseguradora.
+            </p>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
               <div className="p-2 bg-slate-800/80 rounded-xl">

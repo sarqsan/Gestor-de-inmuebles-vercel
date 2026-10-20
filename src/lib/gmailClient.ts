@@ -1,5 +1,18 @@
 import { SolicitudSeguroImpago, DocumentoAdjuntoSeguro } from '../types';
 
+export type ResultadoEnvioGmail = 'RECHAZADO' | 'INCIERTO';
+
+/** Error seguro para UI/logs: sólo expone status HTTP y clasificación, nunca body ni credenciales. */
+export class GmailApiError extends Error {
+  constructor(
+    readonly status: number | null,
+    readonly resultadoEnvio: ResultadoEnvioGmail | null = null,
+  ) {
+    super(status === null ? 'No se pudo verificar la respuesta de Gmail.' : `Gmail respondió HTTP ${status}.`);
+    this.name = 'GmailApiError';
+  }
+}
+
 /**
  * Builds RFC 2822 MIME formatted message for Gmail API (including multipart attachments)
  */
@@ -78,25 +91,51 @@ export async function sendGmailMessage(
   accessToken: string,
   rawBase64Url: string
 ): Promise<{ id: string; threadId: string }> {
-  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      raw: rawBase64Url,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.error?.message || `Error al enviar correo vía Gmail (${response.status})`
-    );
+  let response: Response;
+  try {
+    response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        raw: rawBase64Url,
+      }),
+    });
+  } catch {
+    // Tras iniciar la petición, un error de transporte no acredita si Gmail la aceptó.
+    throw new GmailApiError(null, 'INCIERTO');
   }
 
-  return await response.json();
+  if (!response.ok) {
+    // No leer ni propagar el body del proveedor: puede incluir datos no destinados a logs/UI.
+    const resultado: ResultadoEnvioGmail = response.status >= 500 ? 'INCIERTO' : 'RECHAZADO';
+    throw new GmailApiError(response.status, resultado);
+  }
+
+  let resultado: unknown;
+  try {
+    resultado = await response.json();
+  } catch {
+    // 2xx sin cuerpo JSON verificable puede haber ocurrido después de aceptar el mensaje.
+    throw new GmailApiError(response.status, 'INCIERTO');
+  }
+
+  if (
+    typeof resultado !== 'object' || resultado === null || Array.isArray(resultado) ||
+    typeof (resultado as Record<string, unknown>).id !== 'string' ||
+    !(resultado as Record<string, string>).id.trim() ||
+    typeof (resultado as Record<string, unknown>).threadId !== 'string' ||
+    !(resultado as Record<string, string>).threadId.trim()
+  ) {
+    throw new GmailApiError(response.status, 'INCIERTO');
+  }
+
+  return {
+    id: (resultado as Record<string, string>).id,
+    threadId: (resultado as Record<string, string>).threadId,
+  };
 }
 
 /**
@@ -111,21 +150,25 @@ export async function searchGmailMessages(
   url.searchParams.set('q', query);
   url.searchParams.set('maxResults', '15');
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.error?.message || `Error al consultar mensajes en Gmail (${response.status})`
-    );
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  } catch {
+    throw new GmailApiError(null);
   }
 
-  const data = await response.json();
-  return data.messages || [];
+  if (!response.ok) throw new GmailApiError(response.status);
+
+  try {
+    const data = await response.json();
+    return Array.isArray(data.messages) ? data.messages : [];
+  } catch {
+    throw new GmailApiError(response.status);
+  }
 }
 
 /**
@@ -144,23 +187,28 @@ export async function getGmailMessageDetails(
   snippet: string;
   attachments: { filename: string; mimeType: string; attachmentId: string; size: number }[];
 }> {
-  const response = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    }
-  );
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.error?.message || `Error al leer mensaje ${messageId} (${response.status})`
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
     );
+  } catch {
+    throw new GmailApiError(null);
   }
 
-  const msg = await response.json();
+  if (!response.ok) throw new GmailApiError(response.status);
+
+  let msg: any;
+  try {
+    msg = await response.json();
+  } catch {
+    throw new GmailApiError(response.status);
+  }
   const headers = msg.payload?.headers || [];
 
   const getHeader = (name: string) =>
@@ -190,8 +238,8 @@ export async function getGmailMessageDetails(
                              .trim();
           extractedBody = tmp;
         }
-      } catch (e) {
-        console.warn('Error decodificando parte de correo:', e);
+      } catch {
+        console.warn('No se pudo decodificar una parte del mensaje Gmail:', { codigo: 'ERROR_DECODIFICACION' });
       }
     }
 

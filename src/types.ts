@@ -1797,6 +1797,8 @@ export type DictamenAseguradora =
 
 export type SolicitudSeguroEstado =
   | 'BORRADOR'
+  | 'ERROR_ENVIO'
+  | 'ENVIO_INCIERTO'
   | 'CORREO_ENVIADO'
   | 'SOLICITUD_PENDIENTE'
   | 'RESPUESTA_RECIBIDA'
@@ -1905,22 +1907,31 @@ export interface SolicitudSeguroImpago {
   documentosAdjuntos: DocumentoAdjuntoSeguro[];
   documentacionCompletaSegunAseguradora: boolean;
   
-  // BLOQUE 3: ANÁLISIS IA PREVIO
-  resumenSolvenciaIA: string;
-  scoreSolvenciaIA: number;
-  alertasDetectadasIA: string[];
-  nivelRiesgoIA: 'Bajo' | 'Medio' | 'Alto';
+  // BLOQUE 3: ANÁLISIS / CÁLCULO PREVIO (orientativo; no es dictamen de la aseguradora)
+  /** Resumen orientativo heredado; no es una decisión de la aseguradora. */
+  resumenSolvenciaIA?: string;
+  /** Puntuación ya registrada en la ficha de candidato; no se genera a partir del ratio de alquiler. */
+  scoreSolvenciaIA?: number;
+  scoreSolvenciaFuente?: 'PUNTUACION_CANDIDATO';
+  alertasDetectadasIA?: string[];
   
   // BLOQUE 4: SOLICITUD A ASEGURADORA (ESTADO Y COMUNICACIÓN)
   estado: SolicitudSeguroEstado;
   metodoEnvio: 'GMAIL_API' | 'GMAIL_WEB' | 'MANUAL';
+  /** Respuesta verificable de Gmail (id + threadId); acredita aceptación del servicio, no entrega. */
+  confirmacionGmail?: { id: string; threadId: string; fechaConfirmacion: string };
   emailAsunto?: string;
   emailCuerpo?: string;
   fechaEnvio?: string;
   
   // BLOQUE 5: RESPUESTA DE ASEGURADORA
   fechaRecepcionRespuesta?: string;
+  /** Sólo es un dictamen de aseguradora verificado cuando la persona usuaria lo contrasta y lo confirma explícitamente. */
   dictamenAseguradora: DictamenAseguradora;
+  dictamenAseguradoraVerificadoManualmente?: boolean;
+  fechaVerificacionDictamenAseguradora?: string | null;
+  /** Resultado inferido por IA a partir del texto fuente; nunca sustituye el dictamen verificado. */
+  analisisRespuestaIA?: AnalisisRespuestaAseguradoraAI | null;
   importeMaximoAsegurable?: number;
   primaAnualCalculada?: number;
   condicionesEstipuladas?: string[];
@@ -1955,13 +1966,15 @@ export interface GmailIntegracionConfig {
 }
 
 export interface AnalisisRespuestaAseguradoraAI {
-  dictamen: DictamenAseguradora;
-  dictamenTexto: string;
-  importeMaximoAsegurable: number;
+  /** Clasificación inferida del texto aportado; no acredita un dictamen oficial ni la autenticidad del remitente. */
+  clasificacionInferida: DictamenAseguradora;
+  textoClasificacionInferida: string;
+  /** null significa que el texto no indica un importe verificable; no se imputa la renta como valor por defecto. */
+  importeMaximoAsegurable: number | null;
   condiciones: string[];
   documentosRequeridos: string[];
-  resumenEjecutivo: string;
-  requiereAtencionPropietario: boolean;
+  resumenAnalisis: string;
+  recomendacionAtencionPropietario: boolean;
 }
 
 // ==========================================

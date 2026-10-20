@@ -2,22 +2,20 @@ import React, { useState, useEffect } from 'react';
 import {
   SolicitudSeguroImpago,
   ConfiguracionAseguradora,
-  SolicitudSeguroEstado,
   DecisionFinalPropietarioSeguro,
+  DictamenAseguradora,
   GmailIntegracionConfig,
 } from '../types';
 import {
   X,
   ShieldCheck,
   Building2,
-  Users,
   FileCheck,
   Sparkles,
   Mail,
   Send,
   CheckCircle2,
   AlertTriangle,
-  Clock,
   RotateCw,
   Copy,
   Check,
@@ -25,8 +23,6 @@ import {
   ExternalLink,
   MessageSquare,
   AlertCircle,
-  FileText,
-  HelpCircle,
   Info,
   Paperclip,
 } from 'lucide-react';
@@ -37,9 +33,9 @@ import {
   sendGmailMessage,
   searchGmailMessages,
   getGmailMessageDetails,
+  GmailApiError,
 } from '../lib/gmailClient';
 import { avisarOperacion } from '../feedback/canalFeedback';
-import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
 import { solicitarIA } from '../lib/clienteIA';
 import { esAnalisisRespuestaAseguradoraValido } from '../ia/analisisRespuestaAseguradora';
@@ -60,7 +56,7 @@ interface DetalleSolicitudSeguroModalProps {
   aseguradoras: ConfiguracionAseguradora[];
   gmailConfig?: GmailIntegracionConfig;
   onClose: () => void;
-  onUpdateSolicitud: (updated: SolicitudSeguroImpago) => void;
+  onUpdateSolicitud: (updated: SolicitudSeguroImpago) => void | boolean | Promise<void | boolean>;
 }
 
 export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalProps> = ({
@@ -92,6 +88,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   };
 
   const numCandidato = sol.numeroCandidatoInmueble || 1;
+  const tieneConfirmacionGmailVerificable =
+    typeof sol.confirmacionGmail?.id === 'string' && sol.confirmacionGmail.id.trim().length > 0 &&
+    typeof sol.confirmacionGmail?.threadId === 'string' && sol.confirmacionGmail.threadId.trim().length > 0;
   const direccionCompleta = sol.inmuebleDireccion
     ? `${sol.inmuebleDireccion}, ${sol.inmuebleCiudad || ''}`.trim()
     : `${sol.inmuebleNombre}, ${sol.inmuebleCiudad || ''}`.trim();
@@ -109,10 +108,13 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
+  const [emailGenerationNotice, setEmailGenerationNotice] = useState<string | null>(null);
+  const [emailGenerationError, setEmailGenerationError] = useState<string | null>(null);
   const [sendSuccessMsg, setSendSuccessMsg] = useState<string | null>(null);
   const [sendErrorMsg, setSendErrorMsg] = useState<string | null>(null);
 
-  // Response simulation / test state / Gmail search
+  // Incoming response and Gmail search
+
   const [incomingResponseText, setIncomingResponseText] = useState<string>(
     sol.emailRespuestaRaw || ''
   );
@@ -120,67 +122,93 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
   const [isCheckingGmail, setIsCheckingGmail] = useState(false);
   const [gmailStatusNotice, setGmailStatusNotice] = useState<string | null>(null);
   const [responseProcessingError, setResponseProcessingError] = useState<string | null>(null);
+  const [dictamenManual, setDictamenManual] = useState<DictamenAseguradora>(
+    solicitud.dictamenAseguradoraVerificadoManualmente ? solicitud.dictamenAseguradora : 'EN_ESTUDIO'
+  );
+  const [fuenteOriginalContrastada, setFuenteOriginalContrastada] = useState(false);
+  const [dictamenVerificacionNotice, setDictamenVerificacionNotice] = useState<string | null>(null);
+  const [dictamenVerificacionError, setDictamenVerificacionError] = useState<string | null>(null);
 
   // Owner decision state
   const [ownerDecision, setOwnerDecision] = useState<DecisionFinalPropietarioSeguro>(
     sol.decisionFinalPropietario || 'PENDIENTE'
   );
   const [ownerNotas, setOwnerNotas] = useState<string>(sol.notasPrivadasPropietario || '');
+  const [ownerDecisionError, setOwnerDecisionError] = useState<string | null>(null);
 
-  // Generar borrador formal con IA
+  const persistirSolicitud = async (actualizada: SolicitudSeguroImpago): Promise<boolean> => {
+    try {
+      const resultado = await onUpdateSolicitud(actualizada);
+      return resultado !== false;
+    } catch {
+      return false;
+    }
+  };
+
+  // Generar borrador formal con IA; una plantilla local no sustituye ni sobreescribe el borrador visible.
   const handleGenerateAiEmail = async () => {
     setIsGeneratingEmail(true);
+    setEmailGenerationNotice(null);
+    setEmailGenerationError(null);
     try {
       const res = await solicitarIA('/api/generar-correo-aseguradora', {
         solicitudSeguro: sol,
-        aseguradora: aseguradora,
+        aseguradora,
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.asunto) setEmailAsunto(data.asunto);
-        if (data.cuerpo) setEmailCuerpo(data.cuerpo);
+      if (!res.ok) throw new Error('HTTP_NO_OK');
+
+      const datos: unknown = await res.json();
+      if (typeof datos !== 'object' || datos === null || Array.isArray(datos)) {
+        throw new Error('RESPUESTA_INVALIDA');
       }
-    } catch (e) {
-      console.warn('Fallback al generar correo:', e);
+      const borrador = datos as Record<string, unknown>;
+      if (borrador.origenBorrador === 'PLANTILLA_LOCAL') {
+        setEmailGenerationNotice(
+          'La IA no generó un borrador. Se conserva el texto actual; la plantilla local recibida no se aplicó para no sobrescribirlo.'
+        );
+        return;
+      }
+      if (
+        borrador.origenBorrador !== 'IA' ||
+        typeof borrador.asunto !== 'string' || !borrador.asunto.trim() ||
+        typeof borrador.cuerpo !== 'string' || !borrador.cuerpo.trim()
+      ) {
+        throw new Error('RESPUESTA_INVALIDA');
+      }
+
+      setEmailAsunto(borrador.asunto);
+      setEmailCuerpo(borrador.cuerpo);
+      setEmailGenerationNotice(
+        'Borrador propuesto por IA. Revísalo antes de enviarlo; no es una respuesta ni un dictamen de la aseguradora.'
+      );
+    } catch {
+      console.warn('No se pudo generar el borrador IA:', { codigo: 'BORRADOR_IA_NO_VALIDO' });
+      setEmailGenerationError('No se pudo generar un borrador válido con IA. El asunto y el texto actuales se han conservado.');
     } finally {
       setIsGeneratingEmail(false);
     }
   };
 
-  const guardarBorradorSinConfirmar = async () => {
-    const updated: SolicitudSeguroImpago = {
-      ...sol,
-      emailAsunto,
-      emailCuerpo,
-      fechaActualizacion: new Date().toISOString(),
-    };
-    setSol(updated);
-    try {
-      await onUpdateSolicitud(updated);
-    } catch (error) {
-      console.error('No se pudo persistir el borrador del correo:', error);
-    }
-  };
-
   // Enviar correo a la aseguradora directamente por Gmail API con adjuntos
   const handleSendEmail = async () => {
+    if (isSendingEmail || !['BORRADOR', 'ERROR_ENVIO'].includes(sol.estado)) return;
+
     setIsSendingEmail(true);
     setSendSuccessMsg(null);
     setSendErrorMsg(null);
+    let solicitudGmailIniciada = false;
     let envioConfirmado = false;
+    let registroConfirmado: SolicitudSeguroImpago | null = null;
 
     try {
       let token = (await getAccessToken())?.trim() || null;
       if (!token) {
-        // La cancelación/error del popup se propaga al catch; no equivale a un envío manual.
+        // Un fallo/cancelación OAuth ocurre antes de iniciar una petición de envío.
         const authRes = await googleSignIn();
         token = authRes?.accessToken?.trim() || null;
       }
-      if (!token) {
-        throw new Error('Google no devolvió un token de acceso; no se puede confirmar el envío.');
-      }
+      if (!token) throw new Error('TOKEN_NO_DISPONIBLE');
 
-      // Preparar adjuntos verificados
       const attachmentsToSend = sol.documentosAdjuntos
         .filter((d) => d.verificado && d.base64Data)
         .map((d) => ({
@@ -189,7 +217,6 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
           base64Data: d.base64Data || '',
         }));
 
-      // Construir MIME RFC 2822 y enviar por Gmail REST API
       const rawMime = buildRawEmailWithAttachments({
         to: sol.aseguradoraEmail,
         subject: emailAsunto,
@@ -197,9 +224,11 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
         attachments: attachmentsToSend,
       });
 
+      // Desde este punto cualquier error de transporte puede tener resultado incierto.
+      solicitudGmailIniciada = true;
       const sendResult: unknown = await sendGmailMessage(token, rawMime);
       if (!esResultadoEnvioGmailVerificable(sendResult)) {
-        throw new Error('Gmail no devolvió un identificador de mensaje verificable; no se puede confirmar el envío.');
+        throw new GmailApiError(null, 'INCIERTO');
       }
       envioConfirmado = true;
 
@@ -208,6 +237,11 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
         ...sol,
         estado: 'CORREO_ENVIADO',
         metodoEnvio: 'GMAIL_API',
+        confirmacionGmail: {
+          id: sendResult.id,
+          threadId: sendResult.threadId,
+          fechaConfirmacion: ahora,
+        },
         emailAsunto,
         emailCuerpo,
         fechaEnvio: ahora,
@@ -218,29 +252,114 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
             id: `hist_${Date.now()}`,
             fecha: ahora,
             autor: 'gmail',
-            accion: 'Solicitud enviada exitosamente vía Gmail API',
-            detalle: `Enviado a ${sol.aseguradoraEmail} (ID Mensaje: ${sendResult.id}) con ${attachmentsToSend.length} archivos adjuntos.`,
+            accion: 'Gmail confirmó la aceptación de la solicitud de envío',
+            detalle: `Destinatario: ${sol.aseguradoraEmail}; ID de mensaje: ${sendResult.id}; ID de conversación: ${sendResult.threadId}; adjuntos: ${attachmentsToSend.length}. La respuesta de Gmail no acredita entrega ni lectura por el destinatario.`,
           },
         ],
       };
-
+      registroConfirmado = updated;
+      // La confirmación de Gmail bloquea nuevos envíos incluso si falla su persistencia.
       setSol(updated);
-      await onUpdateSolicitud(updated);
-      setSendSuccessMsg(`¡Correo enviado a ${sol.aseguradoraEmail} con éxito vía Gmail!`);
-      setActiveTab('respuesta');
-    } catch (err: unknown) {
-      console.error('Error enviando con Gmail API:', err);
-      if (!envioConfirmado) await guardarBorradorSinConfirmar();
 
-      const detalle = mensajeDeErrorUsuario(err, 'No se ha podido confirmar el envío automáticamente.');
-      const mensaje = envioConfirmado
-        ? 'Gmail confirmó el envío, pero no se pudo guardar su estado en el expediente. Revisa el historial antes de volver a intentarlo.'
-        : `${detalle} No se pudo confirmar el envío: el expediente no se marcará como enviado y el borrador se conserva.`;
-      setSendErrorMsg(mensaje);
-      avisarOperacion({ tipo: 'error', mensaje });
+      if (!(await persistirSolicitud(updated))) {
+        const mensaje = 'Gmail confirmó la aceptación del mensaje, pero no se pudo confirmar el guardado del expediente. No lo reenvíes; revisa la carpeta Enviados y el historial.';
+        setSendErrorMsg(mensaje);
+        avisarOperacion({ tipo: 'error', mensaje });
+        return;
+      }
+
+      const avisoAceptacionGmail = `Gmail confirmó la aceptación del mensaje dirigido a ${sol.aseguradoraEmail}. Esto no confirma su entrega ni lectura.`;
+      setSendSuccessMsg(avisoAceptacionGmail);
+      setGmailStatusNotice(avisoAceptacionGmail);
+      setActiveTab('respuesta');
+    } catch (error: unknown) {
+      if (envioConfirmado && registroConfirmado) {
+        setSol(registroConfirmado);
+        const mensaje = 'Gmail confirmó la aceptación del mensaje, pero ocurrió un error al guardar su estado. No lo reenvíes; revisa la carpeta Enviados y el historial.';
+        console.warn('Envío Gmail confirmado; persistencia no confirmada.');
+        setSendErrorMsg(mensaje);
+        avisarOperacion({ tipo: 'error', mensaje });
+      } else {
+        const incierto = solicitudGmailIniciada && (
+          !(error instanceof GmailApiError) || error.resultadoEnvio === 'INCIERTO'
+        );
+        const resultado = incierto ? 'ENVIO_INCIERTO' : 'ERROR_ENVIO';
+        const ahora = new Date().toISOString();
+        const statusHttp = error instanceof GmailApiError ? error.status : null;
+        const detalle = incierto
+          ? 'No se recibió una confirmación verificable. Gmail pudo aceptar el mensaje; revisar Enviados antes de cualquier reintento.'
+          : solicitudGmailIniciada
+            ? `Gmail rechazó la solicitud${statusHttp === null ? '' : ` (HTTP ${statusHttp})`}. No se registró como enviada.`
+            : 'No se inició un envío confirmado (autorización o preparación fallida). Se conserva el borrador.';
+        const actualizado: SolicitudSeguroImpago = {
+          ...sol,
+          estado: resultado,
+          metodoEnvio: 'GMAIL_API',
+          emailAsunto,
+          emailCuerpo,
+          fechaActualizacion: ahora,
+          historial: [
+            ...sol.historial,
+            {
+              id: `hist_${Date.now()}`,
+              fecha: ahora,
+              autor: 'gmail',
+              accion: incierto ? 'Resultado de envío incierto; requiere revisión humana' : 'Intento de envío no confirmado',
+              detalle,
+            },
+          ],
+        };
+        setSol(actualizado);
+        const guardado = await persistirSolicitud(actualizado);
+        const mensajeBase = incierto
+          ? 'El resultado del envío es incierto: Gmail pudo haber aceptado el mensaje. Revisa Enviados y no vuelvas a enviarlo hasta comprobarlo.'
+          : solicitudGmailIniciada
+            ? `Gmail rechazó la solicitud${statusHttp === null ? '' : ` (HTTP ${statusHttp})`}. No se marcó como enviada; se conserva el borrador.`
+            : 'No se pudo iniciar el envío por un problema de autorización o preparación. No se marcó como enviado y se conserva el borrador.';
+        const mensaje = guardado
+          ? mensajeBase
+          : `${mensajeBase} Además, no se pudo guardar este estado en el expediente; mantén la revisión manual antes de cualquier reintento.`;
+        console.warn('Envío Gmail no confirmado:', { resultado, status: statusHttp });
+        setSendErrorMsg(mensaje);
+        avisarOperacion({ tipo: 'error', mensaje });
+      }
     } finally {
       setIsSendingEmail(false);
     }
+  };
+
+  const handleAutorizarReintentoManual = async () => {
+    if (sol.estado !== 'ENVIO_INCIERTO') return;
+    const confirmado = window.confirm(
+      'Confirma que has revisado la carpeta Enviados de Gmail y no aparece el mensaje. El siguiente intento puede duplicar un envío si esa comprobación no es correcta.'
+    );
+    if (!confirmado) return;
+
+    const ahora = new Date().toISOString();
+    const actualizado: SolicitudSeguroImpago = {
+      ...sol,
+      estado: 'BORRADOR',
+      fechaActualizacion: ahora,
+      historial: [
+        ...sol.historial,
+        {
+          id: `hist_${Date.now()}`,
+          fecha: ahora,
+          autor: 'propietario',
+          accion: 'Reintento manual autorizado tras revisar Gmail',
+          detalle: 'La persona usuaria confirmó haber revisado la carpeta Enviados antes de habilitar un nuevo intento.',
+        },
+      ],
+    };
+    if (!(await persistirSolicitud(actualizado))) {
+      const mensaje = 'No se pudo guardar la autorización manual. El expediente sigue bloqueado para evitar un posible duplicado.';
+      setSendErrorMsg(mensaje);
+      avisarOperacion({ tipo: 'error', mensaje });
+      return;
+    }
+    setSol(actualizado);
+    setSendErrorMsg(null);
+    setSendSuccessMsg('Reintento habilitado por revisión humana. Comprueba el destinatario y el borrador antes de enviarlo.');
   };
 
   // Buscar automáticamente respuestas en Gmail que contengan la referencia del expediente
@@ -273,13 +392,21 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
       const latestMsg = await getGmailMessageDetails(token, messages[0].id);
       if (latestMsg && latestMsg.body) {
         setIncomingResponseText(latestMsg.body);
-        setGmailStatusNotice(`¡Correo recibido de ${latestMsg.from} cargado automáticamente!`);
-        // Analizar con IA de inmediato
+        setFuenteOriginalContrastada(false);
+        setGmailStatusNotice(
+          `Gmail encontró un mensaje cuyo remitente indica «${latestMsg.from || 'no identificado'}». La aplicación no verifica su autenticidad; contrasta el correo original antes de registrar un dictamen.`
+        );
+        // El resultado es solo un análisis del texto y nunca confirma un dictamen oficial.
         await handleAnalyzeSpecificText(latestMsg.body);
       }
-    } catch (e: any) {
-      console.error('Error buscando respuestas en Gmail:', e);
-      setGmailStatusNotice(`Error al consultar Gmail: ${e.message}`);
+    } catch (error: unknown) {
+      const status = error instanceof GmailApiError ? error.status : null;
+      console.warn('Consulta de respuestas en Gmail no completada:', { status });
+      setGmailStatusNotice(
+        status === null
+          ? 'No se pudo consultar Gmail. Revisa la autorización y la conexión; no se ha registrado una respuesta nueva.'
+          : `Gmail no permitió consultar la respuesta (HTTP ${status}). No se ha registrado una respuesta nueva.`
+      );
     } finally {
       setIsCheckingGmail(false);
     }
@@ -292,20 +419,31 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
     setTimeout(() => setCopiedEmail(false), 2500);
   };
 
-  // Procesar texto de respuesta con IA
+  // Analizar texto de respuesta; la IA produce una clasificación orientativa, nunca un dictamen oficial.
   const handleAnalyzeSpecificText = async (textToAnalyze: string) => {
     if (!textToAnalyze.trim()) return;
     setIsAnalyzingResponse(true);
     setResponseProcessingError(null);
+    const fuenteNueva = textToAnalyze !== sol.emailRespuestaRaw;
     let analisisValido = false;
+
+    const cambiosFuenteNueva = fuenteNueva
+      ? {
+          analisisRespuestaIA: null,
+          dictamenAseguradora: 'EN_ESTUDIO' as DictamenAseguradora,
+          dictamenAseguradoraVerificadoManualmente: false,
+          fechaVerificacionDictamenAseguradora: null,
+        }
+      : {};
 
     const registrarPendienteRevision = async () => {
       const ahora = new Date().toISOString();
       const actualizado: SolicitudSeguroImpago = {
         ...sol,
+        ...cambiosFuenteNueva,
         estado: 'ERROR_PROCESAMIENTO',
         emailRespuestaRaw: textToAnalyze,
-        procesadoConIA: false,
+        procesadoConIA: fuenteNueva ? false : sol.procesadoConIA,
         fechaActualizacion: ahora,
         historial: [
           ...sol.historial,
@@ -313,17 +451,13 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
             id: `hist_${Date.now()}`,
             fecha: ahora,
             autor: 'sistema_ia',
-            accion: 'Respuesta de aseguradora pendiente de revisión humana',
-            detalle: 'No se obtuvo un análisis automático válido. Se conserva el texto recibido para revisión humana.',
+            accion: 'Análisis automático no disponible; requiere revisión humana',
+            detalle: 'El texto fuente se conserva. No se ha registrado una clasificación nueva ni un dictamen oficial.',
           },
         ],
       };
       setSol(actualizado);
-      try {
-        await onUpdateSolicitud(actualizado);
-      } catch (error) {
-        console.error('No se pudo persistir la respuesta pendiente de revisión:', error);
-      }
+      return persistirSolicitud(actualizado);
     };
 
     try {
@@ -334,31 +468,28 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
         rentaMensual: sol.rentaMensual,
       });
 
-      if (!res.ok) {
-        const errorRemoto = await res.json().catch(() => null);
-        const mensaje =
-          typeof errorRemoto?.error === 'string'
-            ? errorRemoto.error
-            : `El análisis automático respondió con HTTP ${res.status}.`;
-        throw new Error(mensaje);
-      }
+      if (!res.ok) throw new Error('ANALISIS_IA_NO_DISPONIBLE');
 
       const datos: unknown = await res.json();
       if (!esAnalisisRespuestaAseguradoraValido(datos)) {
-        throw new Error('La respuesta automática no contiene un dictamen válido.');
+        throw new Error('RESPUESTA_IA_INVALIDA');
       }
-      const parsedAI = datos;
+      const analisis = datos;
       analisisValido = true;
+
+      if (fuenteNueva) {
+        setFuenteOriginalContrastada(false);
+        setDictamenManual('EN_ESTUDIO');
+        setDictamenVerificacionNotice(null);
+        setDictamenVerificacionError(null);
+      }
 
       const ahora = new Date().toISOString();
       const updated: SolicitudSeguroImpago = {
         ...sol,
+        ...cambiosFuenteNueva,
         estado: 'RESPUESTA_PROCESADA',
-        dictamenAseguradora: parsedAI.dictamen,
-        importeMaximoAsegurable: parsedAI.importeMaximoAsegurable,
-        condicionesEstipuladas: parsedAI.condiciones,
-        documentosSolicitadosExtra: parsedAI.documentosRequeridos,
-        resumenProcesadoIA: parsedAI.resumenEjecutivo,
+        analisisRespuestaIA: analisis,
         emailRespuestaRaw: textToAnalyze,
         fechaRecepcionRespuesta: ahora,
         procesadoConIA: true,
@@ -369,24 +500,30 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
             id: `hist_${Date.now()}`,
             fecha: ahora,
             autor: 'sistema_ia',
-            accion: 'Dictamen de aseguradora analizado por IA',
-            detalle: `Resultado: ${parsedAI.dictamen} - ${parsedAI.resumenEjecutivo}`,
+            accion: 'Análisis IA de respuesta registrado; dictamen pendiente de contraste humano',
+            detalle: `Clasificación inferida: ${analisis.clasificacionInferida}. El resultado no acredita autenticidad ni sustituye la decisión humana.`,
           },
         ],
       };
 
       setSol(updated);
-      await onUpdateSolicitud(updated);
-    } catch (error) {
-      console.error('Error analizando respuesta:', error);
-      if (!analisisValido) {
-        await registrarPendienteRevision();
+      if (!(await persistirSolicitud(updated))) {
         setResponseProcessingError(
-          'El análisis automático no se pudo completar. El texto recibido se conserva y el expediente queda pendiente de revisión humana.',
+          'El análisis orientativo se completó, pero no se pudo confirmar su guardado. El resultado no es un dictamen oficial; revisa la conexión antes de continuar.'
+        );
+      }
+    } catch {
+      console.warn('Análisis de respuesta no completado:', { codigo: analisisValido ? 'PERSISTENCIA_NO_CONFIRMADA' : 'IA_NO_VALIDADA' });
+      if (!analisisValido) {
+        const guardado = await registrarPendienteRevision();
+        setResponseProcessingError(
+          guardado
+            ? 'El análisis automático no se pudo completar. El texto recibido se conserva y el expediente queda pendiente de revisión humana.'
+            : 'El análisis automático no se pudo completar. El texto se conserva en pantalla, pero no se confirmó su guardado; requiere revisión humana.'
         );
       } else {
         setResponseProcessingError(
-          'El análisis válido se completó, pero no se pudo guardar en el expediente. Revisa la conexión antes de continuar.',
+          'El análisis orientativo se completó, pero no se pudo guardar en el expediente. No lo trates como dictamen oficial.'
         );
       }
     } finally {
@@ -399,49 +536,72 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
     await handleAnalyzeSpecificText(incomingResponseText);
   };
 
-  // Simular respuesta rápida para demostración
-  const handleSimulateResponse = (tipo: 'FAVORABLE' | 'CONDICIONADO' | 'REQUERIDO' | 'DESFAVORABLE') => {
-    let mockText = '';
-    const isSeag = sol.aseguradoraId === 'seag' || sol.aseguradoraNombre.toLowerCase().includes('seag');
+  const handleRegistrarDictamenManual = async () => {
+    const textoFuente = incomingResponseText.trim();
+    if (!textoFuente || !fuenteOriginalContrastada) return;
 
-    if (tipo === 'FAVORABLE') {
-      if (isSeag) {
-        mockText = `Estimados señores,\n\nEn relación a la solicitud con referencia [${sol.referenciaUnica}] para el inmueble ${direccionCompleta} y candidato ${sol.titular1.nombre} (Candidato ${numCandidato}), les informamos que el estudio de viabilidad con SEAG ha resultado FAVORABLE.\n\nOperación aprobada por una renta mensual de ${sol.rentaMensual} €/mes.\nCoberturas garantizadas por SEAG:\n• Cobro puntual garantizado el día 1 de cada mes (cobertura indefinida hasta desahucio).\n• Reclamación de rentas impagadas y defensa jurídica integral.\n• Compensación de daños y actos vandálicos hasta 3.000 €.\nPueden proceder a la firma del contrato de arrendamiento y remitirnos copia para la emisión definitiva del certificado de garantía.`;
-      } else {
-        mockText = `Estimados señores,\n\nEn relación a la solicitud con referencia [${sol.referenciaUnica}] para el inmueble ${direccionCompleta} y candidato ${sol.titular1.nombre} (Candidato ${numCandidato}), les informamos que el estudio de solvencia ha resultado FAVORABLE.\n\nOperación aprobada por una renta mensual de ${sol.rentaMensual} €/mes.\nCoberturas: 12 meses de impago, actos vandálicos 3.000 € y defensa jurídica.\nPueden proceder a la emisión de la póliza adjuntando el contrato de arrendamiento firmado.`;
-      }
-    } else if (tipo === 'CONDICIONADO') {
-      mockText = `Estimados señores,\n\nRevisado el expediente [${sol.referenciaUnica}], el estudio de solvencia queda APROBADO CONDICIONADO a la incorporación de un avalista solidario o una fianza adicional de 2 mensualidades debido a la antigüedad contractual del titular.\n\nRenta máxima asegurable: ${sol.rentaMensual} €/mes.`;
-    } else if (tipo === 'REQUERIDO') {
-      mockText = `Estimados señores,\n\nPara poder continuar con la valoración del expediente [${sol.referenciaUnica}], solicitamos nos remitan:\n1. Última nómina actualizada del mes en curso.\n2. Informe de vida laboral completo actualizado de la TGSS.\n\nQuedamos a la espera para emitir resolución definitiva.`;
-    } else {
-      mockText = `Estimados señores,\n\nLamentamos comunicarles que tras analizar el expediente [${sol.referenciaUnica}], la operación resulta DESFAVORABLE por superar los parámetros máximos de riesgo admitidos para el producto de impago de alquiler.`;
-    }
-
-    setIncomingResponseText(mockText);
-  };
-
-  // Guardar decisión final del propietario
-  const handleSaveOwnerDecision = () => {
-    const updated: SolicitudSeguroImpago = {
+    setDictamenVerificacionNotice(null);
+    setDictamenVerificacionError(null);
+    const ahora = new Date().toISOString();
+    const fuenteNueva = incomingResponseText !== sol.emailRespuestaRaw;
+    const actualizado: SolicitudSeguroImpago = {
       ...sol,
-      decisionFinalPropietario: ownerDecision,
-      notasPrivadasPropietario: ownerNotas,
-      fechaDecisionPropietario: new Date().toISOString(),
-      fechaActualizacion: new Date().toISOString(),
+      ...(fuenteNueva ? { analisisRespuestaIA: null, procesadoConIA: false } : {}),
+      estado: 'RESPUESTA_PROCESADA',
+      dictamenAseguradora: dictamenManual,
+      dictamenAseguradoraVerificadoManualmente: true,
+      fechaVerificacionDictamenAseguradora: ahora,
+      emailRespuestaRaw: incomingResponseText,
+      fechaRecepcionRespuesta: sol.fechaRecepcionRespuesta || ahora,
+      fechaActualizacion: ahora,
       historial: [
         ...sol.historial,
         {
           id: `hist_${Date.now()}`,
-          fecha: new Date().toISOString(),
+          fecha: ahora,
+          autor: 'propietario',
+          accion: 'Dictamen de aseguradora contrastado manualmente con la fuente original',
+          detalle: `Clasificación registrada por la persona usuaria: ${dictamenManual}. La aplicación no verifica técnicamente la autenticidad del correo.`,
+        },
+      ],
+    };
+
+    if (!(await persistirSolicitud(actualizado))) {
+      // Mantener la revisión y el texto fuente en memoria, sin afirmar que Firestore los guardó.
+      setSol(actualizado);
+      setDictamenVerificacionError('El contraste humano se conserva en memoria, pero no se confirmó su persistencia. Revisa la conexión y vuelve a guardar antes de dar por guardado el expediente.');
+      return;
+    }
+    setSol(actualizado);
+    setDictamenVerificacionNotice('Dictamen registrado por revisión humana de la fuente original; la aplicación no ha autenticado el remitente.');
+  };
+
+  // La decisión del propietario se guarda como campo independiente del dictamen de la aseguradora.
+  const handleSaveOwnerDecision = async () => {
+    setOwnerDecisionError(null);
+    const ahora = new Date().toISOString();
+    const updated: SolicitudSeguroImpago = {
+      ...sol,
+      decisionFinalPropietario: ownerDecision,
+      notasPrivadasPropietario: ownerNotas,
+      fechaDecisionPropietario: ahora,
+      fechaActualizacion: ahora,
+      historial: [
+        ...sol.historial,
+        {
+          id: `hist_${Date.now()}`,
+          fecha: ahora,
           autor: 'propietario',
           accion: `Decisión final registrada: ${ownerDecision}`,
           detalle: ownerNotas || 'Sin notas adicionales.',
         },
       ],
     };
+    if (!(await persistirSolicitud(updated))) {
+      setOwnerDecisionError('No se confirmó el guardado de la decisión. El expediente permanece abierto para revisión.');
+      return;
+    }
     setSol(updated);
-    onUpdateSolicitud(updated);
     onClose();
   };
 
@@ -464,15 +624,19 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                   {sol.referenciaUnica}
                 </span>
                 <span className={`px-2.5 py-0.5 rounded-full text-xs font-black border ${
-                  sol.dictamenAseguradora === 'FAVORABLE'
-                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                    : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
-                    ? 'bg-amber-100 text-amber-800 border-amber-300'
-                    : sol.dictamenAseguradora === 'DESFAVORABLE'
-                    ? 'bg-rose-100 text-rose-800 border-rose-300'
-                    : 'bg-blue-100 text-blue-800 border-blue-300'
+                  sol.dictamenAseguradoraVerificadoManualmente !== true
+                    ? 'bg-slate-100 text-slate-700 border-slate-300'
+                    : sol.dictamenAseguradora === 'FAVORABLE'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                      : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
+                        ? 'bg-amber-100 text-amber-800 border-amber-300'
+                        : sol.dictamenAseguradora === 'DESFAVORABLE'
+                          ? 'bg-rose-100 text-rose-800 border-rose-300'
+                          : 'bg-blue-100 text-blue-800 border-blue-300'
                 }`}>
-                  {sol.dictamenTexto || sol.dictamenAseguradora || 'En Trámite'}
+                  {sol.dictamenAseguradoraVerificadoManualmente === true
+                    ? `Dictamen contrastado: ${sol.dictamenAseguradora}`
+                    : 'Dictamen pendiente de contraste humano'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -513,8 +677,12 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
           >
             <Mail className="w-3.5 h-3.5" />
             2. Solicitud & Correo
-            {sol.estado === 'CORREO_ENVIADO' && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+            {sol.estado === 'CORREO_ENVIADO' && tieneConfirmacionGmailVerificable && (
+              <span
+                role="img"
+                aria-label="Gmail aceptó el mensaje; entrega no confirmada"
+                className="w-2 h-2 rounded-full bg-blue-500 inline-block"
+              />
             )}
           </button>
 
@@ -653,47 +821,29 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 </div>
               </div>
 
-              {/* BLOQUE 3: ANÁLISIS IA */}
+              {/* BLOQUE 3: CÁLCULOS LOCALES, SEPARADOS DEL DICTAMEN */}
               <div className="space-y-3">
                 <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                  <div className="w-6 h-6 rounded-lg bg-purple-600 text-white flex items-center justify-center text-xs font-black">3</div>
-                  <h4 className="font-black text-slate-900 text-sm tracking-wide uppercase">ANÁLISIS IA Y ESTIMACIÓN DE RIESGO</h4>
+                  <div className="w-6 h-6 rounded-lg bg-slate-600 text-white flex items-center justify-center text-xs font-black">3</div>
+                  <h4 className="font-black text-slate-900 text-sm tracking-wide uppercase">CÁLCULOS LOCALES · SIN DICTAMEN DE ASEGURADORA</h4>
                 </div>
 
-                <div className="bg-purple-50/70 border border-purple-200/90 rounded-2xl p-4 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-black">
-                        Scoring de Solvencia: {sol.scoreSolvenciaIA} / 100
-                      </div>
-                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                        sol.nivelRiesgoIA === 'Bajo'
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                          : 'bg-amber-100 text-amber-800 border-amber-300'
-                      }`}>
-                        Riesgo {sol.nivelRiesgoIA}
-                      </span>
-                    </div>
-
-                    <div className="text-xs text-purple-900 font-bold">
-                      Ratio de esfuerzo: {sol.ratioEsfuerzoCalculado}% (Límite {aseguradora.ratioEsfuerzoMaximo}%)
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-purple-950 font-medium leading-relaxed">
-                    {sol.resumenSolvenciaIA}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                  <p className="text-xs text-slate-700">
+                    El ratio es un cálculo aritmético sobre los datos registrados. No es una puntuación de la aseguradora, una recomendación de aceptación ni un análisis de solvencia.
                   </p>
-
-                  {sol.alertasDetectadasIA && sol.alertasDetectadasIA.length > 0 && (
-                    <div className="space-y-1">
-                      {sol.alertasDetectadasIA.map((alerta, idx) => (
-                        <div key={idx} className="p-2 bg-white/90 rounded-lg border border-amber-300 text-xs text-amber-900 font-bold flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span>{alerta}</span>
-                        </div>
-                      ))}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-slate-700 font-bold">
+                      Ratio calculado: {sol.ratioEsfuerzoCalculado}% · Límite configurado: {aseguradora.ratioEsfuerzoMaximo}%
                     </div>
-                  )}
+                    {sol.scoreSolvenciaFuente === 'PUNTUACION_CANDIDATO' &&
+                      typeof sol.scoreSolvenciaIA === 'number' &&
+                      Number.isFinite(sol.scoreSolvenciaIA) && (
+                        <div className="text-xs text-slate-700 bg-white border border-slate-200 px-3 py-1 rounded-lg">
+                          Puntuación existente en la ficha de candidato: {sol.scoreSolvenciaIA} / 100. No es un dictamen ni ha sido verificada para esta aseguradora.
+                        </div>
+                      )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -723,16 +873,37 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 </div>
               </div>
 
+              {emailGenerationNotice && (
+                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-950 text-xs" role="status">
+                  {emailGenerationNotice}
+                </div>
+              )}
+              {emailGenerationError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs" role="alert">
+                  {emailGenerationError}
+                </div>
+              )}
+
               {/* Status bar */}
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-3">
                   <span className="font-bold text-slate-600">Estado de Envío:</span>
                   <span className={`px-2.5 py-0.5 rounded-full font-bold border ${
-                    sol.estado === 'CORREO_ENVIADO' || sol.estado === 'RESPUESTA_PROCESADA' || sol.estado === 'RESPUESTA_RECIBIDA'
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : 'bg-slate-200 text-slate-700 border-slate-300'
+                    sol.estado === 'ENVIO_INCIERTO'
+                      ? 'bg-amber-100 text-amber-900 border-amber-300'
+                      : sol.estado === 'ERROR_ENVIO'
+                        ? 'bg-rose-100 text-rose-800 border-rose-300'
+                        : sol.estado === 'CORREO_ENVIADO' && tieneConfirmacionGmailVerificable
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : sol.estado === 'RESPUESTA_PROCESADA' || sol.estado === 'RESPUESTA_RECIBIDA'
+                          ? 'bg-blue-100 text-blue-800 border-blue-300'
+                          : 'bg-slate-200 text-slate-700 border-slate-300'
                   }`}>
-                    {sol.estado}
+                    {sol.estado === 'CORREO_ENVIADO'
+                      ? tieneConfirmacionGmailVerificable
+                        ? 'GMAIL ACEPTÓ · ENTREGA NO CONFIRMADA'
+                        : 'ESTADO HEREDADO · REVISAR GMAIL'
+                      : sol.estado}
                   </span>
                   <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
                     Candidato {numCandidato}
@@ -745,6 +916,11 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 </div>
               </div>
 
+              {sol.estado === 'CORREO_ENVIADO' && !tieneConfirmacionGmailVerificable && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 text-xs" role="alert">
+                  Este expediente conserva un estado de envío histórico sin id y threadId verificables. No equivale a una confirmación de Gmail; revisa Enviados antes de cualquier acción.
+                </div>
+              )}
               {sendSuccessMsg && (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-bold flex items-center gap-2 animate-in fade-in" role="status">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -755,6 +931,21 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs font-semibold flex items-center gap-2" role="alert">
                   <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>{sendErrorMsg}</span>
+                </div>
+              )}
+              {sol.estado === 'ENVIO_INCIERTO' && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-2">
+                  <p className="text-xs font-semibold text-amber-950">
+                    El envío está bloqueado para evitar duplicados. Revisa manualmente la carpeta Enviados de Gmail antes de habilitar otro intento.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAutorizarReintentoManual}
+                    disabled={isSendingEmail}
+                    className="px-3 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded-lg disabled:opacity-50"
+                  >
+                    He revisado Enviados; habilitar reintento manual
+                  </button>
                 </div>
               )}
 
@@ -833,11 +1024,11 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                 <button
                   type="button"
                   onClick={handleSendEmail}
-                  disabled={isSendingEmail}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl transition-colors shadow-md shadow-indigo-600/20 flex items-center gap-2"
+                  disabled={isSendingEmail || !['BORRADOR', 'ERROR_ENVIO'].includes(sol.estado)}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl transition-colors shadow-md shadow-indigo-600/20 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Send className="w-4 h-4" />
-                  {isSendingEmail ? 'Enviando vía Gmail API...' : 'Enviar Solicitud con Gmail OAuth'}
+                  {isSendingEmail ? 'Enviando vía Gmail API...' : sol.estado === 'ENVIO_INCIERTO' ? 'Reintento bloqueado por resultado incierto' : 'Enviar Solicitud con Gmail OAuth'}
                 </button>
               </div>
             </div>
@@ -864,38 +1055,11 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                     {isCheckingGmail ? 'Buscando en Gmail...' : 'Buscar Respuesta en Gmail'}
                   </button>
 
-                  <div className="flex items-center gap-1 text-xs">
-                    <span className="font-bold text-slate-400 text-[11px]">Simular:</span>
-                    <button
-                      onClick={() => handleSimulateResponse('FAVORABLE')}
-                      className="px-2 py-1 text-[11px] font-bold bg-emerald-100 text-emerald-800 rounded-lg hover:bg-emerald-200"
-                    >
-                      Favorable
-                    </button>
-                    <button
-                      onClick={() => handleSimulateResponse('CONDICIONADO')}
-                      className="px-2 py-1 text-[11px] font-bold bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200"
-                    >
-                      Condicionado
-                    </button>
-                    <button
-                      onClick={() => handleSimulateResponse('REQUERIDO')}
-                      className="px-2 py-1 text-[11px] font-bold bg-sky-100 text-sky-800 rounded-lg hover:bg-sky-200"
-                    >
-                      Docs extra
-                    </button>
-                    <button
-                      onClick={() => handleSimulateResponse('DESFAVORABLE')}
-                      className="px-2 py-1 text-[11px] font-bold bg-rose-100 text-rose-800 rounded-lg hover:bg-rose-200"
-                    >
-                      Denegado
-                    </button>
-                  </div>
                 </div>
               </div>
 
               {gmailStatusNotice && (
-                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-950 text-xs font-medium flex items-center gap-2">
+                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-950 text-xs font-medium flex items-center gap-2" role="status">
                   <Info className="w-4 h-4 text-indigo-600 shrink-0" />
                   <span>{gmailStatusNotice}</span>
                 </div>
@@ -910,12 +1074,17 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
               {/* Text input for received response */}
               <div>
                 <label htmlFor="campo-texto-del-correo-de-respuesta-recibido-d" className="text-xs font-bold text-slate-700 block mb-1">
-                  Texto del Correo de Respuesta recibido de {sol.aseguradoraNombre}:
+                  Texto fuente de respuesta atribuido a {sol.aseguradoraNombre} (no autenticado automáticamente):
                 </label>
                 <textarea
                   value={incomingResponseText}
-                  onChange={(e) => setIncomingResponseText(e.target.value)}
-                  placeholder="Pega aquí el contenido del correo recibido o haz clic en 'Buscar Respuesta en Gmail' para sincronizar automáticamente..."
+                  onChange={(e) => {
+                    setIncomingResponseText(e.target.value);
+                    setFuenteOriginalContrastada(false);
+                    setDictamenVerificacionNotice(null);
+                    setDictamenVerificacionError(null);
+                  }}
+                  placeholder="Pega aquí el contenido del correo recibido o busca mensajes en Gmail. La aplicación no autentica el remitente."
                   rows={5}
                   className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-sky-500 outline-none text-slate-800"
 
@@ -930,76 +1099,123 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                   className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-black rounded-xl transition-colors shadow-md shadow-sky-600/20 flex items-center gap-1.5"
                 >
                   <Sparkles className="w-4 h-4" />
-                  {isAnalyzingResponse ? 'Analizando con Gemini...' : 'Procesar Dictamen con IA'}
+                  {isAnalyzingResponse ? 'Analizando con Gemini...' : 'Analizar texto (orientativo) con IA'}
                 </button>
               </div>
 
-              {/* Extracted Structured Results */}
-              {sol.procesadoConIA && (
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4 animate-in fade-in duration-200">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                    <span className="font-black text-xs text-slate-800 uppercase tracking-wider">
-                      Dictamen Oficial Extraído por IA
-                    </span>
-                    <span className={`px-3 py-1 rounded-full text-xs font-black border ${
-                      sol.dictamenAseguradora === 'FAVORABLE'
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                        : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
-                        ? 'bg-amber-100 text-amber-800 border-amber-300'
-                        : sol.dictamenAseguradora === 'DESFAVORABLE'
-                        ? 'bg-rose-100 text-rose-800 border-rose-300'
-                        : 'bg-blue-100 text-blue-800 border-blue-300'
-                    }`}>
-                      {sol.dictamenAseguradora}
+              {sol.analisisRespuestaIA && (
+                <section className="bg-purple-50 border border-purple-200 rounded-2xl p-4 sm:p-5 space-y-4" aria-label="Análisis orientativo de IA">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-200 pb-2">
+                    <div>
+                      <h5 className="font-black text-xs text-purple-950 uppercase tracking-wider">Análisis IA orientativo · no es dictamen oficial</h5>
+                      <p className="text-[11px] text-purple-900 mt-1">Clasificación inferida del texto fuente; no autentica al remitente. Requiere contraste humano.</p>
+                    </div>
+                    <span className="px-3 py-1 rounded-full text-xs font-black border bg-purple-100 text-purple-900 border-purple-300">
+                      {sol.analisisRespuestaIA.clasificacionInferida}
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-800 font-semibold bg-white p-3 rounded-xl border border-slate-200">
-                    {sol.resumenProcesadoIA || 'Dictamen procesado correctamente.'}
+                  <p className="text-xs text-slate-800 font-medium bg-white p-3 rounded-xl border border-purple-200">
+                    {sol.analisisRespuestaIA.resumenAnalisis}
+                  </p>
+                  <p className="text-xs text-slate-700">
+                    <strong>Texto de clasificación inferida:</strong> {sol.analisisRespuestaIA.textoClasificacionInferida}
+                  </p>
+                  <p className="text-xs text-slate-700">
+                    <strong>Importe máximo explícito:</strong>{' '}
+                    {sol.analisisRespuestaIA.importeMaximoAsegurable === null
+                      ? 'No indicado en el texto fuente.'
+                      : `${sol.analisisRespuestaIA.importeMaximoAsegurable.toLocaleString('es-ES')} €`}
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="p-3 bg-white rounded-xl border border-slate-200">
-                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                        Condiciones Notificadas:
-                      </span>
-                      {sol.condicionesEstipuladas && sol.condicionesEstipuladas.length > 0 ? (
+                    <div className="p-3 bg-white rounded-xl border border-purple-200">
+                      <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">Condiciones identificadas explícitamente:</span>
+                      {sol.analisisRespuestaIA.condiciones.length > 0 ? (
                         <ul className="text-xs text-slate-700 space-y-1">
-                          {sol.condicionesEstipuladas.map((c, i) => (
-                            <li key={i} className="flex items-center gap-1.5 font-medium">
-                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>{c}</span>
-                            </li>
-                          ))}
+                          {sol.analisisRespuestaIA.condiciones.map((condicion, indice) => <li key={indice}>• {condicion}</li>)}
                         </ul>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">Póliza estándar de 12 meses.</span>
-                      )}
+                      ) : <span className="text-xs text-slate-500">No se identificaron condiciones explícitas; esto no acredita que no existan.</span>}
                     </div>
-
-                    <div className="p-3 bg-white rounded-xl border border-slate-200">
-                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                        Documentación Adicional Requerida:
-                      </span>
-                      {sol.documentosSolicitadosExtra && sol.documentosSolicitadosExtra.length > 0 ? (
-                        <ul className="text-xs text-amber-900 space-y-1">
-                          {sol.documentosSolicitadosExtra.map((d, i) => (
-                            <li key={i} className="flex items-center gap-1.5 font-bold">
-                              <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                              <span>{d}</span>
-                            </li>
-                          ))}
+                    <div className="p-3 bg-white rounded-xl border border-purple-200">
+                      <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">Documentación mencionada explícitamente:</span>
+                      {sol.analisisRespuestaIA.documentosRequeridos.length > 0 ? (
+                        <ul className="text-xs text-slate-700 space-y-1">
+                          {sol.analisisRespuestaIA.documentosRequeridos.map((documento, indice) => <li key={indice}>• {documento}</li>)}
                         </ul>
-                      ) : (
-                        <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          No se requieren documentos adicionales.
-                        </span>
-                      )}
+                      ) : <span className="text-xs text-slate-500">No se identificaron documentos en el texto; confirma el mensaje original.</span>}
                     </div>
                   </div>
-                </div>
+                  <p className="text-xs font-semibold text-purple-950">
+                    Sugerencia de seguimiento generada por IA: {sol.analisisRespuestaIA.recomendacionAtencionPropietario ? 'requiere atención humana' : 'no detectada'}.
+                    Esta sugerencia no es una decisión del propietario.
+                  </p>
+                </section>
               )}
+
+              {sol.dictamenAseguradoraVerificadoManualmente && incomingResponseText === sol.emailRespuestaRaw ? (
+                <section className="bg-emerald-50 border border-emerald-300 rounded-2xl p-4 space-y-2" aria-label="Dictamen registrado tras contraste manual">
+                  <h5 className="font-black text-xs text-emerald-950 uppercase tracking-wider">Contraste humano declarado para el texto fuente</h5>
+                  <p className="text-sm font-bold text-emerald-900">{sol.dictamenAseguradora}</p>
+                  <p className="text-xs text-emerald-900">La persona usuaria declaró haber contrastado la fuente original. La aplicación no autentica técnicamente el remitente.</p>
+                  {sol.fechaVerificacionDictamenAseguradora && (
+                    <p className="text-[11px] text-emerald-800">Fecha del contraste humano: {new Date(sol.fechaVerificacionDictamenAseguradora).toLocaleString('es-ES')}</p>
+                  )}
+                </section>
+              ) : (
+                <p className="text-xs font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  No consta un dictamen confirmado manualmente para el texto actualmente visible. La clasificación de IA y los campos heredados no cuentan como dictamen oficial.
+                </p>
+              )}
+
+              {sol.dictamenAseguradoraVerificadoManualmente && incomingResponseText !== sol.emailRespuestaRaw && (
+                <p className="text-xs font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3" role="status">
+                  El texto fuente visible se ha modificado desde la última verificación manual. Vuelve a contrastarlo y regístralo para asociar un dictamen a esta versión.
+                </p>
+              )}
+
+              <section className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <div>
+                  <h5 className="font-black text-xs text-slate-900 uppercase tracking-wider">Registro manual del dictamen</h5>
+                  <p className="text-xs text-slate-600 mt-1">Selecciona lo que has comprobado en la comunicación original. No se copia automáticamente la clasificación de IA.</p>
+                </div>
+                <label htmlFor="dictamen-aseguradora-manual" className="text-xs font-bold text-slate-700">Clasificación confirmada por revisión humana:</label>
+                <select
+                  id="dictamen-aseguradora-manual"
+                  value={dictamenManual}
+                  onChange={(e) => {
+                    setDictamenManual(e.target.value as DictamenAseguradora);
+                    setFuenteOriginalContrastada(false);
+                  }}
+                  className="w-full sm:max-w-md px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
+                >
+                  <option value="EN_ESTUDIO">En estudio / no concluyente</option>
+                  <option value="FAVORABLE">Favorable</option>
+                  <option value="FAVORABLE_CONDICIONADO">Favorable condicionado</option>
+                  <option value="DESFAVORABLE">Desfavorable</option>
+                  <option value="DOCUMENTACION_REQUERIDA">Documentación requerida</option>
+                </select>
+                <label className="flex items-start gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={fuenteOriginalContrastada}
+                    onChange={(e) => setFuenteOriginalContrastada(e.target.checked)}
+                    disabled={!incomingResponseText.trim()}
+                    className="mt-0.5"
+                  />
+                  <span>He contrastado el texto con la comunicación original de la aseguradora y registro esta clasificación manualmente. Entiendo que la aplicación no autentica el correo.</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleRegistrarDictamenManual}
+                  disabled={!fuenteOriginalContrastada || !incomingResponseText.trim()}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Registrar dictamen contrastado manualmente
+                </button>
+                {dictamenVerificacionNotice && <p className="text-xs text-emerald-800" role="status">{dictamenVerificacionNotice}</p>}
+                {dictamenVerificacionError && <p className="text-xs text-rose-800" role="alert">{dictamenVerificacionError}</p>}
+              </section>
             </div>
           )}
 
@@ -1026,9 +1242,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setOwnerDecision('ACEPTADO')}
+                      onClick={() => setOwnerDecision('ACEPTAR_CANDIDATO')}
                       className={`p-3 rounded-xl text-xs font-bold border transition-all flex items-center gap-2.5 text-left ${
-                        ownerDecision === 'ACEPTADO'
+                        ownerDecision === 'ACEPTAR_CANDIDATO'
                           ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                       }`}
@@ -1036,17 +1252,17 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                       <CheckCircle2 className="w-4 h-4 shrink-0" />
                       <div>
                         <span className="block font-black">Aceptar Candidato y Proceder a Firma</span>
-                        <span className={`text-[10px] ${ownerDecision === 'ACEPTADO' ? 'text-emerald-100' : 'text-slate-500'}`}>
-                          Aprobado con la aseguradora {sol.aseguradoraNombre}
+                        <span className={`text-[10px] ${ownerDecision === 'ACEPTAR_CANDIDATO' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                          Decisión del propietario; no sustituye el dictamen verificado de la aseguradora
                         </span>
                       </div>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => setOwnerDecision('CONDICIONADO_AVAL')}
+                      onClick={() => setOwnerDecision('SOLICITAR_AVAL_EXTRA')}
                       className={`p-3 rounded-xl text-xs font-bold border transition-all flex items-center gap-2.5 text-left ${
-                        ownerDecision === 'CONDICIONADO_AVAL'
+                        ownerDecision === 'SOLICITAR_AVAL_EXTRA'
                           ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                       }`}
@@ -1054,7 +1270,7 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                       <AlertCircle className="w-4 h-4 shrink-0" />
                       <div>
                         <span className="block font-black">Condicionar a Aval / Fianza Extra</span>
-                        <span className={`text-[10px] ${ownerDecision === 'CONDICIONADO_AVAL' ? 'text-amber-100' : 'text-slate-500'}`}>
+                        <span className={`text-[10px] ${ownerDecision === 'SOLICITAR_AVAL_EXTRA' ? 'text-amber-100' : 'text-slate-500'}`}>
                           Exigir garantías complementarias antes de firmar
                         </span>
                       </div>
@@ -1062,9 +1278,9 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
 
                     <button
                       type="button"
-                      onClick={() => setOwnerDecision('RECHAZADO')}
+                      onClick={() => setOwnerDecision('RECHAZAR_CANDIDATO')}
                       className={`p-3 rounded-xl text-xs font-bold border transition-all flex items-center gap-2.5 text-left ${
-                        ownerDecision === 'RECHAZADO'
+                        ownerDecision === 'RECHAZAR_CANDIDATO'
                           ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                       }`}
@@ -1072,8 +1288,8 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
                       <X className="w-4 h-4 shrink-0" />
                       <div>
                         <span className="block font-black">Rechazar Candidatura</span>
-                        <span className={`text-[10px] ${ownerDecision === 'RECHAZADO' ? 'text-rose-100' : 'text-slate-500'}`}>
-                          No cumple solvencia requerida
+                        <span className={`text-[10px] ${ownerDecision === 'RECHAZAR_CANDIDATO' ? 'text-rose-100' : 'text-slate-500'}`}>
+                          Decisión del propietario de no continuar con esta candidatura
                         </span>
                       </div>
                     </button>
@@ -1115,6 +1331,12 @@ export const DetalleSolicitudSeguroModal: React.FC<DetalleSolicitudSeguroModalPr
             </div>
           )}
         </div>
+
+        {ownerDecisionError && (
+          <div className="px-4 py-2 bg-rose-50 border-t border-rose-200 text-rose-900 text-xs" role="alert">
+            {ownerDecisionError}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">

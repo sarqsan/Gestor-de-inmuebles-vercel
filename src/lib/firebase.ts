@@ -81,6 +81,7 @@ import {
   limpiarIncidenciasDe,
   reportarErrorGuardado,
   reportarErrorLectura,
+  reportarResultadoGuardado,
 } from '../estadoDatos/canalIncidencias';
 import { FIREBASE_BASE_DATOS_ID, FIREBASE_PROYECTO_ID } from './entornoFirebase';
 import {
@@ -2777,12 +2778,17 @@ export function subscribeSolicitudesSeguro(
 /**
  * Save / Update Solicitud de Seguro de Impago in Firestore
  */
-export async function saveSolicitudSeguroFirestore(solicitud: SolicitudSeguroImpago) {
+export async function saveSolicitudSeguroFirestore(solicitud: SolicitudSeguroImpago): Promise<boolean> {
   try {
     const cleanSol = sanitizeObjectForFirestore(solicitud);
     await setDoc(doc(db, 'solicitudes_seguro_impago', solicitud.id), cleanSol, { merge: true });
+    return true;
   } catch (err) {
-    reportarErrorGuardado('solicitudes_seguro', err, 'Error saving solicitud seguro impago to Firestore:');
+    const codigo = codigoDeError(err);
+    console.warn('No se confirmó el guardado de la solicitud de seguro:', { codigo });
+    // Registrar sólo el código técnico seguro; no volcar objetos/mensajes SDK a logs.
+    reportarResultadoGuardado('solicitudes_seguro', false, { code: codigo });
+    return false;
   }
 }
 

@@ -30,6 +30,13 @@ import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
 
+function tieneConfirmacionGmailVerificable(solicitud: SolicitudSeguroImpago): boolean {
+  return (
+    typeof solicitud.confirmacionGmail?.id === 'string' && solicitud.confirmacionGmail.id.trim().length > 0 &&
+    typeof solicitud.confirmacionGmail?.threadId === 'string' && solicitud.confirmacionGmail.threadId.trim().length > 0
+  );
+}
+
 interface SeguroImpagoSectionProps {
   solicitudesSeguro: SolicitudSeguroImpago[];
   aseguradoras: ConfiguracionAseguradora[];
@@ -55,16 +62,16 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
   const [filterAseguradora, setFilterAseguradora] = useState('todas');
   const [filterDictamen, setFilterDictamen] = useState('todos');
 
-  // Metrics
+  // Los datos IA/heredados y las clasificaciones sin confirmación humana no entran en métricas oficiales.
   const total = solicitudesSeguro.length;
   const favorables = solicitudesSeguro.filter(
-    (s) => s.dictamenAseguradora === 'FAVORABLE' || s.decisionFinalPropietario === 'ACEPTADO'
+    (s) => s.dictamenAseguradoraVerificadoManualmente === true && s.dictamenAseguradora === 'FAVORABLE'
   ).length;
-  const enTramite = solicitudesSeguro.filter(
-    (s) => s.estado === 'CORREO_ENVIADO' || s.estado === 'SOLICITUD_PENDIENTE' || s.dictamenAseguradora === 'EN_ESTUDIO'
+  const aceptadosPorGmail = solicitudesSeguro.filter(
+    (s) => s.estado === 'CORREO_ENVIADO' && tieneConfirmacionGmailVerificable(s)
   ).length;
   const pendientesAccion = solicitudesSeguro.filter(
-    (s) => s.estado === 'BORRADOR' || s.dictamenAseguradora === 'DOCUMENTACION_REQUERIDA' || s.decisionFinalPropietario === 'PENDIENTE'
+    (s) => s.dictamenAseguradoraVerificadoManualmente !== true || s.decisionFinalPropietario === 'PENDIENTE'
   ).length;
 
   // Filtered items
@@ -77,7 +84,9 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
       sol.aseguradoraNombre.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesAseg = filterAseguradora === 'todas' || sol.aseguradoraId === filterAseguradora;
-    const matchesDictamen = filterDictamen === 'todos' || sol.dictamenAseguradora === filterDictamen;
+    const matchesDictamen = filterDictamen === 'todos' || (
+      sol.dictamenAseguradoraVerificadoManualmente === true && sol.dictamenAseguradora === filterDictamen
+    );
 
     return matchesSearch && matchesAseg && matchesDictamen;
   });
@@ -96,7 +105,7 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
                 Seguro de Impago de Alquiler
               </h2>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Tramitación con SEAG, ARAG, Caser, Mutua de Propietarios y DAS, scoring IA y control de resoluciones
+                Tramitación, análisis IA orientativo y dictámenes contrastados manualmente
               </p>
             </div>
           </div>
@@ -130,21 +139,21 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Aprobados / Favorables</span>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Dictámenes favorables contrastados</span>
           <span className="text-2xl font-black text-emerald-600 mt-1 block">{favorables}</span>
-          <span className="text-[11px] text-emerald-700 font-bold mt-0.5 block">Listos para formalizar contrato</span>
+          <span className="text-[11px] text-emerald-700 font-bold mt-0.5 block">Registro manual confirmado; no implica aceptación del propietario</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">En Trámite con Aseguradora</span>
-          <span className="text-2xl font-black text-blue-600 mt-1 block">{enTramite}</span>
-          <span className="text-[11px] text-blue-600 font-medium mt-0.5 block">Esperando dictamen formal</span>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Aceptación de envío por Gmail</span>
+          <span className="text-2xl font-black text-blue-600 mt-1 block">{aceptadosPorGmail}</span>
+          <span className="text-[11px] text-blue-600 font-medium mt-0.5 block">No acredita entrega ni lectura por la aseguradora</span>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Pendiente de Decisión</span>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Pendiente de contraste o decisión</span>
           <span className="text-2xl font-black text-amber-600 mt-1 block">{pendientesAccion}</span>
-          <span className="text-[11px] text-amber-700 font-medium mt-0.5 block">Requiere revisión del propietario</span>
+          <span className="text-[11px] text-amber-700 font-medium mt-0.5 block">Incluye expedientes sin dictamen verificado</span>
         </div>
       </div>
 
@@ -179,13 +188,13 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-xs font-bold text-slate-500">Dictamen:</span>
+            <span className="text-xs font-bold text-slate-500">Dictamen verificado:</span>
             <select
               value={filterDictamen}
               onChange={(e) => setFilterDictamen(e.target.value)}
               className="px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
             >
-              <option value="todos">Todos los dictámenes</option>
+              <option value="todos">Todos los expedientes</option>
               <option value="FAVORABLE">Favorable</option>
               <option value="FAVORABLE_CONDICIONADO">Condicionado</option>
               <option value="EN_ESTUDIO">En Estudio</option>
@@ -226,7 +235,9 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
               {/* Left Info */}
               <div className="flex items-start gap-3.5 min-w-0 flex-1">
                 <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
-                  sol.dictamenAseguradora === 'FAVORABLE'
+                  sol.dictamenAseguradoraVerificadoManualmente !== true
+                    ? 'bg-slate-100 text-slate-600'
+                    : sol.dictamenAseguradora === 'FAVORABLE'
                     ? 'bg-emerald-100 text-emerald-700'
                     : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
                     ? 'bg-amber-100 text-amber-700'
@@ -263,7 +274,7 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
                     </span>
                     <span>•</span>
                     <span className="font-medium">
-                      Ratio esfuerzo: <span className={`font-bold ${sol.ratioEsfuerzoCalculado <= 40 ? 'text-emerald-600' : 'text-amber-600'}`}>{sol.ratioEsfuerzoCalculado}%</span>
+                      Ratio calculado (orientativo): <span className="font-bold text-slate-700">{sol.ratioEsfuerzoCalculado}%</span>
                     </span>
                   </div>
                 </div>
@@ -273,19 +284,35 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
               <div className="flex items-center gap-2.5 shrink-0 w-full lg:w-auto justify-between lg:justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={`px-2.5 py-1 rounded-full text-xs font-black border ${
-                    sol.dictamenAseguradora === 'FAVORABLE'
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
-                      ? 'bg-amber-100 text-amber-800 border-amber-300'
-                      : sol.dictamenAseguradora === 'DESFAVORABLE'
-                      ? 'bg-rose-100 text-rose-800 border-rose-300'
-                      : 'bg-blue-50 text-blue-800 border-blue-200'
+                    sol.dictamenAseguradoraVerificadoManualmente === true
+                      ? sol.dictamenAseguradora === 'FAVORABLE'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : sol.dictamenAseguradora === 'FAVORABLE_CONDICIONADO'
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : sol.dictamenAseguradora === 'DESFAVORABLE'
+                            ? 'bg-rose-100 text-rose-800 border-rose-300'
+                            : 'bg-blue-50 text-blue-800 border-blue-200'
+                      : 'bg-slate-100 text-slate-700 border-slate-300'
                   }`}>
-                    {sol.dictamenTexto || sol.dictamenAseguradora}
+                    {sol.dictamenAseguradoraVerificadoManualmente === true
+                      ? `Contraste manual: ${sol.dictamenAseguradora}`
+                      : 'Pendiente de contraste humano'}
                   </span>
 
+                  {sol.decisionFinalPropietario !== 'PENDIENTE' && (
+                    <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-200">
+                      Decisión propietario: {sol.decisionFinalPropietario}
+                    </span>
+                  )}
+
                   <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
-                    {sol.estado}
+                    {sol.estado === 'CORREO_ENVIADO'
+                      ? tieneConfirmacionGmailVerificable(sol)
+                        ? 'Gmail aceptó el envío · entrega no confirmada'
+                        : 'Estado heredado · revisar Gmail'
+                      : sol.estado === 'ENVIO_INCIERTO'
+                        ? 'Envío incierto · revisar Gmail'
+                        : sol.estado}
                   </span>
                 </div>
 
@@ -332,7 +359,7 @@ export const SeguroImpagoSection: React.FC<SeguroImpagoSectionProps> = ({
           </h3>
         </div>
         <p className="text-xs text-indigo-100 leading-relaxed max-w-3xl">
-          Cada expediente genera una referencia única identificativa (ej: <span className="font-mono font-bold text-white">[REF-IMPAGO-...]</span>) que se inserta en el asunto del correo a la aseguradora. Cuando la aseguradora responde manteniendo el asunto, la IA procesa automáticamente el dictamen oficial, las coberturas y las posibles condiciones o documentos requeridos, dejando la decisión final bajo el control del propietario.
+          Cada expediente genera una referencia única (ej.: <span className="font-mono font-bold text-white">[REF-IMPAGO-...]</span>). La IA puede analizar el texto de una respuesta encontrada o pegada, pero no verifica su origen ni emite dictámenes. La clasificación oficial solo se registra tras contraste humano; la decisión del propietario se conserva por separado. La aceptación de Gmail tampoco acredita entrega o lectura.
         </p>
       </div>
     </div>

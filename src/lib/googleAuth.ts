@@ -74,8 +74,15 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       esErrorRecuperableDatabaseClosing,
       { maxIntentos: MAX_INTENTOS_GOOGLE_SIGNIN, esperaMs: ESPERA_REINTENTO_GOOGLE_MS }
     );
-  } catch (error: any) {
-    console.error('Error en autenticación Google Gmail:', error);
+  } catch (error: unknown) {
+    const codigoOAuth =
+      typeof error === 'object' && error !== null && 'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : '';
+    const codigo = /^auth\/[a-z0-9-]{1,60}$/i.test(codigoOAuth) ? codigoOAuth : 'ERROR_OAUTH';
+    // No registrar el objeto de error: SDKs de OAuth pueden adjuntar detalles sensibles.
+    console.warn('Error en autenticación Google Gmail:', { codigo });
     throw error;
   } finally {
     isSigningIn = false;

@@ -3214,7 +3214,8 @@ export default function App() {
     setShowCrearSeguroModal(true);
   };
 
-  const handleSaveSolicitudSeguro = async (sol: SolicitudSeguroImpago) => {
+  const handleSaveSolicitudSeguro = async (sol: SolicitudSeguroImpago): Promise<boolean> => {
+    // Mantener el último resultado en memoria aunque falle Firestore; devolver false impide anunciarlo como guardado.
     setSolicitudesSeguro((prev) => {
       const idx = prev.findIndex((s) => s.id === sol.id);
       if (idx >= 0) {
@@ -3222,7 +3223,7 @@ export default function App() {
       }
       return [sol, ...prev];
     });
-    await saveSolicitudSeguroFirestore(sol);
+    return saveSolicitudSeguroFirestore(sol);
   };
 
   const handleDeleteSolicitudSeguro = async (solId: string) => {
@@ -4825,8 +4826,14 @@ export default function App() {
             setInmuebleForCrearSeguro(null);
           }}
           onCrearSolicitud={async (nuevaSol) => {
-            await handleSaveSolicitudSeguro(nuevaSol);
+            const guardada = await handleSaveSolicitudSeguro(nuevaSol);
             setSelectedSolicitudSeguroForDetail(nuevaSol);
+            if (!guardada) {
+              avisarOperacion({
+                tipo: 'error',
+                mensaje: 'El expediente se conserva en memoria, pero no se confirmó su guardado. Revisa la conexión antes de tratarlo como persistido.',
+              });
+            }
           }}
         />
       )}
@@ -4837,9 +4844,7 @@ export default function App() {
           solicitud={selectedSolicitudSeguroForDetail}
           aseguradoras={aseguradoras}
           onClose={() => setSelectedSolicitudSeguroForDetail(null)}
-          onUpdateSolicitud={async (updatedSol) => {
-            await handleSaveSolicitudSeguro(updatedSol);
-          }}
+          onUpdateSolicitud={(updatedSol) => handleSaveSolicitudSeguro(updatedSol)}
         />
       )}
 

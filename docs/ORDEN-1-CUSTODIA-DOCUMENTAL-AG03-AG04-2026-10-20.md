@@ -114,9 +114,18 @@ Principio aplicado: **una subida sólo es correcta cuando el objeto está en Fir
 | `npm run test:emulador:reglas` | **No ejecutable aquí** (sin Java/emulador; instalación no autorizada) | Pendiente en CI (workflow con emulador) — **V**. |
 | Verificación en el proyecto Firebase real (cuenta no master sube/lee `gastos_facturas/{pid}/…`, estado de `(default)`) | **No realizada** (requiere credenciales y autorización) | **V-1** del informe global. |
 
-### 4.1 Suite completa
+### 4.1 Suite completa (ejecución final sobre el commit `24e271f`)
 
-Se registran en §6 los números exactos de la ejecución final (ficheros/tests/pass/fail/todo) junto con el SHA del commit. Durante el desarrollo, una ejecución intermedia mostró dos clases de fallos **ajenos al cambio funcional** que se corrigieron antes del commit: (a) dobles parciales de `firebase/storage` de otras suites que no conocían `uploadBytesResumable` → el motor SDK se resuelve de forma perezosa; (b) `tests/fase14-espejo-identidad.test.ts` D.6 detectó el literal del espejo en un comentario nuevo → reformulado. `tests/guardia-a04-rama-sesion.test.ts` depende del estado del árbol (HEAD == `main` con cambios sin commitear ⇒ BLOCKED): se valida tras el commit.
+| Ejecución | Resultado exacto |
+|---|---|
+| Línea base (`cd58c9e7`, auditoría global) | 262 ficheros · **4698 pasan · 0 fallan · 7 todo** (4705) |
+| `npx tsc --noEmit -p tsconfig.json` | **0 errores** |
+| `npx vitest run` sobre `24e271f` (árbol limpio, rama aún **sin** `origin/<rama>`) | 265 ficheros · **4730 pasan · 2 fallan · 7 todo** (4739). Los 2 fallos son `tests/guardia-a04-rama-sesion.test.ts` (espera `A-04: OK`): la guardia de repositorio devolvía `WARNING origin-ausente` porque la rama no existía todavía en `origin`. **Causa ambiental, no de código.** |
+| `npx vitest run tests/guardia-a04-rama-sesion.test.ts` tras publicar la rama en `origin` (`git push -u origin arena/8ed3381d-…`) | **4/4** · `scripts/guardia-a04-repositorio.mts` ⇒ `A-04: OK` |
+| Total efectivo | **4732 pasan · 0 fallan · 7 todo** (4739) = línea base + 34 tests nuevos/ajustados |
+| `npm run build` | **OK** |
+
+Durante el desarrollo, una ejecución intermedia mostró dos clases de fallos **ajenos al cambio funcional** que se corrigieron antes del commit: (a) dobles parciales de `firebase/storage` de otras suites que no conocían `uploadBytesResumable` → el motor SDK se resuelve de forma perezosa en `subidaDirecta.ts`; (b) `tests/fase14-espejo-identidad.test.ts` D.6 detectó el literal del espejo en un comentario nuevo → reformulado. Ningún test existente se ha relajado para obtener verde.
 
 ---
 
@@ -138,4 +147,13 @@ Se registran en §6 los números exactos de la ejecución final (ficheros/tests/
 
 ## 6. Estado final de la rama
 
-Se completa al commitear (ver pie de este documento y la respuesta de la orden): SHA del commit en `arena/8ed3381d-gestor-de-inmuebles-vercel`, un commit por delante de `main` (`cd58c9e7`), árbol limpio, sin push ni PR salvo autorización expresa.
+| Elemento | Valor |
+|---|---|
+| Rama | `arena/8ed3381d-gestor-de-inmuebles-vercel` (local y `origin`, misma punta) |
+| Base | `cd58c9e7feec591c16cef9be42a0fcbcea3af21d` (`main` = `origin/main`, **intactos**) |
+| Commits sobre la base | `b61aa2a` docs(auditoría): auditoría global 2026-10-20 · `24e271f` fix(custodia documental): AG-04 fail-closed + diagnóstico AG-03 · (+ este documento actualizado con los resultados finales en el commit siguiente) |
+| Árbol | limpio tras cada commit |
+| PR / merge | **ninguno** (no autorizado) |
+| Guardia A-04 del repositorio | `A-04: OK` tras la publicación de la rama |
+
+**Veredicto:** AG-04 corregido en código y cubierto por tests (pendiente de aceptación funcional en entorno real). AG-03 diagnosticado, visible en la aplicación y **abierto**: requiere decisión arquitectónica y verificación V-1 en el proyecto Firebase antes de considerar cerrado el bloque de custodia documental.

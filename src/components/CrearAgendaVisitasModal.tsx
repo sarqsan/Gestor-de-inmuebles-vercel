@@ -19,6 +19,7 @@ import {
   Check,
 } from 'lucide-react';
 import { Inmueble, Candidato, VisitSlot, InvitacionVisita } from '../types';
+import { generarTokenCapacidad } from '../lib/tokensPublicos';
 import {
   DayConfig,
   BloqueHorario,
@@ -349,7 +350,7 @@ export const CrearAgendaVisitasModal: React.FC<CrearAgendaVisitasModalProps> = (
         if (!existingInv) {
           const newInv: InvitacionVisita = {
             id: `inv-${candidate.id}`,
-            token: `vst-${candidate.id}-${Math.random().toString(36).substring(2, 7)}`,
+            token: generarTokenCapacidad('vst'),
             candidateId: candidate.id,
             candidateNombre: candidate.nombre,
             candidateTelefono: candidate.telefono,

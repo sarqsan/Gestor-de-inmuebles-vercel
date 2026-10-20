@@ -18,6 +18,7 @@ import { bookSlotTransaction } from '../lib/firebase';
 import { confirmarReservaVisita } from '../lib/reservaVisita';
 import { PublicPropertyGallery } from './PublicPropertyGallery';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface PortalVisitaPublicaViewProps {
   token: string;
@@ -27,6 +28,19 @@ interface PortalVisitaPublicaViewProps {
   onUpdateInvitacion: (inv: InvitacionVisita) => void;
   onUpdateSlot: (slot: VisitSlot) => void;
   onUpdateCandidateState?: (candidateId: string, newState: any) => void;
+  /**
+   * AG-02: operaciones de servidor para el portal público anónimo. Cuando se
+   * informan, la vista NO escribe en Firestore desde el navegador: el servidor
+   * valida el token y aplica la transacción. Si no se informan, se conserva el
+   * camino autenticado existente.
+   */
+  reservarRemoto?: (
+    slot: VisitSlot,
+    invitacion: InvitacionVisita,
+    direccionCompleta: string,
+    notas: string
+  ) => Promise<void>;
+  cancelarRemoto?: (invitacion: InvitacionVisita) => Promise<void>;
 }
 
 export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = ({
@@ -37,6 +51,8 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
   onUpdateInvitacion,
   onUpdateSlot,
   onUpdateCandidateState,
+  reservarRemoto,
+  cancelarRemoto,
 }) => {
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [notas, setNotas] = useState<string>('');
@@ -125,18 +141,20 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
       await confirmarReservaVisita(
         {
           reservarRemoto: () =>
-            bookSlotTransaction(
-              targetSlot.id,
-              {
-                id: invitacion.candidateId,
-                nombre: invitacion.candidateNombre,
-                telefono: invitacion.candidateTelefono,
-                email: invitacion.candidateEmail,
-              },
-              invitacion.id,
-              fullAddress,
-              notas
-            ),
+            reservarRemoto
+              ? reservarRemoto(targetSlot, invitacion, fullAddress, notas)
+              : bookSlotTransaction(
+                  targetSlot.id,
+                  {
+                    id: invitacion.candidateId,
+                    nombre: invitacion.candidateNombre,
+                    telefono: invitacion.candidateTelefono,
+                    email: invitacion.candidateEmail,
+                  },
+                  invitacion.id,
+                  fullAddress,
+                  notas
+                ),
           alConfirmarSlot: onUpdateSlot,
           alConfirmarInvitacion: onUpdateInvitacion,
           alConfirmarCandidato: onUpdateCandidateState,
@@ -150,10 +168,12 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
     }
   };
 
-  const handleCancelReservation = () => {
+  const handleCancelReservation = async () => {
     const slotIdToFree = invitacion.reserva?.slotId;
     if (!slotIdToFree) return;
     setIsSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
 
     const existingSlot = slots.find((s) => s.id === slotIdToFree);
     const updatedSlot: VisitSlot = {
@@ -170,24 +190,35 @@ export const PortalVisitaPublicaView: React.FC<PortalVisitaPublicaViewProps> = (
       reservaInvitationId: undefined,
     };
 
-    onUpdateSlot(updatedSlot);
-
-    onUpdateInvitacion({
-      ...invitacion,
-      status: 'ABIERTO',
-      reserva: undefined,
-    });
-
-    if (onUpdateCandidateState) {
-      onUpdateCandidateState(invitacion.candidateId, 'preseleccionado');
-    }
-
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      if (cancelarRemoto) {
+        // AG-02: remoto primero. Solo si el servidor libera el horario se
+        // anuncia la cancelación; un fallo conserva la reserva y su mensaje.
+        await cancelarRemoto(invitacion);
+      } else {
+        onUpdateSlot(updatedSlot);
+        onUpdateInvitacion({
+          ...invitacion,
+          status: 'ABIERTO',
+          reserva: undefined,
+        });
+        if (onUpdateCandidateState) {
+          onUpdateCandidateState(invitacion.candidateId, 'preseleccionado');
+        }
+      }
       setShowCancelConfirm(false);
       setSelectedSlotId(null);
       setSuccessMessage('Tu reserva ha sido cancelada y el horario ha quedado liberado.');
-    }, 400);
+    } catch (err) {
+      setErrorMessage(
+        mensajeDeErrorUsuario(
+          err,
+          'No se ha podido cancelar la reserva. Comprueba la conexión e inténtalo de nuevo.'
+        )
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const formatDateLabel = (dateStr: string) => {

@@ -35,10 +35,15 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface PortalSolicitudPublicaViewProps {
   inmueble: Inmueble;
-  onCompleteSolicitud: (solicitud: SolicitudAlquiler, candidato: Candidato) => void;
+  /**
+   * AG-01: debe rechazar si la solicitud no se ha persistido. La vista solo
+   * muestra el acuse de recibo cuando esta promesa resuelve.
+   */
+  onCompleteSolicitud: (solicitud: SolicitudAlquiler, candidato: Candidato) => Promise<void> | void;
 }
 
 export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProps> = ({
@@ -87,6 +92,7 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
   // Status flags
   const [submitted, setSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
   // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
@@ -136,11 +142,13 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
     }
   };
 
-  const handleSubmitFinal = () => {
+  const handleSubmitFinal = async () => {
+    if (isSubmitting) return;
     if (!consentimientoAceptado) {
       setErrorMsg('Debes aceptar el consentimiento de privacidad antes de enviar.');
       return;
     }
+    setErrorMsg('');
 
     // Build questionnaire responses
     const respuestasArray: RespuestaIncidencia[] = PREGUNTAS_INCIDENCIAS.map((preg) => {
@@ -323,8 +331,23 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
       perfilOperativo: 85,
     };
 
-    onCompleteSolicitud(newSolicitud, newCandidate);
-    setSubmitted(true);
+    // AG-01: el acuse de recibo es posterior a la persistencia real. Si
+    // Firestore deniega el alta (p. ej. falta una clave exigida por la regla)
+    // o falla la red, se conserva el formulario y se informa del error.
+    setIsSubmitting(true);
+    try {
+      await onCompleteSolicitud(newSolicitud, newCandidate);
+      setSubmitted(true);
+    } catch (err) {
+      setErrorMsg(
+        mensajeDeErrorUsuario(
+          err,
+          'No se ha podido enviar la solicitud. Comprueba la conexión e inténtalo de nuevo.'
+        )
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (submitted) {
@@ -1067,10 +1090,12 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
               <button
                 type="button"
                 onClick={handleSubmitFinal}
-                className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg transition-all inline-flex items-center gap-2"
+                disabled={isSubmitting}
+                aria-busy={isSubmitting}
+                className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg transition-all inline-flex items-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Finalizar y Enviar Solicitud</span>
+                <span>{isSubmitting ? 'Enviando solicitud…' : 'Finalizar y Enviar Solicitud'}</span>
               </button>
             </div>
           </div>

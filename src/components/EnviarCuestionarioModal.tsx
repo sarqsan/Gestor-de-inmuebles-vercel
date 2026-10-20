@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Candidato, Inmueble } from '../types';
 import {
   Send,
@@ -14,6 +14,7 @@ import {
   User,
 } from 'lucide-react';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
+import { generarTokenCapacidad } from '../lib/tokensPublicos';
 
 interface EnviarCuestionarioModalProps {
   isOpen: boolean;
@@ -37,11 +38,20 @@ export const EnviarCuestionarioModal: React.FC<EnviarCuestionarioModalProps> = (
     'ENVIAR CUESTIONARIO'
   );
   const [copied, setCopied] = useState(false);
+  // AG-02: un candidato sin token recibía un enlace `q-<id>` que nunca se
+  // guardaba (y era adivinable). Se emite un token de capacidad una sola vez y
+  // se persiste; los tokens ya existentes no se tocan.
+  const tokenEmitidoPara = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || !candidato || candidato.cuestionarioToken) return;
+    if (tokenEmitidoPara.current === candidato.id) return;
+    tokenEmitidoPara.current = candidato.id;
+    onUpdateCandidateToken(candidato.id, generarTokenCapacidad('q'));
+  }, [isOpen, candidato, onUpdateCandidateToken]);
 
   if (!isOpen || !candidato) return null;
 
-  // Ensure candidate has a questionnaire token
-  const token = candidato.cuestionarioToken || `q-${candidato.id}`;
+  const token = candidato.cuestionarioToken || '';
 
   const publicOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const publicUrl = `${publicOrigin}/#cuestionario/${token}`;
@@ -53,7 +63,7 @@ export const EnviarCuestionarioModal: React.FC<EnviarCuestionarioModalProps> = (
   };
 
   const handleRegenerateToken = () => {
-    const newToken = `q-${Math.random().toString(36).substring(2, 8)}${Date.now().toString(36).substring(4, 7)}`;
+    const newToken = generarTokenCapacidad('q');
     onUpdateCandidateToken(candidato.id, newToken);
   };
 

@@ -14,6 +14,7 @@ import {
   integrarFiscalConRentabilidad,
 } from '../../utils/fiscalEngine';
 import { claveScope, scopeDeUsuario, subscribeGastosSeguros } from '../../lib/firebase';
+import { descargarDocumentoPatrimonial } from '../../lib/expedienteDocumental/gestorFirebase';
 import {
   Building2,
   Calendar,
@@ -80,6 +81,30 @@ export const FiscalidadSection: React.FC<FiscalidadSectionProps> = ({
   );
   const [selectedEjercicio, setSelectedEjercicio] = useState<number>(currentYear);
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [descargandoDocumentoId, setDescargandoDocumentoId] = useState<string | null>(null);
+  const [errorDescargaDocumento, setErrorDescargaDocumento] = useState('');
+  const [errorDescargaDocumentoId, setErrorDescargaDocumentoId] = useState<string | null>(null);
+
+  const descargarJustificanteGasto = async (gasto: Gasto) => {
+    if (!gasto.documento?.id || !gasto.inmuebleId) return;
+    setDescargandoDocumentoId(gasto.id);
+    setErrorDescargaDocumento('');
+    setErrorDescargaDocumentoId(null);
+    try {
+      const result = await descargarDocumentoPatrimonial(gasto.inmuebleId, gasto.documento.id);
+      const url = URL.createObjectURL(new Blob([result.blob], { type: result.mimeType }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.nombre;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErrorDescargaDocumento(e instanceof Error ? e.message : 'No se pudo recuperar el justificante seguro.');
+      setErrorDescargaDocumentoId(gasto.id);
+    } finally {
+      setDescargandoDocumentoId(null);
+    }
+  };
 
   // Profesional denegado
   if (isProfesional) {
@@ -468,13 +493,21 @@ export const FiscalidadSection: React.FC<FiscalidadSectionProps> = ({
                         </td>
                         <td className="py-2 px-3">
                           {g.documento ? (
-                            <a href={g.documento.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline">
-                              <Paperclip className="w-3 h-3" />
-                              <span className="truncate max-w-[100px]">{g.documento.nombre}</span>
-                            </a>
+                            g.documento.url ? (
+                              <a href={g.documento.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline">
+                                <Paperclip className="w-3 h-3" />
+                                <span className="truncate max-w-[100px]">{g.documento.nombre}</span>
+                              </a>
+                            ) : (
+                              <button type="button" onClick={() => void descargarJustificanteGasto(g)} disabled={descargandoDocumentoId === g.id} className="inline-flex items-center gap-1 text-blue-600 hover:underline disabled:opacity-50" aria-label={`Descargar justificante ${g.documento.nombre}`}>
+                                <Paperclip className="w-3 h-3" />
+                                <span className="truncate max-w-[100px]">{descargandoDocumentoId === g.id ? 'Descargando…' : g.documento.nombre}</span>
+                              </button>
+                            )
                           ) : (
                             <span className="text-slate-300">— sin justificante</span>
                           )}
+                          {errorDescargaDocumento && errorDescargaDocumentoId === g.id && <span role="alert" className="block text-xs text-rose-700">{errorDescargaDocumento}</span>}
                         </td>
                       </tr>
                     ))}

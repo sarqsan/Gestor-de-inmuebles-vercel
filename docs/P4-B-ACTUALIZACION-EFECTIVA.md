@@ -51,7 +51,7 @@ Validación focal final: **81/81 en cinco archivos**:
 
 **Las confirmaciones satisfactorias del servicio usan calculadora sintética y puerto en memoria.** Las pruebas REST ejecutan el adaptador real con `fetch`/OAuth simulados. Ninguna demuestra persistencia real, IAM o validez jurídica de un contrato. La aritmética válida se prueba separadamente en el motor existente; no se presenta como un recorrido normativo real confirmable.
 
-Regresión local con el comando de CI (excluye únicamente A-04 de sandbox): **255 archivos, 4.620 aprobadas, 2 omitidas, 7 todo**, antes de añadir la tercera prueba de máscara. TypeScript correcto. Build correcto con avisos existentes de imports mixtos y chunks grandes. El PR ejecutará la regresión final y los emuladores del workflow ya existente; no se instalaron Java/Firebase CLI/emuladores en el sandbox.
+Regresión local con el comando de CI (excluye únicamente A-04 de sandbox): **255 archivos, 4.620 aprobadas, 2 omitidas, 7 todo**, antes de añadir la tercera prueba de máscara. TypeScript correcto. Build correcto con avisos existentes de imports mixtos y chunks grandes. El CI ejecutó la regresión final y los emuladores del workflow ya existente; no se instalaron Java/Firebase CLI/emuladores en el sandbox.
 
 ## Pendientes que NO se resuelven ni se ocultan
 
@@ -62,4 +62,11 @@ Regresión local con el comando de CI (excluye únicamente A-04 de sandbox): **2
 
 ## Integración
 
-Pendiente de PR, controles y verificación real del merge. El informe final de sesión indicará PR y SHA efectivo de `main`; este documento no afirma un merge antes de comprobarlo.
+PR [#52](https://github.com/sarqsan/Gestor-de-inmuebles-vercel/pull/52). Controles del commit de implementación `e954febacd136aa9e334c9e4cbbe0a18e5630672`:
+
+- CI: 255/255 archivos, 4.623 pruebas correctas, 0 fallidas, 7 todo (los dos casos omitidos localmente sí se ejecutan en CI).
+- Reglas Firestore/Storage en el workflow existente: 79/79. No constituyen aceptación específica de persistencia P4.
+- Tipos y build: correctos. Guardia local A-04: 4/4 tras publicar la rama.
+- Vercel: control automático correcto y preview publicada por la integración preexistente, sin comando de despliegue manual.
+
+Antes del merge se detectó que los dos merges anteriores a main tenían despliegues asociados al entorno `Production`. Se consulta la compatibilidad de ese automatismo con la prohibición de despliegues; no se cambia la configuración. El informe final de sesión y el PR registrarán la decisión, el resultado real del merge y el SHA definitivo. No se afirma aquí un merge antes de comprobarlo.

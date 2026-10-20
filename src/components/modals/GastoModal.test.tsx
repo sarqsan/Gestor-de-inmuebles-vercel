@@ -17,6 +17,10 @@ vi.mock('../../lib/firebase', () => ({
   deleteFacturaGastoStorage: vi.fn(async () => undefined),
 }));
 
+import { uploadFacturaGasto } from '../../lib/firebase';
+import { ErrorCustodiaDocumento, MENSAJES_CUSTODIA } from '../../lib/custodiaDocumental/subidaDirecta';
+import { MENSAJE_GASTO_SIN_FACTURA } from './GastoModal';
+
 import type { Gasto, Inmueble, UsuarioApp } from '../../types';
 import { reiniciarAvisosOperacion } from '../../feedback/canalFeedback';
 import { reiniciarCanalIncidencias } from '../../estadoDatos/canalIncidencias';
@@ -149,5 +153,55 @@ describe('UX-4 · GastoModal', () => {
     await waitFor(() => {
       resolver?.();
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // ORDEN 1 · AG-04 — la factura ya no tiene respaldo efímero: si Storage la
+  // deniega, el gasto queda guardado y el aviso dice EXACTAMENTE eso.
+  // -------------------------------------------------------------------------
+  it('AG-04 · si la factura no se custodia, se informa de que el gasto SÍ se guardó y la factura NO; el modal sigue abierto', async () => {
+    const guardados: Gasto[] = [];
+    const onSave = vi.fn(async (g: Gasto) => {
+      const conTitular = { ...g, propietarioId: g.propietarioId || 'prop_A' };
+      guardados.push(conTitular);
+      return conTitular;
+    });
+    const onClose = vi.fn();
+    vi.mocked(uploadFacturaGasto).mockRejectedValueOnce(new ErrorCustodiaDocumento('SIN_PERMISO'));
+    const { container } = render(
+      <>
+        <AvisosOperacion />
+        <GastoModal inmuebles={[INMUEBLE]} currentUser={USUARIO} onSave={onSave} onClose={onClose} />
+      </>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('0,00'), { target: { value: '45' } });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const factura = new File([new Uint8Array(10)], 'factura.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [factura] } });
+    fireEvent.click(screen.getByRole('button', { name: /registrar gasto/i }));
+
+    await waitFor(() => expect(screen.getByTestId('error-persistencia-gasto')).toBeTruthy());
+    const texto = screen.getByTestId('error-persistencia-gasto').textContent ?? '';
+    expect(texto).toContain(MENSAJE_GASTO_SIN_FACTURA);
+    expect(texto).toContain(MENSAJES_CUSTODIA.SIN_PERMISO);
+    expect(texto).not.toMatch(/firebase|storage\/|permission/i);
+    // El aviso NO dice «no se ha podido guardar el gasto» (sería falso) ni «correctamente» (sería falso).
+    expect(screen.getByTestId('aviso-operacion-error').textContent).toContain(MENSAJE_GASTO_SIN_FACTURA);
+    expect(screen.queryByText(/registrado correctamente/i)).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    // El gasto se guardó una vez (sin factura) y no se fabricó ninguna referencia sin custodia.
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(guardados[0].justificanteUrl).toBeUndefined();
+    expect(guardados[0].justificantePath).toBeUndefined();
+    expect(uploadFacturaGasto).toHaveBeenCalledWith(guardados[0].id, factura, 'factura.pdf', 'prop_A');
+
+    // Reintento: ahora Storage acepta → se reutiliza el MISMO gasto (nunca se duplica) y se cierra.
+    vi.mocked(uploadFacturaGasto).mockResolvedValueOnce({ url: 'https://storage.example/f.pdf', storagePath: 'gastos_facturas/prop_A/x/1_factura.pdf' });
+    fireEvent.click(screen.getByRole('button', { name: /registrar gasto/i }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    const ids = new Set(guardados.map((g) => g.id));
+    expect(ids.size).toBe(1);
+    expect(guardados.at(-1)?.justificantePath).toBe('gastos_facturas/prop_A/x/1_factura.pdf');
   });
 });

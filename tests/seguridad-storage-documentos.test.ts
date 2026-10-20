@@ -12,25 +12,20 @@
  *    Firestore, recurso subido). Reproduce la semántica documentada (v2, OR de
  *    bloques solapados, `read`/`write` expandidos, error ⇒ denegado) pero NO es
  *    el motor de Google: la validación en emulador/proyecto queda PENDIENTE (NV).
- *  · `src/lib/documentosServidor.ts` (servidor de documentos de `server.ts`) sí
- *    se ejecuta de verdad.
- *  · Sección G: invariantes textuales mínimos (catch-all último, `server.ts`
- *    usa el módulo). No sustituyen a las secciones semánticas.
+ *  · 2026-10-20 (ORDEN 1 · AG-04): el servidor de documentos efímero
+ *    (`src/lib/documentosServidor.ts`, `/api/upload-document`, `/api/documents/:id`)
+ *    se RETIRÓ: era un almacén en RAM de la función de Vercel que producía
+ *    pérdida de binarios con apariencia de éxito. La antigua sección H (su
+ *    ejecución real) desaparece con él; la sección G comprueba ahora que
+ *    `server.ts` ya no instancia ningún almacén y responde 410 en esas rutas.
+ *    Ver tests/custodia-documental-fail-closed.test.ts.
+ *  · Sección G: invariantes textuales mínimos (catch-all último, retirada del
+ *    almacén). No sustituyen a las secciones semánticas.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { decidir, parsearReglas, permitido, type ContextoPeticion, type Metodo } from './helpers/evaluadorReglasStorage';
-import {
-  AlmacenDocumentosEfimeros,
-  MAX_BYTES_POR_DOCUMENTO,
-  cabecerasDocumento,
-  decodificarBase64Documento,
-  generarIdDocumento,
-  idDeDocumentoValido,
-  nombreMostrable,
-  normalizarTipoContenido,
-} from '../src/lib/documentosServidor';
 
 const raiz = (rel: string) => fileURLToPath(new URL(`../${rel}`, import.meta.url));
 const FUENTE = readFileSync(raiz('storage.rules'), 'utf8');
@@ -637,89 +632,17 @@ describe('G · estructura de storage.rules e integración server.ts', () => {
     expect(FUENTE).not.toMatch(/allow read: if true/);
   });
 
-  it('server.ts usa el módulo de documentos y ya no sirve con caché pública ni id predecible', () => {
+  it('AG-04: server.ts ya no instancia ningún almacén de documentos en memoria ni sirve binarios por URL de capacidad', () => {
     const src = readFileSync(raiz('server.ts'), 'utf8');
-    expect(src).toContain("from './src/lib/documentosServidor'");
-    expect(src).toContain('new AlmacenDocumentosEfimeros()');
-    expect(src).toContain('generarIdDocumento()');
-    expect(src).toContain('idDeDocumentoValido(fileId)');
-    expect(src).toContain('cabecerasDocumento(');
-    expect(src).not.toMatch(/Cache-Control',\s*'public/);
-    expect(src).not.toMatch(/max-age=86400/);
+    expect(src).not.toContain('documentosServidor');
+    expect(src).not.toContain('AlmacenDocumentosEfimeros');
     expect(src).not.toMatch(/new Map<\s*string,\s*\{ buffer: Buffer/);
-    for (const clave of ['url: fileUrl', 'downloadURL: fileUrl', 'storagePath: `server_${fileId}`', 'mimeType: tipo', 'size: buffer.length']) {
-      expect(src, clave).toContain(clave);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// H · Servidor de documentos (ejecución real del módulo)
-// ---------------------------------------------------------------------------
-describe('H · documentosServidor.ts — lo que se ejecuta de verdad', () => {
-  it('S-1: sólo tipos visualizables van inline; HTML/SVG/JS/desconocidos se degradan a descarga', () => {
-    expect(normalizarTipoContenido('text/html', 'f.html')).toEqual({ tipo: 'application/octet-stream', permitirInline: false });
-    expect(normalizarTipoContenido('image/svg+xml', 'l.svg')).toEqual({ tipo: 'application/octet-stream', permitirInline: false });
-    expect(normalizarTipoContenido('application/javascript', 'x.js').permitirInline).toBe(false);
-    expect(normalizarTipoContenido('application/pdf', 'c.pdf')).toEqual({ tipo: 'application/pdf', permitirInline: true });
-    expect(normalizarTipoContenido('image/jpeg', 'c.jpg').permitirInline).toBe(true);
-    expect(normalizarTipoContenido('video/mp4', 'v.mp4')).toEqual({ tipo: 'video/mp4', permitirInline: false });
-    expect(normalizarTipoContenido(undefined, 'sin_tipo.pdf').tipo).toBe('application/pdf');
-    expect(normalizarTipoContenido(undefined, 'sin_tipo.html').tipo).toBe('application/octet-stream');
-    expect(normalizarTipoContenido('Image/PNG; charset=x', 'a').tipo).toBe('image/png');
-  });
-
-  it('S-2/S-5: cabeceras privadas, nosniff, sin CR/LF ni comillas inyectables', () => {
-    const h = cabecerasDocumento('application/pdf', true, 'x.pdf\r\nSet-Cookie: a=b"');
-    expect(h['Cache-Control']).toBe('private, no-store, max-age=0');
-    expect(h['X-Content-Type-Options']).toBe('nosniff');
-    expect(h['Referrer-Policy']).toBe('no-referrer');
-    for (const v of Object.values(h)) expect(v).not.toMatch(/[\r\n"]/);
-    expect(cabecerasDocumento('application/octet-stream', false, 'a.svg')['Content-Disposition']).toMatch(/^attachment;/);
-    expect(nombreMostrable('../../etc/passwd')).not.toMatch(/[\\/]/);
-    expect(nombreMostrable('')).toBe('documento');
-    expect(nombreMostrable('ñ'.repeat(300)).length).toBeLessThanOrEqual(120);
-  });
-
-  it('S-3: id de 128 bits con forma fija; la lectura rechaza cualquier otra forma', () => {
-    const ids = new Set(Array.from({ length: 500 }, generarIdDocumento));
-    expect(ids.size).toBe(500);
-    for (const id of ids) expect(id).toMatch(/^doc_[0-9a-f]{32}$/);
-    for (const malo of ['doc_1758556800000_ab12c', 'doc_' + 'g'.repeat(32), 'DOC_' + 'a'.repeat(32), '', '../x', 'server_doc_' + 'a'.repeat(32), 42, null, undefined]) {
-      expect(idDeDocumentoValido(malo), String(malo)).toBe(false);
-    }
-  });
-
-  it('S-4: base64 validado antes de reservar memoria; tope por documento', () => {
-    expect(decodificarBase64Documento('data:application/pdf;base64,JVBERi0=')).toMatchObject({ ok: true, bytes: 5 });
-    expect(decodificarBase64Documento('JVBERi0=')).toMatchObject({ ok: true, bytes: 5 });
-    expect(decodificarBase64Documento('data:text/plain,hola').ok).toBe(false);
-    expect(decodificarBase64Documento('%%% no base64').ok).toBe(false);
-    expect(decodificarBase64Documento('').ok).toBe(false);
-    expect(decodificarBase64Documento(123).ok).toBe(false);
-    expect(decodificarBase64Documento('A'.repeat(Math.ceil(((MAX_BYTES_POR_DOCUMENTO + 3) * 4) / 3) + 4)).ok).toBe(false);
-    expect(MAX_BYTES_POR_DOCUMENTO).toBe(15 * MB);
-  });
-
-  it('S-4: almacén acotado por entradas, bytes y TTL; inmutable por id; el rol no interviene (URL de capacidad)', () => {
-    let reloj = Date.parse('2026-09-22T00:00:00.000Z');
-    const a = new AlmacenDocumentosEfimeros({ maxEntradas: 2, maxBytes: 500, ttlMs: 60_000, ahora: () => reloj });
-    const id = (n: number) => `doc_${n.toString(16).padStart(32, '0')}`;
-    const doc = (bytes: number) => ({ buffer: Buffer.alloc(bytes), mimeType: 'application/pdf', filename: 'x.pdf', uploadedAt: new Date(reloj).toISOString(), permitirInline: true, bytes });
-    expect(a.set(id(1), doc(100)).ok).toBe(true);
-    expect(a.set(id(1), doc(100)).motivo).toBe('id_ya_existe');
-    expect(a.set('doc_x', doc(1)).motivo).toBe('id_no_valido');
-    expect(a.set(id(2), doc(600)).motivo).toBe('documento_demasiado_grande');
-    a.set(id(3), doc(100));
-    a.set(id(4), doc(100));
-    expect(a.tamano).toBe(2);
-    expect(a.get(id(1))).toBeNull(); // desalojado (LRU por inserción)
-    expect(a.get(id(4))).not.toBeNull();
-    a.set(id(5), doc(300)); // 100+100+300 > 500 → desaloja el más antiguo
-    expect(a.bytes).toBeLessThanOrEqual(500);
-    reloj += 61_000;
-    expect(a.get(id(5))).toBeNull(); // TTL
-    expect(a.purgar()).toBeGreaterThanOrEqual(0);
-    expect(a.tamano).toBe(0);
+    expect(src).not.toContain('storagePath: `server_${fileId}`');
+    expect(src).not.toMatch(/Cache-Control',\s*'public/);
+    // Las rutas antiguas siguen declaradas SOLO para responder 410 (retirada explícita).
+    expect(src).toMatch(/app\.post\('\/api\/upload-document',\s*\(_req, res\) => responderAlmacenTemporalRetirado\(res\)\)/);
+    expect(src).toMatch(/app\.get\('\/api\/documents\/:fileId',\s*\(_req, res\) => responderAlmacenTemporalRetirado\(res\)\)/);
+    expect(src).toContain("res.status(410)");
+    expect(src).toContain("codigo: 'ALMACEN_TEMPORAL_RETIRADO'");
   });
 });

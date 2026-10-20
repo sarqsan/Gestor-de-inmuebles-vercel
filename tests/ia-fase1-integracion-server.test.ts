@@ -513,7 +513,6 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'src/notificaciones/canales.ts',
       'src/notificaciones/autorizacion.ts',
       'src/types/notificaciones.ts',
-      'src/lib/documentosServidor.ts',
       'src/experiencia/proveedorGemini.ts',
       'src/experiencia/limites.ts',
       'src/experiencia/tipos.ts',

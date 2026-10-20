@@ -1,5 +1,5 @@
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
-import { FIREBASE_PROYECTO_ID } from '../../lib/entornoFirebase';
+import { FIREBASE_BASE_DATOS_ID, FIREBASE_PROYECTO_ID, avisoTopologiaCustodia } from '../../lib/entornoFirebase';
 import React, { useState, useRef } from 'react';
 import { UserProfile, Candidato, Inmueble } from '../../types';
 import { ImportExportPanel } from './ImportExportPanel';
@@ -385,8 +385,21 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
             <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
               <span className="text-emerald-400 font-mono font-bold block" data-testid="proyecto-firebase-activo">{FIREBASE_PROYECTO_ID}</span>
               <span className="text-[11px] text-slate-400">ID del proyecto Firebase activo.</span>
+              <span className="text-[11px] text-slate-400 block mt-1">
+                Base de datos: <span className="font-mono text-slate-300" data-testid="base-datos-firebase-activa">{FIREBASE_BASE_DATOS_ID}</span>
+              </span>
             </div>
           </div>
+          {avisoTopologiaCustodia() && (
+            <div
+              role="note"
+              data-testid="aviso-topologia-custodia"
+              className="text-[11px] text-amber-200 bg-amber-900/30 border border-amber-700/60 rounded-xl p-3 mt-3"
+            >
+              <span className="font-bold">Custodia de documentos (AG-03): </span>
+              {avisoTopologiaCustodia()}
+            </div>
+          )}
         </div>
 
         {/* Form Actions */}

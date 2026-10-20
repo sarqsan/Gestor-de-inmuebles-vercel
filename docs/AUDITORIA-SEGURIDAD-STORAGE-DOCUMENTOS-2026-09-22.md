@@ -5,6 +5,8 @@
 **Alcance:** `storage.rules`, servidor de documentos de `server.ts` (`/api/upload-document`, `/api/documents/:fileId`), clientes de subida (`src/lib/firebase.ts`, `firebaseActas.ts`, `suministrosFirestore.ts`, `morosidadEvidenciasStorage.ts`, `GestionImagenesModal.tsx`, `ActasSection.tsx`).
 **Fuera de alcance (intactos):** `firestore.rules`, `firestore.indexes.json`, motores, módulos Operaciones / Backfill-R3 / Inversión / Dashboard / Tesorería / Liquidaciones / Morosidad, capa §6, cliente de subida.
 
+> **Nota de vigencia (2026-10-20 · ORDEN 1 · AG-04).** El servidor de documentos efímero auditado aquí (`src/lib/documentosServidor.ts`, `/api/upload-document`, `/api/documents/:fileId`) ha sido **retirado**: las rutas responden `410 ALMACEN_TEMPORAL_RETIRADO` y los clientes suben directamente a Firebase Storage o fallan de forma explícita. Las secciones S-1…S-5 y H de este documento describen un componente que ya no existe; el resto (reglas de Storage, secciones A–F) sigue vigente. Detalle: `docs/ORDEN-1-CUSTODIA-DOCUMENTAL-AG03-AG04-2026-10-20.md`.
+
 ---
 
 ## 1. Método y limitaciones (léase antes de interpretar los verdes)

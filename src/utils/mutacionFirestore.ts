@@ -45,7 +45,10 @@ export async function ejecutarMutacion<T>(opciones: OpcionesMutacion<T>): Promis
   const resultado = await ejecutarOperacion<T>(resto);
   if (!resultado.ok && concretarError) {
     const fallo = resultado as { ok: false; motivo: MotivoFalloOperacion; error?: unknown };
-    if (fallo.motivo === 'excepcion') concretarAvisoError(fallo.error, opciones.mensajeError);
+    if (fallo.motivo === 'excepcion') {
+      const generico = typeof opciones.mensajeError === 'function' ? opciones.mensajeError(fallo) : opciones.mensajeError;
+      concretarAvisoError(fallo.error, generico);
+    }
   }
   return resultado;
 }

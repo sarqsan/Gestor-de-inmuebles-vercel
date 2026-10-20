@@ -48,6 +48,7 @@ import {
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { evaluarAdjuntoInlinePoliza, leerArchivoComoDataUrl } from '../../lib/custodiaDocumental/adjuntoInlinePoliza';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
 import { solicitarIA } from '../../lib/clienteIA';
 
@@ -86,6 +87,8 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
   const [selectedDocType, setSelectedDocType] = useState<TipoDocumentoPoliza>('CARTA_RENOVACION');
   const [extraccionLoading, setExtraccionLoading] = useState(false);
   const [extraccionError, setExtraccionError] = useState('');
+  /** AG-04: fallo visible al adjuntar un documento (antes sólo `console.error`). */
+  const [errorDocumento, setErrorDocumento] = useState('');
   const [datosExtraidosPreview, setDatosExtraidosPreview] = useState<DatosExtraidosRenovacion | null>(
     poliza.datosExtraidosRenovacion || null
   );
@@ -120,54 +123,29 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setErrorDocumento('');
+
+    // AG-04 (2026-10-20): ya no se envía el binario al almacén efímero del
+    // servidor (`/api/upload-document`, retirado). El adjunto se custodia en la
+    // propia ficha de la póliza (data-URL) si cabe; si no cabe o el guardado
+    // falla, se informa de forma explícita. Nunca hay éxito aparente.
+    const evaluacion = evaluarAdjuntoInlinePoliza(poliza as unknown as Record<string, unknown>, file);
+    if (evaluacion.ok === false) {
+      setErrorDocumento(evaluacion.mensaje);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
 
     setIsSaving(true);
     try {
-      // Try server upload first
-      let downloadURL = '';
-      let storagePath = `local_${Date.now()}`;
-
-      // Convert to base64 for server upload attempt
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = () => resolve('');
-        reader.readAsDataURL(file);
-      });
-
-      try {
-        const res = await fetch('/api/upload-document', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileBase64: base64,
-            filename: file.name,
-            mimeType: file.type,
-            solicitudId: poliza.id,
-            itemId: `poliza_${poliza.id}`,
-          }),
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.url) {
-            downloadURL = json.url;
-            storagePath = json.storagePath || storagePath;
-          }
-        }
-      } catch (err) {
-        console.warn('Server upload fallback:', err);
-      }
-
-      if (!downloadURL) {
-        downloadURL = base64;
-      }
+      const dataUrl = await leerArchivoComoDataUrl(file);
 
       const nuevoDoc: DocumentoRenovacionPoliza = {
         id: `doc_renov_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
         nombre: file.name,
         tipo: selectedDocType,
-        url: downloadURL,
-        storagePath,
+        url: dataUrl,
+        storagePath: `local_${Date.now()}`,
         fechaRecepcion: new Date().toISOString().split('T')[0],
         fechaSubida: new Date().toISOString(),
         subidoPor: currentUser?.nombre || 'Usuario',
@@ -193,9 +171,22 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
         updatedAt: new Date().toISOString(),
       };
 
-      await onSave(polizaActualizada);
+      await ejecutarOperacion({
+        accion: () => onSave(polizaActualizada),
+        mensajeExito: `Documento «${file.name}» adjuntado a la póliza.`,
+        mensajeError: 'No se ha podido adjuntar el documento a la póliza.',
+        origenesDatos: ['polizas'],
+        onFallo: (fallo) =>
+          setErrorDocumento(
+            mensajeDeErrorUsuario(
+              fallo.error,
+              'No se ha podido adjuntar el documento a la póliza: el cambio no se ha guardado. Inténtalo de nuevo.'
+            )
+          ),
+      });
     } catch (err) {
       console.error('Error subiendo documento:', err);
+      setErrorDocumento(mensajeDeErrorUsuario(err, 'No se ha podido leer el archivo seleccionado. Inténtalo de nuevo.'));
     } finally {
       setIsSaving(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -234,21 +225,12 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
       if (doc.url.startsWith('data:')) {
         base64Data = doc.url;
       } else if (doc.url.startsWith('/api/documents/')) {
-        // Recuperar del store del servidor
-        try {
-          const res = await fetch(doc.url);
-          if (res.ok) {
-            const blob = await res.blob();
-            base64Data = await new Promise<string>((resolve) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.readAsDataURL(blob);
-            });
-            mimeType = blob.type || mimeType;
-          }
-        } catch (e) {
-          console.warn('Error fetching doc:', e);
-        }
+        // AG-04: referencia al almacén temporal del servidor, retirado el
+        // 2026-10-20. El binario ya no existe: se informa, no se simula.
+        setExtraccionError(
+          'Este documento se guardó en el almacén temporal retirado y ya no está disponible. Vuelve a adjuntarlo para poder analizarlo.'
+        );
+        return;
       } else {
         // Si es http, no podemos extraer directamente sin proxy, usar simulación
         base64Data = '';
@@ -712,9 +694,15 @@ export const DetallePolizaModal: React.FC<DetallePolizaModalProps> = ({
                     <Upload className="w-4 h-4" />
                     Adjuntar
                   </button>
-                  <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFileUpload} />
+                  <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={handleFileUpload} />
                 </div>
               </div>
+
+              {errorDocumento && (
+                <div role="alert" data-testid="poliza-error-documento" className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
+                  {errorDocumento}
+                </div>
+              )}
 
               {/* Documentos originales */}
               {poliza.documentos && poliza.documentos.length > 0 && (

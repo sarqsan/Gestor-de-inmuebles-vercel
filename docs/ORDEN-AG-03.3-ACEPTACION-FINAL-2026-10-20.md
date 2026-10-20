@@ -19,7 +19,7 @@ Informe de referencia de la implementación: `docs/ORDEN-AG-03.2-CORRECCION-FIRE
 |---|---|
 | Repositorio / rama | `sarqsan/Gestor-de-inmuebles-vercel` · `arena/8ed3381d-gestor-de-inmuebles-vercel` |
 | Base de la rama | `cd58c9e7` (= `origin/main`, merge-base sin cambios) |
-| HEAD al cerrar la orden | ver «Commits de esta orden» (último de la lista; el SHA del commit de este informe se registra en el resumen entregado) |
+| HEAD al cerrar la orden | `f9bf928` (este informe) + un commit de documentación que registra ese SHA; código ejecutable idéntico a `383315c` |
 | Guardia A-04 (`tests/guardia-a04-rama-sesion.test.ts`) | **4/4 OK** al inicio y al cierre (rama local = `origin/<rama>`, `main` local = `cd58c9e7`, árbol limpio) |
 | Código de la aplicación cambiado en AG-03.3 | **0 archivos** (`src/`, `server/`, `storage.rules`, `firestore.rules` intactos respecto de `20f8d2a`). AG-03.3 sólo añade pruebas, arnés de CI y documentación |
 | `firestore.rules` | sin cambios desde la base `cd58c9e7` (no hay nada que publicar en Firestore) |
@@ -33,7 +33,7 @@ Informe de referencia de la implementación: `docs/ORDEN-AG-03.2-CORRECCION-FIRE
 | `8716fe7` | Nueva prueba de integración en proceso `tests/integracion-custodia-documental-extremo-a-extremo.test.ts` (13); `scripts/ci/resumen-resultados-vitest.mjs` + pasos del workflow (anotaciones, resumen, artefactos); suite P3 de emulador pasa de «fallo de módulo» a **omisión explícita y visible**. |
 | `b6864e5` | Retira dos JSON de pruebas locales versionados por error y añade `.cache/` a `.gitignore`. |
 | `383315c` | Corrige el arnés de `tests/emulador/documentos-servidor.emulador.test.ts` (defecto del propio arnés detectado en la primera ejecución en CI, §2.3). |
-| *(este informe)* | `docs/ORDEN-AG-03.3-ACEPTACION-FINAL-2026-10-20.md`. |
+| `f9bf928` | `docs/ORDEN-AG-03.3-ACEPTACION-FINAL-2026-10-20.md` (este informe). El commit siguiente sólo inserta este SHA en el informe. |
 
 Ningún PR, ningún merge, ninguna publicación de reglas, ningún despliegue, ninguna escritura en producción, ninguna migración.
 

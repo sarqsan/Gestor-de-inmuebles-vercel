@@ -246,7 +246,7 @@ describe('DetalleSolicitudSeguroModal · análisis IA de respuesta recibida', ()
     abrirRespuesta();
     const campo = screen.getByLabelText(/Texto del Correo de Respuesta recibido/);
     fireEvent.change(campo, { target: { value: TEXTO_RESPUESTA } });
-    fireEvent.click(screen.getByRole('button', { name: 'Procesar Dictamen con IA' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Analizar Respuesta con IA' }));
 
     await waitFor(() => expect(onUpdateSolicitud).toHaveBeenCalledTimes(1));
     const persistida = onUpdateSolicitud.mock.calls[0][0];
@@ -276,7 +276,7 @@ describe('DetalleSolicitudSeguroModal · análisis IA de respuesta recibida', ()
     montar(onUpdateSolicitud);
     abrirRespuesta();
     fireEvent.change(screen.getByLabelText(/Texto del Correo de Respuesta recibido/), { target: { value: TEXTO_RESPUESTA } });
-    fireEvent.click(screen.getByRole('button', { name: 'Procesar Dictamen con IA' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Analizar Respuesta con IA' }));
 
     await waitFor(() => expect(onUpdateSolicitud).toHaveBeenCalledTimes(1));
     const persistida = onUpdateSolicitud.mock.calls[0][0];
@@ -289,5 +289,206 @@ describe('DetalleSolicitudSeguroModal · análisis IA de respuesta recibida', ()
       autor: 'sistema_ia',
       accion: 'Dictamen de aseguradora analizado por IA',
     });
+  });
+});
+
+describe('DetalleSolicitudSeguroModal · P7 trazabilidad de estados y procedencia', () => {
+  function montarConDetalle(solicitud: SolicitudSeguroImpago, onUpdateSolicitud = vi.fn()) {
+    const onClose = vi.fn();
+    render(
+      <DetalleSolicitudSeguroModal
+        solicitud={structuredClone(solicitud)}
+        aseguradoras={[]}
+        onClose={onClose}
+        onUpdateSolicitud={onUpdateSolicitud}
+      />,
+    );
+    return { onUpdateSolicitud, onClose };
+  }
+
+  it('conserva y muestra la respuesta pendiente de revisión al reabrir el expediente', () => {
+    montarConDetalle({
+      ...solicitudBase,
+      estado: 'ERROR_PROCESAMIENTO',
+      procesadoConIA: false,
+      emailRespuestaRaw: TEXTO_RESPUESTA,
+    });
+
+    expect(screen.getByTestId('origen-dictamen-expediente').textContent).toBe(
+      'Pendiente de revisión humana',
+    );
+    abrirRespuesta();
+    expect(screen.getByTestId('respuesta-pendiente-revision')).toBeTruthy();
+    expect(screen.getByTestId('texto-respuesta-conservado').textContent).toBe(TEXTO_RESPUESTA);
+    expect(screen.queryByTestId('lectura-automatica-respuesta')).toBeNull();
+  });
+
+  it('no presenta la lectura automática como dictamen oficial de la aseguradora', async () => {
+    mocks.solicitarIA.mockResolvedValue(responseOk(ANALISIS_VALIDO));
+    const { onUpdateSolicitud } = montarConDetalle(solicitudBase);
+    abrirRespuesta();
+    fireEvent.change(screen.getByLabelText(/Texto del Correo de Respuesta recibido/), {
+      target: { value: TEXTO_RESPUESTA },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Analizar Respuesta con IA' }));
+
+    await waitFor(() => expect(onUpdateSolicitud).toHaveBeenCalledTimes(1));
+    expect(onUpdateSolicitud.mock.calls[0][0].dictamenTexto).toBe(ANALISIS_VALIDO.dictamenTexto);
+
+    await waitFor(() => expect(screen.getByTestId('lectura-automatica-respuesta')).toBeTruthy());
+    const panel = screen.getByTestId('lectura-automatica-respuesta');
+    expect(panel.textContent).toContain('Lectura automática del correo');
+    expect(panel.textContent).toMatch(/no es un dictamen oficial/i);
+    expect(panel.textContent).not.toMatch(/dictamen oficial extraído/i);
+    expect(screen.getByTestId('origen-dictamen-expediente').textContent).toMatch(/^Lectura IA · /);
+  });
+
+  it('avisa de que el texto de demostración no procede de ninguna aseguradora', () => {
+    montarConDetalle(solicitudBase);
+    abrirRespuesta();
+    fireEvent.click(screen.getByRole('button', { name: 'Favorable' }));
+
+    expect(screen.getByTestId('aviso-texto-simulado').textContent).toMatch(
+      /no lo ha enviado ninguna aseguradora/i,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Texto del Correo de Respuesta recibido/), {
+      target: { value: 'Texto pegado manualmente.' },
+    });
+    expect(screen.queryByTestId('aviso-texto-simulado')).toBeNull();
+  });
+
+  it('etiqueta la solvencia como estimación local y no como análisis de IA', () => {
+    montarConDetalle(solicitudBase);
+
+    expect(screen.getByText('ESTIMACIÓN LOCAL DE SOLVENCIA')).toBeTruthy();
+    expect(screen.getByText(/Estimación local: 80 \/ 100/)).toBeTruthy();
+    expect(screen.getByText(/no es un dictamen, una garantía ni una valoración de la aseguradora/i)).toBeTruthy();
+    expect(screen.queryByText(/ANÁLISIS IA Y ESTIMACIÓN DE RIESGO/)).toBeNull();
+  });
+
+  it('muestra el estado real del envío sin afirmar un envío no confirmado', () => {
+    montarConDetalle(solicitudBase);
+    abrirCorreo();
+
+    expect(screen.getByTestId('estado-solicitud-seguro').textContent).toBe('Borrador');
+    expect(screen.getByTestId('detalle-estado-solicitud-seguro').textContent).toMatch(
+      /sin envío confirmado/i,
+    );
+  });
+
+  it('no registra el envío dos veces al pulsar repetidamente mientras está en curso', async () => {
+    mocks.getAccessToken.mockResolvedValue('token-de-prueba');
+    let resolver: ((valor: unknown) => void) | undefined;
+    mocks.sendGmailMessage.mockImplementation(
+      () => new Promise((resolve) => { resolver = resolve; }),
+    );
+    const { onUpdateSolicitud } = montarConDetalle(solicitudBase);
+    abrirCorreo();
+
+    const boton = screen.getByRole('button', { name: 'Enviar Solicitud con Gmail OAuth' });
+    fireEvent.click(boton);
+    fireEvent.click(boton);
+    fireEvent.click(boton);
+
+    await waitFor(() => expect(mocks.sendGmailMessage).toHaveBeenCalledTimes(1));
+    resolver?.({ id: 'gmail-message-1', threadId: 'gmail-thread-1' });
+    await waitFor(() => expect(onUpdateSolicitud).toHaveBeenCalledTimes(1));
+    expect(onUpdateSolicitud.mock.calls[0][0].estado).toBe('CORREO_ENVIADO');
+  });
+});
+
+describe('DetalleSolicitudSeguroModal · P7 borrador de correo con IA', () => {
+  function montarConDetalle(solicitud: SolicitudSeguroImpago, onUpdateSolicitud = vi.fn()) {
+    const onClose = vi.fn();
+    render(
+      <DetalleSolicitudSeguroModal
+        solicitud={structuredClone(solicitud)}
+        aseguradoras={[]}
+        onClose={onClose}
+        onUpdateSolicitud={onUpdateSolicitud}
+      />,
+    );
+    return { onUpdateSolicitud, onClose };
+  }
+
+  it('declara el uso de la plantilla estándar cuando el servicio no genera con IA', async () => {
+    mocks.solicitarIA.mockResolvedValue(
+      responseOk({
+        asunto: 'Asunto de plantilla',
+        cuerpo: 'Cuerpo de plantilla',
+        generadoConIA: false,
+        motivoGeneracionSinIA: 'IA_NO_DISPONIBLE',
+      }),
+    );
+    montarConDetalle(solicitudBase);
+    abrirCorreo();
+    fireEvent.click(screen.getByRole('button', { name: /Regenerar con IA/ }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('aviso-generacion-correo').textContent).toMatch(
+        /plantilla estándar/i,
+      ),
+    );
+    expect((screen.getByLabelText(/Asunto del Correo/) as HTMLInputElement).value).toBe(
+      'Asunto de plantilla',
+    );
+  });
+
+  it.each([
+    ['error HTTP del servicio', () => mocks.solicitarIA.mockResolvedValue(responseError(503))],
+    ['rechazo de red', () => mocks.solicitarIA.mockRejectedValue(new Error('sin conexión'))],
+    ['respuesta incompleta', () => mocks.solicitarIA.mockResolvedValue(responseOk({ asunto: 'Solo asunto' }))],
+  ])('ante %s conserva el borrador y avisa sin culpar al envío', async (_caso, preparar) => {
+    preparar();
+    montarConDetalle(solicitudBase);
+    abrirCorreo();
+    fireEvent.change(screen.getByLabelText(/Asunto del Correo/), { target: { value: BORRADOR_ASUNTO } });
+    fireEvent.change(screen.getByLabelText(/Cuerpo del Mensaje Formal/), { target: { value: BORRADOR_CUERPO } });
+    fireEvent.click(screen.getByRole('button', { name: /Regenerar con IA/ }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/se conserva el borrador/i));
+    expect((screen.getByLabelText(/Asunto del Correo/) as HTMLInputElement).value).toBe(BORRADOR_ASUNTO);
+    expect((screen.getByLabelText(/Cuerpo del Mensaje Formal/) as HTMLTextAreaElement).value).toBe(BORRADOR_CUERPO);
+  });
+});
+
+describe('DetalleSolicitudSeguroModal · P7 decisión humana', () => {
+  it('no cierra el expediente si la decisión no se puede guardar', async () => {
+    const onUpdateSolicitud = vi.fn().mockRejectedValue(new Error('sin conexión'));
+    const onClose = vi.fn();
+    render(
+      <DetalleSolicitudSeguroModal
+        solicitud={structuredClone(solicitudBase)}
+        aseguradoras={[]}
+        onClose={onClose}
+        onUpdateSolicitud={onUpdateSolicitud}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /4\. Decisión Final Propietario/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Aceptar Candidato y Proceder a Firma/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Guardar Decisión y Actualizar Expediente/ }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/no se pudo guardar la decisión/i));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('persiste la decisión con un valor declarado del modelo y cierra el expediente', async () => {
+    const onUpdateSolicitud = vi.fn(async (_actualizada: SolicitudSeguroImpago) => undefined);
+    const onClose = vi.fn();
+    render(
+      <DetalleSolicitudSeguroModal
+        solicitud={structuredClone(solicitudBase)}
+        aseguradoras={[]}
+        onClose={onClose}
+        onUpdateSolicitud={onUpdateSolicitud}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /4\. Decisión Final Propietario/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Rechazar Candidatura/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Guardar Decisión y Actualizar Expediente/ }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onUpdateSolicitud.mock.calls[0][0].decisionFinalPropietario).toBe('RECHAZAR_CANDIDATO');
   });
 });

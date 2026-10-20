@@ -526,6 +526,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/ia/nucleoIA.ts',
       'server/ia/respuestaAseguradora.ts',
       'src/ia/analisisRespuestaAseguradora.ts',
+      // P7 · borrador de correo a aseguradora con procedencia explícita.
+      'server/ia/correoAseguradora.ts',
+      'src/ia/borradorCorreoAseguradora.ts',
       'server/ia/contextoTitularIA.ts',
       'server/ia/configuracionIA.ts',
       'server/cobros/almacenGoogleStorage.ts',
@@ -844,6 +847,13 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       });
       expect(rOk.status).toBe(httpEsperado);
       if (respuestaSinIA) expect(await rOk.json()).toMatchObject({ codigo: 'IA_NO_DISPONIBLE' });
+      // P7 · el respaldo del borrador de correo se declara como plantilla, nunca como IA.
+      if (id === 'GENERAR_CORREO_ASEGURADORA') {
+        expect(await rOk.json()).toMatchObject({
+          generadoConIA: false,
+          motivoGeneracionSinIA: 'IA_NO_DISPONIBLE',
+        });
+      }
       const opIdAna = rOk.headers.get('x-ia-operacion-id');
       expect(opIdAna).toMatch(/^iaop_[0-9a-f]{40}$/);
       const docGuardado = documentosFirestore.get(`ia_operaciones/${opIdAna}`);

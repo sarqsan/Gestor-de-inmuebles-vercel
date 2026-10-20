@@ -1921,6 +1921,8 @@ export interface SolicitudSeguroImpago {
   // BLOQUE 5: RESPUESTA DE ASEGURADORA
   fechaRecepcionRespuesta?: string;
   dictamenAseguradora: DictamenAseguradora;
+  /** Etiqueta textual que acompaña al dictamen; si procede de la lectura automática, es texto de la IA. */
+  dictamenTexto?: string;
   importeMaximoAsegurable?: number;
   primaAnualCalculada?: number;
   condicionesEstipuladas?: string[];

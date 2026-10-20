@@ -41,6 +41,7 @@ import { crearManejadorBuscarTitulares } from './server/titularidades/manejadorB
 import { clienteIA, contextoOperacionIA, crearNucleoIA, crearVerificadorGeminiReal, generateGeminiWithRetry } from './server/ia/nucleoIA.js';
 import { crearDependenciasNucleoIA } from './server/ia/configuracionIA.js';
 import { ejecutarAnalisisRespuestaAseguradora } from './server/ia/respuestaAseguradora.js';
+import { ejecutarGeneracionCorreoAseguradora } from './server/ia/correoAseguradora.js';
 import {
   crearAsistenteIncidenciasIA,
   crearFuenteAutorizadaInquilinoIA,
@@ -760,9 +761,7 @@ Quedamos a la espera de su resolución y dictamen formal de asegurabilidad. Roga
 Atentamente,
 Administración de Alquileres / Propiedad`;
 
-    if (ai) {
-      try {
-        const prompt = `Genera un correo formal para tramitación de seguro de impago de alquiler a la aseguradora ${aseguradora.nombre}.
+    const prompt = `Genera un correo formal para tramitación de seguro de impago de alquiler a la aseguradora ${aseguradora.nombre}.
 Requisitos obligatorios:
 1. Asunto: debe incluir estrictamente "[${referencia}] Candidato ${numCandidato} - ${solicitudSeguro.inmuebleNombre || direccionCompleta}".
 2. En el cuerpo del correo DEBE incluirse de forma destacada:
@@ -782,24 +781,29 @@ Devuelve ÚNICAMENTE un JSON con:
   "cuerpo": "..."
 }`;
 
-        const resp = await generateGeminiWithRetry(ai, {
-          model: 'gemini-3.7-flash',
-          contents: { parts: [{ text: prompt }] },
-          config: { responseMimeType: 'application/json' },
-        });
+    const generacion = await ejecutarGeneracionCorreoAseguradora(
+      ai,
+      {
+        model: 'gemini-3.7-flash',
+        contents: { parts: [{ text: prompt }] },
+        config: { responseMimeType: 'application/json' },
+      },
+      (cliente, parametros) => generateGeminiWithRetry(cliente, parametros),
+    );
 
-        const parsed = JSON.parse(resp?.text || '{}');
-        if (parsed.asunto && parsed.cuerpo) {
-          return res.json(parsed);
-        }
-      } catch (aiErr) {
-        console.warn('Aviso generando correo con Gemini, usando plantilla estándar:', aiErr);
-      }
+    if (generacion.ok === true) {
+      // Procedencia explícita: el texto lo ha redactado el proveedor de IA.
+      return res.json({ ...generacion.datos, generadoConIA: true });
     }
 
+    // Plantilla determinista del ERP, declarada como tal: nunca se presenta
+    // como una redacción de la IA ni como contenido de la aseguradora.
+    console.warn('Borrador de correo sin IA, usando plantilla estándar:', generacion.codigo);
     return res.json({
       asunto: asuntoDefault,
       cuerpo: cuerpoDefault,
+      generadoConIA: false,
+      motivoGeneracionSinIA: generacion.codigo,
     });
   } catch (err: any) {
     console.error('Error en /api/generar-correo-aseguradora:', err);

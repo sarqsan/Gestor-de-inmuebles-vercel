@@ -20,7 +20,7 @@
  * (entradas ordenadas, fecha DOS fija del escritor B6, JSON estable).
  * El orden de llegada de los registros no afecta al resultado.
  */
-import type { CobroPeriodo, ContratoFormalizacion, Gasto } from '../../types';
+import type { CobroPeriodo, ContratoFormalizacion, Gasto, Inmueble } from '../../types';
 import { analizarDeducibilidad } from '../../utils/deducibilidadEngine';
 import { sha256Hex } from '../importacion/hash';
 import { COLUMNAS_CSV } from '../importExport/exportador';
@@ -29,11 +29,17 @@ import { jsonEstable } from '../migracion/motor';
 import { crearZip, utf8Bytes, type EntradaZip } from '../expedienteFiscal/zip';
 import {
   PAQUETE_ASESOR_SCHEMA,
+  type CoberturaFiscalPaquete,
+  type DocumentoIndicePaquete,
   type EntradaPaqueteAsesor,
+  type FichaInmueblePaquete,
   type IncidenciaPaqueteAsesor,
   type LineaLibroAsesor,
+  type OpcionesEmpaquetadoPaqueteAsesor,
   type PaqueteAsesorGenerado,
+  type RangoFechasPaquete,
   type ResultadoEmpaquetadoAsesor,
+  type ResumenPaqueteAsesor,
   type SolicitudPaqueteAsesor,
   type TotalesEjercicioAsesor,
   type TotalesMesAsesor,
@@ -41,6 +47,7 @@ import {
   type VeredictoAmbitoPaquete,
   type VerificacionCuadre,
 } from './tipos';
+import { aplicarBinariosAlIndice, construirIndiceDocumentos } from './documentos';
 
 // ---------------------------------------------------------------------------
 // Columnas del paquete (GASTO/COBRO reutilizan la definición canónica v1)
@@ -221,6 +228,103 @@ function fechaGasto(g: Gasto): string {
   return '';
 }
 
+/** Fecha contable de un cobro (la misma que usa el libro: pago → vencimiento). */
+function fechaDeCobro(c: CobroPeriodo): string {
+  if (esFechaIsoValida(c.fechaPago)) return c.fechaPago;
+  if (esFechaIsoValida(c.fechaVencimiento)) return c.fechaVencimiento;
+  return '';
+}
+
+/**
+ * Fecha de expedición de una factura en ISO, respetando su formato declarado
+ * `dd-mm-aaaa` o ISO. Sin fuente legible devuelve '' (no se infiere del
+ * ejercicio ni de la fecha actual).
+ */
+function fechaDeFactura(f: {
+  fechaExpedicion?: unknown; fechaExpedicionUtc?: unknown;
+}): string {
+  if (typeof f.fechaExpedicion === 'string') {
+    const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(f.fechaExpedicion);
+    if (dmy) {
+      const iso = `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+      return esFechaIsoValida(iso) ? iso : '';
+    }
+    if (esFechaIsoValida(f.fechaExpedicion)) return f.fechaExpedicion;
+  }
+  if (typeof f.fechaExpedicionUtc === 'string' && esFechaIsoValida(f.fechaExpedicionUtc.slice(0, 10))) {
+    return f.fechaExpedicionUtc.slice(0, 10);
+  }
+  return '';
+}
+
+/** ¿El mes `YYYY-MM` solapa con el rango de fechas? (bordes inclusivos) */
+function mesSolapaRango(mes: string | null, rango: RangoFechasPaquete): boolean {
+  if (mes === null) return false;
+  return `${mes}-01` <= rango.hasta && ultimoDiaDeMes(mes) >= rango.desde;
+}
+
+function numeroONull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Ficha de inmueble del resumen estructurado. Solo datos REGISTRADOS en el
+ * modelo (incluidos los declarados en origen, etiquetados como tales). No
+ * calcula rentas, amortizaciones, porcentajes ni valoraciones.
+ */
+function fichaDeInmueble(
+  inmueble: Inmueble,
+  titularidades: ReadonlyArray<{ propietarioId: string; porcentajeTitularidad: number | null; estado: string; fechaInicio: string; fechaCierre?: string }>,
+): FichaInmueblePaquete {
+  const declarados = inmueble.gastosAnualesDeclarados;
+  const titularidadDeclarada = inmueble.titularidadDeclarada;
+  return {
+    id: inmueble.id,
+    direccion: inmueble.direccion ?? '',
+    ciudad: inmueble.ciudad ?? '',
+    codigoPostal: inmueble.codigoPostal ?? '',
+    referenciaCatastral: inmueble.referenciaCatastral ?? '',
+    tipoInmueble: inmueble.tipoInmueble ?? '',
+    estado: inmueble.estado ?? '',
+    estadoPatrimonial: inmueble.estadoPatrimonial ?? '',
+    superficie: numeroONull(inmueble.superficie),
+    habitaciones: numeroONull(inmueble.habitaciones),
+    banos: numeroONull(inmueble.banos),
+    precio: numeroONull(inmueble.precio),
+    valorAdquisicion: numeroONull(inmueble.valorAdquisicion),
+    fechaAdquisicion: esFechaIsoValida(inmueble.fechaAdquisicion) ? inmueble.fechaAdquisicion : null,
+    valoracionEstimada: numeroONull(inmueble.valoracionEstimada),
+    porcentajeSueloCatastral: numeroONull(inmueble.porcentajeSueloCatastral),
+    amortizacionAnualDeclarada: numeroONull(inmueble.amortizacionAnualDeclarada),
+    rentaMensualDeclarada: numeroONull(inmueble.rentaMensualDeclarada),
+    fechaRegistroPatrimonial: esFechaIsoValida(inmueble.fechaRegistroPatrimonial)
+      ? inmueble.fechaRegistroPatrimonial : null,
+    gastosAnualesDeclarados: declarados === undefined ? null : {
+      comunidad: numeroONull(declarados.comunidad),
+      ibi: numeroONull(declarados.ibi),
+      reparaciones: numeroONull(declarados.reparaciones),
+      seguro: numeroONull(declarados.seguro),
+      ejercicio: numeroONull(declarados.ejercicio),
+    },
+    titularidadDeclarada: titularidadDeclarada === undefined ? null : {
+      texto: titularidadDeclarada.texto ?? '',
+      porcentajePropietario1: numeroONull(titularidadDeclarada.porcentajePropietario1),
+      porcentajePropietario2: numeroONull(titularidadDeclarada.porcentajePropietario2),
+      resuelta: titularidadDeclarada.resuelta === true,
+    },
+    titulares: titularidades
+      .filter((t) => t.propietarioId !== '')
+      .map((t) => ({
+        propietarioId: t.propietarioId,
+        porcentajeTitularidad: t.porcentajeTitularidad,
+        estado: t.estado,
+        fechaInicio: t.fechaInicio,
+        fechaCierre: t.fechaCierre ?? null,
+      }))
+      .sort((a, b) => a.propietarioId.localeCompare(b.propietarioId)),
+  };
+}
+
 function ejercicioDeGasto(g: Gasto): number | null {
   if (typeof g.ejercicioFiscal === 'number' && Number.isInteger(g.ejercicioFiscal)) {
     return g.ejercicioFiscal;
@@ -359,7 +463,7 @@ export function validarAmbitoPaquete(
   const avisos: string[] = [];
   const denegar = (error: string): VeredictoAmbitoPaquete => ({
     ok: false, error, propietariosEfectivos: [], inmueblesEfectivos: [],
-    ejerciciosEfectivos: null, mesesEfectivos: null, avisos,
+    ejerciciosEfectivos: null, mesesEfectivos: null, rangoFechasEfectivo: null, avisos,
   });
 
   const ejercicios = [...new Set((solicitado.ejercicios ?? []).filter(
@@ -367,6 +471,19 @@ export function validarAmbitoPaquete(
   ))].sort((a, b) => a - b);
   if ((solicitado.ejercicios?.length ?? 0) !== ejercicios.length) {
     return denegar('ejercicios inválidos (se esperaban años enteros sin duplicados)');
+  }
+
+  // P6 — intervalo de fechas: se valida antes de cruzar con años/meses.
+  let rangoFechasEfectivo: RangoFechasPaquete | null = null;
+  if (solicitado.rangoFechas !== undefined && solicitado.rangoFechas !== null) {
+    const { desde, hasta } = solicitado.rangoFechas;
+    if (!esFechaIsoValida(desde) || !esFechaIsoValida(hasta)) {
+      return denegar("rangoFechas inválido: 'desde' y 'hasta' deben ser fechas reales 'YYYY-MM-DD'");
+    }
+    if (desde > hasta) {
+      return denegar(`rangoFechas inválido: 'desde' (${desde}) es posterior a 'hasta' (${hasta})`);
+    }
+    rangoFechasEfectivo = { desde, hasta };
   }
 
   const meses = [...new Set((solicitado.meses ?? []).filter((m) => esMesValido(m)))]
@@ -378,6 +495,29 @@ export function validarAmbitoPaquete(
     const fuera = meses.filter((m) => !ejercicios.includes(Number(m.slice(0, 4))));
     if (fuera.length > 0) {
       return denegar(`meses fuera de los ejercicios solicitados: ${fuera.join(', ')} (solicitud contradictoria)`);
+    }
+  }
+  if (rangoFechasEfectivo !== null && ejercicios.length > 0) {
+    const fuera = [...new Set([Number(rangoFechasEfectivo.desde.slice(0, 4)), Number(rangoFechasEfectivo.hasta.slice(0, 4))])]
+      .filter((anio) => !ejercicios.includes(anio));
+    if (fuera.length > 0) {
+      return denegar(`rangoFechas fuera de los ejercicios solicitados: ${fuera.join(', ')} (solicitud contradictoria)`);
+    }
+  }
+  if (rangoFechasEfectivo !== null && meses.length > 0) {
+    // Cada mes tocado por el intervalo debe estar seleccionado: el rango no
+    // puede exigir datos de meses que el usuario no pidió (fail-closed).
+    const tocados: string[] = [];
+    let cursor = `${rangoFechasEfectivo.desde.slice(0, 7)}-01`;
+    const finMes = rangoFechasEfectivo.hasta.slice(0, 7);
+    while (cursor.slice(0, 7) <= finMes) {
+      tocados.push(cursor.slice(0, 7));
+      const [anio, mes] = cursor.slice(0, 7).split('-').map(Number);
+      cursor = `${mes === 12 ? anio + 1 : anio}-${String(mes === 12 ? 1 : mes + 1).padStart(2, '0')}-01`;
+    }
+    const fuera = tocados.filter((m) => !meses.includes(m));
+    if (fuera.length > 0) {
+      return denegar(`rangoFechas toca meses no solicitados: ${fuera.join(', ')} (solicitud contradictoria)`);
     }
   }
 
@@ -420,13 +560,22 @@ export function validarAmbitoPaquete(
     }
     inmueblesEfectivos = [...new Set(solicitado.inmuebleIds)];
   }
+  const tiposDocumento = solicitado.tiposDocumento;
+  if (tiposDocumento !== undefined) {
+    if (!Array.isArray(tiposDocumento)
+      || tiposDocumento.some((t) => typeof t !== 'string' || t.trim() === '')
+      || new Set(tiposDocumento).size !== tiposDocumento.length) {
+      return denegar('tiposDocumento inválido (se esperaban cadenas no vacías sin duplicados)');
+    }
+  }
   const ejerciciosEfectivos = ejercicios.length > 0 ? ejercicios : null;
   const mesesEfectivos = meses.length > 0 ? meses : null;
-  if (ejerciciosEfectivos === null && mesesEfectivos === null) {
-    avisos.push('sin ejercicios ni meses: paquete sin filtro temporal');
+  if (ejerciciosEfectivos === null && mesesEfectivos === null && rangoFechasEfectivo === null) {
+    avisos.push('sin ejercicios, meses ni rango de fechas: paquete sin filtro temporal');
   }
   return {
-    ok: true, propietariosEfectivos, inmueblesEfectivos, ejerciciosEfectivos, mesesEfectivos, avisos,
+    ok: true, propietariosEfectivos, inmueblesEfectivos, ejerciciosEfectivos,
+    mesesEfectivos, rangoFechasEfectivo, avisos,
   };
 }
 
@@ -456,11 +605,19 @@ export function generarPaqueteAsesor(
   const inms = veredicto.inmueblesEfectivos ? new Set(veredicto.inmueblesEfectivos) : null;
   const ejercicios = veredicto.ejerciciosEfectivos; // null = sin filtro anual
   const meses = veredicto.mesesEfectivos; // null = sin filtro mensual
-  const hayFiltroTemporal = ejercicios !== null || meses !== null;
+  const rango = veredicto.rangoFechasEfectivo; // null = sin filtro por fechas
+  const hayFiltroTemporal = ejercicios !== null || meses !== null || rango !== null;
   const enEjercicios = (anio: number | null): boolean =>
     ejercicios === null || (anio !== null && ejercicios.includes(anio));
   const enMeses = (mes: string | null): boolean =>
     meses === null || (mes !== null && meses.includes(mes));
+  const enRango = (fecha: string): boolean =>
+    rango === null || (fecha >= rango.desde && fecha <= rango.hasta);
+  /** Solape de un intervalo [inicio, fin|∞) con el rango de fechas. */
+  const solapaRangoFechas = (inicio: string, fin: string | null): boolean => {
+    if (rango === null) return true;
+    return inicio <= rango.hasta && (fin === null || fin >= rango.desde);
+  };
 
   const incidencias: IncidenciaPaqueteAsesor[] = [];
   const incidencia = (i: IncidenciaPaqueteAsesor) => { incidencias.push(i); };
@@ -600,6 +757,10 @@ export function generarPaqueteAsesor(
       }
       if (ejercicios !== null && !contratoVigenteEnEjercicios(c, ejercicios)) continue;
       if (meses !== null && !contratoVigenteEnMeses(c, meses)) continue;
+      if (rango !== null) {
+        const finContrato = esFechaIsoValida(c.fechaFinContrato) ? c.fechaFinContrato : null;
+        if (!solapaRangoFechas(c.fechaInicioContrato, finContrato)) continue;
+      }
     }
     contratosIncluidos.push(c);
   }
@@ -666,6 +827,18 @@ export function generarPaqueteAsesor(
         }
         if (!enMeses(mes)) continue;
       }
+      if (rango !== null) {
+        const fecha = fechaDeCobro(cobro);
+        if (!fecha) {
+          incidencia({
+            codigo: 'COBRO_SIN_FECHA_RANGO', severidad: 'AVISO',
+            descripcion: `Cobro ${cobro.id} sin fechaPago/fechaVencimiento válida: excluido del paquete por el intervalo de fechas`,
+            entidad: 'cobro', id: cobro.id,
+          });
+          continue;
+        }
+        if (!enRango(fecha)) continue;
+      }
       cobrosIncluidos.push(cobro);
     }
   }
@@ -715,6 +888,18 @@ export function generarPaqueteAsesor(
         continue;
       }
       if (!enMeses(mes)) continue;
+    }
+    if (rango !== null) {
+      const fecha = fechaGasto(g);
+      if (!fecha) {
+        incidencia({
+          codigo: 'GASTO_SIN_FECHA_RANGO', severidad: 'AVISO',
+          descripcion: `Gasto ${g.id} sin fecha de devengo/pago legible: excluido del paquete por el intervalo de fechas`,
+          entidad: 'gasto', id: g.id,
+        });
+        continue;
+      }
+      if (!enRango(fecha)) continue;
     }
     gastosIncluidos.push(g);
   }
@@ -774,6 +959,18 @@ export function generarPaqueteAsesor(
         continue;
       }
       if (!enMeses(mes)) continue;
+    }
+    if (rango !== null) {
+      const fecha = fechaDeFactura(f);
+      if (!fecha) {
+        incidencia({
+          codigo: 'FACTURA_SIN_FECHA_RANGO', severidad: 'AVISO',
+          descripcion: `Factura ${f.id} sin fecha de expedición legible: excluida del paquete por el intervalo de fechas`,
+          entidad: 'factura', id: f.id,
+        });
+        continue;
+      }
+      if (!enRango(fecha)) continue;
     }
     facturasIncluidas.push({ factura: f, ejercicio: ej });
   }
@@ -850,6 +1047,19 @@ export function generarPaqueteAsesor(
       }
       if (!enMeses(mes)) return false;
     }
+    if (rango !== null) {
+      const mes = mesDeLiquidacion(liq);
+      if (!mesSolapaRango(mes, rango)) {
+        if (mes === null) {
+          incidencia({
+            codigo: 'LIQUIDACION_SIN_FECHA_RANGO', severidad: 'AVISO',
+            descripcion: `Liquidación ${liq.id} sin periodo 'YYYY-MM' ni anio/mes legibles: excluida del paquete por el intervalo de fechas`,
+            entidad: 'liquidacion', id: liq.id,
+          });
+        }
+        return false;
+      }
+    }
     if (inms !== null && !(liq.inmuebleIds ?? []).some((id) => inms.has(id))) return false;
     return true;
   });
@@ -889,6 +1099,7 @@ export function generarPaqueteAsesor(
     }
     if (ejercicios !== null && !solapaEjercicios(p.fechaInicio, p.fechaVencimiento, ejercicios)) return false;
     if (meses !== null && !solapaMeses(p.fechaInicio, p.fechaVencimiento, meses)) return false;
+    if (rango !== null && !solapaRangoFechas(p.fechaInicio, p.fechaVencimiento)) return false;
     return true;
   });
 
@@ -906,6 +1117,84 @@ export function generarPaqueteAsesor(
       entidad: 'poliza', id: grupo.id,
     });
   }
+
+  // -- P6 · Titularidades REGISTRADAS (porcentaje tal cual; null = PENDIENTE) -
+  const inmueblesIncluidosSet = new Set(inmueblesIncluidos.map((i) => i.id));
+  const titularidadesIncluidas: Array<{
+    id: string; inmuebleId: string; propietarioId: string;
+    porcentajeTitularidad: number | null; estado: string;
+    fechaInicio: string; fechaCierre?: string;
+  }> = [];
+  for (const t of ordenarPorId(entrada.titularidades ?? [])) {
+    if (!props.has(t.propietarioId)) continue;
+    if (!inmueblesIncluidosSet.has(t.inmuebleId)) continue;
+    if (!idValido(t.id)) {
+      incidencia({
+        codigo: 'TITULARIDAD_SIN_ID', severidad: 'CRITICA',
+        descripcion: 'Titularidad sin identificador: excluida del paquete (no es referenciable)',
+        entidad: 'titularidad',
+      });
+      continue;
+    }
+    if (inmuebleDeOtroPropietario(t.inmuebleId, t.propietarioId)) {
+      incidencia({
+        codigo: 'TITULARIDAD_INMUEBLE_PROPIETARIO_DISTINTO', severidad: 'CRITICA',
+        descripcion: `Titularidad ${t.id} de ${texto(t.propietarioId)} sobre el inmueble ${texto(t.inmuebleId)}, que acredita otro titular: excluida`,
+        entidad: 'titularidad', id: t.id,
+      });
+      continue;
+    }
+    const porcentaje = t.porcentajeTitularidad;
+    if (porcentaje !== null && (typeof porcentaje !== 'number' || !Number.isFinite(porcentaje) || porcentaje < 0 || porcentaje > 100)) {
+      incidencia({
+        codigo: 'TITULARIDAD_PORCENTAJE_INVALIDO', severidad: 'CRITICA',
+        descripcion: `Titularidad ${t.id} con porcentaje ilegible (${texto(porcentaje)}): excluida; no se corrige ni se reparte por defecto`,
+        entidad: 'titularidad', id: t.id,
+      });
+      continue;
+    }
+    titularidadesIncluidas.push({
+      id: t.id, inmuebleId: t.inmuebleId, propietarioId: t.propietarioId,
+      porcentajeTitularidad: porcentaje,
+      estado: texto(t.estado), fechaInicio: texto(t.fechaInicio),
+      ...(t.fechaCierre ? { fechaCierre: t.fechaCierre } : {}),
+    });
+  }
+  for (const grupo of gruposDuplicadosPorId(titularidadesIncluidas)) {
+    incidencia({
+      codigo: 'TITULARIDAD_DUPLICADA', severidad: 'CRITICA',
+      descripcion: `La titularidad ${grupo.id} aparece ${grupo.elementos.length} veces: se conservan las filas y la duplicidad queda identificada`,
+      entidad: 'titularidad', id: grupo.id,
+    });
+  }
+
+  // -- P6 · Documentos originales custodiados (P3) ---------------------------
+  const incluirDocumentos = solicitado.incluirDocumentos === true;
+  if (incluirDocumentos && entrada.documentosPatrimoniales === undefined) {
+    incidencia({
+      codigo: 'DOCUMENTOS_NO_APORTADOS', severidad: 'AVISO',
+      descripcion: 'Se solicitó incluir documentos originales pero el llamante no aportó los metadatos de custodia: el paquete se genera sin binarios y lo declara',
+      entidad: 'documento',
+    });
+  }
+  const indiceDocumentos = incluirDocumentos && entrada.documentosPatrimoniales !== undefined
+    ? construirIndiceDocumentos({
+      inmueblesEfectivos: inmueblesIncluidosSet,
+      propietariosEfectivos: props,
+      registrosIncluidos: {
+        gastos: new Set(gastosIncluidos.map((g) => g.id)),
+        contratos: new Set(contratosIncluidos.map((c) => c.id)),
+        facturas: new Set(facturasIncluidas.map(({ factura }) => factura.id)),
+        polizas_seguros: new Set(polizasIncluidas.map((p) => p.id)),
+        cobros: new Set(cobrosIncluidos.map((c) => c.id)),
+        liquidaciones: new Set(liquidacionesIncluidas.map((l) => l.id)),
+      },
+      rango, ejercicios, meses,
+      tiposDocumento: solicitado.tiposDocumento,
+      documentosPatrimoniales: entrada.documentosPatrimoniales,
+    })
+    : { documentos: [] as DocumentoIndicePaquete[], incidencias: [] as IncidenciaPaqueteAsesor[], avisos: [] as string[], descartadosPorTipo: 0, descartadosPorPeriodo: 0 };
+  for (const i of indiceDocumentos.incidencias) incidencia(i);
 
   // -- Duplicados de movimientos (se identifican; el libro no dobla) ---------
   // datos/*.csv conserva TODAS las filas fuente. En el libro:
@@ -1371,6 +1660,40 @@ export function generarPaqueteAsesor(
     },
   ];
 
+  // -- P6 · Cobertura fiscal INFORMATIVA (no interpreta deducibilidad) -------
+  // Distingue explícitamente: gasto registrado · factura vinculada · pago
+  // registrado · decisión del motor de deducibilidad. Un justificante de pago
+  // NO convierte un gasto en deducible ni confirma por sí solo un movimiento.
+  const gastosConFactura = gastosIncluidos.filter(
+    (g) => typeof g.facturaId === 'string' && g.facturaId !== '' && facturaPorId.has(g.facturaId),
+  ).length;
+  const gastosConPagoRegistrado = gastosIncluidos.filter(
+    (g) => esFechaIsoValida(g.fechaPago) || g.pagado === true
+      || (typeof g.justificantePath === 'string' && g.justificantePath !== ''),
+  ).length;
+  const coberturaFiscal: CoberturaFiscalPaquete = {
+    gastosRegistrados: gastosIncluidos.length,
+    gastosConFacturaVinculada: gastosConFactura,
+    gastosSinFacturaVinculada: gastosIncluidos.length - gastosConFactura,
+    gastosConJustificantePagoRegistrado: gastosConPagoRegistrado,
+    gastosDeduciblesSegunMotor: gastosIncluidos.filter((g) => analizarDeducibilidad(g).deducible === true).length,
+    gastosNoDeduciblesSegunMotor: gastosIncluidos.filter((g) => analizarDeducibilidad(g).deducible !== true).length,
+    documentosTipoFactura: indiceDocumentos.documentos.filter((d) => d.tipo.includes('FACTURA')).length,
+    documentosTipoJustificantePago: indiceDocumentos.documentos.filter((d) => d.tipo.includes('JUSTIFICANTE')).length,
+  };
+  const fichasInmueble = inmueblesIncluidos.map((inmueble) => fichaDeInmueble(
+    inmueble,
+    titularidadesIncluidas.filter((t) => t.inmuebleId === inmueble.id),
+  ));
+  const limitacionesP6: string[] = [
+    'Expediente informativo y documental: NO es una declaración tributaria, no presenta modelos fiscales ni se remite a la AEAT.',
+    'Un justificante de pago no acredita por sí solo el gasto: se distinguen gasto registrado, factura vinculada, pago registrado y la decisión informativa del motor de deducibilidad.',
+    'La deducibilidad mostrada es la del motor existente del ERP; el paquete no crea criterios fiscales ni convierte facturas en gastos deducibles por defecto.',
+    'Los porcentajes de titularidad se copian tal como están registrados; null significa PENDIENTE y nunca se reparte por defecto.',
+    'Los documentos originales solo se incluyen si Storage los autoriza y su SHA-256 coincide con el registrado; los no accesibles se listan con su estado, sin sustituirlos por OCR ni resúmenes.',
+    'Los datos marcados como «Declarad*» provienen del archivo de origen y no son cálculos del ERP.',
+  ];
+
   // -- Proyecciones CSV (sin datos minimizados; ver cabecera de columnas) -----
   const filasInmuebles = inmueblesIncluidos.map((i) => ({
     id: i.id, direccion: i.direccion ?? '', ciudad: i.ciudad ?? '',
@@ -1443,26 +1766,41 @@ export function generarPaqueteAsesor(
     liquidaciones: filasLiquidaciones.length,
     polizas: filasPolizas.length,
     lineasLibro: libro.length,
+    titularidades: titularidadesIncluidas.length,
+    documentos: indiceDocumentos.documentos.length,
   };
 
   const advertencias: string[] = [
-    'Paquete interno para el asesor. NO es un formato oficial de presentación AEAT.',
-    'Sin binarios documentales en v1: las referencias viajan por nombre de fichero.',
+    'Paquete interno para el asesor. NO es un formato oficial de presentación AEAT ni una declaración tributaria.',
     'Factura emitida no equivale a cobro; liquidaciones = agregación. Ninguna de las dos duplica líneas en el libro.',
     'Base/IVA solo donde hay factura vinculada al gasto; en el resto queda SIN_DESGLOSE_EN_ORIGEN (no se inventa).',
+    'Un justificante de pago NO confirma por sí solo un movimiento contable ni la deducibilidad del gasto.',
     'Sin IBAN, DNI de inquilino, teléfonos ni correos (minimización).',
   ];
+  if (!incluirDocumentos) {
+    advertencias.push('Sin documentos originales en este paquete (no solicitados): las referencias viajan por nombre de fichero.');
+  } else if (indiceDocumentos.documentos.length === 0) {
+    advertencias.push('Se solicitaron documentos originales pero no hay documentos custodiados en el ámbito/periodo: no se inventa ninguno.');
+  } else {
+    advertencias.push(
+      'Documentos originales: solo se incorporan si Storage los autoriza y su SHA-256 coincide con el registrado; los no accesibles se listan con su estado (nunca se sustituyen por OCR o resúmenes).',
+    );
+  }
+  for (const a of indiceDocumentos.avisos) advertencias.push(a);
   if (libro.length === 0) advertencias.push('El ámbito seleccionado no contiene líneas de libro.');
 
   // Identificador reproducible del CONTENIDO (sin generatedAt ni generatedBy).
   // `meses` solo forma parte de la huella cuando hay filtro mensual, para no
   // cambiar la identidad de paquetes sin filtro mensual generados antes.
+  // Los campos P6 solo entran cuando aportan contenido (retrocompatibilidad).
+  const incluirResumen = solicitado.incluirResumenEstructurado === true;
   const paqueteId = sha256Hex(jsonEstable({
     schema: PAQUETE_ASESOR_SCHEMA,
     propietarios: veredicto.propietariosEfectivos,
     inmuebles: veredicto.inmueblesEfectivos,
     ejercicios: veredicto.ejerciciosEfectivos,
     ...(veredicto.mesesEfectivos !== null ? { meses: veredicto.mesesEfectivos } : {}),
+    ...(rango !== null ? { rangoFechas: rango } : {}),
     conteos,
     libro,
     filas: {
@@ -1470,8 +1808,42 @@ export function generarPaqueteAsesor(
       gastos: filasGastos, facturas: filasFacturas,
       liquidaciones: filasLiquidaciones, polizas: filasPolizas,
     },
+    ...(titularidadesIncluidas.length > 0 ? { titularidades: titularidadesIncluidas } : {}),
+    ...(indiceDocumentos.documentos.length > 0 ? { documentos: indiceDocumentos.documentos } : {}),
     incidencias,
   }));
+
+  const resumen: ResumenPaqueteAsesor | undefined = incluirResumen
+    ? {
+      schemaVersion: PAQUETE_ASESOR_SCHEMA,
+      generatedAt: opciones.generatedAt,
+      generadoPor: opciones.generatedBy ?? null,
+      ambito: {
+        propietarios: [...veredicto.propietariosEfectivos],
+        inmuebles: veredicto.inmueblesEfectivos,
+        ejercicios: veredicto.ejerciciosEfectivos,
+        meses: veredicto.mesesEfectivos,
+        rangoFechas: rango,
+      },
+      conteos,
+      totales,
+      coberturaFiscal,
+      inmuebles: fichasInmueble,
+      titularidades: titularidadesIncluidas.map((t) => ({
+        id: t.id, inmuebleId: t.inmuebleId, propietarioId: t.propietarioId,
+        porcentajeTitularidad: t.porcentajeTitularidad, estado: t.estado,
+        fechaInicio: t.fechaInicio, fechaCierre: t.fechaCierre ?? null,
+        origen: 'TITULARIDAD_REGISTRADA' as const,
+      })),
+      documentos: {
+        indice: indiceDocumentos.documentos,
+        incluidos: indiceDocumentos.documentos.filter((d) => d.estado === 'INCLUIDO').length,
+        noIncluidos: indiceDocumentos.documentos.filter((d) => d.estado !== 'INCLUIDO').length,
+        limitacion: 'Los binarios solo se incorporan al empaquetar, cuando Storage los autoriza y la huella coincide; este resumen no sustituye a los originales.',
+      },
+      limitaciones: limitacionesP6,
+    }
+    : undefined;
 
   return {
     manifest: {
@@ -1483,6 +1855,7 @@ export function generarPaqueteAsesor(
       inmueblesEfectivos: veredicto.inmueblesEfectivos,
       ejerciciosEfectivos: veredicto.ejerciciosEfectivos,
       mesesEfectivos: veredicto.mesesEfectivos,
+      rangoFechasEfectivo: rango,
       conteos,
       totales,
       verificaciones,
@@ -1492,6 +1865,10 @@ export function generarPaqueteAsesor(
       advertencias,
       formatoOficialAEAT: false,
       incluyeBinariosDocumentales: false,
+      documentos: indiceDocumentos.documentos,
+      numDocumentosIncluidos: 0,
+      numDocumentosNoIncluidos: indiceDocumentos.documentos.length,
+      ...(resumen !== undefined ? { incluyeResumenEstructurado: true } : {}),
       escrituras: 0,
     },
     libro,
@@ -1505,6 +1882,8 @@ export function generarPaqueteAsesor(
       polizas: filasPolizas,
     },
     incidencias,
+    documentos: indiceDocumentos.documentos,
+    ...(resumen !== undefined ? { resumen } : {}),
   };
 }
 
@@ -1547,10 +1926,16 @@ function informeTxt(paquete: PaqueteAsesorGenerado): string {
     `  Inmuebles: ${m.inmueblesEfectivos ? m.inmueblesEfectivos.join(', ') : '(todos los de los propietarios)'}`,
     `  Ejercicios: ${m.ejerciciosEfectivos ? m.ejerciciosEfectivos.join(', ') : '(sin filtro anual)'}`,
     `  Meses: ${m.mesesEfectivos ? m.mesesEfectivos.join(', ') : '(sin filtro mensual)'}`,
+    `  Rango de fechas: ${m.rangoFechasEfectivo ? `${m.rangoFechasEfectivo.desde}..${m.rangoFechasEfectivo.hasta}` : '(sin filtro por fechas)'}`,
     '',
     'CONTENIDO',
     ...Object.entries(m.conteos).map(([k, v]) => `  ${k}: ${v}`),
     `  Incidencias: ${m.numIncidencias} (ver incidencias.json)`,
+    '',
+    'DOCUMENTOS ORIGINALES',
+    `  En el índice: ${(m.documentos ?? []).length} · incluidos en el ZIP: ${m.numDocumentosIncluidos ?? 0} · no incluidos: ${m.numDocumentosNoIncluidos ?? (m.documentos ?? []).length}`,
+    ...(m.documentos ?? []).map((d) => `  - ${d.estado}: ${d.nombre || d.documentoId} [${d.tipo}] ${d.rutaZip ?? '(sin binario)'}`),
+    '  Los no incluidos se conservan referenciados; ningún original se sustituye por OCR o resumen.',
     '',
     'TOTALES DEL LIBRO (EUR)',
     `  Ingresos: ${m.totales.totalIngresos.toFixed(2)}`,
@@ -1580,9 +1965,48 @@ function informeTxt(paquete: PaqueteAsesorGenerado): string {
  */
 export function empaquetarPaqueteAsesor(
   paquete: PaqueteAsesorGenerado,
+  opciones: OpcionesEmpaquetadoPaqueteAsesor = {},
 ): ResultadoEmpaquetadoAsesor {
+  // P6: estados documentales definitivos (solo cambia lo que el llamante pudo
+  // leer; lo no resuelto se declara, no se finge). Si NO se intentó resolver
+  // binarios (sin opciones), los documentos siguen PENDIENTE_BINARIO: no es un
+  // fallo de acceso, es un empaquetado sin binarios solicitados.
+  const intentoResolverBinarios = opciones.documentosOriginales !== undefined
+    || opciones.fallosDocumentos !== undefined;
+  const aplicado = intentoResolverBinarios
+    ? aplicarBinariosAlIndice(
+      paquete.documentos,
+      opciones.documentosOriginales ?? [],
+      opciones.fallosDocumentos ?? [],
+    )
+    : { documentos: paquete.documentos, advertencias: [] as string[] };
+  const documentos = aplicado.documentos;
+  const binarios = new Map<string, Uint8Array>();
+  for (const original of opciones.documentosOriginales ?? []) {
+    if (!binarios.has(original.documentoId)) binarios.set(original.documentoId, original.bytes);
+  }
+  const documentosIncluidos = documentos.filter((d) => d.estado === 'INCLUIDO' && d.rutaZip !== null);
+  const incluyeBinarios = documentosIncluidos.length > 0;
+  const incluirIndiceDocumentos = paquete.documentos.length > 0
+    || opciones.incluirIndiceDocumentos === true
+    || opciones.documentosOriginales !== undefined
+    || opciones.fallosDocumentos !== undefined;
+
+  const paqueteParaInforme: PaqueteAsesorGenerado = {
+    ...paquete,
+    manifest: {
+      ...paquete.manifest,
+      documentos,
+      incluyeBinariosDocumentales: incluyeBinarios,
+      numDocumentosIncluidos: documentosIncluidos.length,
+      numDocumentosNoIncluidos: documentos.length - documentosIncluidos.length,
+      advertencias: [...paquete.manifest.advertencias, ...aplicado.advertencias],
+    },
+    documentos,
+  };
+
   const entradasTexto: EntradaZip[] = [
-    { ruta: 'informe.txt', contenido: utf8Bytes(informeTxt(paquete)) },
+    { ruta: 'informe.txt', contenido: utf8Bytes(informeTxt(paqueteParaInforme)) },
     { ruta: 'libro-ingresos-gastos.csv', contenido: utf8Bytes(libroACsv(paquete.libro)) },
     {
       ruta: 'totales.json',
@@ -1601,9 +2025,33 @@ export function empaquetarPaqueteAsesor(
     { ruta: 'datos/polizas.csv', contenido: utf8Bytes(filasACsv(COLUMNAS_POLIZA_PAQUETE, paquete.filas.polizas)) },
   ];
 
+  if (paquete.resumen !== undefined) {
+    // El resumen se re-serializa con el estado documental definitivo.
+    entradasTexto.push({
+      ruta: 'resumen.json',
+      contenido: utf8Bytes(jsonEstable({
+        ...paquete.resumen,
+        documentos: {
+          ...paquete.resumen.documentos,
+          indice: documentos,
+          incluidos: documentosIncluidos.length,
+          noIncluidos: documentos.length - documentosIncluidos.length,
+        },
+      })),
+    });
+  }
+  if (incluirIndiceDocumentos) {
+    entradasTexto.push({ ruta: 'documentos.json', contenido: utf8Bytes(jsonEstable(documentos)) });
+  }
+  for (const documento of documentosIncluidos) {
+    const bytes = binarios.get(documento.documentoId);
+    if (!bytes || !documento.rutaZip) continue;
+    entradasTexto.push({ ruta: documento.rutaZip, contenido: bytes });
+  }
+
   const hashes: Record<string, string> = {};
   for (const e of entradasTexto) hashes[e.ruta] = sha256Hex(e.contenido);
-  const manifest = { ...paquete.manifest, hashes };
+  const manifest = { ...paqueteParaInforme.manifest, hashes };
   const manifestBytes = utf8Bytes(jsonEstable(manifest));
   const entradas: EntradaZip[] = [
     { ruta: 'manifest.json', contenido: manifestBytes },
@@ -1618,5 +2066,7 @@ export function empaquetarPaqueteAsesor(
       sha256: sha256Hex(e.contenido),
       bytes: e.contenido.length,
     })),
+    manifest,
+    documentos,
   };
 }

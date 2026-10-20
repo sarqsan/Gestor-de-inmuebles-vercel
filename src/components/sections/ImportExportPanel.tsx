@@ -10,7 +10,7 @@
  * Flujo exportar: entidad/ámbito/formato → previsualización → descarga.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, FileJson, FileSpreadsheet, ShieldCheck, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, FileArchive, FileJson, FileSpreadsheet, ShieldCheck, Upload } from 'lucide-react';
 import type { Inmueble, UsuarioApp } from '../../types';
 import type { GestionCartera } from '../../lib/gestionesCartera';
 import { sha256Hex } from '../../lib/importacion/hash';
@@ -59,6 +59,13 @@ import {
   type FuentesCatalogo,
 } from '../../lib/importExportFirebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
+import { vistaPreviaPaqueteAsesor, type FuentesPaqueteAsesor } from '../../lib/paqueteAsesor/adaptador';
+import type {
+  PaqueteAsesorGenerado,
+  ResultadoEmpaquetadoAsesor,
+  SolicitudPaqueteAsesor,
+} from '../../lib/paqueteAsesor/tipos';
+import { verificarPaqueteAsesorZip, type InformeVerificacionPaquete } from '../../lib/paqueteAsesor/verificador';
 
 interface Props {
   inmuebles: Inmueble[];
@@ -97,7 +104,7 @@ function descargarBlob(nombre: string, blob: Blob): void {
 }
 
 export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, gestiones = [], scope, ficheroExterno = null, onFicheroExternoConsumido }) => {
-  const [pestana, setPestana] = useState<'importar' | 'exportar'>('importar');
+  const [pestana, setPestana] = useState<'importar' | 'exportar' | 'asesor'>('importar');
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ---- importar ----
@@ -145,6 +152,30 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
   const [expError, setExpError] = useState<string | null>(null);
   const [expInfo, setExpInfo] = useState<string | null>(null);
   const [expGenerando, setExpGenerando] = useState(false);
+
+  // ---- P6 · Paquete del asesor (informativo/documental; no es declaración) ----
+  const [asCatalogo, setAsCatalogo] = useState<Inmueble[]>(inmuebles);
+  const [asCargandoCatalogo, setAsCargandoCatalogo] = useState(false);
+  /** '' = toda la cartera autorizada; si no, id del inmueble. */
+  const [asAmbito, setAsAmbito] = useState('');
+  const [asModo, setAsModo] = useState<'EJERCICIO' | 'RANGO' | 'TODO'>('EJERCICIO');
+  const [asEjercicio, setAsEjercicio] = useState(String(new Date().getFullYear()));
+  const [asDesde, setAsDesde] = useState('');
+  const [asHasta, setAsHasta] = useState('');
+  const [asIncluirDocs, setAsIncluirDocs] = useState(true);
+  const [asRevisando, setAsRevisando] = useState(false);
+  const [asGenerando, setAsGenerando] = useState(false);
+  const [asFuentes, setAsFuentes] = useState<FuentesPaqueteAsesor | null>(null);
+  const [asPaquete, setAsPaquete] = useState<PaqueteAsesorGenerado | null>(null);
+  const [asResultado, setAsResultado] = useState<ResultadoEmpaquetadoAsesor | null>(null);
+  const [asVerificacion, setAsVerificacion] = useState<InformeVerificacionPaquete | null>(null);
+  const [asAvisos, setAsAvisos] = useState<string[]>([]);
+  const [asError, setAsError] = useState<string | null>(null);
+  /** Cualquier cambio de ámbito/periodo invalida la revisión previa. */
+  const invalidarRevisionAsesor = (): void => {
+    setAsPaquete(null); setAsResultado(null); setAsVerificacion(null); setAsAvisos([]); setAsError(null);
+    setAsFuentes(null);
+  };
 
   // ---- identidad/ámbito (auditoría 3ac21a5/D2) ----
   // El montaje en Configuración no pasa usuario/gestiones/scope y UserProfile
@@ -515,6 +546,133 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
     }
   };
 
+  // ---- P6 · Paquete del asesor: catálogo, revisión y generación ----
+  // El catálogo del selector se carga con el MISMO lector acotado del panel
+  // (no hay consulta nueva): si Rules deniega, falla honesto y no adivina.
+  useEffect(() => {
+    if (pestana !== 'asesor' || !identidadLista || asCatalogo.length > 0 || asCargandoCatalogo) return;
+    let vivo = true;
+    setAsCargandoCatalogo(true);
+    cargarFuentesCatalogo(scopeEf)
+      .then((f) => { if (vivo) setAsCatalogo(f.inmuebles); })
+      .catch((e) => {
+        if (vivo) setAsError(mensajeDeErrorUsuario(e, 'No se pudo cargar el catálogo autorizado para el paquete.'));
+      })
+      .finally(() => { if (vivo) setAsCargandoCatalogo(false); });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pestana, identidadLista, asCatalogo.length, asCargandoCatalogo, scopeEf]);
+
+  const propietariosDelAmbitoAsesor = (): string[] => {
+    if (ambito.propietarioIdsLegibles !== null) return [...ambito.propietarioIdsLegibles];
+    // Master: el motor EXIGE propietarios explícitos (nunca volcado global
+    // implícito). Se derivan de las fichas ya cargadas del ámbito elegido.
+    const ids = new Set<string>();
+    const base = asAmbito === '' ? asCatalogo : asCatalogo.filter((i) => i.id === asAmbito);
+    for (const i of base) {
+      const p = i.propietarioId ?? i.propietarioPrincipalId;
+      if (typeof p === 'string' && p.trim() !== '') ids.add(p);
+    }
+    return [...ids].sort();
+  };
+
+  const construirSolicitudAsesor = (): SolicitudPaqueteAsesor => {
+    const propietarioIds = propietariosDelAmbitoAsesor();
+    if (propietarioIds.length === 0) {
+      throw new Error('Sin propietarios en el ámbito: no se genera un paquete global implícito.');
+    }
+    const base: SolicitudPaqueteAsesor = {
+      propietarioIds,
+      incluirDocumentos: asIncluirDocs,
+      incluirResumenEstructurado: true,
+      incluirFacturas: true,
+      incluirLiquidaciones: true,
+      incluirPolizas: true,
+      ...(asAmbito !== '' ? { inmuebleIds: [asAmbito] } : {}),
+    };
+    if (asModo === 'EJERCICIO') {
+      const anio = Number(asEjercicio);
+      if (!Number.isInteger(anio) || anio < 1900 || anio > 9999) {
+        throw new Error(`Ejercicio inválido: «${asEjercicio}». Usa un año de 4 cifras.`);
+      }
+      return { ...base, ejercicios: [anio] };
+    }
+    if (asModo === 'RANGO') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(asDesde) || !/^\d{4}-\d{2}-\d{2}$/.test(asHasta)) {
+        throw new Error('El rango de fechas necesita «desde» y «hasta» en formato YYYY-MM-DD.');
+      }
+      return { ...base, rangoFechas: { desde: asDesde, hasta: asHasta } };
+    }
+    return base;
+  };
+
+  /** Paso 1: revisar alcance SIN leer binarios (solo metadatos P3). */
+  const onRevisarAsesor = async (): Promise<void> => {
+    if (!identidadLista || !usuarioEf) return;
+    invalidarRevisionAsesor();
+    setAsRevisando(true);
+    try {
+      const solicitud = construirSolicitudAsesor();
+      // Carga diferida: el adaptador Firebase (Storage/Firestore) no entra en
+      // el bundle inicial ni en los montajes que nunca abren esta pestaña.
+      const { cargarFuentesPaqueteAsesor } = await import('../../lib/paqueteAsesorFirebase');
+      const fuentes = await cargarFuentesPaqueteAsesor(usuarioEf, scopeEf);
+      const paquete = vistaPreviaPaqueteAsesor(fuentes, solicitud, ambito, {
+        generatedAt: new Date().toISOString(),
+        generatedBy: identidad?.usuarioId ?? null,
+      });
+      setAsFuentes(fuentes);
+      setAsPaquete(paquete);
+    } catch (e) {
+      setAsError(mensajeDeErrorUsuario(e, 'No se ha podido preparar el paquete del asesor.'));
+    } finally {
+      setAsRevisando(false);
+    }
+  };
+
+  /** Paso 2: empaquetar (lee originales verificados) y descargar. */
+  const onGenerarAsesor = async (): Promise<void> => {
+    if (!asPaquete || !asFuentes) return;
+    setAsGenerando(true); setAsError(null); setAsResultado(null); setAsVerificacion(null);
+    try {
+      const { empaquetarConBinariosStorage } = await import('../../lib/paqueteAsesorFirebase');
+      const { resultado, avisos } = await empaquetarConBinariosStorage(asPaquete, asFuentes, asIncluirDocs);
+      // Autoverificación con el MISMO verificador independiente: un ZIP que no
+      // cumple el contrato no se entrega (se muestra el problema en su lugar).
+      const informe = verificarPaqueteAsesorZip(resultado.zip, {
+        paqueteIdEsperado: resultado.manifest.paqueteId,
+      });
+      setAsVerificacion(informe);
+      if (!informe.ok) {
+        const errores = informe.problemas.filter((p) => p.nivel === 'ERROR').slice(0, 4)
+          .map((p) => `${p.codigo}: ${p.descripcion}`);
+        setAsError(`El ZIP generado NO supera la verificación interna y no se descarga. ${errores.join(' | ')}`);
+        return;
+      }
+      const periodo = asModo === 'EJERCICIO' ? asEjercicio : asModo === 'RANGO' ? `${asDesde}_${asHasta}` : 'sin-fechas';
+      const nombre = `paquete-asesor_${asAmbito === '' ? 'cartera' : asAmbito}_${periodo}_${resultado.manifest.paqueteId.slice(0, 12)}.zip`;
+      descargarBytes(nombre.replace(/[^A-Za-z0-9._-]+/g, '_'), resultado.zip, 'application/zip');
+      setAsResultado(resultado);
+      setAsAvisos(avisos);
+    } catch (e) {
+      setAsError(mensajeDeErrorUsuario(e, 'No se ha podido generar el paquete del asesor.'));
+    } finally {
+      setAsGenerando(false);
+    }
+  };
+
+  const revisionAsesor = useMemo(() => {
+    if (!asPaquete) return null;
+    const documentos = asPaquete.documentos;
+    const porEstado = new Map<string, number>();
+    for (const d of documentos) porEstado.set(d.estado, (porEstado.get(d.estado) ?? 0) + 1);
+    const criticas = asPaquete.incidencias.filter((i) => i.severidad === 'CRITICA');
+    const avisos = asPaquete.incidencias.filter((i) => i.severidad === 'AVISO');
+    const entidades: [string, number][] = ['inmuebles', 'contratos', 'cobros', 'gastos', 'facturas', 'liquidaciones', 'polizas', 'lineasLibro']
+      .map((k) => [k, asPaquete.manifest.conteos[k] ?? 0]);
+    return { documentos, porEstado, criticas, avisos, entidades };
+  }, [asPaquete]);
+
   const pendientes = run?.registros.filter((r) => r.decision !== 'AUTO') ?? [];
   const autos = run?.registros.filter((r) => r.decision === 'AUTO') ?? [];
   // INCIDENCIA (cartera destino): registros que aún no tienen titular resuelto.
@@ -625,6 +783,11 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
             aria-current={pestana === 'exportar' ? 'true' : undefined} type="button" onClick={() => setPestana('exportar')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold ${pestana === 'exportar' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
             Exportar
+          </button>
+          <button
+            aria-current={pestana === 'asesor' ? 'true' : undefined} type="button" onClick={() => setPestana('asesor')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold ${pestana === 'asesor' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+            Paquete del asesor
           </button>
         </div>
       </div>
@@ -1070,6 +1233,203 @@ export const ImportExportPanel: React.FC<Props> = ({ inmuebles, usuario = null, 
           </button>
           {expError && <div className="p-3 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 font-semibold">{expError}</div>}
           {expInfo && <div className="p-3 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold flex items-center gap-2"><Download className="w-4 h-4" />{expInfo}</div>}
+        </div>
+      )}
+
+      {pestana === 'asesor' && (
+        <div className="space-y-3 text-xs">
+          <p className="text-slate-600 leading-relaxed">
+            Paquete <strong>informativo y documental</strong> para el asesor: índice, libro, totales, incidencias,
+            avisos y originales custodiados. <strong>No es una declaración tributaria</strong> ni se envía a la AEAT,
+            y no calcula deducciones propias. Ámbito autorizado: {ambito.esMaster
+              ? 'master (se exigen propietarios explícitos derivados de las fichas)'
+              : `${(ambito.propietarioIdsLegibles ?? []).length} propietario(s) legible(s)`}.
+          </p>
+          <ol className="list-decimal ml-4 text-slate-500 space-y-0.5">
+            <li>Elige ámbito (cartera o un inmueble) y periodo.</li>
+            <li>Revisa qué se incluirá y las incidencias (sin leer ningún binario).</li>
+            <li>Genera y descarga el ZIP; se autoverifica antes de entregarse.</li>
+          </ol>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="text-slate-600">Ámbito:
+              <select
+                value={asAmbito}
+                onChange={(e) => { setAsAmbito(e.target.value); invalidarRevisionAsesor(); }}
+                className="ml-1 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-700 max-w-full">
+                <option value="">Toda la cartera autorizada ({asCatalogo.length} inmueble(s))</option>
+                {asCatalogo.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.direccion}{i.ciudad ? ` — ${i.ciudad}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-slate-600">Periodo:
+              <select
+                value={asModo}
+                onChange={(e) => { setAsModo(e.target.value as 'EJERCICIO' | 'RANGO' | 'TODO'); invalidarRevisionAsesor(); }}
+                className="ml-1 border border-slate-200 rounded-lg px-2 py-1 font-semibold text-slate-700">
+                <option value="EJERCICIO">Ejercicio completo</option>
+                <option value="RANGO">Rango de fechas</option>
+                <option value="TODO">Sin filtro temporal</option>
+              </select>
+            </label>
+            {asModo === 'EJERCICIO' && (
+              <label className="text-slate-600">Ejercicio:
+                <input
+                  value={asEjercicio}
+                  inputMode="numeric"
+                  onChange={(e) => { setAsEjercicio(e.target.value); invalidarRevisionAsesor(); }}
+                  className="ml-1 border border-slate-200 rounded-lg px-2 py-1 w-24 font-mono" />
+              </label>
+            )}
+            {asModo === 'RANGO' && (
+              <>
+                <label className="text-slate-600">Desde:
+                  <input type="date" value={asDesde}
+                    onChange={(e) => { setAsDesde(e.target.value); invalidarRevisionAsesor(); }}
+                    className="ml-1 border border-slate-200 rounded-lg px-2 py-1 font-mono" />
+                </label>
+                <label className="text-slate-600">Hasta:
+                  <input type="date" value={asHasta}
+                    onChange={(e) => { setAsHasta(e.target.value); invalidarRevisionAsesor(); }}
+                    className="ml-1 border border-slate-200 rounded-lg px-2 py-1 font-mono" />
+                </label>
+              </>
+            )}
+          </div>
+
+          <label className="flex items-start gap-2 text-slate-600 font-semibold">
+            <input type="checkbox" checked={asIncluirDocs}
+              onChange={(e) => { setAsIncluirDocs(e.target.checked); invalidarRevisionAsesor(); }} />
+            <span>
+              Incluir documentos originales custodiados (P3). Solo entran los legibles cuyo SHA-256 coincide con la
+              huella registrada; los no accesibles o dudosos se declaran en el índice y en las advertencias, sin
+              bloquear el paquete.
+            </span>
+          </label>
+          <p className="text-slate-500">
+            El ZIP incluye siempre <code>manifest.json</code>, <code>informe.txt</code>, <code>libro-ingresos-gastos.csv</code>,
+            <code>totales.json</code>, <code>incidencias.json</code>, <code>resumen.json</code> y las proyecciones
+            <code>datos/*.csv</code>. Los originales nunca se sustituyen por transcripciones OCR ni resúmenes.
+          </p>
+
+          <button type="button" onClick={() => void onRevisarAsesor()}
+            disabled={!identidadLista || asRevisando || asCargandoCatalogo}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white rounded-xl font-bold flex items-center gap-2">
+            <FileArchive className="w-4 h-4" />
+            {asRevisando ? 'Revisando alcance…' : '1. Revisar alcance e incidencias'}
+          </button>
+          {asCargandoCatalogo && <p className="text-slate-500">Cargando catálogo autorizado…</p>}
+          {asError && <div className="p-3 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 font-semibold">{asError}</div>}
+
+          {asPaquete && revisionAsesor && (
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+              <div className="font-bold text-slate-800">Revisión previa · todavía no se ha leído ningún binario</div>
+              <div className="flex flex-wrap gap-1.5">
+                <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 font-semibold">
+                  {asPaquete.manifest.inmueblesEfectivos?.length ?? asCatalogo.length} inmueble(s)
+                </span>
+                <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 font-semibold">
+                  {asPaquete.manifest.propietariosEfectivos.length} propietario(s)
+                </span>
+                <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 font-semibold">
+                  ejercicio: {asPaquete.manifest.ejerciciosEfectivos?.join(', ') ?? 'sin filtro'}
+                </span>
+                <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 font-semibold">
+                  fechas: {asPaquete.manifest.rangoFechasEfectivo
+                    ? `${asPaquete.manifest.rangoFechasEfectivo.desde} → ${asPaquete.manifest.rangoFechasEfectivo.hasta}`
+                    : 'sin filtro'}
+                </span>
+                <span className="px-2 py-0.5 rounded-lg bg-white border border-slate-200 font-mono">
+                  id {asPaquete.manifest.paqueteId.slice(0, 16)}…
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+                {revisionAsesor.entidades.map(([entidad, n]) => (
+                  <div key={entidad} className="px-2 py-1 rounded-lg bg-white border border-slate-200">
+                    <span className="text-slate-500">{entidad}</span>: <strong>{n}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="text-slate-700">
+                <strong>{revisionAsesor.documentos.length}</strong> documento(s) referenciado(s):
+                {' '}{[...revisionAsesor.porEstado.entries()].map(([estado, n]) => `${estado} ${n}`).join(' · ') || 'ninguno'}
+                {' '}· {asIncluirDocs ? 'se intentará leer solo los PENDIENTE_BINARIO' : 'no se leerán binarios'}.
+              </div>
+              <div className="text-slate-700">
+                Incidencias: <strong className="text-rose-700">{revisionAsesor.criticas.length} crítica(s)</strong>
+                {' '}y {revisionAsesor.avisos.length} aviso(s).
+                {(revisionAsesor.criticas.length > 0 || revisionAsesor.avisos.length > 0) && (
+                  <ul className="mt-1 space-y-0.5 max-h-32 overflow-auto">
+                    {[...revisionAsesor.criticas, ...revisionAsesor.avisos].slice(0, 12).map((i, idx) => (
+                      <li key={`${i.codigo}-${i.id ?? idx}`} className="font-mono text-[11px] text-slate-600">
+                        [{i.severidad}] {i.codigo}: {i.descripcion}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {asFuentes && asFuentes.avisos.length > 0 && (
+                <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+                  <div className="font-bold flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Limitaciones de lectura</div>
+                  <ul className="mt-0.5 space-y-0.5">
+                    {asFuentes.avisos.map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                </div>
+              )}
+              {asPaquete.manifest.advertencias.length > 0 && (
+                <details className="text-slate-600">
+                  <summary className="cursor-pointer font-semibold">Advertencias y limitaciones del paquete ({asPaquete.manifest.advertencias.length})</summary>
+                  <ul className="mt-1 space-y-0.5 list-disc ml-4">
+                    {asPaquete.manifest.advertencias.map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                </details>
+              )}
+              <button type="button" onClick={() => void onGenerarAsesor()} disabled={asGenerando}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-bold flex items-center gap-2">
+                <Download className="w-4 h-4" />
+                {asGenerando ? 'Empaquetando y verificando…' : '2. Generar y descargar ZIP'}
+              </button>
+            </div>
+          )}
+
+          {asResultado && (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 space-y-1">
+              <div className="font-bold flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Paquete generado y verificado</div>
+              <div>
+                {asResultado.entradas.length} entrada(s) · {asResultado.zip.byteLength.toLocaleString('es-ES')} bytes ·
+                sha256 del ZIP <code className="font-mono">{asResultado.sha256Zip.slice(0, 24)}…</code>
+              </div>
+              <div>
+                Documentos incluidos: <strong>{asResultado.manifest.numDocumentosIncluidos ?? 0}</strong> ·
+                no incluidos: <strong>{asResultado.manifest.numDocumentosNoIncluidos ?? 0}</strong> ·
+                {asResultado.manifest.incluyeBinariosDocumentales ? ' el ZIP contiene originales' : ' el ZIP no contiene binarios'} ·
+                resumen estructurado: {asResultado.manifest.incluyeResumenEstructurado ? 'sí' : 'no'}.
+              </div>
+              {asVerificacion && (
+                <div className="text-emerald-700">
+                  Verificación independiente: {asVerificacion.numEntradasZip} entradas, paqueteId
+                  {' '}<code className="font-mono">{asVerificacion.paqueteId?.slice(0, 16)}…</code>
+                  {asVerificacion.problemas.length > 0 ? ` · ${asVerificacion.problemas.length} advertencia(s)` : ' · sin problemas'}.
+                </div>
+              )}
+              {asAvisos.length > 0 && (
+                <details className="text-amber-800">
+                  <summary className="cursor-pointer font-semibold">Documentos declarados no incluidos / avisos ({asAvisos.length})</summary>
+                  <ul className="mt-1 space-y-0.5 list-disc ml-4">
+                    {asAvisos.map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                </details>
+              )}
+              <div className="text-emerald-700">
+                {(asResultado.manifest.numDocumentosNoIncluidos ?? 0) > 0 || revisionAsesor?.criticas.length
+                  ? 'Paquete CON advertencias: revisa los documentos no incluidos antes de entregarlo.'
+                  : 'Paquete completo para el alcance solicitado.'}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

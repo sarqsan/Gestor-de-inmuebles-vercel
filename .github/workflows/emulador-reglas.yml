@@ -7,6 +7,8 @@ on:
   push:
     branches:
       - arena/b18a36de-gestor-de-inmuebles-vercel
+      # AG-03.3: aceptación en emuladores oficiales de la rama de la sesión (sin secretos ni despliegue).
+      - arena/8ed3381d-gestor-de-inmuebles-vercel
   workflow_dispatch:
 
 permissions:

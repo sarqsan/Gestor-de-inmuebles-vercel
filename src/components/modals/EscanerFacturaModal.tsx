@@ -31,6 +31,9 @@ const fechaISOValida = (s: string) => {
 
 export const MENSAJE_ABONO_NO_ADMITIDO = 'El importe total es negativo: parece una factura de abono o rectificativa. El escáner no crea gastos en negativo ni movimientos de devolución automáticos; regístrala manualmente para reflejarla como corresponda. No se ha guardado nada.';
 
+/** P5.4: nunca se sobrescribe un alta ANULADA; se pide reactivación explícita. */
+export const MENSAJE_FACTURA_ANULADA = 'Esta factura ya tiene un gasto ANULADO en este inmueble. No se sobrescribirá: reactívalo desde Gastos (estado «Pendiente») si debe volver a estar activo y, si le falta la factura, vuelve a procesarla. No se ha creado ni modificado ningún gasto.';
+
 export const EscanerFacturaModal: React.FC<Props> = ({ gastos, inmuebles, currentUser, onSave, onDelete, onClose }) => {
   const { refDialogo, propsDialogo } = useDialogoAccesible({ abierto: true, onCerrar: onClose }, 'Escanear factura');
   const [archivo, setArchivo] = useState<File | null>(null);
@@ -86,6 +89,9 @@ export const EscanerFacturaModal: React.FC<Props> = ({ gastos, inmuebles, curren
     })
     : undefined;
   const duplicado = evaluacion?.exacto;
+  // P5.4: un alta OCR ANULADA comparte ID estable con el alta nueva; reescanear
+  // la resucitaría. Se bloquea y se guía a una reactivación explícita.
+  const anulado = evaluacion?.anulado;
   const posibles = evaluacion?.posibles || [];
   const puedeReintentarVinculo = esReintentoVinculoOcr(duplicado, clave, claveLegada);
   const propietario = inmuebles.find((i) => i.id === inmuebleId);
@@ -155,6 +161,7 @@ export const EscanerFacturaModal: React.FC<Props> = ({ gastos, inmuebles, curren
       fechaEmision: valores.fechaEmision || undefined,
       proveedor: valores.proveedor,
     });
+    if (evaluacionFinal.anulado) { setError(MENSAJE_FACTURA_ANULADA); return; }
     const repetido = evaluacionFinal.exacto;
     const esReintento = esReintentoVinculoOcr(repetido, construirClaveOcr(camposClave, huella, propietario.id), claveLegada);
     if (repetido && !esReintento) { setError('Ya existe un gasto con este documento o número de factura en este inmueble. No se ha creado ni modificado ningún gasto.'); return; }
@@ -245,6 +252,7 @@ export const EscanerFacturaModal: React.FC<Props> = ({ gastos, inmuebles, curren
             <p className="self-center text-xs text-slate-500">El gasto se crea como PENDIENTE. No se marcará pagado ni se decidirá la deducibilidad fiscal.</p>
           </fieldset>
           {duplicado && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{puedeReintentarVinculo ? `Ya existe el gasto ${duplicado.id} de un intento anterior sin el enlace al documento. Puedes reintentar para completar la referencia al documento sin crear otro gasto.` : `Duplicado: esta factura ya está registrada en este inmueble (gasto ${duplicado.id}). No se creará ni modificará ningún gasto.`}</div>}
+          {anulado && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{MENSAJE_FACTURA_ANULADA} (gasto {anulado.id})</div>}
           {posibles.length > 0 && <div role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             <strong>Posibles coincidencias para revisar</strong> (no bloquean el alta ni modifican esos gastos):
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
@@ -257,7 +265,7 @@ export const EscanerFacturaModal: React.FC<Props> = ({ gastos, inmuebles, curren
       </div>
       <footer className="flex justify-end gap-2 border-t bg-slate-50 p-4">
         <button type="button" onClick={onClose} disabled={confirmando} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700">Cancelar</button>
-        {archivo && textoOcr && <button type="button" onClick={() => void confirmar()} disabled={ocupado || (!!duplicado && !puedeReintentarVinculo) || !valores.importeTotal} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50"><Check className="h-4 w-4" />Confirmar y añadir gasto</button>}
+        {archivo && textoOcr && <button type="button" onClick={() => void confirmar()} disabled={ocupado || !!anulado || (!!duplicado && !puedeReintentarVinculo) || !valores.importeTotal} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50"><Check className="h-4 w-4" />Confirmar y añadir gasto</button>}
       </footer>
     </div>
   </div>;

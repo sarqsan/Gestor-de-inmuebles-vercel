@@ -164,9 +164,30 @@ describe('P5.2-C · duplicados por inmueble', () => {
     expect(ev.posibles).toEqual([]);
   });
 
-  it('los gastos ANULADOS no cuentan como duplicado', () => {
+  it('los gastos ANULADOS no cuentan como duplicado exacto ni como posible', () => {
     const anulado = { ...gastoOcr(inmuebleA.id, claveNueva), estado: 'ANULADO' as Gasto['estado'] };
     const ev = evaluarDuplicadosFacturaOcr([anulado], { clave: claveNueva, sha256: SHA, inmuebleId: inmuebleA.id });
+    expect(ev.exacto).toBeUndefined();
+    expect(ev.posibles).toEqual([]);
+  });
+
+  it('P5.4: un alta OCR ANULADA de la misma factura se reporta aparte y bloquea el reintento', () => {
+    const anulado = { ...gastoOcr(inmuebleA.id, claveNueva), estado: 'ANULADO' as Gasto['estado'] };
+    const ev = evaluarDuplicadosFacturaOcr([anulado], { clave: claveNueva, sha256: SHA, inmuebleId: inmuebleA.id });
+    expect(ev.anulado).toBe(anulado);
+    // El alta nueva generaría EXACTAMENTE el mismo ID: escribirla con
+    // setDoc({merge:true}) resucitaría el registro anulado como PENDIENTE.
+    expect(idGastoOcr(claveNueva)).toBe(anulado.id);
+    expect(esReintentoVinculoOcr(anulado, claveNueva, claveLegada)).toBe(false);
+  });
+
+  it('P5.4: un ANULADO de OTRO inmueble no bloquea el alta de este inmueble', () => {
+    const anuladoOtro = {
+      ...gastoOcr('inm-b', construirClaveOcr(camposEntrada, SHA, 'inm-b')),
+      estado: 'ANULADO' as Gasto['estado'],
+    };
+    const ev = evaluarDuplicadosFacturaOcr([anuladoOtro], { clave: claveNueva, sha256: SHA, inmuebleId: inmuebleA.id });
+    expect(ev.anulado).toBeUndefined();
     expect(ev.exacto).toBeUndefined();
     expect(ev.posibles).toEqual([]);
   });

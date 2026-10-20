@@ -20,7 +20,7 @@ Fecha: 2026-10-20 · Rama: `arena/8ed3381d-gestor-de-inmuebles-vercel` · Reposi
 | Commits previos de la sesión | `b61aa2a`, `24e271f`, `a463e99` (ORDEN 1) · `edf020e` (AG-03.1, sólo documentación) |
 | HEAD al empezar AG-03.2 | `edf020e` = `origin/arena/8ed3381d-…` (verificado con `git fetch` + comparación de SHA; árbol limpio) |
 | Trabajo previo | Recuperado tal cual (no se sobrescribió ni se re-generó nada; se construyó encima de `edf020e`) |
-| HEAD al cerrar este informe | Ver el último apartado «Commits de esta orden» (se añade tras el commit) |
+| HEAD al cerrar este informe | `72a2c6f7c928eac54be9be9571c3a1f27c248d7b` (código + pruebas + este informe), empujado a `origin/arena/8ed3381d-gestor-de-inmuebles-vercel`; el registro de este SHA se añade en el commit siguiente |
 
 Nota: la orden AG-03.1 citaba ficheros que no existen con ese nombre (`src/firebase.ts`, `src/configuracionFirebase.ts`,
 `src/utils/entornoFirebase.ts`); los equivalentes reales son `src/lib/firebase.ts`, `server/titularidades/configuracionFirebase.ts`
@@ -201,4 +201,5 @@ Nada de lo siguiente se ha ejecutado (prohibido por la orden hasta presentar res
 Según el criterio de cierre de la orden, AG-03 queda **resuelto en código y demostrado en unitario** (toda operación Firestore usa la base con nombre; Storage funciona con una arquitectura compatible y segura; los flujos documentales pasan sus pruebas con cuentas normales simuladas), y **pendiente de aceptación real**: emuladores, publicación de `storage.rules`, despliegue del servidor y la validación con cuentas normales descrita en §8. Hasta completar esos pasos no debe declararse cerrado en producción.
 
 ## Commits de esta orden
-Se completa tras el commit (ver mensaje de entrega).
+- `72a2c6f` — feat(AG-03.2): custodia documental autorizada en servidor sobre la base Firestore con nombre; storage.rules sin consultas a Firestore (42 ficheros).
+- Commit siguiente — docs: registro del SHA anterior en este informe (sólo documentación).

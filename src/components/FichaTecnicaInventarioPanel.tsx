@@ -44,6 +44,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { useDialogoAccesible } from '../accesibilidad/dialogo';
+import { mensajeDeErrorUsuario } from '../feedback/mensajes';
 
 interface Props {
   inmueble: Inmueble;
@@ -68,6 +69,9 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
   const [busqueda, setBusqueda] = useState('');
   const [savingFicha, setSavingFicha] = useState(false);
   const [fichaMsg, setFichaMsg] = useState('');
+  // AG-04.1: la subida de adjuntos es fail-closed (lanza si no se custodia);
+  // el error se muestra aquí en lugar de quedar como rechazo sin manejar.
+  const [errorAdjunto, setErrorAdjunto] = useState('');
 
   const [provincia, setProvincia] = useState(inmueble.provincia || '');
   const [planta, setPlanta] = useState(inmueble.planta || '');
@@ -310,7 +314,14 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
 
   const handleUploadDoc = async (item: ElementoInventario, file: File) => {
     if (!canEdit) return;
-    const up = await uploadInventarioAdjuntoStorage(inmueble.id, item.id, file, file.name);
+    setErrorAdjunto('');
+    let up: { downloadURL: string; storagePath: string };
+    try {
+      up = await uploadInventarioAdjuntoStorage(inmueble.id, item.id, file, file.name);
+    } catch (err) {
+      setErrorAdjunto(mensajeDeErrorUsuario(err, 'No se ha podido guardar el adjunto. Inténtalo de nuevo.'));
+      return;
+    }
     const docItem = {
       id: `doc_${Date.now()}`,
       inventarioId: item.id,
@@ -616,19 +627,26 @@ export const FichaTecnicaInventarioPanel: React.FC<Props> = ({
                     </div>
                   )}
                   {canEdit && (
-                    <label className="inline-flex items-center gap-1 text-blue-700 cursor-pointer pt-1 font-medium hover:underline">
-                      <Upload className="w-3.5 h-3.5" />
-                      Adjuntar factura / foto
-                      <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void handleUploadDoc(item, f);
-                        }}
-                      />
-                    </label>
+                    <>
+                      <label className="inline-flex items-center gap-1 text-blue-700 cursor-pointer pt-1 font-medium hover:underline">
+                        <Upload className="w-3.5 h-3.5" />
+                        Adjuntar factura / foto
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void handleUploadDoc(item, f);
+                          }}
+                        />
+                      </label>
+                      {errorAdjunto && (
+                        <p role="alert" className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1 mt-1">
+                          {errorAdjunto}
+                        </p>
+                      )}
+                    </>
                   )}
                   {item.historial && item.historial.length > 0 && (
                     <details className="text-[11px] text-slate-500 pt-1">

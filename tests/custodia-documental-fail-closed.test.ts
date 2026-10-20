@@ -35,7 +35,7 @@ vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, col: string) => ({ __col: col }),
   doc: (_db: unknown, col: string, id: string) => ({ __col: col, __id: id }),
   getDoc: async () => ({ exists: () => false, data: () => undefined }),
-  setDoc: async () => undefined,
+  setDoc: vi.fn(async () => undefined),
   updateDoc: async () => undefined,
   deleteDoc: async () => undefined,
   deleteField: () => ({}),
@@ -75,10 +75,20 @@ import {
 } from '../src/lib/custodiaDocumental/adjuntoInlinePoliza';
 import { esMensajeTecnico, mensajeDeErrorUsuario } from '../src/feedback/mensajes';
 import {
+  sanearAdjuntoParaFirestore,
+  sanitizeDocForFirestore,
+  saveCandidatoFirestore,
   uploadDocumentoAportadoFile,
   uploadFacturaGasto,
+  uploadIncidenciaAdjuntoStorage,
+  uploadInventarioAdjuntoStorage,
+  uploadInmuebleImageToStorage,
   uploadJustificanteCobro,
+  uploadPresupuestoDocumentoStorage,
+  uploadReformaAdjuntoStorage,
+  uploadTrabajoAdjuntoStorage,
 } from '../src/lib/firebase';
+import { setDoc } from 'firebase/firestore';
 
 const RAIZ = resolve(__dirname, '..');
 const leer = (rel: string) => readFileSync(resolve(RAIZ, rel), 'utf8');
@@ -503,5 +513,161 @@ describe('D · ningún flujo cliente usa ya el almacén temporal, el SDK de Stor
       expect(motor).toContain(`'${ruta}'`);
     }
     expect(motor).not.toMatch(/['"`]data:|base64|localStorage|sessionStorage/);
+  });
+  it('D5 · AG-04.1: src/lib/firebase.ts no fabrica referencias sin custodia (sin data-URL, local_*, server_* ni /api/documents/ inventadas)', () => {
+    const codigo = sinComentarios('src/lib/firebase.ts');
+    expect(codigo).not.toContain('readAsDataURL');
+    expect(codigo).not.toContain('createObjectURL');
+    expect(codigo).not.toContain('local_${');
+    expect(codigo).not.toContain('server_${');
+    expect(codigo).not.toContain('/api/documents/${');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E · AG-04.1: el resto de `upload*` de src/lib/firebase.ts también es
+// fail-closed (motor real contra el servidor sintético): éxito sólo con
+// objeto confirmado + URL; denegación o plazo agotado lanzan
+// `ErrorCustodiaDocumento` y nunca resuelven con data-URL, `blob:` ni `local_*`.
+// ---------------------------------------------------------------------------
+describe('E · upload* restantes — Storage confirmado o error explícito; nunca éxito aparente', () => {
+  const foto = () => new File([new Uint8Array(500)], 'foto.jpg', { type: 'image/jpeg' });
+
+  it('E1 · uploadIncidenciaAdjuntoStorage: éxito → URL https del objeto; denegado → SIN_PERMISO', async () => {
+    const url = await uploadIncidenciaAdjuntoStorage('inc_A', pdf(), 'parte.pdf', 'documento');
+    expect(url).toMatch(/^https:\/\/firebasestorage\.googleapis\.com\//);
+    expect(url.startsWith('data:')).toBe(false);
+    estado.modo = 'denegada';
+    const e = await capturar(uploadIncidenciaAdjuntoStorage('inc_A', pdf(), 'parte.pdf', 'documento'));
+    expect(e.codigo).toBe('SIN_PERMISO');
+    expect(e.storagePath).toMatch(/^incidencias\/inc_A\//);
+  });
+
+  it('E2 · uploadPresupuestoDocumentoStorage denegado → SIN_PERMISO (nunca resuelve con data-URL y ruta real)', async () => {
+    estado.modo = 'denegada';
+    const e = await capturar(uploadPresupuestoDocumentoStorage('pres_A', pdf(), 'pres.pdf'));
+    expect(e.codigo).toBe('SIN_PERMISO');
+    expect(e.storagePath).toMatch(/^presupuestos\/pres_A\//);
+  });
+
+  it('E3 · uploadTrabajoAdjuntoStorage denegado → SIN_PERMISO (nunca resuelve con data-URL)', async () => {
+    estado.modo = 'denegada';
+    const e = await capturar(uploadTrabajoAdjuntoStorage('trab_A', pdf(), 'adj.pdf'));
+    expect(e.codigo).toBe('SIN_PERMISO');
+    expect(e.storagePath).toMatch(/^trabajos\/trab_A\//);
+  });
+
+  it('E4 · uploadInventarioAdjuntoStorage: éxito → ruta real + URL https; denegado → SIN_PERMISO', async () => {
+    const r = await uploadInventarioAdjuntoStorage('inm_A', 'inv_A', foto(), 'foto.jpg');
+    expect(r.storagePath).toMatch(/^inmuebles\/inm_A\/inventario\/inv_A\/\d+_foto\.jpg$/);
+    expect(r.downloadURL).toMatch(/^https:\/\/firebasestorage\.googleapis\.com\//);
+    estado.modo = 'denegada';
+    const e = await capturar(uploadInventarioAdjuntoStorage('inm_A', 'inv_A', foto(), 'foto.jpg'));
+    expect(e.codigo).toBe('SIN_PERMISO');
+  });
+
+  it('E5 · uploadInmuebleImageToStorage: éxito → ruta del catálogo (sin local_*) + URL https; denegado → SIN_PERMISO', async () => {
+    const r = await uploadInmuebleImageToStorage('inm_A', 'img_1', foto(), 'foto.jpg');
+    expect(r.storagePath).toBe('inmuebles/inm_A/img_1_foto.jpg');
+    expect(r.storagePath.startsWith('local_')).toBe(false);
+    expect(r.downloadURL).toMatch(/^https:\/\//);
+    expect(r.downloadURL.startsWith('data:')).toBe(false);
+    expect(r.downloadURL.startsWith('blob:')).toBe(false);
+    estado.modo = 'denegada';
+    const e = await capturar(uploadInmuebleImageToStorage('inm_A', 'img_1', foto(), 'foto.jpg'));
+    expect(e.codigo).toBe('SIN_PERMISO');
+  });
+
+  it('E6 · uploadInmuebleImageToStorage con el almacén colgado: TIEMPO_AGOTADO a los 2 s (antes: data-URL con éxito aparente)', async () => {
+    vi.useFakeTimers();
+    estado.modo = 'colgada';
+    const captura = capturar(uploadInmuebleImageToStorage('inm_A', 'img_1', foto(), 'foto.jpg'));
+    await vi.advanceTimersByTimeAsync(2_001);
+    const e = await captura;
+    expect(e.codigo).toBe('TIEMPO_AGOTADO');
+    expect(e.storagePath).toBe('inmuebles/inm_A/img_1_foto.jpg');
+  });
+
+  it('E7 · uploadReformaAdjuntoStorage: denegado → SIN_PERMISO; colgado → TIEMPO_AGOTADO a los 8 s', async () => {
+    estado.modo = 'denegada';
+    const denegado = await capturar(uploadReformaAdjuntoStorage('proy_A', pdf(), 'plano.pdf', 'prop_A'));
+    expect(denegado.codigo).toBe('SIN_PERMISO');
+    vi.useFakeTimers();
+    estado.modo = 'colgada';
+    const captura = capturar(uploadReformaAdjuntoStorage('proy_A', pdf(), 'plano.pdf', 'prop_A'));
+    await vi.advanceTimersByTimeAsync(8_001);
+    const agotado = await captura;
+    expect(agotado.codigo).toBe('TIEMPO_AGOTADO');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F · AG-04.1: el saneado previo a Firestore nunca inventa `/api/documents/*`
+// ni trata sus referencias muertas como custodia.
+// ---------------------------------------------------------------------------
+describe('F · sanearAdjuntoParaFirestore — sin URL inventadas ni referencias muertas', () => {
+  const base64Grande = `data:application/pdf;base64,${'A'.repeat(30_000)}`;
+  const base64Pequeno = `data:application/pdf;base64,${'A'.repeat(100)}`;
+
+  it('F1 · URL durable (https) + base64 grande → desprende la copia y conserva la URL', () => {
+    const r = sanearAdjuntoParaFirestore({ id: 'a1', url: 'https://firebasestorage.googleapis.com/v0/b/x/o/y', base64Data: base64Grande, nombre: 'f.pdf' });
+    expect(r).toEqual({ id: 'a1', url: 'https://firebasestorage.googleapis.com/v0/b/x/o/y', nombre: 'f.pdf' });
+  });
+
+  it('F2 · base64 grande sin URL → desprende el binario SIN inventar `/api/documents/*`', () => {
+    const r = sanearAdjuntoParaFirestore({ id: 'a2', base64Data: base64Grande, nombre: 'f.pdf' });
+    expect(r).toEqual({ id: 'a2', nombre: 'f.pdf' });
+    expect('url' in r).toBe(false);
+  });
+
+  it('F3 · URL muerta `/api/documents/*` + base64 grande → elimina ambos, conserva los metadatos', () => {
+    const r = sanearAdjuntoParaFirestore({ id: 'a3', url: '/api/documents/a3', base64Data: base64Grande, nombre: 'f.pdf' });
+    expect(r).toEqual({ id: 'a3', nombre: 'f.pdf' });
+  });
+
+  it('F4 · URL muerta `/api/documents/*` + base64 pequeño → elimina la URL y conserva la copia', () => {
+    const r = sanearAdjuntoParaFirestore({ id: 'a4', url: '/api/documents/a4', base64Data: base64Pequeno, nombre: 'f.pdf' });
+    expect(r).toEqual({ id: 'a4', base64Data: base64Pequeno, nombre: 'f.pdf' });
+  });
+
+  it('F5 · base64 pequeño sin URL → intacto', () => {
+    const entrada = { id: 'a5', base64Data: base64Pequeno, nombre: 'f.pdf' };
+    expect(sanearAdjuntoParaFirestore(entrada)).toEqual(entrada);
+  });
+
+  it('F6 · sanitizeDocForFirestore: ningún archivo sale con `/api/documents/*` ni base64 voluminoso', () => {
+    const salida = sanitizeDocForFirestore({
+      id: 'sol-1',
+      documentos: [{
+        nombre: 'DNI', archivos: [
+          { id: 'nuevo', base64Data: base64Grande, nombre: 'dni.pdf' },
+          { id: 'heredado', url: '/api/documents/heredado', base64Data: base64Grande, nombre: 'viejo.pdf' },
+          { id: 'nube', url: 'https://firebasestorage.googleapis.com/v0/b/x/o/y', base64Data: base64Grande, nombre: 'ok.pdf' },
+        ],
+      }],
+    });
+    const archivos = (salida.documentos as Array<{ archivos: Array<Record<string, unknown>> }>)[0].archivos;
+    expect(JSON.stringify(archivos)).not.toContain('/api/documents/');
+    expect(JSON.stringify(archivos)).not.toContain('AAAA');
+    expect(archivos[0]).toEqual({ id: 'nuevo', nombre: 'dni.pdf' });
+    expect(archivos[1]).toEqual({ id: 'heredado', nombre: 'viejo.pdf' });
+    expect(archivos[2]).toEqual({ id: 'nube', url: 'https://firebasestorage.googleapis.com/v0/b/x/o/y', nombre: 'ok.pdf' });
+  });
+
+  it('F7 · saveCandidatoFirestore persiste los documentos saneados (sin base64 grande ni URL inventadas)', async () => {
+    vi.mocked(setDoc).mockClear();
+    await saveCandidatoFirestore({
+      id: 'cand-1',
+      documentosAnalizados: [
+        { id: 'd1', base64Data: base64Grande, nombreArchivo: 'nomina.pdf' },
+        { id: 'd2', url: '/api/documents/d2', base64Data: base64Pequeno, nombreArchivo: 'dni.pdf' },
+      ],
+    } as never);
+    expect(setDoc).toHaveBeenCalledTimes(1);
+    const guardado = vi.mocked(setDoc).mock.calls[0][1] as { documentosAnalizados: Array<Record<string, unknown>> };
+    expect(JSON.stringify(guardado.documentosAnalizados)).not.toContain('/api/documents/');
+    expect(JSON.stringify(guardado.documentosAnalizados)).not.toContain('A'.repeat(10_000));
+    expect(guardado.documentosAnalizados[0]).toEqual({ id: 'd1', nombreArchivo: 'nomina.pdf' });
+    expect(guardado.documentosAnalizados[1]).toEqual({ id: 'd2', base64Data: base64Pequeno, nombreArchivo: 'dni.pdf' });
   });
 });

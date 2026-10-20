@@ -83,8 +83,10 @@ import {
 import { FIREBASE_BASE_DATOS_ID, FIREBASE_PROYECTO_ID } from './entornoFirebase';
 import {
   LIMITES_PREFIJO,
+  clasificarErrorStorage,
   esReferenciaSinCustodia,
   exigirTitular,
+  ErrorCustodiaDocumento,
   sanearSegmento,
   subirBinarioDuradero,
   tipoContenidoDe,
@@ -1170,6 +1172,61 @@ export function sanitizeObjectForFirestore<T extends Record<string, any>>(obj: T
 }
 
 /**
+ * Una URL cuenta como custodia durable del binario cuando apunta a Cloud
+ * Storage (https) o a una ruta `/api/*` durable (p. ej. la descarga P2 de
+ * justificantes). `/api/documents/*` es el almacén temporal RETIRADO (410):
+ * nunca cuenta como custodia.
+ */
+function esUrlCustodiaDuradera(url: unknown): boolean {
+  return typeof url === 'string'
+    && (url.startsWith('http') || (url.startsWith('/api/') && !url.startsWith('/api/documents/')));
+}
+
+function esReferenciaAlmacenRetirado(url: unknown): boolean {
+  return typeof url === 'string' && url.startsWith('/api/documents/');
+}
+
+/**
+ * Sanea UN adjunto/archivo antes de persistirlo en Firestore (límite de 1 MiB
+ * por documento).
+ *
+ * AG-04.1 (2026-10-20): antes, un base64 voluminoso (> 25 KB) sin URL se
+ * «convertía» en `/api/documents/{id}`, una referencia al almacén temporal
+ * retirado que NUNCA tuvo un binario detrás, y se destruía la única copia.
+ * Además, una URL `/api/documents/*` heredada contaba como custodia y
+ * provocaba el desprendimiento del base64. Ambas ramas son éxito aparente:
+ * ahora nunca se inventa una URL y las referencias muertas se eliminan; el
+ * registro sin binario queda sin binario de forma explícita (metadatos
+ * intactos) en lugar de apuntar a un documento inexistente.
+ */
+export function sanearAdjuntoParaFirestore<T extends Record<string, any>>(adjunto: T): T {
+  const url: unknown = (adjunto as { url?: unknown }).url;
+  const base64: unknown = (adjunto as { base64Data?: unknown }).base64Data;
+  if (esUrlCustodiaDuradera(url)) {
+    // El binario vive en la URL durable: se desprende la copia voluminosa.
+    const { base64Data: _descartado, ...resto } = adjunto;
+    return resto as T;
+  }
+  if (esReferenciaAlmacenRetirado(url)) {
+    // Referencia muerta (el almacén responde 410): se elimina para no
+    // persistir éxito aparente. El base64 pequeño se conserva como copia.
+    const { url: _muerta, ...sinUrl } = adjunto;
+    if (typeof base64 === 'string' && base64.length > 25000) {
+      const { base64Data: _grande, ...resto } = sinUrl;
+      return resto as T;
+    }
+    return sinUrl as T;
+  }
+  if (typeof base64 === 'string' && base64.length > 25000) {
+    // Sin custodia durable y binario voluminoso: se desprende para respetar
+    // el límite de 1 MiB, SIN inventar ninguna URL.
+    const { base64Data: _grande, ...resto } = adjunto;
+    return resto as T;
+  }
+  return adjunto;
+}
+
+/**
  * Ensures candidate document objects do not exceed the 1MB Firestore limit.
  * Keeps URLs, metadata, and optimizes/trims oversized base64 strings so Firestore never rejects writes.
  */
@@ -1179,20 +1236,7 @@ export function sanitizeDocForFirestore(docObj: Record<string, any>): Record<str
     if (Array.isArray(clean.documentos)) {
       clean.documentos = clean.documentos.map((item: any) => {
         if (Array.isArray(item.archivos)) {
-          const trimmedArchivos = item.archivos.map((arch: any) => {
-            // If the archivo has a server or cloud URL (/api/documents/ or http), strip bulky base64Data completely so Firestore doc stays tiny (<20KB)
-            if (arch.url && (arch.url.startsWith('http') || arch.url.startsWith('/api/documents/') || arch.url.startsWith('/api/'))) {
-              const { base64Data, ...rest } = arch;
-              return rest;
-            }
-            // If base64Data is large (> 25KB), convert reference to server URL and strip raw string
-            if (arch.base64Data && arch.base64Data.length > 25000) {
-              const safeUrl = arch.url || `/api/documents/${arch.id || 'doc'}`;
-              const { base64Data, ...rest } = arch;
-              return { ...rest, url: safeUrl };
-            }
-            return arch;
-          });
+          const trimmedArchivos = item.archivos.map((arch: any) => sanearAdjuntoParaFirestore(arch));
           return { ...item, archivos: trimmedArchivos };
         }
         return item;
@@ -1211,18 +1255,9 @@ export async function saveCandidatoFirestore(candidato: Candidato) {
   try {
     let cleanCand = deepCleanForFirestore(candidato);
     if (Array.isArray(cleanCand.documentosAnalizados)) {
-      cleanCand.documentosAnalizados = cleanCand.documentosAnalizados.map((d: any) => {
-        if (d.url && (d.url.startsWith('http') || d.url.startsWith('/api/documents/') || d.url.startsWith('/api/'))) {
-          const { base64Data, ...rest } = d;
-          return rest;
-        }
-        if (d.base64Data && d.base64Data.length > 25000) {
-          const safeUrl = d.url || `/api/documents/${d.id || 'doc'}`;
-          const { base64Data, ...rest } = d;
-          return { ...rest, url: safeUrl };
-        }
-        return d;
-      });
+      // AG-04.1: mismo saneado que `sanitizeDocForFirestore` (nunca inventa
+      // `/api/documents/*`; elimina las referencias muertas al almacén retirado).
+      cleanCand.documentosAnalizados = cleanCand.documentosAnalizados.map((d: any) => sanearAdjuntoParaFirestore(d));
     }
     await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
   } catch (err) {
@@ -2594,6 +2629,10 @@ export async function uploadReformaAdjuntoStorage(
   fileName: string,
   propietarioId?: string
 ): Promise<{ url: string; storagePath: string }> {
+  // AG-04.1 (2026-10-20): fail-closed. Antes, si la subida fallaba o superaba
+  // 8 s, devolvía una data-URL local con la ruta REAL de Storage como si el
+  // objeto se hubiese custodiado (éxito aparente con referencia que nunca
+  // resolvía). Ahora sólo devuelve cuando el servidor confirma el objeto.
   const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const ownerSeg = (propietarioId || 'sin_asignar').replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `reformas_documentos/${ownerSeg}/${proyectoId}/${Date.now()}_${safeName}`;
@@ -2612,17 +2651,10 @@ export async function uploadReformaAdjuntoStorage(
     if (url && typeof url === 'string') {
       return { url, storagePath };
     }
+    throw new ErrorCustodiaDocumento('TIEMPO_AGOTADO', { storagePath });
   } catch (err) {
-    console.warn('Storage upload error / timeout, using fallback data URL:', err);
+    throw clasificarErrorStorage(err, storagePath);
   }
-
-  // Fallback seguro a data URL local
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve({ url: reader.result as string, storagePath });
-    reader.onerror = () => resolve({ url: '', storagePath });
-    reader.readAsDataURL(file);
-  });
 }
 
 // ============================================================
@@ -2878,9 +2910,15 @@ export async function deleteSolicitudFirestore(solicitudId: string) {
 }
 
 /**
- * Uploads an image blob to Firebase Storage.
- * Uses a fast 2-second timeout guard. If Firebase Storage is unavailable or slow,
- * it immediately returns a lightweight compressed Data URL so image uploading NEVER blocks or fails.
+ * Sube la imagen de un inmueble al catálogo (`inmuebles/{id}/{fichero}`).
+ *
+ * AG-04.1 (2026-10-20): fail-closed. Antes, si la subida fallaba o superaba
+ * 2 s, devolvía una data-URL (o un `blob:` efímero de la pestaña) con una
+ * referencia `local_*` como si la foto se hubiese guardado: la galería la
+ * persistía en Firestore con mensaje de éxito y la imagen dejaba de resolver
+ * (pérdida con apariencia de éxito). Ahora sólo devuelve cuando el servidor
+ * confirma el objeto; cualquier otro desenlace lanza `ErrorCustodiaDocumento`
+ * y la galería informa del error sin guardar nada.
  */
 export async function uploadInmuebleImageToStorage(
   inmuebleId: string,
@@ -2890,16 +2928,6 @@ export async function uploadInmuebleImageToStorage(
 ): Promise<{ downloadURL: string; storagePath: string }> {
   const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `inmuebles/${inmuebleId}/${imageId}_${sanitizedName}`;
-
-  // Helper to quickly convert blob to data URL as fallback
-  const getDataUrlFallback = async (): Promise<string> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string) || '');
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(blob);
-    });
-  };
 
   try {
     const uploadWork = (async () => {
@@ -2919,15 +2947,10 @@ export async function uploadInmuebleImageToStorage(
 
     if (resultURL && typeof resultURL === 'string') {
       return { downloadURL: resultURL, storagePath };
-    } else {
-      console.warn('Firebase Storage upload timed out, using compressed Data URL fallback.');
-      const dataURL = await getDataUrlFallback();
-      return { downloadURL: dataURL || URL.createObjectURL(blob), storagePath: `local_${imageId}` };
     }
+    throw new ErrorCustodiaDocumento('TIEMPO_AGOTADO', { storagePath });
   } catch (err) {
-    console.warn('Firebase Storage upload failed, using compressed Data URL fallback:', err);
-    const dataURL = await getDataUrlFallback();
-    return { downloadURL: dataURL || URL.createObjectURL(blob), storagePath: `local_${imageId}` };
+    throw clasificarErrorStorage(err, storagePath);
   }
 }
 
@@ -3647,6 +3670,9 @@ export async function uploadIncidenciaAdjuntoStorage(
   nombreArchivo: string,
   tipo?: 'imagen' | 'video' | 'documento'
 ): Promise<string> {
+  // AG-04.1 (2026-10-20): fail-closed. Antes devolvía una data-URL local como
+  // si fuese la URL del objeto custodiado cuando la subida fallaba. Ahora
+  // lanza `ErrorCustodiaDocumento` y el modal informa sin guardar el adjunto.
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `incidencias/${incidenciaId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
@@ -3656,13 +3682,7 @@ export async function uploadIncidenciaAdjuntoStorage(
     await uploadBytes(fileRef, file, { contentType: mimeType });
     return await getDownloadURL(fileRef);
   } catch (err) {
-    console.warn('Firebase Storage upload failed for incidencia adjunto, fallback to data url:', err);
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    });
+    throw clasificarErrorStorage(err, storagePath);
   }
 }
 
@@ -3808,6 +3828,10 @@ export async function uploadPresupuestoDocumentoStorage(
   file: File | Blob,
   nombreArchivo: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
+  // AG-04.1 (2026-10-20): fail-closed. Antes devolvía una data-URL local con
+  // la ruta REAL de Storage como si el objeto se hubiese custodiado cuando la
+  // subida fallaba. Ahora lanza `ErrorCustodiaDocumento` y el modal informa
+  // sin guardar el documento.
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `presupuestos/${presupuestoId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
@@ -3818,14 +3842,7 @@ export async function uploadPresupuestoDocumentoStorage(
     const downloadUrl = await getDownloadURL(fileRef);
     return { downloadUrl, storagePath };
   } catch (err) {
-    console.warn('Firebase Storage upload failed for presupuesto document, using fallback:', err);
-    const downloadUrl = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    });
-    return { downloadUrl, storagePath };
+    throw clasificarErrorStorage(err, storagePath);
   }
 }
 
@@ -3834,6 +3851,9 @@ export async function uploadTrabajoAdjuntoStorage(
   file: File | Blob,
   nombreArchivo: string
 ): Promise<string> {
+  // AG-04.1 (2026-10-20): fail-closed. Antes devolvía una data-URL local como
+  // si fuese la URL del objeto custodiado cuando la subida fallaba. Ahora
+  // lanza `ErrorCustodiaDocumento` y el modal informa sin guardar el adjunto.
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `trabajos/${trabajoId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
@@ -3843,13 +3863,7 @@ export async function uploadTrabajoAdjuntoStorage(
     await uploadBytes(fileRef, file, { contentType: mimeType });
     return await getDownloadURL(fileRef);
   } catch (err) {
-    console.warn('Firebase Storage upload failed for trabajo adjunto, using fallback:', err);
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    });
+    throw clasificarErrorStorage(err, storagePath);
   }
 }
 
@@ -3947,6 +3961,10 @@ export async function uploadInventarioAdjuntoStorage(
   file: File | Blob,
   nombreArchivo: string
 ): Promise<{ downloadURL: string; storagePath: string }> {
+  // AG-04.1 (2026-10-20): fail-closed. Antes devolvía una data-URL local con
+  // la ruta REAL de Storage como si el objeto se hubiese custodiado cuando la
+  // subida fallaba. Ahora lanza `ErrorCustodiaDocumento` y el panel informa
+  // sin guardar el adjunto.
   const sanitizedName = nombreArchivo.replace(/[^a-zA-Z0-9._-]/g, '_');
   const storagePath = `inmuebles/${inmuebleId}/inventario/${inventarioId}/${Date.now()}_${sanitizedName}`;
   const fileRef = ref(storage, storagePath);
@@ -3955,14 +3973,7 @@ export async function uploadInventarioAdjuntoStorage(
     const downloadURL = await getDownloadURL(fileRef);
     return { downloadURL, storagePath };
   } catch (err) {
-    console.warn('Storage inventario fallback:', err);
-    const downloadURL = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string) || '');
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(file);
-    });
-    return { downloadURL, storagePath };
+    throw clasificarErrorStorage(err, storagePath);
   }
 }
 

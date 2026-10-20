@@ -7,6 +7,7 @@ import {
   SolicitudDocEstado,
   DocItemEstado,
 } from '../types';
+import { generarTokenCapacidad } from '../lib/tokensPublicos';
 
 export interface DocTemplatePreset {
   tipo: TipoDocumento;
@@ -267,7 +268,7 @@ export function buildSolicitudDocumentacion(
     ownerId?: string;
   }
 ): SolicitudDocumentacion {
-  const token = `doc-${candidato.id.replace(/[^a-zA-Z0-9]/g, '')}-${Math.random().toString(36).substring(2, 8)}`;
+  const token = generarTokenCapacidad('doc');
   const nowStr = new Date().toISOString();
   const fechaFormateada = new Date().toLocaleString('es-ES', {
     day: '2-digit',

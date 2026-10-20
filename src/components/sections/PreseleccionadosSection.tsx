@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { generarTokenCapacidad } from '../../lib/tokensPublicos';
 import {
   UserCheck,
   Building2,
@@ -123,7 +124,7 @@ export const PreseleccionadosSection: React.FC<PreseleccionadosSectionProps> = (
 
     const newInv: InvitacionVisita = {
       id: `inv-${candidate.id}`,
-      token: `vst-${candidate.id}-${Math.random().toString(36).substring(2, 7)}`,
+      token: generarTokenCapacidad('vst'),
       candidateId: candidate.id,
       candidateNombre: candidate.nombre,
       candidateTelefono: candidate.telefono,

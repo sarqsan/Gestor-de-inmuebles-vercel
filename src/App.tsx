@@ -107,6 +107,8 @@ import {
   deleteCandidatoFirestore,
   savePropietarioFirestore,
   saveSolicitudFirestore,
+  guardarSolicitudPublicaFirestore,
+  guardarCandidatoPublicoFirestore,
   deleteSolicitudFirestore,
   saveInvitacionFirestore,
   deleteInvitacionFirestore,
@@ -159,7 +161,8 @@ import { asignarTitularesAlta, type TitularesAltaInmueble } from './lib/altaInmu
 import { guardarTitularidad } from './lib/titularidadesFirestore';
 import { transmitirInmuebleFirestore } from './lib/transmisionPatrimonialFirestore';
 import type { PeticionTransmision, ResultadoTransmision } from './lib/transmisionPatrimonialFirestore';
-import { resolverTokensPublicos } from './lib/tokensPublicos';
+import { generarTokenCapacidad, resolverTokensPublicos } from './lib/tokensPublicos';
+import { registrarSolicitudPublica } from './lib/solicitudPublica';
 import {
   persistirMejorEsfuerzo,
   planificarAltaCandidato,
@@ -184,7 +187,6 @@ import { CrearAgendaVisitasModal } from './components/CrearAgendaVisitasModal';
 import {
   adaptarFichaAInmuebleVista,
   cargarFichaPublicaPorToken,
-  getFichaPublicaInmueble,
   type FichaPublicaInmueble,
 } from './lib/fichaPublicaInmueble';
 import { CuestionarioPublicoView } from './components/CuestionarioPublicoView';
@@ -197,6 +199,9 @@ import { PortalVisitaPublicaView } from './components/PortalVisitaPublicaView';
 import { CrearSolicitudDocModal } from './components/CrearSolicitudDocModal';
 import { DetalleSolicitudDocModal } from './components/DetalleSolicitudDocModal';
 import { PortalDocumentacionPublicaView } from './components/PortalDocumentacionPublicaView';
+import { PortalDocumentacionPublicaServidor } from './components/portal-publico/PortalDocumentacionPublicaServidor';
+import { PortalVisitaPublicaServidor } from './components/portal-publico/PortalVisitaPublicaServidor';
+import { CuestionarioPublicoServidor } from './components/portal-publico/CuestionarioPublicoServidor';
 import { FormalizarContratoModal } from './components/FormalizarContratoModal';
 import { CrearSolicitudSeguroModal } from './components/CrearSolicitudSeguroModal';
 import { DetalleSolicitudSeguroModal } from './components/DetalleSolicitudSeguroModal';
@@ -1157,21 +1162,28 @@ export default function App() {
     // suscribe aquí: vive en el efecto autenticado. Las vistas anónimas
     // resuelven la ficha pública mínima por id (efecto R3 posterior).
 
-    const unsubscribeInv = subscribeInvitaciones(conDatos<InvitacionVisita[]>('invitaciones', (data) => {
-      if (data && data.length > 0) {
-        setInvitaciones(data);
-        try { localStorage.setItem('rentselect_invitaciones', JSON.stringify(data)); } catch (e) {}
-      }
-    }));
+    // AG-02: `invitaciones`, `slots_visita` y `solicitudes_documentacion` solo
+    // se leen con sesión. Las reglas deniegan `list` al anónimo; los portales
+    // públicos resuelven su enlace por token en el servidor.
+    const unsubscribeInv = currentUser
+      ? subscribeInvitaciones(conDatos<InvitacionVisita[]>('invitaciones', (data) => {
+          if (data && data.length > 0) {
+            setInvitaciones(data);
+            try { localStorage.setItem('rentselect_invitaciones', JSON.stringify(data)); } catch (e) {}
+          }
+        }))
+      : () => {};
 
-    const unsubscribeSlot = subscribeVisitSlots(conDatos<VisitSlot[]>('slots_visita', (data) => {
-      if (data && data.length > 0) {
-        setSlots(data);
-        try { localStorage.setItem('rentselect_slots', JSON.stringify(data)); } catch (e) {}
-      }
-    }));
+    const unsubscribeSlot = currentUser
+      ? subscribeVisitSlots(conDatos<VisitSlot[]>('slots_visita', (data) => {
+          if (data && data.length > 0) {
+            setSlots(data);
+            try { localStorage.setItem('rentselect_slots', JSON.stringify(data)); } catch (e) {}
+          }
+        }))
+      : () => {};
 
-    const unsubscribeDoc = subscribeSolicitudesDoc((data) => {
+    const unsubscribeDoc = currentUser ? subscribeSolicitudesDoc((data) => {
       if (data && data.length > 0) {
         setSolicitudesDoc(data);
         try { localStorage.setItem('rentselect_solicitudes_doc', JSON.stringify(data)); } catch (e) {}
@@ -1209,7 +1221,7 @@ export default function App() {
           return fresh || prev;
         });
       }
-    });
+    }) : () => {};
 
     const unsubscribeEnlacesHook = subscribeEnlacesRegistro(conDatos<EnlaceRegistro[]>('enlaces_registro', (data) => {
       setEnlacesRegistro(data);
@@ -1821,7 +1833,7 @@ export default function App() {
         const existingInv = invitaciones.find((i) => i.candidateId === candidateId);
         if (!existingInv) {
           const sol = solicitudes.find((s) => s.candidatoId === cand.id);
-          const tokenVal = cand.cuestionarioToken || `vst-${cand.id}-${Math.random().toString(36).substring(2, 7)}`;
+          const tokenVal = generarTokenCapacidad('vst');
           const newInv: InvitacionVisita = {
             id: `inv-${cand.id}`,
             token: tokenVal,
@@ -2459,18 +2471,23 @@ export default function App() {
   };
 
   // Handler for creating/submitting new Solicitud from Candidate Portal
-  const handleSavePublicSolicitud = (newSol: SolicitudAlquiler) => {
-    setSolicitudes((prev) => [newSol, ...prev]);
-    saveSolicitudFirestore(newSol);
-
+  //
+  // AG-01: el alta pública solo se da por buena cuando `solicitudes` se ha
+  // escrito de verdad. La regla exige `nombre/email/telefono` (los añade
+  // `registrarSolicitudPublica`); si Firestore deniega, la promesa rechaza y
+  // la vista NO muestra el acuse de recibo. El candidato es un registro
+  // secundario: su fallo se registra, pero no invalida una solicitud ya
+  // persistida (reenviarla duplicaría el alta).
+  const handleSavePublicSolicitud = async (newSol: SolicitudAlquiler) => {
     // Also sync or create candidate record if not present
     const existingCandidate = candidatos.find(
       (c) => c.email.toLowerCase() === newSol.candidatoEmail.toLowerCase()
     );
 
+    let nuevoCandidato: Candidato | null = null;
     if (!existingCandidate) {
       const respuestas = newSol.cuestionarioData?.respuestas || [];
-      const newCand: Candidato = {
+      nuevoCandidato = {
         id: newSol.candidatoId,
         nombre: newSol.candidatoNombre,
         email: newSol.candidatoEmail,
@@ -2489,7 +2506,9 @@ export default function App() {
         observaciones: '',
         documentos: newSol.documentos || [],
         scoreEstimado: newSol.scoreSolvencia || 82,
-        cuestionarioToken: `q-${newSol.id}`,
+        // AG-02: token de capacidad con 128 bits; antes era `q-${newSol.id}`
+        // (predecible a partir del timestamp de la solicitud).
+        cuestionarioToken: generarTokenCapacidad('q'),
         cuestionarioIncidencias: {
           completado: newSol.cuestionarioCompletado,
           fechaCompletado: newSol.cuestionarioCompletado ? new Date().toISOString() : undefined,
@@ -2498,7 +2517,19 @@ export default function App() {
           respuestas,
         },
       };
-      saveCandidatoFirestore(newCand);
+    }
+
+    const persistida = await registrarSolicitudPublica(newSol, nuevoCandidato, {
+      guardarSolicitud: guardarSolicitudPublicaFirestore,
+      guardarCandidato: guardarCandidatoPublicoFirestore,
+      avisarCandidatoNoGuardado: (error) =>
+        console.error('Alta pública: solicitud guardada; el candidato no se pudo guardar:', error),
+    });
+
+    setSolicitudes((prev) => [persistida, ...prev]);
+    if (nuevoCandidato) {
+      const creado = nuevoCandidato;
+      setCandidatos((prev) => (prev.some((c) => c.id === creado.id) ? prev : [creado, ...prev]));
     }
   };
 
@@ -3642,24 +3673,16 @@ export default function App() {
         setCargandoFichaPublica(false);
         return;
       }
-      if (!activePublicVisitaToken && !activePublicSolicitudToken && !activePublicQuestionnaireToken) {
+      // AG-02: visita, cuestionario y documentación resuelven su token en el
+      // servidor, incluida la ficha del inmueble; aquí solo queda el alta de
+      // solicitud, que se publica por `sol-<idInmueble>`.
+      if (!activePublicSolicitudToken) {
         setCargandoFichaPublica(false);
         return;
       }
       setCargandoFichaPublica(true);
       try {
-        let ficha: FichaPublicaInmueble | null = null;
-        if (activePublicVisitaToken) {
-          const inv = invitaciones.find((i) => i.token === activePublicVisitaToken);
-          if (inv?.inmuebleId) ficha = await getFichaPublicaInmueble(inv.inmuebleId);
-        } else if (activePublicSolicitudToken) {
-          ficha = await cargarFichaPublicaPorToken(activePublicSolicitudToken);
-        } else if (activePublicQuestionnaireToken) {
-          const cand = candidatos.find(
-            (c) => c.cuestionarioToken === activePublicQuestionnaireToken || c.id === activePublicQuestionnaireToken
-          );
-          if (cand?.inmuebleId) ficha = await getFichaPublicaInmueble(cand.inmuebleId);
-        }
+        const ficha = await cargarFichaPublicaPorToken(activePublicSolicitudToken);
         if (!cancelado) setFichaPublicaVista(ficha);
       } catch {
         if (!cancelado) setFichaPublicaVista(null);
@@ -3670,14 +3693,7 @@ export default function App() {
     return () => {
       cancelado = true;
     };
-  }, [
-    currentUser,
-    activePublicVisitaToken,
-    activePublicSolicitudToken,
-    activePublicQuestionnaireToken,
-    invitaciones,
-    candidatos,
-  ]);
+  }, [currentUser, activePublicSolicitudToken]);
 
   if (carteraInvitada) return <InvitacionCarteraView enlaceId={carteraInvitada}
     onComplete={usuario => { setCurrentUser(usuario); setCarteraInvitada(null); window.history.replaceState({}, '', window.location.pathname); }}
@@ -3747,6 +3763,13 @@ export default function App() {
 
   // Standalone Candidate Document Submission Portal View (Public URL - Fase 2)
   if (activePublicDocToken) {
+    // AG-02: sin sesión, la solicitud se resuelve por token en el servidor.
+    // El estado `solicitudesDoc` solo se alimenta con sesión (las reglas
+    // deniegan el listado anónimo).
+    if (!currentUser) {
+      return <PortalDocumentacionPublicaServidor token={activePublicDocToken} />;
+    }
+
     const publicSolDoc = solicitudesDoc.find(
       (s) => s.token === activePublicDocToken || s.id === activePublicDocToken
     );
@@ -3792,6 +3815,11 @@ export default function App() {
 
   // Standalone Candidate Visita Booking Portal View (Public URL)
   if (activePublicVisitaToken) {
+    // AG-02: la invitación y los slots se leen en el servidor con el token;
+    // la reserva se confirma allí de forma atómica.
+    if (!currentUser) {
+      return <PortalVisitaPublicaServidor token={activePublicVisitaToken} />;
+    }
     return (
       <PortalVisitaPublicaView
         token={activePublicVisitaToken}
@@ -3843,15 +3871,21 @@ export default function App() {
     return (
       <PortalSolicitudPublicaView
         inmueble={targetInmueble}
-        onCompleteSolicitud={(newSol) => {
-          handleSavePublicSolicitud(newSol);
-        }}
+        // AG-01: se devuelve la promesa para que la vista espere la escritura
+        // y no muestre el acuse de recibo si Firestore la deniega.
+        onCompleteSolicitud={handleSavePublicSolicitud}
       />
     );
   }
 
   // Standalone Public Questionnaire View (Mobile & Desktop)
   if (activePublicQuestionnaireToken) {
+    // AG-02: el candidato se resuelve por token en el servidor y las respuestas
+    // se persisten allí con lista blanca (el anónimo no lee ni escribe).
+    if (!currentUser) {
+      return <CuestionarioPublicoServidor token={activePublicQuestionnaireToken} />;
+    }
+
     const publicCand = candidatos.find(
       (c) => c.cuestionarioToken === activePublicQuestionnaireToken || c.id === activePublicQuestionnaireToken
     );
@@ -4580,6 +4614,7 @@ export default function App() {
         inmuebles={scopedInmuebles}
         solicitudesDoc={solicitudesDoc}
         contratos={scopedContratos}
+        invitaciones={invitaciones}
         onClose={() => setSelectedCandidateForModal(null)}
         onUpdateStatus={handleUpdateStatus}
         onUpdateCandidateDocs={handleUpdateCandidateDocs}

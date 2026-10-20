@@ -3,6 +3,7 @@ import {
   Candidato,
   CandidateStatus,
   Inmueble,
+  InvitacionVisita,
   DocumentoAnalizado,
   InformeInteligente,
   NotaPrivada,
@@ -68,6 +69,8 @@ interface CandidateModalProps {
   inmuebles: Inmueble[];
   solicitudesDoc?: SolicitudDocumentacion[];
   contratos?: ContratoFormalizacion[];
+  /** AG-02: invitación de visita del candidato (su `token` es el del portal). */
+  invitaciones?: InvitacionVisita[];
   onClose: () => void;
   onUpdateStatus: (candidateId: string, newStatus: CandidateStatus) => void;
   onUpdateCandidateDocs?: (candidateId: string, docs: DocumentoAnalizado[], updatedCandidateData?: Partial<Candidato>) => void;
@@ -87,6 +90,7 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
   inmuebles,
   solicitudesDoc = [],
   contratos = [],
+  invitaciones = [],
   onClose,
   onUpdateStatus,
   onUpdateCandidateDocs,
@@ -401,19 +405,35 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
               </div>
 
               <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                <button
-                  onClick={() => {
-                    const token = candidato.cuestionarioToken || `vst-${candidato.id}`;
-                    const visitUrl = `${window.location.origin}/#visita/${token}`;
-                    navigator.clipboard.writeText(visitUrl);
-                    setCopiedLink(true);
-                    setTimeout(() => setCopiedLink(false), 3000);
-                  }}
-                  className="px-3 py-2 bg-white hover:bg-amber-100/60 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1 shadow-2xs"
-                >
-                  <Copy className="w-3.5 h-3.5 text-amber-700" />
-                  <span>{copiedLink ? '¡Enlace copiado!' : 'Copiar enlace'}</span>
-                </button>
+                {(() => {
+                  // AG-02: el portal de visita resuelve `invitaciones.token`; el
+                  // token del cuestionario NO abre la invitación (antes se
+                  // copiaba ese token y el enlace terminaba en «no encontrada»).
+                  const invitacionVisita = invitaciones.find(
+                    (inv) => inv.candidateId === candidato.id
+                  );
+                  if (!invitacionVisita?.token) {
+                    return (
+                      <span className="text-[11px] font-semibold text-amber-800">
+                        Sin enlace de visita generado
+                      </span>
+                    );
+                  }
+                  return (
+                    <button
+                      onClick={() => {
+                        const visitUrl = `${window.location.origin}/#visita/${invitacionVisita.token}`;
+                        navigator.clipboard.writeText(visitUrl);
+                        setCopiedLink(true);
+                        setTimeout(() => setCopiedLink(false), 3000);
+                      }}
+                      className="px-3 py-2 bg-white hover:bg-amber-100/60 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1 shadow-2xs"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-amber-700" />
+                      <span>{copiedLink ? '¡Enlace copiado!' : 'Copiar enlace'}</span>
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           )}

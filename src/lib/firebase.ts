@@ -1023,8 +1023,11 @@ export function subscribeCandidatos(callback: (candidatos: Candidato[]) => void)
         const data = docSnap.data() as Candidato;
         const initialMatch = INITIAL_CANDIDATOS.find((ic) => ic.id === docSnap.id);
 
-        if (!data.cuestionarioToken) {
-          data.cuestionarioToken = initialMatch?.cuestionarioToken || `q-${docSnap.id}`;
+        // AG-02: no se inventa un token `q-<id>` en la lectura (no se persiste
+        // y el portal lo rechazaría). Si el dato inicial lo aporta, se usa; si
+        // no, la UI emite y guarda un token de capacidad al abrir el enlace.
+        if (!data.cuestionarioToken && initialMatch?.cuestionarioToken) {
+          data.cuestionarioToken = initialMatch.cuestionarioToken;
         }
 
         // Merge initial mock questionnaire if completely missing on Firestore doc
@@ -1248,21 +1251,35 @@ export function sanitizeDocForFirestore(docObj: Record<string, any>): Record<str
   return clean;
 }
 
+/** Documento de candidato listo para Firestore (compartido por las dos escrituras). */
+function candidatoParaFirestore(candidato: Candidato): Record<string, any> {
+  const cleanCand = deepCleanForFirestore(candidato);
+  if (Array.isArray(cleanCand.documentosAnalizados)) {
+    // AG-04.1: mismo saneado que `sanitizeDocForFirestore` (nunca inventa
+    // `/api/documents/*`; elimina las referencias muertas al almacén retirado).
+    cleanCand.documentosAnalizados = cleanCand.documentosAnalizados.map((d: any) => sanearAdjuntoParaFirestore(d));
+  }
+  return cleanCand;
+}
+
 /**
  * Save / Update Candidato in Firestore
  */
 export async function saveCandidatoFirestore(candidato: Candidato) {
   try {
-    let cleanCand = deepCleanForFirestore(candidato);
-    if (Array.isArray(cleanCand.documentosAnalizados)) {
-      // AG-04.1: mismo saneado que `sanitizeDocForFirestore` (nunca inventa
-      // `/api/documents/*`; elimina las referencias muertas al almacén retirado).
-      cleanCand.documentosAnalizados = cleanCand.documentosAnalizados.map((d: any) => sanearAdjuntoParaFirestore(d));
-    }
-    await setDoc(doc(db, 'candidatos', candidato.id), cleanCand, { merge: true });
+    await setDoc(doc(db, 'candidatos', candidato.id), candidatoParaFirestore(candidato), { merge: true });
   } catch (err) {
     reportarErrorGuardado('candidatos', err, 'Error saving candidato to Firestore:');
   }
+}
+
+/**
+ * AG-01 — Escritura ESTRICTA del candidato del alta pública.
+ * A diferencia de `saveCandidatoFirestore`, no silencia el error: el llamador
+ * decide cómo tratarlo (el alta de la solicitud ya está persistida).
+ */
+export async function guardarCandidatoPublicoFirestore(candidato: Candidato): Promise<void> {
+  await setDoc(doc(db, 'candidatos', candidato.id), candidatoParaFirestore(candidato), { merge: true });
 }
 
 /**
@@ -1463,6 +1480,18 @@ export async function saveSolicitudFirestore(solicitud: SolicitudAlquiler) {
   } catch (err) {
     reportarErrorGuardado('solicitudes', err, 'Error saving solicitud to Firestore:');
   }
+}
+
+/**
+ * AG-01 — Alta pública ESTRICTA de la solicitud.
+ * La regla `solicitudes.create` exige `nombre/email/telefono`; si Firestore
+ * deniega o la red falla, el rechazo llega al portal y NO se muestra el acuse
+ * de recibo. La escritura de actualización interna sigue usando
+ * `saveSolicitudFirestore` (silenciosa, con incidencia de lectura/escritura).
+ */
+export async function guardarSolicitudPublicaFirestore(solicitud: SolicitudAlquiler): Promise<void> {
+  const cleanSol = sanitizeObjectForFirestore(solicitud);
+  await setDoc(doc(db, 'solicitudes', solicitud.id), cleanSol, { merge: true });
 }
 
 /**

@@ -97,3 +97,26 @@ export function resolverTokensPublicosDesdeUrl(url: string): TokensPublicosResue
   const parsed = new URL(url, 'http://localhost');
   return resolverTokensPublicos({ pathname: parsed.pathname, hash: parsed.hash, search: parsed.search });
 }
+
+/**
+ * AG-02 — Token de capacidad para enlaces públicos.
+ *
+ * Los tokens heredados se construían con `Math.random()` y, en el caso del
+ * cuestionario, con el propio id de la solicitud (`q-sol-<timestamp>`), lo que
+ * los hacía adivinables por un tercero. Los enlaces nuevos usan 128 bits de
+ * entropía del generador criptográfico del navegador. Los tokens ya emitidos
+ * siguen siendo válidos: se guardan en el documento y no se reescriben.
+ */
+export function generarTokenCapacidad(prefijo: string): string {
+  const bytes = new Uint8Array(16);
+  const cripto = typeof globalThis !== 'undefined' ? (globalThis.crypto as Crypto | undefined) : undefined;
+  if (cripto && typeof cripto.getRandomValues === 'function') {
+    cripto.getRandomValues(bytes);
+  } else {
+    // Entorno sin Web Crypto (no ocurre en navegadores ni en Node ≥ 18): se
+    // conserva una fuente no criptográfica antes que romper el alta.
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  const cuerpo = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${prefijo}-${cuerpo}`;
+}

@@ -55,6 +55,8 @@ import { crearServicioActualizacionRenta } from './server/actualizacionRenta/ser
 import { montarRutasActualizacionRenta } from './server/actualizacionRenta/rutasActualizacionRenta.js';
 import { crearServicioDocumentos } from './server/documentos/servicioDocumentos.js';
 import { montarRutasDocumentos } from './server/documentos/rutasDocumentos.js';
+import { crearServicioPortalPublico } from './server/portalPublico/servicioPortalPublico.js';
+import { montarRutasPortalPublico } from './server/portalPublico/rutasPortalPublico.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -267,6 +269,13 @@ const servicioJustificantesCobro = dependenciasIA.firestore && dependenciasIA.st
 // las rutas responden 503: ningún documento se acepta en memoria ni se finge.
 const servicioDocumentos = dependenciasIA.firestore && dependenciasIA.storage
   ? crearServicioDocumentos({ puerto: dependenciasIA.firestore, almacen: dependenciasIA.storage })
+  : null;
+
+// AG-02 — portales públicos por token (visita, cuestionario, documentación).
+// La autorización es el token del enlace, resuelto contra la base Firestore con
+// nombre con la credencial de servicio. Sin Firestore las rutas responden 503.
+const servicioPortalPublico = dependenciasIA.firestore
+  ? crearServicioPortalPublico({ puerto: dependenciasIA.firestore })
   : null;
 
 // P4 · preview + confirmación explícita del actor autorizado. Las mutaciones se
@@ -2754,6 +2763,8 @@ montarRutasDocumentos(app, {
   verificarToken: dependenciasIA.verificarToken,
   servicio: servicioDocumentos,
 });
+
+montarRutasPortalPublico(app, { servicio: servicioPortalPublico });
 
 montarRutasAdminIA(app, {
   verificarToken: dependenciasIA.verificarToken,

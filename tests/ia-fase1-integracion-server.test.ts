@@ -536,6 +536,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/documentos/autorizacionDocumental.ts',
       'server/documentos/servicioDocumentos.ts',
       'server/documentos/rutasDocumentos.ts',
+      // AG-02 · portales públicos por token (importados por server.ts).
+      'server/portalPublico/servicioPortalPublico.ts',
+      'server/portalPublico/rutasPortalPublico.ts',
       'server/ia/registroOperacionesIA.ts',
       'server/ia/gobiernoIA.ts',
       'server/ia/adminIA.ts',

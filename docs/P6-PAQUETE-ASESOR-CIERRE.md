@@ -141,11 +141,11 @@ Aditivas, solo cuando aplican:
 - Focal P6: `npx vitest run src/lib/paqueteAsesor tests/paquete-asesor-panel.test.tsx`
   → **6 archivos / 89 pruebas aprobadas** (núcleo 62 heredadas + 17 P6 + 7 adaptador +
   3 interfaz).
-- Suite completa: `npx vitest run` → **260 archivos aprobados de 261, 4.663 pruebas
-  aprobadas, 2 fallidas, 2 omitidas y 7 todo**. Las dos fallidas son
-  `tests/guardia-a04-rama-sesion.test.ts`, que exige que la rama de trabajo ya esté
-  publicada (`origin/arena/adef1be7-…`) y HEAD distinto de `main`; antes del commit y
-  del push la guardia responde `BLOCKED` por diseño. Se repite tras publicar.
+- Suite completa: `npx vitest run` → **261 archivos aprobados de 261 y 4.665 pruebas
+  aprobadas, 2 omitidas y 7 todo; 0 fallidas**. En el primer intento, antes del
+  commit/push, falló `tests/guardia-a04-rama-sesion.test.ts` porque la guardia A-04
+  exige HEAD distinto de `main` y la rama ya publicada; tras commit y push pasa
+  (4/4) y la suite completa queda en verde.
 - `npm run build`: correcto; el adaptador Firebase queda en un chunk de carga
   diferida.
 - `git diff --check`: correcto.

@@ -44,6 +44,12 @@ describe('P5.2-B · parser: subtotal, multilínea y totales', () => {
     expect(campos.fechaEmision.valor).toBe('2026-04-01');
   });
 
+  it('P5.3: miles separados por espacio se leen completos («1 234,56» no es «1»)', () => {
+    const campos = extraerCamposFactura('SUMINISTROS SL\nBase imponible: 1 000,00 €\nTotal factura: 1 210,00 €', 95);
+    expect(campos.baseImponible.valor).toBe('1000,00');
+    expect(campos.importeTotal.valor).toBe('1210,00');
+  });
+
   it('abono: el total negativo se conserva pero queda DUDOSO, nunca fiable', () => {
     const campos = extraerCamposFactura('ACME SL\nTotal factura: -121,00 €', 95);
     expect(campos.importeTotal.valor).toBe('-121,00');
@@ -67,6 +73,12 @@ describe('P5.2-B · parser: NIF del emisor', () => {
   it('dos NIF sin contexto de emisor quedan DUDOSOS (sin confirmar)', () => {
     const campos = extraerCamposFactura('NIF: 12345678Z\nNIF: B12345674\nFactura nº: A-1\nTotal: 10,00 €', 95);
     expect(campos.nifProveedor.estado).toBe('DUDOSO');
+  });
+
+  it('P5.3: DNI de emisor autónomo con letra de control válida es RECONOCIDO', () => {
+    const campos = extraerCamposFactura('Emisor: María Fontanera\nNIF: 12345678Z\nFactura nº: 7\nTotal: 60,50 €', 95);
+    expect(campos.nifProveedor.valor).toBe('12345678Z');
+    expect(campos.nifProveedor.estado).toBe('RECONOCIDO');
   });
 
   it('un NIF con formato pero control inválido queda DUDOSO, no RECONOCIDO', () => {
@@ -164,6 +176,13 @@ describe('P5.2-C · duplicados por inmueble', () => {
     expect(esReintentoVinculoOcr(incompleto, claveNueva, claveLegada)).toBe(true);
     const completo = gastoOcr(inmuebleA.id, claveNueva, true);
     expect(esReintentoVinculoOcr(completo, claveNueva, claveLegada)).toBe(false);
+  });
+
+  it('P5.3: un incompleto ya editado hasta PAGADO no es reintentable (no sobrescribir definitivos)', () => {
+    const pagado = { ...gastoOcr(inmuebleA.id, claveNueva, false), estado: 'PAGADO' as Gasto['estado'], fechaPago: '2026-03-20' };
+    expect(esReintentoVinculoOcr(pagado, claveNueva, claveLegada)).toBe(false);
+    const anulado = { ...gastoOcr(inmuebleA.id, claveNueva, false), estado: 'ANULADO' as Gasto['estado'] };
+    expect(esReintentoVinculoOcr(anulado, claveNueva, claveLegada)).toBe(false);
   });
 });
 

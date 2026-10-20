@@ -64,9 +64,11 @@ describe('P5.2-A · guardarGastoVerificado', () => {
 
   it('si Firestore deniega la escritura, lanza ESCRITURA (no éxito silencioso)', async () => {
     mocks.fallos.set = true;
-    await expect(guardarGastoVerificado(gasto)).rejects.toMatchObject({
-      name: 'ErrorPersistenciaGasto', etapa: 'ESCRITURA',
-    });
+    const error = await guardarGastoVerificado(gasto).catch((e: unknown) => e);
+    expect(error).toMatchObject({ name: 'ErrorPersistenciaGasto', etapa: 'ESCRITURA' });
+    // P5.3: el motivo mostrado no filtra el mensaje interno de Firebase.
+    expect((error as Error).message).toMatch(/no tiene permiso/);
+    expect((error as Error).message).not.toMatch(/Missing or insufficient/i);
   });
 
   it('si el enlace documental no quedó persistido, lanza VERIFICACION', async () => {

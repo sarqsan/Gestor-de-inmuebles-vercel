@@ -12,11 +12,12 @@ const normalizar = (texto: string) => texto.normalize('NFD').replace(/[\u0300-\u
 
 /**
  * Importe en la MISMA línea que su etiqueta (P5.2-B): exige dígitos y no
- * admite saltos de línea ni espacios internos, para no concatenar cifras de
- * líneas consecutivas (`100,00` + `21`) ni casar solo espacios. Acepta
- * `1.234,56`, `121,00`, `121.00`, `121` y signo (abonos).
+ * admite saltos de línea, para no concatenar cifras de líneas consecutivas
+ * (`100,00` + `21`) ni casar solo espacios. Acepta `1.234,56`, `1 234,56`,
+ * `121,00`, `121.00`, `121` y signo (abonos). Los miles con espacio exigen
+ * grupos de exactamente 3 dígitos (P5.3: «1 234,56» no debe leerse «1»).
  */
-const IMPORTE = String.raw`(-?\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|-?\d+,\d{1,2}|-?\d+\.\d{1,2}|-?\d+)`;
+const IMPORTE = String.raw`(-?\d{1,3}(?:(?:\.|[^\S\n])\d{3})+(?:,\d{1,2})?|-?\d+,\d{1,2}|-?\d+\.\d{1,2}|-?\d+)`;
 /** Separador etiqueta→valor solo horizontal (nunca cruza de línea). */
 const SEP = String.raw`[^\S\n]*[:\-]?[^\S\n]*`;
 
@@ -116,7 +117,9 @@ interface CandidatoNif { valor: string; textoOrigen: string; contexto: 'EMISOR' 
  * texto contiguo a la misma línea.
  */
 function buscarNifEmisor(texto: string): CampoReconocidoOcr {
-  const etiquetado = new RegExp(String.raw`(?<![A-Z0-9])(?:N\.?I\.?F\.?|C\.?I\.?F\.?|VAT(?:[^\S\n]*ID)?)${SEP}(${NIF_ESTRICTO})(?![A-Z0-9])`, 'gi');
+  // Sin lookbehind (compatibilidad con motores JS sin soporte): la frontera
+  // inicial se consume como carácter no alfanumérico o inicio de línea.
+  const etiquetado = new RegExp(String.raw`(?:^|[^A-Z0-9])(?:N\.?I\.?F\.?|C\.?I\.?F\.?|VAT(?:[^\S\n]*ID)?)${SEP}(${NIF_ESTRICTO})(?![A-Z0-9])`, 'gim');
   const candidatos: CandidatoNif[] = [];
   for (const m of texto.matchAll(etiquetado)) {
     const anterior = normalizar(texto.slice(Math.max(0, (m.index || 0) - 90), m.index || 0));
@@ -136,7 +139,7 @@ function buscarNifEmisor(texto: string): CampoReconocidoOcr {
   }
   if (candidatos.length === 0) {
     // Respaldo conservador: token único etiquetado sin espacios internos.
-    const suelto = new RegExp(String.raw`(?<![A-Z0-9])(?:N\.?I\.?F\.?|C\.?I\.?F\.?|VAT(?:[^\S\n]*ID)?)${SEP}([A-Z0-9][A-Z0-9.-]{5,13})(?![A-Z0-9])`, 'i');
+    const suelto = new RegExp(String.raw`(?:^|[^A-Z0-9])(?:N\.?I\.?F\.?|C\.?I\.?F\.?|VAT(?:[^\S\n]*ID)?)${SEP}([A-Z0-9][A-Z0-9.-]{5,13})(?![A-Z0-9])`, 'im');
     const m = suelto.exec(texto);
     if (!m?.[1]) return campoVacio();
     return { valor: normalizarNif(m[1]), textoOrigen: m[0].trim(), estado: 'DUDOSO' };
@@ -296,7 +299,12 @@ export async function reconocerDocumentoLocal(file: File, alProgreso?: (progreso
   type TrabajadorOcr = { recognize: (entrada: File | Blob) => Promise<{ data: { text?: string; confidence?: number } }>; terminate: () => Promise<unknown> };
   let worker: TrabajadorOcr | undefined;
   let terminado = false;
+  // P5.3: si el plazo/cancelación llega mientras el motor aún se está
+  // creando (descarga CDN lenta), el worker tardío debe terminar al nacer:
+  // sin esta marca quedaría huérfano reconociendo en segundo plano.
+  let finSolicitado = false;
   const terminar = async () => {
+    finSolicitado = true;
     if (worker && !terminado) {
       terminado = true;
       try { await worker.terminate(); } catch { /* best-effort */ }
@@ -335,6 +343,11 @@ export async function reconocerDocumentoLocal(file: File, alProgreso?: (progreso
     } catch (e) {
       if (senal?.aborted) throw errorCancelado();
       throw new Error(`No se pudo iniciar el motor OCR local. Comprueba la conexión (la primera ejecución descarga el motor y el idioma) y vuelve a intentarlo. Detalle: ${e instanceof Error ? e.message : 'error desconocido'}`);
+    }
+    if (finSolicitado) {
+      terminado = true;
+      try { await worker.terminate(); } catch { /* best-effort */ }
+      throw errorCancelado();
     }
     if (senal?.aborted) throw errorCancelado();
     const paginas = mimeReal === 'application/pdf' ? await renderizarPaginasPdf(file) : [file];

@@ -67,6 +67,18 @@ describe('P5.2-D · reconocerDocumentoLocal', () => {
     expect(mocks.terminate).toHaveBeenCalled();
   });
 
+  it('P5.3: si el worker nace tras agotarse el plazo, se termina y no queda huérfano', async () => {
+    mocks.createWorker.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 70));
+      return { recognize: mocks.recognize, terminate: mocks.terminate };
+    });
+    await expect(reconocerDocumentoLocal(archivoPng(), undefined, { plazoMs: 25 }))
+      .rejects.toMatchObject({ codigo: CODIGO_OCR_TIEMPO_AGOTADO });
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    expect(mocks.terminate).toHaveBeenCalled();
+    expect(mocks.recognize).not.toHaveBeenCalled();
+  });
+
   it('motor no disponible (CDN/red): error claro de inicio, sin éxito ficticio', async () => {
     mocks.createWorker.mockRejectedValue(new Error('Failed to fetch dynamically'));
     await expect(reconocerDocumentoLocal(archivoPng())).rejects.toThrow(/No se pudo iniciar el motor OCR local/);

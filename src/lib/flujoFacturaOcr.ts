@@ -187,6 +187,12 @@ export function idGastoOcr(clave: string): string {
 export function esReintentoVinculoOcr(gasto: Gasto | undefined, clave: string, claveLegada?: string): boolean {
   if (!gasto || !clave) return false;
   if (gasto.facturaOcr?.documentoId || gasto.documento?.id) return false;
+  // P5.3: si el gasto incompleto ya fue editado hasta pagarse, dejó de ser
+  // un simple intento de alta: reprocesar lo sobrescribiría a PENDIENTE con
+  // los valores del nuevo escaneo. En ese caso no es reintentable y el
+  // duplicado bloquea sin tocar el registro (el original, si se custodió,
+  // sigue accesible desde el expediente del inmueble).
+  if (gasto.estado !== 'PENDIENTE' || gasto.fechaPago) return false;
   // El llamante pasa el duplicado EXACTO (misma factura/inmueble ya
   // establecidos por huella o emisor+número): basta que su ID estable
   // derive de la clave entrante, de su forma legada o de la clave que el

@@ -41,8 +41,23 @@ export class ErrorPersistenciaGasto extends Error {
   }
 }
 
-const detalle = (error: unknown): string => (error instanceof Error ? error.message : 'error desconocido');
 const codigoDe = (error: unknown): string | undefined => (error as { code?: string })?.code;
+/** Motivo apto para la persona usuaria (sin mensajes internos de Firebase). */
+const detalle = (error: unknown): string => {
+  switch (codigoDe(error)) {
+    case 'permission-denied':
+      return 'tu cuenta no tiene permiso para esta operación sobre este gasto';
+    case 'unauthenticated':
+      return 'la sesión ha caducado; vuelve a iniciar sesión';
+    case 'unavailable':
+    case 'deadline-exceeded':
+      return 'el servidor no respondió a tiempo; comprueba la conexión';
+    case 'not-found':
+      return 'el gasto ya no existe en el servidor';
+    default:
+      return error instanceof Error ? error.message : 'error desconocido';
+  }
+};
 
 /**
  * Guarda el gasto y confirma contra el servidor que quedó persistido con

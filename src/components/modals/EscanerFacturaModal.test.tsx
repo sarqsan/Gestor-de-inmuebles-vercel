@@ -118,4 +118,33 @@ describe('P5.2 · errores por etapa, abonos y posibles duplicados en la UI', () 
     expect(onSave).not.toHaveBeenCalled();
     expect(onDelete).not.toHaveBeenCalledWith('gas_manual');
   });
+
+  it('P5.3 · tiempo agotado: se muestra como error (no éxito) y permite reintentar el mismo archivo', async () => {
+    vi.mocked(reconocerDocumentoLocal).mockRejectedValueOnce(
+      Object.assign(new Error('La lectura ha superado el tiempo máximo (120 s) y se ha detenido.'), { codigo: 'OCR_TIEMPO_AGOTADO' })
+    );
+    renderEscaner();
+    const input = screen.getByLabelText(/Selecciona o captura una factura/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['fake'], 'factura.png', { type: 'image/png' })] } });
+    expect((await screen.findByRole('alert')).textContent).toMatch(/tiempo máximo/);
+    expect(screen.getByRole('button', { name: /Reintentar lectura del mismo archivo/ })).toBeTruthy();
+    expect(screen.queryByText(/Factura incorporada/)).toBeNull();
+  });
+
+  it('P5.3 · cancelar lectura aborta el reconocimiento y no deja estado engañoso', async () => {
+    vi.mocked(reconocerDocumentoLocal).mockImplementationOnce((async (
+      _file: File, _progreso?: unknown, opciones?: { senal?: AbortSignal }
+    ) => new Promise((_resolve, reject) => {
+      opciones?.senal?.addEventListener('abort', () => reject(
+        Object.assign(new Error('Lectura cancelada. No se ha guardado nada.'), { codigo: 'OCR_CANCELADO' })
+      ));
+    })) as never);
+    const { onSave } = renderEscaner();
+    const input = screen.getByLabelText(/Selecciona o captura una factura/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['fake'], 'factura.png', { type: 'image/png' })] } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancelar lectura' }));
+    expect((await screen.findByRole('status')).textContent).toMatch(/Lectura cancelada/);
+    expect(screen.queryByText(/Reconociendo documento/)).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
 });

@@ -243,4 +243,22 @@ describe('UX-4 · GastoModal', () => {
       URL.revokeObjectURL = revokePrevio;
     }
   });
+
+  it('P5.3 · si la descarga verificada falla, se muestra error (no éxito ficticio) dentro del modal', async () => {
+    vi.mocked(descargarDocumentoPatrimonial).mockRejectedValueOnce(new Error('El original custodizado no coincide con su huella.'));
+    const gastoOcr = {
+      id: 'gas_ocr_2', inmuebleId: 'inm-1', propietarioId: 'prop_A', tipo: 'EXPLOTACION', categoria: 'REPARACION',
+      concepto: 'Reparación de caldera', proveedor: 'ACME SL', importe: 242, estado: 'PENDIENTE',
+      fechaDevengo: '2026-03-14', aCargoDe: 'arrendador', deducible: false, origen: 'FACTURA',
+      createdAt: '2026-03-14T00:00:00.000Z', updatedAt: '2026-03-14T00:00:00.000Z',
+      documento: { id: 'doc_88', nombre: 'factura.pdf', url: '', storagePath: 'inmuebles/inm-1/documentos_patrimoniales/doc_88/factura.pdf' },
+      facturaOcr: { version: 1, sha256Documento: 'd'.repeat(64), claveDeduplicacion: 'k2', procesadoEl: '2026-03-14', confianzaOcr: 90, camposReconocidos: {}, camposConfirmados: {}, documentoId: 'doc_88' },
+    } as Gasto;
+    render(
+      <GastoModal gastoParaEditar={gastoOcr} inmuebles={[INMUEBLE]} currentUser={USUARIO} onSave={vi.fn(async (g: Gasto) => g)} onClose={() => undefined} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Descargar factura del expediente/ }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/no coincide con su huella/);
+    expect(screen.queryByText(/Documento verificado y descargado/)).toBeNull();
+  });
 });

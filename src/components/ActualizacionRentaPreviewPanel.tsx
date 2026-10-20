@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { AlertTriangle, CalendarClock, FileSearch, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { ContratoFormalizacion } from '../types';
 import { formatEuro } from '../utils/formatters';
@@ -45,6 +45,10 @@ function fechaHoyMadrid(): string {
 }
 
 export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewPanelProps> = ({ contrato, disabled = false }) => {
+  const enCurso = useRef(false);
+  const [fechaComunicacion, setFechaComunicacion] = useState('');
+  const [referenciaComunicacion, setReferenciaComunicacion] = useState('');
+  const [declaroEvidencia, setDeclaroEvidencia] = useState(false);
   const [preview, setPreview] = useState<PreviewActualizacionRenta | null>(null);
   const [huellaPreview, setHuellaPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +59,12 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
   const [aceptoConfirmar, setAceptoConfirmar] = useState(false);
   const [claveReintento, setClaveReintento] = useState<string | null>(null);
 
+  const invalidarPreview = () => {
+    setPreview(null); setHuellaPreview(null); setAceptoConfirmar(false); setClaveReintento(null); setConfirmacion(null);
+  };
   const solicitarPreview = async () => {
+    if (enCurso.current || disabled) return;
+    enCurso.current = true;
     setCargando(true);
     setError(null);
     setConfirmacion(null);
@@ -63,7 +72,9 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
     setAceptoConfirmar(false);
     setClaveReintento(null);
     try {
-      const resultado = await previsualizarActualizacionRenta(contrato.id);
+      const resultado = await previsualizarActualizacionRenta(contrato.id, declaroEvidencia ? {
+        fecha: fechaComunicacion, referenciaDocumental: referenciaComunicacion, declaradaPorActor: true,
+      } : undefined);
       setPreview(resultado.preview);
       setHuellaPreview(resultado.huellaPreview);
     } catch (err) {
@@ -71,12 +82,13 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
       setPreview(null);
       setHuellaPreview(null);
     } finally {
-      setCargando(false);
+      setCargando(false); enCurso.current = false;
     }
   };
 
   const confirmar = async () => {
-    if (!preview || !huellaPreview || preview.estado !== 'CALCULABLE' || !fechaProgramadaAviso || !aceptoConfirmar) return;
+    if (enCurso.current || disabled || !preview?.evidenciaComunicacion || !preview.fechaEfectividad || preview.fechaEfectividad > fechaHoyMadrid() || !preview.fechaAniversario || preview.fechaEfectividad < preview.fechaAniversario || !huellaPreview || preview.estado !== 'CALCULABLE' || !fechaProgramadaAviso || !aceptoConfirmar) return;
+    enCurso.current = true;
     setConfirmando(true);
     setError(null);
     try {
@@ -85,6 +97,7 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
       const resultado = await confirmarActualizacionRenta({
         contratoId: contrato.id,
         huellaPreview,
+        evidenciaComunicacion: preview.evidenciaComunicacion,
         fechaProgramadaAviso,
         confirmacionExplicita: true,
         idempotencyKey: clave,
@@ -95,7 +108,7 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
       // reproduzca el resultado sin crear un segundo anexo o aviso.
       setError(err instanceof Error ? err.message : 'No se pudo confirmar la actualización. No se ha afirmado ningún envío.');
     } finally {
-      setConfirmando(false);
+      setConfirmando(false); enCurso.current = false;
     }
   };
 
@@ -129,13 +142,27 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
         </button>
       </div>
 
+      {!confirmacion && <fieldset disabled={disabled || cargando || confirmando} className="space-y-2 text-xs">
+        <legend>Comunicación ya realizada por otro medio (declaración del actor, no verificación externa)</legend>
+        <label className="block">Fecha de comunicación realizada
+          <input className="block rounded-lg border border-slate-300 bg-white px-2.5 py-2" type="date" max={fechaHoyMadrid()} value={fechaComunicacion} onChange={(e) => { setFechaComunicacion(e.target.value); invalidarPreview(); }} />
+        </label>
+        <label className="block">Referencia documental de la comunicación
+          <input className="block w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2" type="text" maxLength={1000} value={referenciaComunicacion} onChange={(e) => { setReferenciaComunicacion(e.target.value); invalidarPreview(); }} />
+        </label>
+        <label className="block"><input type="checkbox" checked={declaroEvidencia} onChange={(e) => { setDeclaroEvidencia(e.target.checked); invalidarPreview(); }} />Declaro que la comunicación indicada ya se realizó y consta en la referencia documental.</label>
+        <p>Sin declaración no se aplica la renta. La efectividad se deriva del mes siguiente; no se anticipa una renta futura ni se acredita entrega SMTP.</p>
+      </fieldset>}
+      {(confirmacion?.estadoActualizacion === 'EFECTIVA' || contrato.actualizacionRentaVigente) && (
+        <p role="status">Renta vigente: {formatEuro(confirmacion?.rentaVigente ?? contrato.rentaMensual)} · Efectiva desde {confirmacion?.fechaEfectividad ?? contrato.actualizacionRentaVigente?.fechaEfectividad}</p>
+      )}
       {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-[11px] text-rose-800">{error}</p>}
 
       {preview && (
         <div className="space-y-3 border-t border-indigo-100 pt-3" aria-live="polite">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${preview.estado === 'CALCULABLE' ? 'bg-emerald-100 text-emerald-800' : preview.estado === 'SIN_ACTUALIZACION' ? 'bg-slate-200 text-slate-800' : 'bg-amber-100 text-amber-900'}`}>
-              {etiquetaEstado(preview)}
+              {confirmacion?.estadoActualizacion === 'EFECTIVA' ? 'Actualización efectiva registrada' : etiquetaEstado(preview)}
             </span>
             {preview.codigo && <code className="text-[10px] text-slate-500">{preview.codigo}</code>}
           </div>
@@ -143,15 +170,17 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
           <dl className="grid grid-cols-1 gap-x-5 gap-y-2 text-[11px] sm:grid-cols-2 xl:grid-cols-3">
             <div><dt className="text-slate-500">Celebración del contrato</dt><dd className="font-semibold text-slate-800">{preview.fechaCelebracion || 'No acreditada'}</dd></div>
             <div><dt className="text-slate-500">Inicio contractual / aniversario</dt><dd className="font-semibold text-slate-800">{preview.fechaInicioContrato || 'No acreditado'} · {preview.fechaAniversario || 'sin resolver'}</dd></div>
-            <div><dt className="text-slate-500">Comunicación programada</dt><dd className="font-semibold text-slate-800">{confirmacion?.fechaProgramadaAviso || (preview.estadoAviso === 'NO_PROGRAMADO' ? 'No programada; se elige al confirmar' : preview.estadoAviso)}</dd></div>
+            <div><dt className="text-slate-500">Comunicación programada</dt><dd className="font-semibold text-slate-800">{confirmacion?.fechaProgramadaAviso || (preview.estadoAviso === 'NO_PROGRAMADO' ? 'Aviso de la aplicación no programado; se elige al confirmar' : preview.estadoAviso)}</dd></div>
             <div><dt className="text-slate-500">Modalidad / uso</dt><dd className="font-semibold text-slate-800">{preview.modalidad || 'No acreditada'} · {preview.finalidadUso || 'No acreditado'}</dd></div>
             <div><dt className="text-slate-500">Cláusula de actualización</dt><dd className="font-semibold text-slate-800">{preview.evidenciaClausula ? estadoClausula[preview.evidenciaClausula.estado] : 'No acreditada'}{preview.evidenciaClausula?.mecanismo ? ` · ${preview.evidenciaClausula.mecanismo}` : ''}</dd></div>
-            <div><dt className="text-slate-500">Renta mensual actual</dt><dd className="font-semibold text-slate-800">{preview.rentaActual !== undefined ? formatEuro(preview.rentaActual) : 'No acreditada'}</dd></div>
+            <div><dt className="text-slate-500">Renta de partida</dt><dd className="font-semibold text-slate-800">{preview.rentaActual !== undefined ? formatEuro(preview.rentaActual) : 'No acreditada'}</dd></div>
+            <div><dt className="text-slate-500">Versión de cálculo</dt><dd>{preview.versionCalculo || 'Sin acreditar'}</dd></div>
             <div><dt className="text-slate-500">Índice oficial</dt><dd className="font-semibold text-slate-800">{preview.indice ? `${preview.indice.serie} ${preview.indice.periodo} · ${preview.indice.valorPct.toFixed(2)} % · ${preview.indice.estado}` : 'No aplicable / no disponible'}</dd></div>
             <div><dt className="text-slate-500">Publicación / consulta del índice</dt><dd className="font-semibold text-slate-800">{preview.indice ? `${preview.indice.publicadoEn} / ${preview.indice.consultadoEn}` : '—'}</dd></div>
             <div><dt className="text-slate-500">Índice y topes</dt><dd className="font-semibold text-slate-800">{topesTexto || 'Pendientes de verificar'}</dd></div>
             <div><dt className="text-slate-500">Propuesta aritmética</dt><dd className="font-semibold text-slate-800">{preview.rentaFutura !== undefined ? `${formatEuro(preview.rentaFutura)} (${preview.porcentajeAplicado?.toFixed(2)} %; +${formatEuro(preview.importeIncremento || 0)})` : 'Ningún importe propuesto'}</dd></div>
-            <div><dt className="text-slate-500">Efectividad / comunicación</dt><dd className="font-semibold text-slate-800">{confirmacion?.fechaEfectividad || preview.fechaEfectividad || 'Sin determinar'} · {confirmacion?.comunicado || 'No comunicado'}</dd></div>
+            <div><dt className="text-slate-500">Efectividad / comunicación</dt><dd className="font-semibold text-slate-800">{confirmacion?.fechaEfectividad || preview.fechaEfectividad || 'Sin determinar'} · {preview.evidenciaComunicacion ? 'Comunicación previa declarada por el actor; aviso de la aplicación no enviado' : 'No comunicado'}</dd></div>
+            {preview.evidenciaComunicacion && <div><dt className="text-slate-500">Comunicación previa declarada</dt><dd>{preview.evidenciaComunicacion.fecha} · {preview.evidenciaComunicacion.referenciaDocumental}</dd></div>}
             <div><dt className="text-slate-500">Estado del aviso</dt><dd className="font-semibold text-slate-800">{confirmacion?.estadoAviso || preview.estadoAviso}</dd></div>
           </dl>
 
@@ -169,12 +198,13 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
             </blockquote>
           )}
 
+          {preview.estado === 'CALCULABLE' && (!preview.fechaEfectividad || !preview.fechaAniversario || preview.fechaEfectividad > fechaHoyMadrid() || preview.fechaEfectividad < preview.fechaAniversario) && <p role="alert">No se puede aplicar: falta evidencia o la fecha efectiva no ha llegado o precede a la anualidad.</p>}
           {preview.estado === 'CALCULABLE' && !confirmacion && (
             <div className="space-y-3 rounded-xl border border-indigo-200 bg-white/80 p-3">
               <div>
-                <h5 className="text-[11px] font-bold text-slate-900">Confirmación y aviso pendiente</h5>
+                <h5 className="text-[11px] font-bold text-slate-900">Aplicación efectiva y aviso pendiente</h5>
                 <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
-                  La fecha se elige expresamente; no se presupone un preaviso legal de 30 días. Guardar crea un borrador versionado y un aviso durable PENDIENTE_ENVIO. No se envía correo, no se publica en la bandeja, no se firma y no se modifican recibos ni cobros.
+                  La fecha se elige expresamente; no se presupone un preaviso legal de 30 días. Confirmar actualiza la renta canónica, conserva el historial y registra un anexo no firmado y un aviso PENDIENTE_ENVIO. No se envía correo, no se publica en la bandeja, no se firma y no se modifican recibos ni cobros.
                 </p>
               </div>
               <label className="flex flex-col gap-1 text-[10px] font-semibold text-slate-700 sm:max-w-xs">
@@ -197,23 +227,24 @@ export const ActualizacionRentaPreviewPanel: React.FC<ActualizacionRentaPreviewP
                   disabled={disabled || confirmando}
                   className="mt-0.5"
                 />
-                <span>Confirmo expresamente, como propietario o actor con permiso de escritura, que deseo guardar el anexo borrador v1 y programar el aviso indicado, sujeto a la nueva verificación del servidor.</span>
+                <span>Confirmo expresamente, como propietario o actor con permiso de escritura, que deseo aplicar la nueva renta con la fecha efectiva mostrada y registrar el anexo y aviso indicado, sujeto a la nueva verificación del servidor.</span>
               </label>
               <button
                 type="button"
                 onClick={confirmar}
-                disabled={disabled || confirmando || !fechaProgramadaAviso || !aceptoConfirmar}
+                disabled={disabled || cargando || confirmando || !fechaProgramadaAviso || !aceptoConfirmar || !preview.evidenciaComunicacion || !preview.fechaEfectividad || preview.fechaEfectividad > fechaHoyMadrid() || !preview.fechaAniversario || preview.fechaEfectividad < preview.fechaAniversario}
                 className="rounded-xl bg-indigo-700 px-3 py-2 text-[11px] font-bold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {confirmando ? 'Verificando y guardando…' : 'Confirmar y guardar borrador'}
+                {confirmando ? 'Verificando y guardando…' : 'Confirmar y aplicar renta'}
               </button>
+              <button type="button" disabled={confirmando} onClick={invalidarPreview}>{claveReintento ? 'Cerrar sin revertir la operación solicitada' : 'Cancelar sin aplicar'}</button>
             </div>
           )}
 
           {confirmacion && (
-            <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[10px] leading-relaxed text-emerald-900">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[10px] leading-relaxed text-emerald-900">
               <strong>Registro durable {confirmacion.estado === 'REPETIDA' ? 'recuperado por reintento' : 'creado'}.</strong>
-              {' '}Anexo {confirmacion.anexoId}, versión {confirmacion.version}, borrador no firmado. Aviso {confirmacion.avisoId} en {confirmacion.estadoAviso}, previsto para {confirmacion.fechaProgramadaAviso}. No está comunicado ni enviado; no hay fecha de efectividad acreditada.
+              {' '}Anexo {confirmacion.anexoId}, versión {confirmacion.version}, anexo no firmado. Aviso {confirmacion.avisoId} en {confirmacion.estadoAviso}, previsto para {confirmacion.fechaProgramadaAviso}. La aplicación no ha enviado este aviso ni acredita recepción. La comunicación previa es una declaración del actor, no una verificación externa.
             </div>
           )}
 

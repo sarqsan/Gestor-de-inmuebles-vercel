@@ -418,7 +418,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
                   </div>
                 </div>
 
-                <ActualizacionRentaPreviewPanel contrato={contrato} disabled={!puedeEditar} />
+                <ActualizacionRentaPreviewPanel key={contrato.id} contrato={contrato} disabled={!puedeEditar} />
 
                 {/* GAP 2: Ciclo contractual (modalidad, anexos, finalización, finiquito) */}
                 <CicloContractualPanel

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ContratoFormalizacion } from '../../src/types';
 import {
   calcularPreviewActualizacionRenta,
+  fechaEfectividadDesdeComunicacion,
   FUENTES_IRAV_OFICIALES,
   programarAvisoActualizacionRenta,
   type DatoIRAVOficial,
@@ -13,10 +14,11 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/;
 const HASH_RE = /^[a-f0-9]{64}$/;
 
 export interface EscrituraP4Atomica {
+  camposActualizar?: readonly string[];
   coleccion: string;
   id: string;
   datos: Record<string, unknown>;
-  precondicion: { tipo: 'NO_EXISTE' };
+  precondicion: { tipo: 'NO_EXISTE' } | { tipo: 'VERSION'; updateTime: string };
 }
 
 export interface PuertoActualizacionRenta {
@@ -34,7 +36,14 @@ export interface DependenciasActualizacionRenta {
   calcularPreview?: typeof calcularPreviewActualizacionRenta;
 }
 
+export interface EvidenciaComunicacionP4 {
+  fecha: string;
+  referenciaDocumental: string;
+  declaradaPorActor: true;
+}
+
 export interface EntradaConfirmarActualizacionRenta {
+  evidenciaComunicacion?: EvidenciaComunicacionP4;
   uid: string;
   contratoId: string;
   huellaPreview: string;
@@ -58,15 +67,21 @@ export interface ResultadoConfirmacionActualizacionRenta {
   fechaProgramadaAviso: string;
   estadoAviso: 'PENDIENTE_ENVIO';
   comunicado: 'NO_COMUNICADO';
-  fechaEfectividad: null;
+  fechaEfectividad: string | null;
+  estadoActualizacion?: 'EFECTIVA';
+  rentaAnterior?: number;
+  rentaVigente?: number;
+  versionCalculo?: string;
 }
 
 export interface ServicioActualizacionRenta {
-  previsualizar(entrada: { uid: string; contratoId: string }): Promise<ResultadoPrevisualizacionActualizacionRenta>;
+  previsualizar(entrada: { uid: string; contratoId: string; evidenciaComunicacion?: EvidenciaComunicacionP4 }): Promise<ResultadoPrevisualizacionActualizacionRenta>;
   confirmar(entrada: EntradaConfirmarActualizacionRenta): Promise<ResultadoConfirmacionActualizacionRenta>;
 }
 
 export type CodigoErrorActualizacionRenta =
+  | 'EVIDENCIA_COMUNICACION_REQUERIDA'
+  | 'FECHA_EFECTIVIDAD_NO_APLICABLE'
   | 'PETICION_INVALIDA'
   | 'PERFIL_NO_VALIDO'
   | 'CONTRATO_NO_AUTORIZADO'
@@ -145,10 +160,10 @@ function sha256(valor: string): string {
   return createHash('sha256').update(valor, 'utf8').digest('hex');
 }
 
-function huellaPreview(preview: PreviewActualizacionRenta, actor: ActorActualizacionRenta): string {
+function huellaPreview(preview: PreviewActualizacionRenta, actor: ActorActualizacionRenta, versionContrato?: string): string {
   return sha256(JSON.stringify(normalizarParaHuella({
     actor: { uid: actor.uid, usuarioId: actor.usuarioId },
-    preview,
+    preview, versionContrato,
   })));
 }
 
@@ -163,7 +178,9 @@ function resultadoDesdeOperacion(datos: Record<string, unknown>): ResultadoConfi
     || typeof resultado.fechaProgramadaAviso !== 'string'
     || resultado.estadoAviso !== 'PENDIENTE_ENVIO'
     || resultado.comunicado !== 'NO_COMUNICADO'
-    || resultado.fechaEfectividad !== null) return null;
+    || (resultado.fechaEfectividad !== null && (!esFechaISO(resultado.fechaEfectividad)
+      || resultado.estadoActualizacion !== 'EFECTIVA' || !Number.isFinite(resultado.rentaAnterior)
+      || !Number.isFinite(resultado.rentaVigente) || resultado.versionCalculo !== 'P4-IRAV1-v1'))) return null;
   return { ...(resultado as unknown as ResultadoConfirmacionActualizacionRenta), estado: 'REPETIDA' };
 }
 
@@ -238,6 +255,7 @@ export function crearServicioActualizacionRenta(
   async function cargarContratoAutorizado(uid: string, contratoId: string): Promise<{
     actor: ActorActualizacionRenta;
     contrato: ContratoFormalizacion;
+    updateTime?: string;
   }> {
     if (!idValido(contratoId)) throw new ErrorActualizacionRenta('PETICION_INVALIDA', 400);
     const actor = await resolverActor(uid);
@@ -246,19 +264,30 @@ export function crearServicioActualizacionRenta(
       throw new ErrorActualizacionRenta('CONTRATO_NO_AUTORIZADO', 404);
     }
     await autorizar(actor, documento.datos);
-    return { actor, contrato: { ...documento.datos, id: contratoId } as unknown as ContratoFormalizacion };
+    return { actor, contrato: { ...documento.datos, id: contratoId } as unknown as ContratoFormalizacion, updateTime: documento.updateTime };
   }
 
-  function crearPreview(contrato: ContratoFormalizacion): PreviewActualizacionRenta {
+  function validarEvidencia(evidencia: EvidenciaComunicacionP4 | undefined): EvidenciaComunicacionP4 {
+    if (!evidencia || evidencia.declaradaPorActor !== true || !esFechaISO(evidencia.fecha)
+      || evidencia.fecha > fechaMadrid(ahora()) || !texto(evidencia.referenciaDocumental, 1000)) {
+      throw new ErrorActualizacionRenta('EVIDENCIA_COMUNICACION_REQUERIDA', 400);
+    }
+    return { fecha: evidencia.fecha, referenciaDocumental: evidencia.referenciaDocumental.trim(), declaradaPorActor: true };
+  }
+
+  function crearPreview(contrato: ContratoFormalizacion, evidencia?: EvidenciaComunicacionP4): PreviewActualizacionRenta {
     const fechaHoy = fechaMadrid(ahora());
     const entrada: EntradaCalculoActualizacionRenta = {};
-    return calcular(contrato, entrada, { hoy: fechaHoy, serie });
+    const preview = calcular(contrato, entrada, { hoy: fechaHoy, serie });
+    return { ...preview, versionCalculo: 'P4-IRAV1-v1',
+      ...(evidencia ? { evidenciaComunicacion: evidencia, fechaEfectividad: fechaEfectividadDesdeComunicacion(evidencia.fecha) } : {}),
+    };
   }
 
-  async function previsualizar(entrada: { uid: string; contratoId: string }): Promise<ResultadoPrevisualizacionActualizacionRenta> {
-    const { actor, contrato } = await cargarContratoAutorizado(entrada.uid, entrada.contratoId);
-    const preview = crearPreview(contrato);
-    return { preview, huellaPreview: huellaPreview(preview, actor) };
+  async function previsualizar(entrada: { uid: string; contratoId: string; evidenciaComunicacion?: EvidenciaComunicacionP4 }): Promise<ResultadoPrevisualizacionActualizacionRenta> {
+    const { actor, contrato, updateTime } = await cargarContratoAutorizado(entrada.uid, entrada.contratoId);
+    const preview = crearPreview(contrato, entrada.evidenciaComunicacion ? validarEvidencia(entrada.evidenciaComunicacion) : undefined);
+    return { preview, huellaPreview: huellaPreview(preview, actor, updateTime) };
   }
 
   async function confirmar(entrada: EntradaConfirmarActualizacionRenta): Promise<ResultadoConfirmacionActualizacionRenta> {
@@ -274,7 +303,8 @@ export function crearServicioActualizacionRenta(
     }
 
     // Resolver identidad y autorización tanto en el primer intento como en un reintento.
-    const { actor, contrato } = await cargarContratoAutorizado(entrada.uid, entrada.contratoId);
+    const { actor, contrato, updateTime } = await cargarContratoAutorizado(entrada.uid, entrada.contratoId);
+    const evidencia = validarEvidencia(entrada.evidenciaComunicacion);
     const fechaAhora = ahora();
     const hoy = fechaMadrid(fechaAhora);
 
@@ -286,6 +316,7 @@ export function crearServicioActualizacionRenta(
       huellaPreview: entrada.huellaPreview,
       fechaProgramadaAviso: entrada.fechaProgramadaAviso,
       confirmacionExplicita: entrada.confirmacionExplicita,
+      evidenciaComunicacion: evidencia,
     })));
     const rutaOperacion = `actualizacion_renta_operaciones/${idempotencyKeyHash}`;
     const operacionExistente = await leer(rutaOperacion);
@@ -301,15 +332,24 @@ export function crearServicioActualizacionRenta(
       throw new ErrorActualizacionRenta('FECHA_PROGRAMADA_INVALIDA', 400);
     }
 
-    const previewActual = crearPreview(contrato);
+    // Una anualidad ya registrada no se vuelve a aplicar sobre la renta incrementada.
+    const previewActual = crearPreview(contrato, evidencia);
+    if (previewActual.fechaAniversario && await leer(`actualizacion_renta_controles/${entrada.contratoId}__${previewActual.fechaAniversario}`)) {
+      throw new ErrorActualizacionRenta('ACTUALIZACION_YA_CONFIRMADA', 409);
+    }
     if (previewActual.estado !== 'CALCULABLE') {
       throw new ErrorActualizacionRenta('PREVIEW_REQUIERE_REVISION', 409);
     }
-    const huellaActual = huellaPreview(previewActual, actor);
+    const huellaActual = huellaPreview(previewActual, actor, updateTime);
     if (huellaActual !== entrada.huellaPreview) {
       throw new ErrorActualizacionRenta('PREVIEW_DESACTUALIZADO', 409);
     }
-    if (!deps.puerto.escribirAtomico) {
+    const fechaEfectividad = previewActual.fechaEfectividad;
+    if (!fechaEfectividad || fechaEfectividad > hoy || !previewActual.fechaAniversario
+      || fechaEfectividad < previewActual.fechaAniversario) {
+      throw new ErrorActualizacionRenta('FECHA_EFECTIVIDAD_NO_APLICABLE', 409);
+    }
+    if (!deps.puerto.escribirAtomico || !updateTime) {
       throw new ErrorActualizacionRenta('FUENTE_NO_DISPONIBLE', 503);
     }
 
@@ -335,16 +375,17 @@ export function crearServicioActualizacionRenta(
       estado: 'CREADA', contratoId: entrada.contratoId, anexoId, avisoId, version: 1,
       fechaAniversario: previewActual.fechaAniversario,
       fechaProgramadaAviso: entrada.fechaProgramadaAviso,
-      estadoAviso: 'PENDIENTE_ENVIO', comunicado: 'NO_COMUNICADO', fechaEfectividad: null,
+      estadoAviso: 'PENDIENTE_ENVIO', comunicado: 'NO_COMUNICADO', fechaEfectividad,
+      estadoActualizacion: 'EFECTIVA', rentaAnterior: previewActual.rentaActual, rentaVigente: previewActual.rentaFutura, versionCalculo: previewActual.versionCalculo,
     };
 
     const anexo = {
       id: anexoId,
-      tipo: 'ANEXO_ACTUALIZACION_RENTA_BORRADOR',
+      tipo: 'ANEXO_ACTUALIZACION_RENTA',
       version: 1,
       contratoId: entrada.contratoId,
       propietarioId: previewActual.propietarioId,
-      estado: 'BORRADOR_NO_FIRMADO',
+      estado: 'ACTUALIZACION_EFECTIVA_NO_FIRMADO',
       inmutable: true,
       fechaCelebracion: previewActual.fechaCelebracion,
       fechaInicioContrato: previewActual.fechaInicioContrato,
@@ -358,6 +399,7 @@ export function crearServicioActualizacionRenta(
       porcentaje: previewActual.porcentajeAplicado,
       incremento: previewActual.importeIncremento,
       rentaPropuesta: previewActual.rentaFutura,
+      rentaNueva: previewActual.rentaFutura,
       indice: previewActual.indice,
       topes: previewActual.topes,
       baseLegal: previewActual.baseLegal,
@@ -367,7 +409,10 @@ export function crearServicioActualizacionRenta(
       actorUsuarioId: actor.usuarioId,
       creadoEn: fechaRegistro,
       comunicado: 'NO_COMUNICADO',
-      fechaEfectividad: null,
+      fechaEfectividad,
+      estadoActualizacion: 'EFECTIVA',
+      versionCalculo: previewActual.versionCalculo,
+      evidenciaComunicacion: { ...evidencia, actorUid: actor.uid, actorUsuarioId: actor.usuarioId, registradaEn: fechaRegistro },
       avisoId,
     };
     const aviso = {
@@ -379,15 +424,20 @@ export function crearServicioActualizacionRenta(
       fechaAniversario: previewActual.fechaAniversario,
       fechaProgramadaAviso: entrada.fechaProgramadaAviso,
       estado: 'PENDIENTE_ENVIO',
+      // Estado del aviso generado por la aplicación, independiente de la declaración previa del actor.
       comunicado: 'NO_COMUNICADO',
       fechaComunicacion: null,
-      fechaEfectividad: null,
+      fechaEfectividad,
+      estadoActualizacion: 'EFECTIVA',
+      versionCalculo: previewActual.versionCalculo,
+      evidenciaComunicacion: { ...evidencia, actorUid: actor.uid, actorUsuarioId: actor.usuarioId, registradaEn: fechaRegistro },
       canales: {
         EMAIL: { estado: 'PENDIENTE_VALIDACION', confirmadoSMTP: false },
         BANDEJA_INTERNA: { estado: 'PENDIENTE_VALIDACION', confirmadoPorCanal: false },
       },
       montoPropuesto: previewActual.importeIncremento,
       rentaPropuesta: previewActual.rentaFutura,
+      rentaNueva: previewActual.rentaFutura,
       creadoPorUid: actor.uid,
       creadoPorUsuarioId: actor.usuarioId,
       creadoEn: fechaRegistro,
@@ -402,11 +452,14 @@ export function crearServicioActualizacionRenta(
       huellaPreview: huellaActual,
       idempotencyKeyHash,
       fechaEvento: fechaRegistro,
-      resultado: 'ANEXO_BORRADOR_Y_AVISO_PENDIENTE_CREADOS',
+      resultado: 'RENTA_ACTUALIZADA_Y_AVISO_PENDIENTE',
+      rentaAnterior: previewActual.rentaActual, rentaNueva: previewActual.rentaFutura, fechaEfectividad,
+      versionCalculo: previewActual.versionCalculo, indice: previewActual.indice,
       estadoAviso: 'PENDIENTE_ENVIO',
       comunicado: 'NO_COMUNICADO',
     };
     const control = {
+      estadoActualizacion: 'EFECTIVA', fechaEfectividad,
       contratoId: entrada.contratoId,
       propietarioId: previewActual.propietarioId,
       fechaAniversario: previewActual.fechaAniversario,
@@ -427,6 +480,12 @@ export function crearServicioActualizacionRenta(
     };
 
     const escrituras: EscrituraP4Atomica[] = [
+      { coleccion: 'contratos_formalizacion', id: entrada.contratoId,
+        camposActualizar: ['rentaMensual', 'actualizacionRentaVigente'],
+        datos: { rentaMensual: previewActual.rentaFutura,
+          actualizacionRentaVigente: { anexoId, fechaEfectividad, rentaAnterior: previewActual.rentaActual,
+            versionCalculo: previewActual.versionCalculo, confirmadoPorUid: actor.uid, confirmadoEn: fechaRegistro } },
+        precondicion: { tipo: 'VERSION', updateTime } },
       { coleccion: 'anexos_actualizacion_renta', id: anexoId, datos: anexo, precondicion: { tipo: 'NO_EXISTE' } },
       { coleccion: 'avisos_actualizacion_renta', id: avisoId, datos: aviso, precondicion: { tipo: 'NO_EXISTE' } },
       { coleccion: 'auditoria_actualizacion_renta', id: auditId, datos: auditoria, precondicion: { tipo: 'NO_EXISTE' } },
@@ -452,7 +511,7 @@ export function crearServicioActualizacionRenta(
     }
     const controlExistente = await leer(`actualizacion_renta_controles/${encodeURIComponent(idControl)}`);
     if (controlExistente) throw new ErrorActualizacionRenta('ACTUALIZACION_YA_CONFIRMADA', 409);
-    throw new ErrorActualizacionRenta('FUENTE_NO_DISPONIBLE', 503);
+    throw new ErrorActualizacionRenta('PREVIEW_DESACTUALIZADO', 409);
   }
 
   return { previsualizar, confirmar };

@@ -1296,6 +1296,11 @@ export interface ContratoFormalizacion {
   fechaCelebracionContrato?: string; // YYYY-MM-DD
   /** Evidencia documental de pacto de actualización o de su ausencia confirmada. */
   evidenciaClausulaActualizacionRenta?: EvidenciaClausulaActualizacionRenta;
+  /** Referencia al historial P4 inmutable; rentaMensual sigue siendo la renta canónica. */
+  actualizacionRentaVigente?: {
+    anexoId: string; fechaEfectividad: string; rentaAnterior: number;
+    versionCalculo: string; confirmadoPorUid: string; confirmadoEn: string;
+  };
   /** Referencia verificable al contrato original asociado a la evidencia anterior. */
   referenciaContratoActualizacionRenta?: string;
   /** Evidencia de uso necesaria para clasificar temporada/habitación sin inferencias. */

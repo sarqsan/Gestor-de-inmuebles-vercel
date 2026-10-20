@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { montarRutasActualizacionRenta } from './rutasActualizacionRenta';
-import type { ServicioActualizacionRenta } from './servicioActualizacionRenta';
+import { ErrorActualizacionRenta, type ServicioActualizacionRenta } from './servicioActualizacionRenta';
 
 const servidores: Server[] = [];
 
@@ -30,6 +30,8 @@ const preview = {
   motivo: 'Requiere revisión.',
 };
 
+const evidencia = { fecha: '2026-09-20', referenciaDocumental: 'fixture.pdf', declaradaPorActor: true };
+
 const resultadoPreview = { preview, huellaPreview: 'a'.repeat(64) };
 const resultadoConfirmacion = {
   estado: 'CREADA' as const,
@@ -41,7 +43,8 @@ const resultadoConfirmacion = {
   fechaProgramadaAviso: '2026-10-20',
   estadoAviso: 'PENDIENTE_ENVIO' as const,
   comunicado: 'NO_COMUNICADO' as const,
-  fechaEfectividad: null,
+  fechaEfectividad: '2026-10-01',
+  estadoActualizacion: 'EFECTIVA' as const, rentaAnterior: 1200, rentaVigente: 1224, versionCalculo: 'P4-IRAV1-v1',
 };
 
 describe('P4 · rutas HTTP con token, verificación y payload mínimo', () => {
@@ -99,13 +102,20 @@ describe('P4 · rutas HTTP con token, verificación y payload mínimo', () => {
     const url = `${base}/api/contratos/actualizacion-renta/confirmar`;
     const body = {
       contratoId: 'contrato-a', huellaPreview: 'a'.repeat(64),
-      fechaProgramadaAviso: '2026-10-20', confirmacionExplicita: true,
+      fechaProgramadaAviso: '2026-10-20', confirmacionExplicita: true, evidenciaComunicacion: evidencia,
     };
     const headers = {
       Authorization: 'Bearer token-owner', 'Content-Type': 'application/json', 'Idempotency-Key': 'idempotency-key-route-01',
     };
     const extra = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, propietarioId: 'prop-victima' }) });
     expect(extra.status).toBe(400);
+    expect(confirmar).not.toHaveBeenCalled();
+
+    for (const evidenciaInvalida of [undefined, { ...evidencia, declaradaPorActor: false }, { ...evidencia, actorUid: 'victima' }]) {
+      const invalida = await fetch(url, { method: 'POST', headers,
+        body: JSON.stringify({ ...body, evidenciaComunicacion: evidenciaInvalida }) });
+      expect(invalida.status).toBe(400);
+    }
     expect(confirmar).not.toHaveBeenCalled();
 
     const sinClave = await fetch(url, {
@@ -118,7 +128,7 @@ describe('P4 · rutas HTTP con token, verificación y payload mínimo', () => {
     expect(ok.status).toBe(201);
     expect(await ok.json()).toMatchObject({
       ok: true, estado: 'CREADA', estadoAviso: 'PENDIENTE_ENVIO',
-      comunicado: 'NO_COMUNICADO', fechaEfectividad: null,
+      comunicado: 'NO_COMUNICADO', fechaEfectividad: '2026-10-01', estadoActualizacion: 'EFECTIVA', rentaVigente: 1224,
     });
     expect(confirmar).toHaveBeenCalledWith({
       uid: 'uid-owner-a', ...body, idempotencyKey: 'idempotency-key-route-01',
@@ -138,4 +148,29 @@ describe('P4 · rutas HTTP con token, verificación y payload mínimo', () => {
       expect(await response.json()).toMatchObject({ ok: false, codigo: 'P4_NO_DISPONIBLE' });
     }
   });
+
+  it('un resultado de persistencia incierto no afirma éxito ni que no se haya guardado', async () => {
+    const app = express();
+    app.use(express.json());
+    montarRutasActualizacionRenta(app, {
+      verificarToken: async () => ({ uid: 'uid-owner-a' }),
+      servicio: {
+        previsualizar: async () => resultadoPreview,
+        confirmar: async () => { throw new ErrorActualizacionRenta('FUENTE_NO_DISPONIBLE', 503); },
+      },
+    });
+    const base = await baseLocal(app);
+    const response = await fetch(`${base}/api/contratos/actualizacion-renta/confirmar`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json', 'Idempotency-Key': 'resultado-incierto-p4' },
+      body: JSON.stringify({ contratoId: 'contrato-a', huellaPreview: 'a'.repeat(64),
+        fechaProgramadaAviso: '2026-10-20', confirmacionExplicita: true, evidenciaComunicacion: evidencia }),
+    });
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain('misma clave');
+    expect(body.error).not.toContain('no se confirmó ni programó nada');
+  });
+
 });

@@ -10,25 +10,32 @@ import {
 class FirestoreMemoriaP4 {
   readonly documentos = new Map<string, Record<string, unknown>>();
   fallarLectura = false;
+  readonly versiones = new Map<string, number>();
 
   sembrar(ruta: string, datos: Record<string, unknown>): void {
     this.documentos.set(ruta, structuredClone(datos));
+    this.versiones.set(ruta, (this.versiones.get(ruta) || 0) + 1);
   }
 
   async leerDocumento(ruta: string) {
     if (this.fallarLectura) throw new Error('fallo sintético; no representa Firestore real');
     const datos = this.documentos.get(ruta);
-    return datos ? { id: ruta.split('/').pop() || '', datos: structuredClone(datos) } : null;
+    return datos ? { id: ruta.split('/').pop() || '', datos: structuredClone(datos), updateTime: String(this.versiones.get(ruta)) } : null;
   }
 
   async escribirAtomico(escrituras: readonly EscrituraP4Atomica[]): Promise<'COMMIT' | 'CONFLICTO'> {
-    if (escrituras.some((escritura) => this.documentos.has(`${escritura.coleccion}/${escritura.id}`))) return 'CONFLICTO';
+    if (escrituras.some((e) => e.precondicion.tipo === 'NO_EXISTE'
+      ? this.documentos.has(`${e.coleccion}/${e.id}`)
+      : String(this.versiones.get(`${e.coleccion}/${e.id}`)) !== e.precondicion.updateTime)) return 'CONFLICTO';
     for (const escritura of escrituras) {
-      this.documentos.set(`${escritura.coleccion}/${escritura.id}`, structuredClone(escritura.datos));
+      const ruta = `${escritura.coleccion}/${escritura.id}`;
+      this.sembrar(ruta, escritura.camposActualizar ? { ...this.documentos.get(ruta), ...escritura.datos } : escritura.datos);
     }
     return 'COMMIT';
   }
 }
+
+const evidencia = { fecha: '2026-09-20', referenciaDocumental: 'fixture-comunicacion-no-real.pdf', declaradaPorActor: true as const };
 
 const UID_PROPIETARIO_A = 'uid-propietario-a';
 const UID_PROPIETARIO_B = 'uid-propietario-b';
@@ -48,12 +55,12 @@ function calculadoraSinteticaAutorizada(
     evidenciaClausula: { estado: 'ACREDITADA', textoExtracto: 'fixture', referenciaDocumental: 'fixture', mecanismo: 'IRAV' },
     fechaCelebracion: contrato.fechaCelebracionContrato,
     fechaInicioContrato: contrato.fechaInicioContrato,
-    fechaAniversario: '2026-10-17',
+    fechaAniversario: '2026-10-01',
     fechaEfectividad: null,
-    rentaActual: 1_200,
+    rentaActual: contrato.rentaMensual,
     porcentajeAplicado: 2,
     importeIncremento: 24,
-    rentaFutura: 1_224,
+    rentaFutura: contrato.rentaMensual + 24,
     indice: {
       serie: 'IRAV1', periodo: '2026M09', estado: 'DEFINITIVO', valorPct: 2.54,
       publicadoEn: '2026-10-14', consultadoEn: '2026-10-17',
@@ -109,11 +116,16 @@ function crearEntorno(calcularPreview?: Parameters<typeof crearServicioActualiza
     permiso: 'LECTURA_ESCRITURA', responsableActual: 'GESTOR', inmuebleIds: ['inm-a'],
   });
 
-  const servicio = crearServicioActualizacionRenta({
+  const servicioReal = crearServicioActualizacionRenta({
     puerto,
     ahora: () => new Date(reloj.fecha),
     ...(calcularPreview ? { calcularPreview } : {}),
   });
+  // Evidencia explícita por defecto para pruebas del servicio; los casos de ausencia la sobrescriben.
+  const servicio = {
+    previsualizar: (entrada: Parameters<typeof servicioReal.previsualizar>[0]) => servicioReal.previsualizar({ evidenciaComunicacion: evidencia, ...entrada }),
+    confirmar: (entrada: Parameters<typeof servicioReal.confirmar>[0]) => servicioReal.confirmar({ evidenciaComunicacion: evidencia, ...entrada }),
+  };
   return { puerto, servicio, reloj };
 }
 
@@ -261,20 +273,26 @@ describe('P4 · servicio server-side de previsualización y autorización de car
 
     const creada = await servicio.confirmar(entrada);
     expect(creada).toMatchObject({
-      estado: 'CREADA', version: 1, fechaAniversario: '2026-10-17',
+      estado: 'CREADA', version: 1, fechaAniversario: '2026-10-01',
       fechaProgramadaAviso: '2026-10-20', estadoAviso: 'PENDIENTE_ENVIO',
-      comunicado: 'NO_COMUNICADO', fechaEfectividad: null,
+      comunicado: 'NO_COMUNICADO', fechaEfectividad: '2026-10-01', estadoActualizacion: 'EFECTIVA', rentaVigente: 1224,
     });
     const anexo = puerto.documentos.get(`anexos_actualizacion_renta/${creada.anexoId}`)!;
     const aviso = puerto.documentos.get(`avisos_actualizacion_renta/${creada.avisoId}`)!;
-    expect(anexo).toMatchObject({ version: 1, estado: 'BORRADOR_NO_FIRMADO', inmutable: true, rentaPropuesta: 1_224 });
-    expect(aviso).toMatchObject({ estado: 'PENDIENTE_ENVIO', comunicado: 'NO_COMUNICADO', fechaEfectividad: null });
+    expect(anexo).toMatchObject({ version: 1, estado: 'ACTUALIZACION_EFECTIVA_NO_FIRMADO', inmutable: true, rentaPropuesta: 1_224 });
+    expect(aviso).toMatchObject({ estado: 'PENDIENTE_ENVIO', comunicado: 'NO_COMUNICADO', fechaEfectividad: '2026-10-01' });
     expect(aviso.canales).toMatchObject({
       EMAIL: { estado: 'PENDIENTE_VALIDACION', confirmadoSMTP: false },
       BANDEJA_INTERNA: { estado: 'PENDIENTE_VALIDACION', confirmadoPorCanal: false },
     });
     expect([...puerto.documentos.keys()].filter((ruta) => ruta.startsWith('auditoria_actualizacion_renta/'))).toHaveLength(1);
 
+    expect(puerto.documentos.get('contratos_formalizacion/contrato-a')).toMatchObject({
+      rentaMensual: 1224, inmuebleId: 'inm-a', propietarioId: 'prop-a', actualizacionRentaVigente: { fechaEfectividad: '2026-10-01', anexoId: creada.anexoId },
+    });
+    expect(anexo).toMatchObject({ rentaAnterior: 1200, rentaPropuesta: 1224, fechaEfectividad: creada.fechaEfectividad,
+      versionCalculo: 'P4-IRAV1-v1', evidenciaComunicacion: { ...evidencia, actorUid: UID_PROPIETARIO_A } });
+    expect(aviso).toMatchObject({ rentaPropuesta: creada.rentaVigente, contratoId: creada.contratoId, fechaEfectividad: creada.fechaEfectividad });
     const cantidadDocumentos = puerto.documentos.size;
     reloj.fecha = '2026-10-21T12:00:00.000Z'; // la fecha programada original ya quedó atrás
     const repetida = await servicio.confirmar(entrada);
@@ -309,4 +327,141 @@ describe('P4 · servicio server-side de previsualización y autorización de car
       idempotencyKey: 'idempotency-key-tenant-01',
     })).rejects.toMatchObject({ codigo: 'CONTRATO_NO_AUTORIZADO', status: 404 });
   });
+
+  it('rechaza un fallo de escritura sin éxito ni documentos parciales (puerto simulado)', async () => {
+    const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+    const entradaPreview = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+    const antes = structuredClone([...puerto.documentos]);
+    const { huellaPreview } = await servicio.previsualizar(entradaPreview);
+    expect([...puerto.documentos]).toEqual(antes);
+    puerto.escribirAtomico = async () => { throw new Error('fallo de escritura simulado'); };
+    await expect(servicio.confirmar({
+      ...entradaPreview, huellaPreview, idempotencyKey: 'fallo-escritura-p4-01',
+      fechaProgramadaAviso: '2026-10-20', confirmacionExplicita: true,
+    })).rejects.toMatchObject({ codigo: 'FUENTE_NO_DISPONIBLE', status: 503 });
+    expect([...puerto.documentos]).toEqual(antes);
+  });
+
+  it('serializa dos confirmaciones concurrentes de la anualidad sin duplicar (puerto simulado)', async () => {
+    const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+    const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+    const { huellaPreview } = await servicio.previsualizar(identidad);
+    const entrada = { ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20', confirmacionExplicita: true };
+    const resultados = await Promise.allSettled([
+      servicio.confirmar({ ...entrada, idempotencyKey: 'concurrencia-p4-clave-a' }),
+      servicio.confirmar({ ...entrada, idempotencyKey: 'concurrencia-p4-clave-b' }),
+    ]);
+    expect(resultados.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(resultados.find((r) => r.status === 'rejected')).toMatchObject({
+      reason: { codigo: 'ACTUALIZACION_YA_CONFIRMADA' },
+    });
+    expect([...puerto.documentos.keys()].filter((r) => r.startsWith('anexos_actualizacion_renta/'))).toHaveLength(1);
+    expect([...puerto.documentos.keys()].filter((r) => r.startsWith('auditoria_actualizacion_renta/'))).toHaveLength(1);
+  });
+
+  it('recupera por la misma clave un commit cuya respuesta se perdió, sin duplicarlo (puerto simulado)', async () => {
+    const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+    const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+    const { huellaPreview } = await servicio.previsualizar(identidad);
+    const entrada = { ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20',
+      confirmacionExplicita: true, idempotencyKey: 'respuesta-perdida-p4-01' };
+    const escribir = puerto.escribirAtomico.bind(puerto);
+    puerto.escribirAtomico = async (escrituras) => {
+      await escribir(escrituras);
+      throw new Error('respuesta perdida tras commit simulado');
+    };
+    await expect(servicio.confirmar(entrada)).rejects.toMatchObject({ codigo: 'FUENTE_NO_DISPONIBLE' });
+    const persistido = structuredClone([...puerto.documentos]);
+    await expect(servicio.confirmar(entrada)).resolves.toMatchObject({ estado: 'REPETIDA' });
+    expect([...puerto.documentos]).toEqual(persistido);
+  });
+
+
+  it('rechaza renta o versión cambiada entre preview y confirmación sin escrituras P4', async () => {
+    for (const cambios of [{ rentaMensual: 1300 }, { inmuebleId: 'otro-inmueble' }]) {
+      const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+      const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+      const { huellaPreview } = await servicio.previsualizar(identidad);
+      puerto.sembrar('contratos_formalizacion/contrato-a', { ...puerto.documentos.get('contratos_formalizacion/contrato-a'), ...cambios });
+      const antes = structuredClone([...puerto.documentos]);
+      await expect(servicio.confirmar({ ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20',
+        confirmacionExplicita: true, idempotencyKey: 'contrato-cambiado-p4-01' }))
+        .rejects.toMatchObject({ codigo: 'PREVIEW_DESACTUALIZADO' });
+      expect([...puerto.documentos]).toEqual(antes);
+    }
+  });
+
+  it('el CAS rechaza un cambio posterior a la última lectura sin guardar historial parcial', async () => {
+    const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+    const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+    const { huellaPreview } = await servicio.previsualizar(identidad);
+    const escribir = puerto.escribirAtomico.bind(puerto);
+    puerto.escribirAtomico = async (escrituras) => {
+      puerto.sembrar('contratos_formalizacion/contrato-a', { ...puerto.documentos.get('contratos_formalizacion/contrato-a'), rentaMensual: 1350 });
+      return escribir(escrituras);
+    };
+    await expect(servicio.confirmar({ ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20',
+      confirmacionExplicita: true, idempotencyKey: 'cas-contrato-cambiado-p4' }))
+      .rejects.toMatchObject({ codigo: 'PREVIEW_DESACTUALIZADO' });
+    expect(puerto.documentos.get('contratos_formalizacion/contrato-a')?.rentaMensual).toBe(1350);
+    expect([...puerto.documentos.keys()].filter((r) => /actualizacion_renta/.test(r))).toEqual([]);
+  });
+
+  it('no aplica sin evidencia, con fecha futura ni con efectividad anterior a la anualidad', async () => {
+    for (const dato of [undefined, { ...evidencia, fecha: '2026-10-17' }, { ...evidencia, fecha: '2026-08-20' }]) {
+      const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+      const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a', evidenciaComunicacion: dato };
+      const antes = structuredClone([...puerto.documentos]);
+      const { huellaPreview } = await servicio.previsualizar(identidad);
+      await expect(servicio.confirmar({ ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20',
+        confirmacionExplicita: true, idempotencyKey: 'evidencia-fecha-p4-01' }))
+        .rejects.toMatchObject({ codigo: dato ? 'FECHA_EFECTIVIDAD_NO_APLICABLE' : 'EVIDENCIA_COMUNICACION_REQUERIDA' });
+      expect([...puerto.documentos]).toEqual(antes);
+    }
+  });
+
+  it('bloquea evidencia inválida y no permite sustituirla después del preview', async () => {
+    const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+    const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+    for (const dato of [{ ...evidencia, fecha: '2026-02-30' }, { ...evidencia, referenciaDocumental: ' ' }, { ...evidencia, fecha: '2027-01-01' }]) {
+      await expect(servicio.previsualizar({ ...identidad, evidenciaComunicacion: dato })).rejects.toMatchObject({ codigo: 'EVIDENCIA_COMUNICACION_REQUERIDA' });
+    }
+    const { huellaPreview } = await servicio.previsualizar(identidad);
+    const antes = structuredClone([...puerto.documentos]);
+    await expect(servicio.confirmar({ ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20',
+      evidenciaComunicacion: { ...evidencia, referenciaDocumental: 'otra.pdf' },
+      confirmacionExplicita: true, idempotencyKey: 'cambio-evidencia-p4-01' })).rejects.toMatchObject({ codigo: 'PREVIEW_DESACTUALIZADO' });
+    expect([...puerto.documentos]).toEqual(antes);
+  });
+
+  it('concurrentes con la misma clave recuperan un único resultado efectivo', async () => {
+    const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+    const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+    const { huellaPreview } = await servicio.previsualizar(identidad);
+    const entrada = { ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20', confirmacionExplicita: true, idempotencyKey: 'concurrencia-misma-p4' };
+    const resultados = await Promise.all([servicio.confirmar(entrada), servicio.confirmar(entrada)]);
+    expect(resultados.map((r) => r.estado).sort()).toEqual(['CREADA', 'REPETIDA']);
+    expect(puerto.documentos.get('contratos_formalizacion/contrato-a')?.rentaMensual).toBe(1224);
+    expect([...puerto.documentos.keys()].filter((r) => r.startsWith('anexos_actualizacion_renta/'))).toHaveLength(1);
+  });
+
+  it('preserva anexos históricos y deniega cuando no dispone de versión para el CAS', async () => {
+    const { puerto, servicio } = crearEntorno(calculadoraSinteticaAutorizada);
+    const identidad = { uid: UID_PROPIETARIO_A, contratoId: 'contrato-a' };
+    puerto.sembrar('anexos_actualizacion_renta/anterior', { rentaAnterior: 1100, rentaPropuesta: 1200, version: 1 });
+    const { huellaPreview } = await servicio.previsualizar(identidad);
+    await servicio.confirmar({ ...identidad, huellaPreview, fechaProgramadaAviso: '2026-10-20', confirmacionExplicita: true, idempotencyKey: 'historial-anterior-p4' });
+    expect(puerto.documentos.get('anexos_actualizacion_renta/anterior')).toEqual({ rentaAnterior: 1100, rentaPropuesta: 1200, version: 1 });
+    const otro = crearEntorno(calculadoraSinteticaAutorizada);
+    const leer = otro.puerto.leerDocumento.bind(otro.puerto);
+    otro.puerto.leerDocumento = async (ruta) => {
+      const documento = await leer(ruta);
+      return documento ? { ...documento, updateTime: undefined } : null;
+    };
+    const vista = await otro.servicio.previsualizar(identidad);
+    await expect(otro.servicio.confirmar({ ...identidad, huellaPreview: vista.huellaPreview, fechaProgramadaAviso: '2026-10-20',
+      confirmacionExplicita: true, idempotencyKey: 'sin-version-p4-01' })).rejects.toMatchObject({ codigo: 'FUENTE_NO_DISPONIBLE' });
+    expect(otro.puerto.documentos.get('contratos_formalizacion/contrato-a')?.rentaMensual).toBe(1200);
+  });
+
 });

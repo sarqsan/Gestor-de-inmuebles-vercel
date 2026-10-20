@@ -50,6 +50,7 @@ import { TablaAmortizacionModal } from '../modals/TablaAmortizacionModal';
 import { RentabilidadPanel } from './RentabilidadPanel';
 import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
+import { descargarDocumentoPatrimonial } from '../../lib/expedienteDocumental/gestorFirebase';
 
 interface GastosSectionProps {
   gastos: Gasto[];
@@ -60,6 +61,9 @@ interface GastosSectionProps {
   currentUser?: UsuarioApp | null;
   onSaveGasto: (gasto: Gasto) => Promise<Gasto | void> | Gasto | void;
   onDeleteGasto: (gastoId: string) => Promise<void> | void;
+  /** P5.2-A: adaptadores que confirman la persistencia y lanzan si falla (escáner OCR). */
+  onSaveGastoVerificado?: (gasto: Gasto) => Promise<Gasto | void> | Gasto | void;
+  onDeleteGastoVerificado?: (gastoId: string) => Promise<void> | void;
   onSaveRecurrente: (plantilla: GastoRecurrente) => Promise<void> | void;
   onDeleteRecurrente: (plantillaId: string) => Promise<void> | void;
   onSavePrestamo: (prestamo: Prestamo) => Promise<void> | void;
@@ -93,6 +97,8 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
   currentUser,
   onSaveGasto,
   onDeleteGasto,
+  onSaveGastoVerificado,
+  onDeleteGastoVerificado,
   onSaveRecurrente,
   onDeleteRecurrente,
   onSavePrestamo,
@@ -119,6 +125,29 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
 
   const [showModal, setShowModal] = useState<boolean>(false);
   const [showEscanerFactura, setShowEscanerFactura] = useState(false);
+  // P5.2-D: descarga verificada del original custodiado en el expediente (P3).
+  const [descargandoDocumentoGastoId, setDescargandoDocumentoGastoId] = useState<string | null>(null);
+  const [errorDescargaDocumento, setErrorDescargaDocumento] = useState('');
+
+  const descargarDocumentoDeGasto = async (g: Gasto) => {
+    const documentoId = g.documento?.id || g.documentos?.find((d) => d.id)?.id || g.facturaOcr?.documentoId;
+    if (!documentoId || !g.inmuebleId) return;
+    setDescargandoDocumentoGastoId(g.id);
+    setErrorDescargaDocumento('');
+    try {
+      const resultado = await descargarDocumentoPatrimonial(g.inmuebleId, documentoId);
+      const url = URL.createObjectURL(resultado.blob);
+      const enlace = document.createElement('a');
+      enlace.href = url;
+      enlace.download = resultado.nombre;
+      enlace.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setErrorDescargaDocumento(error instanceof Error ? error.message : 'No se pudo recuperar la factura custodiada.');
+    } finally {
+      setDescargandoDocumentoGastoId(null);
+    }
+  };
   const [gastoParaEditar, setGastoParaEditar] = useState<Gasto | null>(null);
   const [inmuebleIdInicial, setInmuebleIdInicial] = useState<string>('');
 
@@ -768,6 +797,9 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
           </div>
         ) : (
           <div className="overflow-x-auto">
+            {errorDescargaDocumento && (
+              <div role="alert" className="m-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{errorDescargaDocumento}</div>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -839,6 +871,19 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
                               <Paperclip className="w-3 h-3" /> Factura
                             </a>
                           )}
+                          {/* P5.2-D: original custodiado en el expediente P3 (p. ej. alta OCR): sin URL pública; se recupera y verifica al descargar. */}
+                          {(g.documento?.id || g.facturaOcr?.documentoId) && (
+                            <button
+                              type="button"
+                              disabled={descargandoDocumentoGastoId === g.id}
+                              onClick={(e) => { e.stopPropagation(); void descargarDocumentoDeGasto(g); }}
+                              title="Descargar la factura custodiada en el expediente del inmueble (se verifica su integridad)"
+                              aria-label={`Descargar factura custodiada de ${g.concepto}`}
+                              className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700 hover:text-indigo-900 disabled:opacity-50"
+                            >
+                              <Paperclip className="w-3 h-3" /> {descargandoDocumentoGastoId === g.id ? 'Descargando…' : 'Factura (expediente)'}
+                            </button>
+                          )}
                           {esFin && typeof g.intereses === 'number' && (
                             <span className="text-[10px] text-violet-600">
                               intereses {euro(g.intereses || 0)} · capital{' '}
@@ -907,8 +952,8 @@ export const GastosSection: React.FC<GastosSectionProps> = ({
           gastos={gastos}
           inmuebles={inmuebles}
           currentUser={currentUser}
-          onSave={onSaveGasto}
-          onDelete={onDeleteGasto}
+          onSave={onSaveGastoVerificado ?? onSaveGasto}
+          onDelete={onDeleteGastoVerificado ?? onDeleteGasto}
           onClose={() => setShowEscanerFactura(false)}
         />
       )}

@@ -14,6 +14,7 @@ vi.mock('../../lib/ocrFactura', async (importOriginal) => {
 });
 
 import type { Gasto, Inmueble, UsuarioApp } from '../../types';
+import { reconocerDocumentoLocal } from '../../lib/ocrFactura';
 import { EscanerFacturaModal } from './EscanerFacturaModal';
 
 const INMUEBLE = { id: 'inm-1', propietarioId: 'prop-1', direccion: 'Calle Uno 1', ciudad: 'Alicante' } as Inmueble;
@@ -21,9 +22,9 @@ const USUARIO = { id: 'uid-1', nombre: 'Gestora', email: 'gestora@example.test' 
 const DOC = { id: 'doc_12345678', nombre: 'factura.png', storagePath: 'inmuebles/inm-1/documentos_patrimoniales/doc_12345678/factura.png' } as any;
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
-function renderEscaner(onSave = vi.fn(async (g: Gasto) => g), onDelete = vi.fn()) {
+function renderEscaner(onSave = vi.fn(async (g: Gasto) => g), onDelete = vi.fn(), gastos: Gasto[] = []) {
   const onClose = vi.fn();
-  render(<EscanerFacturaModal gastos={[]} inmuebles={[INMUEBLE]} currentUser={USUARIO} onSave={onSave} onDelete={onDelete} onClose={onClose} />);
+  render(<EscanerFacturaModal gastos={gastos} inmuebles={[INMUEBLE]} currentUser={USUARIO} onSave={onSave} onDelete={onDelete} onClose={onClose} />);
   return { onSave, onDelete, onClose };
 }
 async function seleccionarFactura() {
@@ -61,5 +62,89 @@ describe('P5 · revisión visible antes de cualquier persistencia', () => {
     expect(subirDocumento).toHaveBeenCalledWith(expect.objectContaining({ inmuebleId: 'inm-1', tipo: 'FACTURA_GASTO', relaciones: { gastoId: primero.id } }));
     expect(segundo.documento).toMatchObject({ id: DOC.id, storagePath: DOC.storagePath, url: '' });
     expect(segundo.facturaOcr.documentoId).toBe(DOC.id);
+  });
+});
+
+describe('P5.2 · errores por etapa, abonos y posibles duplicados en la UI', () => {
+  async function prepararConfirmacion() {
+    await seleccionarFactura();
+    fireEvent.change(screen.getByLabelText('Quién asume el gasto *'), { target: { value: 'arrendador' } });
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar y añadir gasto/ }));
+  }
+
+  it('etapa 1: si el guardado del gasto falla, no sube el documento ni muestra éxito', async () => {
+    const onSave = vi.fn(async () => { throw new Error('permission-denied'); });
+    renderEscaner(onSave as never);
+    await prepararConfirmacion();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/No se pudo guardar el gasto/);
+    expect(subirDocumento).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Factura incorporada/)).toBeNull();
+  });
+
+  it('etapa 3: si falla la segunda escritura (enlace), muestra el estado real sin éxito', async () => {
+    subirDocumento.mockResolvedValue({ documento: DOC, duplicado: false });
+    const onSave = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('offline'));
+    renderEscaner(onSave as never);
+    await prepararConfirmacion();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/referencia cruzada/);
+    expect(screen.queryByText(/Factura incorporada/)).toBeNull();
+  });
+
+  it('abono/rectificativa: total negativo se bloquea con mensaje específico y no guarda nada', async () => {
+    vi.mocked(reconocerDocumentoLocal).mockResolvedValueOnce({
+      texto: 'Proveedor: ACME SL\nNIF: B12345674\nFactura nº: R-1\nConcepto: Devolución de material\nTotal factura: -121,00 €',
+      confianza: 90,
+    });
+    const { onSave } = renderEscaner();
+    await prepararConfirmacion();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/abono o rectificativa/);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(subirDocumento).not.toHaveBeenCalled();
+  });
+
+  it('gasto manual coincidente: avisa como posible sin bloquear ni modificarlo', async () => {
+    const manual = {
+      id: 'gas_manual', inmuebleId: 'inm-1', propietarioId: 'prop-1', tipo: 'EXPLOTACION', categoria: 'REPARACION',
+      concepto: 'Reparación de persiana', proveedor: 'ACME Reparaciones SL', importe: 121, estado: 'PAGADO',
+      fechaDevengo: '2026-03-14', aCargoDe: 'arrendador', deducible: true,
+      justificanteUrl: 'https://storage.example/f.pdf',
+      createdAt: '2026-03-14T00:00:00.000Z', updatedAt: '2026-03-14T00:00:00.000Z',
+    } as Gasto;
+    const { onSave, onDelete } = renderEscaner(undefined, undefined, [manual]);
+    await seleccionarFactura();
+    expect(await screen.findByText(/Posibles coincidencias para revisar/)).toBeTruthy();
+    const boton = screen.getByRole('button', { name: /Confirmar y añadir gasto/ }) as HTMLButtonElement;
+    expect(boton.disabled).toBe(false);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalledWith('gas_manual');
+  });
+
+  it('P5.3 · tiempo agotado: se muestra como error (no éxito) y permite reintentar el mismo archivo', async () => {
+    vi.mocked(reconocerDocumentoLocal).mockRejectedValueOnce(
+      Object.assign(new Error('La lectura ha superado el tiempo máximo (120 s) y se ha detenido.'), { codigo: 'OCR_TIEMPO_AGOTADO' })
+    );
+    renderEscaner();
+    const input = screen.getByLabelText(/Selecciona o captura una factura/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['fake'], 'factura.png', { type: 'image/png' })] } });
+    expect((await screen.findByRole('alert')).textContent).toMatch(/tiempo máximo/);
+    expect(screen.getByRole('button', { name: /Reintentar lectura del mismo archivo/ })).toBeTruthy();
+    expect(screen.queryByText(/Factura incorporada/)).toBeNull();
+  });
+
+  it('P5.3 · cancelar lectura aborta el reconocimiento y no deja estado engañoso', async () => {
+    vi.mocked(reconocerDocumentoLocal).mockImplementationOnce((async (
+      _file: File, _progreso?: unknown, opciones?: { senal?: AbortSignal }
+    ) => new Promise((_resolve, reject) => {
+      opciones?.senal?.addEventListener('abort', () => reject(
+        Object.assign(new Error('Lectura cancelada. No se ha guardado nada.'), { codigo: 'OCR_CANCELADO' })
+      ));
+    })) as never);
+    const { onSave } = renderEscaner();
+    const input = screen.getByLabelText(/Selecciona o captura una factura/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['fake'], 'factura.png', { type: 'image/png' })] } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancelar lectura' }));
+    expect((await screen.findByRole('status')).textContent).toMatch(/Lectura cancelada/);
+    expect(screen.queryByText(/Reconociendo documento/)).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

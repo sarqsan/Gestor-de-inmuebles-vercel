@@ -28,6 +28,7 @@ import {
   tipoDeCategoria,
 } from '../../utils/gastosEngine';
 import { uploadFacturaGasto, deleteFacturaGastoStorage } from '../../lib/firebase';
+import { descargarDocumentoPatrimonial } from '../../lib/expedienteDocumental/gestorFirebase';
 import { ErrorCampo, ResumenErrores, claseEntrada } from '../formularios/CampoFormulario';
 import { hayErrores, resumenErrores, validarFormulario } from '../../formularios/validacion';
 import type { ErroresFormulario } from '../../formularios/validacion';
@@ -139,6 +140,30 @@ export const GastoModal: React.FC<GastoModalProps> = ({
   const [facturaPath, setFacturaPath] = useState<string>(gastoParaEditar?.justificantePath || '');
   const [eliminarFactura, setEliminarFactura] = useState<boolean>(false);
   const [subiendo, setSubiendo] = useState<boolean>(false);
+  // P5.2-D: factura custodiada en el expediente P3 (p. ej. alta OCR). Es una
+  // referencia DISTINTA del justificante adjuntado manualmente de arriba:
+  // se muestra y se descarga verificada; este modal no la borra ni sustituye.
+  const documentoExpedienteId = gastoParaEditar?.documento?.id || gastoParaEditar?.facturaOcr?.documentoId || '';
+  const [descargandoExpediente, setDescargandoExpediente] = useState(false);
+  const [errorExpediente, setErrorExpediente] = useState('');
+  const descargarFacturaExpediente = async () => {
+    if (!gastoParaEditar || !documentoExpedienteId) return;
+    setDescargandoExpediente(true);
+    setErrorExpediente('');
+    try {
+      const resultado = await descargarDocumentoPatrimonial(gastoParaEditar.inmuebleId, documentoExpedienteId);
+      const url = URL.createObjectURL(resultado.blob);
+      const enlace = document.createElement('a');
+      enlace.href = url;
+      enlace.download = resultado.nombre;
+      enlace.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setErrorExpediente(error instanceof Error ? error.message : 'No se pudo recuperar la factura del expediente.');
+    } finally {
+      setDescargandoExpediente(false);
+    }
+  };
 
   const tipo: TipoGasto = tipoDeCategoria(categoria);
   const esFinanciacion = tipo === 'FINANCIACION';
@@ -597,6 +622,18 @@ export const GastoModal: React.FC<GastoModalProps> = ({
               />
               Deducible fiscalmente en el IRPF del alquiler
             </label>
+          )}
+
+          {/* P5.2-D: original en el expediente seguro del inmueble (solo lectura aquí) */}
+          {documentoExpedienteId && (
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+              <p className="text-xs font-semibold text-indigo-950">Factura custodiada en el expediente del inmueble{gastoParaEditar?.facturaOcr ? ' (alta por escáner OCR)' : ''}</p>
+              <p className="mt-0.5 text-[11px] text-indigo-900/80">{gastoParaEditar?.documento?.nombre || 'Documento original'} · Se recupera del expediente seguro verificando su integridad. Adjuntar otra factura abajo añade un justificante aparte; no sustituye este original.</p>
+              <button type="button" disabled={descargandoExpediente} onClick={() => void descargarFacturaExpediente()} className="mt-2 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-indigo-800 bg-white border border-indigo-200 rounded-xl hover:bg-indigo-100 transition disabled:opacity-50">
+                <Paperclip className="w-3.5 h-3.5" /> {descargandoExpediente ? 'Descargando…' : 'Descargar factura del expediente'}
+              </button>
+              {errorExpediente && <p role="alert" className="mt-2 text-[11px] text-rose-700">{errorExpediente}</p>}
+            </div>
           )}
 
           {/* Factura / justificante en Storage */}

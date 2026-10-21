@@ -4,6 +4,8 @@
 **Criterio:** un hallazgo exige evidencia en el código o en una prueba ejecutada. Las sospechas no verificables figuran en el informe principal §8.2 y **no** se cuentan como defectos.
 
 **Severidades:** P0 crítica · P1 alta · P2 media · P3 baja.
+
+> **Actualización 2026-10-21 (BLOQUE 1, diagnóstico):** A-20 y A-04 se han verificado y ampliado con evidencia reproducible, y se han añadido A-21 (escritura cruzada de fichas de profesionales), A-22 (catálogo de especialidades), A-23 (configuración de módulos), A-24 (tokens heredados) y A-25 (tokens en URL sin `Referrer-Policy`). Detalle, matriz completa por colección/operación/perfil y pruebas: `docs/BLOQUE-1-SEGURIDAD-DIAGNOSTICO-2026-10-21.md`.
 **Estado de producción:** salvo indicación, no se ha podido determinar si el defecto está activo en producción (V-1).
 
 | ID | Sev. | Módulo | Título |

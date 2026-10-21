@@ -15,6 +15,7 @@ vi.mock('../../lib/ocrFactura', async (importOriginal) => {
 
 import type { Gasto, Inmueble, UsuarioApp } from '../../types';
 import { reconocerDocumentoLocal } from '../../lib/ocrFactura';
+import { idGastoOcr } from '../../lib/flujoFacturaOcr';
 import { EscanerFacturaModal } from './EscanerFacturaModal';
 
 const INMUEBLE = { id: 'inm-1', propietarioId: 'prop-1', direccion: 'Calle Uno 1', ciudad: 'Alicante' } as Inmueble;
@@ -117,6 +118,31 @@ describe('P5.2 · errores por etapa, abonos y posibles duplicados en la UI', () 
     expect(boton.disabled).toBe(false);
     expect(onSave).not.toHaveBeenCalled();
     expect(onDelete).not.toHaveBeenCalledWith('gas_manual');
+  });
+
+  it('P5.4 · factura de un gasto ANULADO: bloquea el alta y no sobrescribe el registro', async () => {
+    const clave = 'factura:inm-1:b12345678:f2026031';
+    const anulado = {
+      id: idGastoOcr(clave), inmuebleId: 'inm-1', propietarioId: 'prop-1', tipo: 'EXPLOTACION', categoria: 'REPARACION',
+      concepto: 'Reparación de persiana', proveedor: 'ACME Reparaciones SL', importe: 121, estado: 'ANULADO',
+      aCargoDe: 'arrendador', deducible: false,
+      createdAt: '2026-03-14T00:00:00.000Z', updatedAt: '2026-03-14T00:00:00.000Z',
+      facturaOcr: {
+        version: 1, sha256Documento: 'a'.repeat(64), claveDeduplicacion: clave, procesadoEl: '2026-03-14',
+        confianzaOcr: 91, camposReconocidos: {}, camposConfirmados: {},
+      },
+    } as Gasto;
+    const { onSave, onDelete } = renderEscaner(undefined, undefined, [anulado]);
+    await seleccionarFactura();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/ya tiene un gasto ANULADO/);
+    expect(screen.getByRole('alert').textContent).toMatch(/No se sobrescribirá/);
+    const boton = screen.getByRole('button', { name: /Confirmar y añadir gasto/ }) as HTMLButtonElement;
+    expect(boton.disabled).toBe(true);
+    fireEvent.click(boton);
+    // Sin escritura ni custodia no hay resurrección posible del registro anulado.
+    expect(onSave).not.toHaveBeenCalled();
+    expect(subirDocumento).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it('P5.3 · tiempo agotado: se muestra como error (no éxito) y permite reintentar el mismo archivo', async () => {

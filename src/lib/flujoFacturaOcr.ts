@@ -97,6 +97,14 @@ export interface EvaluacionDuplicadosOcr {
   /** Misma factura y mismo inmueble: bloquea un segundo alta. */
   exacto?: Gasto;
   /**
+   * P5.4: alta OCR **ANULADA** de la misma factura en el mismo inmueble.
+   * El ID del gasto OCR es estable (`idGastoOcr`), así que el alta nueva
+   * apuntaría al MISMO documento de Firestore y `setDoc({merge:true})`
+   * resucitaría el anulado como `PENDIENTE`. Por eso no se ignora en
+   * silencio: bloquea el alta hasta una reactivación humana explícita.
+   */
+  anulado?: Gasto;
+  /**
    * Coincidencias NO concluyentes para revisar (gasto manual del mismo
    * inmueble con importe/fecha/proveedor coincidentes, o la misma factura
    * en OTRO inmueble). Nunca bloquean ni modifican esos registros.
@@ -108,6 +116,9 @@ export interface EvaluacionDuplicadosOcr {
  * Detección de duplicados delimitada por inmueble (P5.2-C):
  * - `exacto` solo dentro del MISMO inmueble y solo para gastos OCR con la
  *   misma huella o el mismo emisor+número (claves P5.2 y legadas P5).
+ * - `anulado` (P5.4): alta OCR ANULADA de la misma factura en el mismo
+ *   inmueble. NUNCA se sobrescribe: comparte el ID estable del alta y un
+ *   reintento la resucitaría; el llamante debe bloquear y pedir reactivación.
  * - Los gastos MANUALES no guardan huella ni número de factura, así que solo
  *   pueden ser `posibles` (aviso para revisión humana) cuando coinciden
  *   inmueble + importe + fecha + proveedor y tienen justificante/documento.
@@ -116,21 +127,24 @@ export interface EvaluacionDuplicadosOcr {
 export function evaluarDuplicadosFacturaOcr(gastos: Gasto[], entrada: EntradaDuplicadosOcr): EvaluacionDuplicadosOcr {
   const claveLegada = claveSinAmbitoInmueble(entrada.clave, entrada.inmuebleId);
   let exacto: Gasto | undefined;
+  let anulado: Gasto | undefined;
   const posibles: Gasto[] = [];
   const proveedorEntrada = normalizarTextoDedupe(entrada.proveedor || '');
   for (const gasto of gastos) {
-    if (gasto.estado === 'ANULADO') continue;
     if (gasto.facturaOcr) {
       if (!mismaFacturaOcr(gasto, claveLegada, entrada.sha256)) continue;
       if (gasto.inmuebleId === entrada.inmuebleId) {
         // El duplicado exacto también casa por clave con ámbito: se cubre
         // porque mismaFacturaOcr compara en forma legada y por huella.
-        exacto ||= gasto;
-      } else {
+        if (gasto.estado === 'ANULADO') anulado ||= gasto;
+        else exacto ||= gasto;
+      } else if (gasto.estado !== 'ANULADO') {
         posibles.push(gasto);
       }
       continue;
     }
+    // Gasto manual ANULADO: no cuenta (no comparte ID ni identidad OCR).
+    if (gasto.estado === 'ANULADO') continue;
     // Gasto manual: solo puede ser coincidencia dudosa del mismo inmueble.
     if (gasto.inmuebleId !== entrada.inmuebleId) continue;
     const tieneSoporte = Boolean(gasto.justificanteUrl || gasto.justificantePath || gasto.documento?.id || gasto.documentos?.length);
@@ -143,7 +157,7 @@ export function evaluarDuplicadosFacturaOcr(gastos: Gasto[], entrada: EntradaDup
     if (!proveedorGasto || !(proveedorGasto.includes(proveedorEntrada) || proveedorEntrada.includes(proveedorGasto))) continue;
     posibles.push(gasto);
   }
-  return { exacto, posibles };
+  return { exacto, anulado, posibles };
 }
 
 /**
@@ -260,7 +274,9 @@ export async function confirmarGastoConFactura(input: {
       } catch {
         throw new Error(`No se pudo custodiar el documento ni revertir el gasto ${guardado.id}. El gasto puede haber quedado pendiente SIN factura enlazada: revísalo o elimínalo manualmente antes de reintentar. Motivo de custodia: ${motivo}`);
       }
-      throw new Error(`No se pudo custodiar el documento. El gasto creado (${guardado.id}) se ha ANULADO para que no tenga efecto económico; vuelve a procesar la factura para darla de alta correctamente. Motivo: ${motivo}`);
+      // P5.4: un alta ANULADA no se reintenta reescaneando (el reintento la
+      // resucitaría con el mismo ID). La recuperación es explícita: reactivar.
+      throw new Error(`No se pudo custodiar el documento. El gasto creado (${guardado.id}) se ha ANULADO para que no tenga efecto económico. Para darla de alta, reactívalo desde Gastos (estado «Pendiente») y vuelve a procesar la factura. Motivo: ${motivo}`);
     }
     throw errorCustodia;
   }

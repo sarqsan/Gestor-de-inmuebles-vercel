@@ -30,7 +30,8 @@
     "lint": "tsc --noEmit",
     "doctor": "node scripts/doctor.mjs",
     "test": "vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=dot",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verificar:produccion": "node scripts/verificar-produccion.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

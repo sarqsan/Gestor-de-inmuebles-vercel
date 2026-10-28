@@ -45,6 +45,8 @@ function formulario(sobreescribir: Record<string, unknown> = {}) {
 
 function puerto(opciones: {
   ficha?: DocumentoLeido | null;
+  /** H-06 — documento PRIVADO del inmueble: es quien autoriza la capacidad. */
+  propiedad?: Record<string, unknown> | null;
   commit?: 'COMMIT' | 'CONFLICTO';
 } = {}) {
   const escrituras: EscrituraDocumentoFirestoreAtomica[] = [];
@@ -52,6 +54,11 @@ function puerto(opciones: {
     async leerDocumento(ruta: string) {
       if (ruta.startsWith('fichas_publicas_inmueble/')) {
         return opciones.ficha === undefined ? FICHA : opciones.ficha;
+      }
+      if (ruta.startsWith('inmuebles/')) {
+        if (opciones.propiedad === null) return null;
+        const datos = opciones.propiedad ?? { id: 'inm-1', direccion: 'Calle Ficticia 1' };
+        return { id: 'inm-1', datos, updateTime: '2026-10-20T00:00:00.000Z' };
       }
       return null;
     },

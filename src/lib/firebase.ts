@@ -1,5 +1,6 @@
 import { ADMIN_MASTER_EMAIL, esEmailMaster } from './masterAdmin';
 import { semillasHabilitadas } from './flags';
+import { asegurarTokenSolicitud } from './tokenSolicitudPublica';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import {
@@ -1091,7 +1092,12 @@ export function sanitizeInmuebleForFirestore(inmueble: Inmueble): Inmueble {
  */
 export async function saveInmuebleFirestore(inmueble: Inmueble): Promise<boolean> {
   try {
-    const cleanInmueble = sanitizeInmuebleForFirestore(inmueble);
+    // H-06 — todo inmueble guardado sale con token de solicitud propio (128 bits).
+    // Se emite aquí, en el punto por el que pasan todas las altas, para que la
+    // propiedad tenga una capacidad no adivinable sin depender de que alguien
+    // abra el modal de enlaces. Si ya lo tiene, se respeta: reemitirlo
+    // invalidaría los enlaces que ya están en manos de candidatos.
+    const cleanInmueble = sanitizeInmuebleForFirestore(asegurarTokenSolicitud(inmueble));
     await setDoc(doc(db, 'inmuebles', cleanInmueble.id), cleanInmueble, { merge: true });
     // R3: espejo público mínimo (mejor esfuerzo: nunca rompe el guardado principal).
     try {

@@ -527,6 +527,8 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/shared/rateLimit.ts',
       // H-04 · límite de cuerpo en streaming para las rutas públicas.
       'server/shared/limiteCuerpo.ts',
+      // H-06 · formato y verificación del token de solicitud (cliente y servidor).
+      'src/lib/tokenSolicitudPublica.ts',
       'server/catastro/autorizacionCatastro.ts',
       // P0.3 · entrega OTP y su plantilla.
       // H-07/H-08 · OTP de actas con autoridad en servidor (sustituye al relé

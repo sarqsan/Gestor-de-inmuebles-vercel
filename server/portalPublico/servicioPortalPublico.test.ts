@@ -71,17 +71,21 @@ class PuertoFalso implements PuertoPortalPublico {
     escrituras: readonly EscrituraDocumentoFirestoreAtomica[]
   ): Promise<'COMMIT' | 'CONFLICTO'> {
     if (this.forzarConflicto) return 'CONFLICTO';
+    // El alta publica usa precondición de CREACIÓN (`NO_EXISTE`): el doble debe
+    // respetarla igual que el cliente real, o el alta nunca podría probarse.
     for (const escritura of escrituras) {
       const actual = this.docs.get(`${escritura.coleccion}/${escritura.id}`);
-      if (!actual) return 'CONFLICTO';
-      if (escritura.precondicion.tipo !== 'VERSION' || escritura.precondicion.updateTime !== actual.updateTime) {
-        return 'CONFLICTO';
+      if (escritura.precondicion.tipo === 'NO_EXISTE') {
+        if (actual) return 'CONFLICTO';
+        continue;
       }
+      if (!actual) return 'CONFLICTO';
+      if (escritura.precondicion.updateTime !== actual.updateTime) return 'CONFLICTO';
     }
     for (const escritura of escrituras) {
       const clave = `${escritura.coleccion}/${escritura.id}`;
-      const actual = this.docs.get(clave)!;
-      const siguientes = escritura.camposActualizar
+      const actual = this.docs.get(clave);
+      const siguientes = escritura.camposActualizar && actual
         ? { ...actual.datos }
         : { ...escritura.datos };
       if (escritura.camposActualizar) {
@@ -138,6 +142,9 @@ function mundo() {
   puerto.poner('fichas_publicas_inmueble/inm-1', {
     id: 'inm-1', inmuebleId: 'inm-1', direccion: 'Calle Ficticia 1', ciudad: 'Alicante',
   });
+  // H-06 — documento PRIVADO del inmueble: sin `tokenSolicitud`, es decir, un
+  // inmueble heredado al que aún se le acepta el enlace `sol-<id>`.
+  puerto.poner('inmuebles/inm-1', { id: 'inm-1', direccion: 'Calle Ficticia 1' });
   puerto.poner('candidatos/cand-1', {
     nombre: 'Ana Sintética',
     telefono: '600000001',
@@ -535,5 +542,92 @@ describe('AG-02 · capacidad y carreras (endurecimiento)', () => {
       reservaCandidateId: 'cand-otro',
       reservaInvitationId: 'inv-otra',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H-06 — Capacidad del enlace de solicitud
+// ---------------------------------------------------------------------------
+// El alta pública no tenía NINGUNA prueba: el token era el id del inmueble y
+// bastaba con que existiera la ficha. Estos casos fijan el contrato nuevo y,
+// sobre todo, el cierre: sin secreto correcto no se crea nada.
+describe('H-06 · el enlace de solicitud es una capacidad, no un id', () => {
+  const SOLICITUD = {
+    candidatoNombre: 'Ana Sintética',
+    candidatoEmail: 'ana@example.test',
+    candidatoTelefono: '600000001',
+    consentimientoAceptado: true,
+    importeMensual: 900,
+  };
+  const SECRETO = 'a'.repeat(32);
+
+  function mundoConToken(): ReturnType<typeof mundo> & { puerto: PuertoFalso } {
+    const base = mundo();
+    base.puerto.poner('inmuebles/inm-2', {
+      id: 'inm-2',
+      direccion: 'Calle Nueva 2',
+      tokenSolicitud: `sol-inm-2-t${SECRETO}`,
+    });
+    base.puerto.poner('fichas_publicas_inmueble/inm-2', {
+      id: 'inm-2', inmuebleId: 'inm-2', direccion: 'Calle Nueva 2', ciudad: 'Alicante', estado: 'disponible',
+    });
+    return base;
+  }
+
+  it('acepta el token firmado y crea la solicitud en el inmueble correcto', async () => {
+    const { puerto, servicio } = mundoConToken();
+    const resultado = await servicio.crearSolicitud(`sol-inm-2-t${SECRETO}`, { solicitud: SOLICITUD });
+    const solicitudId = String(resultado.solicitud.id);
+    expect(solicitudId.startsWith('sol-')).toBe(true);
+    expect(resultado.solicitud.inmuebleId).toBe('inm-2');
+    const creada = puerto.docs.get(`solicitudes/${solicitudId}`);
+    expect(creada?.datos.inmuebleId).toBe('inm-2');
+  });
+
+  it('rechaza el id del inmueble cuando la propiedad YA tiene token emitido', async () => {
+    const { servicio } = mundoConToken();
+    await esperarCodigo(servicio.crearSolicitud('sol-inm-2', { solicitud: SOLICITUD }), 'ENLACE_NO_VALIDO');
+    await esperarCodigo(servicio.crearSolicitud('inm-2', { solicitud: SOLICITUD }), 'ENLACE_NO_VALIDO');
+  });
+
+  it('rechaza un secreto inventado, aunque el id sea correcto', async () => {
+    const { servicio } = mundoConToken();
+    await esperarCodigo(
+      servicio.crearSolicitud(`sol-inm-2-t${'b'.repeat(32)}`, { solicitud: SOLICITUD }),
+      'ENLACE_NO_VALIDO'
+    );
+  });
+
+  it('un secreto de otra propiedad tampoco sirve (no hay tokens intercambiables)', async () => {
+    const { servicio } = mundoConToken();
+    await esperarCodigo(
+      servicio.crearSolicitud(`sol-inm-1-t${SECRETO}`, { solicitud: SOLICITUD }),
+      'ENLACE_NO_VALIDO'
+    );
+  });
+
+  it('mantiene el enlace heredado sol-<id> mientras la propiedad no tenga token', async () => {
+    const { servicio } = mundo();
+    const resultado = await servicio.crearSolicitud('sol-inm-1', { solicitud: SOLICITUD });
+    expect(String(resultado.solicitud.id).startsWith('sol-')).toBe(true);
+    expect(resultado.solicitud.inmuebleId).toBe('inm-1');
+  });
+
+  it('el enlace heredado caduca: pasada la fecha de corte ya no vale', async () => {
+    const { puerto } = mundo();
+    const servicioTardio = crearServicioPortalPublico({
+      puerto,
+      ahora: () => new Date('2027-06-01T00:00:00.000Z'),
+    });
+    await esperarCodigo(
+      servicioTardio.crearSolicitud('sol-inm-1', { solicitud: SOLICITUD }),
+      'ENLACE_NO_VALIDO'
+    );
+  });
+
+  it('sin inmueble legible no hay capacidad, aunque exista la ficha pública', async () => {
+    const { puerto, servicio } = mundo();
+    puerto.docs.delete('inmuebles/inm-1');
+    await esperarCodigo(servicio.crearSolicitud('sol-inm-1', { solicitud: SOLICITUD }), 'ENLACE_NO_VALIDO');
   });
 });

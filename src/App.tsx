@@ -194,6 +194,7 @@ import {
   cargarFichaPublicaPorToken,
   type FichaPublicaInmueble,
 } from './lib/fichaPublicaInmueble';
+import { tokenEnlaceParaMostrar } from './lib/tokenSolicitudPublica';
 import { CuestionarioPublicoView } from './components/CuestionarioPublicoView';
 import { EnviarCuestionarioModal } from './components/EnviarCuestionarioModal';
 
@@ -4764,9 +4765,17 @@ export default function App() {
         <CrearEnlaceSolicitudModal
           inmueble={inmuebleForLinkModal}
           onClose={() => setInmuebleForLinkModal(null)}
+          onEmitirToken={(inm) => {
+            // H-06 — el inmueble pasa a tener token propio (128 bits) y se
+            // persiste: el enlace que se reparta ya no es el id del inmueble.
+            setInmuebles((prev) => prev.map((i) => (i.id === inm.id ? inm : i)));
+            void saveInmuebleOrdinarioFirestore(inm).then((ok) => {
+              if (!ok) reportarResultadoGuardado('inmuebles', false);
+            });
+          }}
           onOpenPortal={(inm) => {
             setInmuebleForLinkModal(null);
-            const token = inm.tokenSolicitud || `sol-${inm.id}`;
+            const token = tokenEnlaceParaMostrar(inm);
             setActivePublicSolicitudToken(token);
           }}
         />

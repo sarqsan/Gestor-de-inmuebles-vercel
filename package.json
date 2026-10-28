@@ -27,7 +27,10 @@
     "auditoria:repositorio": "tsx scripts/guardia-a04-repositorio.mts",
     "auditoria:reglas:matriz": "tsx scripts/diagnostico-b12-list.mts",
     "auditoria:reglas:list": "tsx scripts/auditoria-reglas-list.mts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "doctor": "node scripts/doctor.mjs",
+    "test": "vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=dot",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -63,5 +66,8 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "dompurify": "^3.4.17"
   }
 }

@@ -17,9 +17,21 @@
 #      Si alguna de esas cuatro respuestas cambia, el run se pone ROJO.
 #   3. No usa credenciales de la aplicación, no escribe datos y no necesita
 #      `npm ci` (el script solo usa módulos nativos de Node).
+#
+# Disparadores: push a main (evidencia en cada despliegue), diario (vigilancia) y
+# manual. Se añadió `push` porque lanzarlo a mano exige permiso `actions:write`,
+# que una integración de solo lectura no tiene; así la verificación no depende de
+# que alguien se acuerde ni de credenciales elevadas.
 name: Verificación de producción (solo lectura)
 
 on:
+  # Se ejecuta sola: tras cada fusión a main (para no depender de permisos de
+  # `workflow_dispatch` al lanzarla a mano) y una vez al día como vigilancia.
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '17 6 * * *'
   workflow_dispatch:
     inputs:
       url:

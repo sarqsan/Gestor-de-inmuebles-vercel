@@ -341,6 +341,14 @@ peticiones), **el run se pone rojo**. El resultado queda como resumen del propio
 evidencia fechada, repetible, sin secretos y sin `npm ci` (el script usa solo módulos
 nativos de Node).
 
+**Sobre la URL:** los dominios *por-deployment* (`…-<hash>-<equipo>.vercel.app`)
+pueden estar detrás de **Vercel Authentication** y responder `401` a todo, incluido
+`/api/health`. Eso no es un fallo del servidor. El workflow prueba varios candidatos
+(la URL manual, la del último deployment de Production y el alias estable
+`https://<proyecto>.vercel.app`) y usa el primero que dé `200`; si ninguno lo da,
+deja la tabla de candidatos en el resumen del run para distinguir «protección de
+Vercel» de «aplicación caída».
+
 Uso local, cuando haya red hacia el despliegue:
 
 ```

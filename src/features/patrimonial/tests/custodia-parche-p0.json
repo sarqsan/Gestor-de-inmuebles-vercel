@@ -1,12 +1,11 @@
 {
- "base": "2ed356e04e94d9f5efbc7cf64b4cd0e31d111d4d",
+ "base": "658f692d828df8a6b36830fe3d09eda1d5cc5f3b",
  "nota": "Superficie revisada de la rama respecto a la base de main. `superficie` es la lista EXACTA de ficheros que la rama cambia y `parches` reconstruye byte a byte los ficheros compartidos; cualquier diferencia no declarada hace fallar las guardias de custodia.",
  "superficie": [
   ".github/workflows/verificacion-produccion.yml",
-  "scripts/verificar-produccion.mjs",
+  "docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md",
   "src/features/operaciones/tests/custodia-parche-p0.json",
-  "src/features/patrimonial/tests/custodia-parche-p0.json",
-  "tests/verificar-produccion.test.ts"
+  "src/features/patrimonial/tests/custodia-parche-p0.json"
  ],
  "parches": {
   "package.json": [],

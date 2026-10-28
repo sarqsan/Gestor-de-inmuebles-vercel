@@ -2695,23 +2695,13 @@ service cloud.firestore {
       function movimientoVisible(d) {
         return movimientoEsMio(d) || ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));
       }
-      function sinSecretosBancarios() {
-        return !(
-          'credentials' in incoming() ||
-          'apiKey' in incoming() ||
-          'accessToken' in incoming() ||
-          'psd2' in incoming() ||
-          'ibanSecreto' in incoming() ||
-          'tokenBancario' in incoming() ||
-          'password' in incoming() ||
-          'secret' in incoming() ||
-          'clave' in incoming()
-        );
-      }
       allow get: if isMasterAdmin() || (isPropietarioRole() && movimientoVisible(existing()));
       allow list: if isMasterAdmin() || (isPropietarioRole() && movimientoEsMio(resource.data));
       // E-07/importación manual cerrada provisionalmente por decisión conservadora.
       // Parsers conservados en código; ningún cliente puede crear/alterar movimientos.
+      // La comprobación `sinSecretosBancarios()` se retiró de este bloque: al no
+      // poder crearse ni modificarse documentos aquí, era inalcanzable, y la
+      // consola de Firebase RECHAZA publicar un ruleset con funciones sin usar.
       allow create, update: if false;
       allow delete: if isMasterAdmin();
     }
@@ -2777,20 +2767,11 @@ service cloud.firestore {
       function importacionEsMia(d) {
         return 'propietarioId' in d && d.propietarioId == myPropId();
       }
-      function sinSecretosBancarios() {
-        return !(
-          'credentials' in incoming() ||
-          'apiKey' in incoming() ||
-          'accessToken' in incoming() ||
-          'psd2' in incoming() ||
-          'tokenBancario' in incoming() ||
-          'password' in incoming() ||
-          'secret' in incoming()
-        );
-      }
       allow get: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(existing()));
       allow list: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(resource.data));
       // Sin importación autorizada, ningún cliente crea o cambia cabeceras de import.
+      // Igual que en `movimientos_bancarios`: `sinSecretosBancarios()` se retiró por
+      // ser código muerto (la consola rechaza publicar funciones sin usar).
       allow create, update: if false;
       allow delete: if isMasterAdmin();
     }

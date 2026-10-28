@@ -168,7 +168,7 @@ test('SDK directo: las dos rutas son cerradas, el cliente no suministra permiso 
  assert.ok(body('opFilaAutorizada').includes("key == fila.registro.tipo + '~' + fila.registro.id"));
  assert.doesNotMatch(block,/allow write:|if true/);
  const audit=rulesFull.slice(rulesFull.indexOf('match /audit_logs/'),rulesFull.indexOf('match /notificaciones/'));
- assert.match(audit,/allow read: if isMasterAdmin\(\);/);assert.match(audit,/allow create: if isSignedIn\(\);/);assert.match(audit,/allow update, delete: if false;/);
+ assert.match(audit,/allow read: if isMasterAdmin\(\);/);assert.match(audit,/allow create: if isSignedIn\(\) && \(/);assert.match(audit,/incoming\(\)\.usuarioEmail == authEmail\(\)/);assert.match(audit,/allow update, delete: if false;/);
 });
 
 test('presupuesto: única lectura en cabecera, nunca duplicada desde la entidad',()=>{

@@ -38,7 +38,10 @@ interface SolicitudDetailModalProps {
   solicitud: SolicitudAlquiler;
   inmueble?: Inmueble;
   onClose: () => void;
-  onUpdateSolicitud: (updated: SolicitudAlquiler) => void;
+  /** P0.2.6 — contrato REAL que usa App.tsx: cambio de estado por id. */
+  onUpdateEstado?: (solicitudId: string, estado: SolicitudEstado, nota?: string) => void;
+  /** Compatibilidad con otros llamadores: recibe el documento completo. */
+  onUpdateSolicitud?: (updated: SolicitudAlquiler) => void;
   onTriggerAiAnalysis?: (solicitud: SolicitudAlquiler) => void;
 }
 
@@ -46,6 +49,7 @@ export const SolicitudDetailModal: React.FC<SolicitudDetailModalProps> = ({
   solicitud,
   inmueble,
   onClose,
+  onUpdateEstado,
   onUpdateSolicitud,
   onTriggerAiAnalysis,
 }) => {
@@ -89,7 +93,10 @@ export const SolicitudDetailModal: React.FC<SolicitudDetailModalProps> = ({
       observacionesOwner: ownerNote,
     };
 
-    onUpdateSolicitud(updated);
+    // Si la App provee el contrato por id se usa ese (persiste en Firestore y
+    // actualiza el modal). Si no, se mantiene el callback de documento completo.
+    if (onUpdateEstado) onUpdateEstado(solicitud.id, nuevoEstado, ownerNote);
+    else onUpdateSolicitud?.(updated);
   };
 
   const handleRunAiAnalysis = () => {

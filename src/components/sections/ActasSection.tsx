@@ -1,15 +1,15 @@
+import { EtiquetaSimulacion } from '../common/EtiquetaSimulacion';
+import { solicitarOtpFirma, validarOtpFirmaApi } from '../../lib/entregaOtpApi';
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useMemo, useEffect } from 'react';
-import { Acta, TipoActa, EstadoActa, ParticipanteActa, ElementoActaInventario, LecturaContador, EvidenciaActa, IncidenciaActa, OtpActa } from '../../types/actas';
+import { Acta, TipoActa, EstadoActa, ParticipanteActa, ElementoActaInventario, LecturaContador, EvidenciaActa, IncidenciaActa } from '../../types/actas';
 import { Inmueble, ContratoFormalizacion, UsuarioApp } from '../../types';
 import { FileText, Plus, Search, Filter, Eye, Edit, CheckCircle, Clock, AlertTriangle, FileCheck, Download, Camera, Zap, Droplets, Flame, UserCheck, Shield, History, BarChart3 } from 'lucide-react';
 import { crearActaBase, crearActaSalidaDesdeEntrada, validarActaParaRevision, cambiarEstadoActa, actualizarActa, versionarActa } from '../../utils/actas/actaEngine';
 import { compararActasEntradaSalida } from '../../utils/actas/actaComparacionEngine';
-import { prepararActaParaFirma, completarFirma, validarFirmaConOtp, todasFirmasCompletadas, cerrarActaTrasFirmas } from '../../utils/actas/actaFirmaEngine';
-import { crearOtpActa, validarOtp } from '../../utils/actas/actaOtpEngine';
 import { generarPdfActa, descargarPdfActa } from '../../utils/actas/actaPdfEngine';
 import { ESTADOS_ELEMENTO_ACTA, CATEGORIAS_ELEMENTO_ACTA, crearElementoActaInventario } from '../../utils/actas/actaInventarioEngine';
-import { saveActaFirestore, subscribeActas, uploadEvidenciaActaStorage, saveEvidenciaActaFirestore, subscribeEvidenciasPorPropietario, saveIncidenciaActaFirestore, subscribeTodasIncidenciasActa, saveOtpActaFirestore, subscribeOtpPorActa } from '../../lib/firebaseActas';
+import { saveActaFirestore, subscribeActas, uploadEvidenciaActaStorage, saveEvidenciaActaFirestore, subscribeEvidenciasPorPropietario, saveIncidenciaActaFirestore, subscribeTodasIncidenciasActa, getActaFirestore } from '../../lib/firebaseActas';
 import { registrarAuditoriaFirestore } from '../../lib/firebase';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { avisarOperacion } from '../../feedback/canalFeedback';
@@ -27,7 +27,8 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
   const [actas, setActas] = useState<Acta[]>(initialActas || []);
   const [evidencias, setEvidencias] = useState<EvidenciaActa[]>([]);
   const [incidenciasActa, setIncidenciasActa] = useState<IncidenciaActa[]>([]);
-  const [otps, setOtps] = useState<OtpActa[]>([]);
+  // P0.3 — aviso explícito cuando el canal de entrega no está disponible.
+  const [otpEntregaAviso, setOtpEntregaAviso] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<TipoActa | 'TODOS'>('TODOS');
   const [filtroEstado, setFiltroEstado] = useState<EstadoActa | 'TODOS'>('TODOS');
   const [busqueda, setBusqueda] = useState('');
@@ -74,18 +75,6 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
     const unsubInc = subscribeTodasIncidenciasActa((items) => setIncidenciasActa(items), scope as any);
     return () => { unsub(); unsubEv(); unsubInc(); };
   }, [currentUser]);
-
-  // Subscribe OTP for selected acta
-  useEffect(() => {
-    if (!selectedActa) return;
-    const scope = {
-      tipoPerfil: currentUser?.tipoPerfil,
-      propietarioId: currentUser?.propietarioId,
-      inmuebleIds: currentUser?.inmuebleIds || [],
-    };
-    const unsub = subscribeOtpPorActa(selectedActa.id, (items) => setOtps(items), scope as any);
-    return () => unsub();
-  }, [selectedActa?.id]);
 
   const actasFiltradas = useMemo(() => {
     return actas.filter(a => {
@@ -180,6 +169,18 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
   };
 
   const handleCambiarEstado = async (acta: Acta, nuevoEstado: EstadoActa) => {
+    // H-03: el cliente no puede declarar un acta FIRMADA/CERRADA. Ese estado sólo
+    // lo alcanza el servidor cuando valida el último OTP, y las reglas de
+    // Firestore rechazan esa transición desde el navegador.
+    if (nuevoEstado === 'FIRMADA' || nuevoEstado === 'CERRADA') {
+      avisarOperacion({
+        tipo: 'error',
+        mensaje: nuevoEstado === 'FIRMADA'
+          ? 'Un acta pasa a FIRMADA sola cuando el servidor valida la firma de todos los firmantes.'
+          : 'El cierre a CERRADA se realiza sobre un acta ya FIRMADA, desde FIRMADA → CERRADA.',
+      });
+      return;
+    }
     try {
       const { actaActualizada, historialItem } = cambiarEstadoActa(acta, nuevoEstado, currentUser?.nombre || 'Propietario', currentUser?.id, `Cambio manual a ${nuevoEstado}`);
       await saveActaFirestore(actaActualizada);
@@ -201,89 +202,55 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
   };
 
   const handleSolicitarFirma = async (acta: Acta) => {
-    try {
-      const { actaActualizada } = prepararActaParaFirma(acta, currentUser?.nombre || 'Propietario', currentUser?.id);
-      await saveActaFirestore(actaActualizada);
-      // Generar OTPs para cada firma — transporte PENDIENTE, código solo en campo temporal seguro, no en logs producción
-      for (const firma of actaActualizada.firmas) {
-        const { otp } = await crearOtpActa({
-          actaId: acta.id,
-          firmaId: firma.id,
-          ownerId: acta.ownerId,
-          propertyId: acta.propertyId,
-          contractId: acta.contractId,
-          versionActa: acta.version,
-          solicitante: currentUser?.nombre,
-          solicitanteId: currentUser?.id,
-          canal: 'PENDIENTE_PROVEEDOR'
-        });
-        await saveOtpActaFirestore(otp);
-        // NO console.log del código en producción. El código se entrega solo vía campo temporal controlado en UI dev/manual si canal MANUAL, y se limpia tras uso.
-      }
-      setSelectedActa(actaActualizada);
-      await registrarAuditoriaFirestore({
-        usuarioId: currentUser?.id || 'system',
-        usuarioEmail: currentUser?.email || '',
-        usuarioNombre: currentUser?.nombre || 'Propietario',
-        accion: 'ACTA_SOLICITUD_FIRMA',
-        descripcion: `Solicitud firma acta ${acta.id} v${acta.version} a ${actaActualizada.firmas.length} participantes`,
-        entidadAfectada: 'inmueble' as any,
-        idAfectado: acta.propertyId,
-        resultado: 'EXITO',
-        detalles: { actaId: acta.id, firmas: actaActualizada.firmas.map(f=>f.id) },
+    // H-07/H-08: el navegador NO genera el código ni elige el destino. Pide al
+    // servidor que lo cree y lo entregue al correo que el acta guarda para cada
+    // firmante; si el servidor no puede, no se acredita ninguna firma.
+    const firmantes = acta.participantes.filter(p => p.firmaRequerida);
+    if (firmantes.length === 0) {
+      avisarOperacion({ tipo: 'error', mensaje: 'El acta no tiene participantes con firma requerida.' });
+      return;
+    }
+    const fallos: string[] = [];
+    let enviados = 0;
+    for (const participante of firmantes) {
+      const entrega = await solicitarOtpFirma({ actaId: acta.id, participanteId: participante.id });
+      if (entrega.enviado) enviados += 1;
+      else fallos.push(`${participante.nombre}: ${entrega.error || 'no se pudo entregar el código'}`);
+    }
+    const fresca = await getActaFirestore(acta.id).catch(() => null);
+    if (fresca) setSelectedActa(fresca);
+    setOtpEntregaAviso(fallos.length ? fallos.join(' · ') : null);
+    if (enviados > 0) {
+      avisarOperacion({
+        tipo: 'exito',
+        mensaje: `Código enviado a ${enviados} firmante(s). La firma se acredita cuando el servidor valida el código.`,
       });
-    } catch (e:any) {
-      avisarOperacion({ tipo: 'error', mensaje: mensajeDeErrorUsuario(e, 'No se ha podido completar la operación.') });
+    }
+    if (enviados === 0) {
+      avisarOperacion({ tipo: 'error', mensaje: 'No se ha podido entregar ningún código: la firma NO se ha solicitado.' });
     }
   };
 
-  const handleValidarOtpYFirmar = async (acta: Acta, firmaId: string, codigo: string) => {
-    const firma = acta.firmas.find(f=>f.id===firmaId);
-    if (!firma) { avisarOperacion({ tipo: 'error', mensaje: 'Firma no encontrada' }); return; }
-    const otp = otps.find(o=>o.firmaId===firmaId && o.estado==='ACTIVO');
-    if (!otp) { avisarOperacion({ tipo: 'error', mensaje: 'OTP no encontrado o no activo' }); return; }
-    // Aislamiento: verificar acta/firma/versión/owner corresponden
-    const { validarOtpContexto } = await import('../../utils/actas/actaOtpEngine');
-    const ctxCheck = validarOtpContexto(otp, { actaId: acta.id, firmaId, ownerId: acta.ownerId, versionActa: acta.version, propertyId: acta.propertyId });
-    if (!ctxCheck.valido) { avisarOperacion({ tipo: 'error', mensaje: `OTP aislamiento: ${ctxCheck.motivo}` }); return; }
-    const { valido, motivo, otpActualizado } = await validarOtp(otp, codigo);
-    await saveOtpActaFirestore(otpActualizado);
-    await registrarAuditoriaFirestore({
-      usuarioId: currentUser?.id || 'system',
-      usuarioEmail: currentUser?.email || '',
-      usuarioNombre: currentUser?.nombre || 'Propietario',
-      accion: valido ? 'ACTA_OTP_VALIDADO' : 'ACTA_OTP_FALLIDO',
-      descripcion: `OTP ${otp.id} validación ${valido ? 'OK' : 'FALLO'}: ${motivo || ''}`,
-      entidadAfectada: 'inmueble' as any,
-      idAfectado: acta.propertyId,
-      resultado: valido ? 'EXITO' : 'ERROR',
-      detalles: { actaId: acta.id, firmaId, otpId: otp.id, valido, motivo },
-    });
-    if (!valido) { avisarOperacion({ tipo: 'error', mensaje: `OTP inválido: ${motivo}` }); return; }
-    // Validar firma con OTP y completar
-    let firmaActualizada = validarFirmaConOtp(firma);
-    firmaActualizada = completarFirma(firmaActualizada);
-    const firmasActualizadas = acta.firmas.map(f=>f.id===firmaId?firmaActualizada:f);
-    let actaActualizada: Acta = { ...acta, firmas: firmasActualizadas, fechaActualizacion: new Date().toISOString() };
-    // Si todas firmadas, cerrar a FIRMADA
-    if (todasFirmasCompletadas(actaActualizada)) {
-      const cierre = cerrarActaTrasFirmas(actaActualizada, currentUser?.nombre || 'Propietario', currentUser?.id);
-      actaActualizada = cierre.actaActualizada;
-    } else {
-      actaActualizada.estadoFirma = 'EN_PROCESO';
+  const handleValidarOtpYFirmar = async (acta: Acta, participanteId: string, codigo: string) => {
+    if (!/^\d{6}$/.test(String(codigo || '').trim())) {
+      avisarOperacion({ tipo: 'error', mensaje: 'El código debe tener 6 dígitos.' });
+      return;
     }
-    await saveActaFirestore(actaActualizada);
-    setSelectedActa(actaActualizada);
-    await registrarAuditoriaFirestore({
-      usuarioId: currentUser?.id || 'system',
-      usuarioEmail: currentUser?.email || '',
-      usuarioNombre: currentUser?.nombre || 'Propietario',
-      accion: 'ACTA_FIRMADA',
-      descripcion: `Firma ${firmaId} completada por ${firma.firmanteNombre} en acta ${acta.id} v${acta.version}`,
-      entidadAfectada: 'inmueble' as any,
-      idAfectado: acta.propertyId,
-      resultado: 'EXITO',
-      detalles: { actaId: acta.id, firmaId, version: acta.version },
+    const resultado = await validarOtpFirmaApi({ actaId: acta.id, participanteId, codigo: String(codigo).trim() });
+    const fresca = await getActaFirestore(acta.id).catch(() => null);
+    if (fresca) setSelectedActa(fresca);
+    if (!resultado.ok) {
+      const restantes = typeof resultado.intentosRestantes === 'number'
+        ? ` Intentos restantes: ${resultado.intentosRestantes}.`
+        : '';
+      avisarOperacion({ tipo: 'error', mensaje: `${resultado.error || 'Código no válido.'}${restantes}` });
+      return;
+    }
+    avisarOperacion({
+      tipo: 'exito',
+      mensaje: resultado.actaCerrada
+        ? 'Firma acreditada en el servidor. Todas las firmas están completas: el acta queda FIRMADA.'
+        : 'Firma acreditada en el servidor. El acta sigue pendiente del resto de firmantes.',
     });
   };
 
@@ -557,6 +524,12 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
               {selectedActa.actaAnteriorId && <div className="text-[11px] text-slate-600">Versionado de: {selectedActa.actaAnteriorId} | Motivo: {selectedActa.motivoVersionado || '—'} | Fecha: {selectedActa.fechaVersionado?.slice(0,19) || '—'}</div>}
               {selectedActa.cadenaVersionIds && selectedActa.cadenaVersionIds.length>1 && <div className="text-[10px] text-slate-500">Cadena versiones: {selectedActa.cadenaVersionIds.join(' → ').slice(0,120)}</div>}
               {selectedActa.pdfUrl && <div className="text-[10px] text-emerald-700">PDF persistido: <a href={selectedActa.pdfUrl} target="_blank" className="underline">{selectedActa.pdfStoragePath}</a> v{selectedActa.pdfVersion} {selectedActa.pdfFechaGeneracion?.slice(0,19)}</div>}
+              <div className="my-2"><EtiquetaSimulacion id="entregaOtp" compacto /></div>
+              {otpEntregaAviso && (
+                <p role="alert" data-testid="aviso-entrega-otp" className="my-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                  ENTREGA OTP NO REALIZADA · {otpEntregaAviso}
+                </p>
+              )}
               <div className="flex gap-1 flex-wrap pt-2">
                 <button onClick={()=>handleCambiarEstado(selectedActa, 'EN_REVISION')} className="px-2 py-1 bg-blue-600 text-white rounded-lg font-bold">A revisión</button>
                 <button onClick={()=>handleCambiarEstado(selectedActa, 'PENDIENTE_FIRMA')} className="px-2 py-1 bg-amber-600 text-white rounded-lg font-bold">Pendiente firma</button>
@@ -625,17 +598,16 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
           <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl text-xs space-y-2">
             <h4 className="font-bold flex items-center gap-1"><FileCheck className="w-4 h-4 text-violet-600" />Firmas y OTP ({selectedActa.firmas.length}) — Trazabilidad completa</h4>
             {selectedActa.firmas.map(f=>{
-              const otp = otps.find(o=>o.firmaId===f.id);
               return (
                 <div key={f.id} className="p-2 bg-white border rounded-lg flex flex-col gap-1">
                   <div className="flex justify-between"><span>{f.firmanteNombre} ({f.firmanteRol}) — {f.estado} — {f.metodo} v{f.versionActa}</span><span className="font-mono text-[10px]">{f.fechaFirma?.slice(0,19) || f.fechaSolicitud?.slice(0,19) || '—'}</span></div>
-                  {otp && <div className="text-[11px] text-slate-600">OTP {otp.id.slice(0,12)} Estado {otp.estado} Intentos {otp.intentos}/{otp.maxIntentos} Expira {otp.fechaExpiracion.slice(0,19)} {otp.codigoPlainTemporal ? `Código (temporal entrega inmediata): ${otp.codigoPlainTemporal}` : ''}</div>}
+                  <div className="text-[11px] text-slate-600">El código lo genera y valida el servidor; el destino es el correo del participante en el acta. {f.estado==='FIRMADA' ? 'Firma acreditada.' : f.estado==='SOLICITADA' ? 'Código solicitado: pide uno nuevo si ha caducado.' : 'Solicita el código con «Solicitar firma + OTP».'}</div>
                   {f.estado!=='FIRMADA' && (
                     <div className="flex gap-2 items-center">
-                      <input id={`otp_input_${f.id}`} placeholder="Código OTP 6 dígitos" className="px-2 py-1 bg-slate-50 border rounded text-xs w-40" />
+                      <input id={`otp_input_${f.id}`} placeholder="Código OTP 6 dígitos" inputMode="numeric" maxLength={6} className="px-2 py-1 bg-slate-50 border rounded text-xs w-40" />
                       <button onClick={()=>{
                         const input = document.getElementById(`otp_input_${f.id}`) as HTMLInputElement;
-                        if (input) handleValidarOtpYFirmar(selectedActa, f.id, input.value);
+                        if (input) handleValidarOtpYFirmar(selectedActa, f.firmanteId, input.value);
                       }} className="px-3 py-1 bg-violet-600 text-white rounded-lg font-bold text-xs">Validar OTP y firmar</button>
                     </div>
                   )}
@@ -747,13 +719,26 @@ const AddParticipanteForm: React.FC<{ onAdd: (p: ParticipanteActa) => void }> = 
   const [nombre, setNombre] = useState('');
   const [rol, setRol] = useState<ParticipanteActa['rol']>('ARRENDATARIO');
   const [dni, setDni] = useState('');
+  const [email, setEmail] = useState('');
   const [firmaReq, setFirmaReq] = useState(true);
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-2 p-3 bg-slate-50 border rounded-xl">
+    <div className="grid grid-cols-1 md:grid-cols-5 gap-2 p-3 bg-slate-50 border rounded-xl">
       <input placeholder="Nombre completo *" value={nombre} onChange={e=>setNombre(e.target.value)} className="px-2 py-1 bg-white border rounded" />
       <select value={rol} onChange={e=>setRol(e.target.value as any)} className="px-2 py-1 bg-white border rounded"><option>ARRENDADOR</option><option>ARRENDATARIO</option><option>COTITULAR</option><option>AVALISTA</option><option>TESTIGO</option><option>GESTOR</option><option>ADMINISTRADOR</option><option>OTRO</option></select>
       <input placeholder="DNI/NIE" value={dni} onChange={e=>setDni(e.target.value)} className="px-2 py-1 bg-white border rounded" />
-      <div className="flex items-center gap-2"><label className="flex items-center gap-1"><input type="checkbox" checked={firmaReq} onChange={e=>setFirmaReq(e.target.checked)} />Firma req</label><button onClick={()=>{ if(!nombre.trim()){avisarOperacion({ tipo: 'error', mensaje: 'Nombre requerido' }); return;} const p: ParticipanteActa = { id: `part_${Date.now()}`, nombre: nombre.trim(), rol, dni: dni.trim()||undefined, firmaRequerida: firmaReq, haFirmado: false }; onAdd(p); setNombre(''); setDni(''); }} className="px-3 py-1 bg-violet-600 text-white rounded-lg font-bold">Añadir</button></div>
+      <input placeholder={firmaReq ? 'Correo del firmante *' : 'Correo (opcional)'} type="email" value={email} onChange={e=>setEmail(e.target.value)} className="px-2 py-1 bg-white border rounded" />
+      <div className="flex items-center gap-2"><label className="flex items-center gap-1"><input type="checkbox" checked={firmaReq} onChange={e=>setFirmaReq(e.target.checked)} />Firma req</label><button onClick={()=>{
+        if(!nombre.trim()){avisarOperacion({ tipo: 'error', mensaje: 'Nombre requerido' }); return;}
+        const correo = email.trim().toLowerCase();
+        // H-08: sin correo del firmante el servidor no tiene destino legítimo al
+        // que enviar el código (no se acepta un buzón arbitrario del navegador).
+        if (firmaReq && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) {
+          avisarOperacion({ tipo: 'error', mensaje: 'El correo del firmante es obligatorio para solicitar su firma.' });
+          return;
+        }
+        const p: ParticipanteActa = { id: `part_${Date.now()}`, nombre: nombre.trim(), rol, dni: dni.trim()||undefined, email: correo||undefined, firmaRequerida: firmaReq, haFirmado: false };
+        onAdd(p); setNombre(''); setDni(''); setEmail('');
+      }} className="px-3 py-1 bg-violet-600 text-white rounded-lg font-bold">Añadir</button></div>
     </div>
   );
 };

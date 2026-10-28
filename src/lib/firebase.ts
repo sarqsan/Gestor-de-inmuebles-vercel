@@ -1,3 +1,5 @@
+import { ADMIN_MASTER_EMAIL, esEmailMaster } from './masterAdmin';
+import { semillasHabilitadas } from './flags';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import {
@@ -121,18 +123,9 @@ import {
   type IncidenciaLecturaInmuebles,
 } from './observabilidadLecturaInmuebles';
 import { ENTORNO_EJECUCION } from './entornoEjecucion';
-import {
-  INITIAL_CANDIDATOS,
-  INITIAL_INMUEBLES,
-  INITIAL_PROPIETARIOS,
-  INITIAL_SOLICITUDES,
-  INITIAL_INVITACIONES,
-  INITIAL_VISIT_SLOTS,
-  INITIAL_SOLICITUDES_DOC,
-  INITIAL_CONTRATOS,
-  INITIAL_ASEGURADORAS,
-  INITIAL_GMAIL_CONFIG,
-} from '../data/mockData';
+// P0.1: solo la rutina de siembra (opt-in) usa datos de demostración.
+import { INITIAL_ASEGURADORAS } from '../data/mockData';
+import { inicialAseguradoras, inicialCandidatos, inicialGmailConfig } from '../data/estadoInicial';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
@@ -197,6 +190,12 @@ export const MODULOS_CONFIG_REF = doc(db, 'system', 'modulos_config');
 export async function seedInitialDataIfEmpty() {
   // Only attempt seeding if an authenticated user is present
   if (!auth.currentUser) {
+    return;
+  }
+  // P0.1 — SEGURIDAD: sembrar datos de demostración (usuarios demo,
+  // aseguradoras, especialidades, profesional demo y log de auditoría)
+  // requiere VITE_SEEDS_ENABLED. En producción queda DESACTIVADO.
+  if (!semillasHabilitadas()) {
     return;
   }
   try {
@@ -360,7 +359,7 @@ export function subscribeTitularesAmbito(
  */
 export async function savePropietarioFirestore(propietario: Propietario) {
   const cleanProp = sanitizeObjectForFirestore(propietario);
-  if (auth.currentUser?.email?.toLowerCase() === 'sarqsan2@gmail.com') {
+  if (esEmailMaster(auth.currentUser?.email)) {
     const { guardarAccesoAuditado } = await import('./auditoriaAccesoFirebase');
     await guardarAccesoAuditado('propietarios', propietario.id, cleanProp, 'GUARDAR_PROPIETARIO');
   } else {
@@ -1021,7 +1020,7 @@ export function subscribeCandidatos(callback: (candidatos: Candidato[]) => void)
       const items: Candidato[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as Candidato;
-        const initialMatch = INITIAL_CANDIDATOS.find((ic) => ic.id === docSnap.id);
+        const initialMatch = inicialCandidatos().find((ic) => ic.id === docSnap.id);
 
         // AG-02: no se inventa un token `q-<id>` en la lectura (no se persiste
         // y el portal lo rechazaría). Si el dato inicial lo aporta, se usa; si
@@ -2744,13 +2743,14 @@ export function subscribeAseguradoras(callback: (aseguradoras: ConfiguracionAseg
         items.push({ id: docSnap.id, ...docSnap.data() } as ConfiguracionAseguradora);
       });
       if (items.length === 0) {
-        callback(INITIAL_ASEGURADORAS);
+        callback(inicialAseguradoras());
       } else {
         // Ensure SEAG is present in the list
         const hasSeag = items.some(
           (i) => i.id === 'seag' || i.nombre.toLowerCase().includes('seag')
         );
-        if (!hasSeag) {
+        // P0.1: una LECTURA nunca debe mezclar ni escribir datos demo.
+        if (!hasSeag && semillasHabilitadas()) {
           const seagDefault = INITIAL_ASEGURADORAS.find((a) => a.id === 'seag');
           if (seagDefault) {
             const merged = [seagDefault, ...items];
@@ -2765,7 +2765,7 @@ export function subscribeAseguradoras(callback: (aseguradoras: ConfiguracionAseg
     },
     (err) => {
       reportarErrorLectura('aseguradoras', err, 'Firestore configuracion_aseguradoras snapshot error:');
-      callback(INITIAL_ASEGURADORAS);
+      callback(inicialAseguradoras());
     }
   );
 }
@@ -2854,7 +2854,7 @@ export function subscribeGmailConfig(callback: (config: GmailIntegracionConfig) 
       if (docSnap.exists()) {
         callback(docSnap.data() as GmailIntegracionConfig);
       } else {
-        callback(INITIAL_GMAIL_CONFIG);
+        callback(inicialGmailConfig());
       }
     },
     (err) => {
@@ -3193,7 +3193,7 @@ export async function saveUsuarioFirestore(usuario: UsuarioApp & { passwordHash?
     ...usuario,
     updatedAt: new Date().toISOString(),
   });
-  if (auth.currentUser?.email?.toLowerCase() === 'sarqsan2@gmail.com') {
+  if (esEmailMaster(auth.currentUser?.email)) {
     const { guardarAccesosAuditados } = await import('./auditoriaAccesoFirebase');
     await guardarAccesosAuditados([
       {coleccion:'usuarios',id:usuario.id,datos:clean},
@@ -3419,6 +3419,10 @@ export const DEFAULT_ESPECIALIDADES_INITIAL: Especialidad[] = [
 ];
 
 export async function seedAuthAndRolesIfEmpty() {
+  // P0.1: defensa en profundidad; también se llama desde otros flujos.
+  if (!semillasHabilitadas()) {
+    return;
+  }
   try {
     // 1. Seed admin user if not exists
     const usersSnap = await getDocs(USUARIOS_COL);
@@ -3428,7 +3432,7 @@ export async function seedAuthAndRolesIfEmpty() {
         id: 'user_admin_principal',
         nombre: 'Administrador Principal',
         apellidos: 'RentSelect',
-        email: 'sarqsan2@gmail.com',
+        email: ADMIN_MASTER_EMAIL,
         telefono: '+34 600 111 222',
         tipoPerfil: 'ADMINISTRADOR',
         estado: 'ACTIVO',
@@ -3557,7 +3561,7 @@ export async function seedAuthAndRolesIfEmpty() {
     if (auditSnap.empty) {
       await registrarAuditoriaFirestore({
         usuarioId: 'user_admin_principal',
-        usuarioEmail: 'sarqsan2@gmail.com',
+        usuarioEmail: ADMIN_MASTER_EMAIL,
         usuarioNombre: 'Administrador Principal',
         accion: 'SISTEMA_INICIALIZADO',
         descripcion: 'Capa estructural de autenticación, usuarios, perfiles, permisos y profesionales inicializada con éxito.',

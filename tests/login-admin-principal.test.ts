@@ -303,6 +303,6 @@ describe('Login admin · C. invariantes', () => {
   it('C.5 `firestore.rules` mantiene la exigencia de sesión en `usuarios` y `audit_logs`', () => {
     const r = sinComentarios(RULES);
     expect(r).toMatch(/match \/usuarios\/\{usuarioId\}\s*\{[\s\S]*?allow get: if isSignedIn\(\) &&/);
-    expect(r).toMatch(/match \/audit_logs\/\{auditId\}\s*\{[\s\S]*?allow create: if isSignedIn\(\);/);
+    expect(r).toMatch(/match \/audit_logs\/\{auditId\}\s*\{[\s\S]*?allow create: if isSignedIn\(\) && \(/);
   });
 });

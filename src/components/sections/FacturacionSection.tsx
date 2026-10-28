@@ -1,3 +1,9 @@
+import { EtiquetaSimulacion } from '../common/EtiquetaSimulacion';
+import {
+  resolverModalidadSistema,
+  claseSistemaParaRegistro,
+  esPreparacionSinRemision,
+} from '../../lib/configuracionFiscal';
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -76,7 +82,18 @@ const euro2 = (n: number): string =>
 
 const IVA_TIPOS = [21, 10, 4, 0];
 
-/** Prepara registro de facturación + envío VERI*FACTU (identidad determinista). */
+/**
+ * P1.5-pre — la modalidad ya NO está fijada en el código. Por defecto es
+ * PREPARACION (sin remisión); solo un despliegue con dictamen fiscal P1.4 y
+ * transporte AEAT verificado debería configurar VERIFACTU. Es una variable
+ * PÚBLICA (VITE_*): NO es un secreto y NO habilita por sí sola ningún envío.
+ */
+const CONFIGURACION_FISCAL = resolverModalidadSistema(
+  (import.meta.env as Record<string, string | undefined>).VITE_MODALIDAD_SISTEMA_FACTURACION,
+);
+const CLASE_SISTEMA = claseSistemaParaRegistro(CONFIGURACION_FISCAL.modalidad);
+
+/** Prepara registro de facturación + envío (identidad determinista). */
 function generarRegistroYEnvio(
   factura: Factura,
   previo: RegistroFacturacion | null,
@@ -92,7 +109,7 @@ function generarRegistroYEnvio(
     cuotaTotal: factura.cuotaIva,
     importeTotal: factura.importeTotal,
     fechaHoraHusoGenRegistro: fechaHoraHusoActual(),
-    modalidad: 'VERIFACTU',
+    modalidad: CLASE_SISTEMA,
     registroAnterior: previo,
   });
   const envio = crearEnvioPendiente(generado.registro, factura.propietarioId);
@@ -180,7 +197,7 @@ export const FacturacionSection: React.FC<FacturacionSectionProps> = ({
             <Receipt className="w-5 h-5 text-blue-600" /> Facturación
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Facturas, registro de facturación (huella SHA-256 encadenada) y preparación VERI*FACTU. Sin secretos ni conexión real a la AEAT.
+            Facturas y registro de facturación (huella SHA-256 encadenada). Sin secretos ni conexión real a la AEAT.
           </p>
         </div>
         <button
@@ -189,6 +206,28 @@ export const FacturacionSection: React.FC<FacturacionSectionProps> = ({
         >
           <Plus className="w-4 h-4" /> Nueva factura
         </button>
+      </div>
+
+      {/* P1.5-pre —aviso visible y verificable de la modalidad REAL del sistema. */}
+      <div
+        data-testid="aviso-modalidad-fiscal"
+        data-modalidad={CONFIGURACION_FISCAL.modalidad}
+        className={`border rounded-xl px-4 py-3 text-xs ${
+          CONFIGURACION_FISCAL.modalidad === 'VERIFACTU'
+            ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
+            : 'border-amber-200 bg-amber-50 text-amber-900'
+        }`}
+        role="note"
+      >
+        <b>Estado del sistema de facturación:</b> {CONFIGURACION_FISCAL.descripcion}
+        {CONFIGURACION_FISCAL.aviso && <span className="block mt-1">{CONFIGURACION_FISCAL.aviso}</span>}
+        {esPreparacionSinRemision(CONFIGURACION_FISCAL.modalidad) && (
+          <span className="block mt-1">
+            Los registros, la huella y el QR son preparación local: <b>no se remite nada a la AEAT</b> y
+            no constituyen cumplimiento del RRSIF. La decisión sobre VERI*FACTU / NO VERI*FACTU
+            requiere el dictamen P1.4.
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -624,7 +663,7 @@ function DetalleFactura({
         fecha: factura.fechaExpedicion,
         importe: factura.importeTotal,
         entorno: 'produccion',
-        claseSistema: 'VERIFACTU',
+        claseSistema: CLASE_SISTEMA,
       });
       import('qrcode')
         .then((QRCode) => QRCode.toDataURL(url, { width: 240, margin: 1 }))
@@ -817,7 +856,7 @@ function DetalleFactura({
                   fecha: factura.fechaExpedicion,
                   importe: factura.importeTotal,
                   entorno: 'produccion',
-                  claseSistema: 'VERIFACTU',
+                  claseSistema: CLASE_SISTEMA,
                 })}
               </p>
             </div>
@@ -835,7 +874,7 @@ function DetalleFactura({
               <p>Estado: <b>{envio.estado}</b> · Intentos: {envio.intentos}</p>
               {envio.codigoError && <p>Error: {envio.codigoError}{envio.descripcionError ? ` — ${envio.descripcionError}` : ''}</p>}
               {envio.codigoSeguroVerificacion && <p>CSV: {envio.codigoSeguroVerificacion}</p>}
-              <p className="text-slate-400">Conexión real con AEAT pendiente (certificado/URL oficiales). Sin secretos.</p>
+              <EtiquetaSimulacion id="verifactu" compacto />
             </div>
           ) : (
             <p className="text-xs text-slate-400">Sin preparación de envío.</p>
@@ -882,6 +921,7 @@ function DetalleFactura({
 
         {/* GAP 8 — Factura electrónica B2B (bloque separado de RRSIF/VERI*FACTU) */}
         <FacturaElectronicaB2BPanel factura={factura} currentUser={currentUser ?? null} />
+        <div className="mt-2"><EtiquetaSimulacion id="b2b" compacto /></div>
 
         <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5" />

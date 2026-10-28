@@ -1,3 +1,4 @@
+import { esEmailMaster } from './masterAdmin';
 /** Escrituras nominales sobre enlaces_registro + audit_logs existentes.
  * ROADMAP-01: no crea Auth, usuarios ni propietarios; ROADMAP-02 hará UX de onboarding.
  */
@@ -8,7 +9,7 @@ import type { EnlaceRegistro, UsuarioApp } from '../types';
 
 function master() {
   const user = auth.currentUser;
-  if (!user || user.email?.toLowerCase() !== 'sarqsan2@gmail.com') throw new Error('Solo el master puede administrar invitaciones nominales');
+  if (!user || !esEmailMaster(user.email)) throw new Error('Solo el master puede administrar invitaciones nominales');
   return user;
 }
 function idSeguro(id: string) { return !!id && id.length <= 128 && !/[\/]/.test(id); }

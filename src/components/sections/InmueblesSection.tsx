@@ -1,3 +1,5 @@
+import { esEmailMaster } from '../../lib/masterAdmin';
+import { tokenUsuarioActual } from '../../lib/busquedaTitularesServidor';
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Inmueble,
@@ -506,7 +508,7 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
    */
   const esAdminTitularidades =
     currentUser?.tipoPerfil === 'ADMINISTRADOR' ||
-    (currentUser?.email || '').trim().toLowerCase() === 'sarqsan2@gmail.com';
+    esEmailMaster(currentUser?.email);
   const puedoLeerTitularidadesDe = (inm: Inmueble): boolean =>
     puedeLeerTitularidades
       ? puedeLeerTitularidades(inm)
@@ -880,9 +882,16 @@ export const InmueblesSection: React.FC<InmueblesSectionProps> = ({
     setCatastroConsultando(true);
     setCatastroAviso(null);
     try {
+      // P0.2.4: el endpoint exige un ID token verificado en el servidor.
+      const idToken = await tokenUsuarioActual();
+      if (!idToken) {
+        setCatastroAviso({ tipo: 'err', texto: 'Inicia sesión para consultar el Catastro.' });
+        setCatastroConsultando(false);
+        return;
+      }
       const resp = await fetch('/api/catastro/consultar', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ referenciaCatastral: ref }),
       });
       const j = await resp.json();

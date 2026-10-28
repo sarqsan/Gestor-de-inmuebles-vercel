@@ -1,3 +1,4 @@
+import { esEmailMaster } from './masterAdmin';
 /**
  * GESTIONES-CARTERA — Adaptador Firestore de los puertos del servicio.
  * ---------------------------------------------------------------------------
@@ -50,7 +51,7 @@ import { indexarGestionesActivas, proyectarCarterasGestionadas } from './cartera
 
 function eventoObligatorioGestion(ref: {id:string}, gestion: GestionCartera, auditId: string) {
   const actor = auth.currentUser;
-  if (!actor || actor.email?.toLowerCase() !== 'sarqsan2@gmail.com')
+  if (!actor || !esEmailMaster(actor.email))
     throw new Error('Gestión administrativa sin master autenticado');
   const ultimo = gestion.eventos?.[gestion.eventos.length - 1];
   return {id:auditId,usuarioId:actor.uid,usuarioEmail:actor.email,usuarioNombre:actor.email,
@@ -204,7 +205,7 @@ export const puertoEspejoCarterasFirestore: PuertoEspejoCarteras = {
     // La query solo descubre rutas: cada relación y propietario se relee EN
     // la transacción junto al espejo. Altas nuevas ausentes fallan cerrado.
     const actor = auth.currentUser;
-    if (!actor || actor.email !== 'sarqsan2@gmail.com') throw new Error('Solo master proyecta carteras');
+    if (!actor || !esEmailMaster(actor.email)) throw new Error('Solo master proyecta carteras');
     const mirrorRef = doc(db, COLECCION_ESPEJOS_AUTH, uid);
     const mirror = await getDoc(mirrorRef);
     if (!mirror.exists() || !mirror.data().usuarioId) throw new Error('Espejo de identidad pendiente');

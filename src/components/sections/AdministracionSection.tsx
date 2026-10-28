@@ -661,6 +661,9 @@ export const AdministracionSection: React.FC<AdministracionSectionProps> = ({
           {activeTab === 'roles' && (
             <div className="space-y-6">
               <div>
+                <p data-testid="aviso-permisos-informativos" className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2">
+                  Solo documentación: la selección de permisos no se aplica hoy en las reglas de acceso. La autorización efectiva la decide el perfil veraz y las reglas de Firestore.
+                </p>
                 <h3 className="text-sm font-bold text-slate-900 mb-1">
                   Roles Predefinidos del Sistema
                 </h3>
@@ -701,7 +704,7 @@ export const AdministracionSection: React.FC<AdministracionSectionProps> = ({
 
               <div className="pt-4 border-t border-slate-200">
                 <h3 className="text-sm font-bold text-slate-900 mb-1">
-                  Catálogo Completo de Permisos Granulares ({PERMISOS_SISTEMA.length})
+                  Catálogo INFORMATIVO de permisos ({PERMISOS_SISTEMA.length}) — sin efecto en la autorización
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {PERMISOS_SISTEMA.map((perm) => (

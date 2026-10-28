@@ -563,7 +563,7 @@ export const CrearUsuarioModal: React.FC<CrearUsuarioModalProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2 text-slate-800 font-semibold text-sm">
                 <Key className="w-4 h-4 text-blue-600" />
-                <span>Permisos Granulares Activos ({selectedPermisos.length})</span>
+                <span data-testid="aviso-permisos-declarativos">Permisos declarativos (informativo; la autorización real la define el perfil y las reglas) ({selectedPermisos.length})</span>
               </div>
             </div>
             {permisosBloqueados && (

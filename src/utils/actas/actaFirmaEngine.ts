@@ -1,5 +1,5 @@
 import { Acta, FirmaActa, ParticipanteActa, HistorialActa } from '../../types/actas';
-import { validarTransicion } from './actaStateMachine';
+import { validarTransicion } from './actaStateMachine.js';
 
 export function crearFirmaActa(
   actaId: string,

@@ -1,3 +1,4 @@
+import { EtiquetaSimulacion } from './common/EtiquetaSimulacion';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EstadoSindicacionPortal,
@@ -466,6 +467,7 @@ export const PublicacionInmueblesPanel: React.FC<PublicacionInmueblesPanelProps>
 
       {abierto && (
         <div className="px-5 pb-5 space-y-4 border-t border-slate-100 pt-4">
+          <EtiquetaSimulacion id="sindicacion" compacto />
           {/* VALIDACIÓN */}
           {validacion && (
             <div className="space-y-1.5">

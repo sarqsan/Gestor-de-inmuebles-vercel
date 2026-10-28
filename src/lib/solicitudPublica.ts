@@ -29,8 +29,12 @@ export type SolicitudPublicaCanonica = SolicitudAlquiler & {
 };
 
 export interface PersistenciaAltaPublica {
-  /** Escritura de la solicitud. Debe rechazar si Firestore deniega el alta. */
-  guardarSolicitud: (solicitud: SolicitudAlquiler) => Promise<void>;
+  /**
+   * Escritura de la solicitud. Debe rechazar si el alta no se confirma.
+   * P0.2: puede devolver el documento construido por el SERVIDOR (con ids y
+   * campos controlados allí); en ese caso sustituye al documento local.
+   */
+  guardarSolicitud: (solicitud: SolicitudAlquiler) => Promise<void | SolicitudAlquiler>;
   /** Escritura del candidato (registro secundario, best-effort). */
   guardarCandidato?: (candidato: Candidato) => Promise<void>;
   /** Diagnóstico cuando el candidato no se pudo guardar. */
@@ -60,7 +64,7 @@ export async function registrarSolicitudPublica(
   persistencia: PersistenciaAltaPublica
 ): Promise<SolicitudPublicaCanonica> {
   const canonica = conIdentidadCanonica(solicitud);
-  await persistencia.guardarSolicitud(canonica);
+  const confirmada = await persistencia.guardarSolicitud(canonica);
 
   if (candidato && persistencia.guardarCandidato) {
     try {
@@ -70,5 +74,9 @@ export async function registrarSolicitudPublica(
     }
   }
 
-  return canonica;
+  // El servidor puede haber asignado ids/estado/fechas distintos: manda su
+  // respuesta. Los alias canónicos se conservan aunque no los devuelva.
+  return (confirmada && typeof confirmada === 'object'
+    ? { ...canonica, ...(confirmada as SolicitudAlquiler) }
+    : canonica) as SolicitudPublicaCanonica;
 }

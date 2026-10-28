@@ -234,7 +234,7 @@ describe('INC-06 · reglas de propietarios con ficha patrimonial', () => {
 
 describe('INC-06 · audit_logs sigue siendo append-only', () => {
   const log = {
-    id: 'a1', usuarioId: 'u', usuarioEmail: 'e', usuarioNombre: 'n',
+    id: 'a1', usuarioId: 'u', usuarioEmail: 'x@test.local', usuarioNombre: 'n',
     accion: 'IMPORTACION_PATRIMONIAL_EJECUTADA', descripcion: 'd',
     fechaHora: '2026-09-26T00:00:00.000Z', entidadAfectada: 'importacion_patrimonial',
     idAfectado: 'lote_pat_1', resultado: 'EXITO',
@@ -243,6 +243,8 @@ describe('INC-06 · audit_logs sigue siendo append-only', () => {
 
   it('cualquier sesión puede crear; nadie edita ni borra; solo master lee', () => {
     expect(permite('audit_logs', 'create', peticion({ ...t, requestResource: log, docId: 'a1' }))).toBe(true);
+    // P0.2.8: la autoría no se puede suplantar.
+    expect(permite('audit_logs', 'create', peticion({ ...t, requestResource: { ...log, usuarioEmail: 'otro@test.local' }, docId: 'a1' }))).toBe(false);
     expect(permite('audit_logs', 'update', peticion({ ...t, resource: log, requestResource: log, docId: 'a1' }))).toBe(false);
     expect(permite('audit_logs', 'update', peticion({ ...authMaster, resource: log, requestResource: log, docId: 'a1' }))).toBe(false);
     expect(permite('audit_logs', 'delete', peticion({ ...authMaster, resource: log, docId: 'a1' }))).toBe(false);

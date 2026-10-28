@@ -1,7 +1,8 @@
+import { ADMIN_MASTER_EMAIL } from '../../../lib/masterAdmin.ts';
 /** Lectura del contrato B fc14156: espejo usuarios_auth + perfil resuelto.
  * No provisiona usuarios, binding ni carteras. Las Rules son la autoridad.
  */
-export const MASTER_EMAIL_CANONICO = 'sarqsan2@gmail.com';
+export const MASTER_EMAIL_CANONICO = ADMIN_MASTER_EMAIL;
 export interface IdentidadCanonica {
   readonly uid: string;
   readonly usuarioId: string;

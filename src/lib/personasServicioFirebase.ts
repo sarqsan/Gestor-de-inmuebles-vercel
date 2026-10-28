@@ -1,3 +1,4 @@
+import { ADMIN_MASTER_EMAIL } from './masterAdmin';
 /** Adaptador opt-in ROADMAP-01. Escrituras master-only, atómicas con audit_logs.
  * No ejecuta migraciones ni se invoca desde el onboarding existente. El master
  * debe vincular explícitamente la ficha jurídica y, si existe, el usuario.
@@ -8,7 +9,7 @@ import type { Persona, RolPersona } from './personas';
 import { crearPersona, vincularPropietario, vincularUsuario, desvincularUsuario, desvincularPropietario, cambiarRolesPersona, auditoriaPersona } from './personas';
 import type { Propietario, UsuarioApp } from '../types';
 
-const MASTER = 'sarqsan2@gmail.com';
+const MASTER = ADMIN_MASTER_EMAIL;
 function actor() {
   const u = auth.currentUser;
   if (!u || u.email?.toLowerCase() !== MASTER) throw new Error('Operación reservada al master autenticado');

@@ -145,7 +145,7 @@ export const INITIAL_SOLICITUDES_SEGURO: SolicitudSeguroImpago[] = [];
 
 export const INITIAL_GMAIL_CONFIG: GmailIntegracionConfig = {
   conectado: true,
-  emailConectado: 'sarqsan2@gmail.com',
-  nombreTitular: 'Usuario RentSelect',
+  emailConectado: 'demo@correo.invalid',
+  nombreTitular: 'Cuenta de demostración',
   autoProcesarRespuestas: true,
 };

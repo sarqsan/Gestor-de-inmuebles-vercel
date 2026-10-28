@@ -1,3 +1,4 @@
+import { esEmailMaster } from '../../lib/masterAdmin';
 import { inmueblesOperativos, inmueblesDadosDeBaja } from '../../utils/bajaPatrimonialInmueble';
 import React, { useState, useMemo, useEffect } from 'react';
 import {
@@ -244,7 +245,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const [personaSeleccionadaId, setPersonaSeleccionadaId] = useState('');
   const [errorPersona, setErrorPersona] = useState('');
   const [guardandoPersona, setGuardandoPersona] = useState(false);
-  const esMasterIdentidad = currentUser.email?.toLowerCase() === 'sarqsan2@gmail.com';
+  const esMasterIdentidad = esEmailMaster(currentUser.email);
   useEffect(() => {
     if (!esMasterIdentidad || activeSection !== 'propietarios') return;
     let vigente = true;
@@ -1235,8 +1236,11 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
             {modulosConfig && (
               <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
                 <h3 className="text-sm font-bold text-white mb-2">Módulos Globales de la Plataforma</h3>
-                <p className="text-xs text-slate-400 mb-6">
-                  Habilita o deshabilita funciones operativas a nivel de sistema.
+                {/* P0.4.2 / P-03 — estos toggles NO tienen enforcement: etiquetado honesto. */}
+                <p data-testid="aviso-modulos-informativos" className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800 rounded-lg px-3 py-2 mb-6">
+                  Catálogo INFORMATIVO. Estos indicadores NO activan ni desactivan funciones ni otorgan permisos:
+                  la autorización real depende del perfil y de <code>firestore.rules</code>. Los controles están desactivados
+                  hasta que exista enforcement verificable.
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1256,6 +1260,11 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                           </p>
                         </div>
                         <button
+                          type="button"
+                          disabled
+                          title="Sin efecto: catálogo informativo sin enforcement (P-03)"
+                          aria-label={`Módulo ${key}: solo informativo`}
+                          data-testid={`modulo-informativo-${key}`}
                           onClick={() => handleToggleModulo(key)}
                           className={`p-1.5 rounded-lg transition-all cursor-pointer ${
                             isEnabled

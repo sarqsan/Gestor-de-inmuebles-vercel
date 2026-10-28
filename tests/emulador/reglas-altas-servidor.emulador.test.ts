@@ -115,6 +115,43 @@ describe('solicitudes · el alta pública la escribe solo el servidor', () => {
   });
 });
 
+describe('candidatos · el alta pública la escribe solo el servidor', () => {
+  // Hueco detectado el 28-10-2026 al documentar los 6 casos del Rules Playground:
+  // `solicitudes.create` y `audit_logs.create` tenían prueba de emulador, pero el
+  // alta anónima de `candidatos` NO. Sin esta prueba, la fila 2 de la tabla del
+  // simulador era una afirmación sin nada detrás.
+  const CANDIDATO = {
+    inmuebleId: INMUEBLE_ID,
+    propietarioId: PROPIETARIO_ID,
+    nombre: 'Candidato Sintético',
+    email: 'candidato@example.invalid',
+    telefono: '600000000',
+    estado: 'NUEVO',
+  };
+
+  it('un anónimo NO puede dar de alta un candidato', async () => {
+    await assertFails(anonimo().doc('candidatos/cand_anonimo').set(CANDIDATO));
+  });
+
+  it('un anónimo NO puede leer, modificar ni borrar un candidato', async () => {
+    await escribirAdmin({ 'candidatos/cand_existente': CANDIDATO });
+    const anon = anonimo();
+    await assertFails(anon.doc('candidatos/cand_existente').get());
+    await assertFails(anon.doc('candidatos/cand_existente').update({ nombre: 'otro' }));
+    await assertFails(anon.doc('candidatos/cand_existente').delete());
+  });
+
+  it('el titular del inmueble sí puede darlo de alta en su ámbito', async () => {
+    await assertSucceeds(propietario().doc('candidatos/cand_propio').set(CANDIDATO));
+  });
+
+  it('el titular NO puede darlo de alta en un inmueble que no es suyo', async () => {
+    await assertFails(propietario().doc('candidatos/cand_ajeno').set({
+      ...CANDIDATO, inmuebleId: 'inm_ajeno_999',
+    }));
+  });
+});
+
 describe('audit_logs · append-only sin suplantación de autor', () => {
   it('un usuario puede registrar su propio correo', async () => {
     await assertSucceeds(propietario().doc('audit_logs/aud_propio').set({

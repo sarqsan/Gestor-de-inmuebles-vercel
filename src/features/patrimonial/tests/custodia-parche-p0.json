@@ -1,27 +1,24 @@
 {
- "base": "6166bde5446a6116406de6cee0fb9436881c294a",
+ "base": "5113783d0c448d568ff2fad73e366805a57ebd9a",
  "nota": "Superficie revisada de la rama respecto a la base de main. `superficie` es la lista EXACTA de ficheros que la rama cambia y `parches` reconstruye byte a byte los ficheros compartidos; cualquier diferencia no declarada hace fallar las guardias de custodia.",
  "superficie": [
+  ".github/workflows/verificacion-produccion.yml",
   "docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md",
-  "firestore.rules",
+  "package.json",
+  "scripts/verificar-produccion.mjs",
   "src/features/operaciones/tests/custodia-parche-p0.json",
-  "src/features/operaciones/tests/integration-boundaries.test.mjs",
   "src/features/patrimonial/tests/custodia-parche-p0.json",
   "src/features/patrimonial/tests/isolation.test.mjs",
-  "tests/reglas-funciones-sin-usar.test.ts"
+  "tests/verificar-produccion.test.ts"
  ],
  "parches": {
-  "package.json": [],
-  "package-lock.json": [],
-  "firestore.rules": [
+  "package.json": [
    {
-    "viejo": "        return movimientoEsMio(d) || ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));\n      }\n      function sinSecretosBancarios() {\n        return !(\n          'credentials' in incoming() ||\n          'apiKey' in incoming() ||\n          'accessToken' in incoming() ||\n          'psd2' in incoming() ||\n          'ibanSecreto' in incoming() ||\n          'tokenBancario' in incoming() ||\n          'password' in incoming() ||\n          'secret' in incoming() ||\n          'clave' in incoming()\n        );\n      }\n      allow get: if isMasterAdmin() || (isPropietarioRole() && movimientoVisible(existing()));\n      allow list: if isMasterAdmin() || (isPropietarioRole() && movimientoEsMio(resource.data));\n      // E-07/importación manual cerrada provisionalmente por decisión conservadora.\n      // Parsers conservados en código; ningún cliente puede crear/alterar movimientos.\n      allow create, update: if false;\n      allow delete: if isMasterAdmin();\n",
-    "nuevo": "        return movimientoEsMio(d) || ('inmuebleId' in d && myInmuebleIds().hasAny([d.inmuebleId]));\n      }\n      allow get: if isMasterAdmin() || (isPropietarioRole() && movimientoVisible(existing()));\n      allow list: if isMasterAdmin() || (isPropietarioRole() && movimientoEsMio(resource.data));\n      // E-07/importación manual cerrada provisionalmente por decisión conservadora.\n      // Parsers conservados en código; ningún cliente puede crear/alterar movimientos.\n      // La comprobación `sinSecretosBancarios()` se retiró de este bloque: al no\n      // poder crearse ni modificarse documentos aquí, era inalcanzable, y la\n      // consola de Firebase RECHAZA publicar un ruleset con funciones sin usar.\n      allow create, update: if false;\n      allow delete: if isMasterAdmin();\n"
-   },
-   {
-    "viejo": "        return 'propietarioId' in d && d.propietarioId == myPropId();\n      }\n      function sinSecretosBancarios() {\n        return !(\n          'credentials' in incoming() ||\n          'apiKey' in incoming() ||\n          'accessToken' in incoming() ||\n          'psd2' in incoming() ||\n          'tokenBancario' in incoming() ||\n          'password' in incoming() ||\n          'secret' in incoming()\n        );\n      }\n      allow get: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(existing()));\n      allow list: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(resource.data));\n      // Sin importación autorizada, ningún cliente crea o cambia cabeceras de import.\n      allow create, update: if false;\n      allow delete: if isMasterAdmin();\n",
-    "nuevo": "        return 'propietarioId' in d && d.propietarioId == myPropId();\n      }\n      allow get: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(existing()));\n      allow list: if isMasterAdmin() || (isPropietarioRole() && importacionEsMia(resource.data));\n      // Sin importación autorizada, ningún cliente crea o cambia cabeceras de import.\n      // Igual que en `movimientos_bancarios`: `sinSecretosBancarios()` se retiró por\n      // ser código muerto (la consola rechaza publicar funciones sin usar).\n      allow create, update: if false;\n      allow delete: if isMasterAdmin();\n"
+    "viejo": "    \"doctor\": \"node scripts/doctor.mjs\",\n    \"test\": \"vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=dot\",\n    \"typecheck\": \"tsc --noEmit\"\n  },\n  \"dependencies\": {\n",
+    "nuevo": "    \"doctor\": \"node scripts/doctor.mjs\",\n    \"test\": \"vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=dot\",\n    \"typecheck\": \"tsc --noEmit\",\n    \"verificar:produccion\": \"node scripts/verificar-produccion.mjs\"\n  },\n  \"dependencies\": {\n"
    }
-  ]
+  ],
+  "package-lock.json": [],
+  "firestore.rules": []
  }
 }

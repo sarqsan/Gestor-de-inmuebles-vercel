@@ -130,7 +130,7 @@ test('dependencias y lockfile solo cambian en el parche revisado de la rama', as
   assert.deepEqual(actualPackage.overrides, { dompurify: '^3.4.17' },
     'la única sobreescritura admitida es el parche de seguridad de DOMPurify');
   const scriptsAnadidos = Object.keys(actualPackage.scripts).filter((k) => !(k in basePackage.scripts));
-  const RUNNERS_ADMITIDOS = ['doctor', 'test', 'typecheck'];
+  const RUNNERS_ADMITIDOS = ['doctor', 'test', 'typecheck', 'verificar:produccion'];
   // Siempre: solo pueden APARECER esos tres runners (ninguno más, y ninguno de
   // los scripts existentes puede reescribirse). Con la base del manifiesto, además
   // se exige que estén los tres: esa es la superficie exacta revisada.

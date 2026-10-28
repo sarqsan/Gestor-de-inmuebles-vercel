@@ -1,0 +1,96 @@
+# Verificación EN VIVO del despliegue de producción — solo lectura.
+# ---------------------------------------------------------------------------
+# Este job existe porque el entorno de desarrollo del proyecto no tiene salida a
+# `*.vercel.app`: sin él, "producción responde bien" sería una afirmación sin
+# prueba. Aquí un runner de GitHub sí llega, y el resultado se publica como
+# resumen del propio run (evidencia fechada, repetible y sin secretos).
+#
+# Qué hace:
+#   1. Resuelve la URL del despliegue de producción más reciente vía la API de
+#      GitHub (status `environment_url` de Vercel). Si se pasa `url` a mano, usa
+#      esa.
+#   2. Ejecuta `scripts/verificar-produccion.mjs`, que solo hace:
+#        GET  /api/health                  → 200 con esquema 1 y capacidades
+#        POST /api/actas/otp/entregar      → 410 (ruta retirada)
+#        POST /api/actas/otp/solicitar     → 401 sin sesión (no genera OTP)
+#        POST /api/solicitud (300 KB)      → 413 (límite antes de parsear)
+#      Si alguna de esas cuatro respuestas cambia, el run se pone ROJO.
+#   3. No usa credenciales de la aplicación, no escribe datos y no necesita
+#      `npm ci` (el script solo usa módulos nativos de Node).
+name: Verificación de producción (solo lectura)
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL del despliegue (vacío = resolver el último de producción)'
+        required: false
+        type: string
+      host_esperado:
+        description: 'Host que debe coincidir (opcional, guardia extra)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  deployments: read
+  statuses: read
+
+jobs:
+  verificar:
+    name: Salud y rechazos esperados en producción
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolver el despliegue de producción
+        id: destino
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          URL_MANUAL: ${{ inputs.url }}
+        run: |
+          set -euo pipefail
+          url="${URL_MANUAL:-}"
+          if [ -z "$url" ]; then
+            # Último deployment de Production que haya terminado en éxito.
+            for candidato in $(gh api "repos/${GITHUB_REPOSITORY}/deployments?environment=Production&per_page=10" --jq '.[].id'); do
+              estado=$(gh api "repos/${GITHUB_REPOSITORY}/deployments/${candidato}/statuses" --jq '.[0].state // empty')
+              url=$(gh api "repos/${GITHUB_REPOSITORY}/deployments/${candidato}/statuses" --jq '.[0].environment_url // empty')
+              if [ "$estado" = "success" ] && [ -n "$url" ]; then
+                echo "Despliegue ${candidato}: ${url} (${estado})"
+                break
+              fi
+              url=""
+            done
+          fi
+          if [ -z "$url" ]; then
+            echo "::error::No se pudo resolver la URL de producción. Pásala como input 'url'."
+            exit 1
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Verificar (solo lectura)
+        env:
+          URL_PRODUCCION: ${{ steps.destino.outputs.url }}
+          HOST_ESPERADO: ${{ inputs.host_esperado }}
+        run: |
+          set -euo pipefail
+          args=(--url "$URL_PRODUCCION" --json)
+          if [ -n "${HOST_ESPERADO:-}" ]; then args+=(--host-esperado "$HOST_ESPERADO"); fi
+          set +e
+          salida=$(node scripts/verificar-produccion.mjs "${args[@]}" 2>&1)
+          codigo=$?
+          set -e
+          echo "$salida"
+          {
+            echo '## Verificación de producción'
+            echo '```json'
+            echo "$salida"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $codigo

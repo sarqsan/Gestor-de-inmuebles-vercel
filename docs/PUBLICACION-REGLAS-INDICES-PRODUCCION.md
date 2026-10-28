@@ -310,3 +310,42 @@ versión publicada (la consola la muestra), casos 1-6 verificados y estado de lo
 - `firebase.json`: solo cambia para el CLI (declara `indexes`). No afecta al proyecto.
 - No crees índices de un solo campo ni «exenciones» (`fieldOverrides`): el fichero no
   declara ninguna.
+
+---
+
+## 9. Verificación en vivo de producción (automatizada, solo lectura)
+
+Reglas e índices se publican en la consola, pero **"está publicado" no es lo mismo
+que "responde"**. El entorno de desarrollo de este proyecto no tiene salida a
+`*.vercel.app` (y `npm run doctor` rechaza producción a propósito, por diseño), así
+que la comprobación se ejecuta en un runner de GitHub, que sí llega:
+
+**`.github/workflows/verificacion-produccion.yml`** — *Actions → Verificación de
+producción (solo lectura) → Run workflow*.
+
+Sin inputs resuelve automáticamente la URL del último despliegue de **Production**
+(`environment_url` que reporta Vercel a GitHub). Opcionalmente se le pasa `url` y
+`host_esperado`.
+
+Qué comprueba, y por qué es seguro:
+
+| Comprobación | Petición | Esperado | Por qué no escribe nada |
+|---|---|---|---|
+| Salud | `GET /api/health` | 200, `status: ok`, `esquemaDiagnostico: 1`, mapa de capacidades | lectura |
+| Ruta retirada | `POST /api/actas/otp/entregar` | **410** | la ruta ya no existe |
+| OTP sin sesión | `POST /api/actas/otp/solicitar` | **401** | se rechaza antes de generar el código |
+| Límite de cuerpo | `POST /api/solicitud` con 300 KB en `chunked` | **413** | se rechaza antes de parsear |
+
+Si alguna respuesta cambia (por ejemplo, la ruta retirada volviera a aceptar
+peticiones), **el run se pone rojo**. El resultado queda como resumen del propio run:
+evidencia fechada, repetible, sin secretos y sin `npm ci` (el script usa solo módulos
+nativos de Node).
+
+Uso local, cuando haya red hacia el despliegue:
+
+```
+node scripts/verificar-produccion.mjs --url https://<deployment>.vercel.app
+```
+
+Rechaza `http://`, `localhost` y cualquier dominio que no sea `*.vercel.app`: un
+localhost daría un falso verde sobre el despliegue real.

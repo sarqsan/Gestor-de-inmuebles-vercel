@@ -245,7 +245,11 @@ describe('H7-7 — los campos ordinarios se siguen guardando', () => {
 
     const payload = escriturasInmuebles()[0].datos;
     const esperados = Object.keys(completo).filter((k) => k !== 'titularesIds');
-    expect(Object.keys(payload).sort()).toEqual(esperados.sort());
+    // H-06 — el guardado añade `tokenSolicitud` si falta (capacidad del enlace
+    // público). Es un campo NUEVO, nunca una pérdida: el contrato de H7 sigue
+    // siendo «del payload original solo desaparece titularesIds».
+    const esperadosConToken = [...esperados, 'tokenSolicitud'].filter((k) => k in payload);
+    expect(Object.keys(payload).sort()).toEqual(esperadosConToken.sort());
     for (const campo of esperados) {
       expect(payload[campo]).toEqual((completo as unknown as Record<string, unknown>)[campo]);
     }

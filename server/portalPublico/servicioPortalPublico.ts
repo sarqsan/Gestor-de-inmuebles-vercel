@@ -25,6 +25,13 @@
  */
 import { randomBytes } from 'node:crypto';
 
+// H-06 — fuente única del formato del token de solicitud (cliente y servidor).
+import {
+  FECHA_CORTE_ENLACES_LEGADOS,
+  analizarTokenSolicitud,
+  verificarTokenContraPropiedad,
+} from '../../src/lib/tokenSolicitudPublica.js';
+
 import type {
   DocumentoLeido,
   EscrituraDocumentoFirestoreAtomica,
@@ -951,28 +958,55 @@ export function crearServicioPortalPublico(deps: DependenciasPortalPublico) {
     return undefined;
   }
 
-  function idsFichaDesdeToken(token: string): string[] {
-    const limpio = token.trim();
-    const ids = [limpio];
-    if (limpio.startsWith('sol-') && limpio.length > 4) {
-      const sinPrefijo = limpio.slice(4);
-      if (sinPrefijo && !ids.includes(sinPrefijo)) ids.push(sinPrefijo);
-    }
-    return ids;
-  }
-
+  /**
+   * H-06 — Resolución del enlace de solicitud CON verificación de capacidad.
+   * ---------------------------------------------------------------------------
+   * Antes bastaba con que existiera `fichas_publicas_inmueble/<id>`: el token
+   * era el id del inmueble, así que conocerlo (o adivinarlo) daba derecho a dar
+   * de alta solicitudes y candidatos en esa cartera sin haber recibido enlace.
+   *
+   * Ahora el token `sol-<id>-t<secreto>` se contrasta con
+   * `inmuebles/<id>.tokenSolicitud`, un documento privado que solo se lee con la
+   * credencial de servicio (el navegador no puede consultarlo). Los enlaces
+   * heredados `sol-<id>` dejan de valer tras la ventana de compatibilidad
+   * declarada en el módulo compartido.
+   *
+   * Todos los fallos responden lo mismo (404 ENLACE_DESCONOCIDO) salvo el
+   * caducado, que se distingue para poder avisar al candidato: así no se filtra
+   * si un inmueble existe, está disponible o simplemente no autoriza.
+   */
   async function resolverFichaParaSolicitud(token: string): Promise<Record<string, unknown>> {
-    for (const id of idsFichaDesdeToken(token)) {
-      const ficha = await leerFichaPublica(id);
-      if (!ficha) continue;
-      if (typeof ficha.inmuebleId !== 'string' || ficha.inmuebleId.trim() === '') continue;
-      // Solo se admiten altas sobre fichas publicadas como disponibles.
-      if (ficha.estado !== undefined && ficha.estado !== 'disponible') {
-        throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'INMUEBLE_NO_DISPONIBLE');
-      }
-      return ficha;
+    const analizado = analizarTokenSolicitud(token);
+    if (!analizado) throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'TOKEN_INVALIDO');
+
+    const propiedad = await deps.puerto.leerDocumento(
+      `inmuebles/${encodeURIComponent(analizado.inmuebleId)}`
+    );
+    if (!propiedad) throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'ENLACE_DESCONOCIDO');
+
+    const veredicto = verificarTokenContraPropiedad(
+      token,
+      propiedad.datos,
+      isoAhora(),
+      FECHA_CORTE_ENLACES_LEGADOS
+    );
+    if (veredicto === 'LEGADO_CADUCADO') {
+      throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'ENLACE_CADUCADO');
     }
-    throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'ENLACE_DESCONOCIDO');
+    if (veredicto !== 'OK') {
+      throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'ENLACE_DESCONOCIDO');
+    }
+
+    const ficha = await leerFichaPublica(analizado.inmuebleId);
+    if (!ficha) throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'ENLACE_DESCONOCIDO');
+    if (typeof ficha.inmuebleId !== 'string' || ficha.inmuebleId.trim() === '') {
+      throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'ENLACE_DESCONOCIDO');
+    }
+    // Solo se admiten altas sobre fichas publicadas como disponibles.
+    if (ficha.estado !== undefined && ficha.estado !== 'disponible') {
+      throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'INMUEBLE_NO_DISPONIBLE');
+    }
+    return ficha;
   }
 
   async function crearSolicitud(

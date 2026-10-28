@@ -10,11 +10,13 @@
  *
  * - Escritura: `saveFichaPublicaInmueble` (la invoca `saveInmuebleFirestore`
  *   tras guardar; solo master/propietario titular según reglas R3).
- * - Lectura anónima: `cargarFichaPublicaPorToken` (id exacto o `sol-<id>`).
+ * - Lectura anónima: `cargarFichaPublicaPorToken` (ver `tokenSolicitudPublica.ts`:
+ *   token firmado `sol-<id>-t<secreto>` o enlace heredado `sol-<id>`).
  * - Este módulo NUNCA lee la colección `inmuebles` (verificado en tests).
  * - Sin propietario efectivo no hay ficha (cierre por defecto).
  */
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { idsFichaCandidatos } from './tokenSolicitudPublica';
 import { db } from './firebase';
 import type { Inmueble, InmuebleImage } from '../types';
 
@@ -255,19 +257,16 @@ export async function getFichaPublicaInmueble(fichaId: string): Promise<FichaPub
 }
 
 /**
- * Ids candidatos para un token de enlace, en orden: el token tal cual (cubre
- * enlaces `/#solicitud/<id>` con el id directo) y, si lleva el prefijo
- * generado por el ERP, el id sin prefijo. Pura (testeable sin red).
+ * Ids candidatos para un token de enlace, en orden.
+ *
+ * H-06 — el parseo vive en `tokenSolicitudPublica.ts` (una sola fuente para
+ * cliente y servidor). Con un token firmado `sol-<id>-t<secreto>` la ficha se
+ * resuelve por el id del inmueble; con un enlace heredado se conservan las dos
+ * formas históricas (`/#solicitud/<id>` y `/#solicitud/sol-<id>`) para no
+ * romper enlaces ya enviados mientras dure la ventana de compatibilidad.
  */
 export function candidatosIdFichaPublica(token: string): string[] {
-  const t = String(token || '').trim();
-  if (!t) return [];
-  const ids = [t];
-  if (t.startsWith(PREFIJO_ENLACE_SOLICITUD) && t.length > PREFIJO_ENLACE_SOLICITUD.length) {
-    const sinPrefijo = t.slice(PREFIJO_ENLACE_SOLICITUD.length);
-    if (!ids.includes(sinPrefijo)) ids.push(sinPrefijo);
-  }
-  return ids;
+  return idsFichaCandidatos(token);
 }
 
 /**

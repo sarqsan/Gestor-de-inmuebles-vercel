@@ -1,3 +1,4 @@
+import { esEmailMaster } from './lib/masterAdmin';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { UserPlus, X } from 'lucide-react';
 import {
@@ -39,20 +40,24 @@ import {
   RolDefinicion,
   TrabajoProfesional,
 } from './types';
+// P0.1: los estados iniciales ya NO son los datos de demostración de
+// `mockData`; `estadoInicial` los deja vacíos salvo flag explícito.
+// H-11: la caché de cartera en `localStorage` es OPT-IN (VITE_CACHE_LOCAL_ENABLED).
+import { leerCacheLocal, guardarCacheLocal } from './lib/cacheLocal';
 import {
-  INITIAL_CANDIDATOS,
-  INITIAL_INMUEBLES,
-  INITIAL_PROPIETARIOS,
-  INITIAL_USER_PROFILE,
-  INITIAL_SOLICITUDES,
-  INITIAL_INVITACIONES,
-  INITIAL_VISIT_SLOTS,
-  INITIAL_SOLICITUDES_DOC,
-  INITIAL_CONTRATOS,
-  INITIAL_ASEGURADORAS,
-  INITIAL_SOLICITUDES_SEGURO,
-  INITIAL_GMAIL_CONFIG,
-} from './data/mockData';
+  inicialPropietarios,
+  inicialCandidatos,
+  inicialInmuebles,
+  inicialSolicitudes,
+  inicialInvitaciones,
+  inicialSlots,
+  inicialSolicitudesDoc,
+  inicialContratos,
+  inicialAseguradoras,
+  inicialSolicitudesSeguro,
+  inicialGmailConfig,
+  inicialPerfilUsuario,
+} from './data/estadoInicial';
 import { generarInformeInteligente } from './utils/reportGenerator';
 import {
   obtenerTodosCobros,
@@ -107,8 +112,6 @@ import {
   deleteCandidatoFirestore,
   savePropietarioFirestore,
   saveSolicitudFirestore,
-  guardarSolicitudPublicaFirestore,
-  guardarCandidatoPublicoFirestore,
   deleteSolicitudFirestore,
   saveInvitacionFirestore,
   deleteInvitacionFirestore,
@@ -164,6 +167,7 @@ import { transmitirInmuebleFirestore } from './lib/transmisionPatrimonialFiresto
 import type { PeticionTransmision, ResultadoTransmision } from './lib/transmisionPatrimonialFirestore';
 import { generarTokenCapacidad, resolverTokensPublicos } from './lib/tokensPublicos';
 import { registrarSolicitudPublica } from './lib/solicitudPublica';
+import { crearSolicitudPublicaPorToken } from './lib/portalPublico';
 import {
   persistirMejorEsfuerzo,
   planificarAltaCandidato,
@@ -213,7 +217,6 @@ import { InicioSection } from './components/sections/InicioSection';
 import { InmueblesSection } from './components/sections/InmueblesSection';
 import { CandidatosSection } from './components/sections/CandidatosSection';
 import { NuevoCandidatoSection } from './components/sections/NuevoCandidatoSection';
-import { CuestionarioSection } from './components/sections/CuestionarioSection';
 import { AnalisisSection } from './components/sections/AnalisisSection';
 import { ConfiguracionSection } from './components/sections/ConfiguracionSection';
 import { DatosSection } from './components/sections/DatosSection';
@@ -302,7 +305,6 @@ import { IncidenciasSection } from './components/sections/IncidenciasSection';
 import { OperacionesSection } from './components/sections/OperacionesSection';
 import { PropietariosSection } from './components/sections/PropietariosSection';
 
-import { AdministracionSection } from './components/sections/AdministracionSection';
 import { PropietarioPortalSection } from './components/sections/PropietarioPortalSection';
 import { ProfesionalPortalSection } from './components/sections/ProfesionalPortalSection';
 import { InversionSection } from './components/sections/InversionSection';
@@ -391,60 +393,36 @@ export default function App() {
   // operativo de un inmueble (enlace, no duplicación de la sección de seguros).
   const [filtroPolizasInmuebleId, setFiltroPolizasInmuebleId] = useState<string | undefined>(undefined);
   const [propietarios, setPropietarios] = useState<Propietario[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_propietarios');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_PROPIETARIOS;
+    leerCacheLocal<ReturnType<typeof inicialPropietarios>[number]>('propietarios')
+      ?? inicialPropietarios();
   });
   const [candidatos, setCandidatos] = useState<Candidato[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_candidatos');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_CANDIDATOS;
+    leerCacheLocal<ReturnType<typeof inicialCandidatos>[number]>('candidatos')
+      ?? inicialCandidatos();
   });
   const [inmuebles, setInmuebles] = useState<Inmueble[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_inmuebles');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_INMUEBLES;
+    leerCacheLocal<ReturnType<typeof inicialInmuebles>[number]>('inmuebles')
+      ?? inicialInmuebles();
   });
   const [solicitudes, setSolicitudes] = useState<SolicitudAlquiler[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_solicitudes');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_SOLICITUDES;
+    leerCacheLocal<ReturnType<typeof inicialSolicitudes>[number]>('solicitudes')
+      ?? inicialSolicitudes();
   });
   const [invitaciones, setInvitaciones] = useState<InvitacionVisita[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_invitaciones');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_INVITACIONES;
+    leerCacheLocal<ReturnType<typeof inicialInvitaciones>[number]>('invitaciones')
+      ?? inicialInvitaciones();
   });
   const [slots, setSlots] = useState<VisitSlot[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_slots');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_VISIT_SLOTS;
+    leerCacheLocal<ReturnType<typeof inicialSlots>[number]>('slots')
+      ?? inicialSlots();
   });
   const [solicitudesDoc, setSolicitudesDoc] = useState<SolicitudDocumentacion[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_solicitudes_doc');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_SOLICITUDES_DOC;
+    leerCacheLocal<ReturnType<typeof inicialSolicitudesDoc>[number]>('solicitudes_doc')
+      ?? inicialSolicitudesDoc();
   });
   const [contratos, setContratos] = useState<ContratoFormalizacion[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_contratos');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_CONTRATOS;
+    leerCacheLocal<ReturnType<typeof inicialContratos>[number]>('contratos')
+      ?? inicialContratos();
   });
   // FASE 2.0: gastos (explotación vs financiación). Colección nueva, sin caché local.
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -461,16 +439,13 @@ export default function App() {
   const [propuestasInmobiliaria, setPropuestasInmobiliaria] = useState<PropuestaInmobiliaria[]>([]);
   const [leadsInmobiliarios, setLeadsInmobiliarios] = useState<LeadInmobiliario[]>([]);
   const [nuevoExpedienteCtx, setNuevoExpedienteCtx] = useState<ContextoNuevoExpediente | null>(null);
-  const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(INITIAL_ASEGURADORAS);
+  const [aseguradoras, setAseguradoras] = useState<ConfiguracionAseguradora[]>(inicialAseguradoras);
   const [solicitudesSeguro, setSolicitudesSeguro] = useState<SolicitudSeguroImpago[]>(() => {
-    try {
-      const cached = localStorage.getItem('rentselect_solicitudes_seguro');
-      if (cached) return JSON.parse(cached);
-    } catch (e) {}
-    return INITIAL_SOLICITUDES_SEGURO;
+    leerCacheLocal<ReturnType<typeof inicialSolicitudesSeguro>[number]>('solicitudes_seguro')
+      ?? inicialSolicitudesSeguro();
   });
-  const [gmailConfig, setGmailConfig] = useState<GmailIntegracionConfig>(INITIAL_GMAIL_CONFIG);
-  const [userProfile, setUserProfile] = useState<UserProfile>(INITIAL_USER_PROFILE);
+  const [gmailConfig, setGmailConfig] = useState<GmailIntegracionConfig>(inicialGmailConfig);
+  const [userProfile, setUserProfile] = useState<UserProfile>(inicialPerfilUsuario);
 
   const [selectedCandidateForModal, setSelectedCandidateForModal] = useState<Candidato | null>(null);
   const [selectedCandidateForAnalysis, setSelectedCandidateForAnalysis] = useState<Candidato | null>(null);
@@ -1170,7 +1145,7 @@ export default function App() {
       ? subscribeInvitaciones(conDatos<InvitacionVisita[]>('invitaciones', (data) => {
           if (data && data.length > 0) {
             setInvitaciones(data);
-            try { localStorage.setItem('rentselect_invitaciones', JSON.stringify(data)); } catch (e) {}
+            guardarCacheLocal('invitaciones', data);
           }
         }))
       : () => {};
@@ -1179,7 +1154,7 @@ export default function App() {
       ? subscribeVisitSlots(conDatos<VisitSlot[]>('slots_visita', (data) => {
           if (data && data.length > 0) {
             setSlots(data);
-            try { localStorage.setItem('rentselect_slots', JSON.stringify(data)); } catch (e) {}
+            guardarCacheLocal('slots', data);
           }
         }))
       : () => {};
@@ -1187,7 +1162,7 @@ export default function App() {
     const unsubscribeDoc = currentUser ? subscribeSolicitudesDoc((data) => {
       if (data && data.length > 0) {
         setSolicitudesDoc(data);
-        try { localStorage.setItem('rentselect_solicitudes_doc', JSON.stringify(data)); } catch (e) {}
+        guardarCacheLocal('solicitudes_doc', data);
       }
       // Auto-sync incoming Firestore docs into local candidate profiles
       if (data && data.length > 0) {
@@ -1310,7 +1285,7 @@ export default function App() {
       procesarSnapshotInmuebles(data, {
         setInmuebles,
         escribirCacheLectura: (items) => {
-          try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(items)); } catch (e) {}
+          guardarCacheLocal('inmuebles', items);
         },
       });
     }), dataScope);
@@ -1318,7 +1293,7 @@ export default function App() {
     const unsubscribeCand = subscribeCandidatos(conDatos<Candidato[]>('candidatos', (data) => {
       if (data && data.length > 0) {
         setCandidatos(data);
-        try { localStorage.setItem('rentselect_candidatos', JSON.stringify(data)); } catch (e) {}
+        guardarCacheLocal('candidatos', data);
       } else {
         setCandidatos((current) => {
           if (current.length > 0) {
@@ -1333,21 +1308,21 @@ export default function App() {
     const unsubscribeProp = subscribePropietarios(conDatos<Propietario[]>('propietarios', (data) => {
       if (data && data.length > 0) {
         setPropietarios(data);
-        try { localStorage.setItem('rentselect_propietarios', JSON.stringify(data)); } catch (e) {}
+        guardarCacheLocal('propietarios', data);
       }
     }), dataScope);
 
     const unsubscribeSol = subscribeSolicitudes((data) => {
       if (data && data.length > 0) {
         setSolicitudes(data);
-        try { localStorage.setItem('rentselect_solicitudes', JSON.stringify(data)); } catch (e) {}
+        guardarCacheLocal('solicitudes', data);
       }
     });
 
     const unsubscribeContratos = subscribeContratos(conDatos<ContratoFormalizacion[]>('contratos', (data) => {
       if (data && data.length > 0) {
         setContratos(data);
-        try { localStorage.setItem('rentselect_contratos', JSON.stringify(data)); } catch (e) {}
+        guardarCacheLocal('contratos', data);
       }
     }), dataScope);
 
@@ -1442,7 +1417,7 @@ export default function App() {
     const unsubscribeSolicitudesSeguro = subscribeSolicitudesSeguro(conDatos<SolicitudSeguroImpago[]>('solicitudes_seguro', (data) => {
       if (data && data.length > 0) {
         setSolicitudesSeguro(data);
-        try { localStorage.setItem('rentselect_solicitudes_seguro', JSON.stringify(data)); } catch (e) {}
+        guardarCacheLocal('solicitudes_seguro', data);
       }
     }), dataScope);
 
@@ -2066,7 +2041,7 @@ export default function App() {
     // Persistencia confirmada: ahora sí cambia la vista (y sólo con el parche guardado).
     setInmuebles((prev) => {
       const next = aplicarBajaAlEstado(prev, previo.id, resultado);
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
+      guardarCacheLocal('inmuebles', next);
       return next;
     });
 
@@ -2108,7 +2083,7 @@ export default function App() {
   const handleAddInmueble = (newInmueble: Inmueble, titulares?: TitularesAltaInmueble) => {
     setInmuebles((prev) => {
       const next = [newInmueble, ...prev];
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
+      guardarCacheLocal('inmuebles', next);
       return next;
     });
     // UX-2 §6: el resultado de la persistencia no se descarta: si no se guardó,
@@ -2147,7 +2122,7 @@ export default function App() {
     // (H9) y transmisiones (K.2) siguen escribiéndolo por sus vías atómicas.
     setInmuebles((prev) => {
       const next = prev.map((i) => (i.id === updatedInmueble.id ? fusionarEdicionOrdinaria(i, updatedInmueble) : i));
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
+      guardarCacheLocal('inmuebles', next);
       return next;
     });
     void saveInmuebleOrdinarioFirestore(updatedInmueble).then((ok) => {
@@ -2193,7 +2168,7 @@ export default function App() {
     const cambios = resultado.plan.cambiosInmueble;
     setInmuebles((prev) => {
       const next = prev.map((i) => (i.id === peticion.inmuebleId ? { ...i, ...cambios } : i));
-      try { localStorage.setItem('rentselect_inmuebles', JSON.stringify(next)); } catch (e) {}
+      guardarCacheLocal('inmuebles', next);
       return next;
     });
     return resultado;
@@ -2473,13 +2448,16 @@ export default function App() {
 
   // Handler for creating/submitting new Solicitud from Candidate Portal
   //
-  // AG-01: el alta pública solo se da por buena cuando `solicitudes` se ha
-  // escrito de verdad. La regla exige `nombre/email/telefono` (los añade
-  // `registrarSolicitudPublica`); si Firestore deniega, la promesa rechaza y
-  // la vista NO muestra el acuse de recibo. El candidato es un registro
-  // secundario: su fallo se registra, pero no invalida una solicitud ya
-  // persistida (reenviarla duplicaría el alta).
-  const handleSavePublicSolicitud = async (newSol: SolicitudAlquiler) => {
+  // P0.2.1: el alta pública pasa por `POST /api/solicitud/:token`. El cliente
+  // anónimo NO escribe en Firestore; el servidor valida el token, aplica
+  // honeypot + rate limit y confirma un commit atómico. Se conserva el
+  // contrato AG-01 de «sin falso éxito»: `registrarSolicitudPublica` solo
+  // resuelve si la llamada al servidor confirma la escritura.
+  const handleSavePublicSolicitud = async (
+    newSol: SolicitudAlquiler,
+    _candidato?: Candidato,
+    honeypot = ''
+  ) => {
     // Also sync or create candidate record if not present
     const existingCandidate = candidatos.find(
       (c) => c.email.toLowerCase() === newSol.candidatoEmail.toLowerCase()
@@ -2520,16 +2498,18 @@ export default function App() {
       };
     }
 
-    const persistida = await registrarSolicitudPublica(newSol, nuevoCandidato, {
-      guardarSolicitud: guardarSolicitudPublicaFirestore,
-      guardarCandidato: guardarCandidatoPublicoFirestore,
-      avisarCandidatoNoGuardado: (error) =>
-        console.error('Alta pública: solicitud guardada; el candidato no se pudo guardar:', error),
+    const token = activePublicSolicitudToken || '';
+    const persistida = await registrarSolicitudPublica(newSol, null, {
+      guardarSolicitud: async (canonica) => {
+        const resultado = await crearSolicitudPublicaPorToken(token, canonica, nuevoCandidato, honeypot);
+        return { ...canonica, ...resultado.solicitud, candidatoId: resultado.candidatoId };
+      },
     });
 
     setSolicitudes((prev) => [persistida, ...prev]);
+    // El id del candidato lo asigna el SERVIDOR (no el navegador).
     if (nuevoCandidato) {
-      const creado = nuevoCandidato;
+      const creado = { ...nuevoCandidato, id: persistida.candidatoId };
       setCandidatos((prev) => (prev.some((c) => c.id === creado.id) ? prev : [creado, ...prev]));
     }
   };
@@ -3220,9 +3200,7 @@ export default function App() {
       const updated = exists
         ? prev.map((p) => (p.id === propietario.id ? propietario : p))
         : [propietario, ...prev];
-      try {
-        localStorage.setItem('rentselect_propietarios', JSON.stringify(updated));
-      } catch (e) {}
+      guardarCacheLocal('propietarios', updated);
       return updated;
     });
   };
@@ -3373,7 +3351,7 @@ export default function App() {
   const handleDeleteUsuario = async (userId: string) => {
     const u = usuarios.find((x) => x.id === userId);
     if (!u) throw new Error('Usuario inexistente');
-    if (u.email.toLowerCase() === 'sarqsan2@gmail.com') throw new Error('No se puede desactivar el master');
+    if (esEmailMaster(u.email)) throw new Error('No se puede desactivar el master');
     // Baja reversible, conserva identidad e histórico y revoca el espejo
     // dentro de la MISMA transacción auditada. Nunca delete sin rastro.
     const deBaja = { ...u, estado:'INACTIVO' as const, updatedAt:new Date().toISOString() };
@@ -4501,7 +4479,7 @@ export default function App() {
             />
           )}
 
-          {(activeSection === 'candidatos' || activeSection === 'solicitudes' || activeSection === 'nuevo_candidato' || activeSection === 'cuestionario') && (
+          {(activeSection === 'candidatos' || activeSection === 'nuevo_candidato' || activeSection === 'cuestionario') && (
             <CandidatosSection
               candidatos={scopedCandidatos}
               inmuebles={scopedInmuebles}
@@ -4510,6 +4488,18 @@ export default function App() {
               onGenerarInforme={(cand) => handleOpenOrGenerateReport(cand)}
               onDeleteCandidate={handleDeleteCandidato}
               onOpenAddCandidateModal={() => setShowNuevoCandidatoModal(true)}
+            />
+          )}
+
+          {/* P0.2.5 — Bandeja de solicitudes: antes `SolicitudesSection` estaba
+              importada pero NUNCA se montaba, así que las altas públicas no
+              tenían ninguna vista de revisión. P0.2.6 cablea el detalle. */}
+          {activeSection === 'solicitudes' && (
+            <SolicitudesSection
+              solicitudes={solicitudes}
+              inmuebles={scopedInmuebles}
+              onSelectSolicitud={(sol) => setSelectedSolicitudForModal(sol)}
+              onTriggerAiAnalysis={(sol) => handleAiAnalysisSolicitud(sol)}
             />
           )}
 
@@ -4759,6 +4749,9 @@ export default function App() {
           onClose={() => setSelectedSolicitudForModal(null)}
           onUpdateEstado={(solId, newEstado, nota) => {
             handleUpdateSolicitudState(solId, newEstado, nota);
+          }}
+          onUpdateSolicitud={(actualizada) => {
+            handleUpdateSolicitudState(actualizada.id, actualizada.estado, actualizada.observacionesOwner);
           }}
           onTriggerAiAnalysis={(sol) => {
             handleAiAnalysisSolicitud(sol);

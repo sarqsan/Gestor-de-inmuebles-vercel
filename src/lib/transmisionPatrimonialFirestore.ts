@@ -180,7 +180,7 @@ export async function transmitirInmuebleFirestore(
     // Auditoría SÓLO tras el commit: una transmisión fallida no se registra.
     void registrarAuditoriaFirestore({
       usuarioId: autor?.usuarioId || peticion.actor?.id || 'system',
-      usuarioEmail: autor?.usuarioEmail || 'sistema',
+      usuarioEmail: autor?.usuarioEmail || '',
       usuarioNombre: autor?.usuarioNombre || peticion.actor?.nombre || 'sistema',
       accion: 'INMUEBLE_TITULARIDAD_CAMBIO',
       descripcion: `Transmisión patrimonial del inmueble ${peticion.inmuebleId}: ${plan.transmitenteId} → ${plan.adquirenteId} (${peticion.motivo})`,

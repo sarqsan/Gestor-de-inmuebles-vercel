@@ -1245,7 +1245,7 @@ export async function logoutUser(): Promise<void> {
     try {
       await saveAuditLogFirestore({
         usuarioId: current.uid,
-        usuarioEmail: current.email || 'desconocido',
+        usuarioEmail: current.email || '',
         usuarioNombre: current.displayName || 'Usuario',
         accion: 'LOGOUT',
         descripcion: 'Cierre de sesión seguro en la plataforma.',

@@ -17,7 +17,7 @@ si las reglas antiguas (más permisivas) siguieran vigentes.
 | Proyecto | `gestor-inmuebles-produccion` |
 | Base de datos Firestore (**no** es `(default)`) | `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` |
 | Bucket de Storage | `gestor-inmuebles-produccion.firebasestorage.app` |
-| Reglas Firestore (destino) | `firestore.rules` — 4 083 líneas, `sha256 96024678…6bdb62` |
+| Reglas Firestore (destino) | `firestore.rules` — 4 064 líneas, `sha256 81b9ae93…413d` |
 | Reglas Storage | `storage.rules` — **sin cambios, no se publica** |
 | Índices | `firestore.indexes.json` — 10 índices compuestos, `sha256 5002edd6…e80fcb` |
 
@@ -41,6 +41,16 @@ la del cuadro anterior; la URL correcta contiene `/firestore/databases/ai-studio
 ---
 
 ## 3. Reglas Firestore
+
+> **Cambio respecto a la primera tentativa (2026-10-28).** La consola rechazó el
+> guardado con `Unused function: sinSecretosBancarios` en las líneas 2698 y 2780.
+> Eran dos definiciones **muertas** (la tercera, en `conciliaciones_bancarias`, sí se
+> usa): quedaron huérfanas cuando la importación bancaria se cerró con
+> `allow create, update: if false`. Se han eliminado del fichero.
+> Los emuladores de CI las aceptaban con un aviso; la consola de Firebase **bloquea**
+> la publicación ante cualquier diagnóstico, por eso el fallo solo apareció al pegar.
+> Ahora `tests/reglas-funciones-sin-usar.test.ts` reproduce esa comprobación (con
+> caso de control negativo) y la suite falla antes de volver a intentar publicar.
 
 ### Opción A (recomendada): pegar el fichero completo
 

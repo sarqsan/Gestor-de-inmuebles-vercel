@@ -1,7 +1,9 @@
 # Informe de corrección de la auditoría de cierre — 2026-10-28
 
 **Rama:** `arena/fb69e0b0-gestor-de-inmuebles-vercel` (no publicada, no fusionada)
-**Base:** `2563831` (`main` del clon) · **HEAD:** `f7cfde3`
+**Base:** `2563831` (`main` del clon). **HEAD:** el último commit de la rama,
+que se comprueba con `git log -1` (citar un hash dentro del mismo fichero que lo
+contiene siempre queda un commit por detrás; ver la tabla del §2.2).
 **Ámbito:** corrección de los defectos H-01…H-17 y D-01…D-09 de
 `docs/INFORME-AUDITORIA-CIERRE-2026-10-27.md`.
 **Naturaleza de este documento:** informe único de ejecución. No es una auditoría
@@ -84,7 +86,7 @@ puede demostrar** y pasar a citar sólo los de esta rama.
 | `dd36454` | H-15 casos de emulador para las reglas nuevas + H-12 exclusión de pagos global |
 | `3fd7cf1` | dependencias: crítica de DOMPurify y altas de express/vite (10 → 5) |
 | `9273902` | recuperación: trabajo P0/P1/P2 + OTP que el clon recreado dejó sin confirmar |
-| `f7cfde3` | este informe |
+| `f7cfde3` | este informe (y sus correcciones de cabecera posteriores) |
 
 > **Los hashes son de esta rama y se pueden comprobar con `git log`.** El
 > entorno de trabajo recrea el `.git` en cada arranque (clon superficial desde

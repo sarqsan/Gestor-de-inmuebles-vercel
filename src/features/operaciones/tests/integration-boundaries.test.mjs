@@ -114,7 +114,12 @@ test('servicios/modelos heredados y entrypoints solo cambian en la superficie re
   // en `src/lib/firebase.ts` (lo comprueba el bloque de símbolos de más abajo):
   // simplemente ya no hay ningún punto de la app que las llame.
   const RETIRADOS_P0_2=['guardarCandidatoPublicoFirestore','guardarSolicitudPublicaFirestore'];
-  assert.deepEqual(perdidos,RETIRADOS_P0_2,'App.tsx: importación de servicio eliminada (solo se admiten las dos retiradas revisadas de P0.2)');
+  assert.deepEqual(perdidos.filter((s)=>!RETIRADOS_P0_2.includes(s)),[],
+    'App.tsx: importación de servicio eliminada (solo se admiten las dos retiradas revisadas de P0.2)');
+  if(referencia.estricto){
+    assert.deepEqual(perdidos,RETIRADOS_P0_2,
+      'App.tsx: respecto a la base de main se esperaban exactamente las dos retiradas de P0.2');
+  }
   const firebaseActual=read('src/lib/firebase.ts');
   const firebaseBase=git('show',`${referencia.sha}:src/lib/firebase.ts`);
   const segmentos=[

@@ -77,6 +77,31 @@ function custodia() {
   return custodiaMemo;
 }
 const ficheroConParcheRevisado = (path) => ficheroConParche(CUSTODIA_P0, custodia().sha, path, repo);
+// La base del manifiesto es la de la rama que lo generó. Si la rama parte de
+// otra base, la custodia byte a byte NO puede aplicarse: se degrada a invariantes
+// y se AVISA en voz alta, porque una guardia que se relaja en silencio es
+// exactamente el fallo que esta cabecera documenta.
+function sinCambios(sha, path) {
+  return execFileSync('git', ['diff', '--name-only', sha, '--', path], { cwd: repo, encoding: 'utf8' }).trim() === '';
+}
+function avisoModoInvariante() {
+  const { sha, ref, modo, estricto } = custodia();
+  if (estricto) return false;
+  if (custodia().avisado) return true;
+  custodia().avisado = true;
+  console.warn(`[custodia] base de la rama ${sha.slice(0, 7)} (${modo} con ${ref}) ≠ base del manifiesto ${CUSTODIA_P0.base.slice(0, 7)}: `
+    + 'se aplican invariantes (los ficheros compartidos deben seguir intactos). Para custodia byte a byte, regenera `custodia-parche-p0.json` con la base actual.');
+  return true;
+}
+// Ficheros compartidos que el manifiesto fija byte a byte.
+const FICHEROS_DEL_PARCHE = ['package.json', 'package-lock.json', 'firestore.rules'];
+// Artefactos locales que no forman parte del árbol versionado (un enlace a
+// `node_modules/` no lo cubre `.gitignore`, que espera un directorio).
+const SIN_SEGUIMIENTO_IGNORADO = /^(node_modules|\.env.*|dist|coverage|\.vercel)(\/|$)/;
+function sinSeguimientoPermitido(ejecutar) {
+  return ejecutar('ls-files', '--others', '--exclude-standard').split('\n').filter(Boolean)
+    .filter((path) => !SIN_SEGUIMIENTO_IGNORADO.test(path));
+}
 
 test('dependencias y lockfile solo cambian en el parche revisado de la rama', async () => {
   const { execFileSync } = await import('node:child_process');
@@ -85,7 +110,13 @@ test('dependencias y lockfile solo cambian en el parche revisado de la rama', as
   // (1) `package.json` y `package-lock.json`: igualdad BYTE A BYTE con la base más
   // el parche revisado (scripts P0/doctor y `overrides.dompurify`). Ni una línea
   // más puede diferir: tocar una dependencia sin declararla hace fallar la guardia.
+  const invariante = avisoModoInvariante();
   for (const fichero of ['package.json', 'package-lock.json']) {
+    if (invariante) {
+      assert.ok(sinCambios(custodia().sha, fichero),
+        `${fichero} cambiado sin manifiesto: actualiza custodia-parche-p0.json con la base de esta rama`);
+      continue;
+    }
     assert.equal(readFileSync(resolve(repo, fichero), 'utf8'), ficheroConParcheRevisado(fichero),
       `${fichero}: distinto del parche revisado (dependencias o scripts no declarados)`);
   }
@@ -99,8 +130,16 @@ test('dependencias y lockfile solo cambian en el parche revisado de la rama', as
   assert.deepEqual(actualPackage.overrides, { dompurify: '^3.4.17' },
     'la única sobreescritura admitida es el parche de seguridad de DOMPurify');
   const scriptsAnadidos = Object.keys(actualPackage.scripts).filter((k) => !(k in basePackage.scripts));
-  assert.deepEqual(scriptsAnadidos.sort(), ['doctor', 'test', 'typecheck'],
-    'solo se admiten los runners P0 añadidos; ningún script previo puede cambiar');
+  const RUNNERS_ADMITIDOS = ['doctor', 'test', 'typecheck'];
+  // Siempre: solo pueden APARECER esos tres runners (ninguno más, y ninguno de
+  // los scripts existentes puede reescribirse). Con la base del manifiesto, además
+  // se exige que estén los tres: esa es la superficie exacta revisada.
+  assert.deepEqual(scriptsAnadidos.filter((k) => !RUNNERS_ADMITIDOS.includes(k)), [],
+    'solo se admiten los runners P0 añadidos; ningún otro script nuevo');
+  if (!avisoModoInvariante()) {
+    assert.deepEqual(scriptsAnadidos.sort(), [...RUNNERS_ADMITIDOS].sort(),
+      'respecto a la base del manifiesto deben aparecer exactamente los tres runners P0');
+  }
   for (const clave of Object.keys(basePackage.scripts)) {
     assert.equal(actualPackage.scripts[clave], basePackage.scripts[clave], `script reescrito: ${clave}`);
   }
@@ -535,7 +574,7 @@ test('la superficie de la rama es EXACTAMENTE la declarada frente a main', async
     // Rama con otra base (p. ej. main tras la fusión): el manifiesto de esta rama
     // ya no la describe. Se conservan las comprobaciones independientes de la base
     // y se exige que el manifiesto se regenere al tocar ficheros compartidos.
-    assert.equal(ejecutar('ls-files', '--others', '--exclude-standard').trim(), '',
+    assert.deepEqual(sinSeguimientoPermitido(ejecutar), [],
       'hay ficheros sin seguimiento: la superficie debe estar confirmada en Git');
     const p3 = cambiados.filter((path) => P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path) && !(path in P3_REBASADOS_EN_MAIN));
     assert.deepEqual(p3, [], `P3 no integrada: ${p3.join(', ')}`);
@@ -546,7 +585,7 @@ test('la superficie de la rama es EXACTAMENTE la declarada frente a main', async
   // ningún fichero declarado que ya no cambie (manifiesto obsoleto).
   assert.deepEqual(cambiados, declarados,
     `superficie distinta del manifiesto: sobran=[${cambiados.filter((f) => !declarados.includes(f)).join(', ')}] faltan=[${declarados.filter((f) => !cambiados.includes(f)).join(', ')}]`);
-  assert.equal(ejecutar('ls-files', '--others', '--exclude-standard').trim(), '',
+  assert.deepEqual(sinSeguimientoPermitido(ejecutar), [],
     'hay ficheros sin seguimiento: la superficie debe estar confirmada en Git');
   const p3Pendiente = cambiados.filter((path) => P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path) && !(path in P3_REBASADOS_EN_MAIN));
   assert.deepEqual(p3Pendiente, [], `P3 no integrada: falta Norma 43 normativa, emulador/persistencia y dictamen: ${p3Pendiente.join(', ')}`);
@@ -578,9 +617,14 @@ test('BLOQUES 10-12 (rebasado a main): reglas byte a byte con parche revisado, s
   assert.ok(readFileSync(resolve(repo, 'storage.rules')).equals(
     Buffer.from(ejecutar('show', `${referencia.sha}:storage.rules`), 'utf8')),
     'storage.rules: las reglas no pueden cambiar sin dictamen');
-  assert.equal(readFileSync(resolve(repo, 'firestore.rules'), 'utf8'),
-    ficheroConParcheRevisado('firestore.rules'),
-    'firestore.rules: distinto del parche revisado (ni relajarse ni endurecerse sin declararlo)');
+  if (avisoModoInvariante()) {
+    assert.ok(sinCambios(referencia.sha, 'firestore.rules'),
+      'firestore.rules cambiado sin manifiesto: actualiza custodia-parche-p0.json con la base de esta rama');
+  } else {
+    assert.equal(readFileSync(resolve(repo, 'firestore.rules'), 'utf8'),
+      ficheroConParcheRevisado('firestore.rules'),
+      'firestore.rules: distinto del parche revisado (ni relajarse ni endurecerse sin declararlo)');
+  }
 
   // (3) Ficheros compartidos sin cambios respecto a la base (los que sí cambian
   // quedan fijados por el parche revisado en el test de dependencias).
@@ -603,8 +647,14 @@ test('BLOQUES 10-12 (rebasado a main): reglas byte a byte con parche revisado, s
     const actual = simbolos(readFileSync(resolve(repo, fichero), 'utf8'));
     let eliminados = [...base].filter((s) => !actual.has(s));
     if (fichero === 'src/lib/firebaseActas.ts') {
-      assert.deepEqual([...eliminados].sort(), RETIRADOS_OTP_CLIENTE,
+      // El OTP ya no se calcula ni se guarda en el navegador: cualquier otra
+      // exportación que desaparezca sigue haciendo fallar la guardia.
+      assert.deepEqual(eliminados.filter((s) => !RETIRADOS_OTP_CLIENTE.includes(s)), [],
         `${fichero}: solo se admite la retirada del OTP de cliente`);
+      if (referencia.estricto) {
+        assert.deepEqual([...eliminados].sort(), RETIRADOS_OTP_CLIENTE,
+          `${fichero}: se esperaba exactamente la retirada del OTP de cliente`);
+      }
       eliminados = [];
     }
     assert.deepEqual(eliminados, [], `${fichero}: API histórica eliminada`);

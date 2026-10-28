@@ -86,7 +86,7 @@ puede demostrar** y pasar a citar sólo los de esta rama.
 | `dd36454` | H-15 casos de emulador para las reglas nuevas + H-12 exclusión de pagos global |
 | `3fd7cf1` | dependencias: crítica de DOMPurify y altas de express/vite (10 → 5) |
 | `9273902` | recuperación: trabajo P0/P1/P2 + OTP que el clon recreado dejó sin confirmar |
-| `f7cfde3` | este informe (y sus correcciones de cabecera posteriores) |
+| `f7cfde3`, `09758f5`, `6470e5d` | este informe y sus dos correcciones de cabecera |
 
 > **Los hashes son de esta rama y se pueden comprobar con `git log`.** El
 > entorno de trabajo recrea el `.git` en cada arranque (clon superficial desde

@@ -6,6 +6,21 @@
 > anteriores. El estado actual del código, Git y la documentación canónica son
 > la fuente de verdad del proyecto.**
 
+## 0. ¿Qué queda abierto?
+
+Antes de proponer trabajo, lee **`PENDIENTES-ABIERTOS.md`**: es el registro único
+de lo que falta, con dueño y estado. Dos reglas que evitan el error caro:
+
+1. **No dar por hecho un pendiente ajeno.** Si algo es del usuario (por ejemplo
+   **P-01**: confirmar índices y los casos del simulador en la consola de
+   Firebase), se describe como **pendiente**, nunca como verificado, hasta que
+   esté cerrado en el registro con fecha y resultado.
+2. **No cerrar en un sitio lo que sigue abierto en otro.** Si un commit cierra un
+   pendiente, se actualiza la fila del registro **en ese mismo commit**;
+   `tests/pendientes-abiertos.test.ts` comprueba que el registro, el documento
+   del usuario y las cifras citadas (líneas y `sha256` de `firestore.rules`) no
+   se contradicen.
+
 ---
 
 ## 1. ¿Cuál es el repositorio?

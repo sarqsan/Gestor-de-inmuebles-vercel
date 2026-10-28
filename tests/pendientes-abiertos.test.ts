@@ -1,0 +1,140 @@
+/**
+ * Guardia del registro de pendientes.
+ *
+ * El 28-10-2026 el usuario aplazó su parte («lo hago mañana con el ordenador»).
+ * El riesgo de un aplazamiento no es olvidarlo: es que **alguien lo dé por hecho**
+ * — un documento que dice «índices confirmados» sin haberlos mirado, o un cierre
+ * que se apoya en un pendiente que sigue abierto.
+ *
+ * Esta prueba fija cuatro cosas:
+ *  1. la lista de pendientes es única y numerada (no hay dos registros paralelos);
+ *  2. cada fila tiene un estado válido y el ID no se repite;
+ *  3. los documentos enlazados existen de verdad (un «cómo» roto es un pendiente
+ *     perdido);
+ *  4. el documento del usuario y el registro se apuntan mutuamente, y las cifras
+ *     de las reglas que se citan son las del fichero real.
+ */
+import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+
+const REGISTRO = 'docs/PENDIENTES-ABIERTOS.md';
+const DOC_USUARIO = 'docs/PENDIENTE-USUARIO-2026-10-28.md';
+
+type Fila = { id: string; que: string; deQuien: string; estado: string; doc: string };
+
+/** Filas del registro: `| **P-01** | qué | quién | estado | desde | doc |`. */
+function filas(): Fila[] {
+  const texto = readFileSync(REGISTRO, 'utf8');
+  const salida: Fila[] = [];
+  for (const linea of texto.split('\n')) {
+    const m = linea.match(/^\|\s*\*\*(P-\d{2})\*\*\s*\|(.+)\|\s*$/);
+    if (!m) continue;
+    const celdas = m[2].split('|').map((c) => c.trim());
+    salida.push({
+      id: m[1],
+      que: celdas[0] || '',
+      deQuien: celdas[1] || '',
+      estado: celdas[2] || '',
+      doc: celdas[4] || '',
+    });
+  }
+  return salida;
+}
+
+const ESTADOS = ['PENDIENTE', 'EN CURSO', 'BLOQUEADO', 'HECHO'];
+
+describe('pendientes · un solo registro, sin estados inventados', () => {
+  it('el registro existe y está enlazado desde la documentación de continuidad', () => {
+    expect(existsSync(REGISTRO)).toBe(true);
+    const continuidad = readFileSync('docs/CONTINUIDAD-ARENA.md', 'utf8');
+    expect(continuidad).toContain('PENDIENTES-ABIERTOS.md');
+  });
+
+  it('hay filas y cada una tiene estado de la lista cerrada', () => {
+    const f = filas();
+    expect(f.length).toBeGreaterThanOrEqual(7);
+    for (const fila of f) {
+      expect(ESTADOS.some((e) => fila.estado.includes(e))).toBe(true);
+    }
+  });
+
+  it('no hay IDs repetidos ni huecos en la numeración', () => {
+    const ids = filas().map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const numeros = ids.map((id) => Number(id.slice(2))).sort((a, b) => a - b);
+    for (let i = 0; i < numeros.length; i += 1) expect(numeros[i]).toBe(i + 1);
+  });
+
+  it('cada fila dice de quién es (usuario o agente), nunca queda sin dueño', () => {
+    for (const fila of filas()) {
+      expect(fila.deQuien).toMatch(/usuario|agente/i);
+    }
+  });
+
+  it('los documentos enlazados existen: un «cómo» roto es un pendiente perdido', () => {
+    const faltan = filas()
+      .flatMap((f) => [...f.doc.matchAll(/`([^`]+\.md)`/g)].map((m) => m[1]))
+      .filter((ruta) => !existsSync(ruta));
+    expect(faltan).toEqual([]);
+  });
+
+  it('el registro y el documento del usuario se apuntan mutuamente', () => {
+    const registro = readFileSync(REGISTRO, 'utf8');
+    const doc = readFileSync(DOC_USUARIO, 'utf8');
+    expect(registro).toContain('PENDIENTE-USUARIO-2026-10-28.md');
+    expect(doc).toContain('PENDIENTES-ABIERTOS.md');
+    expect(doc).toContain('P-01');
+  });
+});
+
+describe('pendientes · P-01 sigue abierto y no se puede dar por hecho', () => {
+  const fila = () => filas().find((f) => f.id === 'P-01')!;
+
+  it('es del usuario y está en PENDIENTE (no en HECHO)', () => {
+    expect(fila().deQuien).toMatch(/usuario/i);
+    expect(fila().estado).toContain('PENDIENTE');
+    expect(fila().estado).not.toContain('HECHO');
+  });
+
+  it('deja dicho que se hace en ordenador y desde cuándo está aplazado', () => {
+    const doc = readFileSync(DOC_USUARIO, 'utf8');
+    expect(doc).toMatch(/PENDIENTE — no iniciado/);
+    expect(doc).toContain('2026-10-29');
+    expect(doc).toMatch(/ordenador/i);
+    // El motivo no es una preferencia: hay que decirlo, o se intentará en el móvil.
+    expect(doc).toContain('Por qué no vale el móvil');
+  });
+
+  it('el estado del documento coincide con el del registro', () => {
+    const doc = readFileSync(DOC_USUARIO, 'utf8');
+    if (fila().estado.includes('HECHO')) {
+      // Si algún día se cierra, el banner no puede seguir diciendo «no iniciado».
+      expect(doc).not.toContain('PENDIENTE — no iniciado');
+    } else {
+      expect(doc).toContain('PENDIENTE — no iniciado');
+    }
+  });
+});
+
+describe('pendientes · las cifras de las reglas citadas son las reales', () => {
+  it('firestore.rules mide las 4 064 líneas y tiene el sha256 que se cita', () => {
+    const contenido = readFileSync('firestore.rules', 'utf8');
+    const lineas = contenido.replace(/\n$/, '').split('\n').length;
+    const sha = createHash('sha256').update(contenido).digest('hex');
+
+    expect(lineas).toBe(4064);
+    expect(sha.startsWith('81b9ae93')).toBe(true);
+
+    // Y los documentos que el usuario va a mirar dicen lo mismo: el sha, las
+    // líneas y la misma cifra. Si las reglas cambian, estas tres citas mienten
+    // y el usuario comprobaría "4 064" en una consola que ya no cuadra.
+    for (const doc of [REGISTRO, DOC_USUARIO, 'docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md']) {
+      const texto = readFileSync(doc, 'utf8');
+      // Sin espacios: los documentos usan el separador de millares tipográfico.
+      const compacto = texto.replace(/\s/g, '');
+      expect(compacto).toContain(String(lineas));
+      expect(texto).toContain(sha.slice(0, 8));
+    }
+  });
+});

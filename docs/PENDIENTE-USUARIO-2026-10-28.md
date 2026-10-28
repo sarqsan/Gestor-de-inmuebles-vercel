@@ -1,11 +1,41 @@
 # Lo que queda de tu parte — 28-10-2026
 
-> Dos tareas en la consola de Firebase, unos **12 minutos en total**, y **nada de
-> código**. Todo lo demás (reglas, código, despliegue, pruebas) está hecho y
-> fusionado en `main@2d1ead8`.
+| | |
+|---|---|
+| **Estado** | 🟡 **PENDIENTE — no iniciado** |
+| **De quién** | El usuario (consola de Firebase, cuenta de Google propia) |
+| **Registrado** | 2026-10-28 |
+| **Aplazado a** | **2026-10-29 o después, en ordenador** |
+| **Por qué en ordenador** | Ver §«Por qué no vale el móvil» |
+| **Duración estimada** | ~12 min (índices ~5 + simulador ~7) |
+| **Bloquea a** | El cierre del registro de publicación de reglas e índices. **No bloquea** H-17 ni el trabajo de código |
+| **Cómo se cierra** | Rellenar el cuadro de §5 de este documento y pegarlo. El registro se actualiza con fecha, versión y resultado; hasta entonces esto sigue **publicado pero no confirmado** |
+| **Registro padre** | `docs/PENDIENTES-ABIERTOS.md` → **P-01** |
+
+> Dos tareas en la consola de Firebase, unos **12 minutos**, y **nada de código**.
+> Todo lo demás (reglas, código, despliegue, pruebas) está hecho y fusionado en
+> `main@7e20bfd`.
 >
 > Esto no es una auditoría: son dos comprobaciones que **solo puede hacer el
 > dueño de la consola**, porque requieren entrar con tu cuenta de Google.
+
+## 0.0 Por qué no vale el móvil
+
+No es una preferencia: las dos tareas son incómodas o directamente imposibles
+desde el teléfono.
+
+- **Crear índices**: el formulario pide añadir campos uno a uno y elegir
+  Ascendente/Descendente en desplegables. En pantalla pequeña se toca el campo
+  equivocado, y un índice con el orden cambiado **no da error**: simplemente no
+  sirve y la consulta sigue fallando.
+- **Simulador de reglas**: hay que pegar JSON, marcar «Autenticado» y escribir un
+  email exacto. En móvil el campo de email se autocorrige y `a@b.c` acaba siendo
+  otra cosa; el síntoma es un «Permitido» que parece un fallo de seguridad y no
+  lo es.
+- **Copia y pega del cuadro de resultados** (§5): en el móvil se pierde el
+  formato y no se puede comparar con la tabla.
+
+Se hace en el ordenador, con las dos pestañas abiertas.
 
 ---
 

@@ -98,9 +98,30 @@ export function evaluarCodigo(nombre, esperado, recibido, cuerpo = null) {
   return { nombre, estado: 'OK', detalle: `HTTP ${recibido}` };
 }
 
-/** Cuerpo grande para forzar el límite de tamaño (no llega a parsearse). */
+/**
+ * Cuerpo grande FRAGMENTADO para forzar el límite de tamaño.
+ *
+ * Importante: no se puede fijar la cabecera `transfer-encoding` a mano — el
+ * `fetch` de Node la rechaza («invalid transfer-encoding header») y la petición
+ * ni siquiera sale; ese fue el primer fallo de esta verificación. La forma
+ * correcta de enviar realmente fragmentado es pasar un `ReadableStream` como
+ * cuerpo (con `duplex: 'half'`), y así lo confirma el servidor: `chunked` sin
+ * `content-length`.
+ */
 export function cuerpoGrande(bytes = 300 * 1024) {
   return JSON.stringify({ relleno: 'x'.repeat(bytes) });
+}
+
+/** Convierte el cuerpo en un flujo de `trozos` partes: fuerza `chunked` de verdad. */
+export function cuerpoFragmentado(texto, trozos = 8) {
+  const datos = new TextEncoder().encode(texto);
+  const tamano = Math.ceil(datos.length / trozos);
+  return new ReadableStream({
+    start(controlador) {
+      for (let i = 0; i < datos.length; i += tamano) controlador.enqueue(datos.slice(i, i + tamano));
+      controlador.close();
+    },
+  });
 }
 
 async function pedir(url, opciones = {}, timeoutMs = 20000, fetchImpl = fetch) {
@@ -177,11 +198,13 @@ export async function verificar(base, { fetchImpl = fetch } = {}) {
   // 4. Cuerpo fragmentado enorme: 413 antes de parsear. Si devolviera 2xx,
   //    significaría que producción acepta cuerpos sin límite.
   try {
-    const cuerpo = cuerpoGrande();
     const r = await pedir(`${raiz}/api/solicitud`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'transfer-encoding': 'chunked' },
-      body: cuerpo,
+      headers: { 'content-type': 'application/json' },
+      // ReadableStream + duplex:'half' ⇒ transferencia fragmentada real, sin
+      // fijar `transfer-encoding` (cabecera prohibida por el fetch de Node).
+      body: cuerpoFragmentado(cuerpoGrande()),
+      duplex: 'half',
     }, 20000, fetchImpl);
     const c = evaluarCodigo('limite-cuerpo-fragmentado', 413, r.estado, r.json);
     anotar(c.nombre, c.estado, c.estado === 'OK' ? `${c.detalle} · rechazado antes de parsear` : c.detalle);

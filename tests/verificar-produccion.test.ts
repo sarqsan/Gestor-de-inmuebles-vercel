@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  cuerpoFragmentado,
   cuerpoGrande,
   evaluarCodigo,
   evaluarSalud,
@@ -63,7 +64,13 @@ describe('verificación de producción · humo completo', () => {
       if (url.endsWith('/api/actas/otp/entregar')) return respuesta(410, { codigo: 'RUTA_RETIRADA' });
       if (url.endsWith('/api/actas/otp/solicitar')) return respuesta(401, { codigo: 'NO_AUTENTICADO' });
       if (url.endsWith('/api/solicitud')) {
+        // La transferencia debe ser fragmentada DE VERDAD: cuerpo en stream y
+        // `duplex: 'half'`. Fijar `transfer-encoding` a mano hace que el `fetch`
+        // de Node aborte antes de enviar (fue el primer fallo en producción).
         expect(opciones.method).toBe('POST');
+        expect(opciones.duplex).toBe('half');
+        expect(opciones.body).toBeInstanceOf(ReadableStream);
+        expect(opciones.headers['transfer-encoding']).toBeUndefined();
         return respuesta(413, { codigo: 'PETICION_INVALIDA' });
       }
       throw new Error(`URL inesperada: ${url}`);
@@ -91,7 +98,12 @@ describe('verificación de producción · humo completo', () => {
     expect(comprobaciones.find((c) => c.nombre === 'otp-entregar-retirada').estado).toBe('FALLO');
   });
 
-  it('el cuerpo de prueba es grande de verdad', () => {
+  it('el cuerpo de prueba es grande y viaja fragmentado', async () => {
     expect(cuerpoGrande().length).toBeGreaterThan(300 * 1024);
+    const flujo = cuerpoFragmentado(cuerpoGrande());
+    expect(flujo).toBeInstanceOf(ReadableStream);
+    let bytes = 0;
+    for await (const trozo of flujo as unknown as AsyncIterable<Uint8Array>) bytes += trozo.length;
+    expect(bytes).toBeGreaterThan(300 * 1024);
   });
 });

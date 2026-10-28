@@ -1,23 +1,15 @@
 {
- "base": "5113783d0c448d568ff2fad73e366805a57ebd9a",
+ "base": "2ed356e04e94d9f5efbc7cf64b4cd0e31d111d4d",
  "nota": "Superficie revisada de la rama respecto a la base de main. `superficie` es la lista EXACTA de ficheros que la rama cambia y `parches` reconstruye byte a byte los ficheros compartidos; cualquier diferencia no declarada hace fallar las guardias de custodia.",
  "superficie": [
   ".github/workflows/verificacion-produccion.yml",
-  "docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md",
-  "package.json",
   "scripts/verificar-produccion.mjs",
   "src/features/operaciones/tests/custodia-parche-p0.json",
   "src/features/patrimonial/tests/custodia-parche-p0.json",
-  "src/features/patrimonial/tests/isolation.test.mjs",
   "tests/verificar-produccion.test.ts"
  ],
  "parches": {
   "server.ts": [],
-  "package.json": [
-   {
-    "viejo": "    \"doctor\": \"node scripts/doctor.mjs\",\n    \"test\": \"vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=dot\",\n    \"typecheck\": \"tsc --noEmit\"\n  },\n  \"dependencies\": {\n",
-    "nuevo": "    \"doctor\": \"node scripts/doctor.mjs\",\n    \"test\": \"vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=dot\",\n    \"typecheck\": \"tsc --noEmit\",\n    \"verificar:produccion\": \"node scripts/verificar-produccion.mjs\"\n  },\n  \"dependencies\": {\n"
-   }
-  ]
+  "package.json": []
  }
 }

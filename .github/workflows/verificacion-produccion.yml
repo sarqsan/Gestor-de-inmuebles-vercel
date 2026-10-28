@@ -92,6 +92,7 @@ jobs:
           HOST_ESPERADO: ${{ inputs.host_esperado }}
         run: |
           set -euo pipefail
+          echo "::notice title=Destino verificado::${URL_PRODUCCION}"
           args=(--url "$URL_PRODUCCION" --json)
           if [ -n "${HOST_ESPERADO:-}" ]; then args+=(--host-esperado "$HOST_ESPERADO"); fi
           set +e
@@ -99,8 +100,25 @@ jobs:
           codigo=$?
           set -e
           echo "$salida"
+          # Los logs no siempre son descargables desde según qué entornos, así que
+          # cada comprobación fallida se publica ADEMÁS como anotación del run: la
+          # evidencia queda legible por API y en la pestaña del propio job.
+          echo "$salida" | node -e '
+            let datos = "";
+            process.stdin.on("data", (c) => (datos += c));
+            process.stdin.on("end", () => {
+              let informe;
+              try { informe = JSON.parse(datos); } catch { process.exit(0); }
+              for (const c of informe.comprobaciones || []) {
+                const linea = `${c.nombre}: ${c.detalle}`;
+                if (c.estado === "OK") console.log(`::notice title=OK ${c.nombre}::${c.detalle}`);
+                else console.log(`::error title=FALLO ${c.nombre}::${linea}`);
+              }
+            });
+          '
           {
             echo '## Verificación de producción'
+            echo "Destino: \`${URL_PRODUCCION}\`"
             echo '```json'
             echo "$salida"
             echo '```'

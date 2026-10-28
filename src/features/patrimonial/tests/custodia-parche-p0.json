@@ -1,0 +1,250 @@
+{
+ "base": "2563831df9b026dec8276c45db40977f72883f9d",
+ "nota": "Superficie revisada de la rama respecto a la base de main (merge-base 2563831). `superficie` es la lista EXACTA de ficheros que la rama cambia y `parches` reconstruye byte a byte los ficheros compartidos; cualquier diferencia no declarada hace fallar las guardias de custodia.",
+ "superficie": [
+  ".env.example",
+  ".firebaserc",
+  ".github/workflows/emulador-reglas.yml",
+  "docs/AE-01-AUDITORIA-ESCALABILIDAD-DOCUMENTAL-2026-10-27.md",
+  "docs/AUDITORIA-FUNCIONAL-PORTALES-2026-10-27.md",
+  "docs/CONFIGURACION-VERIFICABLE.md",
+  "docs/FASE-0-AUDITORIA-PREPARACION-2026-10-27.md",
+  "docs/INFORME-AUDITORIA-CIERRE-2026-10-27.md",
+  "docs/INFORME-CONSOLIDADO-EJECUCION-2026-10-27.md",
+  "docs/INFORME-CORRECCION-AUDITORIA-2026-10-28.md",
+  "docs/P1.4-DICTAMEN-FISCAL-PREVIO-2026-10-27.md",
+  "docs/P2-PROPUESTAS-PRIORIZADAS-2026-10-27.md",
+  "docs/REGISTRO-EJECUCION-2026-10-27.md",
+  "docs/SECCIONES-HUERFANAS-P0.4.md",
+  "firebase.json",
+  "firestore.rules",
+  "package-lock.json",
+  "package.json",
+  "scripts/doctor.mjs",
+  "server.ts",
+  "server/actas/rutasOtpActas.ts",
+  "server/actas/servicioOtpActas.ts",
+  "server/catastro/autorizacionCatastro.ts",
+  "server/diagnostico/capacidades.ts",
+  "server/indices/fuenteIrav.ts",
+  "server/portalPublico/rutasPortalPublico.test.ts",
+  "server/portalPublico/rutasPortalPublico.ts",
+  "server/portalPublico/servicioPortalPublico.ts",
+  "server/shared/limiteCuerpo.ts",
+  "server/shared/rateLimit.ts",
+  "server/titularidades/backendTitulares.ts",
+  "server/titularidades/googleBackend.ts",
+  "src/App.tsx",
+  "src/components/PortalSolicitudPublicaView.tsx",
+  "src/components/PublicacionInmueblesPanel.tsx",
+  "src/components/SolicitudDetailModal.tsx",
+  "src/components/admin/AdminControlCenter.tsx",
+  "src/components/common/EtiquetaSimulacion.tsx",
+  "src/components/modals/CrearUsuarioModal.tsx",
+  "src/components/sections/ActasSection.tsx",
+  "src/components/sections/AdministracionSection.tsx",
+  "src/components/sections/DashboardEjecutivoSection.tsx",
+  "src/components/sections/FacturacionSection.tsx",
+  "src/components/sections/InmueblesSection.tsx",
+  "src/data/estadoInicial.ts",
+  "src/data/mockData.ts",
+  "src/features/operaciones/persistence/authorization.ts",
+  "src/features/operaciones/tests/custodia-parche-p0.json",
+  "src/features/operaciones/tests/integration-boundaries.test.mjs",
+  "src/features/operaciones/tests/isolation.test.mjs",
+  "src/features/operaciones/tests/rules-architecture.test.mjs",
+  "src/features/operaciones/tests/rules-harness.test.mjs",
+  "src/features/patrimonial/tests/custodia-parche-p0.json",
+  "src/features/patrimonial/tests/isolation.test.mjs",
+  "src/lib/accesoPropietariosFirebase.ts",
+  "src/lib/authService.ts",
+  "src/lib/cacheLocal.ts",
+  "src/lib/configuracionFiscal.ts",
+  "src/lib/conversionSolicitud.ts",
+  "src/lib/entregaOtpApi.ts",
+  "src/lib/firebase.ts",
+  "src/lib/firebaseActas.ts",
+  "src/lib/flags.ts",
+  "src/lib/gestionesCarteraServicioFirebase.ts",
+  "src/lib/inventarioSimulaciones.ts",
+  "src/lib/masterAdmin.ts",
+  "src/lib/onboardingCarterasFirebase.ts",
+  "src/lib/personasServicioFirebase.ts",
+  "src/lib/portalPublico.ts",
+  "src/lib/solicitudPublica.ts",
+  "src/notificaciones/plantillas.ts",
+  "src/types/actas.ts",
+  "src/utils/actas/actaEngine.ts",
+  "src/utils/actas/actaFirmaEngine.ts",
+  "src/utils/actas/actaOtpEngine.ts",
+  "src/utils/actas/bloqueD.test.ts",
+  "src/utils/intercambioB2B/adaptadoresB2B.ts",
+  "tests/acta-firma-e2e.test.ts",
+  "tests/acta-otp-entrega.test.tsx",
+  "tests/ag01-alta-publica-solicitud.test.ts",
+  "tests/ag03-solicitud-servidor.test.ts",
+  "tests/b2b-adaptador-disponibilidad.test.ts",
+  "tests/cache-local-h11.test.ts",
+  "tests/catastro-autenticacion.test.ts",
+  "tests/configuracion-documentada.test.ts",
+  "tests/configuracion-indices.test.ts",
+  "tests/conversion-solicitud.test.ts",
+  "tests/doctor.test.ts",
+  "tests/emulador/actas-otp.emulador.test.ts",
+  "tests/emulador/reglas-altas-servidor.emulador.test.ts",
+  "tests/estado-inicial-vacio.test.tsx",
+  "tests/etiquetado-simulaciones.test.tsx",
+  "tests/exclusion-integraciones-pago.test.ts",
+  "tests/harness/puertoOtpFalso.ts",
+  "tests/health-capacidades.test.ts",
+  "tests/helpers/capacidadesSalud.ts",
+  "tests/helpers/custodia-rama.mjs",
+  "tests/helpers/solicitudFixture.ts",
+  "tests/ia-fase1-arranque-seguro.test.ts",
+  "tests/ia-fase1-integracion-server.test.ts",
+  "tests/irav-fuente-viva.test.ts",
+  "tests/justificantes-sin-contabilizacion.test.ts",
+  "tests/login-admin-principal.test.ts",
+  "tests/master-admin-paridad.test.ts",
+  "tests/modulos-efectivos.test.ts",
+  "tests/observabilidad-lectura-inmuebles-reglas.test.ts",
+  "tests/otp-csprng.test.ts",
+  "tests/otp-servidor.test.ts",
+  "tests/otp-transporte.test.ts",
+  "tests/paridad-nav-guarda.test.ts",
+  "tests/permisos-efectivos.test.ts",
+  "tests/portal-publico-limites.test.ts",
+  "tests/rate-limit-solicitud.test.ts",
+  "tests/reglas-actas-otp.test.ts",
+  "tests/reglas-audit-logs-autoria.test.ts",
+  "tests/reglas-despliegue-produccion.test.ts",
+  "tests/secciones-montadas.test.tsx",
+  "tests/seeds-desactivados.test.ts",
+  "tests/seguridad-firestore-d2.test.ts",
+  "tests/seguridad-firestore-patrimonial.test.ts",
+  "tests/solicitud-detalle-cableado.test.tsx",
+  "tests/solicitudes-bandeja.test.tsx",
+  "tests/texto-normativo.test.ts",
+  "tests/verifactu-modalidad-configurable.test.ts"
+ ],
+ "parches": {
+  "package.json": [
+   {
+    "viejo": "    \"auditoria:reglas:matriz\": \"tsx scripts/diagnostico-b12-list.mts\",\n    \"auditoria:reglas:list\": \"tsx scripts/auditoria-reglas-list.mts\",\n    \"lint\": \"tsc --noEmit\"\n  },\n  \"dependencies\": {\n",
+    "nuevo": "    \"auditoria:reglas:matriz\": \"tsx scripts/diagnostico-b12-list.mts\",\n    \"auditoria:reglas:list\": \"tsx scripts/auditoria-reglas-list.mts\",\n    \"lint\": \"tsc --noEmit\",\n    \"doctor\": \"node scripts/doctor.mjs\",\n    \"test\": \"vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=dot\",\n    \"typecheck\": \"tsc --noEmit\"\n  },\n  \"dependencies\": {\n"
+   },
+   {
+    "viejo": "    \"vite\": \"^6.2.3\",\n    \"vitest\": \"^5.0.1\"\n  }\n}\n",
+    "nuevo": "    \"vite\": \"^6.2.3\",\n    \"vitest\": \"^5.0.1\"\n  },\n  \"overrides\": {\n    \"dompurify\": \"^3.4.17\"\n  }\n}\n"
+   }
+  ],
+  "package-lock.json": [
+   {
+    "viejo": "    },\n    \"node_modules/@firebase/rules-unit-testing\": {\n      \"version\": \"5.0.1\",\n      \"resolved\": \"https://registry.npmjs.org/@firebase/rules-unit-testing/-/rules-unit-testing-5.0.1.tgz\",\n      \"integrity\": \"sha512-EvbxUvgoY2cG7vgtdhKc7gjalKzeO3AWr2NiUuyEEmcXaSaOJanV3hXLj3Viigs+Y/jFYQmtVPpSoiwUs/ZlPg==\",\n      \"dev\": true,\n      \"license\": \"Apache-2.0\",\n",
+    "nuevo": "    },\n    \"node_modules/@firebase/rules-unit-testing\": {\n      \"version\": \"5.0.2\",\n      \"resolved\": \"https://registry.npmjs.org/@firebase/rules-unit-testing/-/rules-unit-testing-5.0.2.tgz\",\n      \"integrity\": \"sha512-g053AaFcuf4gpAQbwRK/GIIGfPHhpomW3qkIYLi4xnaTUrf65yGP+0TPdojoXfB/ejrfevkXmMs5qXOTSwdN6A==\",\n      \"dev\": true,\n      \"license\": \"Apache-2.0\",\n"
+   },
+   {
+    "viejo": "      }\n    },\n    \"node_modules/@vitest/mocker\": {\n      \"version\": \"5.0.1\",\n      \"resolved\": \"https://registry.npmjs.org/@vitest/mocker/-/mocker-5.0.1.tgz\",\n      \"integrity\": \"sha512-6K1DoBNAPGvuOcSsGA4D6x+5zEEff/KmOOP3uetT2TrGpVfI+HRHRnJJfKi5ib/g1vx8IYHQD8s0pbJz8WQI7Q==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"@jridgewell/trace-mapping\": \"0.3.31\",\n        \"@vitest/spy\": \"5.0.1\",\n        \"estree-walker\": \"^3.0.3\",\n        \"magic-string\": \"^1.2.3\"\n      },\n      \"funding\": {\n        \"url\": \"https://opencollective.com/vitest\"\n      },\n      \"peerDependencies\": {\n        \"msw\": \"^2.4.9\",\n        \"vite\": \"^6.0.0 || ^7.0.0 || ^8.0.0\"\n      },\n      \"peerDependenciesMeta\": {\n        \"msw\": {\n          \"optional\": true\n        },\n        \"vite\": {\n          \"optional\": true\n        }\n      }\n    },\n    \"node_modules/@vitest/mocker/node_modules/magic-string\": {\n      \"version\": \"1.4.1\",\n      \"resolved\": \"https://registry.npmjs.org/magic-string/-/magic-string-1.4.1.tgz\",\n      \"integrity\": \"sha512-8lyCu36ErXR0J9uaGKlKQoiLZKmtI63YGLE8G2o9jyRPdr4X47LusSOwgOJOzcVtp81fTAAjxR7BwKz682Jhow==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"@jridgewell/sourcemap-codec\": \"^1.6.0\"\n      }\n    },\n    \"node_modules/@vitest/spy\": {\n      \"version\": \"5.0.1\",\n      \"resolved\": \"https://registry.npmjs.org/@vitest/spy/-/spy-5.0.1.tgz\",\n      \"integrity\": \"sha512-rbto/mF/SGERxEgYOek7Xm6B9b+y+mVoo+f4b2LymYO8zM1b7uB5nHuhVMTP2hxdzgxvGiZYGxGIaMvL5y180Q==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n",
+    "nuevo": "      }\n    },\n    \"node_modules/@vitest/spy\": {\n      \"version\": \"5.0.5\",\n      \"resolved\": \"https://registry.npmjs.org/@vitest/spy/-/spy-5.0.5.tgz\",\n      \"integrity\": \"sha512-lwJRExuH417257Q5wv9QYugN9IMJkoxcrKrYxGPQkBzl7wlNpTUxD/5yNX4ESKVUIShKPgkGchYPFMWOOk0wzw==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/body-parser\": {\n      \"version\": \"1.20.8\",\n      \"resolved\": \"https://registry.npmjs.org/body-parser/-/body-parser-1.20.8.tgz\",\n      \"integrity\": \"sha512-JNcyFQ64OiijEkPzUBTCe+hyPXUD/3LEldGQ6iF5LR1w00mx9o7xtDWHXBY2iItjdCFGoilOLNQbH943ut7pHA==\",\n      \"license\": \"MIT\",\n      \"dependencies\": {\n",
+    "nuevo": "    },\n    \"node_modules/body-parser\": {\n      \"version\": \"1.20.9\",\n      \"resolved\": \"https://registry.npmjs.org/body-parser/-/body-parser-1.20.9.tgz\",\n      \"integrity\": \"sha512-FISIQxV5u91Y9gvuFq3q/tA/qTqLJn3AhRcEvyozyhJTh5OBFFtv827AdHU7Rbyct4r+Ba1/99oFa1Y3yuFsdw==\",\n      \"license\": \"MIT\",\n      \"dependencies\": {\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/chai\": {\n      \"version\": \"6.2.2\",\n      \"resolved\": \"https://registry.npmjs.org/chai/-/chai-6.2.2.tgz\",\n      \"integrity\": \"sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n",
+    "nuevo": "    },\n    \"node_modules/chai\": {\n      \"version\": \"6.3.0\",\n      \"resolved\": \"https://registry.npmjs.org/chai/-/chai-6.3.0.tgz\",\n      \"integrity\": \"sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/dompurify\": {\n      \"version\": \"3.4.15\",\n      \"resolved\": \"https://registry.npmjs.org/dompurify/-/dompurify-3.4.15.tgz\",\n      \"integrity\": \"sha512-EUBjM+B+lkDE41iE82DDSCfkoPGfXx8IxFxPMjNzm/Uk4xDet77rTN9wqlxlVg71kK7XGuUMv6wUxJUwwv+Xyw==\",\n      \"license\": \"(MPL-2.0 OR Apache-2.0)\",\n      \"optional\": true,\n",
+    "nuevo": "    },\n    \"node_modules/dompurify\": {\n      \"version\": \"3.4.17\",\n      \"resolved\": \"https://registry.npmjs.org/dompurify/-/dompurify-3.4.17.tgz\",\n      \"integrity\": \"sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==\",\n      \"license\": \"(MPL-2.0 OR Apache-2.0)\",\n      \"optional\": true,\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/obug\": {\n      \"version\": \"2.2.1\",\n      \"resolved\": \"https://registry.npmjs.org/obug/-/obug-2.2.1.tgz\",\n      \"integrity\": \"sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q==\",\n      \"dev\": true,\n      \"funding\": [\n",
+    "nuevo": "    },\n    \"node_modules/obug\": {\n      \"version\": \"3.0.0\",\n      \"resolved\": \"https://registry.npmjs.org/obug/-/obug-3.0.0.tgz\",\n      \"integrity\": \"sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==\",\n      \"dev\": true,\n      \"funding\": [\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/qs\": {\n      \"version\": \"6.16.0\",\n      \"resolved\": \"https://registry.npmjs.org/qs/-/qs-6.16.0.tgz\",\n      \"integrity\": \"sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==\",\n      \"license\": \"BSD-3-Clause\",\n      \"dependencies\": {\n",
+    "nuevo": "    },\n    \"node_modules/qs\": {\n      \"version\": \"6.16.2\",\n      \"resolved\": \"https://registry.npmjs.org/qs/-/qs-6.16.2.tgz\",\n      \"integrity\": \"sha512-VYdnB5S7/0IeXzBacUtwNAaM6d7Y/PgYnNC7bJCI6meqA/OgnsQbZMtVW8Dt2D1PHgbHGtYmhSoEIgvt7xZ2ZA==\",\n      \"license\": \"BSD-3-Clause\",\n      \"dependencies\": {\n"
+   },
+   {
+    "viejo": "      }\n    },\n    \"node_modules/siginfo\": {\n      \"version\": \"2.0.0\",\n      \"resolved\": \"https://registry.npmjs.org/siginfo/-/siginfo-2.0.0.tgz\",\n      \"integrity\": \"sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==\",\n      \"dev\": true,\n      \"license\": \"ISC\"\n    },\n    \"node_modules/source-map-js\": {\n      \"version\": \"1.2.1\",\n      \"resolved\": \"https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.1.tgz\",\n      \"integrity\": \"sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==\",\n      \"license\": \"BSD-3-Clause\",\n      \"engines\": {\n",
+    "nuevo": "      }\n    },\n    \"node_modules/source-map-js\": {\n      \"version\": \"1.2.2\",\n      \"resolved\": \"https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.2.tgz\",\n      \"integrity\": \"sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==\",\n      \"license\": \"BSD-3-Clause\",\n      \"engines\": {\n"
+   },
+   {
+    "viejo": "      }\n    },\n    \"node_modules/stackback\": {\n      \"version\": \"0.0.2\",\n      \"resolved\": \"https://registry.npmjs.org/stackback/-/stackback-0.0.2.tgz\",\n      \"integrity\": \"sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==\",\n      \"dev\": true,\n      \"license\": \"MIT\"\n    },\n    \"node_modules/stackblur-canvas\": {\n      \"version\": \"2.7.0\",\n",
+    "nuevo": "      }\n    },\n    \"node_modules/stackblur-canvas\": {\n      \"version\": \"2.7.0\",\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/std-env\": {\n      \"version\": \"4.2.0\",\n      \"resolved\": \"https://registry.npmjs.org/std-env/-/std-env-4.2.0.tgz\",\n      \"integrity\": \"sha512-oCUKSupKTHX53EyjDtuZQ64pjLJ6yYCtpmEw0goYxtjG9KpbRe8KAsl2tBUGU9DyMcJ0RwJ8GqJAFzMXcXW1Rw==\",\n      \"dev\": true,\n      \"license\": \"MIT\"\n",
+    "nuevo": "    },\n    \"node_modules/std-env\": {\n      \"version\": \"4.3.0\",\n      \"resolved\": \"https://registry.npmjs.org/std-env/-/std-env-4.3.0.tgz\",\n      \"integrity\": \"sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==\",\n      \"dev\": true,\n      \"license\": \"MIT\"\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/tinybench\": {\n      \"version\": \"6.1.4\",\n      \"resolved\": \"https://registry.npmjs.org/tinybench/-/tinybench-6.1.4.tgz\",\n      \"integrity\": \"sha512-9APumHG7r4yOk4X4WlkmE71aZcv1gvin1czO3OQ1U9iJcFA5Ja/ygyb0vPOVHTthFozUYs8CLoLUlM8grb2lTQ==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n",
+    "nuevo": "    },\n    \"node_modules/tinybench\": {\n      \"version\": \"6.2.2\",\n      \"resolved\": \"https://registry.npmjs.org/tinybench/-/tinybench-6.2.2.tgz\",\n      \"integrity\": \"sha512-nIZ2N2dFpjBsg2hgitKu7mA+FvsIJuGJOwysRngmVRRmWgR/UyPjwJj8c/fT/dhm8EkHnF5EOogRf+0Z2qrimA==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/tinyexec\": {\n      \"version\": \"1.3.0\",\n      \"resolved\": \"https://registry.npmjs.org/tinyexec/-/tinyexec-1.3.0.tgz\",\n      \"integrity\": \"sha512-QKAl9m8gWWGHV8jZcPeym6j+XULi6tOf1mT83WYJ4Lk2ytW/uwAWkrP0uFsdoYMdueVJ0qs26wZ+23xeB4ibNQ==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n",
+    "nuevo": "    },\n    \"node_modules/tinyexec\": {\n      \"version\": \"1.3.1\",\n      \"resolved\": \"https://registry.npmjs.org/tinyexec/-/tinyexec-1.3.1.tgz\",\n      \"integrity\": \"sha512-GCvB3aoys96IuDFBMcTB46JOR6mdMtAToqwiW8JlWhsoh1mhHi/xn9ss/Dg7N555GiJyEt2qzoG/NHCwM6h1EA==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/undici\": {\n      \"version\": \"8.10.2\",\n      \"resolved\": \"https://registry.npmjs.org/undici/-/undici-8.10.2.tgz\",\n      \"integrity\": \"sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n",
+    "nuevo": "    },\n    \"node_modules/undici\": {\n      \"version\": \"8.12.3\",\n      \"resolved\": \"https://registry.npmjs.org/undici/-/undici-8.12.3.tgz\",\n      \"integrity\": \"sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/vite\": {\n      \"version\": \"6.4.3\",\n      \"resolved\": \"https://registry.npmjs.org/vite/-/vite-6.4.3.tgz\",\n      \"integrity\": \"sha512-NTKlcQjlAK7MlQoyb6LgaqHc8sso/pVyUJYWMws3jg21uTJw/LddqIFPcPqP6PzpgbIcZyKI85sFE4HBrQDA8A==\",\n      \"license\": \"MIT\",\n      \"dependencies\": {\n",
+    "nuevo": "    },\n    \"node_modules/vite\": {\n      \"version\": \"6.4.5\",\n      \"resolved\": \"https://registry.npmjs.org/vite/-/vite-6.4.5.tgz\",\n      \"integrity\": \"sha512-4enwjFfi4IwtEh0w+jPzpLVOFQiPHmmzPxcHXQOyEur47o6u0jE573DmGpjA+7irXoMLYRZD5ZaFUEneS3abPg==\",\n      \"license\": \"MIT\",\n      \"dependencies\": {\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/vitest\": {\n      \"version\": \"5.0.1\",\n      \"resolved\": \"https://registry.npmjs.org/vitest/-/vitest-5.0.1.tgz\",\n      \"integrity\": \"sha512-iA95lQbKEkvrtTkdAgnWbXfbipWiiWe/hDl2P5tMi6WFwD76G0NxXAGp/M9EOcYupeGJRr6wppMc7CoA41TQjg==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"@types/chai\": \"^5.2.2\",\n        \"@vitest/mocker\": \"5.0.1\",\n        \"chai\": \"^6.2.2\",\n        \"es-module-lexer\": \"^2.3.2\",\n        \"expect-type\": \"^1.4.0\",\n        \"magic-string\": \"^1.2.3\",\n        \"obug\": \"^2.1.4\",\n        \"picomatch\": \"^4.0.7\",\n        \"std-env\": \"^4.2.0\",\n        \"tinybench\": \"6.1.4\",\n        \"tinyexec\": \"1.3.0\",\n        \"tinyglobby\": \"^0.2.17\",\n        \"why-is-node-running\": \"^2.3.0\"\n      },\n      \"bin\": {\n",
+    "nuevo": "    },\n    \"node_modules/vitest\": {\n      \"version\": \"5.0.5\",\n      \"resolved\": \"https://registry.npmjs.org/vitest/-/vitest-5.0.5.tgz\",\n      \"integrity\": \"sha512-cPODOMF8YnkiiYtDdHo6n4wWmBrOBBbOIYH2d33M4l3CdNn72h+qMmO6uXffUN6A5AZFXNND/d+krS9mgkXRfg==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"@types/chai\": \"^5.2.2\",\n        \"@vitest/mocker\": \"5.0.5\",\n        \"chai\": \"^6.3.0\",\n        \"es-module-lexer\": \"^2.3.2\",\n        \"expect-type\": \"^1.4.0\",\n        \"magic-string\": \"^1.4.3\",\n        \"obug\": \"^3.0.0\",\n        \"picomatch\": \"^4.0.7\",\n        \"std-env\": \"^4.3.0\",\n        \"tinybench\": \"^6.2.2\",\n        \"tinyexec\": \"^1.3.1\",\n        \"tinyglobby\": \"^0.2.17\",\n        \"why-is-node-running\": \"3.2.1\"\n      },\n      \"bin\": {\n"
+   },
+   {
+    "viejo": "        \"@opentelemetry/api\": \"^1.9.0\",\n        \"@types/node\": \"^22.0.0 || >=24.0.0\",\n        \"@vitest/browser-playwright\": \"5.0.1\",\n        \"@vitest/browser-preview\": \"5.0.1\",\n        \"@vitest/browser-webdriverio\": \"^5.0.0-beta.5 || >=5.0.0\",\n        \"@vitest/coverage-istanbul\": \"5.0.1\",\n        \"@vitest/coverage-v8\": \"5.0.1\",\n        \"@vitest/ui\": \"5.0.1\",\n        \"happy-dom\": \"*\",\n        \"jsdom\": \"*\",\n",
+    "nuevo": "        \"@opentelemetry/api\": \"^1.9.0\",\n        \"@types/node\": \"^22.0.0 || >=24.0.0\",\n        \"@vitest/browser-playwright\": \"5.0.5\",\n        \"@vitest/browser-preview\": \"5.0.5\",\n        \"@vitest/browser-webdriverio\": \"^5.0.0-beta.5 || >=5.0.0\",\n        \"@vitest/coverage-istanbul\": \"5.0.5\",\n        \"@vitest/coverage-v8\": \"5.0.5\",\n        \"@vitest/ui\": \"5.0.5\",\n        \"happy-dom\": \"*\",\n        \"jsdom\": \"*\",\n"
+   },
+   {
+    "viejo": "      }\n    },\n    \"node_modules/vitest/node_modules/magic-string\": {\n      \"version\": \"1.4.1\",\n      \"resolved\": \"https://registry.npmjs.org/magic-string/-/magic-string-1.4.1.tgz\",\n      \"integrity\": \"sha512-8lyCu36ErXR0J9uaGKlKQoiLZKmtI63YGLE8G2o9jyRPdr4X47LusSOwgOJOzcVtp81fTAAjxR7BwKz682Jhow==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n",
+    "nuevo": "      }\n    },\n    \"node_modules/vitest/node_modules/@vitest/mocker\": {\n      \"version\": \"5.0.5\",\n      \"resolved\": \"https://registry.npmjs.org/@vitest/mocker/-/mocker-5.0.5.tgz\",\n      \"integrity\": \"sha512-xLL3lkDegJZw+MGoGaCCsFayDZthGgpAtr3Vziyfc4p7xH89K7KRPcRBBh/kEYm0Aqkt5DtTmkYpBtRV/FrHZg==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"@jridgewell/trace-mapping\": \"0.3.31\",\n        \"@vitest/spy\": \"5.0.5\",\n        \"estree-walker\": \"^3.0.3\",\n        \"magic-string\": \"^1.4.3\"\n      },\n      \"funding\": {\n        \"url\": \"https://opencollective.com/vitest\"\n      },\n      \"peerDependencies\": {\n        \"msw\": \"^2.4.9 || ^3.0.0\",\n        \"vite\": \"^6.0.0 || ^7.0.0 || ^8.0.0\"\n      },\n      \"peerDependenciesMeta\": {\n        \"msw\": {\n          \"optional\": true\n        },\n        \"vite\": {\n          \"optional\": true\n        }\n      }\n    },\n    \"node_modules/vitest/node_modules/magic-string\": {\n      \"version\": \"1.4.5\",\n      \"resolved\": \"https://registry.npmjs.org/magic-string/-/magic-string-1.4.5.tgz\",\n      \"integrity\": \"sha512-oLLC2+YvQUfAa+vxoufE/yc1icb87M9iXIRqAoR/2EhE/8cb3SF/+Gi0c2By1B+5Vz2e2vQtUvHiu1+63Znh+w==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n"
+   },
+   {
+    "viejo": "    },\n    \"node_modules/why-is-node-running\": {\n      \"version\": \"2.3.0\",\n      \"resolved\": \"https://registry.npmjs.org/why-is-node-running/-/why-is-node-running-2.3.0.tgz\",\n      \"integrity\": \"sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"siginfo\": \"^2.0.0\",\n        \"stackback\": \"0.0.2\"\n      },\n      \"bin\": {\n        \"why-is-node-running\": \"cli.js\"\n      },\n      \"engines\": {\n        \"node\": \">=8\"\n      }\n    },\n",
+    "nuevo": "    },\n    \"node_modules/why-is-node-running\": {\n      \"version\": \"3.2.1\",\n      \"resolved\": \"https://registry.npmjs.org/why-is-node-running/-/why-is-node-running-3.2.1.tgz\",\n      \"integrity\": \"sha512-Tb2FUhB4vUsGQlfSquQLYkApkuPAFQXGFzxWKHHumVz2dK+X1RUm/HnID4+TfIGYJ1kTcwOaCk/buYCEJr6YjQ==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"bin\": {\n        \"why-is-node-running\": \"cli.js\"\n      },\n      \"engines\": {\n        \"node\": \">=20.11\"\n      }\n    },\n"
+   }
+  ],
+  "firestore.rules": [
+   {
+    "viejo": "        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());\n\n      // Alta pública de captación (sin sesión, campos mínimos) y alta interna.\n      allow create: if isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)\n        && propietarioCoherenteConInmueble(incoming())) || (\n        incoming().keys().hasAll(['nombre', 'email', 'telefono', 'estado'])\n        && incoming().nombre is string\n        && incoming().nombre.size() > 0\n        && !('propietarioId' in incoming())\n      );\n      // R-1 (cierre 2026-10-14): la rama anónima del cuestionario se RETIRA. Un candidato responde\n      // mediante el servidor, que valida el token y escribe por lista blanca. Un titular solo modifica\n",
+    "nuevo": "        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());\n\n      // P0.2.2 — SIN alta anónima. El candidato lo crea el SERVIDOR mediante\n      // `POST /api/solicitud/:token` (Admin SDK, fuera de estas reglas) o el\n      // personal interno / titular en su ámbito. La rama pública histórica\n      // (`nombre/email/telefono`) queda RETIRADA: era escritura sin sesión,\n      // sin antispam y sin validación de propietario.\n      allow create: if isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)\n        && propietarioCoherenteConInmueble(incoming()) && isSignedIn());\n      // R-1 (cierre 2026-10-14): la rama anónima del cuestionario se RETIRA. Un candidato responde\n      // mediante el servidor, que valida el token y escribe por lista blanca. Un titular solo modifica\n"
+   },
+   {
+    "viejo": "\n    // =========================================================================\n    // 4. SOLICITUDES DE ALQUILER (creación pública de captación)\n    // =========================================================================\n    match /solicitudes/{solicitudId} {\n",
+    "nuevo": "\n    // =========================================================================\n    // 4. SOLICITUDES DE ALQUILER (alta pública por SERVIDOR, P0.2)\n    // =========================================================================\n    match /solicitudes/{solicitudId} {\n"
+   },
+   {
+    "viejo": "      allow get: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));\n      allow list: if isStaff();\n      allow create: if incoming().keys().hasAll(['nombre', 'email', 'telefono', 'inmuebleId', 'estado'])\n        && incoming().nombre is string\n        && incoming().email is string;\n      // D2 (§7.4): `isSignedIn()` → `isStaff()` (ver candidatos).\n      allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId));\n",
+    "nuevo": "      allow get: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));\n      allow list: if isStaff();\n      // P0.2.2 — SIN alta anónima de solicitudes. Solo personal interno o\n      // titular/gestor autenticado en su ámbito; el alta pública la escribe el\n      // SERVIDOR (`POST /api/solicitud/:token`) con token, honeypot y límite.\n      allow create: if isStaff() || (isSignedIn() && 'inmuebleId' in incoming()\n        && ambitoPorInmuebleEscritura(incoming().inmuebleId)\n        && propietarioCoherenteConInmueble(incoming()));\n      // D2 (§7.4): `isSignedIn()` → `isStaff()` (ver candidatos).\n      allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId));\n"
+   },
+   {
+    "viejo": "    match /audit_logs/{auditId} {\n      allow read: if isMasterAdmin();\n      allow create: if isSignedIn();\n      allow update, delete: if false;\n    }\n",
+    "nuevo": "    match /audit_logs/{auditId} {\n      allow read: if isMasterAdmin();\n      // P0.2.8 — sigue siendo append-only, pero un usuario YA NO puede\n      // escribir un registro de auditoría atribuido a OTRO correo. Se admiten\n      // los registros automáticos sin autor declarado (`usuarioEmail` ausente\n      // o vacío) que genera el transporte de diagnóstico.\n      allow create: if isSignedIn() && (\n        isMasterAdmin()\n        || !('usuarioEmail' in incoming())\n        || incoming().usuarioEmail == ''\n        || incoming().usuarioEmail == authEmail()\n      );\n      allow update, delete: if false;\n    }\n"
+   },
+   {
+    "viejo": "          : incoming().version >= existing().version;\n      }\n      function esTransicionFirmadaACerrada() {\n        // Única transición permitida desde FIRMADA: → CERRADA, misma versión, sin cambios críticos\n",
+    "nuevo": "          : incoming().version >= existing().version;\n      }\n      // H-03 — La evidencia de firma sólo la escribe el SERVIDOR. El navegador\n      // no puede cambiar `firmas`, `estadoFirma` ni `fechaFirma`, ni declarar un\n      // acta FIRMADA (o CERRADA sin estar ya firmada): eso permitía fabricar una\n      // firma sin OTP. El servidor de firma escribe con credencial de servicio y\n      // no pasa por estas reglas.\n      function evidenciaFirmaSoloServidor() {\n        return incoming().firmas == existing().firmas\n          && incoming().estadoFirma == existing().estadoFirma\n          && (('fechaFirma' in incoming()) == ('fechaFirma' in existing()))\n          && (!('fechaFirma' in existing()) || incoming().fechaFirma == existing().fechaFirma)\n          && !(incoming().estado == 'FIRMADA' && existing().estado != 'FIRMADA')\n          && !(incoming().estado == 'CERRADA' && !(existing().estado in ['FIRMADA', 'CERRADA']));\n      }\n      // H-03 — Tampoco se puede nacer con firmas ni con estado de firma cerrado.\n      function altaSinEvidenciaDeFirma() {\n        return 'firmas' in incoming()\n          && incoming().firmas.size() == 0\n          && (!('estadoFirma' in incoming()) || incoming().estadoFirma == 'PENDIENTE')\n          && !('fechaFirma' in incoming());\n      }\n      function esTransicionFirmadaACerrada() {\n        // Única transición permitida desde FIRMADA: → CERRADA, misma versión, sin cambios críticos\n"
+   },
+   {
+    "viejo": "        && incoming().estado == 'BORRADOR'\n        && 'version' in incoming() && incoming().version >= 1\n      ) && sinSecretosActa();\n\n",
+    "nuevo": "        && incoming().estado == 'BORRADOR'\n        && 'version' in incoming() && incoming().version >= 1\n        && altaSinEvidenciaDeFirma()\n      ) && sinSecretosActa();\n\n"
+   },
+   {
+    "viejo": "        && noModificacionSilenciosaFirmada()\n        && estadoValido()\n      ) && sinSecretosActa();\n\n",
+    "nuevo": "        && noModificacionSilenciosaFirmada()\n        && estadoValido()\n        && evidenciaFirmaSoloServidor()\n      ) && sinSecretosActa();\n\n"
+   },
+   {
+    "viejo": "\n    match /actas_otp/{otpId} {\n      function otpEsMio(d) {\n        return 'ownerId' in d && d.ownerId == myPropId();\n      }\n      function sinSecretoPlanoExcesivo() {\n        // No permitir almacenamiento de codigo en texto plano salvo temporal controlado.\n        // codigoPlainTemporal (solo canal MANUAL, entrega en persona por personal interno)\n        // se permite SOLO mientras el OTP sigue ACTIVO y sin usar, o si se envía null\n        // (limpieza obligatoria tras uso/expiración).\n        return !('codigo' in incoming() && incoming().codigo.size() > 0) // nunca campo 'codigo' plano\n          && !('plain' in incoming())\n          && (!('codigoPlainTemporal' in incoming())\n              || incoming().codigoPlainTemporal == null\n              || (incoming().estado == 'ACTIVO' && incoming().usado == false));\n      }\n      allow get: if isMasterAdmin() || (isPropietarioRole() && otpEsMio(existing()));\n      allow list: if isMasterAdmin() || (isPropietarioRole() && otpEsMio(resource.data));\n      allow create: if isMasterAdmin() || (\n        isPropietarioRole()\n        && 'ownerId' in incoming() && incoming().ownerId == myPropId()\n        && 'actaId' in incoming() && incoming().actaId is string\n        && 'firmaId' in incoming() && incoming().firmaId is string\n        && 'codigoHash' in incoming()\n      ) && sinSecretoPlanoExcesivo();\n      allow update: if isMasterAdmin() || (\n        isPropietarioRole()\n        && 'ownerId' in existing() && existing().ownerId == myPropId()\n        && 'ownerId' in incoming() && incoming().ownerId == myPropId()\n        && 'actaId' in incoming() && incoming().actaId == existing().actaId\n      ) && sinSecretoPlanoExcesivo();\n      allow delete: if isMasterAdmin();\n    }\n\n",
+    "nuevo": "\n    match /actas_otp/{otpId} {\n      // H-07 — El OTP es material del SERVIDOR, no del navegador.\n      // ===========================================================\n      // Antes el cliente creaba el documento (con su hash), lo leía para mostrar\n      // el estado, lo actualizaba al fallar y podía fijar `estado`/`usado`. Con\n      // eso la \"validación\" era una decisión del propio interesado.\n      // Ahora: generación, entrega, intentos y consumo ocurren en las rutas\n      // /api/actas/otp/* con credencial de servicio (no pasan por reglas). El\n      // navegador NO crea, NO modifica, NO borra y NO puede listar hashes; sólo\n      // el master conserva lectura de diagnóstico.\n      allow get, list: if isMasterAdmin();\n      allow create, update, delete: if false;\n    }\n\n"
+   }
+  ]
+ }
+}

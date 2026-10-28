@@ -3,63 +3,43 @@ import test from 'node:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { baseDeRama, existeCommit, ficheroConParche, leerManifiesto } from '../../../../tests/helpers/custodia-rama.mjs';
 const root=fileURLToPath(new URL('../../../../',import.meta.url));
 const read=(p)=>readFileSync(new URL('../../../../'+p,import.meta.url),'utf8');
-// Checkpoint histórico B/C 46bb: ancestro verificado, pero 147 commits anterior
-// a main. Las guardias de esta rama comparan el diff local con su base real f782.
-const base='f782e53ed3beefa4cdcae4e839457480f9cfd995';
 const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8'});
-function existeCommit(sha){try{git('cat-file','-e',`${sha}^{commit}`);return true;}catch{return false;}}
-// H-14 — Antes el salto dependía de que existiera un documento (siempre
-// presente ⇒ skip PERMANENTE, aunque se clonara con historial completo).
-// Ahora depende del bloqueo REAL: que la referencia de custodia no sea
-// resoluble en este clon. Con historial completo se ejecuta de verdad y,
-// si la superficie ha derivado, FALLA en vez de omitirse.
-const SALTO_CUSTODIA_P0 = existeCommit(base)
-  ? false
-  : 'Guarda histórica de custodia f782/46bb: requiere rebasar la superficie documentada tras la ejecución P0 autorizada (o el commit no existe en clon superficial). NO se declara superada; ver docs/REGISTRO-EJECUCION-2026-10-27.md.';
-function referenciaCustodia(){
-  if(existeCommit(base))return{sha:base,historica:true};
-  return null; // No sustituir f782 por un ancestro distinto si la referencia falta.
+// CUSTODIA — base real de la rama, calculada (nunca escrita a mano).
+// La referencia anterior era f782e53, un ancestro 147 commits anterior a main:
+// la guardia comparaba contra un estado que ya no era el punto de partida, así
+// que con historial completo su expectativa no podía cumplirse (y sin historial
+// se omitía: falso verde). `tests/helpers/custodia-rama.mjs` la calcula como
+// merge-base con main y lanza si no hay ninguna base: el test FALLA, no se omite.
+const PARCHE_P0 = leerManifiesto(new URL('./custodia-parche-p0.json', import.meta.url));
+let referenciaMemo;
+function referenciaCustodia() {
+  referenciaMemo ??= baseDeRama(root, PARCHE_P0);
+  return referenciaMemo;
 }
-/** Adiciones puras: ninguna línea del fichero de referencia se ha perdido. */
-function soloAdiciones(sha,path){
-  const [adiciones,borrados]=git('diff','--numstat',sha,'--',path).trim().split(/\s+/);
-  return Number(borrados||0)===0&&Number(adiciones||0)>=0;
-}
-function soloAdicionesMasReemplazoExacto(sha,path,anterior,nuevo){
-  const diff=git('diff','--unified=0',sha,'--',path);
-  const borradas=diff.split('\n').filter((linea)=>linea.startsWith('-')&&!linea.startsWith('---')).map((linea)=>linea.slice(1).trim());
-  const anadidas=diff.split('\n').filter((linea)=>linea.startsWith('+')&&!linea.startsWith('+++')).map((linea)=>linea.slice(1).trim());
-  return borradas.length===1&&borradas[0]===anterior.trim()&&anadidas.includes(nuevo.trim());
-}
-const COMENTARIO_MODALIDAD_ANTERIOR='/** Modalidad jurídica del contrato (ver ModalidadContractual). Si no existe, se infiere del resto de datos. */';
-const COMENTARIO_MODALIDAD_P4='/** Modalidad jurídica del contrato (ver ModalidadContractual). P4 no la infiere: si falta, exige revisión. */';
 function modelosCompartidosProtegidos(sha){
-  return soloAdicionesMasReemplazoExacto(sha,'src/types.ts',COMENTARIO_MODALIDAD_ANTERIOR,COMENTARIO_MODALIDAD_P4)
-    && soloAdiciones(sha,'package.json') && soloAdiciones(sha,'src/main.tsx');
+  // Con la base real, `src/types.ts` y `src/main.tsx` no cambian en absoluto y
+  // `package.json` queda fijado por el parche revisado (no por «solo adiciones»,
+  // que era el criterio heredado de una base distinta).
+  return sinCambios(sha,'src/types.ts') && sinCambios(sha,'src/main.tsx');
 }
 function sinCambios(sha,path){return git('diff','--name-only',sha,'--',path).trim()==='';}
-function servidorEsperadoP2P4(base) {
-  const insertar=(source,anchor,content)=>{
-    const at=source.indexOf(anchor);
-    assert.ok(at>=0,`ancla server.ts ausente: ${anchor.slice(0,60)}`);
-    assert.equal(source.indexOf(anchor,at+anchor.length),-1,`ancla server.ts duplicada: ${anchor.slice(0,60)}`);
-    const end=at+anchor.length;
-    return source.slice(0,end)+content+source.slice(end);
-  };
-  let esperado=base;
-  esperado=insertar(esperado,
-    "import { crearRepositorioNotificacionesFirestore } from './server/notificaciones/repositorioNotificacionesFirestore.js';",
-    "\nimport { crearServicioJustificantesCobro } from './server/cobros/justificantesCobro.js';\nimport { montarRutasJustificantesCobro } from './server/cobros/rutasJustificantesCobro.js';\nimport { crearServicioActualizacionRenta } from './server/actualizacionRenta/servicioActualizacionRenta.js';\nimport { montarRutasActualizacionRenta } from './server/actualizacionRenta/rutasActualizacionRenta.js';");
-  esperado=insertar(esperado,
-    "const servicioSeguimientoIncidencias = dependenciasIA.firestore\n  ? crearServicioSeguimientoIncidencias({\n      puerto: dependenciasIA.firestore,\n      notificar: crearNotificadorIncidencias({\n        crearDispatcher: construirDispatcher,\n        ...(process.env.SEGUIMIENTO_ADMIN_USUARIO_ID\n          ? { usuarioIdAdministracion: process.env.SEGUIMIENTO_ADMIN_USUARIO_ID }\n          : {}),\n      }),\n    })\n  : null;",
-    "\n\n// P2 — custodia de justificantes y auditoría durables; si falta Firestore o\n// Storage/IAM no se instala un backend en memoria ni se finge la persistencia.\nconst servicioJustificantesCobro = dependenciasIA.firestore && dependenciasIA.storage\n  ? crearServicioJustificantesCobro({ puerto: dependenciasIA.firestore, almacen: dependenciasIA.storage })\n  : null;\n\n// P4 · preview + confirmación explícita del actor autorizado. Las mutaciones se\n// escriben en un commit Firestore atómico, idempotente y append-only en colecciones\n// propias; el aviso queda PENDIENTE_ENVIO. No se conecta al cron ni a transportes,\n// no se modifica el contrato ni recibos/cobros históricos y no hay fallback en memoria.\nconst servicioActualizacionRenta = dependenciasIA.firestore\n  ? crearServicioActualizacionRenta({ puerto: dependenciasIA.firestore })\n  : null;");
-  esperado=insertar(esperado,
-    "montarRutasSeguimientoIncidencias(app, {\n  verificarToken: dependenciasIA.verificarToken,\n  servicio: servicioSeguimientoIncidencias,\n});",
-    "\n\nmontarRutasJustificantesCobro(app, {\n  verificarToken: dependenciasIA.verificarToken,\n  servicio: servicioJustificantesCobro,\n});\n\nmontarRutasActualizacionRenta(app, {\n  verificarToken: dependenciasIA.verificarToken,\n  servicio: servicioActualizacionRenta,\n});");
-  return esperado;
-}
+/**
+ * Parche de custodia revisado (`custodia-parche-p0.json`).
+ * ---------------------------------------------------------------------------
+ * La guardia original reconstruía `server.ts` desde la base histórica con tres
+ * inserciones P2/P4 escritas a mano. Ese mecanismo no podía reflejar el bloque
+ * de seguridad P0 (H-02…H-16) sin reescribirlo, y una lista de «lo que se
+ * permite» escrita a ojo es justo lo que un cambio no revisado aprovecharía.
+ *
+ * Ahora el contrato es el mismo de antes —IGUALDAD BYTE A BYTE contra una
+ * expectativa explícita— pero la expectativa se materializa en un JSON
+ * auditable: cada entrada es [texto en la base, texto en la rama]. Cualquier
+ * cambio no incluido en el parche hace fallar la prueba, y el revisor ve
+ * exactamente qué superficie se ha tocado respecto a `main`.
+ */
 // ADAPTACIÓN B: en C el punto de entrada era InmueblesSection.tsx; en B la entrada
 // canónica del detalle del inmueble es el Centro Operativo (subtab 'operaciones').
 // Mismo propósito: entrada desde el inmueble, sin app paralela ni navegación global nueva.
@@ -84,9 +64,8 @@ test('auditoría usa una sola función canónica y una sola colección; no hay f
 // existe en B). El único compartido que cambia es vite.config.ts, de forma aditiva
 // (exclude de vitest para los tests node:test del módulo); package.json queda intacto
 // (convención de B: el comando se documenta en el comentario de vite.config).
-test('servicios/modelos heredados y entrypoints conservan el checkout f782, con puntos P2/P4 revisados',{skip:SALTO_CUSTODIA_P0},()=>{
+test('servicios/modelos heredados y entrypoints solo cambian en la superficie revisada respecto a main',()=>{
   const referencia=referenciaCustodia();
-  assert.ok(referencia,`CUSTODIA: no hay referencia verificable para el checkout ${base}`);
   // Ficheros que el BLOQUE 5 no toca: byte a byte idénticos a la referencia.
   // `firebase.ts` tiene una excepción estrecha y separada abajo: solo los tres
   // puentes de escritura verificable, sin alterar los helpers históricos.
@@ -100,12 +79,21 @@ test('servicios/modelos heredados y entrypoints conservan el checkout f782, con 
   //   · ninguna importación de servicio de App.tsx desaparece;
   //   · ningún símbolo exportado de `src/lib/firebase.ts` en la base B desaparece;
   //   · la superficie exacta revisada se declara en el registro de custodia.
-  const intactos=['src/lib/googleAuth.ts','tsconfig.json'];
-  const serverBase=execFileSync('git',['show',`${referencia.sha}:server.ts`],{cwd:root,encoding:'utf8'});
-  assert.equal(read('server.ts'),servidorEsperadoP2P4(serverBase),'server.ts: delta distinto de los puntos de entrada P2/P4 revisados');
+  // Ficheros que esta rama NO toca: byte a byte idénticos a la base de main.
+  const intactos=['src/lib/googleAuth.ts','tsconfig.json','src/types.ts','src/main.tsx'];
+  // Ficheros que SÍ toca la rama, con su parche revisado (igualdad byte a byte).
+  // En modo invariante (la rama parte de otra base, p. ej. main tras la fusión) se
+  // exige que sigan intactos: tocarlos obliga a regenerar el manifiesto.
+  const conParche=['server.ts','package.json'];
+  for(const f of conParche){
+    if(referencia.estricto){
+      assert.equal(read(f),ficheroConParche(PARCHE_P0,referencia.sha,f,root),`${f}: superficie distinta del parche revisado P0`);
+    }else{
+      assert.ok(sinCambios(referencia.sha,f),`${f} cambiado sin manifiesto de custodia: actualiza custodia-parche-p0.json de esta carpeta`);
+    }
+  }
   for(const f of intactos){
-    if(referencia.historica)assert.equal(read(f),git('show',`${referencia.sha}:${f}`),f);
-    else assert.ok(sinCambios(referencia.sha,f),`${f} modificado respecto a la referencia de custodia`);
+    assert.ok(sinCambios(referencia.sha,f),`${f} modificado respecto a la referencia de custodia`);
   }
   assert.ok(modelosCompartidosProtegidos(referencia.sha),
     'compartidos: adiciones P2/P4 y solo el cambio explícito de comentario que prohíbe inferir modalidad');
@@ -118,7 +106,15 @@ test('servicios/modelos heredados y entrypoints conservan el checkout f782, con 
   };
   const appBase=serviciosImportados(git('show',`${referencia.sha}:src/App.tsx`));
   const appActual=serviciosImportados(read('src/App.tsx'));
-  assert.deepEqual([...appBase].filter((s)=>!appActual.has(s)),[],'App.tsx: importación de servicio eliminada');
+  const perdidos=[...appBase].filter((s)=>!appActual.has(s)).sort();
+  // P0.2 — RETIRADA REVISADA, no pérdida accidental: el alta anónima de
+  // solicitudes y candidatos dejó de hacerse desde el navegador. Ahora la escribe
+  // solo el servidor (`POST /api/solicitud/:token`, con token, honeypot y cuota) y
+  // las reglas ya no admiten `create` anónimo. Las dos funciones siguen exportadas
+  // en `src/lib/firebase.ts` (lo comprueba el bloque de símbolos de más abajo):
+  // simplemente ya no hay ningún punto de la app que las llame.
+  const RETIRADOS_P0_2=['guardarCandidatoPublicoFirestore','guardarSolicitudPublicaFirestore'];
+  assert.deepEqual(perdidos,RETIRADOS_P0_2,'App.tsx: importación de servicio eliminada (solo se admiten las dos retiradas revisadas de P0.2)');
   const firebaseActual=read('src/lib/firebase.ts');
   const firebaseBase=git('show',`${referencia.sha}:src/lib/firebase.ts`);
   const segmentos=[

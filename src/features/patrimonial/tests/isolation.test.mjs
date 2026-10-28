@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve, dirname, relative, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { baseDeRama, leerManifiesto, ficheroConParche } from '../../../../tests/helpers/custodia-rama.mjs';
 import demoConfig from '../demo/vite.config.mjs';
 
 const modulo = fileURLToPath(new URL('../', import.meta.url));
@@ -56,65 +57,52 @@ test('estilos y HTML no cargan recursos remotos', () => {
   }
 });
 
-// Reconciliación histórica Arena B + Arena C: el checkpoint 46bb9f79… fue
-// recuperado y verificado, pero main avanzó 147 commits desde allí. Las guardias
-// del worktree usan el punto real de partida de esta sesión, f782e53…, para no
-// atribuir al cambio local el historial ya integrado en main.
-const BASE_CHECKOUT = 'f782e53ed3beefa4cdcae4e839457480f9cfd995';
-// H-14 — Antes el salto dependía de que existiera un documento (siempre
-// presente ⇒ skip PERMANENTE, aunque se clonara con historial completo).
-// Ahora depende del bloqueo REAL: que la referencia de custodia no sea
-// resoluble en este clon. Con historial completo se ejecuta de verdad y,
-// si la superficie ha derivado, FALLA en vez de omitirse.
-const SALTO_CUSTODIA_P0 = existeCommit(BASE_CHECKOUT)
-  ? false
-  : 'Guarda histórica de custodia f782/46bb: requiere rebasar la superficie documentada tras la ejecución P0 autorizada (package.json, firestore.rules y código de producto han cambiado). NO se declara superada; ver docs/REGISTRO-EJECUCION-2026-10-27.md.';
-function existeCommit(sha) {
-  try { execFileSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: repo }); return true; } catch { return false; }
+// CUSTODIA — la base se CALCULA, no se escribe a mano.
+// ---------------------------------------------------------------------------
+// La guardia histórica fijaba f782e53 (un ancestro 147 commits anterior a main)
+// y se omitía cuando ese commit no era resoluble: con un clon superficial pasaba
+// en verde sin comprobar nada. Ahora:
+//   · la base es `merge-base` con main (`tests/helpers/custodia-rama.mjs`), así
+//     que la guardia mide exactamente lo que esta rama cambia respecto a main;
+//   · si no hay base verificable, la guardia FALLA (nunca se omite);
+//   · el manifiesto `custodia-parche-p0.json` declara la superficie exacta y el
+//     parche byte a byte de los ficheros compartidos (package.json, lockfile y
+//     reglas), de modo que cualquier cambio no declarado rompe la custodia;
+//   · si la rama parte de otra base (p. ej. main después de la fusión) se pasa a
+//     modo invariante: los ficheros compartidos deben seguir intactos.
+const CUSTODIA_P0 = leerManifiesto(new URL('./custodia-parche-p0.json', import.meta.url));
+let custodiaMemo;
+function custodia() {
+  custodiaMemo ??= baseDeRama(repo, CUSTODIA_P0);
+  return custodiaMemo;
 }
-function referenciaCustodia(base) {
-  if (existeCommit(base)) return { sha: base };
-  return null; // No caer a una base histórica distinta: sin la ref exacta se bloquea.
-}
+const ficheroConParcheRevisado = (path) => ficheroConParche(CUSTODIA_P0, custodia().sha, path, repo);
 
-test('dependencias y lockfile siguen exactamente como en el checkout canónico', {skip:SALTO_CUSTODIA_P0}, async () => {
+test('dependencias y lockfile solo cambian en el parche revisado de la rama', async () => {
   const { execFileSync } = await import('node:child_process');
-  assert.ok(existeCommit(BASE_CHECKOUT), `CUSTODIA: base de checkout no resoluble: ${BASE_CHECKOUT}`);
-  for (const file of ['package.json', 'package-lock.json', 'bun.lock']) {
-    let base;
-    try {
-      base = execFileSync('git', ['show', `${BASE_CHECKOUT}:${file}`], { cwd: repo });
-    } catch (error) {
-      if (file !== 'bun.lock') throw error;
-      continue; // bun.lock no existe en esta base
-    }
-    if (file !== 'package.json') {
-      assert.deepEqual(readFileSync(resolve(repo, file)), base, `${file} modificado`);
-      continue;
-    }
-    // La reconciliación añade únicamente los runners reproducibles de B5/B7;
-    // no admite cambios de paquetes, dependencias, metadatos ni scripts previos.
-    const actualPackage = JSON.parse(readFileSync(resolve(repo, file), 'utf8'));
-    const basePackage = JSON.parse(base.toString('utf8'));
-    const { scripts: actualScripts, ...actualRest } = actualPackage;
-    const { scripts: baseScripts, ...baseRest } = basePackage;
-    assert.deepEqual(actualRest, baseRest, 'solo pueden cambiar los scripts B5/B7');
-    // BLOQUE 12 · A-05: los runners oficiales de las suites `.mjs` (Tipo A) y las
-    // dos guardias de auditoría. La garantía sigue siendo la misma: `package.json`
-    // SOLO añade scripts, no puede borrar ni reescribir ninguna línea base (se
-    // verifica con `git diff --numstat`: borrados = 0) y ninguna dependencia,
-    // metadato o script previo puede cambiar.
-    assert.deepEqual(actualScripts, {
-      ...baseScripts,
-      'test:bloque-5': 'tsx scripts/test-bloque-5.ts',
-      'test:bloque-7': 'tsx scripts/test-bloque-7.ts',
-      'test:operaciones': 'node --import tsx --test "src/features/operaciones/tests/*.test.mjs"',
-      'test:patrimonial': 'node --import tsx --test "src/features/patrimonial/tests/*.test.mjs"',
-      'test:integracion': 'npm run test:operaciones && npm run test:patrimonial',
-      'test:emulador:operaciones': 'node --import tsx --test src/features/operaciones/tests/emulator/operaciones.emulator.mjs',
-      'auditoria:repositorio': 'tsx scripts/guardia-a04-repositorio.mts',
-      'auditoria:reglas:matriz': 'tsx scripts/diagnostico-b12-list.mts',
-    }, 'package.json solo añade los runners de B5/B7 y los de A-05/auditoría (sin borrados)');
+  const ejecutar = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+
+  // (1) `package.json` y `package-lock.json`: igualdad BYTE A BYTE con la base más
+  // el parche revisado (scripts P0/doctor y `overrides.dompurify`). Ni una línea
+  // más puede diferir: tocar una dependencia sin declararla hace fallar la guardia.
+  for (const fichero of ['package.json', 'package-lock.json']) {
+    assert.equal(readFileSync(resolve(repo, fichero), 'utf8'), ficheroConParcheRevisado(fichero),
+      `${fichero}: distinto del parche revisado (dependencias o scripts no declarados)`);
+  }
+
+  // (2) Ninguna dependencia ni metadato cambia: el parche solo añade tres runners
+  // y la sobreescritura de seguridad de DOMPurify.
+  const actualPackage = JSON.parse(readFileSync(resolve(repo, 'package.json'), 'utf8'));
+  const basePackage = JSON.parse(ejecutar('show', `${custodia().sha}:package.json`));
+  assert.deepEqual(actualPackage.dependencies, basePackage.dependencies, 'dependencias alteradas');
+  assert.deepEqual(actualPackage.devDependencies, basePackage.devDependencies, 'devDependencies alteradas');
+  assert.deepEqual(actualPackage.overrides, { dompurify: '^3.4.17' },
+    'la única sobreescritura admitida es el parche de seguridad de DOMPurify');
+  const scriptsAnadidos = Object.keys(actualPackage.scripts).filter((k) => !(k in basePackage.scripts));
+  assert.deepEqual(scriptsAnadidos.sort(), ['doctor', 'test', 'typecheck'],
+    'solo se admiten los runners P0 añadidos; ningún script previo puede cambiar');
+  for (const clave of Object.keys(basePackage.scripts)) {
+    assert.equal(actualPackage.scripts[clave], basePackage.scripts[clave], `script reescrito: ${clave}`);
   }
 });
 
@@ -522,83 +510,103 @@ const P3_NO_INTEGRAR_SIN_GUARDIAS = [
   'tests/conciliacion-p3-rules.test.ts',
   'tests/conciliacion-persistencia.test.ts',
 ];
+// REBASE A MAIN — dos entradas de la lista P3 cambian respecto a main por motivos
+// que NO son P3 y que están fijados por otra guardia:
+//   · `firestore.rules`: el cierre P0 de `actas_otp` y de la escritura de evidencia
+//     de firma (H-03/H-07). No introduce nada de Norma 43 ni de conciliación, y su
+//     contenido está fijado BYTE A BYTE por el parche revisado (test de reglas).
+//   · `FacturacionSection.tsx`: P1.5-pre, la modalidad fiscal deja de estar
+//     cableada a VERIFACTU y pasa a configuración explícita sin remisión.
+// Cualquier otro fichero P3 sigue bloqueado sin dictamen.
+const P3_REBASADOS_EN_MAIN = {
+  'firestore.rules': 'cierre P0 de actas_otp/evidencia (fijado byte a byte por el parche revisado)',
+  'src/components/sections/FacturacionSection.tsx': 'P1.5-pre: modalidad fiscal configurable, sin remisión por defecto',
+};
 const permitido = (path) =>
   PERMITIDOS_INTEGRACION.some((p) => path === p || path.startsWith(p))
   || permitidaPostB(path) || ELIMINACIONES_DEC_01.includes(path);
 
-test('ningún archivo productivo del worktree queda fuera de la superficie documentada frente a f782', {skip:SALTO_CUSTODIA_P0}, async () => {
+test('la superficie de la rama es EXACTAMENTE la declarada frente a main', async () => {
   const { execFileSync } = await import('node:child_process');
-  const rutasActuales = [
-    ...execFileSync('git', ['diff', '--name-only', BASE_CHECKOUT, '--', '.'], { cwd: repo, encoding: 'utf8' }).split('\n'),
-    ...execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' }).split('\n'),
-  ].filter(Boolean);
-  const p3Pendiente = rutasActuales.filter((path) => P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path));
+  const ejecutar = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+  const cambiados = ejecutar('diff', '--name-only', custodia().sha, '--', '.').split('\n').filter(Boolean).sort();
+  const declarados = [...CUSTODIA_P0.superficie].sort();
+  if (!custodia().estricto) {
+    // Rama con otra base (p. ej. main tras la fusión): el manifiesto de esta rama
+    // ya no la describe. Se conservan las comprobaciones independientes de la base
+    // y se exige que el manifiesto se regenere al tocar ficheros compartidos.
+    assert.equal(ejecutar('ls-files', '--others', '--exclude-standard').trim(), '',
+      'hay ficheros sin seguimiento: la superficie debe estar confirmada en Git');
+    const p3 = cambiados.filter((path) => P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path) && !(path in P3_REBASADOS_EN_MAIN));
+    assert.deepEqual(p3, [], `P3 no integrada: ${p3.join(', ')}`);
+    assert.ok(ELIMINACIONES_DEC_01.every((path) => !existsSync(resolve(repo, path))), 'DEC-01: WhatsApp no debe reaparecer');
+    return;
+  }
+  // Igualdad EXACTA en los dos sentidos: ningún fichero sin declarar (drift) y
+  // ningún fichero declarado que ya no cambie (manifiesto obsoleto).
+  assert.deepEqual(cambiados, declarados,
+    `superficie distinta del manifiesto: sobran=[${cambiados.filter((f) => !declarados.includes(f)).join(', ')}] faltan=[${declarados.filter((f) => !cambiados.includes(f)).join(', ')}]`);
+  assert.equal(ejecutar('ls-files', '--others', '--exclude-standard').trim(), '',
+    'hay ficheros sin seguimiento: la superficie debe estar confirmada en Git');
+  const p3Pendiente = cambiados.filter((path) => P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path) && !(path in P3_REBASADOS_EN_MAIN));
   assert.deepEqual(p3Pendiente, [], `P3 no integrada: falta Norma 43 normativa, emulador/persistencia y dictamen: ${p3Pendiente.join(', ')}`);
   assert.ok(ELIMINACIONES_DEC_01.every((path) => !existsSync(resolve(repo, path))), 'DEC-01: WhatsApp no debe reaparecer');
-  const exclusiones = [...PERMITIDOS_INTEGRACION, ...SUPERFICIE_BLOQUES_POST_B, ...SUPERFICIE_SESION_AUDITADA, ...ELIMINACIONES_DEC_01].map((p) => `:!${p.replace(/\/$/, '')}`);
-  const diff = execFileSync('git', [
-    'diff', '--name-only', BASE_CHECKOUT, '--', '.', ...exclusiones,
-  ], { cwd: repo, encoding: 'utf8' });
-  assert.equal(diff.trim(), '');
-  const sinSeguimiento = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' });
-  assert.ok(sinSeguimiento.trim().split('\n').filter(Boolean).every(permitido));
-  // Guardia adicional contra la base exacta del checkout (f782): solo se admiten
-  // ADICIONES en package.json; las dependencias integradas desde 46bb ya forman
-  // parte de main y no se atribuyen al diff local.
-  const referencia = referenciaCustodia(BASE_CHECKOUT);
-  assert.ok(referencia, 'CUSTODIA: no hay referencia verificable (base histórica ni commit de partida del bloque)');
-  for (const ficheroCompartido of ['package.json']) {
-    const [adiciones, borrados] = execFileSync('git', ['diff', '--numstat', referencia.sha, '--', ficheroCompartido], { cwd: repo, encoding: 'utf8' }).trim().split(/\s+/);
-    assert.equal(Number(borrados || 0), 0, `${ficheroCompartido} solo admite adiciones (añadido=${adiciones || 0})`);
+  for (const ruta of declarados) {
+    assert.doesNotMatch(ruta, /^(dist|node_modules)\//, `artefacto de build en la superficie: ${ruta}`);
   }
 });
 
-// ---------------------------------------------------------------------------
-// BLOQUES 10, 11 y 12 — invariantes de custodia que NO se relajan:
-//   · las reglas de seguridad no cambian (ni se relajan ni se endurecen);
-//   · la única baja admitida es la retirada explícita de WhatsApp (DEC-01); no hay otras bajas/renombres;
-//   · los ficheros compartidos sólo admiten adiciones puras;
-//   · ningún símbolo exportado de los servicios compartidos desaparece.
-// La superficie de la lista anterior se amplía con los ficheros REALMENTE
-// revisados en esos bloques (declarados uno a uno), no con directorios amplios.
-// ---------------------------------------------------------------------------
-test('BLOQUES 10-12: reglas byte a byte, sin borrados y con API de servicios preservada', {skip:SALTO_CUSTODIA_P0}, async () => {
+test('BLOQUES 10-12 (rebasado a main): reglas byte a byte con parche revisado, sin borrados y con API preservada', async () => {
   const { execFileSync } = await import('node:child_process');
-  const referencia = referenciaCustodia(BASE_CHECKOUT);
+  const referencia = custodia();
   assert.ok(referencia, 'CUSTODIA: no hay referencia verificable (base histórica ni commit de partida del bloque)');
   const ejecutar = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
 
   // (1) DEC-01: comprobar primero la baja exacta y que no se renombró otra ruta.
   // Así esta regresión sigue ejecutándose aunque el gate de Rules P3 continúe rojo.
+  // DEC-01 ya está integrado en main: la retirada del modal WhatsApp forma parte
+  // de la base. Respecto a main, esta rama no elimina ningún fichero, y la
+  // ausencia del modal se sigue exigiendo (más arriba) para que no reaparezca.
   const borrados=ejecutar('diff', '--diff-filter=D', '--name-only', referencia.sha, '--', '.').trim().split('\n').filter(Boolean);
-  assert.deepEqual(borrados, ELIMINACIONES_DEC_01, 'DEC-01: se retiró únicamente el modal WhatsApp y no debe reaparecer');
+  assert.deepEqual(borrados, [], 'esta rama no elimina ficheros respecto a main');
   assert.equal(ejecutar('diff', '--diff-filter=R', '--name-only', referencia.sha, '--', '.').trim(), '', 'hay ficheros renombrados desde la base del checkout');
 
-  // (2) Reglas de seguridad: idénticas al checkout canónico f782 (comparación
-  // binaria). Las modificaciones P3 locales deben seguir bloqueando esta guardia
-  // hasta revisión/cierre; esta prueba no autoriza publicar Rules.
-  for (const fichero of ['firestore.rules', 'storage.rules']) {
-    const actual = readFileSync(resolve(repo, fichero));
-    const base = Buffer.from(ejecutar('show', `${referencia.sha}:${fichero}`), 'utf8');
-    assert.ok(
-      actual.equals(base),
-      `${fichero}: las reglas no pueden cambiar sin dictamen (ni relajarse ni endurecerse)`
-    );
-  }
+  // (2) Reglas de seguridad: `storage.rules` idéntico a la base y `firestore.rules`
+  // igual a la base MÁS el parche revisado (cierre de `actas_otp` y
+  // `evidenciaFirmaSoloServidor`, H-03/H-07). La comparación sigue siendo binaria:
+  // cualquier otra modificación de reglas hace fallar la guardia.
+  assert.ok(readFileSync(resolve(repo, 'storage.rules')).equals(
+    Buffer.from(ejecutar('show', `${referencia.sha}:storage.rules`), 'utf8')),
+    'storage.rules: las reglas no pueden cambiar sin dictamen');
+  assert.equal(readFileSync(resolve(repo, 'firestore.rules'), 'utf8'),
+    ficheroConParcheRevisado('firestore.rules'),
+    'firestore.rules: distinto del parche revisado (ni relajarse ni endurecerse sin declararlo)');
 
-  // (3) Ficheros compartidos: adiciones puras (0 líneas borradas).
-  for (const compartido of ['src/types.ts', 'package.json', 'src/main.tsx']) {
-    const [adiciones, borrados] = ejecutar('diff', '--numstat', referencia.sha, '--', compartido).trim().split(/\s+/);
-    assert.equal(Number(borrados || 0), 0, `${compartido} solo admite adiciones (añadido=${adiciones || 0})`);
+  // (3) Ficheros compartidos sin cambios respecto a la base (los que sí cambian
+  // quedan fijados por el parche revisado en el test de dependencias).
+  for (const compartido of ['src/types.ts', 'src/main.tsx']) {
+    assert.equal(ejecutar('diff', '--name-only', referencia.sha, '--', compartido).trim(), '',
+      `${compartido} no puede cambiar en esta rama`);
   }
 
   // (4) Los servicios compartidos conservan toda su API exportada.
   const simbolos = (texto) =>
     new Set([...texto.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|class|type|interface|enum)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]));
+  // RETIRADA REVISADA (no pérdida accidental): el OTP de actas dejó de calcularse
+  // y guardarse en el navegador. Se sirve solo desde el servidor
+  // (`server/actas/servicioOtpActas.ts`, con `server/actas/rutasOtpActas.ts`), de
+  // modo que las funciones cliente serían una segunda vía de emisión y no deben
+  // existir. `tests/acta-otp-entrega.test.tsx` exige además su ausencia.
+  const RETIRADOS_OTP_CLIENTE = ['getOtpActaFirestore', 'saveOtpActaFirestore', 'subscribeOtpPorActa'];
   for (const fichero of ['src/lib/firebase.ts', 'src/lib/suministrosFirestore.ts', 'src/lib/firebaseActas.ts', 'src/lib/firebaseInversion.ts']) {
     const base = simbolos(ejecutar('show', `${referencia.sha}:${fichero}`));
     const actual = simbolos(readFileSync(resolve(repo, fichero), 'utf8'));
-    const eliminados = [...base].filter((s) => !actual.has(s));
+    let eliminados = [...base].filter((s) => !actual.has(s));
+    if (fichero === 'src/lib/firebaseActas.ts') {
+      assert.deepEqual([...eliminados].sort(), RETIRADOS_OTP_CLIENTE,
+        `${fichero}: solo se admite la retirada del OTP de cliente`);
+      eliminados = [];
+    }
     assert.deepEqual(eliminados, [], `${fichero}: API histórica eliminada`);
   }
 });

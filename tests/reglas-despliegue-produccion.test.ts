@@ -9,7 +9,10 @@
  * exactamente la clase de discrepancia que produce denegaciones como la de Carteras.
  *
  * Este test fija, sin credenciales ni red:
- *  1. `.firebaserc` fija `gestor-inmuebles-produccion` como proyecto por defecto.
+ *  1. `.firebaserc` identifica `gestor-inmuebles-produccion` —el MISMO proyecto de
+ *     la aplicación— **sólo con un alias explícito**, y NO como destino por
+ *     defecto (H-02): un `firebase deploy` sin `--project` debe fallar en vez de
+ *     publicar reglas, índices o storage en producción sin decirlo.
  *  2. `firebase.json` publica `firestore.rules` en la MISMA base de datos que usa la app.
  *  3. Ni las instrucciones de despliegue ni el código fuente apuntan al proyecto antiguo.
  */
@@ -35,12 +38,16 @@ const DOCS_DE_DESPLIEGUE = [
 const PROYECTO_ANTIGUO = 'startup-sanctuary-sln7n';
 
 describe('destino de publicación de firestore.rules', () => {
-  it('`.firebaserc` fija como proyecto por defecto el MISMO de la aplicación', () => {
+  it('`.firebaserc` nombra el proyecto de la aplicación solo como alias explícito (H-02)', () => {
     const ruta = resolve(RAIZ, '.firebaserc');
     expect(existsSync(ruta)).toBe(true);
     const rc = JSON.parse(readFileSync(ruta, 'utf8'));
-    expect(rc.projects?.default).toBe(CONFIG.projectId);
-    expect(rc.projects?.default).toBe('gestor-inmuebles-produccion');
+    // El proyecto de la app sigue siendo el único destino de producción declarado…
+    expect(rc.projects?.produccion).toBe(CONFIG.projectId);
+    expect(rc.projects?.produccion).toBe('gestor-inmuebles-produccion');
+    // …pero ya NO hay destino implícito: sin `--project`, la CLI falla.
+    expect('default' in (rc.projects || {})).toBe(false);
+    expect(rc._nota).toMatch(/NO hay proyecto por defecto/);
   });
 
   it('`firebase.json` publica `firestore.rules` en la MISMA base de datos de la aplicación', () => {

@@ -2,7 +2,8 @@
   "firestore": [
     {
       "database": "ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51",
-      "rules": "firestore.rules"
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
     }
   ],
   "storage": {

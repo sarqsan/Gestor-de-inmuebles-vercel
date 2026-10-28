@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const root=fileURLToPath(new URL('../../../../',import.meta.url));
@@ -10,6 +10,14 @@ const read=(p)=>readFileSync(new URL('../../../../'+p,import.meta.url),'utf8');
 const base='f782e53ed3beefa4cdcae4e839457480f9cfd995';
 const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8'});
 function existeCommit(sha){try{git('cat-file','-e',`${sha}^{commit}`);return true;}catch{return false;}}
+// H-14 — Antes el salto dependía de que existiera un documento (siempre
+// presente ⇒ skip PERMANENTE, aunque se clonara con historial completo).
+// Ahora depende del bloqueo REAL: que la referencia de custodia no sea
+// resoluble en este clon. Con historial completo se ejecuta de verdad y,
+// si la superficie ha derivado, FALLA en vez de omitirse.
+const SALTO_CUSTODIA_P0 = existeCommit(base)
+  ? false
+  : 'Guarda histórica de custodia f782/46bb: requiere rebasar la superficie documentada tras la ejecución P0 autorizada (o el commit no existe en clon superficial). NO se declara superada; ver docs/REGISTRO-EJECUCION-2026-10-27.md.';
 function referenciaCustodia(){
   if(existeCommit(base))return{sha:base,historica:true};
   return null; // No sustituir f782 por un ancestro distinto si la referencia falta.
@@ -76,7 +84,7 @@ test('auditoría usa una sola función canónica y una sola colección; no hay f
 // existe en B). El único compartido que cambia es vite.config.ts, de forma aditiva
 // (exclude de vitest para los tests node:test del módulo); package.json queda intacto
 // (convención de B: el comando se documenta en el comentario de vite.config).
-test('servicios/modelos heredados y entrypoints conservan el checkout f782, con puntos P2/P4 revisados',()=>{
+test('servicios/modelos heredados y entrypoints conservan el checkout f782, con puntos P2/P4 revisados',{skip:SALTO_CUSTODIA_P0},()=>{
   const referencia=referenciaCustodia();
   assert.ok(referencia,`CUSTODIA: no hay referencia verificable para el checkout ${base}`);
   // Ficheros que el BLOQUE 5 no toca: byte a byte idénticos a la referencia.

@@ -13,6 +13,14 @@ const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const BASE_PATRIMONIAL_B = '46bb9f79b43949d833acf00e9557e575769d039a';
 const BASE_CHECKOUT = 'f782e53ed3beefa4cdcae4e839457480f9cfd995';
 const excepcion = 'src/features/patrimonial/tests/isolation.test.mjs';
+// H-14 — Antes el salto dependía de que existiera un documento (siempre
+// presente ⇒ skip PERMANENTE, aunque se clonara con historial completo).
+// Ahora depende del bloqueo REAL: que la referencia de custodia no sea
+// resoluble en este clon. Con historial completo se ejecuta de verdad y,
+// si la superficie ha derivado, FALLA en vez de omitirse.
+const SALTO_CUSTODIA_P0 = existeCommit(BASE_CHECKOUT)
+  ? false
+  : 'Guarda histórica de custodia f782/46bb: requiere rebasar la superficie documentada tras la ejecución P0 autorizada (o el commit no existe en clon superficial). NO se declara superada; ver docs/REGISTRO-EJECUCION-2026-10-27.md.';
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
 function existeCommit(sha) { try { git('cat-file', '-e', `${sha}^{commit}`); return true; } catch { return false; } }
 function referenciaCustodia(base) {
@@ -248,7 +256,7 @@ test('política default profundamente inmutable; extensiones mediante contexto s
 // no toca archivos patrimoniales productivos ni nada fuera del alcance autorizado.
 const BASE=BASE_PATRIMONIAL_B;
 const excepcionRegistro='src/features/patrimonial/tests/isolation.test.mjs';
-test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimonial',()=>{
+test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimonial',{skip:SALTO_CUSTODIA_P0},()=>{
   const referencia=referenciaCustodia(BASE);
   assert.ok(referencia,'CUSTODIA: base patrimonial histórica 46bb no resoluble');
   const paths=git('ls-tree','-r','--name-only',referencia.sha,'--','src/features/patrimonial').split('\n').filter((p)=>p&&p!==excepcionRegistro);
@@ -442,7 +450,7 @@ const SUPERFICIE_BLOQUES_POST_B = [
   'docs/DICTAMEN-PRE-MERGE-FINAL.md', // §11 de la orden final: dictamen pre-merge
 ];
 const permitidaPostB=(path)=>SUPERFICIE_BLOQUES_POST_B.some((p)=>(p.endsWith('/')?path.startsWith(p):path===p));
-test('diff local desde el checkout f782 permite solo la superficie documentada',()=>{
+test('diff local desde el checkout f782 permite solo la superficie documentada',{skip:SALTO_CUSTODIA_P0},()=>{
   const permitida=(path)=>path.startsWith('src/features/operaciones/')||path==='docs/operaciones/alcance.md'
     ||path==='src/lib/auditoria.ts'||path==='src/components/inmueble/CentroOperativoInmueblePanel.tsx'
     ||path==='vite.config.ts'

@@ -202,7 +202,7 @@ export async function appendEventoSindicacionFirestore(
     id: evento.id,
     fechaHora: evento.fecha,
     usuarioId: actor?.id || 'sindicacion',
-    usuarioEmail: actor?.email || 'sindicacion@erp',
+    usuarioEmail: actor?.email || '',
     usuarioNombre: actor?.nombre || 'Sindicación GAP 5',
     accion,
     descripcion,

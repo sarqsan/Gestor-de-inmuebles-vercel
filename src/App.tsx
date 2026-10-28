@@ -2047,7 +2047,7 @@ export default function App() {
 
     void registrarAuditoriaFirestore({
       usuarioId: currentUser?.id || 'system',
-      usuarioEmail: currentUser?.email || 'sistema',
+      usuarioEmail: currentUser?.email || '',
       usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
       accion: 'INMUEBLE_BAJA_PATRIMONIAL',
       descripcion: `Inmueble ${previo.id} dado de baja (${etiquetaMotivoBaja(solicitud.motivo)}). El inmueble y su histórico se conservan.`,
@@ -2132,7 +2132,7 @@ export default function App() {
       if (!diff.cambio) return;
       void registrarAuditoriaFirestore({
         usuarioId: currentUser?.id || 'system',
-        usuarioEmail: currentUser?.email || 'sistema',
+        usuarioEmail: currentUser?.email || '',
         usuarioNombre: currentUser?.nombre || currentUser?.email || 'sistema',
         accion: 'INMUEBLE_TITULARIDAD_CAMBIO',
         descripcion: `Titularidad del inmueble ${updatedInmueble.id} modificada (${diff.campos.join(', ')})`,
@@ -3297,7 +3297,7 @@ export default function App() {
       id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       fechaHora: new Date().toISOString(),
       usuarioId: currentUser?.id || 'admin_root',
-      usuarioEmail: currentUser?.email || 'admin@rentselect.es',
+      usuarioEmail: currentUser?.email || '',
       usuarioNombre: currentUser?.nombre || 'Administrador',
       accion,
       descripcion: detalle,

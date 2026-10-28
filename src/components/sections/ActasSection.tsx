@@ -154,7 +154,7 @@ export const ActasSection: React.FC<ActasSectionProps> = ({ inmuebles, contratos
     await saveActaFirestore(nuevaActa);
     await registrarAuditoriaFirestore({
       usuarioId: currentUser?.id || 'system',
-      usuarioEmail: currentUser?.email || 'propietario',
+      usuarioEmail: currentUser?.email || '',
       usuarioNombre: creadoPor,
       accion: 'ACTA_CREADA',
       descripcion: `Acta ${nuevaActa.tipo} ${nuevaActa.id} v${nuevaActa.version} creada para inmueble ${nuevaActa.propertyId}`,

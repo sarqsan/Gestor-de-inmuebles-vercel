@@ -1,7 +1,7 @@
 # Informe de corrección de la auditoría de cierre — 2026-10-28
 
 **Rama:** `arena/fb69e0b0-gestor-de-inmuebles-vercel` (no publicada, no fusionada)
-**Base:** `2563831` (`main` del clon) · **HEAD:** `5bb29f9`
+**Base:** `2563831` (`main` del clon) · **HEAD de los commits:** `9273902`
 **Ámbito:** corrección de los defectos H-01…H-17 y D-01…D-09 de
 `docs/INFORME-AUDITORIA-CIERRE-2026-10-27.md`.
 **Naturaleza de este documento:** informe único de ejecución. No es una auditoría
@@ -77,13 +77,20 @@ puede demostrar** y pasar a citar sólo los de esta rama.
 
 | Hash | Contenido |
 |---|---|
-| `ba78fc7` | H-04 cuerpo acotado en streaming + H-05 cuota con IP de confianza + H-13 capacidad de auth real |
-| `b11f076` | H-11 caché de cartera opt-in, con prefijo y borrada al cerrar sesión |
-| `8088406` | H-14 guardias históricas sin `skip` incondicional |
-| `8eaec2b` | H-02 sin proyecto por defecto + H-16 índices declarados + documentación |
-| `b702b7d` | H-15 casos de emulador para las reglas nuevas + H-12 exclusión de pagos global |
-| `68030a7` | recuperación: trabajo P0/P1/P2 + OTP que el clon recreado dejó sin confirmar |
-| `5bb29f9` | dependencias: crítica de DOMPurify y altas de express/vite (10 → 5) |
+| `f2a28ef` | H-04 cuerpo acotado en streaming + H-05 cuota con IP de confianza + H-13 capacidad de auth real |
+| `dfd3abb` | H-11 caché de cartera opt-in, con prefijo y borrada al cerrar sesión |
+| `079725a` | H-14 guardias históricas sin `skip` incondicional |
+| `146d797` | H-02 sin proyecto por defecto + H-16 índices declarados + documentación |
+| `dd36454` | H-15 casos de emulador para las reglas nuevas + H-12 exclusión de pagos global |
+| `3fd7cf1` | dependencias: crítica de DOMPurify y altas de express/vite (10 → 5) |
+| `9273902` | recuperación: trabajo P0/P1/P2 + OTP que el clon recreado dejó sin confirmar |
+
+> **Los hashes son de esta rama y se pueden comprobar con `git log`.** El
+> entorno de trabajo recrea el `.git` en cada arranque (clon superficial desde
+> `2563831`) conservando el árbol de ficheros; por eso los commits se rehacen y
+> **sus hashes cambian de una ejecución a otra**. Lo que no cambia es el
+> contenido ni la verificación: este informe se re-emitió tras la última
+> recreación y las cifras del §7 se volvieron a medir sobre el árbol actual.
 
 `git status` **limpio**. La rama **no existe en `origin`**
 (`git ls-remote --heads origin refs/heads/arena/fb69e0b0-…` devuelve vacío):

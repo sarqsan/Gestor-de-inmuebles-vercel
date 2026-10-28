@@ -16,6 +16,8 @@ import {
   MAX_CUERPO_PORTAL_PUBLICO,
   montarRutasPortalPublico,
 } from './rutasPortalPublico.js';
+import { limitarCuerpoPublico, manejadorCuerpoDemasiadoGrande } from '../shared/limiteCuerpo.js';
+import { crearLimitadorVentana } from '../shared/rateLimit.js';
 
 const servidores: Server[] = [];
 
@@ -57,10 +59,12 @@ function servicioFalso(over: Partial<ServicioPortalPublico> = {}) {
   } as unknown as ServicioPortalPublico;
 }
 
-async function montar(servicio: ServicioPortalPublico | null) {
+/** Misma composición que `server.ts`: parser acotado por bytes + rutas. */
+async function montar(servicio: ServicioPortalPublico | null, deps: Partial<Parameters<typeof montarRutasPortalPublico>[1]> = {}) {
   const app = express();
-  app.use(express.json());
-  montarRutasPortalPublico(app, { servicio });
+  app.use(...limitarCuerpoPublico(MAX_CUERPO_PORTAL_PUBLICO));
+  app.use(manejadorCuerpoDemasiadoGrande());
+  montarRutasPortalPublico(app, { servicio, ...deps });
   return baseLocal(app);
 }
 
@@ -229,6 +233,80 @@ describe('AG-02 · rutas de cuestionario y documentación', () => {
     });
     expect(respuesta.status).toBe(413);
     expect(servicio.guardarCuestionario).not.toHaveBeenCalled();
+  });
+});
+
+describe('H-05 · cuota y honeypot en TODAS las superficies públicas', () => {
+  it('el honeypot bloquea la reserva de visita sin llamar al servicio', async () => {
+    const servicio = servicioFalso();
+    const base = await montar(servicio);
+    const respuesta = await fetch(`${base}/api/visita/vst-token-123456/reservar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slotId: 'slot-1', _hp: 'relleno-de-bot' }),
+    });
+    expect(respuesta.status).toBe(400);
+    expect(servicio.reservarVisita).not.toHaveBeenCalled();
+  });
+
+  it('el honeypot bloquea el cuestionario y la documentación', async () => {
+    const servicio = servicioFalso();
+    const base = await montar(servicio);
+    const cuestionario = await fetch(`${base}/api/cuestionario/q-token-123456`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ datos: {}, respuestas: [], _hp: 'bot' }),
+    });
+    expect(cuestionario.status).toBe(400);
+    expect(servicio.guardarCuestionario).not.toHaveBeenCalled();
+
+    const documentacion = await fetch(`${base}/api/documentacion/doc-token-123456`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentos: [], final: false, _hp: 'bot' }),
+    });
+    expect(documentacion.status).toBe(400);
+    expect(servicio.actualizarDocumentacion).not.toHaveBeenCalled();
+  });
+
+  it('la cuota de reservas devuelve 429 al superar la ventana', async () => {
+    const servicio = servicioFalso();
+    const base = await montar(servicio, {
+      limitadores: { visita: crearLimitadorVentana({ limite: 2, ventanaMs: 60_000 }) },
+    });
+    const enviar = () => fetch(`${base}/api/visita/vst-token-123456/reservar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slotId: 'slot-1' }),
+    });
+    expect((await enviar()).status).toBe(200);
+    expect((await enviar()).status).toBe(200);
+    const tercera = await enviar();
+    expect(tercera.status).toBe(429);
+    expect(tercera.headers.get('retry-after')).toBeTruthy();
+    expect(servicio.reservarVisita).toHaveBeenCalledTimes(2);
+  });
+
+  it('la cuota de cuestionario y de lectura también responde 429', async () => {
+    const servicio = servicioFalso();
+    const base = await montar(servicio, {
+      limitadores: {
+        cuestionario: crearLimitadorVentana({ limite: 1, ventanaMs: 60_000 }),
+        lectura: crearLimitadorVentana({ limite: 1, ventanaMs: 60_000 }),
+      },
+    });
+    const post = () => fetch(`${base}/api/cuestionario/q-token-123456`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ datos: {}, respuestas: [] }),
+    });
+    expect((await post()).status).toBe(200);
+    expect((await post()).status).toBe(429);
+
+    const lectura = await fetch(`${base}/api/documentacion/doc-token-123456`);
+    expect(lectura.status).toBe(200);
+    const segunda = await fetch(`${base}/api/documentacion/doc-token-123456`);
+    expect(segunda.status).toBe(429);
   });
 });
 

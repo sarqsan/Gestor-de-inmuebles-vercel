@@ -520,6 +520,22 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/titularidades/manejadorBuscarTitulares.ts',
       'server/titularidades/backendTitulares.ts',
       'server/titularidades/configuracionFirebase.ts',
+      // P0.1 · fuente única del maestro y mapa de capacidades del health.
+      'src/lib/masterAdmin.ts',
+      'server/diagnostico/capacidades.ts',
+      // P0.2 · antispam y autorización del endpoint catastral.
+      'server/shared/rateLimit.ts',
+      // H-04 · límite de cuerpo en streaming para las rutas públicas.
+      'server/shared/limiteCuerpo.ts',
+      'server/catastro/autorizacionCatastro.ts',
+      // P0.3 · entrega OTP y su plantilla.
+      // H-07/H-08 · OTP de actas con autoridad en servidor (sustituye al relé
+      // de correo con destino libre que se ha retirado).
+      'server/actas/servicioOtpActas.ts',
+      'server/actas/rutasOtpActas.ts',
+      'src/utils/actas/actaOtpEngine.ts',
+      'src/utils/actas/actaFirmaEngine.ts',
+      'src/utils/actas/actaStateMachine.ts',
       'server/titularidades/googleBackend.ts',
       'src/titularidades/busquedaTitulares.ts',
       'server/ia/nucleoIA.ts',
@@ -740,7 +756,8 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
     const r = await fetchReal(`${baseVercel}/api/health`);
     expect(r.status).toBe(200);
     const body = await r.json();
-    expect(body).toEqual({
+    // P0.1: se mantiene el contrato histórico y se añade el mapa de capacidades.
+    expect(body).toMatchObject({
       status: 'ok',
       geminiKeyConfigured: false,
       // FASE 9 · sin IA_LLAVES_CLAVE_MAESTRA el subsistema de llaves de usuario queda NO_CONFIGURADO.
@@ -748,7 +765,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       // FASE A · sin proveedor de correo ni CRON_SECRET el canal queda en modo
       // seguro y el reloj cerrado; el health lo publica sin secretos.
       notificaciones: { email: { modo: 'MODO_SEGURO', proveedor: null }, cron: { configurado: false } },
+      esquemaDiagnostico: 1,
     });
+    expect(body.capacidades).toBeTypeOf('object');
   });
 
   /**

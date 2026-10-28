@@ -56,7 +56,13 @@ import { montarRutasActualizacionRenta } from './server/actualizacionRenta/rutas
 import { crearServicioDocumentos } from './server/documentos/servicioDocumentos.js';
 import { montarRutasDocumentos } from './server/documentos/rutasDocumentos.js';
 import { crearServicioPortalPublico } from './server/portalPublico/servicioPortalPublico.js';
-import { montarRutasPortalPublico } from './server/portalPublico/rutasPortalPublico.js';
+import { montarRutasPortalPublico, MAX_CUERPO_PORTAL_PUBLICO } from './server/portalPublico/rutasPortalPublico.js';
+import { limitarCuerpoPublico, manejadorCuerpoDemasiadoGrande } from './server/shared/limiteCuerpo.js';
+import { proxyDeConfianza } from './server/shared/rateLimit.js';
+import { construirCapacidades } from './server/diagnostico/capacidades.js';
+import { crearLimitadorVentana as crearLimitadorCuota } from './server/shared/rateLimit.js';
+import { autorizarConsultaCatastro } from './server/catastro/autorizacionCatastro.js';
+import { montarRutasOtpActas } from './server/actas/rutasOtpActas.js';
 import type {
   ContextoAutorizacion,
   EnviarNotificacionPayload,
@@ -154,9 +160,25 @@ function construirDispatcher(ctx: ContextoAutorizacion): DispatcherNotificacione
 const app = express();
 const PORT = 3000;
 
-// Body parser with 50MB limit for base64 encoded documents (PDFs / Images)
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// H-05 — `req.ip` sólo toma `x-forwarded-for` si delante hay un proxy de
+// confianza (Vercel lo sobrescribe; en autohospedaje habría que declararlo con
+// TRUST_PROXY=1). Sin esto, la cuota se podía cambiar de «IP» por cabecera.
+app.set('trust proxy', proxyDeConfianza());
+
+// P0.2.3 — el límite global baja de 50 MB a 15 MB (suficiente para el base64
+// de un PDF de inspección) y las rutas públicas de escritura tienen tope PROPIO
+// de 256 KB.
+// H-04 — antes ese tope se comprobaba SÓLO con `Content-Length`, así que un
+// cuerpo `Transfer-Encoding: chunked` lo esquivaba (la auditoría lo reprodujo:
+// 413 con cabecera, 503 con chunked). Ahora las cuatro superficies públicas
+// montan un parser acotado que CUENTA los bytes del stream: el 413 llega igual
+// con o sin cabecera, y ningún otro parser puede releer el cuerpo con un tope
+// mayor (`type: () => true`).
+const PREFIJOS_PUBLICOS = ['/api/solicitud', '/api/visita', '/api/cuestionario', '/api/documentacion'];
+app.use(PREFIJOS_PUBLICOS, ...limitarCuerpoPublico(MAX_CUERPO_PORTAL_PUBLICO));
+app.use(manejadorCuerpoDemasiadoGrande());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
 // ---------------------------------------------------------------------------
 // ALMACÉN TEMPORAL DE DOCUMENTOS — RETIRADO (AG-04 · 2026-10-20)
@@ -2212,7 +2234,28 @@ Responde SOLO con JSON válido:
 
 const unwrapOvc = (v: any): any => (Array.isArray(v) ? v[0] : v);
 
+const limitadorCatastro = crearLimitadorCuota({ limite: 20, ventanaMs: 60_000 });
+
 app.post('/api/catastro/consultar', async (req, res) => {
+  // P0.2.4: sesión verificada + cuota. Sin esto cualquiera podía usar el
+  // servidor como proxy abierto contra la sede del Catastro.
+  const autorizacion = await autorizarConsultaCatastro(req, {
+    verificarToken: (token) => dependenciasIA.verificarToken(token),
+    limitador: limitadorCatastro,
+  });
+  if (!autorizacion.ok) {
+    const denegado = autorizacion as {
+      ok: false; status: 401 | 429; codigo: string; error: string; reintentarEnSegundos?: number;
+    };
+    if (denegado.reintentarEnSegundos) {
+      res.setHeader('Retry-After', String(denegado.reintentarEnSegundos));
+    }
+    return res.status(denegado.status).json({
+      ok: false,
+      codigo: denegado.codigo,
+      error: denegado.error,
+    });
+  }
   try {
     const ref = String(req.body?.referenciaCatastral || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     if (ref.length < 14) {
@@ -2721,17 +2764,46 @@ Responde ÚNICAMENTE en formato JSON con la siguiente estructura:
 app.post('/api/titulares/buscar', crearManejadorBuscarTitulares());
 
 // Health check endpoint
+// P0.1 — además del estado histórico se publica un mapa de CAPACIDADES con
+// vocabulario cerrado (OK / NO_CONFIGURADO / SIMULACION / BLOQUEADO) para que
+// `npm run doctor` pueda distinguir un despliegue real de uno simulado. Nunca
+// se publican credenciales ni valores de secretos, solo su presencia.
 app.get('/api/health', (req, res) => {
   // FASE A — estado del transporte de avisos y del reloj, SIN secretos: el modo
   // (`REAL` / `MODO_SEGURO`) es lo único que se publica, jamás credenciales.
+  const estadoIA = nucleoIA.estado();
   res.json({
     status: 'ok',
+    esquemaDiagnostico: 1,
     geminiKeyConfigured: !!process.env.GEMINI_API_KEY,
-    ia: nucleoIA.estado(),
+    ia: estadoIA,
     notificaciones: {
       email: { modo: transporteEmail.modo, proveedor: transporteEmail.proveedor },
       cron: { configurado: Boolean(process.env.CRON_SECRET?.trim()) },
     },
+    configuracion: {
+      entorno: process.env.NODE_ENV || 'development',
+      master: { overrideConfigurado: Boolean(process.env.MASTER_ADMIN_EMAIL?.trim()) },
+    },
+    capacidades: construirCapacidades({
+      // H-13: derivada de la configuración real, no de una constante.
+      autenticacion: Boolean(dependenciasIA.configuracion.proyectoId)
+        && !dependenciasIA.configuracion.errorConfiguracion,
+      firestore: Boolean(dependenciasIA.firestore),
+      storage: Boolean(dependenciasIA.storage),
+      registroIA: estadoIA.registro,
+      llavesIA: String(estadoIA.llaves),
+      bloqueoComercialIA: estadoIA.bloqueoComercial === 'APROBACION_PENDIENTE',
+      claveModeloServidor: Boolean(process.env.GEMINI_API_KEY),
+      modoEmail: transporteEmail.modo,
+      cron: Boolean(process.env.CRON_SECRET?.trim()),
+      notificacionesDuraderas: notificacionesRepoDuradero !== null,
+      portalesPublicos: servicioPortalPublico !== null,
+      justificantesCobro: servicioJustificantesCobro !== null,
+      actualizacionRenta: servicioActualizacionRenta !== null,
+      seguimientoIncidencias: servicioSeguimientoIncidencias !== null,
+      documentos: servicioDocumentos !== null,
+    }),
   });
 });
 
@@ -2765,6 +2837,20 @@ montarRutasDocumentos(app, {
 });
 
 montarRutasPortalPublico(app, { servicio: servicioPortalPublico });
+
+// H-07/H-08 · OTP de actas con AUTORIDAD EN SERVIDOR: el código se genera aquí
+// (CSPRNG + SHA-256 con sal), el destino se deriva del acta —nunca de un buzón
+// libre enviado por el cliente— y la firma se acredita con un commit atómico.
+// Sin credencial de servicio responde 503: no hay OTP en el navegador.
+montarRutasOtpActas(app, {
+  verificarToken: (token) => dependenciasIA.verificarToken(token),
+  puerto: dependenciasIA.firestore,
+  transporte: {
+    modo: transporteEmail.modo,
+    proveedor: transporteEmail.proveedor,
+    provider: transporteEmail.provider,
+  },
+});
 
 montarRutasAdminIA(app, {
   verificarToken: dependenciasIA.verificarToken,

@@ -15,6 +15,7 @@ import type {
   InvitacionVisita,
   ItemDocumentoSolicitado,
   RespuestaIncidencia,
+  SolicitudAlquiler,
   SolicitudDocPublicData,
   VisitSlot,
 } from '../types';
@@ -159,4 +160,37 @@ export function actualizarDocumentacionPublica(
     method: 'POST',
     body: JSON.stringify({ documentos: carga, final }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// P0.2.1 — Alta pública de solicitud (SOLO servidor)
+// ---------------------------------------------------------------------------
+
+export interface ResultadoAltaSolicitudPublica {
+  solicitud: SolicitudAlquiler;
+  candidatoId: string;
+}
+
+/**
+ * Envía el formulario al servidor por el token de capacidad del enlace.
+ * NO importa el SDK de Firebase: el anónimo no tiene permisos de escritura
+ * (firestore.rules P0.2.2). La promesa SOLO resuelve si el servidor confirma
+ * el commit atómico de `solicitudes` + `candidatos`.
+ *
+ * `_hp` es el campo honeypot (P0.2.3): un bot que rellene todos los campos
+ * del formulario lo enviará con contenido y el servidor rechazará el alta.
+ */
+export function crearSolicitudPublicaPorToken(
+  token: string,
+  solicitud: SolicitudAlquiler,
+  candidato: unknown,
+  honeypot = ''
+): Promise<ResultadoAltaSolicitudPublica> {
+  return pedir<ResultadoAltaSolicitudPublica>(ruta('/api/solicitud', token), {
+    method: 'POST',
+    body: JSON.stringify({ solicitud, candidato, _hp: honeypot }),
+  }).then((respuesta) => ({
+    ...respuesta,
+    solicitud: { ...solicitud, ...respuesta.solicitud } as SolicitudAlquiler,
+  }));
 }

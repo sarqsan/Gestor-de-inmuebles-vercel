@@ -20,7 +20,6 @@ import type {
   Acta,
   EvidenciaActa,
   IncidenciaActa,
-  OtpActa,
   FirmaActa,
 } from '../types/actas';
 
@@ -28,7 +27,6 @@ import type {
 const ACTAS_COL = collection(db, 'actas');
 const EVIDENCIAS_ACTA_COL = collection(db, 'actas_evidencias');
 const INCIDENCIAS_ACTA_COL = collection(db, 'actas_incidencias');
-const OTP_ACTA_COL = collection(db, 'actas_otp');
 
 function subscribeColeccionPropietarioActas<T extends { id: string; ownerId?: string }>(
   col: ReturnType<typeof collection>,
@@ -233,61 +231,6 @@ export async function deleteIncidenciaActaFirestore(id: string): Promise<void> {
     reportarErrorGuardado('incidencias', err, 'Error deleting incidencia acta:');
     throw err;
   }
-}
-
-// ---- OTP ----
-export function subscribeOtpPorActa(
-  actaId: string,
-  callback: (items: OtpActa[]) => void,
-  scope?: DataAccessScope
-): Unsubscribe {
-  const mapear = (snap: QuerySnapshot) => {
-    const items: OtpActa[] = [];
-    snap.forEach((ds) => items.push({ id: ds.id, ...ds.data() } as OtpActa));
-    callback(items);
-  };
-  const onError = (err: unknown) => reportarErrorLectura('actas', err, 'Firestore actas_otp snapshot error:');
-
-  if (scope?.tipoPerfil === 'PROFESIONAL') {
-    callback([]);
-    return () => {};
-  }
-
-  if (!scope || scope.tipoPerfil !== 'PROPIETARIO') {
-    return onSnapshot(query(OTP_ACTA_COL, where('actaId', '==', actaId)), mapear, onError);
-  }
-  const pid = scope.propietarioId;
-  if (!pid) {
-    callback([]);
-    return () => {};
-  }
-  return onSnapshot(
-    query(OTP_ACTA_COL, where('actaId', '==', actaId), where('ownerId', '==', pid)),
-    mapear,
-    onError
-  );
-}
-
-export async function saveOtpActaFirestore(otp: OtpActa): Promise<void> {
-  try {
-    // Limpieza obligatoria: un OTP usado/expirado/bloqueado no conserva el código
-    // temporal en texto plano (merge:true no borra campos omitidos ⇒ null explícita).
-    const payload: OtpActa & { codigoPlainTemporal?: string | null } =
-      otp.usado || otp.estado !== 'ACTIVO'
-        ? { ...otp, codigoPlainTemporal: null }
-        : otp;
-    const clean = sanitizeObjectForFirestore(payload);
-    await setDoc(doc(db, 'actas_otp', otp.id), clean, { merge: true });
-  } catch (err) {
-    reportarErrorGuardado('actas', err, 'Error saving OTP acta:');
-    throw err;
-  }
-}
-
-export async function getOtpActaFirestore(otpId: string): Promise<OtpActa | null> {
-  const snap = await getDoc(doc(db, 'actas_otp', otpId));
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() } as OtpActa;
 }
 
 // ---- STORAGE EVIDENCIAS ----

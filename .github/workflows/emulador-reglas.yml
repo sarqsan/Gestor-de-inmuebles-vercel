@@ -9,6 +9,9 @@ on:
       - arena/b18a36de-gestor-de-inmuebles-vercel
       # AG-03.3: aceptación en emuladores oficiales de la rama de la sesión (sin secretos ni despliegue).
       - arena/8ed3381d-gestor-de-inmuebles-vercel
+      # P0/P1 (2026-10-27): la rama de esta ejecución también debe pasar por
+      # los emuladores oficiales. El job NO despliega nada: solo pruebas.
+      - arena/fb69e0b0-gestor-de-inmuebles-vercel
   workflow_dispatch:
 
 permissions:
@@ -114,6 +117,16 @@ jobs:
       - name: Suite completa (vitest, sin la guardia A-04 de sandbox)
         id: suite
         run: npx vitest run --exclude tests/guardia-a04-rama-sesion.test.ts --reporter=default --reporter=json --outputFile.json=vitest-resultados.json
+
+      # P0.1 · Las pruebas nativas node:test (operaciones + patrimonial) también
+      # deben pasar en CI. Requieren fetch-depth: 0 (este job ya lo tiene).
+      - name: Integración (node:test de operaciones y patrimonial)
+        run: npm run test:integracion
+
+      # P0.1 · Diagnóstico de solo lectura: paridad del maestro, semillas,
+      # documentación de variables y ausencia de secretos en .env.example.
+      - name: Doctor (comprobaciones estáticas, sin servidor)
+        run: npm run doctor
 
       # AG-03.3: resultados legibles sin descargar el log (anotaciones del check-run + resumen + artefacto).
       - name: Resultados legibles (anotaciones y resumen)

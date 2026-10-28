@@ -19,6 +19,7 @@
  */
 import type { Express, Request, Response } from 'express';
 import { ErrorPortalPublico, type ServicioPortalPublico } from './servicioPortalPublico.js';
+import { crearLimitadorVentana, claveClientePeticion, type LimitadorVentana } from '../shared/rateLimit.js';
 
 export const RUTAS_PORTAL_PUBLICO = {
   visita: '/api/visita/:token',
@@ -26,6 +27,7 @@ export const RUTAS_PORTAL_PUBLICO = {
   cancelarVisita: '/api/visita/:token/cancelar',
   cuestionario: '/api/cuestionario/:token',
   documentacion: '/api/documentacion/:token',
+  solicitud: '/api/solicitud/:token',
 } as const;
 
 /** Cuerpo máximo de estas rutas (JSON pequeño; los binarios van a Storage). */
@@ -44,6 +46,20 @@ const MENSAJES: Record<string, string> = {
 export interface DependenciasRutasPortalPublico {
   /** `null` ⇒ 503 en todas las rutas (sin credencial de servicio). */
   servicio: ServicioPortalPublico | null;
+  /** Inyectable para pruebas deterministas; por defecto 8 altas/minuto por IP+token. */
+  limitador?: LimitadorVentana;
+  /**
+   * H-05 — Cuotas POR RUTA. Antes sólo el alta de solicitud tenía cuota; las
+   * demás superficies públicas (reserva/cancelación de visita, cuestionario y
+   * documentación) se podían martillear sin límite. Cada una tiene ahora su
+   * propia ventana y todas comparten honeypot.
+   */
+  limitadores?: {
+    visita?: LimitadorVentana;
+    cuestionario?: LimitadorVentana;
+    documentacion?: LimitadorVentana;
+    lectura?: LimitadorVentana;
+  };
 }
 
 function sinCache(res: Response): void {
@@ -120,16 +136,75 @@ async function ejecutar(res: Response, tarea: () => Promise<unknown>): Promise<v
 
 export function montarRutasPortalPublico(app: Express, deps: DependenciasRutasPortalPublico): void {
   const { servicio } = deps;
+  const limitador = deps.limitador ?? crearLimitadorVentana({ limite: 8, ventanaMs: 60_000 });
+  const limiteVisitas = deps.limitadores?.visita ?? crearLimitadorVentana({ limite: 12, ventanaMs: 60_000 });
+  const limiteCuestionario = deps.limitadores?.cuestionario ?? crearLimitadorVentana({ limite: 8, ventanaMs: 60_000 });
+  const limiteDocumentacion = deps.limitadores?.documentacion ?? crearLimitadorVentana({ limite: 8, ventanaMs: 60_000 });
+  const limiteLectura = deps.limitadores?.lectura ?? crearLimitadorVentana({ limite: 40, ventanaMs: 60_000 });
+
+  /** H-05 — cuota por IP + token de capacidad + ruta. 429 explícito con Retry-After. */
+  function aplicarCuota(req: Request, res: Response, limitadorRuta: LimitadorVentana, etiqueta: string): boolean {
+    const cuota = limitadorRuta.permitir(claveClientePeticion(
+      req.headers as Record<string, unknown>,
+      `${etiqueta}|${String(req.params.token || '')}`,
+      req.ip || (req.socket?.remoteAddress ?? ''),
+    ));
+    if (cuota.permitido) return true;
+    sinCache(res);
+    res.setHeader('Retry-After', String(cuota.reintentarEnSegundos));
+    res.status(429).json({
+      ok: false,
+      codigo: 'DEMASIADAS_PETICIONES',
+      error: 'Demasiadas solicitudes desde esta conexión. Inténtalo de nuevo en unos minutos.',
+      reintentarEnSegundos: cuota.reintentarEnSegundos,
+    });
+    return false;
+  }
+
+  // P0.2.3 — Honeypot: un campo que ningún formulario legítimo rellena. Si
+  // viene con contenido se rechaza ANTES de tocar el servicio (ni se escribe).
+  function honeypot(body: Record<string, unknown>, res: Response): boolean {
+    const senuelo = body._hp;
+    if (senuelo !== undefined && senuelo !== null && String(senuelo).trim() !== '') {
+      sinCache(res);
+      res.status(400).json({ ok: false, codigo: 'PETICION_INVALIDA', error: MENSAJES.PETICION_INVALIDA });
+      return false;
+    }
+    return true;
+  }
+
+  // P0.2.1/P0.2.3 — alta pública de solicitud: token + honeypot + rate limit.
+  // El cliente anónimo NO escribe en Firestore: lo hace el servidor con la
+  // credencial de servicio y con precondición de «documento no existente».
+  app.post(RUTAS_PORTAL_PUBLICO.solicitud, async (req, res) => {
+    if (!exigirServicio(servicio, res)) return;
+    const body = cuerpo(req, res, ['solicitud', 'candidato', '_hp']);
+    if (!body || !honeypot(body, res)) return;
+    if (!body.solicitud || typeof body.solicitud !== 'object' || Array.isArray(body.solicitud)) {
+      sinCache(res);
+      res.status(400).json({ ok: false, codigo: 'PETICION_INVALIDA', error: MENSAJES.PETICION_INVALIDA });
+      return;
+    }
+    if (!aplicarCuota(req, res, limitador, 'solicitud')) return;
+    await ejecutar(res, () =>
+      servicio.crearSolicitud(req.params.token, {
+        solicitud: body.solicitud as Record<string, unknown>,
+        candidato: body.candidato as Record<string, unknown> | undefined,
+      })
+    );
+  });
 
   app.get(RUTAS_PORTAL_PUBLICO.visita, async (req, res) => {
     if (!exigirServicio(servicio, res)) return;
+    if (!aplicarCuota(req, res, limiteLectura, 'visita-get')) return;
     await ejecutar(res, () => servicio.obtenerVisita(req.params.token));
   });
 
   app.post(RUTAS_PORTAL_PUBLICO.reservarVisita, async (req, res) => {
     if (!exigirServicio(servicio, res)) return;
-    const body = cuerpo(req, res, ['slotId', 'notas']);
-    if (!body) return;
+    if (!aplicarCuota(req, res, limiteVisitas, 'visita-reservar')) return;
+    const body = cuerpo(req, res, ['slotId', 'notas', '_hp']);
+    if (!body || !honeypot(body, res)) return;
     await ejecutar(res, () =>
       servicio.reservarVisita(req.params.token, {
         slotId: body.slotId as string,
@@ -140,20 +215,23 @@ export function montarRutasPortalPublico(app: Express, deps: DependenciasRutasPo
 
   app.post(RUTAS_PORTAL_PUBLICO.cancelarVisita, async (req, res) => {
     if (!exigirServicio(servicio, res)) return;
-    const body = cuerpo(req, res, []);
-    if (!body) return;
+    if (!aplicarCuota(req, res, limiteVisitas, 'visita-cancelar')) return;
+    const body = cuerpo(req, res, ['_hp']);
+    if (!body || !honeypot(body, res)) return;
     await ejecutar(res, () => servicio.cancelarVisita(req.params.token));
   });
 
   app.get(RUTAS_PORTAL_PUBLICO.cuestionario, async (req, res) => {
     if (!exigirServicio(servicio, res)) return;
+    if (!aplicarCuota(req, res, limiteLectura, 'cuestionario-get')) return;
     await ejecutar(res, () => servicio.obtenerCuestionario(req.params.token));
   });
 
   app.post(RUTAS_PORTAL_PUBLICO.cuestionario, async (req, res) => {
     if (!exigirServicio(servicio, res)) return;
-    const body = cuerpo(req, res, ['datos', 'respuestas', 'informacionAdicional']);
-    if (!body) return;
+    if (!aplicarCuota(req, res, limiteCuestionario, 'cuestionario-post')) return;
+    const body = cuerpo(req, res, ['datos', 'respuestas', 'informacionAdicional', '_hp']);
+    if (!body || !honeypot(body, res)) return;
     await ejecutar(res, () =>
       servicio.guardarCuestionario(req.params.token, {
         datos: body.datos as Record<string, unknown>,
@@ -165,13 +243,15 @@ export function montarRutasPortalPublico(app: Express, deps: DependenciasRutasPo
 
   app.get(RUTAS_PORTAL_PUBLICO.documentacion, async (req, res) => {
     if (!exigirServicio(servicio, res)) return;
+    if (!aplicarCuota(req, res, limiteLectura, 'documentacion-get')) return;
     await ejecutar(res, () => servicio.obtenerDocumentacion(req.params.token));
   });
 
   app.post(RUTAS_PORTAL_PUBLICO.documentacion, async (req, res) => {
     if (!exigirServicio(servicio, res)) return;
-    const body = cuerpo(req, res, ['documentos', 'final']);
-    if (!body) return;
+    if (!aplicarCuota(req, res, limiteDocumentacion, 'documentacion-post')) return;
+    const body = cuerpo(req, res, ['documentos', 'final', '_hp']);
+    if (!body || !honeypot(body, res)) return;
     await ejecutar(res, () =>
       servicio.actualizarDocumentacion(req.params.token, {
         documentos: body.documentos,

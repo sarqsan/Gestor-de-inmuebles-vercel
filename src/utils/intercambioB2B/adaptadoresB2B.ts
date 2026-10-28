@@ -84,7 +84,7 @@ export class AdaptadorSpfeB2B implements AdaptadorIntercambioB2B {
   readonly mecanismo =
     'Intercambio a través de la solución pública de facturación electrónica gestionada por la AEAT (RD 238/2026, art. 6).';
   readonly requisitosExternos: string[] = [
-    'PENDIENTE NORMATIVO/TÉCNICO: calendario de obligatoriedad pendiente de orden ministerial.',
+    'PENDIENTE DE DICTAMEN: la Orden HAC/1028/2026 ya regula el calendario B2B (6-10-2027 / 6-10-2028 / 6-10-2029). Sin auditoría normativa previa no se implementa el envío.',
     'PENDIENTE TÉCNICO: especificaciones de conexión (API/certificados) de la SPFE no publicadas o no integradas.',
     'No se inventan endpoints ni credenciales: el envío efectivo se habilitará cuando exista integración oficial.',
   ];

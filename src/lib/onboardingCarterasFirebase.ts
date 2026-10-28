@@ -1,3 +1,4 @@
+import { esEmailMaster } from './masterAdmin';
 /** ROADMAP-02: orquestación sobre Persona, propietarios, usuarios,
  * enlaces_registro y gestiones_cartera existentes. Nunca crea ni elimina Auth.
  * Cada paso Firestore confirma junto con audit_logs; IDs estables permiten
@@ -18,7 +19,7 @@ function id(value: string) {
 }
 function actor(master = false) {
   const u = auth.currentUser;
-  if (!u?.email || (master && u.email.toLowerCase() !== 'sarqsan2@gmail.com'))
+  if (!u?.email || (master && !esEmailMaster(u.email)))
     throw new Error('Se requiere una sesión autenticada autorizada');
   return u;
 }
@@ -205,7 +206,7 @@ export async function resolverInvitacionCarteraFirestore(enlaceId: string,
     const es = await tx.get(ref);
     if (!es.exists() || es.data().finalidad !== 'ONBOARDING_CARTERA') throw new Error('Invitación de cartera inexistente');
     const e = datos<EnlaceRegistro>(es);
-    const master = a.email!.toLowerCase() === 'sarqsan2@gmail.com';
+    const master = esEmailMaster(a.email!);
     if ((['REVOCADA','EXPIRADA'].includes(decision) && !master) || (!master && e.emailInvitado !== a.email!.toLowerCase())) throw new Error('Destinatario no autorizado');
     const us = await tx.get(doc(db, 'usuarios', e.usuarioIdVinculado!));
     if (!us.exists()) throw new Error('Cuenta inexistente');

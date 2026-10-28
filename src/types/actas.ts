@@ -193,8 +193,13 @@ export interface OtpActa {
   propertyId?: string; // para aislamiento adicional
   contractId?: string;
   versionActa?: number; // versión concreta a la que pertenece el OTP
-  codigoHash: string; // SHA-256 hash del código, no texto plano
-  codigoPlainTemporal?: string; // solo para entrega inmediata en UI de prueba manual/dev, se limpia tras uso, nunca en logs prod
+  codigoHash: string; // SHA-256 del código; P0.3: con sal por OTP
+  /** P0.3 — sal aleatoria de 128 bits (hex). Ausente solo en OTP heredados. */
+  codigoSalt?: string;
+  /** P0.3 — marca el esquema; los OTP nuevos son siempre SHA-256_SALTED. */
+  algoritmoHash?: 'SHA-256_SALTED';
+  /** @deprecated P0.3.3 — ya NO se escribe ni se muestra. Solo limpieza de heredados. */
+  codigoPlainTemporal?: string;
   fechaCreacion: string; // ISO
   fechaExpiracion: string; // ISO
   intentos: number;

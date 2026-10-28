@@ -1,3 +1,4 @@
+import { resolverEmailMaster } from '../../src/lib/masterAdmin.js';
 /**
  * F3 — ALTA / SELECCIÓN SEGURA DE TITULARES (LÓGICA DE SERVICIO)
  * ===============================================================
@@ -44,8 +45,9 @@ import {
 } from '../../src/titularidades/busquedaTitulares.js';
 import type { CandidatoTitular } from '../../src/types';
 
-/** Correo del master (paridad con `isMasterAdmin()` de firestore.rules). */
-export const EMAIL_MASTER = process.env.MASTER_ADMIN_EMAIL || 'sarqsan2@gmail.com';
+/** Correo del master (paridad con `isMasterAdmin()` de firestore.rules).
+ * P0.1: se resuelve desde la fuente única; el servidor admite override. */
+export const EMAIL_MASTER = resolverEmailMaster(process.env);
 
 export type MotivoDenegacion =
   | 'peticion_invalida'

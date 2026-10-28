@@ -1,3 +1,4 @@
+import { EtiquetaSimulacion } from '../common/EtiquetaSimulacion';
 import { estadoInmuebleEtiqueta, valorConsta } from '../../lib/inmuebleCompletitud';
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 /**
@@ -1138,6 +1139,7 @@ export const DashboardEjecutivoSection: React.FC<DashboardEjecutivoProps> = ({
               <Sparkles className="w-5 h-5 text-indigo-600" />
               Asistente contextual IA — Preparado
             </h2>
+            <div className="mb-2"><EtiquetaSimulacion id="asistenteIA" compacto /></div>
             <p className="text-xs text-indigo-800 leading-relaxed">
               Hueco arquitectónico reservado para futuro asistente contextual que consumirá los mismos motores existentes (cobrosEngine, gastosEngine, incidenciasEngine, reportingEngine) sin duplicar lógica ni crear segunda fuente de verdad.
             </p>

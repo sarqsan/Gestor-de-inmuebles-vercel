@@ -533,6 +533,23 @@ export const PLANTILLAS: Record<string, PlantillaNotificacion> = {
     canalesPermitidos: ['EMAIL', 'INAPP'],
     inicio: 'IMMEDIATE',
   },
+  // P0.3.2 — entrega del código OTP de firma de actas. El código se sustituye
+  // en el SERVIDOR, nunca se registra ni se devuelve en la respuesta HTTP.
+  'acta.otp_firma': {
+    id: 'acta.otp_firma',
+    asunto: 'Código de firma del acta {actaId}',
+    cuerpo: [
+      'Estimado/a firmante:',
+      '',
+      'Su código de firma es {codigo}. Caduca en 15 minutos y solo es válido para esta acta.',
+      '',
+      'Si no ha solicitado firmar un acta, ignore este mensaje. Nunca le pediremos claves, datos bancarios ni pagos por correo.',
+      '',
+      '— Administración',
+    ].join('\n'),
+    canalesPermitidos: ['EMAIL'],
+    inicio: 'IMMEDIATE',
+  },
   'morosidad.registro_pagos': {
     id: 'morosidad.registro_pagos',
     asunto: '{titulo}',

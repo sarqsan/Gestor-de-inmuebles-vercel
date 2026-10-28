@@ -21,6 +21,8 @@ import {
 } from 'firebase/firestore';
 import { auth, db, USUARIOS_COL, ENLACES_REGISTRO_COL, saveAuditLogFirestore } from './firebase';
 import { validarActivacionPendiente, validarInvitacionPropietario } from './accesoPropietarios';
+// H-11 — la caché de cartera es opt-in y se borra aquí, en un único lugar.
+import { limpiarCacheLocal } from './cacheLocal';
 import {
   contratosDelInquilino,
   puedeAccederContrato,
@@ -42,7 +44,8 @@ import {
   PERMISOS_SISTEMA,
 } from '../types';
 
-export const ADMIN_MASTER_EMAIL = 'sarqsan2@gmail.com';
+export { ADMIN_MASTER_EMAIL } from './masterAdmin';
+import { ADMIN_MASTER_EMAIL } from './masterAdmin';
 
 /**
  * ¿Es un rechazo de las Security Rules de Firestore? (`FirestoreError` con
@@ -1256,18 +1259,14 @@ export async function logoutUser(): Promise<void> {
   }
 
   try {
+    // Claves de sesión (no son caché de datos: identifican la sesión guardada).
     localStorage.removeItem('rentselect_active_session');
     localStorage.removeItem('rentselect_current_user_id');
-    localStorage.removeItem('rentselect_propietarios');
-    localStorage.removeItem('rentselect_candidatos');
-    localStorage.removeItem('rentselect_inmuebles');
-    localStorage.removeItem('rentselect_solicitudes');
-    localStorage.removeItem('rentselect_invitaciones');
-    localStorage.removeItem('rentselect_slots');
-    localStorage.removeItem('rentselect_solicitudes_doc');
-    localStorage.removeItem('rentselect_contratos');
-    localStorage.removeItem('rentselect_solicitudes_seguro');
   } catch (e) {}
+  // H-11 — Una sola fuente de verdad para las claves de cartera: si mañana se
+  // añade una colección cacheada, `CLAVES_CACHE_APP` la incluye y este cierre de
+  // sesión la borra sin tocar nada más.
+  limpiarCacheLocal();
 
   try {
     await signOut(auth);

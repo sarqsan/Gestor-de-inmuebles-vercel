@@ -8,7 +8,7 @@ import {
   HistorialActa,
   ResumenDiferencias,
 } from '../../types/actas';
-import { validarTransicion, esEstadoEditable } from './actaStateMachine';
+import { validarTransicion, esEstadoEditable } from './actaStateMachine.js';
 import { compararActasEntradaSalida } from './actaComparacionEngine';
 
 export function generarIdActa(): string {

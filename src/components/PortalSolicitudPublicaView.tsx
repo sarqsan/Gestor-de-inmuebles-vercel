@@ -43,7 +43,7 @@ interface PortalSolicitudPublicaViewProps {
    * AG-01: debe rechazar si la solicitud no se ha persistido. La vista solo
    * muestra el acuse de recibo cuando esta promesa resuelve.
    */
-  onCompleteSolicitud: (solicitud: SolicitudAlquiler, candidato: Candidato) => Promise<void> | void;
+  onCompleteSolicitud: (solicitud: SolicitudAlquiler, candidato: Candidato, honeypot?: string) => Promise<void> | void;
 }
 
 export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProps> = ({
@@ -93,6 +93,8 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
   const [submitted, setSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // P0.2.3 — campo honeypot: invisible para personas, visible para bots.
+  const [honeypot, setHoneypot] = useState('');
 
   // UX-7 §6: capa que ya se comporta como diálogo (título y cierre propios) →
   // mismo patrón que el resto: el foco entra, `Escape` cancela, el foco vuelve
@@ -336,7 +338,7 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
     // o falla la red, se conserva el formulario y se informa del error.
     setIsSubmitting(true);
     try {
-      await onCompleteSolicitud(newSolicitud, newCandidate);
+      await onCompleteSolicitud(newSolicitud, newCandidate, honeypot);
       setSubmitted(true);
     } catch (err) {
       setErrorMsg(
@@ -388,6 +390,18 @@ export const PortalSolicitudPublicaView: React.FC<PortalSolicitudPublicaViewProp
   return (
     <div className="min-h-screen bg-slate-100/90 py-4 sm:py-8 px-3 sm:px-6 font-sans text-slate-800 antialiased">
       <div className="max-w-2xl mx-auto space-y-4">
+        {/* P0.2.3 — honeypot: fuera de la vista, sin etiqueta ni tabulación. */}
+        <input
+          type="text"
+          name="_hp"
+          value={honeypot}
+          onChange={(e) => setHoneypot(e.target.value)}
+          autoComplete="off"
+          tabIndex={-1}
+          aria-hidden="true"
+          data-testid="honeypot-solicitud"
+          style={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+        />
         {/* Header Bar */}
         <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div className="flex items-center gap-3">

@@ -56,12 +56,17 @@ describe('app real: un proyecto incompatible no derriba HTTP ni permite operacio
     const respuesta = await fetchHttp(`${base}/api/health`);
     expect(respuesta.status).toBe(200);
     const json = await respuesta.json();
-    expect(json).toEqual({
+    // P0.1: health añade `capacidades` y `configuracion`; se comprueba el
+    // contrato histórico con toMatchObject y que los campos nuevos no filtran.
+    expect(json).toMatchObject({
       status: 'ok', geminiKeyConfigured: false,
       ia: { registro: 'NO_CONFIGURADO', gobierno: 'NO_CONFIGURADO', llaves: 'NO_CONFIGURADO', titularidad: 'BLOQUEADA', autenticacion: 'TOKEN_FIREBASE', operaciones: 12, errorConfiguracion: 'FIREBASE_PROYECTO_INCOMPATIBLE' },
       // FASE A · estado del transporte de avisos y del reloj, sin secretos.
       notificaciones: { email: { modo: 'MODO_SEGURO', proveedor: null }, cron: { configurado: false } },
+      esquemaDiagnostico: 1,
     });
+    expect(json.capacidades).toBeTypeOf('object');
+    expect(json.configuracion.master.overrideConfigurado).toBe(false);
     for (const secreto of secretos) expect(JSON.stringify(json)).not.toContain(secreto);
   });
 

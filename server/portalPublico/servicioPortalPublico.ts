@@ -23,6 +23,8 @@
  * No se tocan las reglas: el anónimo sigue sin poder leer/escribir el funnel.
  * La autorización por token vive aquí y se aplica a cada operación.
  */
+import { randomBytes } from 'node:crypto';
+
 import type {
   DocumentoLeido,
   EscrituraDocumentoFirestoreAtomica,
@@ -85,6 +87,16 @@ export interface EntradaCuestionarioPublico {
   datos: Record<string, unknown>;
   respuestas: unknown;
   informacionAdicional?: string;
+}
+
+export interface EntradaSolicitudPublica {
+  solicitud: Record<string, unknown>;
+  candidato?: Record<string, unknown>;
+}
+
+export interface ResultadoSolicitudPublica {
+  solicitud: Record<string, unknown>;
+  candidatoId: string;
 }
 
 export interface EntradaDocumentacionPublica {
@@ -902,6 +914,227 @@ export function crearServicioPortalPublico(deps: DependenciasPortalPublico) {
     };
   }
 
+
+  // -------------------------------------------------------------------------
+  // P0.2.1 — ALTA PÚBLICA DE SOLICITUD (por token, SOLO en servidor)
+  // -------------------------------------------------------------------------
+  // El anónimo YA NO escribe en `solicitudes` ni en `candidatos`: las reglas
+  // se lo deniegan (P0.2.2) y aquí se construye el documento con valores
+  // controlados por el servidor. El cliente solo aporta el formulario.
+  // -------------------------------------------------------------------------
+
+  /** Copia recursiva con límites: evita payloads profundos o gigantes. */
+  function jsonSeguro(valor: unknown, profundidad = 0, estadoNodos = { n: 0 }): unknown {
+    if (profundidad > 6 || estadoNodos.n > 800) {
+      throw new ErrorPortalPublico('PETICION_INVALIDA', 400, 'CUERPO_DEMASIADO_COMPLEJO');
+    }
+    estadoNodos.n += 1;
+    if (valor === null || typeof valor === 'boolean') return valor;
+    if (typeof valor === 'number') {
+      if (!Number.isFinite(valor)) throw new ErrorPortalPublico('PETICION_INVALIDA', 400, 'NUMERO_INVALIDO');
+      return valor;
+    }
+    if (typeof valor === 'string') return valor.slice(0, 2000);
+    if (Array.isArray(valor)) {
+      if (valor.length > 60) throw new ErrorPortalPublico('PETICION_INVALIDA', 400, 'ARRAY_LARGO');
+      return valor.map((v) => jsonSeguro(v, profundidad + 1, estadoNodos));
+    }
+    if (valor && typeof valor === 'object') {
+      const claves = Object.keys(valor as Record<string, unknown>).slice(0, 60);
+      const salida: Record<string, unknown> = {};
+      for (const clave of claves) {
+        if (clave.startsWith('$') || clave.includes('.')) continue;
+        salida[clave] = jsonSeguro((valor as Record<string, unknown>)[clave], profundidad + 1, estadoNodos);
+      }
+      return salida;
+    }
+    return undefined;
+  }
+
+  function idsFichaDesdeToken(token: string): string[] {
+    const limpio = token.trim();
+    const ids = [limpio];
+    if (limpio.startsWith('sol-') && limpio.length > 4) {
+      const sinPrefijo = limpio.slice(4);
+      if (sinPrefijo && !ids.includes(sinPrefijo)) ids.push(sinPrefijo);
+    }
+    return ids;
+  }
+
+  async function resolverFichaParaSolicitud(token: string): Promise<Record<string, unknown>> {
+    for (const id of idsFichaDesdeToken(token)) {
+      const ficha = await leerFichaPublica(id);
+      if (!ficha) continue;
+      if (typeof ficha.inmuebleId !== 'string' || ficha.inmuebleId.trim() === '') continue;
+      // Solo se admiten altas sobre fichas publicadas como disponibles.
+      if (ficha.estado !== undefined && ficha.estado !== 'disponible') {
+        throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'INMUEBLE_NO_DISPONIBLE');
+      }
+      return ficha;
+    }
+    throw new ErrorPortalPublico('ENLACE_NO_VALIDO', 404, 'ENLACE_DESCONOCIDO');
+  }
+
+  async function crearSolicitud(
+    tokenEntrada: string,
+    entrada: EntradaSolicitudPublica
+  ): Promise<ResultadoSolicitudPublica> {
+    const token = exigirToken(tokenEntrada);
+    const ficha = await resolverFichaParaSolicitud(token);
+    const fuente = objeto(entrada.solicitud, 'solicitud');
+
+    // Identidad: siempre del formulario, nunca de caminos alternativos.
+    const nombre = texto(fuente.candidatoNombre, 'NOMBRE', 120);
+    const email = texto(fuente.candidatoEmail, 'EMAIL', 200);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new ErrorPortalPublico('PETICION_INVALIDA', 400, 'CAMPO_EMAIL_FORMATO');
+    }
+    const telefono = texto(fuente.candidatoTelefono, 'TELEFONO', 30);
+    if (!booleano(fuente.consentimientoAceptado ?? false, 'CONSENTIMIENTO')) {
+      throw new ErrorPortalPublico('PETICION_INVALIDA', 400, 'CAMPO_CONSENTIMIENTO');
+    }
+
+    const inmuebleId = String(ficha.inmuebleId);
+    const ahoraIso = isoAhora();
+    const sufijo = randomBytes(12).toString('hex');
+    const solicitudId = `sol-${ahora().getTime()}-${sufijo}`;
+    const candidatoId = `cand-${ahora().getTime()}-${sufijo}`;
+    const cuestionarioCompletado = fuente.cuestionarioCompletado === true;
+    const documentosCompletados = fuente.documentosCompletados === true;
+
+    const solDoc: Record<string, unknown> = {
+      // Campos controlados por el SERVIDOR.
+      id: solicitudId,
+      token: `sol-${inmuebleId}-${sufijo.slice(0, 8)}`,
+      inmuebleId,
+      inmuebleNombre: typeof ficha.direccion === 'string' ? ficha.direccion.slice(0, 200) : inmuebleId,
+      inmueblePrecio: typeof ficha.precio === 'number' ? ficha.precio : 0,
+      inmuebleCiudad: typeof ficha.ciudad === 'string' ? ficha.ciudad.slice(0, 120) : '',
+      propietarioId: typeof ficha.propietarioId === 'string' ? ficha.propietarioId : '',
+      ownerId: typeof ficha.propietarioId === 'string' ? ficha.propietarioId : '',
+      candidatoId,
+      estado: cuestionarioCompletado ? 'CUESTIONARIO COMPLETADO' : 'NUEVA',
+      fechaCreacion: ahoraIso.slice(0, 10),
+      fechaActualizacion: ahoraIso,
+      fechaConsentimiento: ahoraIso,
+      // Alias canónicos exigidos históricamente por las reglas (paridad AG-01).
+      nombre,
+      email,
+      telefono,
+      candidatoNombre: nombre,
+      candidatoEmail: email,
+      candidatoTelefono: telefono,
+      consentimientoAceptado: true,
+      cuestionarioCompletado,
+      documentosCompletados,
+      historial: [{
+        id: `h-${sufijo}`,
+        fecha: ahoraIso,
+        accion: 'Solicitud recibida',
+        detalle: 'Alta pública verificada por el servidor mediante enlace de capacidad.',
+      }],
+    };
+
+    const escalaresTexto = [
+      'fechaEntradaAproximada', 'duracionPrevista', 'detallesMascotas', 'empresa', 'puesto',
+      'antiguedadLaboral', 'descripcionOtrosIngresos', 'detallesAvalista',
+    ] as const;
+    for (const campo of escalaresTexto) {
+      if (fuente[campo] !== undefined) {
+        solDoc[campo] = typeof fuente[campo] === 'string'
+          ? texto(fuente[campo], campo.toUpperCase(), 400, false)
+          : jsonSeguro(fuente[campo]);
+      }
+    }
+    for (const campo of ['situacionLaboral', 'tipoContrato'] as const) {
+      if (typeof fuente[campo] === 'string' && fuente[campo].length <= 60) solDoc[campo] = fuente[campo];
+    }
+    for (const campo of [
+      'numAdultos', 'numMenores', 'numTotalPersonas', 'ingresosNetosMensuales',
+      'otrosIngresos', 'scoreSolvencia', 'perfilOperativo',
+    ] as const) {
+      if (fuente[campo] !== undefined) solDoc[campo] = numero(fuente[campo], campo.toUpperCase(), 0, 1_000_000);
+    }
+    for (const campo of ['tieneMascotas', 'esFumador', 'tieneAvalista'] as const) {
+      if (fuente[campo] !== undefined) solDoc[campo] = booleano(fuente[campo], campo.toUpperCase());
+    }
+    for (const campo of ['cuestionarioData', 'documentos'] as const) {
+      if (fuente[campo] !== undefined) solDoc[campo] = jsonSeguro(fuente[campo]);
+    }
+
+    const candDoc: Record<string, unknown> = {
+      id: candidatoId,
+      nombre,
+      email,
+      telefono,
+      inmuebleId,
+      inmuebleNombre: solDoc.inmuebleNombre,
+      propietarioId: solDoc.propietarioId,
+      estado: 'nuevo',
+      fechaCreacion: ahoraIso.slice(0, 10),
+      numPersonas: solDoc.numTotalPersonas ?? 1,
+      ingresosNetos: solDoc.ingresosNetosMensuales ?? 0,
+      tipoEmpleo: solDoc.situacionLaboral ?? 'cuenta_ajena',
+      tipoContrato: solDoc.tipoContrato ?? 'no_aplica',
+      antiguedadLaboral: solDoc.antiguedadLaboral ?? '',
+      otrosIngresos: solDoc.otrosIngresos ?? 0,
+      avalista: solDoc.tieneAvalista ?? false,
+      observaciones: '',
+      documentos: solDoc.documentos ?? [],
+      // Token de capacidad para el cuestionario; 128 bits, no deducible del id.
+      cuestionarioToken: `q-${randomBytes(16).toString('hex')}`,
+    };
+
+    const resultado = await deps.puerto.escribirAtomico([
+      { coleccion: 'solicitudes', id: solicitudId, datos: solDoc, precondicion: { tipo: 'NO_EXISTE' } },
+      { coleccion: 'candidatos', id: candidatoId, datos: candDoc, precondicion: { tipo: 'NO_EXISTE' } },
+    ]);
+    if (resultado === 'CONFLICTO') {
+      throw new ErrorPortalPublico('CONFLICTO', 409, 'SOLICITUD_DUPLICADA');
+    }
+    // La respuesta NO devuelve el expediente completo: solo un acuse mínimo.
+    return {
+      candidatoId,
+      solicitud: {
+        id: solicitudId,
+        token: solDoc.token,
+        estado: solDoc.estado,
+        inmuebleId,
+        inmuebleNombre: solDoc.inmuebleNombre,
+        candidatoNombre: nombre,
+        candidatoEmail: email,
+        candidatoTelefono: telefono,
+        candidatoId,
+        nombre,
+        email,
+        telefono,
+        fechaCreacion: solDoc.fechaCreacion,
+        fechaActualizacion: solDoc.fechaActualizacion,
+        fechaConsentimiento: solDoc.fechaConsentimiento,
+        consentimientoAceptado: true,
+        cuestionarioCompletado,
+        documentosCompletados,
+        historial: solDoc.historial,
+        ...(solDoc.numAdultos !== undefined ? { numAdultos: solDoc.numAdultos } : {}),
+        ...(solDoc.numMenores !== undefined ? { numMenores: solDoc.numMenores } : {}),
+        ...(solDoc.numTotalPersonas !== undefined ? { numTotalPersonas: solDoc.numTotalPersonas } : {}),
+        ...(solDoc.fechaEntradaAproximada !== undefined ? { fechaEntradaAproximada: solDoc.fechaEntradaAproximada } : {}),
+        ...(solDoc.duracionPrevista !== undefined ? { duracionPrevista: solDoc.duracionPrevista } : {}),
+        ...(solDoc.situacionLaboral !== undefined ? { situacionLaboral: solDoc.situacionLaboral } : {}),
+        ...(solDoc.tipoContrato !== undefined ? { tipoContrato: solDoc.tipoContrato } : {}),
+        ...(solDoc.antiguedadLaboral !== undefined ? { antiguedadLaboral: solDoc.antiguedadLaboral } : {}),
+        ...(solDoc.ingresosNetosMensuales !== undefined ? { ingresosNetosMensuales: solDoc.ingresosNetosMensuales } : {}),
+        ...(solDoc.otrosIngresos !== undefined ? { otrosIngresos: solDoc.otrosIngresos } : {}),
+        ...(solDoc.tieneMascotas !== undefined ? { tieneMascotas: solDoc.tieneMascotas } : {}),
+        ...(solDoc.esFumador !== undefined ? { esFumador: solDoc.esFumador } : {}),
+        ...(solDoc.tieneAvalista !== undefined ? { tieneAvalista: solDoc.tieneAvalista } : {}),
+        ...(solDoc.cuestionarioData !== undefined ? { cuestionarioData: solDoc.cuestionarioData } : {}),
+        ...(solDoc.documentos !== undefined ? { documentos: solDoc.documentos } : {}),
+        ...(solDoc.scoreSolvencia !== undefined ? { scoreSolvencia: solDoc.scoreSolvencia } : {}),
+      },
+    };
+  }
+
   return {
     obtenerVisita,
     reservarVisita,
@@ -910,6 +1143,7 @@ export function crearServicioPortalPublico(deps: DependenciasPortalPublico) {
     guardarCuestionario,
     obtenerDocumentacion,
     actualizarDocumentacion,
+    crearSolicitud,
   };
 }
 

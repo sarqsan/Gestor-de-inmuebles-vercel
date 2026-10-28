@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "gestor-inmuebles-produccion"
-  }
+    "produccion": "gestor-inmuebles-produccion"
+  },
+  "_nota": "H-02 — NO hay proyecto por defecto a propósito. Sin `default`, cualquier `firebase deploy` sin `--project` FALLA en vez de publicar reglas, índices o storage en producción. Usa siempre `--project <destino>` explícito; en CI/pruebas, `--project demo-gestor-reglas`."
 }

@@ -380,7 +380,7 @@ describe('D2 · F — Funnel: tenants fuera del write global', () => {
       expect(op(col, 'delete', 'master', d)).toBe(true);
     }
   });
-  it('F3 · ramas anónimas del flujo público intactas (reserva/cuestionario/aporte)', () => {
+  it('F3 · P0.2.2: el anónimo YA NO crea candidatos ni solicitudes (alta por servidor)', () => {
     expect(op('candidatos', 'update', 'anon', CAND_X, {
       ...CAND_X, cuestionarioToken: 'tok', estado: 'cuestionario',
     })).toBe(false);
@@ -391,12 +391,19 @@ describe('D2 · F — Funnel: tenants fuera del write global', () => {
     expect(op('solicitudes_documentacion', 'update', 'anon', SOLDOC_X, {
       ...SOLDOC_X, estado: 'aportada', documentos: [],
     })).toBe(false);
+    // P0.2 — la alta pública pasa por `POST /api/solicitud/:token` con la
+    // credencial de servicio: el navegador anónimo NO puede escribir.
     expect(op('candidatos', 'create', 'anon', null, {
       nombre: 'N', email: 'n@t.local', telefono: '600', estado: 'nuevo',
-    }, 'nuevo')).toBe(true);
+    }, 'nuevo')).toBe(false);
     expect(op('solicitudes', 'create', 'anon', null, {
       nombre: 'N', email: 'n@t.local', telefono: '600', inmuebleId: 'inm_A', estado: 'nueva',
-    }, 'nuevo')).toBe(true);
+    }, 'nuevo')).toBe(false);
+    // Ni siquiera con todos los alias canónicos que exigía la regla anterior.
+    expect(op('solicitudes', 'create', 'anon', null, {
+      nombre: 'N', email: 'n@t.local', telefono: '600', inmuebleId: 'inm_A', estado: 'NUEVA',
+      propietarioId: '',
+    }, 'nuevo')).toBe(false);
   });
   it('F4 · el anónimo NO borra ni toca fuera de forma', () => {
     for (const [col, doc] of FUNNEL) {

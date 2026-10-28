@@ -284,6 +284,12 @@ export async function obtenerTokenAcceso(
 export interface IdentidadVerificada {
   uid: string;
   email?: string;
+  /**
+   * `email_verified` del token (H-07). Sólo con `true` se admite que un firmante
+   * actúe sobre el acta cuyo participante declara ESE correo: un correo sin
+   * verificar no acredita identidad.
+   */
+  emailVerificado?: boolean;
 }
 
 interface CertificadosCacheados {
@@ -345,7 +351,7 @@ export async function verificarIdToken(
   if (partes.length !== 3) return null;
 
   let cabecera: { alg?: string; kid?: string };
-  let cuerpo: { aud?: string; iss?: string; exp?: number; iat?: number; sub?: string; email?: string };
+  let cuerpo: { aud?: string; iss?: string; exp?: number; iat?: number; sub?: string; email?: string; email_verified?: boolean };
   try {
     cabecera = JSON.parse(decodificarB64url(partes[0]));
     cuerpo = JSON.parse(decodificarB64url(partes[1]));
@@ -384,7 +390,12 @@ export async function verificarIdToken(
   if (cuerpo.iss !== `https://securetoken.google.com/${projectId}`) return null;
   if (!cuerpo.sub) return null;
 
-  return { uid: cuerpo.sub, email: cuerpo.email };
+  return {
+    uid: cuerpo.sub,
+    ...(cuerpo.email ? { email: cuerpo.email } : {}),
+    // Sólo se declara cuando el proveedor lo afirma: ausencia == no verificado.
+    ...(cuerpo.email_verified === true ? { emailVerificado: true } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------

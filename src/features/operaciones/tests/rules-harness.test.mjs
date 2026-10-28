@@ -25,7 +25,7 @@ test('sin roles/permisos UI ni isStaff en bloque operativo',()=>assert.doesNotMa
 // codifica el contrato literal; el port NO lo duplica.
 test('audit_logs: contrato B literal create autenticado/read master/update-delete false',()=>{
  const block=rulesFull.slice(rulesFull.indexOf('match /audit_logs/'),rulesFull.indexOf('match /notificaciones/'));
- for(const s of ['allow read: if isMasterAdmin();','allow create: if isSignedIn();','allow update, delete: if false;'])assert.ok(block.includes(s));
+ for(const s of ['allow read: if isMasterAdmin();','allow create: if isSignedIn() && (','incoming().usuarioEmail == authEmail()','allow update, delete: if false;'])assert.ok(block.includes(s),s);
  assert.ok(fn(rulesFull,'isMasterAdmin').includes("authEmail() == 'sarqsan2@gmail.com'"));
 });
 test('transiciones persistentes coinciden exactamente con el motor',()=>{

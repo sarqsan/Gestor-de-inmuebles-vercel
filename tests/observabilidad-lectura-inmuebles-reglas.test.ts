@@ -105,7 +105,7 @@ describe('observabilidad de Inmuebles · el libro es inmutable', () => {
   it('`firestore.rules` mantiene `allow update, delete: if false` en audit_logs', () => {
     const bloque = RULES.slice(RULES.indexOf('match /audit_logs/'));
     expect(bloque).toMatch(/allow read: if isMasterAdmin\(\);/);
-    expect(bloque).toMatch(/allow create: if isSignedIn\(\);/);
+    expect(bloque).toMatch(/allow create: if isSignedIn\(\) && \(/);
     expect(bloque).toMatch(/allow update, delete: if false;/);
   });
 

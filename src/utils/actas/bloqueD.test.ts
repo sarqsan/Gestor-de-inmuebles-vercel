@@ -727,7 +727,9 @@ describe('BLOQUE D2 · OTP aislamiento y seguridad', () => {
     const adapter = new TransporteManualAdapter();
     // Debe retornar sin exponer código en console.log (verificado por implementación sin console.log)
     const res = await adapter.enviarOtp('dest', '123456', { actaId: 'a', firmaId: 'f' });
-    expect(res.enviado).toBe(true);
+    // P0.3.5: la entrega manual de desarrollo NUNCA se acredita como real.
+    expect(res.enviado).toBe(false);
+    expect(res.simulado).toBe(true);
     // Código no debe estar en campo codigo plano en Firestore rules (solo codigoHash permitido)
     const { otp } = await crearOtpActa({ actaId: 'acta1', firmaId: 'firma1', ownerId: ownerA, canal: 'PENDIENTE_PROVEEDOR' });
     expect((otp as any).codigo).toBeUndefined();

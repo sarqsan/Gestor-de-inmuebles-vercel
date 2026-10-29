@@ -1,5 +1,5 @@
 {
-  "base": "3580ccc733443b3c9e5f2d0b5efd30d776a06810",
+  "base": "733826f65728346121589a76fffde5f7d40c2ce9",
   "nota": "Superficie revisada respecto a main y reglas exactas del cambio de lecturas de alquiler por propietario; ver docs/auditoria/LECTURAS-PROPIETARIO-ALQUILER.md.",
   "superficie": [
     ".github/workflows/emulador-reglas.yml",

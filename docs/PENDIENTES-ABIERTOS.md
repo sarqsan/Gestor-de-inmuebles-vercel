@@ -20,12 +20,13 @@
 | ID | Qué | De quién | Estado | Desde | Dónde está el cómo |
 |---|---|---|---|---|---|
 | **P-01** | Confirmar en la consola de Firebase los **10 índices** y los **6 casos del Rules Playground** | **Usuario** (cuenta de Google) | ✅ **HECHO** 2026-10-29 — 10/10 índices *Habilitado* y final de reglas con 4064 líneas y denegación global. Evidencia: `docs/P-01-CIERRE-CONSOLA-2026-10-29.md` | 2026-10-28 | `docs/PENDIENTE-USUARIO-2026-10-28.md` |
-| **P-02** | **H-17** — staging + dictamen fiscal: solo procedimiento y evidencia | Agente | 🟡 PENDIENTE | 2026-10-28 | `docs/ROADMAP-01-BLOQUEANTES-VALIDACION-Y-AUDITORIA.md` |
+| **P-02** | **H-17** — staging + dictamen fiscal. Mitad técnica hecha (guardia de entorno, runbook, carta al asesor); falta crear el staging (cuenta del titular), P-08 (config de cliente por entorno) y la firma | Agente + **Usuario** | 🟡 PENDIENTE (parcial) | 2026-10-28 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` |
 | **P-03** | **Bundle ~5,56 MB**: code-splitting (la primera carga del panel lo arrastra entero) | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-GLOBAL-ERP-2026-10-20.md` |
 | **P-04** | **Sin E2E de navegador**: los flujos críticos están probados por unidades e integración, no por un navegador real | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-FUNCIONAL-PORTALES-2026-10-27.md` |
 | **P-05** | `actions/*` desactualizadas: GitHub fuerza Node 24 sobre `checkout@v4`/`setup-node@v4`. **Aviso ya activo en cada run** | Agente | 🟡 PENDIENTE | 2026-10-28 | Aviso del propio run + §«Errores conocidos» |
 | **P-06** | **H-15** parcial: quedan supuestos de emulador sin cubrir | Agente | 🔵 EN CURSO (parcial) | 2026-10-27 | `docs/INFORME-AUDITORIA-CIERRE-2026-10-27.md` |
 | **P-07** | Dependencias con versión mayor retenida (`firebase@9.14.0`, `nodemailer@10.2.1`): decisión de **no** degradar, documentada | Agente | ⛔ BLOQUEADO por decisión | 2026-10-27 | `npm audit` + informe de cierre |
+| **P-08** | **Config de cliente por entorno** (`VITE_ENTORNO_FIREBASE` + `VITE_FIREBASE_*`) para que el staging sea operativo también en interfaz. Sin esto, el staging solo sirve para `/api/*` | Agente | 🟡 PENDIENTE | 2026-10-29 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` §1.2 |
 
 ## P-01 — cerrado el 2026-10-29 (histórico de la comprobación)
 
@@ -40,9 +41,10 @@ repo no ha cambiado (`firestore.rules` = `sha256 81b9ae93…413d`, 4 064 líneas
 `storage.rules` sin cambios. Comprobación de 5 segundos antes de empezar: la
 última línea de la pestaña Reglas debe ser **4 064**.
 
-**Qué NO hacer mientras P-01 esté abierto:** ni revertir reglas, ni volver a
-publicarlas «por si acaso», ni dar por confirmados los índices. Ante un resultado
-inesperado en el simulador: parar y avisar.
+**Ya no hay nada abierto de P-01.** Lo que se aprendió, por si hay que repetirlo
+en otro proyecto: no revertir reglas ante un resultado inesperado; los índices son
+aditivos y no rompen nada; y en esta versión de la consola la pestaña se llama
+**«Seguridad»**, no «Reglas».
 
 **Cerrado.** El usuario aportó tres capturas de la consola: **10/10 índices en
 *Habilitado***, alcance *Colección*, y el final del ruleset publicado con **4064

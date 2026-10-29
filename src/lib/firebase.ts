@@ -25,8 +25,8 @@ import { getStorage } from 'firebase/storage';
 // (`/api/documentos/*`), que autoriza contra la base Firestore con nombre. El
 // objeto `storage` del SDK se conserva sólo por compatibilidad de firmas.
 import { ref, uploadBytes, getDownloadURL, deleteObject } from './custodiaDocumental/almacenServidor';
-// P-08 — el destino (producción o staging) se resuelve en UN solo módulo:
-// las variables `VITE_FIREBASE_*` solo se leen si `VITE_ENTORNO_FIREBASE=staging`.
+// El destino se resuelve en UN solo módulo y es único: el proyecto real. No hay
+// variables de entorno que puedan cambiarlo (no existe entorno de pruebas).
 import { destinoFirebaseRequerido, verificarAppPrecedente } from './destinoFirebase';
 import {
   Candidato,
@@ -130,12 +130,12 @@ import { ENTORNO_EJECUCION } from './entornoEjecucion';
 import { INITIAL_ASEGURADORAS } from '../data/mockData';
 import { inicialAseguradoras, inicialCandidatos, inicialGmailConfig } from '../data/estadoInicial';
 
-// P-08 — `destinoFirebaseRequerido()` lanza si la configuración es incoherente
-// (staging incompleto, staging apuntando a producción, entorno desconocido):
-// el fallo ocurre al arrancar, no se degrada a un destino por defecto.
+// `destinoFirebaseRequerido()` lanza si la configuración es incoherente (sin
+// proyecto real, sin base con nombre): el fallo ocurre al arrancar, no se degrada
+// a un destino por defecto.
 const configuracionFirebase = destinoFirebaseRequerido();
 
-// P-08 — si otro módulo creó la app antes con OTRO proyecto, se falla aquí.
+// Si otro módulo creó la app antes con OTRO proyecto, se falla aquí.
 verificarAppPrecedente(getApps(), configuracionFirebase);
 const app = getApps().length === 0 ? initializeApp(configuracionFirebase) : getApps()[0];
 

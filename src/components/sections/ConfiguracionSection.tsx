@@ -1,9 +1,7 @@
 import { inmueblesOperativos } from '../../utils/bajaPatrimonialInmueble';
 import {
-  ES_DESTINO_STAGING,
   FIREBASE_BASE_DATOS_ID,
   FIREBASE_PROYECTO_ID,
-  avisoEntornoDespliegue,
   avisoTopologiaCustodia,
 } from '../../lib/entornoFirebase';
 import React, { useState, useRef } from 'react';
@@ -390,26 +388,12 @@ export const ConfiguracionSection: React.FC<ConfiguracionSectionProps> = ({
             </div>
             <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
               <span className="text-emerald-400 font-mono font-bold block" data-testid="proyecto-firebase-activo">{FIREBASE_PROYECTO_ID}</span>
-              <span className="text-[11px] text-slate-400">
-                ID del proyecto Firebase activo.
-                {ES_DESTINO_STAGING && (
-                  <span className="ml-1 font-bold text-amber-300" data-testid="entorno-staging-activo">· STAGING</span>
-                )}
-              </span>
+              <span className="text-[11px] text-slate-400">ID del proyecto Firebase activo.</span>
               <span className="text-[11px] text-slate-400 block mt-1">
                 Base de datos: <span className="font-mono text-slate-300" data-testid="base-datos-firebase-activa">{FIREBASE_BASE_DATOS_ID}</span>
               </span>
             </div>
           </div>
-          {avisoEntornoDespliegue() && (
-            <div
-              role="note"
-              data-testid="aviso-entorno-despliegue"
-              className="text-[11px] text-amber-200 bg-amber-900/30 border border-amber-700/60 rounded-xl p-3 mt-3"
-            >
-              {avisoEntornoDespliegue()}
-            </div>
-          )}
           {avisoTopologiaCustodia() && (
             <div
               role="note"

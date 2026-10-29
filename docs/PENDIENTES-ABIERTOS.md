@@ -4,8 +4,9 @@
 > cómo**. Si algo no está aquí, no está pendiente; si está aquí y ya se hizo,
 > hay que cerrarlo en el mismo commit que lo hizo.
 >
-> Actualizado: **2026-10-29**. P-01 y P-08 cerrados. De H-17 solo queda lo externo
-> (más el residuo P-09, que no bloquea el staging).
+> Actualizado: **2026-10-29**. P-01 cerrado. **No hay entorno de pruebas** (decisión
+> del titular): P-02, P-08 y P-09 quedan cerrados como tales. De H-17 solo espera la
+> firma del asesor.
 
 ## Estados
 
@@ -21,14 +22,14 @@
 | ID | Qué | De quién | Estado | Desde | Dónde está el cómo |
 |---|---|---|---|---|---|
 | **P-01** | Confirmar en la consola de Firebase los **10 índices** y los **6 casos del Rules Playground** | **Usuario** (cuenta de Google) | ✅ **HECHO** 2026-10-29 — 10/10 índices *Habilitado* y final de reglas con 4064 líneas y denegación global. Evidencia: `docs/P-01-CIERRE-CONSOLA-2026-10-29.md` | 2026-10-28 | `docs/PENDIENTE-USUARIO-2026-10-28.md` |
-| **P-02** | **H-17** — staging + dictamen fiscal. **Todo el código está hecho** (guardia de entorno en servidor, P-08 en cliente, runbook, carta al asesor); falta crear el proyecto de staging (cuenta del titular) y la firma fiscal | Agente + **Usuario** | 🟡 PENDIENTE (solo externo) | 2026-10-28 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` |
+| **P-02** | **H-17 · dictamen fiscal** — falta la **firma del asesor**. La carta está lista (§2.3); no hay nada que montar: **no habrá entorno de pruebas** (decisión del titular, 2026-10-29) | **Usuario** | 🟡 PENDIENTE (solo la firma) | 2026-10-28 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` |
 | **P-03** | **Bundle ~5,56 MB**: code-splitting (la primera carga del panel lo arrastra entero) | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-GLOBAL-ERP-2026-10-20.md` |
 | **P-04** | **Sin E2E de navegador**: los flujos críticos están probados por unidades e integración, no por un navegador real | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-FUNCIONAL-PORTALES-2026-10-27.md` |
 | **P-05** | `actions/*` desactualizadas: GitHub fuerza Node 24 sobre `checkout@v4`/`setup-node@v4`. **Aviso ya activo en cada run** | Agente | 🟡 PENDIENTE | 2026-10-28 | Aviso del propio run + §«Errores conocidos» |
 | **P-06** | **H-15** parcial: quedan supuestos de emulador sin cubrir | Agente | 🔵 EN CURSO (parcial) | 2026-10-27 | `docs/INFORME-AUDITORIA-CIERRE-2026-10-27.md` |
 | **P-07** | Dependencias con versión mayor retenida (`firebase@9.14.0`, `nodemailer@10.2.1`): decisión de **no** degradar, documentada | Agente | ⛔ BLOQUEADO por decisión | 2026-10-27 | `npm audit` + informe de cierre |
-| **P-08** | **Config de cliente por entorno** (`VITE_ENTORNO_FIREBASE` + `VITE_FIREBASE_*`): un solo punto de resolución, staging visible y variables ignoradas fuera de él | Agente | ✅ **HECHO** 2026-10-29 — `src/lib/destinoFirebase.ts`, 22 casos (19 + 3 de arranque real) | 2026-10-29 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` §1.2 |
-| **P-09** | `src/lib/googleAuth.ts` sigue leyendo el JSON versionado porque la guardia de custodia lo exige **byte a byte igual a `main`**. Hoy no puede crear la app (arranca `firebase.ts` primero) y hay guardia de fallo explícito, pero es un residuo: mientras no esté en el manifiesto revisado, el staging depende de un orden de importación | Agente | 🟡 PENDIENTE — requiere regenerar `custodia-parche-p0.json` (base `658f692`, no disponible en el clon superficial) | 2026-10-29 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` §1.2, «Residuo conocido» |
+| **P-08** | **Destino único del cliente**: lo que se preparó como «config por entorno» se ha **retirado**; queda que la aplicación no pueda hablar con otro proyecto (si lo hiciera, no arranca) | Agente | ✅ **HECHO** (decisión en contra) 2026-10-29 — sin variables de entorno; `src/lib/destinoFirebase.ts` | 2026-10-29 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` §1.2 |
+| **P-09** | `src/lib/googleAuth.ts` sigue leyendo el JSON versionado porque la guardia de custodia lo exige **byte a byte igual a `main`**. No puede crear la app (arranca `firebase.ts` primero) y, si el orden cambiara, hay fallo explícito. Es un residuo de limpieza, no un riesgo abierto | Agente | 🟡 PENDIENTE (limpieza) — requiere regenerar `custodia-parche-p0.json` (base `658f692`, no disponible en el clon superficial) | 2026-10-29 | `docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md` §1.3 |
 
 ## P-01 — cerrado el 2026-10-29 (histórico de la comprobación)
 

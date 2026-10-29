@@ -307,6 +307,18 @@ service cloud.firestore {
         && (pidEnAmbitoEscritura(pidDelInmuebleAmbito(inmuebleId))
           || inmuebleParcialIndexado(pidDelInmuebleAmbito(inmuebleId), inmuebleId, true)));
     }
+    // La relación de alquiler se comprueba contra el inmueble real, no contra
+    // un propietarioId que puede faltar en documentos históricos o ser antiguo.
+    // La consulta debe fijar inmuebleId; nunca permite listar toda la colección.
+    function propietarioLeeAlquiler(d) {
+      return isPropietarioRole() && 'inmuebleId' in d && d.inmuebleId is string
+        && exists(/databases/$(database)/documents/inmuebles/$(d.inmuebleId))
+        && (inmuebleEsMio(get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+          || inmuebleAutorizadoExplicito(d.inmuebleId)
+          || inmuebleEnCarteraGestionada(get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data)
+          || ('propietarioId' in get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data
+            && inmuebleParcialIndexado(get(/databases/$(database)/documents/inmuebles/$(d.inmuebleId)).data.propietarioId, d.inmuebleId, false)));
+    }
     // R-2/R-3 — `propietarioId` denormalizado en candidatos y solicitudes_documentacion: sirve para
     // listar por titular (`where('propietarioId','==', pid)`). Solo puede valer el titular REAL del
     // inmueble al que pertenece el documento: impide reasignarlo a la cartera de otro titular.
@@ -2049,10 +2061,9 @@ service cloud.firestore {
     match /candidatos/{candidatoId} {
       // R-2 (cierre 2026-10-14): ya NO hay lectura pública por id. El enlace del cuestionario lo sirve
       // el servidor (`/api/cuestionario/:token`) con el token guardado en el propio candidato.
-      allow get: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
-      // Listado: personal interno, o titular/gestor de cartera por `where('propietarioId','==', pid)`.
-      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
-        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow get: if isStaff() || propietarioLeeAlquiler(resource.data) || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
+      // Listado por inmueble autorizado; no depende de campos históricos denormalizados.
+      allow list: if isStaff() || propietarioLeeAlquiler(resource.data);
 
       // P0.2.2 — SIN alta anónima. El candidato lo crea el SERVIDOR mediante
       // `POST /api/solicitud/:token` (Admin SDK, fuera de estas reglas) o el
@@ -2080,8 +2091,8 @@ service cloud.firestore {
     match /solicitudes/{solicitudId} {
       // BLOQUE E (reconciliado): el inquilino no lee solicitudes (el alta sigue siendo pública).
       // Lectura por cartera (titular o gestor con L del inmueble); listado global solo interno.
-      allow get: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
-      allow list: if isStaff();
+      allow get: if isStaff() || propietarioLeeAlquiler(resource.data) || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
+      allow list: if isStaff() || propietarioLeeAlquiler(resource.data);
       // P0.2.2 — SIN alta anónima de solicitudes. Solo personal interno o
       // titular/gestor autenticado en su ámbito; el alta pública la escribe el
       // SERVIDOR (`POST /api/solicitud/:token`) con token, honeypot y límite.
@@ -2089,7 +2100,9 @@ service cloud.firestore {
         && ambitoPorInmuebleEscritura(incoming().inmuebleId)
         && propietarioCoherenteConInmueble(incoming()));
       // D2 (§7.4): `isSignedIn()` → `isStaff()` (ver candidatos).
-      allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId));
+      allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
+        && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId
+        && propietarioCoherenteConInmueble(incoming()));
       allow delete: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId));
     }
 
@@ -2102,12 +2115,10 @@ service cloud.firestore {
     match /invitaciones/{invitacionId} {
       // CIERRE VISITAS (2026-10-14): sin lectura ni escritura anónima. El candidato usa el
       // servidor (/api/visita/:token), que resuelve SU invitación por token.
-      // Personal: todo. Titular o gestor: solo las invitaciones de SU cartera, por `propietarioId`
-      // estampado en el documento (consulta por igualdad que las reglas sí pueden demostrar).
-      allow get: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
-        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
-      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
-        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      // Personal: todo. Titular: solo invitaciones de inmuebles autorizados.
+      allow get: if isStaff() || propietarioLeeAlquiler(resource.data)
+        || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
+      allow list: if isStaff() || propietarioLeeAlquiler(resource.data);
       allow create: if isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)
         && propietarioCoherenteConInmueble(incoming()));
       allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
@@ -2125,10 +2136,9 @@ service cloud.firestore {
     // atómicas y precondiciones de versión. Personal y titular/gestor de cartera: su ámbito.
     // =========================================================================
     match /slots_visita/{slotId} {
-      allow get: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
-        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
-      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
-        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      allow get: if isStaff() || propietarioLeeAlquiler(resource.data)
+        || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId));
+      allow list: if isStaff() || propietarioLeeAlquiler(resource.data);
       allow create: if isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)
         && propietarioCoherenteConInmueble(incoming()));
       allow update: if isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId)
@@ -2155,18 +2165,16 @@ service cloud.firestore {
     //    cliente: lo hace el SERVIDOR con el token de la solicitud
     //    (server/ia/portalDocumentacion.ts, cuenta de servicio). Las reglas NO verifican
     //    el token: esa verificación es del servidor y de la subida a Storage (ver storage.rules).
-    //  · `list` (listado global) solo para personal interno. Un titular no lista todas
-    //    las solicitudes; un listado filtrado por cartera requiere validación en emulador.
+    //  · `list` global solo para personal interno; titular consulta por inmueble autorizado.
     //  · Sin `inmuebleId` no hay ámbito: se deniega (fail closed).
     //  · `update` no puede reasignar la solicitud a otro inmueble.
     // =========================================================================
     match /solicitudes_documentacion/{solicitudDocId} {
-      allow get: if isStaff() || (
+      allow get: if isStaff() || propietarioLeeAlquiler(resource.data) || (
         'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId)
       );
-      // R-3: listado global solo personal; el titular lista SU cartera por `propietarioId` (consulta demostrable).
-      allow list: if isStaff() || inmuebleEnCarteraGestionada(resource.data)
-        || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId());
+      // Listado global solo personal; titular filtra por inmueble autorizado.
+      allow list: if isStaff() || propietarioLeeAlquiler(resource.data);
       allow create: if isStaff() || (
         'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)
         && propietarioCoherenteConInmueble(incoming())

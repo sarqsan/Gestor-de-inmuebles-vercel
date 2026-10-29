@@ -19,6 +19,8 @@ import {
   where,
   type Unsubscribe,
   type QuerySnapshot,
+  type Query,
+  type DocumentData,
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 // AG-03.2: toda operación documental pasa por el motor mediado por el servidor
@@ -235,6 +237,8 @@ export interface DataAccessScope {
   tipoPerfil?: string;
   propietarioId?: string;
   inmuebleIds?: string[];
+  /** Inmuebles de la cartera visibles para consultas de alquiler. */
+  inmueblesAlquilerIds?: string[];
   /** Propietarios de carteras completas legibles; cada PID se consulta aparte. */
   propietariosGestionados?: string[];
   /** IDs deducidos de gestiones parciales activas; solo acotan consultas. */
@@ -1012,56 +1016,49 @@ export function subscribeInmuebles(
 }
 
 /**
- * Real-time listener for Candidatos
+ * Real-time listener for Candidatos y demás listados de alquiler.
+ * Las consultas se acotan en origen, nunca tras una lectura global.
  */
-export function subscribeCandidatos(callback: (candidatos: Candidato[]) => void) {
-  return onSnapshot(
-    CANDIDATOS_COL,
-    (snapshot) => {
-      const items: Candidato[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Candidato;
-        const initialMatch = inicialCandidatos().find((ic) => ic.id === docSnap.id);
-
-        // AG-02: no se inventa un token `q-<id>` en la lectura (no se persiste
-        // y el portal lo rechazaría). Si el dato inicial lo aporta, se usa; si
-        // no, la UI emite y guarda un token de capacidad al abrir el enlace.
-        if (!data.cuestionarioToken && initialMatch?.cuestionarioToken) {
-          data.cuestionarioToken = initialMatch.cuestionarioToken;
-        }
-
-        // Merge initial mock questionnaire if completely missing on Firestore doc
-        if (initialMatch?.cuestionarioIncidencias && !data.cuestionarioIncidencias) {
-          data.cuestionarioIncidencias = initialMatch.cuestionarioIncidencias;
-        }
-
-        items.push({ id: docSnap.id, ...data });
-      });
-      callback(items);
-    },
-    (err) => {
-      reportarErrorLectura('candidatos', err, 'Firestore candidatos snapshot error:');
-    }
-  );
+function escucharUnion<T extends { id: string }>(
+  consultas: Query<DocumentData>[], origen: Parameters<typeof reportarErrorLectura>[0],
+  callback: (items: T[]) => void,
+  transformar: (id: string, data: DocumentData) => T = (id, data) => ({ ...data, id } as T),
+): Unsubscribe {
+  if (!consultas.length) { callback([]); return () => {}; }
+  const resultados = new Map<number, T[]>();
+  const subs = consultas.map((consulta, indice) => onSnapshot(consulta, (snapshot) => {
+    const items: T[] = [];
+    snapshot.forEach((d) => items.push(transformar(d.id, d.data())));
+    resultados.set(indice, items);
+    // No presentar un resultado parcial como lectura completa.
+    if (resultados.size !== consultas.length) return;
+    const union = new Map<string, T>();
+    for (const lote of resultados.values()) for (const item of lote) union.set(item.id, item);
+    callback([...union.values()]);
+  }, (err) => reportarErrorLectura(origen, err, `Firestore ${origen} snapshot error:`)));
+  return () => subs.forEach((unsub) => unsub());
 }
 
-/**
- * Real-time listener for Solicitudes
- */
-export function subscribeSolicitudes(callback: (solicitudes: SolicitudAlquiler[]) => void) {
-  return onSnapshot(
-    SOLICITUDES_COL,
-    (snapshot) => {
-      const items: SolicitudAlquiler[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as SolicitudAlquiler);
-      });
-      callback(items);
-    },
-    (err) => {
-      reportarErrorLectura('solicitudes', err, 'Firestore solicitudes snapshot error:');
-    }
-  );
+function consultasCartera(col: Query<DocumentData>, scope?: DataAccessScope): Query<DocumentData>[] {
+  if (!scope) return [];
+  if (scope.tipoPerfil === 'ADMINISTRADOR' || scope.tipoPerfil === 'SUPERADMIN' || scope.tipoPerfil === 'PROFESIONAL') return [col];
+  if (scope.tipoPerfil !== 'PROPIETARIO') return [];
+  const ids = Array.from(new Set(scope.inmueblesAlquilerIds ?? [])).filter(Boolean);
+  return ids.map((id) => query(col, where('inmuebleId', '==', id)));
+}
+
+export function subscribeCandidatos(callback: (candidatos: Candidato[]) => void, scope?: DataAccessScope) {
+  return escucharUnion(consultasCartera(CANDIDATOS_COL, scope), 'candidatos', callback, (id, raw) => {
+    const data = raw as Candidato;
+    const initialMatch = inicialCandidatos().find((ic) => ic.id === id);
+    if (!data.cuestionarioToken && initialMatch?.cuestionarioToken) data.cuestionarioToken = initialMatch.cuestionarioToken;
+    if (initialMatch?.cuestionarioIncidencias && !data.cuestionarioIncidencias) data.cuestionarioIncidencias = initialMatch.cuestionarioIncidencias;
+    return { ...data, id };
+  });
+}
+
+export function subscribeSolicitudes(callback: (solicitudes: SolicitudAlquiler[]) => void, scope?: DataAccessScope) {
+  return escucharUnion(consultasCartera(SOLICITUDES_COL, scope), 'solicitudes', callback);
 }
 
 /**
@@ -1301,39 +1298,12 @@ export async function deleteCandidatoFirestore(candidateId: string) {
 /**
  * Real-time listener for Invitaciones de Visita
  */
-export function subscribeInvitaciones(callback: (invitaciones: InvitacionVisita[]) => void) {
-  return onSnapshot(
-    INVITACIONES_COL,
-    (snapshot) => {
-      const items: InvitacionVisita[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as InvitacionVisita);
-      });
-      callback(items);
-    },
-    (err) => {
-      reportarErrorLectura('invitaciones', err, 'Firestore invitaciones snapshot error:');
-    }
-  );
+export function subscribeInvitaciones(callback: (invitaciones: InvitacionVisita[]) => void, scope?: DataAccessScope) {
+  return escucharUnion(consultasCartera(INVITACIONES_COL, scope), 'invitaciones', callback);
 }
 
-/**
- * Real-time listener for Visit Slots
- */
-export function subscribeVisitSlots(callback: (slots: VisitSlot[]) => void) {
-  return onSnapshot(
-    SLOTS_VISITA_COL,
-    (snapshot) => {
-      const items: VisitSlot[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as VisitSlot);
-      });
-      callback(items);
-    },
-    (err) => {
-      reportarErrorLectura('slots_visita', err, 'Firestore visit slots snapshot error:');
-    }
-  );
+export function subscribeVisitSlots(callback: (slots: VisitSlot[]) => void, scope?: DataAccessScope) {
+  return escucharUnion(consultasCartera(SLOTS_VISITA_COL, scope), 'slots_visita', callback);
 }
 
 /**
@@ -1502,20 +1472,8 @@ export async function guardarSolicitudPublicaFirestore(solicitud: SolicitudAlqui
 /**
  * Real-time listener for Solicitudes de Documentación Post-Visita
  */
-export function subscribeSolicitudesDoc(callback: (solicitudesDoc: SolicitudDocumentacion[]) => void) {
-  return onSnapshot(
-    SOLICITUDES_DOC_COL,
-    (snapshot) => {
-      const items: SolicitudDocumentacion[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as SolicitudDocumentacion);
-      });
-      callback(items);
-    },
-    (err) => {
-      reportarErrorLectura('solicitudes_documentacion', err, 'Firestore solicitudes_documentacion snapshot error:');
-    }
-  );
+export function subscribeSolicitudesDoc(callback: (solicitudesDoc: SolicitudDocumentacion[]) => void, scope?: DataAccessScope) {
+  return escucharUnion(consultasCartera(SOLICITUDES_DOC_COL, scope), 'solicitudes_documentacion', callback);
 }
 
 /**
@@ -3223,20 +3181,15 @@ export async function deleteUsuarioFirestore(_usuarioId: string): Promise<void> 
 // GESTIÓN DE PROFESIONALES Y MANTENIMIENTO
 // =========================================================================
 
-export function subscribeProfesionales(callback: (profesionales: Profesional[]) => void) {
-  return onSnapshot(
-    PROFESIONALES_COL,
-    (snapshot) => {
-      const items: Profesional[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as Profesional);
-      });
-      callback(items);
-    },
-    (err) => {
-      reportarErrorLectura('profesionales', err, 'Firestore profesionales snapshot error:');
-    }
-  );
+export function subscribeProfesionales(callback: (profesionales: Profesional[]) => void, scope?: DataAccessScope) {
+  if (!scope) return escucharUnion([], 'profesionales', callback);
+  if (['ADMINISTRADOR', 'SUPERADMIN', 'PROFESIONAL'].includes(scope.tipoPerfil ?? '')) {
+    return escucharUnion([PROFESIONALES_COL], 'profesionales', callback);
+  }
+  if (scope.tipoPerfil !== 'PROPIETARIO') return escucharUnion([], 'profesionales', callback);
+  const consultas = [query(PROFESIONALES_COL, where('esPrivado', '==', false))];
+  if (scope.propietarioId) consultas.push(query(PROFESIONALES_COL, where('creadoPorPropietarioId', '==', scope.propietarioId)));
+  return escucharUnion(consultas, 'profesionales', callback);
 }
 
 export async function saveProfesionalFirestore(profesional: Profesional): Promise<void> {

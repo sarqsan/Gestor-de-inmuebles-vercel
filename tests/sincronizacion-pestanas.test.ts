@@ -156,19 +156,11 @@ describe('ausencia de restauración indebida desde caché', () => {
   });
 });
 
-describe('cableado en App.tsx', () => {
-  it('registra el listener con limpieza y sólo para las 3 claves', () => {
+describe('aislamiento entre sesiones en App.tsx', () => {
+  it('no incorpora datos de otra sesión desde el almacenamiento compartido', () => {
     const src = readFileSync(resolve(RAIZ, 'src/App.tsx'), 'utf-8');
-    expect(src).toContain("from './lib/sincronizacionPestanas'");
-    expect(src).toContain("window.addEventListener('storage', sincronizarDesdeOtraPestana)");
-    expect(src).toContain('window.removeEventListener(\'storage\', sincronizarDesdeOtraPestana)');
-    expect(src).toContain('reconciliarDesdeStorage(e.key, e.newValue, prev)');
-    // Inmuebles fuera del listener: setInmuebles no aparece en ese bloque.
-    const bloque = src.slice(
-      src.indexOf('const sincronizarDesdeOtraPestana'),
-      src.indexOf('window.removeEventListener(\'storage\'')
-    );
-    expect(bloque).not.toContain('setInmuebles');
-    expect(bloque).not.toContain('saveInmuebleFirestore');
+    expect(src).not.toContain('reconciliarDesdeStorage');
+    expect(src).not.toContain("leerCacheLocal<ReturnType<typeof inicialCandidatos>");
+    expect(src).toContain("subscribeCandidatos(conDatos<Candidato[]>('candidatos', setCandidatos), dataScope)");
   });
 });

@@ -1,5 +1,12 @@
 # Publicación de reglas e índices en producción — 2026-10-28
 
+> **Actualización posterior:** este documento conserva la evidencia histórica de la versión
+> de 4 064 líneas. La versión de trabajo actual tiene **4 072 líneas**, SHA-256
+> `b3a9475fca73f31ea7c6ad4e281e068ac45721636721315269cae4344c2286f0`.
+> Incorpora cambios de acceso de propietarios y **aún no está verificada en el
+> emulador oficial ni publicada**. No confundirla con la versión histórica.
+
+
 Guía para **pegar en la consola de Firebase** exactamente lo que falta en producción.
 No hay secretos en este documento: las reglas, los índices y el nombre de la base de
 datos son configuración pública.

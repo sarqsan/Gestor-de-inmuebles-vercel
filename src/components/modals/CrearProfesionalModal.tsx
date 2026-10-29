@@ -136,6 +136,11 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
       return;
     }
 
+    if (currentUser.tipoPerfil === 'PROPIETARIO' && !currentUser.propietarioId) {
+      setErrorMsg('Tu cuenta no tiene un propietario vinculado. Contacta con un administrador antes de guardar.');
+      return;
+    }
+
     try {
       setGuardando(true);
       setErrorMsg('');
@@ -144,7 +149,7 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
       const profesionalActualizado: Profesional = {
         id: profesionalParaEditar?.id || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         usuarioId: profesionalParaEditar?.usuarioId,
-        creadoPorPropietarioId: profesionalParaEditar?.creadoPorPropietarioId || (esOwner ? currentUser.id : undefined),
+        creadoPorPropietarioId: profesionalParaEditar?.creadoPorPropietarioId || (esOwner ? currentUser.propietarioId : undefined),
         esPrivado: profesionalParaEditar?.esPrivado !== undefined ? profesionalParaEditar.esPrivado : esOwner,
         tipo,
         nombreComercial: nombreComercial.trim(),

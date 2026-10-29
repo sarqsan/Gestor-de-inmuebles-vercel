@@ -320,12 +320,21 @@ export const NAVEGACION: readonly ItemNavDef[] = [
 
   // ── Comercial y alquiler ───────────────────────────────────────────────────
   {
+    section: 'solicitudes',
+    grupo: 'COMERCIAL',
+    icono: FileText,
+    etiquetas: { porDefecto: 'Solicitudes de alquiler' },
+    descripciones: { porDefecto: 'Solicitudes de tus inmuebles' },
+    perfiles: ['PROPIETARIO'],
+    contador: 'solicitudes',
+  },
+  {
     section: 'candidatos',
     grupo: 'COMERCIAL',
     icono: Users,
     etiquetas: { porDefecto: 'Candidatos' },
     descripciones: { porDefecto: 'Listado completo' },
-    perfiles: ['ADMINISTRADOR'],
+    perfiles: ['ADMINISTRADOR', 'PROPIETARIO'],
     contador: 'candidatos',
   },
   {
@@ -334,7 +343,7 @@ export const NAVEGACION: readonly ItemNavDef[] = [
     icono: Key,
     etiquetas: { porDefecto: 'Preseleccionados' },
     descripciones: { porDefecto: 'Gestión de visitas y citas' },
-    perfiles: ['ADMINISTRADOR'],
+    perfiles: ['ADMINISTRADOR', 'PROPIETARIO'],
     contador: 'preseleccionados',
   },
   {

@@ -21,9 +21,9 @@ describe('paridad menú ⊆ guarda', () => {
   const propietario = guarda('SECCIONES_PROPIETARIO');
   const profesional = guarda('SECCIONES_PROFESIONAL');
 
-  it('los recuentos del catálogo son 30 / 24 / 5 (7 con gestor)', () => {
+  it('los recuentos del catálogo son 30 / 27 / 5 (7 con gestor)', () => {
     expect(seccionesDePerfil('ADMINISTRADOR')).toHaveLength(30);
-    expect(seccionesDePerfil('PROPIETARIO')).toHaveLength(24);
+    expect(seccionesDePerfil('PROPIETARIO')).toHaveLength(27);
     expect(seccionesDePerfil('PROFESIONAL')).toHaveLength(5);
     expect(seccionesDePerfil('PROFESIONAL', { gestorPatrimonial: true })).toHaveLength(7);
   });

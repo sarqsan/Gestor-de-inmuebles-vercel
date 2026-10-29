@@ -39,28 +39,83 @@ Los dos casos están cubiertos por prueba (`tests/h17-entorno-despliegue.test.ts
 producción funciona igual que antes**. No hay ningún cambio de comportamiento en
 el despliegue actual.
 
-### 1.2 Lo que falta en código (cliente) — P-08
+### 1.2 Cliente: destino por entorno — ✅ hecho (P-08)
 
-El cliente lee `firebase-applet-config.json` **versionado en el repositorio**
-(`src/lib/firebase.ts`, `src/lib/entornoFirebase.ts`, `src/lib/googleAuth.ts`).
-Un despliegue de staging necesita hablar con **otro** proyecto, y no hay forma de
-cambiar ese fichero por entorno en Vercel.
+El cliente leía `firebase-applet-config.json` **versionado** desde tres módulos
+(`firebase.ts`, `entornoFirebase.ts`, `googleAuth.ts`). Como Vercel no puede variar
+un fichero versionado por entorno, un despliegue de staging habría seguido
+hablando con **producción** en la interfaz.
 
-Diseño propuesto (no implementado, para no refactorizar el arranque de auth y
-storage al final de una sesión larga sin necesidad):
+Ahora hay **un solo punto de resolución**: `src/lib/destinoFirebase.ts`.
+`src/lib/firebase.ts` y `src/lib/entornoFirebase.ts` lo consumen; `googleAuth.ts`
+es la excepción documentada (ver «Residuo conocido» al final de este apartado).
 
-- `VITE_ENTORNO_FIREBASE=staging` + `VITE_FIREBASE_PROJECT_ID`,
-  `VITE_FIREBASE_FIRESTORE_DATABASE_ID`, `VITE_FIREBASE_API_KEY`,
-  `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_APP_ID`.
-- Sin `VITE_ENTORNO_FIREBASE=staging`, el JSON versionado manda **y las variables
-  se ignoran**: así nadie puede cambiar el destino de producción desde el panel
-  de Vercel por error.
-- Un solo módulo (`src/lib/destinoFirebase.ts`) que resuelva el objeto de
-  configuración y valide la coherencia, importado por los tres ficheros.
+**Variables** (solo Vercel, proyecto de staging):
 
-Hasta que P-08 exista, el staging es **operativo en servidor y no en cliente**:
-se puede desplegar y verificar `/api/*`, pero la interfaz seguiría apuntando a
-producción. Por eso no se marca H-17 como cerrado.
+| Variable | Obligatoria | Valor |
+|---|---|---|
+| `VITE_ENTORNO_FIREBASE` | sí (para staging) | `staging` |
+| `VITE_FIREBASE_PROJECT_ID` | sí | `gestor-inmuebles-staging` |
+| `VITE_FIREBASE_APP_ID` | sí | el del proyecto de staging |
+| `VITE_FIREBASE_API_KEY` | sí | clave web pública |
+| `VITE_FIREBASE_AUTH_DOMAIN` | sí | `gestor-inmuebles-staging.firebaseapp.com` |
+| `VITE_FIREBASE_FIRESTORE_DATABASE_ID` | sí | base **con nombre** de staging |
+| `VITE_FIREBASE_STORAGE_BUCKET` | sí | bucket de staging |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID`, `..._MEASUREMENT_ID`, `..._OAUTH_CLIENT_ID`, `..._RECAPTCHA_SITE_KEY` | no | opcionales |
+
+**Las cinco reglas que hacen esto seguro** (todas con prueba):
+
+1. **Sin `VITE_ENTORNO_FIREBASE`, manda el JSON versionado** y las
+   `VITE_FIREBASE_*` se **ignoran por completo**. Una variable suelta mal puesta
+   en el panel de Vercel **no puede cambiar el destino de producción**.
+2. **Staging incompleto falla**, con el nombre de la variable que falta. No cae a
+   producción en silencio: ese modo de fallo dejaría el staging apuntando a la base
+   de clientes sin que nadie lo note.
+3. **Staging apuntando al proyecto real → bloqueado** (`DESTINO_STAGING_INCOHERENTE`).
+4. **Valor de entorno desconocido → bloqueado**: no se asume producción.
+5. **La base debe ser con nombre**: la base por defecto no forma parte de la
+   arquitectura, tampoco en staging.
+
+Y el staging **se ve**: la pantalla de Configuración marca `· STAGING` junto al
+proyecto activo y muestra un aviso de que los datos no son los reales. Un entorno
+de pruebas indistinguible del real es la forma más fácil de dar por bueno un dato
+de prueba o de creer que se está probando en una copia.
+
+**Prueba de arranque real** (`tests/p08-arranque-cliente-staging.test.ts`): con el
+entorno de staging puesto, se importa el arranque del cliente y se comprueba que
+la app de Firebase queda en `gestor-inmuebles-staging`, que `googleAuth` reutiliza
+**esa misma** app (no una segunda) y que un staging incompleto **no arranca**. No
+es una lectura de código: es el SDK inicializado.
+
+### Residuo conocido (P-09)
+
+`src/lib/googleAuth.ts` **no se ha tocado**. La guardia de custodia
+(`src/features/operaciones/tests/integration-boundaries.test.mjs`) lo exige byte a
+byte idéntico a `main`, y saltársela está prohibido: no se edita el fichero que
+vigila. Sigue haciendo `initializeApp(firebaseConfig)` con el JSON versionado, pero
+esa rama **no se ejecuta**: cuando se evalúa, `getApps().length` ya es 1 porque
+`firebase.ts` arrancó antes.
+
+Ese «antes» es un orden de importación, y un orden no es una garantía del lenguaje.
+Por eso el arranque **falla en voz alta** en vez de degradarse: si la app existente
+apunta a otro proyecto, `verificarAppPrecedente()` lanza
+`DESTINO_APP_PRECEDENTE_INCOMPATIBLE` y no se reutiliza ni se crea una segunda app.
+Escenario cerrado: *staging que escribe en la base de clientes porque el módulo
+equivocado cargó primero*. Como mucho, un staging que no arranca — nunca un dato
+real en pruebas.
+
+Para eliminarlo del todo hay que llevar `googleAuth.ts` al manifiesto revisado
+(`custodia-parche-p0.json`) con su parche byte a byte. El manifiesto está fijado a
+la base `658f692`, que no existe en este clon superficial; hacerlo a ciegas sería
+reescribir la custodia sin poder verificarla. Queda registrado como **P-09**.
+
+**Nota de compatibilidad:** en producción no cambia nada. El destino resuelto es
+el mismo fichero, el mismo proyecto y la misma base; y la guardia de topología
+(AG-03.2) sigue exigiendo base con nombre y prohibiendo `getFirestore(app)`.
+
+Con P-08 hecho, el staging es **operativo en servidor y en cliente** en cuanto
+exista el proyecto. Lo que falta ya no es código: es crear el proyecto (§1.3) y
+la firma fiscal (§2).
 
 ### 1.3 Runbook: crear el staging (requiere tu cuenta de Google)
 
@@ -83,8 +138,9 @@ Pasos concretos, en este orden. **Nada de esto toca producción.**
 4. **Cuenta de servicio** en ese proyecto (IAM → Cuentas de servicio → crear, rol
    «Cloud Datastore User»), descargar el JSON.
 5. **Vercel**: proyecto duplicado, rama `staging`, y variables:
-   `ENTORNO_DESPLIEGUE=staging`, `FIREBASE_SERVICE_ACCOUNT=<JSON>`, y las
-   `VITE_*` de §1.2 cuando exista P-08.
+   `ENTORNO_DESPLIEGUE=staging`, `FIREBASE_SERVICE_ACCOUNT=<JSON>` y las seis
+   `VITE_FIREBASE_*` obligatorias de §1.2 (más `VITE_ENTORNO_FIREBASE=staging`).
+   **Sin esa marca, la interfaz ignoraría las variables y apuntaría a producción.**
 6. **Verificar el propio despliegue** (no fiarse de que «está desplegado»):
    ```bash
    node scripts/verificar-produccion.mjs --url https://<staging>.vercel.app --json
@@ -178,7 +234,7 @@ VERI*FACTU» en ningún sitio del código (se corrigió en D-09).
 |---|---|
 | Guardia de entorno en servidor | ✅ Hecha y probada (13 casos) |
 | Compatibilidad de producción | ✅ Sin cambios: ausente = producción |
-| Cliente con destino por entorno (P-08) | 🟡 Pendiente — diseño escrito en §1.2 |
+| Cliente con destino por entorno (P-08) | ✅ Hecho — `src/lib/destinoFirebase.ts`, 18 casos |
 | Proyecto de staging creado | 🟡 Pendiente — requiere la cuenta de Google del titular |
 | Runbook de staging | ✅ §1.3 |
 | Pre-dictamen técnico fiscal | ✅ Ya existía |
@@ -187,4 +243,6 @@ VERI*FACTU» en ningún sitio del código (se corrigió en D-09).
 
 **H-17 no se puede cerrar desde el repositorio.** Se cierra el día que exista un
 proyecto de staging verificado y una firma. Lo que sí se ha hecho es quitar la
-excusa técnica: antes ni siquiera era posible intentarlo.
+excusa técnica: antes ni siquiera era posible intentarlo, ni por el servidor (que
+rechazaba cualquier proyecto que no fuese producción) ni por el cliente (que leía
+un fichero versionado).

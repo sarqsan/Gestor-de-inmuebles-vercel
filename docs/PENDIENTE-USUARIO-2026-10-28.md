@@ -2,14 +2,14 @@
 
 | | |
 |---|---|
-| **Estado** | 🟡 **PENDIENTE — no iniciado** |
+| **Estado** | ✅ **CERRADO el 2026-10-29** — ver `docs/P-01-CIERRE-CONSOLA-2026-10-29.md` |
 | **De quién** | El usuario (consola de Firebase, cuenta de Google propia) |
 | **Registrado** | 2026-10-28 |
 | **Aplazado a** | **2026-10-29 o después, en ordenador** |
 | **Por qué en ordenador** | Ver §«Por qué no vale el móvil» |
 | **Duración estimada** | ~12 min (índices ~5 + simulador ~7) |
 | **Bloquea a** | El cierre del registro de publicación de reglas e índices. **No bloquea** H-17 ni el trabajo de código |
-| **Cómo se cierra** | Rellenar el cuadro de §5 de este documento y pegarlo. El registro se actualiza con fecha, versión y resultado; hasta entonces esto sigue **publicado pero no confirmado** |
+| **Cómo se cerró** | Capturas de la consola: 10/10 índices *Habilitado* y final de reglas con 4064 líneas + denegación global. Registrado en el documento de cierre |
 | **Registro padre** | `docs/PENDIENTES-ABIERTOS.md` → **P-01** |
 
 > Dos tareas en la consola de Firebase, unos **12 minutos**, y **nada de código**.
@@ -19,9 +19,11 @@
 > Esto no es una auditoría: son dos comprobaciones que **solo puede hacer el
 > dueño de la consola**, porque requieren entrar con tu cuenta de Google.
 >
-> **Progreso 2026-10-29:** los **10 índices, creados** (informado por el usuario;
-> falta ver que la consola los muestre en *Habilitado*). **Queda la Tarea 2**, el
-> simulador: ver §2, ya ampliada con el detalle del token de autenticación.
+> **Cerrado el 2026-10-29.** Los **10 índices** están en *Habilitado* y el ruleset
+> publicado termina en la línea **4064** con la denegación global. Este documento
+> se conserva como registro de cómo se hizo y de los tropiezos del camino (botón
+> con otro nombre, `Ctrl+F` que engaña, instrucciones que pedían terminal).
+> **No hay nada más que hacer aquí.**
 
 ## 0.0 Por qué no vale el móvil
 

@@ -4,7 +4,7 @@
 > cómo**. Si algo no está aquí, no está pendiente; si está aquí y ya se hizo,
 > hay que cerrarlo en el mismo commit que lo hizo.
 >
-> Actualizado: **2026-10-28**. `main` = `7e20bfd`.
+> Actualizado: **2026-10-29**. P-01 cerrado con evidencia en consola.
 
 ## Estados
 
@@ -19,7 +19,7 @@
 
 | ID | Qué | De quién | Estado | Desde | Dónde está el cómo |
 |---|---|---|---|---|---|
-| **P-01** | Confirmar en la consola de Firebase los **10 índices** y los **6 casos del Rules Playground** | **Usuario** (cuenta de Google) | 🟡 PENDIENTE — **índices creados** y **recuento de reglas 4064 confirmado** (2026-10-29, informado por el usuario); faltan los marcadores o el simulador | 2026-10-28 | `docs/PENDIENTE-USUARIO-2026-10-28.md` |
+| **P-01** | Confirmar en la consola de Firebase los **10 índices** y los **6 casos del Rules Playground** | **Usuario** (cuenta de Google) | ✅ **HECHO** 2026-10-29 — 10/10 índices *Habilitado* y final de reglas con 4064 líneas y denegación global. Evidencia: `docs/P-01-CIERRE-CONSOLA-2026-10-29.md` | 2026-10-28 | `docs/PENDIENTE-USUARIO-2026-10-28.md` |
 | **P-02** | **H-17** — staging + dictamen fiscal: solo procedimiento y evidencia | Agente | 🟡 PENDIENTE | 2026-10-28 | `docs/ROADMAP-01-BLOQUEANTES-VALIDACION-Y-AUDITORIA.md` |
 | **P-03** | **Bundle ~5,56 MB**: code-splitting (la primera carga del panel lo arrastra entero) | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-GLOBAL-ERP-2026-10-20.md` |
 | **P-04** | **Sin E2E de navegador**: los flujos críticos están probados por unidades e integración, no por un navegador real | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-FUNCIONAL-PORTALES-2026-10-27.md` |
@@ -27,7 +27,7 @@
 | **P-06** | **H-15** parcial: quedan supuestos de emulador sin cubrir | Agente | 🔵 EN CURSO (parcial) | 2026-10-27 | `docs/INFORME-AUDITORIA-CIERRE-2026-10-27.md` |
 | **P-07** | Dependencias con versión mayor retenida (`firebase@9.14.0`, `nodemailer@10.2.1`): decisión de **no** degradar, documentada | Agente | ⛔ BLOQUEADO por decisión | 2026-10-27 | `npm audit` + informe de cierre |
 
-## Detalle de P-01 (lo del usuario)
+## P-01 — cerrado el 2026-10-29 (histórico de la comprobación)
 
 Dos tareas, ~12 min, sin código:
 
@@ -44,7 +44,17 @@ repo no ha cambiado (`firestore.rules` = `sha256 81b9ae93…413d`, 4 064 líneas
 publicarlas «por si acaso», ni dar por confirmados los índices. Ante un resultado
 inesperado en el simulador: parar y avisar.
 
-**Dos caminos equivalentes** (§2.4 del documento del usuario):
+**Cerrado.** El usuario aportó tres capturas de la consola: **10/10 índices en
+*Habilitado***, alcance *Colección*, y el final del ruleset publicado con **4064
+líneas** y el cierre `match /{document=**}` → `allow read, write: if false;`.
+Detalle, límites de la evidencia y observaciones: `docs/P-01-CIERRE-CONSOLA-2026-10-29.md`.
+
+Queda anotado para el futuro que en esta versión de la consola la pestaña se llama
+**«Seguridad»** (no «Reglas») y el simulador es **«Desarrollar y realizar
+pruebas»** o la barra plegada **«Zona de pruebas de reglas»** abajo a la izquierda.
+
+Los dos caminos que se propusieron, por si hay que repetirlo en otro proyecto
+(§2.4 del documento del usuario):
 
 - **A · simulador**: los 6 casos del Rules Playground.
 - **B · identidad**: copiar el texto publicado y compararlo con `firestore.rules`

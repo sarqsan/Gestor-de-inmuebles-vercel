@@ -88,32 +88,47 @@ describe('pendientes · un solo registro, sin estados inventados', () => {
   });
 });
 
-describe('pendientes · P-01 sigue abierto y no se puede dar por hecho', () => {
+describe('pendientes · P-01 cerrado con evidencia, no por inercia', () => {
   const fila = () => filas().find((f) => f.id === 'P-01')!;
+  const CIERRE = 'docs/P-01-CIERRE-CONSOLA-2026-10-29.md';
 
-  it('es del usuario y está en PENDIENTE (no en HECHO)', () => {
+  it('está en HECHO y dice de quién era', () => {
     expect(fila().deQuien).toMatch(/usuario/i);
-    expect(fila().estado).toContain('PENDIENTE');
-    expect(fila().estado).not.toContain('HECHO');
+    expect(fila().estado).toContain('HECHO');
   });
 
-  it('deja dicho que se hace en ordenador y desde cuándo está aplazado', () => {
-    const doc = readFileSync(DOC_USUARIO, 'utf8');
-    expect(doc).toMatch(/PENDIENTE — no iniciado/);
-    expect(doc).toContain('2026-10-29');
-    expect(doc).toMatch(/ordenador/i);
-    // El motivo no es una preferencia: hay que decirlo, o se intentará en el móvil.
-    expect(doc).toContain('Por qué no vale el móvil');
+  it('el cierre lleva fecha y enlace a la evidencia', () => {
+    expect(fila().estado).toContain('2026-10-29');
+    const registro = readFileSync(REGISTRO, 'utf8');
+    expect(registro).toContain(CIERRE);
+    expect(existsSync(CIERRE)).toBe(true);
   });
 
-  it('el estado del documento coincide con el del registro', () => {
-    const doc = readFileSync(DOC_USUARIO, 'utf8');
-    if (fila().estado.includes('HECHO')) {
-      // Si algún día se cierra, el banner no puede seguir diciendo «no iniciado».
-      expect(doc).not.toContain('PENDIENTE — no iniciado');
-    } else {
-      expect(doc).toContain('PENDIENTE — no iniciado');
+  it('la evidencia registra lo que se vio, no lo que se esperaba', () => {
+    const cierre = readFileSync(CIERRE, 'utf8');
+    // Los 10 índices, uno por uno, y el estado real de la consola.
+    for (const coleccion of ['actas', 'actas_evidencias', 'actas_incidencias', 'actas_otp', 'gestiones_cartera', 'ia_operaciones']) {
+      expect(cierre).toContain(coleccion);
     }
+    expect(cierre.match(/Habilitado/g)?.length).toBeGreaterThanOrEqual(10);
+    expect(cierre).toContain('4064');
+    // Y el límite de la evidencia, explícito: no se comparó byte a byte.
+    expect(cierre).toMatch(/no he comparado\s+byte a byte|\*\*no he comparado/i);
+  });
+
+  it('el documento del usuario ya no se presenta como pendiente', () => {
+    const doc = readFileSync(DOC_USUARIO, 'utf8');
+    expect(doc).not.toContain('PENDIENTE — no iniciado');
+    expect(doc).toContain('CERRADO el 2026-10-29');
+    expect(doc).toContain(CIERRE);
+  });
+
+  it('conserva el porqué de los tropiezos, para no repetirlos', () => {
+    const doc = readFileSync(DOC_USUARIO, 'utf8');
+    expect(doc).toMatch(/ordenador/i); // se aplazó por eso
+    expect(doc).toContain('Por qué no vale el móvil');
+    expect(doc).toContain('Por qué buscar con Ctrl+F dentro de la consola engaña');
+    expect(doc).toContain('Ruta sin teclado: capturas de pantalla');
   });
 });
 

@@ -224,3 +224,42 @@ describe('pendientes · la guía no exige herramientas que el usuario no tiene',
     expect(DOC).toMatch(/Con \*\*A\*\* y \*\*B\*\*|Con \*\*A\*\* y \*\*B\*\*/);
   });
 });
+
+describe('pendientes · H-17 no se cierra por haber escrito un runbook', () => {
+  const DOC_H17 = 'docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md';
+
+  it('la fila P-02 sigue abierta y dice que la mitad es del usuario', () => {
+    const fila = filas().find((f) => f.id === 'P-02')!;
+    expect(fila.estado).toContain('PENDIENTE');
+    expect(fila.estado).toContain('parcial');
+    expect(fila.deQuien).toMatch(/usuario/i); // crear el proyecto exige su cuenta
+    expect(fila.doc).toContain('H-17-STAGING-Y-DICTAMEN-FISCAL.md');
+  });
+
+  it('P-08 existe y es del agente: el staging no está completo sin la config de cliente', () => {
+    const fila = filas().find((f) => f.id === 'P-08')!;
+    expect(fila.estado).toContain('PENDIENTE');
+    expect(fila.deQuien).toMatch(/agente/i);
+  });
+
+  it('el documento dice qué falta y no presenta el staging como operativo', () => {
+    const doc = readFileSync(DOC_H17, 'utf8');
+    expect(doc).toContain('staging es **operativo en servidor y no en cliente**');
+    expect(doc).toContain('**H-17 no se puede cerrar desde el repositorio.**');
+    // Y deja claro que el dictamen lo firma una persona, no el repositorio.
+    expect(doc).toMatch(/no es un dictamen firmado/i);
+    expect(doc).toContain('Carta para el asesor');
+  });
+
+  it('la carta al asesor tiene las seis preguntas y ninguna es «¿qué hacemos?»', () => {
+    const doc = readFileSync(DOC_H17, 'utf8');
+    const carta = doc.slice(doc.indexOf('### 2.3 Carta para el asesor'));
+    for (const n of ['1. **Obligado tributario.**', '2. **¿El ERP se comercializa como SIF?**',
+      '3. **Locales, temporada y habitación.**', '4. **Modalidad.**',
+      '5. **Factura electrónica B2B.**', '6. **Vigencia de las fuentes.**']) {
+      expect(carta).toContain(n);
+    }
+    // Cada pregunta pide una decisión, no una explicación genérica.
+    expect(carta).toContain('pedimos que lo valides o lo corrijas');
+  });
+});

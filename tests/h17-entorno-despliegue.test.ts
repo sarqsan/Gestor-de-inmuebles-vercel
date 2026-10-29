@@ -19,6 +19,7 @@
  *   4. producción declarada como staging, bloqueado;
  *   5. un valor de entorno desconocido no se interpreta como producción.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   PROYECTO_PRODUCCION,
@@ -131,5 +132,22 @@ describe('H-17 · lo que ya estaba bien no se ha relajado', () => {
       { ENTORNO_DESPLIEGUE: 'staging' },
       config(PROYECTO_STAGING, '(default)'),
     ).errorConfiguracion).toBe('FIREBASE_CONFIGURACION_INVALIDA');
+  });
+
+  it('el runbook habla al usuario sin terminal: todo son clics y capturas', () => {
+    const doc = readFileSync('docs/H-17-STAGING-Y-DICTAMEN-FISCAL.md', 'utf8');
+    const runbook = doc.slice(doc.indexOf('### 1.3'), doc.indexOf('### 1.4'));
+    // Prohibido pedirle comandos al usuario: si aparece `npx`, `npm` o un bloque
+    // de shell, el runbook vuelve a exigir una consola.
+    expect(runbook).not.toMatch(/```bash/);
+    expect(runbook).not.toMatch(/\bnpx\b|\bnpm run\b/);
+    // Cada comprobación del usuario se cierra con captura, y el documento dice
+    // cómo hacerla.
+    expect((runbook.match(/📸/g) ?? []).length).toBeGreaterThanOrEqual(4);
+    expect(runbook).toContain('Windows + Mayús + S');
+    expect(runbook).toContain('Ctrl + Fin');
+    // Y separa lo que hace el usuario de lo que hace el agente.
+    expect(runbook).toContain('(A) Lo que haces tú');
+    expect(runbook).toContain('(B) Lo que hago yo');
   });
 });

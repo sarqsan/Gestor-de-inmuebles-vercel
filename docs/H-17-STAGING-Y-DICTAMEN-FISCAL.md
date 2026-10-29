@@ -117,38 +117,105 @@ Con P-08 hecho, el staging es **operativo en servidor y en cliente** en cuanto
 exista el proyecto. Lo que falta ya no es código: es crear el proyecto (§1.3) y
 la firma fiscal (§2).
 
-### 1.3 Runbook: crear el staging (requiere tu cuenta de Google)
+### 1.3 Runbook: crear el staging
 
-Pasos concretos, en este orden. **Nada de esto toca producción.**
+**Ningún paso de esta lista se hace en una terminal.** Tú solo abres páginas web y
+haces clics; lo que requiera tocar código lo hago yo. **Nada de esto toca
+producción**: se trabaja siempre en el proyecto nuevo.
 
-1. **Proyecto nuevo** en <https://console.cloud.google.com/projectcreate>:
-   - Nombre: `gestor-inmuebles-staging`
-   - ID: `gestor-inmuebles-staging` (si está cogido, `gestor-inmuebles-staging-2`
-     y entonces hay que actualizar `PROYECTO_STAGING` en el código **y** el test
-     que fija la lista).
-2. **Firestore** en ese proyecto: «Crear base de datos» → **modo nativo** →
-   **base con nombre** (no `(default)`), misma forma de ID que producción:
-   `ai-studio-staging-<algo>`. Anótalo: va en la configuración del cliente.
-3. **Reglas e índices**: los mismos ficheros del repositorio.
-   ```bash
-   npx firebase-tools@15.33.0 deploy --only firestore:rules,firestore:indexes --project gestor-inmuebles-staging
-   ```
-   Ojo: `--project` acepta el **ID del proyecto**, no el alias `produccion` de
-   `.firebaserc`.
-4. **Cuenta de servicio** en ese proyecto (IAM → Cuentas de servicio → crear, rol
-   «Cloud Datastore User»), descargar el JSON.
-5. **Vercel**: proyecto duplicado, rama `staging`, y variables:
-   `ENTORNO_DESPLIEGUE=staging`, `FIREBASE_SERVICE_ACCOUNT=<JSON>` y las seis
-   `VITE_FIREBASE_*` obligatorias de §1.2 (más `VITE_ENTORNO_FIREBASE=staging`).
-   **Sin esa marca, la interfaz ignoraría las variables y apuntaría a producción.**
-6. **Verificar el propio despliegue** (no fiarse de que «está desplegado»):
-   ```bash
-   node scripts/verificar-produccion.mjs --url https://<staging>.vercel.app --json
-   ```
-   Debe dar salud 200 con `esquemaDiagnostico: 1`, y los tres rechazos (410, 401,
-   413).
-7. **Evidencia a guardar**: captura de la lista de índices del proyecto de staging
-   (como P-01) y la salida del paso 6.
+#### (A) Lo que haces tú — 5 tareas, solo clics
+
+**Tarea A.1 · Crear el proyecto (3 min)**
+1. Entra en <https://console.firebase.google.com> con tu cuenta de Google.
+2. Arriba a la izquierda, clic en el nombre del proyecto → **«Crear proyecto»**.
+3. Nombre: `gestor-inmuebles-staging`. Si el identificador que propone ya está
+   cogido, acepta el que añada un número al final y **dímelo**: hay que ajustar
+   un literal en el código (lo hago yo).
+4. Analítica: **desactívala** (no hace falta y gasta cuota).
+5. Clic en **«Crear proyecto»** → espera → **«Continuar»**.
+6. 📸 **Captura 1** (qué demuestra: que el proyecto de pruebas existe y no es el
+   real): la pantalla de inicio del proyecto, donde se lee el nombre arriba a la
+   izquierda. `Impr Pant`, o `Windows + Mayús + S` y arrastra un recuadro
+   (en Mac: `Cmd + Mayús + 4`).
+
+**Tarea A.2 · Crear la base de datos con nombre (3 min)**
+1. Menú izquierdo → **«Firestore Database»** → **«Crear base de datos»**.
+2. Ubicación: la misma que producción (`europe-west1` si no recuerdas cuál, dime
+   y lo miro).
+3. Modo: **«Modo de producción»** (nunca «modo de prueba»: las reglas abiertas son
+   el error clásico).
+4. **El ID de la base**: en el desplegable de bases, clic en **«Añadir base de
+   datos»**… no hace falta: el proyecto nuevo nace con la base `(default)`, y la
+   arquitectura exige **base con nombre**. Para crearla con nombre, en la consola
+   de Google Cloud: <https://console.cloud.google.com/firestore/databases> →
+   **«Crear base de datos»** → **«Dar un nombre a la base de datos»** →
+   `ai-studio-staging-1` (o el que prefieras, **anótalo**) → modo nativo →
+   **«Crear»**.
+5. 📸 **Captura 2** (qué demuestra: que la base tiene nombre y no es la
+   `(default)`): la lista de bases de datos, con el nombre visible.
+
+**Tarea A.3 · Publicar reglas e índices en el proyecto nuevo (5 min)**
+1. En el repo, abre en el navegador el fichero `firestore.rules` y usa el botón de
+   copiar del visor de GitHub (el icono de dos hojas, arriba a la derecha del
+   fichero). No hace falta abrir ningún editor.
+2. En la consola de Firebase **del proyecto nuevo**: Firestore Database →
+   pestaña **«Reglas»** → clic dentro del texto → `Ctrl + A` (seleccionar todo) →
+   `Ctrl + V` (pegar) → **«Publicar»**.
+3. Índices: pestaña **«Índices»** → **«Crear índice»**, uno por cada índice de
+   `firestore.indexes.json`. Son los mismos 10 que ya creaste en producción.
+4. 📸 **Captura 3** (qué demuestra: que el staging tiene las MISMAS reglas, no unas
+   relajadas): la pestaña «Reglas» con la última línea `allow read, write: if
+   false;` visible (clic dentro del texto y `Ctrl + Fin` para ir al final).
+5. 📸 **Captura 4**: la lista de índices en estado **«Habilitado»**.
+
+**Tarea A.4 · Dar de alta la aplicación web (2 min)**
+1. Rueda dentada (⚙️, arriba a la izquierda) → **«Configuración del proyecto»** →
+   pestaña **«General»** → baja hasta **«Tus apps»** → icono **`</>`** (web).
+2. Apodo: `panel`. **No** marques Hosting.
+3. Se abre un cuadro con un bloque de configuración. **No lo copies**: solo hace
+   falta que esté creada la app.
+4. 📸 **Captura 5** (qué demuestra: que la app web existe y de qué proyecto es):
+   la pantalla con el apodo `panel` y el `projectId` visible.
+
+**Tarea A.5 · Copiar a un sitio seguro los 6 datos y decírmelos**
+No los pegues aquí en el chat salvo el `projectId`, el `authDomain`, la base y el
+bucket (esos cuatro son públicos). La **clave API web** también es pública por
+diseño, pero si prefieres no escribirla, la pones tú directamente en Vercel en la
+tarea B.4. **Nunca** me pases la cuenta de servicio: esa sí es secreta.
+
+| Dato | Dónde está | ¿Secreto? |
+|---|---|---|
+| `projectId` | Configuración del proyecto → General | no |
+| `authDomain` | `<projectId>.firebaseapp.com` | no |
+| `firestoreDatabaseId` | el nombre que pusiste en A.2 | no |
+| `storageBucket` | Configuración → General → «Bucket» | no |
+| `apiKey` (web) | Configuración → General → «Tus apps» | no (es pública, va en el navegador) |
+| `appId` | Configuración → General → «Tus apps» | no |
+
+**Lo que NO debe salir de tu ordenador:** la **cuenta de servicio** (JSON con clave
+privada). Esa se pega solo en Vercel (tarea B.3), nunca en el chat, ni en un
+commit, ni en una captura.
+
+#### (B) Lo que hago yo, cuando me des los datos de A.5
+
+1. Ajustar el literal del proyecto de staging en el código y en el test que fija la
+   lista (si el nombre lleva sufijo).
+2. Montar el despliegue de staging en Vercel y las variables `VITE_FIREBASE_*`
+   (§1.2). Si prefieres ponerlas tú: Vercel → proyecto → **Settings** →
+   **Environment Variables** → **Add New**, seis filas, ámbito *Preview*.
+3. Verificar el despliegue **desde CI**, no desde tu ordenador: el workflow
+   `verificacion-produccion.yml` ya comprueba salud 200 y los rechazos 410/401/413
+   contra la URL que se le indique. Te doy el resultado con la lista de
+   comprobaciones, sin que tengas que ejecutar nada.
+4. Dejar la evidencia en `docs/` y cerrar P-02 cuando esté verificado.
+
+#### Lo que NO hay que hacer
+
+- No dupliques el proyecto de producción «copiando» la base: el staging nace vacío
+  a propósito. Una copia con datos reales es un riesgo de privacidad.
+- No publiques las reglas de staging en producción ni al revés: son ficheros
+  distintos de proyectos distintos.
+- No uses el modo de prueba de Firestore en ningún momento.
 
 ### 1.4 Para qué sirve el staging cuando exista
 

@@ -48,7 +48,7 @@ inesperado en el simulador: parar y avisar.
 
 - **A · simulador**: los 6 casos del Rules Playground.
 - **B · identidad**: copiar el texto publicado y compararlo con `firestore.rules`
-  (`npm run verificar:reglas-publicadas -- reglas-consola.txt`). Si el `sha256`
+  (`node scripts/verificar-reglas-publicadas.mjs reglas-consola.txt`). Si el `sha256`
   coincide, lo publicado es lo que CI prueba en el emulador; con eso basta y
   sobran los seis formularios.
 

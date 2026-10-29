@@ -11,10 +11,12 @@
  * fichero ya está probado en el emulador, entonces lo publicado se comporta como
  * el fichero. Eso es una cadena de dos eslabones verificables, no una suposición.
  *
- * Uso:
+ * Uso (sin alias en `package.json`: ese fichero está custodiado por
+ * `src/features/operaciones/tests/integration-boundaries.test.mjs`, y añadir un
+ * script lo cambiaría sin manifiesto revisado; la invocación directa basta):
  *   1. En la consola → Firestore → Reglas: clic dentro del editor, Ctrl+A, Ctrl+C.
  *   2. Pegar en un fichero, p. ej. `reglas-consola.txt`.
- *   3. `npm run verificar:reglas-publicadas -- reglas-consola.txt`
+ *   3. `node scripts/verificar-reglas-publicadas.mjs reglas-consola.txt`
  *
  * Solo lectura: no toca la consola ni el repositorio.
  */
@@ -98,7 +100,7 @@ function main(argv) {
     console.log('');
     console.log('  1. Consola → Firestore → Reglas → clic en el editor → Ctrl+A → Ctrl+C');
     console.log('  2. Pegar en un fichero (p. ej. reglas-consola.txt)');
-    console.log('  3. npm run verificar:reglas-publicadas -- reglas-consola.txt');
+    console.log('  3. node scripts/verificar-reglas-publicadas.mjs reglas-consola.txt');
     return ruta ? 0 : 2;
   }
 

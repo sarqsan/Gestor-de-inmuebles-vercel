@@ -225,7 +225,7 @@ detecta igual, y sin equivocarse de `ASC`/`DESC` en un formulario.
 5. En la terminal, desde esa carpeta:
 
    ```bash
-   npm run verificar:reglas-publicadas -- reglas-consola.txt
+   node scripts/verificar-reglas-publicadas.mjs reglas-consola.txt
    ```
 
 **Qué te va a decir:**

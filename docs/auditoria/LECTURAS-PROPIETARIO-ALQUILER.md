@@ -24,13 +24,14 @@ usaba el ID de usuario, pero las reglas exigían el ID del propietario vinculado
 
 ## No publicar sin verificar
 
-Las pruebas unitarias y el evaluador local no sustituyen al motor real de reglas
-ni comprueban los datos ni la configuración desplegada. El emulador oficial no se
-ha ejecutado en este entorno (no se puede descargar el binario); está preparada
-`tests/emulador/lecturas-alquiler-ambito.emulador.test.ts` para probar consultas
-por inmueble propio, compartido y ajeno, históricas, anónimas y personal interno.
-**Debe pasar la suite de emulador en CI antes de publicar reglas y aplicación de
-forma coordinada**, seguida de una comprobación con una cuenta propietaria real.
+La suite oficial de Firestore/Storage ha pasado en GitHub Actions (ejecución
+40939528083, commit `36f547b`): los seis casos nuevos verifican consultas por
+inmueble propio, compartido, ajeno, históricos y acceso de profesionales.
+También pasó la suite local. Estas pruebas no comprueban los datos de producción.
+
+Las reglas y la aplicación todavía no están publicadas. Tras la revisión de la
+integración, hay que desplegarlas de forma coordinada y comprobar el acceso con
+una cuenta propietaria real.
 
 Los profesionales históricos que lleven el ID de la cuenta en lugar del ID del
 propietario, o carezcan de `esPrivado`, pueden necesitar una revisión y migración

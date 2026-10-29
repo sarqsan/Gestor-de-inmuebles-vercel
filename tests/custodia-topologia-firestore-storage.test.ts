@@ -84,7 +84,7 @@ describe('1 · cliente y servidor seleccionan la MISMA base Firestore con nombre
     // resolvedor cuando la configuración no declara base con nombre. Un grep
     // sobre `firebase.ts` no demuestra que se lance el error; esto sí.
     for (const invalida of [undefined, '', '(default)', 'Base Mal', 'ab']) {
-      const resultado = resolverDestinoClienteFirebase({}, {
+      const resultado = resolverDestinoClienteFirebase({
         projectId: CONFIG.projectId,
         firestoreDatabaseId: invalida,
       });

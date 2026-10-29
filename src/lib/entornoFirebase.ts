@@ -2,7 +2,7 @@
  * ENTORNO FIREBASE EN USO — única fuente para mostrar/registrar A QUÉ proyecto y base
  * de datos habla realmente la aplicación.
  *
- * P-08 — lee el destino RESUELTO por `destinoFirebase.ts`, el mismo que usa
+ * Lee el destino RESUELTO por `destinoFirebase.ts`, el mismo que usa
  * `src/lib/firebase.ts` para inicializar el SDK (no es una segunda configuración).
  * Sin dependencia del SDK: se puede importar desde la interfaz y desde los
  * diagnósticos sin arrastrar Firebase.
@@ -18,9 +18,9 @@
 import { DESTINO_FIREBASE, esBaseDatosConNombre as esBaseConNombre } from './destinoFirebase';
 
 /**
- * P-08 — estos valores salen del destino RESUELTO, no del JSON directamente: si
- * el despliegue es de staging, la pantalla de Configuración tiene que decir
- * staging. Mostrar el proyecto de producción en un staging es exactamente el tipo
+ * Estos valores salen del destino RESUELTO, no del JSON directamente: la pantalla
+ * de Configuración debe decir el proyecto con el que habla de verdad. Mostrar el
+ * proyecto de producción cuando la app habla con otro es exactamente el tipo
  * de mentira que este módulo existe para evitar.
  */
 const destino = DESTINO_FIREBASE;
@@ -47,17 +47,6 @@ export const FIREBASE_BASE_DATOS_ID: string = destino.estado === 'OK'
   : '(sin base de datos con nombre: configuración incompleta)';
 
 /**
- * P-08 — entorno activo del cliente. `staging` solo aparece si el despliegue lo
- * declaró y la configuración resultó coherente; nunca por deducción.
- */
-export const ENTORNO_FIREBASE_ACTIVO: 'produccion' | 'staging' = destino.estado === 'OK'
-  ? destino.entorno
-  : 'produccion';
-
-/** `true` si la interfaz está hablando con el staging. Para avisos visibles. */
-export const ES_DESTINO_STAGING: boolean = ENTORNO_FIREBASE_ACTIVO === 'staging';
-
-/**
  * AG-03.2 · Diagnóstico de topología (sin red). Las reglas de Cloud Storage de
  * este repositorio ya NO consultan Firestore (ninguna base): la autorización
  * documental la resuelve el servidor contra la base con nombre. Por tanto la
@@ -74,14 +63,4 @@ export function avisoTopologiaCustodia(): string | null {
     return 'La configuración de la aplicación no declara la base de datos con nombre. La aplicación no arranca contra ninguna otra base: revisa «firestoreDatabaseId» en la configuración versionada antes de publicar.';
   }
   return null;
-}
-
-/**
- * P-08 — aviso de entorno, para que nadie confunda el staging con producción.
- * Un staging indistinguible del sistema real es la forma más fácil de probar algo
- * «en producción» creyendo que es una copia, o de dar por bueno un dato de prueba.
- */
-export function avisoEntornoDespliegue(): string | null {
-  if (!ES_DESTINO_STAGING) return null;
-  return 'ENTORNO DE PRUEBAS (staging): esta interfaz NO habla con la base de producción. Los datos que veas y escribas aquí no son los reales.';
 }

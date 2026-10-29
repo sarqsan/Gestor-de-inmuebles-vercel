@@ -6,48 +6,23 @@ export type CodigoErrorConfiguracionFirebase = CodigoErrorCredencial
   | 'FIREBASE_CREDENCIAL_AUSENTE' | 'FIREBASE_PROYECTO_INCOMPATIBLE'
   | 'FIREBASE_CONFIGURACION_AUSENTE' | 'FIREBASE_CONFIGURACION_ILEGIBLE'
   | 'FIREBASE_CONFIGURACION_INVALIDA' | 'FIREBASE_BASE_DATOS_AUSENTE'
-  | 'FIREBASE_OVERRIDE_INCOMPATIBLE'
-  // H-17 — el proyecto declarado y `ENTORNO_DESPLIEGUE` no coinciden.
-  | 'FIREBASE_ENTORNO_INCOMPATIBLE';
+  | 'FIREBASE_OVERRIDE_INCOMPATIBLE';
 
 /**
- * H-17 — DESTINOS PERMITIDOS, EXPLÍCITOS.
+ * DESTINO PERMITIDO, ÚNICO.
  * =====================================================================
- * Antes solo se admitía `gestor-inmuebles-produccion` escrito a mano, así que
- * **un staging era imposible**: cualquier otro proyecto se bloqueaba. Eso hacía
- * que «staging documentado» fuese una promesa sin código detrás.
+ * El servidor solo habla con el proyecto real. No hay lista de «entornos» ni
+ * variable que los seleccione: **no existe entorno de pruebas** (decisión del
+ * titular, 2026-10-29). Un proyecto ajeno, un fork o un proyecto personal se
+ * bloquean; y si alguien editara el fichero de configuración para apuntar a otro
+ * sitio, el servidor **no arranca** en vez de servir datos desde allí.
  *
- * Ahora hay una lista cerrada de dos destinos. No se «abre» nada: se nombra.
- * `proyecto-ajeno`, un fork o un proyecto personal siguen bloqueados igual.
+ * Antes de esa decisión se llegó a admitir un segundo destino y una variable
+ * `ENTORNO_DESPLIEGUE`; ambos se han retirado para no dejar una puerta abierta
+ * que nadie va a usar.
  */
 export const PROYECTO_PRODUCCION = 'gestor-inmuebles-produccion';
-export const PROYECTO_STAGING = 'gestor-inmuebles-staging';
-export const PROYECTOS_PERMITIDOS: readonly string[] = [PROYECTO_PRODUCCION, PROYECTO_STAGING];
-
-/**
- * Entornos de despliegue. `ENTORNO_DESPLIEGUE` es la ÚNICA variable que decide
- * con qué proyecto se habla, y solo como confirmación: si el JSON dice staging y
- * la variable no lo confirma, se bloquea. Nunca se adivina.
- */
-export type EntornoDespliegue = 'produccion' | 'staging';
-
-/** Proyecto que corresponde a cada entorno. Un entorno sin proyecto no existe. */
-export const PROYECTO_POR_ENTORNO: Readonly<Record<EntornoDespliegue, string>> = {
-  produccion: PROYECTO_PRODUCCION,
-  staging: PROYECTO_STAGING,
-};
-
-/**
- * Entorno declarado. **Ausente = producción**, que es el caso de hoy: así este
- * cambio no altera ni un byte del comportamiento actual del despliegue.
- */
-export function entornoDeclarado(entorno: NodeJS.ProcessEnv = process.env): EntornoDespliegue | null {
-  const crudo = (entorno.ENTORNO_DESPLIEGUE ?? '').trim().toLowerCase();
-  if (crudo === '') return 'produccion';
-  if (crudo === 'produccion' || crudo === 'production' || crudo === 'prod') return 'produccion';
-  if (crudo === 'staging' || crudo === 'pre' || crudo === 'preproduccion') return 'staging';
-  return null; // valor desconocido: se trata como error, no como producción
-}
+export const PROYECTOS_PERMITIDOS: readonly string[] = [PROYECTO_PRODUCCION];
 
 export interface DestinoFirebase {
   proyectoId: string | null;
@@ -75,15 +50,6 @@ export function resolverDestinoFirebase(
   const { projectId, firestoreDatabaseId } = config as Record<string, unknown>;
   if (typeof projectId !== 'string' || !projectId) return bloqueado('FIREBASE_CONFIGURACION_INVALIDA');
   if (!PROYECTOS_PERMITIDOS.includes(projectId)) return bloqueado('FIREBASE_PROYECTO_INCOMPATIBLE');
-  // H-17 — el proyecto y el entorno declarado tienen que ser el MISMO destino.
-  // Sin esta comprobación, un `firebase-applet-config.json` de staging desplegado
-  // en el dominio de producción pasaría inadvertido: el servidor hablaría con la
-  // base de staging creyendo servir a clientes reales.
-  const entornoSolicitado = entornoDeclarado(entorno);
-  if (entornoSolicitado === null) return bloqueado('FIREBASE_ENTORNO_INCOMPATIBLE');
-  if (PROYECTO_POR_ENTORNO[entornoSolicitado] !== projectId) {
-    return bloqueado('FIREBASE_ENTORNO_INCOMPATIBLE');
-  }
   if (firestoreDatabaseId === undefined || firestoreDatabaseId === null || firestoreDatabaseId === '') {
     return bloqueado('FIREBASE_BASE_DATOS_AUSENTE');
   }

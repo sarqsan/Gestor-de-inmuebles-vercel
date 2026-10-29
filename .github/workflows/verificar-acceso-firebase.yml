@@ -1,0 +1,24 @@
+name: Comprobar acceso a Firebase para publicación
+on:
+  push:
+    branches:
+      - arena/216b794e-gestor-de-inmuebles-vercel
+    paths:
+      - .github/workflows/verificar-acceso-firebase.yml
+permissions:
+  contents: read
+jobs:
+  comprobar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar si la identidad de despliegue está configurada
+        env:
+          PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          if [ -n "$PROVIDER" ] && [ -n "$SERVICE_ACCOUNT" ]; then
+            echo '::notice::Identidad de despliegue de Firebase configurada (sin comprobar todavía su acceso).'
+          else
+            echo '::error::No está configurada la identidad de despliegue de Firebase para GitHub Actions.'
+            exit 1
+          fi

@@ -19,7 +19,7 @@
 
 | ID | Qué | De quién | Estado | Desde | Dónde está el cómo |
 |---|---|---|---|---|---|
-| **P-01** | Confirmar en la consola de Firebase los **10 índices** y los **6 casos del Rules Playground** | **Usuario** (cuenta de Google) | 🟡 PENDIENTE — aplazado al 2026-10-29, **en ordenador** | 2026-10-28 | `docs/PENDIENTE-USUARIO-2026-10-28.md` |
+| **P-01** | Confirmar en la consola de Firebase los **10 índices** y los **6 casos del Rules Playground** | **Usuario** (cuenta de Google) | 🟡 PENDIENTE — **índices creados** (2026-10-29, informado por el usuario); falta el simulador | 2026-10-28 | `docs/PENDIENTE-USUARIO-2026-10-28.md` |
 | **P-02** | **H-17** — staging + dictamen fiscal: solo procedimiento y evidencia | Agente | 🟡 PENDIENTE | 2026-10-28 | `docs/ROADMAP-01-BLOQUEANTES-VALIDACION-Y-AUDITORIA.md` |
 | **P-03** | **Bundle ~5,56 MB**: code-splitting (la primera carga del panel lo arrastra entero) | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-GLOBAL-ERP-2026-10-20.md` |
 | **P-04** | **Sin E2E de navegador**: los flujos críticos están probados por unidades e integración, no por un navegador real | Agente | 🟡 PENDIENTE | 2026-10-27 | `docs/AUDITORIA-FUNCIONAL-PORTALES-2026-10-27.md` |

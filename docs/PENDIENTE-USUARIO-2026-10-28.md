@@ -1,5 +1,12 @@
 # Lo que queda de tu parte — 28-10-2026
 
+> **Actualización posterior:** este documento conserva la evidencia histórica de la versión
+> de 4 064 líneas. La versión de trabajo actual tiene **4 072 líneas**, SHA-256
+> `b3a9475fca73f31ea7c6ad4e281e068ac45721636721315269cae4344c2286f0`.
+> Incorpora cambios de acceso de propietarios; la suite del emulador oficial
+> ha pasado en CI, pero **aún no está publicada**. No confundirla con la versión histórica.
+
+
 | | |
 |---|---|
 | **Estado** | ✅ **CERRADO el 2026-10-29** — ver `docs/P-01-CIERRE-CONSOLA-2026-10-29.md` |

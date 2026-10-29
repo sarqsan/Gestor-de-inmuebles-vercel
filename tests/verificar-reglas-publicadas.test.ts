@@ -52,8 +52,8 @@ describe('reglas publicadas · la comparación no miente en ninguna dirección',
     const r = compararConRepo(anterior, REGLAS);
     expect(r.igual).toBe(false);
     expect(r.lineasConsola).toBe(4000);
-    expect(r.lineasRepo).toBe(4064);
-    expect(r.motivo).toMatch(/4000 líneas y el del repositorio 4064/);
+    expect(r.lineasRepo).toBe(contarLineas(REGLAS));
+    expect(r.motivo).toContain(`4000 líneas y el del repositorio ${contarLineas(REGLAS)}`);
   });
 
   it('detecta un texto vacío o basura (pegado fallido)', () => {
@@ -69,8 +69,9 @@ describe('reglas publicadas · la comparación no miente en ninguna dirección',
   });
 
   it('la huella del fichero del repositorio es la que se cita en la documentación', () => {
-    expect(huellaReglas(REGLAS).startsWith('81b9ae93')).toBe(true);
-    expect(contarLineas(REGLAS)).toBe(4064);
+    const doc = readFileSync('docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md', 'utf8');
+    expect(doc).toContain(huellaReglas(REGLAS).slice(0, 8));
+    expect(doc.replace(/\s/g, '')).toContain(String(contarLineas(REGLAS)));
   });
 
   it('normalizar es idempotente (no altera el texto dos veces)', () => {

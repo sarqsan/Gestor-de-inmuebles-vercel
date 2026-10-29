@@ -224,7 +224,7 @@ describe('UX-1 · D/H — Navegación ⊆ acceso y fail-closed', () => {
   });
 
   it('el PROPIETARIO no ve destinos de gestión interna en ninguna plataforma', () => {
-    const prohibidas = ['inquilinos', 'morosidad', 'candidatos', 'preseleccionados', 'seguro_impago', 'analisis', 'administracion'];
+    const prohibidas = ['inquilinos', 'morosidad', 'seguro_impago', 'analisis', 'administracion'];
     const escritorio = renderSidebar(propietario);
     const enEscritorio = seccionesPintadas(escritorio.container);
     escritorio.unmount();
@@ -233,6 +233,10 @@ describe('UX-1 · D/H — Navegación ⊆ acceso y fail-closed', () => {
     for (const s of prohibidas) {
       expect(enEscritorio).not.toContain(s);
       expect(enMovil).not.toContain(s);
+    }
+    for (const s of ['solicitudes', 'candidatos', 'preseleccionados']) {
+      expect(enEscritorio).toContain(s);
+      expect(enMovil).toContain(s);
     }
     expect(enEscritorio).toContain('suministros');
     expect(enMovil).toContain('suministros');

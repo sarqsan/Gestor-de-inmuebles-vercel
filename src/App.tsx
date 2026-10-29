@@ -46,12 +46,7 @@ import {
 import { leerCacheLocal, guardarCacheLocal } from './lib/cacheLocal';
 import {
   inicialPropietarios,
-  inicialCandidatos,
   inicialInmuebles,
-  inicialSolicitudes,
-  inicialInvitaciones,
-  inicialSlots,
-  inicialSolicitudesDoc,
   inicialContratos,
   inicialAseguradoras,
   inicialSolicitudesSeguro,
@@ -173,12 +168,6 @@ import {
   planificarAltaCandidato,
   planificarGuardadoInvitacion,
 } from './lib/invitacionesCandidatos';
-import {
-  CLAVE_STORAGE_CANDIDATOS,
-  CLAVE_STORAGE_INVITACIONES,
-  CLAVE_STORAGE_SLOTS,
-  reconciliarDesdeStorage,
-} from './lib/sincronizacionPestanas';
 
 import { useDialogoAccesible } from './accesibilidad/dialogo';
 import { Sidebar } from './components/Sidebar';
@@ -358,6 +347,9 @@ const SECCIONES_PROPIETARIO: SectionType[] = [
   // PROPIETARIOS / TITULARES para el propietario: su ficha de titular (antes no tenía entrada).
   'titulares',
   'inmuebles',
+  'solicitudes',
+  'candidatos',
+  'preseleccionados',
   'inversion',
   'formalizacion',
   'cobros',
@@ -397,30 +389,15 @@ export default function App() {
     leerCacheLocal<ReturnType<typeof inicialPropietarios>[number]>('propietarios')
       ?? inicialPropietarios();
   });
-  const [candidatos, setCandidatos] = useState<Candidato[]>(() => {
-    leerCacheLocal<ReturnType<typeof inicialCandidatos>[number]>('candidatos')
-      ?? inicialCandidatos();
-  });
+  const [candidatos, setCandidatos] = useState<Candidato[]>([]);
   const [inmuebles, setInmuebles] = useState<Inmueble[]>(() => {
     leerCacheLocal<ReturnType<typeof inicialInmuebles>[number]>('inmuebles')
       ?? inicialInmuebles();
   });
-  const [solicitudes, setSolicitudes] = useState<SolicitudAlquiler[]>(() => {
-    leerCacheLocal<ReturnType<typeof inicialSolicitudes>[number]>('solicitudes')
-      ?? inicialSolicitudes();
-  });
-  const [invitaciones, setInvitaciones] = useState<InvitacionVisita[]>(() => {
-    leerCacheLocal<ReturnType<typeof inicialInvitaciones>[number]>('invitaciones')
-      ?? inicialInvitaciones();
-  });
-  const [slots, setSlots] = useState<VisitSlot[]>(() => {
-    leerCacheLocal<ReturnType<typeof inicialSlots>[number]>('slots')
-      ?? inicialSlots();
-  });
-  const [solicitudesDoc, setSolicitudesDoc] = useState<SolicitudDocumentacion[]>(() => {
-    leerCacheLocal<ReturnType<typeof inicialSolicitudesDoc>[number]>('solicitudes_doc')
-      ?? inicialSolicitudesDoc();
-  });
+  const [solicitudes, setSolicitudes] = useState<SolicitudAlquiler[]>([]);
+  const [invitaciones, setInvitaciones] = useState<InvitacionVisita[]>([]);
+  const [slots, setSlots] = useState<VisitSlot[]>([]);
+  const [solicitudesDoc, setSolicitudesDoc] = useState<SolicitudDocumentacion[]>([]);
   const [contratos, setContratos] = useState<ContratoFormalizacion[]>(() => {
     leerCacheLocal<ReturnType<typeof inicialContratos>[number]>('contratos')
       ?? inicialContratos();
@@ -545,6 +522,7 @@ export default function App() {
     reintentarCapacidad,
     intentoDeCapacidad,
     estadoDePantalla,
+    estadoDe,
     incidencias: incidenciasDatos,
     descartarIncidencia,
     descartarIncidencias,
@@ -1139,67 +1117,6 @@ export default function App() {
     // suscribe aquí: vive en el efecto autenticado. Las vistas anónimas
     // resuelven la ficha pública mínima por id (efecto R3 posterior).
 
-    // AG-02: `invitaciones`, `slots_visita` y `solicitudes_documentacion` solo
-    // se leen con sesión. Las reglas deniegan `list` al anónimo; los portales
-    // públicos resuelven su enlace por token en el servidor.
-    const unsubscribeInv = currentUser
-      ? subscribeInvitaciones(conDatos<InvitacionVisita[]>('invitaciones', (data) => {
-          if (data && data.length > 0) {
-            setInvitaciones(data);
-            guardarCacheLocal('invitaciones', data);
-          }
-        }))
-      : () => {};
-
-    const unsubscribeSlot = currentUser
-      ? subscribeVisitSlots(conDatos<VisitSlot[]>('slots_visita', (data) => {
-          if (data && data.length > 0) {
-            setSlots(data);
-            guardarCacheLocal('slots', data);
-          }
-        }))
-      : () => {};
-
-    const unsubscribeDoc = currentUser ? subscribeSolicitudesDoc((data) => {
-      if (data && data.length > 0) {
-        setSolicitudesDoc(data);
-        guardarCacheLocal('solicitudes_doc', data);
-      }
-      // Auto-sync incoming Firestore docs into local candidate profiles
-      if (data && data.length > 0) {
-        setCandidatos((currentCandidates) => {
-          let updatedList = [...currentCandidates];
-          data.forEach((solDoc) => {
-            const { updatedCandidates } = syncCandidateWithSolicitudDoc(solDoc, updatedList);
-            updatedList = updatedCandidates;
-          });
-          return updatedList;
-        });
-
-        // Also update open modal states in real-time
-        setSelectedCandidateForModal((prev) => {
-          if (!prev) return null;
-          const matchingSol = data.find(
-            (s) =>
-              s.candidatoId === prev.id ||
-              (s.candidatoNombre && prev.nombre && s.candidatoNombre.trim().toLowerCase() === prev.nombre.trim().toLowerCase()) ||
-              (s.candidatoTelefono && prev.telefono && s.candidatoTelefono.replace(/\s+/g, '') === prev.telefono.replace(/\s+/g, ''))
-          );
-          if (matchingSol) {
-            const { targetCand } = syncCandidateWithSolicitudDoc(matchingSol, [prev]);
-            return targetCand || prev;
-          }
-          return prev;
-        });
-
-        setSelectedSolicitudDocForDetail((prev) => {
-          if (!prev) return null;
-          const fresh = data.find((s) => s.id === prev.id || s.token === prev.token);
-          return fresh || prev;
-        });
-      }
-    }) : () => {};
-
     const unsubscribeEnlacesHook = subscribeEnlacesRegistro(conDatos<EnlaceRegistro[]>('enlaces_registro', (data) => {
       setEnlacesRegistro(data);
     }), currentUser ?? undefined);
@@ -1214,40 +1131,20 @@ export default function App() {
 
     return () => {
       window.removeEventListener('hashchange', checkUrlForTokens);
-      unsubscribeInv();
-      unsubscribeSlot();
-      unsubscribeDoc();
       unsubscribeEnlacesHook();
       unsubscribeEspecialidadesHook();
       unsubscribeModulosHook();
     };
   }, [currentUser]);
 
-  // DELTA-C (pestañas): coherencia local entre pestañas para candidatos,
-  // invitaciones y slots (merge por id ante eventos `storage`). NUNCA toca
-  // inmuebles (clave ignorada), no escribe en Firestore y no usa la caché
-  // antigua de C: respeta `snapshotInmueblesCache.ts` como única vía
-  // Firestore → estado/caché de lectura para inmuebles.
-  useEffect(() => {
-    const sincronizarDesdeOtraPestana = (e: StorageEvent) => {
-      if (e.key === CLAVE_STORAGE_CANDIDATOS) {
-        setCandidatos((prev) => reconciliarDesdeStorage(e.key, e.newValue, prev) ?? prev);
-      } else if (e.key === CLAVE_STORAGE_INVITACIONES) {
-        setInvitaciones((prev) => reconciliarDesdeStorage(e.key, e.newValue, prev) ?? prev);
-      } else if (e.key === CLAVE_STORAGE_SLOTS) {
-        setSlots((prev) => reconciliarDesdeStorage(e.key, e.newValue, prev) ?? prev);
-      }
-      // Cualquier otra clave (incluida `rentselect_inmuebles`) se ignora.
-    };
-    window.addEventListener('storage', sincronizarDesdeOtraPestana);
-    return () => window.removeEventListener('storage', sincronizarDesdeOtraPestana);
-  }, []);
-
   // Authenticated subscriptions (attached strictly when a user is authenticated)
   // UX-2: `intentoLecturas` vuelve a ejecutar este efecto al pulsar «Reintentar»,
   // de modo que la lectura se rehace de verdad (nuevas suscripciones, sin recargar).
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setProfesionales([]);
+      return;
+    }
 
     iniciarLecturas();
 
@@ -1274,6 +1171,8 @@ export default function App() {
       ambitosParcialesGestionados,
     };
 
+    setProfesionales([]);
+
     // D2a: suscripción de inmuebles CON ÁMBITO (propios ∪ autorizados
     // explícitos; colección completa sólo para el ámbito administrativo
     // legítimo). Las reglas ya no permiten a un usuario ordinario listar o
@@ -1291,34 +1190,12 @@ export default function App() {
       });
     }), dataScope);
 
-    const unsubscribeCand = subscribeCandidatos(conDatos<Candidato[]>('candidatos', (data) => {
-      if (data && data.length > 0) {
-        setCandidatos(data);
-        guardarCacheLocal('candidatos', data);
-      } else {
-        setCandidatos((current) => {
-          if (current.length > 0) {
-            current.forEach((c) => saveCandidatoFirestore(c));
-            return current;
-          }
-          return [];
-        });
-      }
-    }));
-
     const unsubscribeProp = subscribePropietarios(conDatos<Propietario[]>('propietarios', (data) => {
       if (data && data.length > 0) {
         setPropietarios(data);
         guardarCacheLocal('propietarios', data);
       }
     }), dataScope);
-
-    const unsubscribeSol = subscribeSolicitudes((data) => {
-      if (data && data.length > 0) {
-        setSolicitudes(data);
-        guardarCacheLocal('solicitudes', data);
-      }
-    });
 
     const unsubscribeContratos = subscribeContratos(conDatos<ContratoFormalizacion[]>('contratos', (data) => {
       if (data && data.length > 0) {
@@ -1365,7 +1242,7 @@ export default function App() {
 
     const unsubscribeProfesionalesHook = subscribeProfesionales(conDatos<Profesional[]>('profesionales', (data) => {
       setProfesionales(data);
-    }));
+    }), dataScope);
 
     let unsubscribeMorosidadExp: (() => void) | undefined;
     let unsubscribeMorosidadCmp: (() => void) | undefined;
@@ -1459,9 +1336,7 @@ export default function App() {
 
     return () => {
       unsubscribeInm();
-      unsubscribeCand();
       unsubscribeProp();
-      unsubscribeSol();
       unsubscribeContratos();
       unsubscribeGastos();
       unsubscribeRecurrentes();
@@ -1489,7 +1364,72 @@ export default function App() {
       if (unsubscribeMorosidadPol) unsubscribeMorosidadPol();
       if (unsubscribeMorosidadResumen) unsubscribeMorosidadResumen();
     };
-  }, [currentUser?.id, currentUser?.tipoPerfil, claveInmueblesParcialesGestionados, intentoLecturas]);
+  }, [currentUser?.id, currentUser?.tipoPerfil, currentUser?.propietarioId, JSON.stringify(currentUser?.carterasL), JSON.stringify(currentUser?.carterasE), claveInmueblesParcialesGestionados, intentoLecturas]);
+
+  // Los registros de alquiler se consultan por inmueble: cubre también datos
+  // antiguos sin propietarioId y cotitulares. Las reglas comprueban el inmueble.
+  const claveInmueblesAlquiler = JSON.stringify(scopedInmuebles.map((inm) => inm.id).sort());
+  const estadoInmueblesAlquiler = estadoDe('inmuebles');
+  useEffect(() => {
+    setCandidatos([]); setSolicitudes([]); setInvitaciones([]); setSlots([]); setSolicitudesDoc([]);
+    if (!currentUser || (currentUser.tipoPerfil === 'PROPIETARIO' && estadoInmueblesAlquiler !== 'LISTO')) return;
+    const dataScope = {
+      tipoPerfil: currentUser.tipoPerfil,
+      propietarioId: currentUser.propietarioId,
+      inmueblesAlquilerIds: JSON.parse(claveInmueblesAlquiler) as string[],
+    };
+    const unsubscribeInv = subscribeInvitaciones(conDatos<InvitacionVisita[]>('invitaciones', (data) => {
+          setInvitaciones(data);
+        }), dataScope);
+
+    const unsubscribeSlot = subscribeVisitSlots(conDatos<VisitSlot[]>('slots_visita', (data) => {
+          setSlots(data);
+        }), dataScope);
+
+    const unsubscribeDoc = subscribeSolicitudesDoc(conDatos<SolicitudDocumentacion[]>('solicitudes_documentacion', (data) => {
+      setSolicitudesDoc(data);
+      // Auto-sync incoming Firestore docs into local candidate profiles
+      if (data && data.length > 0) {
+        setCandidatos((currentCandidates) => {
+          let updatedList = [...currentCandidates];
+          data.forEach((solDoc) => {
+            const { updatedCandidates } = syncCandidateWithSolicitudDoc(solDoc, updatedList);
+            updatedList = updatedCandidates;
+          });
+          return updatedList;
+        });
+
+        // Also update open modal states in real-time
+        setSelectedCandidateForModal((prev) => {
+          if (!prev) return null;
+          const matchingSol = data.find(
+            (s) =>
+              s.candidatoId === prev.id ||
+              (s.candidatoNombre && prev.nombre && s.candidatoNombre.trim().toLowerCase() === prev.nombre.trim().toLowerCase()) ||
+              (s.candidatoTelefono && prev.telefono && s.candidatoTelefono.replace(/\s+/g, '') === prev.telefono.replace(/\s+/g, ''))
+          );
+          if (matchingSol) {
+            const { targetCand } = syncCandidateWithSolicitudDoc(matchingSol, [prev]);
+            return targetCand || prev;
+          }
+          return prev;
+        });
+
+        setSelectedSolicitudDocForDetail((prev) => {
+          if (!prev) return null;
+          const fresh = data.find((s) => s.id === prev.id || s.token === prev.token);
+          return fresh || prev;
+        });
+      }
+    }), dataScope);
+
+
+    const unsubscribeCand = subscribeCandidatos(conDatos<Candidato[]>('candidatos', setCandidatos), dataScope);
+
+    const unsubscribeSol = subscribeSolicitudes(conDatos<SolicitudAlquiler[]>('solicitudes', setSolicitudes), dataScope);
+
+    return () => { unsubscribeInv(); unsubscribeSlot(); unsubscribeDoc(); unsubscribeCand(); unsubscribeSol(); };
+  }, [currentUser?.id, currentUser?.tipoPerfil, currentUser?.propietarioId, claveInmueblesAlquiler, estadoInmueblesAlquiler, intentoLecturas]);
 
   // Ref to track candidate questionnaires currently being auto-analyzed
   const autoAnalyzingSetRef = React.useRef<Set<string>>(new Set());

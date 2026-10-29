@@ -51,10 +51,14 @@ describe('AG-02 · App y suscripciones', () => {
   });
 
   it('las tres suscripciones del funnel solo se abren con sesión', () => {
-    expect(APP).toContain('const unsubscribeInv = currentUser\n      ? subscribeInvitaciones(');
-    expect(APP).toContain('const unsubscribeSlot = currentUser\n      ? subscribeVisitSlots(');
-    expect(APP).toContain('const unsubscribeDoc = currentUser ? subscribeSolicitudesDoc(');
-    expect(APP).toContain('AG-02: `invitaciones`, `slots_visita` y `solicitudes_documentacion` solo');
+    const inicio = APP.indexOf('const claveInmueblesAlquiler');
+    const fin = APP.indexOf('// Ref to track candidate questionnaires', inicio);
+    const efecto = APP.slice(inicio, fin);
+    expect(efecto).toContain('if (!currentUser ||');
+    expect(efecto).toContain('const unsubscribeInv = subscribeInvitaciones(');
+    expect(efecto).toContain('const unsubscribeSlot = subscribeVisitSlots(');
+    expect(efecto).toContain('const unsubscribeDoc = subscribeSolicitudesDoc(');
+    expect(efecto).toContain('}), dataScope)');
   });
 
   it('la ficha pública de la App ya solo se resuelve para el alta de solicitud', () => {

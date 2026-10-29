@@ -78,7 +78,7 @@ const ORDEN_ESPERADO: Record<PerfilNavegacion, SectionType[]> = {
     // ficha de titular; antes el aviso «créalo desde Propietarios/Titulares» no llevaba a ningún sitio.
     'propietarios', 'inmuebles', 'titulares', 'datos', 'inversion', 'suministros',
     'cobros', 'tesoreria', 'gastos', 'financiacion', 'conciliacion', 'facturacion', 'fiscal', 'informes',
-    'formalizacion', 'recomercializacion',
+    'solicitudes', 'candidatos', 'preseleccionados', 'formalizacion', 'recomercializacion',
     'incidencias', 'operaciones', 'polizas', 'actas',
     'configuracion', 'ayuda',
   ],
@@ -173,18 +173,18 @@ describe('UX-1 · B — Navegación por perfil', () => {
     expect(s.length).toBe(30);
   });
 
-  it('PROPIETARIO: 24 destinos, sin secciones de gestión interna', () => {
+  it('PROPIETARIO: incluye el alquiler de sus inmuebles, sin secciones internas', () => {
     const s = seccionesDePerfil('PROPIETARIO');
     expect(s).toEqual(ORDEN_ESPERADO.PROPIETARIO);
-    expect(s.length).toBe(24);
+    expect(s.length).toBe(27);
     // AUDITORÍA 2026-09-29 (FASE 16): Importar/Exportar es destino de primer nivel.
     expect(s).toContain('datos');
     expect(s.indexOf('datos')).toBeLessThan(s.indexOf('inversion'));
-    for (const prohibida of ['inquilinos', 'morosidad', 'candidatos', 'preseleccionados', 'seguro_impago', 'analisis', 'administracion'] as SectionType[]) {
+    for (const prohibida of ['inquilinos', 'morosidad', 'seguro_impago', 'analisis', 'administracion'] as SectionType[]) {
       expect(s).not.toContain(prohibida);
     }
     // Conservadas explícitamente (invariante del BLOQUE E, sin regresión de navegación)
-    for (const requerida of ['suministros', 'incidencias', 'inmuebles', 'formalizacion', 'cobros', 'tesoreria', 'actas'] as SectionType[]) {
+    for (const requerida of ['solicitudes', 'candidatos', 'preseleccionados', 'suministros', 'incidencias', 'inmuebles', 'formalizacion', 'cobros', 'tesoreria', 'actas'] as SectionType[]) {
       expect(s).toContain(requerida);
     }
   });

@@ -52,6 +52,9 @@ function origenesConReporteDeLectura(): Set<string> {
     for (const match of contenido.matchAll(/reportarErrorLectura\(\s*'([a-z_]+)'/g)) {
       encontrados.add(match[1]);
     }
+    if (contenido.includes('reportarErrorLectura(origen')) {
+      for (const match of contenido.matchAll(/escucharUnion\([^\n]*,\s*'([a-z_]+)'/g)) encontrados.add(match[1]);
+    }
     if (contenido.includes('reportarErrorLectura(etiqueta')) {
       for (const match of contenido.matchAll(/^\s*'([a-z_]+)',?\s*$/gm)) {
         encontrados.add(match[1]);

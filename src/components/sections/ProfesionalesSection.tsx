@@ -140,8 +140,8 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
   const [incidenciaSeleccionada, setIncidenciaSeleccionada] = useState<Incidencia | null>(null);
 
   // Firestore Subscriptions
-  // BLOQUE 12 · A-01: `profesionales` es directorio compartido (lectura global),
-  // pero trabajos, presupuestos, valoraciones e incidencias son patrimoniales:
+  // El catálogo del titular se limita a profesionales públicos y privados propios;
+  // trabajos, presupuestos, valoraciones e incidencias también son patrimoniales:
   // se piden acotados por ámbito y el filtrado por rol se mantiene después.
   const scope = useMemo(() => scopeDeUsuario(currentUser), [currentUser]);
   const claveDelScope = claveScope(scope);
@@ -151,7 +151,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
 
     const unsubProf = subscribeProfesionales((data) => {
       setProfesionales(data);
-    });
+    }, scope);
 
     const unsubTrab = subscribeTrabajosProfesionales((data) => {
       setTrabajos(data);
@@ -186,7 +186,7 @@ export const ProfesionalesSection: React.FC<ProfesionalesSectionProps> = ({
     : [];
 
   const scopedProfesionales = isOwner
-    ? profesionales.filter((p) => !p.esPrivado || p.creadoPorPropietarioId === currentUser?.id)
+    ? profesionales.filter((p) => !p.esPrivado || p.creadoPorPropietarioId === currentUser?.propietarioId)
     : profesionales;
 
   const scopedTrabajos = isOwner

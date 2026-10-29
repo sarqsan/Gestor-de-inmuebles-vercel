@@ -197,6 +197,57 @@ al revés):
 
 ---
 
+## 2.4 Alternativa mucho más corta (3 minutos) si el simulador se atraganta
+
+El simulador es la parte más torpe de la consola: seis formularios, un editor de
+JSON y un campo de autenticación que casi nadie acierta a la primera. Hay un
+camino equivalente y más corto, **verificado por identidad del texto**.
+
+**La lógica, para que no sea fe ciega:**
+
+1. CI ejecuta la batería de reglas del emulador **contra `firestore.rules`**. Eso
+   demuestra el comportamiento del fichero.
+2. Tú demuestras que el texto **publicado en la consola** es exactamente ese
+   fichero (mismo `sha256`).
+3. Por tanto lo publicado se comporta como lo probado.
+
+El eslabón 2 es el que se rompe en silencio (alguien publicó una versión
+anterior), y es justo el que el simulador iba a detectar. Comparar el texto lo
+detecta igual, y sin equivocarse de `ASC`/`DESC` en un formulario.
+
+**Pasos:**
+
+1. Consola → **Firestore → Reglas**.
+2. Clic **dentro del editor de reglas** (donde está el código).
+3. **Ctrl+A** (seleccionar todo) y **Ctrl+C** (copiar).
+4. Abre un editor de texto y pega. Guarda como **`reglas-consola.txt`** en la
+   carpeta del repositorio (junto a `firestore.rules`).
+5. En la terminal, desde esa carpeta:
+
+   ```bash
+   node scripts/verificar-reglas-publicadas.mjs reglas-consola.txt
+   ```
+
+**Qué te va a decir:**
+
+| Salida | Significado | Qué haces |
+|---|---|---|
+| `✓ OK — lo publicado en la consola es EXACTAMENTE el fichero del repositorio` | publicado = probado | pega esa línea y cerramos |
+| `✗ DISTINTO` + «*tiene X líneas y el del repositorio 4064*» | hay publicada otra versión | **no toques nada**, avísame |
+| `✗ DISTINTO` + «*primera diferencia está en la línea N*» | mismo tamaño, contenido cambiado | avísame con el número de línea |
+
+La comparación **no da falso negativo por formato**: da igual que el pegado use
+saltos de línea de Windows, espacios al final de línea o una línea en blanco de
+más. Solo falla si el **contenido** difiere.
+
+**Y si aun así quieres el simulador**, con este atajo ya hecho basta con dos
+casos de humo en lugar de seis —los dos que cubren los extremos—:
+
+- **Caso 1** (anónimo, `/solicitudes/prueba`, `create`) → **Denegado**.
+- **Caso 6** (`/audit_logs/prueba`, `create`, autenticado con `a@b.c`) → **Permitido**.
+
+---
+
 ## 3. Cómo interpretar un resultado inesperado
 
 | Lo que ves | Qué significa | Qué haces |

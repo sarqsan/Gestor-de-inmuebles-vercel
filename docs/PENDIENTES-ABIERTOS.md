@@ -44,6 +44,14 @@ repo no ha cambiado (`firestore.rules` = `sha256 81b9ae93…413d`, 4 064 líneas
 publicarlas «por si acaso», ni dar por confirmados los índices. Ante un resultado
 inesperado en el simulador: parar y avisar.
 
+**Dos caminos equivalentes** (§2.4 del documento del usuario):
+
+- **A · simulador**: los 6 casos del Rules Playground.
+- **B · identidad**: copiar el texto publicado y compararlo con `firestore.rules`
+  (`node scripts/verificar-reglas-publicadas.mjs reglas-consola.txt`). Si el `sha256`
+  coincide, lo publicado es lo que CI prueba en el emulador; con eso basta y
+  sobran los seis formularios.
+
 **Cómo se cierra P-01:** el usuario pega el cuadro de resultados de §5 de
 `docs/PENDIENTE-USUARIO-2026-10-28.md`. En el mismo commit se anota aquí la
 fecha, la versión publicada que muestre la consola y el estado de los 10 índices.

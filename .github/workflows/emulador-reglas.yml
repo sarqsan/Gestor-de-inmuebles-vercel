@@ -6,6 +6,8 @@ on:
   pull_request:
   push:
     branches:
+      # Verificar las reglas de alquiler del propietario en el emulador oficial.
+      - arena/216b794e-gestor-de-inmuebles-vercel
       - arena/b18a36de-gestor-de-inmuebles-vercel
       # AG-03.3: aceptación en emuladores oficiales de la rama de la sesión (sin secretos ni despliegue).
       - arena/8ed3381d-gestor-de-inmuebles-vercel

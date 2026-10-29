@@ -231,20 +231,35 @@ describe('pendientes · H-17 no se cierra por haber escrito un runbook', () => {
   it('la fila P-02 sigue abierta y dice que la mitad es del usuario', () => {
     const fila = filas().find((f) => f.id === 'P-02')!;
     expect(fila.estado).toContain('PENDIENTE');
-    expect(fila.estado).toContain('parcial');
+    // Tras P-08 no queda trabajo de código en H-17: solo lo externo.
+    expect(fila.estado).toMatch(/solo externo|parcial/);
     expect(fila.deQuien).toMatch(/usuario/i); // crear el proyecto exige su cuenta
     expect(fila.doc).toContain('H-17-STAGING-Y-DICTAMEN-FISCAL.md');
   });
 
-  it('P-08 existe y es del agente: el staging no está completo sin la config de cliente', () => {
+  it('P-08 está hecho: sin la config de cliente el staging no está completo', () => {
     const fila = filas().find((f) => f.id === 'P-08')!;
-    expect(fila.estado).toContain('PENDIENTE');
+    expect(fila.estado).toContain('HECHO');
     expect(fila.deQuien).toMatch(/agente/i);
+    // Y su cierre remite al módulo real, no a una promesa.
+    expect(existsSync('src/lib/destinoFirebase.ts')).toBe(true);
+    expect(fila.estado).toContain('destinoFirebase.ts');
+  });
+
+  it('P-09 registra el residuo de custodia de googleAuth en vez de dar el staging por perfecto', () => {
+    const fila = filas().find((f) => f.id === 'P-09')!;
+    expect(fila.estado).toContain('PENDIENTE');
+    expect(fila.que).toContain('googleAuth.ts');
+    // Y el fichero sigue congelado: si alguien lo toca, la custodia falla antes
+    // de que este test pueda mentir.
+    expect(readFileSync('src/lib/googleAuth.ts', 'utf8')).toContain("import firebaseConfig from '../../firebase-applet-config.json';");
   });
 
   it('el documento dice qué falta y no presenta el staging como operativo', () => {
     const doc = readFileSync(DOC_H17, 'utf8');
-    expect(doc).toContain('staging es **operativo en servidor y no en cliente**');
+    // P-08 hecho: el documento ya no puede decir que el cliente no puede ir a staging.
+    expect(doc).not.toContain('operativo en servidor y no en cliente');
+    expect(doc).toContain('operativo en servidor y en cliente');
     expect(doc).toContain('**H-17 no se puede cerrar desde el repositorio.**');
     // Y deja claro que el dictamen lo firma una persona, no el repositorio.
     expect(doc).toMatch(/no es un dictamen firmado/i);

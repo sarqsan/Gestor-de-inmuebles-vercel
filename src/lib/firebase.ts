@@ -27,7 +27,9 @@ import { getStorage } from 'firebase/storage';
 // (`/api/documentos/*`), que autoriza contra la base Firestore con nombre. El
 // objeto `storage` del SDK se conserva sólo por compatibilidad de firmas.
 import { ref, uploadBytes, getDownloadURL, deleteObject } from './custodiaDocumental/almacenServidor';
-import firebaseConfig from '../../firebase-applet-config.json';
+// P-08 — el destino (producción o staging) se resuelve en UN solo módulo:
+// las variables `VITE_FIREBASE_*` solo se leen si `VITE_ENTORNO_FIREBASE=staging`.
+import { destinoFirebaseRequerido, verificarAppPrecedente } from './destinoFirebase';
 import {
   Candidato,
   Inmueble,
@@ -130,15 +132,19 @@ import { ENTORNO_EJECUCION } from './entornoEjecucion';
 import { INITIAL_ASEGURADORAS } from '../data/mockData';
 import { inicialAseguradoras, inicialCandidatos, inicialGmailConfig } from '../data/estadoInicial';
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+// P-08 — `destinoFirebaseRequerido()` lanza si la configuración es incoherente
+// (staging incompleto, staging apuntando a producción, entorno desconocido):
+// el fallo ocurre al arrancar, no se degrada a un destino por defecto.
+const configuracionFirebase = destinoFirebaseRequerido();
+
+// P-08 — si otro módulo creó la app antes con OTRO proyecto, se falla aquí.
+verificarAppPrecedente(getApps(), configuracionFirebase);
+const app = getApps().length === 0 ? initializeApp(configuracionFirebase) : getApps()[0];
 
 // AG-03.2: la ÚNICA base Firestore de la aplicación es la base CON NOMBRE
-// declarada en `firebase-applet-config.json`. Sin ella no se selecciona ninguna
-// otra (`(default)` no forma parte de la arquitectura): fallo explícito.
-const firestoreDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-if (typeof firestoreDbId !== 'string' || !/^[a-z][a-z0-9-]{2,61}[a-z0-9]$/.test(firestoreDbId)) {
-  throw new Error('FIREBASE_BASE_DATOS_AUSENTE: firebase-applet-config.json debe declarar `firestoreDatabaseId` (base con nombre).');
-}
+// declarada en el destino resuelto. Sin ella no se selecciona ninguna otra
+// (`(default)` no forma parte de la arquitectura): el módulo ya lo valida.
+const firestoreDbId = configuracionFirebase.firestoreDatabaseId;
 export const db = getFirestore(app, firestoreDbId);
 
 export const storage = getStorage(app);

@@ -39,6 +39,7 @@ import {
   custodiaStorageDependeDeBaseDistinta,
   esBaseDatosConNombre,
 } from '../src/lib/entornoFirebase';
+import { destinoFirebaseRequerido, resolverDestinoClienteFirebase } from '../src/lib/destinoFirebase';
 import { ClienteFirestoreRest, esBaseDatosConNombre as esBaseDatosConNombreServidor } from '../server/titularidades/googleBackend';
 import { EMAIL_MASTER } from '../server/titularidades/backendTitulares';
 import { permiteServidor, type PeticionServidor } from './helpers/autorizacionDocumentalHarness';
@@ -67,14 +68,35 @@ describe('1 · cliente y servidor seleccionan la MISMA base Firestore con nombre
   });
 
   it('el cliente inicializa Firestore SÓLO con esa base y falla de forma explícita si falta (sin respaldo a otra base)', () => {
+    // P-08 — el destino se resuelve en `destinoFirebase.ts` (producción o staging).
+    // La propiedad que este caso protege NO cambia: el cliente usa la base con
+    // nombre del destino resuelto y NO cae a `getFirestore(app)` ni a `(default)`.
     const cliente = leer('src/lib/firebase.ts');
-    expect(cliente).toMatch(/const firestoreDbId = \(firebaseConfig as \{ firestoreDatabaseId\?: string \}\)\.firestoreDatabaseId;/);
-    expect(cliente).toContain("throw new Error('FIREBASE_BASE_DATOS_AUSENTE");
+    expect(cliente).toContain('destinoFirebaseRequerido()');
+    expect(cliente).toContain('const firestoreDbId = configuracionFirebase.firestoreDatabaseId;');
     expect(cliente).toMatch(/export const db = getFirestore\(app, firestoreDbId\);/);
     expect(cliente).not.toMatch(/getFirestore\(app\)\s*;/);
     expect(sinComentarios(cliente)).not.toContain('(default)');
     expect(sinComentarios(leer('src/lib/entornoFirebase.ts'))).not.toContain('(default)');
     expect(leer('src/lib/entornoFirebase.ts')).not.toContain('BASE_DATOS_ACCESIBLE_DESDE_STORAGE_RULES');
+
+    // Y ahora la parte que antes solo se podía leer: el comportamiento REAL del
+    // resolvedor cuando la configuración no declara base con nombre. Un grep
+    // sobre `firebase.ts` no demuestra que se lance el error; esto sí.
+    for (const invalida of [undefined, '', '(default)', 'Base Mal', 'ab']) {
+      const resultado = resolverDestinoClienteFirebase({}, {
+        projectId: CONFIG.projectId,
+        firestoreDatabaseId: invalida,
+      });
+      expect(resultado.estado, String(invalida)).toBe('ERROR');
+      if (resultado.estado === 'ERROR') {
+        expect(resultado.codigo, String(invalida)).toBe('FIREBASE_BASE_DATOS_AUSENTE');
+      }
+      // El mensaje de arranque conserva el código histórico que ya documenta la
+      // auditoría: quien despliegue ve el mismo identificador que antes.
+      expect(() => destinoFirebaseRequerido(resultado), String(invalida))
+        .toThrowError(/FIREBASE_BASE_DATOS_AUSENTE/);
+    }
   });
 
   it('el servidor (REST con cuenta de servicio) exige `baseDatosId` con nombre: sin él no construye cliente alguno', () => {

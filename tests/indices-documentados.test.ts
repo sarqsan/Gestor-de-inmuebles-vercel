@@ -54,6 +54,9 @@ function filasDocumentadas(ruta: string): string[] {
 const DOCS = [
   'docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md',
   'docs/PENDIENTE-USUARIO-2026-10-28.md',
+  // La tabla del documento de cierre se copió de la CONSOLA (lo que se vio), no
+  // del fichero: es justo la que más importa atar, porque es la que certifica.
+  'docs/P-01-CIERRE-CONSOLA-2026-10-29.md',
 ];
 
 describe('índices · la tabla que se copia en la consola es la del fichero', () => {

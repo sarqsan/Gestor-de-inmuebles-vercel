@@ -18,6 +18,10 @@
 >
 > Esto no es una auditoría: son dos comprobaciones que **solo puede hacer el
 > dueño de la consola**, porque requieren entrar con tu cuenta de Google.
+>
+> **Progreso 2026-10-29:** los **10 índices, creados** (informado por el usuario;
+> falta ver que la consola los muestre en *Habilitado*). **Queda la Tarea 2**, el
+> simulador: ver §2, ya ampliada con el detalle del token de autenticación.
 
 ## 0.0 Por qué no vale el móvil
 
@@ -102,9 +106,54 @@ operaciones de IA) que, sin ellos, fallan con «la consulta requiere un índice�
 <https://console.firebase.google.com/project/gestor-inmuebles-produccion/firestore/databases/ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51/rules>
 
 En la pestaña **Reglas**, pulsa **Simulador de reglas** (en la interfaz en inglés,
-*Rules Playground*). Para cada fila: escribes la **ruta**, eliges la
-**operación**, marcas o no **Autenticado**, pegas los **datos** y pulsas
-**Ejecutar**.
+*Rules Playground*). Es el mismo botón con dos nombres: **no hay que elegir entre
+uno y otro**.
+
+### 2.1 Dónde está el botón y cómo se ve
+
+- Está **dentro de la pestaña Reglas**, no en otra pantalla: en el editor, arriba a
+  la derecha, junto a «Publicar». Se llama **Simulador** / **Simulador de reglas**
+  (icono de matraz o de reproducción). En consolas antiguas, **Rules Playground**.
+- Al pulsarlo, el editor se parte y aparece un panel a la derecha. Si no lo ves,
+  la ventana es estrecha: ensancha el navegador o busca el icono lateral.
+- **No hay un botón «Publicar» que haya que pulsar aquí.** El simulador solo
+  evalúa; no guarda ni aplica nada.
+
+El panel tiene cuatro bloques, en este orden:
+
+| Bloque | Qué es | Qué se pone |
+|---|---|---|
+| **Ubicación** / *Location* | la ruta del documento | `/solicitudes/prueba` — **empieza por `/`**, sin `databases/...`: la base ya está elegida al estar en su pestaña |
+| **Operación** / *Operation* | el tipo | `get` o `create` según el caso |
+| **Autenticado** / *Authenticated* | interruptor | ON u OFF según el caso |
+| **Carga útil** / *Payload* | el JSON | el de la tabla |
+
+### 2.2 El detalle que hace fallar el caso 6 sin motivo: el email va DENTRO del token
+
+Marcar **Autenticado** y escribir un UID **no basta**. Las reglas leen
+`request.auth.token.email`, así que el email tiene que estar en el JSON de
+autenticación, no en un campo suelto. En los casos autenticados, abre el bloque de
+autenticación y pega exactamente esto:
+
+```json
+{"uid":"prueba","token":{"email":"a@b.c","email_verified":true}}
+```
+
+Cambia solo el email donde el caso lo pida. Si `token.email` falta, `authEmail()`
+devuelve `''` y el caso 6 (**Permitir**) saldrá **Denegado** aunque hayas marcado
+«Autenticado»: es el falso negativo más frecuente de este simulador.
+
+Para el caso 4, el email debe ser `a@b.c` y **no** `sarqsan2@gmail.com`: el master
+sí puede leer OTP (para diagnóstico), así que con su correo el resultado correcto
+es «Permitido» y parecería un fallo de seguridad.
+
+### 2.3 Qué NO rellenar
+
+- **No** hace falta «Documento existente» en los casos `create`: son altas.
+- En el caso `get` (caso 4) el documento no tiene por qué existir: la regla se
+  evalúa antes de leer y el resultado esperado es «Denegado» igual.
+- **No** rellenes «Hora de la solicitud» (*Request time*): no interviene en estos
+  seis casos.
 
 Los seis son **de solo lectura del simulador**: no escriben nada en la base de
 datos, aunque el resultado diga «Permitir».

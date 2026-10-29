@@ -138,3 +138,42 @@ describe('pendientes · las cifras de las reglas citadas son las reales', () => 
     }
   });
 });
+
+describe('pendientes · los marcadores que se le piden al usuario existen de verdad', () => {
+  // El 2026-10-29 la guía pedía buscar dos textos dentro del editor de la consola
+  // y el usuario no los encontró con el recuento de líneas correcto. La causa era
+  // el editor (solo dibuja las líneas visibles), pero el episodio deja una lección:
+  // **una instrucción de verificación también se prueba**. Si el marcador no está
+  // en el fichero, el usuario busca en vano y acaba creyendo que lo publicado está
+  // mal. Aquí se fija cada marcador que la guía manda buscar.
+  const REGLAS = readFileSync('firestore.rules', 'utf8');
+  const DOC = readFileSync(DOC_USUARIO, 'utf8');
+
+  it('las tres cadenas ASCII de §2.4.2 existen en firestore.rules', () => {
+    for (const marcador of ['rules_version = \'2\';', 'actas_otp', 'DENEGACIÓN GLOBAL POR DEFECTO']) {
+      expect(REGLAS).toContain(marcador);
+      expect(DOC).toContain(marcador);
+    }
+  });
+
+  it('la guía desaconseja buscar con Ctrl+F dentro de la consola y explica por qué', () => {
+    expect(DOC).toContain('Por qué buscar con Ctrl+F dentro de la consola engaña');
+    expect(DOC).toMatch(/solo tiene dibujadas|solo dibuja/i);
+  });
+
+  it('el final de fichero que se le pide comparar es el final real', () => {
+    const real = REGLAS.replace(/\n$/, '').split('\n').slice(-6).map((l) => l.trim()).join('\n');
+    // Las seis últimas líneas reales, normalizadas: cierre del match global.
+    expect(real).toContain('match /{document=**} {');
+    expect(real).toContain('allow read, write: if false;');
+    const bloque = DOC.slice(DOC.indexOf('las **últimas líneas**'));
+    expect(bloque).toContain('match /{document=**} {');
+    expect(bloque).toContain('allow read, write: if false;');
+  });
+
+  it('el marcador `actas_otp` sigue siendo único: si deja de serlo, la guía miente', () => {
+    const apariciones = REGLAS.split('\n').filter((l) => l.includes('actas_otp')).length;
+    expect(apariciones).toBe(1);
+    expect(DOC).toContain('**1 vez**');
+  });
+});

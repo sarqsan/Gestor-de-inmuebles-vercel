@@ -215,14 +215,54 @@ El eslabón 2 es el que se rompe en silencio (alguien publicó una versión
 anterior), y es justo el que el simulador iba a detectar. Comparar el texto lo
 detecta igual, y sin equivocarse de `ASC`/`DESC` en un formulario.
 
-**Pasos:**
+### 2.4.1 Por qué buscar con Ctrl+F dentro de la consola engaña
 
-1. Consola → **Firestore → Reglas**.
-2. Clic **dentro del editor de reglas** (donde está el código).
-3. **Ctrl+A** (seleccionar todo) y **Ctrl+C** (copiar).
-4. Abre un editor de texto y pega. Guarda como **`reglas-consola.txt`** en la
+Registrado el 2026-10-29: el usuario buscó dos textos que **sí** están en el
+fichero (líneas 3645 y 3655) y no los encontró, con el recuento de líneas
+correcto (4064). No era un problema de las reglas: es el editor.
+
+- El editor de la consola **solo tiene dibujadas en pantalla las líneas visibles**.
+  La búsqueda del navegador (Ctrl+F) únicamente ve lo dibujado, así que un texto
+  que está en la línea 3645 **no lo encuentra** si no está a la vista. Ausencia de
+  resultado **no** significa ausencia de texto.
+- Además, frases con guion largo (`—`) o tildes fallan si se escriben con un
+  guion normal o desde un teclado distinto.
+
+**Regla práctica:** busca **después de pegar en un editor de texto**, nunca
+dentro del editor de la consola. Y busca cadenas cortas en ASCII.
+
+### 2.4.2 Comprobación rápida sin instalar nada (1 minuto)
+
+1. Clic **dentro del editor de reglas** → **Ctrl+A** → **Ctrl+C**.
+2. Abre el **Bloc de notas** (o TextEdit / gedit) y **pega**.
+3. Con el foco en esa ventana, **Ctrl+F** y busca estas tres cadenas, una a una
+   (todas en ASCII, sin tildes ni guiones largos):
+
+   | Cadena a buscar | Debe aparecer |
+   |---|---|
+   | `rules_version = '2';` | en la **primera** línea |
+   | `actas_otp` | **1 vez** |
+   | `DENEGACIÓN GLOBAL POR DEFECTO` | cerca del final |
+
+4. Y comprueba que las **últimas líneas** del texto pegado son exactamente estas:
+
+   ```text
+       match /{document=**} {
+         allow read, write: if false;
+       }
+     }
+   }
+   ```
+
+Si las tres cadenas aparecen y el final coincide, lo publicado es la versión
+buena: el recuento de líneas (4064) ya lo habías confirmado.
+
+### 2.4.3 Comprobación definitiva (5 minutos, si tienes el repositorio)
+
+1. Consola → **Firestore → Reglas** → clic dentro del editor → **Ctrl+A** → **Ctrl+C**.
+2. Abre un editor de texto, pega y guarda como **`reglas-consola.txt`** en la
    carpeta del repositorio (junto a `firestore.rules`).
-5. En la terminal, desde esa carpeta:
+3. En la terminal, desde esa carpeta:
 
    ```bash
    node scripts/verificar-reglas-publicadas.mjs reglas-consola.txt

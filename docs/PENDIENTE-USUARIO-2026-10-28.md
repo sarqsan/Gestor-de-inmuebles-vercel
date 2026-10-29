@@ -231,7 +231,30 @@ correcto (4064). No era un problema de las reglas: es el editor.
 **Regla práctica:** busca **después de pegar en un editor de texto**, nunca
 dentro del editor de la consola. Y busca cadenas cortas en ASCII.
 
-### 2.4.2 Comprobación rápida sin instalar nada (1 minuto)
+### 2.4.1bis Ruta sin teclado: capturas de pantalla (la que hay que usar)
+
+Aviso registrado el 2026-10-29: las secciones §2.4.2 y §2.4.3 piden pegar texto en
+un editor o abrir una terminal. **Si eso no es tu caso, sáltalas**: no hacen
+falta. Todo lo que queda se puede comprobar con **clic y una captura de
+pantalla**, y quien la lee (yo) saca la conclusión.
+
+**Captura en Windows:** tecla `Impr Pant`, o `Windows + Mayús + S` para recortar
+solo una zona. **En Mac:** `Cmd + Mayús + 4`. Luego pega en el chat.
+
+| Captura | Dónde | Qué demuestra |
+|---|---|---|
+| **A** | Firestore → **Índices** | que están los 10 y en estado *Habilitado* |
+| **B** | Firestore → **Reglas**, desplazado **hasta abajo** | que el final del texto es el correcto (ver §2.4.2) |
+| **C** | Firestore → **Reglas**, parte superior de la pantalla | *solo si quieres seguir con el simulador*: sirve para señalar el botón exacto que tienes |
+
+Con **A** y **B** se cierra P-01. La **C** es opcional y solo para que yo te
+señale el botón del simulador sobre tu propia pantalla, en lugar de describirlo.
+
+**Cómo desplazar el editor de reglas hasta abajo:** clic **una vez dentro del
+texto** de las reglas y pulsa **Ctrl + Fin** (`Cmd + Flecha abajo` en Mac). No
+hace falta seleccionar nada.
+
+### 2.4.2 *(opcional, si sabes usar un editor de texto)* Comparación de marcadores en 1 minuto
 
 1. Clic **dentro del editor de reglas** → **Ctrl+A** → **Ctrl+C**.
 2. Abre el **Bloc de notas** (o TextEdit / gedit) y **pega**.
@@ -257,7 +280,7 @@ dentro del editor de la consola. Y busca cadenas cortas en ASCII.
 Si las tres cadenas aparecen y el final coincide, lo publicado es la versión
 buena: el recuento de líneas (4064) ya lo habías confirmado.
 
-### 2.4.3 Comprobación definitiva (5 minutos, si tienes el repositorio)
+### 2.4.3 *(opcional, solo si tienes el repositorio y sabes usar una terminal)* Comprobación definitiva
 
 1. Consola → **Firestore → Reglas** → clic dentro del editor → **Ctrl+A** → **Ctrl+C**.
 2. Abre un editor de texto, pega y guarda como **`reglas-consola.txt`** en la

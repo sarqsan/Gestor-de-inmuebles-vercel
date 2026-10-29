@@ -177,3 +177,35 @@ describe('pendientes · los marcadores que se le piden al usuario existen de ver
     expect(DOC).toContain('**1 vez**');
   });
 });
+
+describe('pendientes · la guía no exige herramientas que el usuario no tiene', () => {
+  // 2026-10-29: el usuario dijo «yo no sé hacer eso con el ordenador» a una guía
+  // que pedía pegar en el Bloc de notas y abrir una terminal. Una instrucción que
+  // el usuario no puede ejecutar no es una instrucción: es una pared. La ruta
+  // principal tiene que ser clic + captura de pantalla, y las que exigen teclado
+  // tienen que estar marcadas como opcionales.
+  const DOC = readFileSync(DOC_USUARIO, 'utf8');
+
+  it('existe una ruta sin teclado basada en capturas de pantalla', () => {
+    expect(DOC).toContain('Ruta sin teclado: capturas de pantalla');
+    expect(DOC).toContain('Impr Pant');
+    expect(DOC).toMatch(/Ctrl \+ Fin|Ctrl \+ Fin`/);
+  });
+
+  it('las rutas con teclado están marcadas como opcionales, no como el camino', () => {
+    const conTerminal = DOC.indexOf('Comprobación definitiva');
+    const conEditor = DOC.indexOf('Comparación de marcadores');
+    expect(conEditor).toBeGreaterThan(0);
+    expect(conTerminal).toBeGreaterThan(0);
+    // Ambas llevan «opcional» en su título.
+    const tituloEditor = DOC.slice(DOC.lastIndexOf('###', conEditor), conEditor);
+    const tituloTerminal = DOC.slice(DOC.lastIndexOf('###', conTerminal), conTerminal);
+    expect(tituloEditor).toContain('opcional');
+    expect(tituloTerminal).toContain('opcional');
+  });
+
+  it('dice qué demuestra cada captura, para que la conclusión no dependa del usuario', () => {
+    expect(DOC).toContain('Qué demuestra');
+    expect(DOC).toMatch(/Con \*\*A\*\* y \*\*B\*\*|Con \*\*A\*\* y \*\*B\*\*/);
+  });
+});

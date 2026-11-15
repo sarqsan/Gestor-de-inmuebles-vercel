@@ -394,6 +394,36 @@ service cloud.firestore {
         && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();
     }
 
+    // --- P1 · Participantes del canal de una orden de trabajo ---------------
+    // El trabajo es la ÚNICA fuente de verdad de quién participa. Nunca se
+    // confía en los campos del propio mensaje para decidir el acceso.
+    function trabajoDelMensaje(m) {
+      return get(/databases/$(database)/documents/trabajos_profesionales/$(m.trabajoId)).data;
+    }
+    function soyParteDelTrabajo(t) {
+      return (isPropietarioRole() && 'propietarioId' in t && t.propietarioId == myPropId())
+        || (isProfesionalRole() && 'profesionalId' in t && t.profesionalId == myProfId());
+    }
+    function mensajeDeTrabajoLegible(m) {
+      return 'trabajoId' in m && m.trabajoId is string
+        && exists(/databases/$(database)/documents/trabajos_profesionales/$(m.trabajoId))
+        && soyParteDelTrabajo(trabajoDelMensaje(m));
+    }
+    function mensajeDeTrabajoCreable() {
+      return 'trabajoId' in incoming() && incoming().trabajoId is string
+        && exists(/databases/$(database)/documents/trabajos_profesionales/$(incoming().trabajoId))
+        && soyParteDelTrabajo(trabajoDelMensaje(incoming()))
+        // El autor firma con SU uid y con SU rol; nadie puede suplantar.
+        && 'remitenteUid' in incoming() && incoming().remitenteUid == request.auth.uid
+        && 'remitenteRol' in incoming()
+        && incoming().remitenteRol is string
+        && ((isPropietarioRole() && incoming().remitenteRol == 'PROPIETARIO')
+            || (isProfesionalRole() && incoming().remitenteRol == 'PROFESIONAL'))
+        && 'texto' in incoming() && incoming().texto is string
+        && incoming().texto.size() >= 1 && incoming().texto.size() <= 4000
+        && 'createdAt' in incoming();
+    }
+
     // Validación del espejo de identidad contra el perfil autoritativo.
     function indexMatchesProfile(profileId) {
       return get(/databases/$(database)/documents/usuarios/$(profileId)).data;
@@ -1775,6 +1805,52 @@ service cloud.firestore {
         isPropietarioRole()
         && 'propietarioId' in existing() && existing().propietarioId == myPropId()
       );
+    }
+
+    // =========================================================================
+    // 2H-bis. MENSAJES DE TRABAJO (P1 — propietario ↔ profesional por orden)
+    //
+    // POR QUÉ UNA COLECCIÓN NUEVA Y NO `mensajes_portal`:
+    //   `mensajes_portal` exige `contratoId` y su ámbito se deriva del contrato
+    //   (propietario ↔ inquilino). Una orden de trabajo NO tiene contrato, y el
+    //   profesional no es parte de ninguno. Forzar el hilo del profesional
+    //   dentro de `mensajes_portal` habría exigido relajar su ámbito y habría
+    //   puesto en riesgo el aislamiento del hilo del inquilino. Por eso el canal
+    //   del profesional es una colección APARTE, minúscula y acotada.
+    //   `mensajes_portal` NO se toca: ni una línea de su bloque 39 cambia.
+    //
+    // AISLAMIENTO (lo importante):
+    //   - A quién se le permite hablar NO se deduce del mensaje, sino del
+    //     TRABAJO (`trabajos_profesionales/{trabajoId}`): su `propietarioId` y su
+    //     `profesionalId`. Un mensaje no puede "declarar" participantes.
+    //   - Un profesional JAMÁS lee el hilo de otro: la pertenencia se comprueba
+    //     contra los trabajos que tiene asignados.
+    //   - `remitenteUid` tiene que ser el UID de quien escribe y
+    //     `remitenteRol` uno de los dos roles del canal: no se puede firmar un
+    //     mensaje en nombre de otro ni inventarse un tercer rol.
+    //   - Sin `delete`: el hilo es registro de comunicaciones (mismo criterio
+    //     que `mensajes_portal` y que las actas).
+    //   - No hay canal profesional ↔ profesional: el único rol que puede
+    //     escribir en un hilo es el propietario del trabajo o el profesional
+    //     asignado a ESE trabajo.
+    // =========================================================================
+    match /mensajes_trabajo/{mensajeId} {
+      // Puede LEER quien participa en el trabajo: su propietario o su
+      // profesional asignado. (get y list tienen el mismo criterio.)
+      allow get: if isMasterAdmin() || mensajeDeTrabajoLegible(existing());
+      allow list: if isMasterAdmin() || mensajeDeTrabajoLegible(resource.data);
+      // Se puede ESCRIBIR solo si el mensaje es coherente con el trabajo y el
+      // autor es quien dice ser.
+      allow create: if isMasterAdmin() || mensajeDeTrabajoCreable();
+      // Solo se actualiza el acuse de lectura del destinatario. El texto de un
+      // mensaje enviado NO se puede reescribir (integridad del registro).
+      allow update: if isMasterAdmin() || (
+        mensajeDeTrabajoLegible(existing())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+             'leidoPorPropietario', 'leidoPorProfesional'
+           ])
+      );
+      allow delete: if false;
     }
 
     // =========================================================================

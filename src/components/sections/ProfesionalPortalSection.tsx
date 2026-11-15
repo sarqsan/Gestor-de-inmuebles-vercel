@@ -41,6 +41,7 @@ import {
   EstadoTrabajoProfesional,
   PresupuestoProfesional,
 } from '../../types';
+import type { EvidenciaTrabajo } from '../profesional/PanelEvidencias';
 import {
   ESTADO_TRABAJO_LABELS,
   PRIORIDAD_TRABAJO_LABELS,
@@ -52,6 +53,7 @@ import {
   subscribeIncidencias,
   subscribePresupuestosProfesionales,
   saveTrabajoProfesionalFirestore,
+  uploadEvidenciaTrabajoStorage,
   saveIncidenciaFirestore,
   type DataAccessScope,
 } from '../../lib/firebase';
@@ -307,6 +309,80 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
    * `handleCambiarEstadoTrabajo`, que ya escribe historial, sincroniza la
    * incidencia vinculada y respeta las reglas; no se duplica la escritura.
    */
+  /**
+   * P1 §C — Sube una evidencia y la registra en el trabajo.
+   *
+   * La ruta la impone el núcleo (`rutaEvidencia`): siempre bajo
+   * `incidencias/{incidenciaId}/{momento}_…`, el único prefijo que el
+   * servidor autoriza al profesional asignado. El binario va por el motor
+   * mediado por servidor; en el trabajo solo se persiste metadato + URL.
+   */
+  const handleAdjuntarEvidencia = async (entrada: {
+    archivo: File;
+    momento: 'ANTES' | 'DURANTE' | 'DESPUES';
+    observacion: string;
+    ruta: string;
+  }): Promise<EvidenciaTrabajo> => {
+    const trabajo = selectedTrabajoForModal;
+    if (!trabajo) throw new Error('No hay un trabajo abierto.');
+    if (!profesional?.id || trabajo.profesionalId !== profesional.id) {
+      throw new Error('Solo el profesional asignado puede adjuntar evidencias de este trabajo.');
+    }
+    if (!trabajo.incidenciaId) {
+      throw new Error('Este trabajo no tiene una incidencia vinculada donde guardar evidencias.');
+    }
+
+    const { url, storagePath } = await uploadEvidenciaTrabajoStorage(
+      entrada.ruta,
+      entrada.archivo,
+      entrada.archivo.type || 'image/jpeg'
+    );
+
+    const adjunto: EvidenciaTrabajo = {
+      id: `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      nombre: entrada.archivo.name,
+      url,
+      storagePath,
+      tipo: entrada.archivo.type.startsWith('image/') ? 'IMAGEN' : 'DOCUMENTO',
+      mimeType: entrada.archivo.type,
+      tamano: entrada.archivo.size,
+      tamanoBytes: entrada.archivo.size,
+      fechaSubida: new Date().toISOString(),
+      incidenciaId: trabajo.incidenciaId,
+      inmuebleId: trabajo.inmuebleId,
+      propietarioId: trabajo.propietarioId,
+      trabajoId: trabajo.id,
+      subidoPor: profesional.nombreComercial || profesional.razonSocial || currentUser.nombre || 'Profesional',
+      momentoEvidencia: entrada.momento,
+      observacion: entrada.observacion || undefined,
+      fechaMomento: new Date().toISOString(),
+    };
+
+    const documentos = [...((trabajo.documentos || []) as EvidenciaTrabajo[]), adjunto];
+    const actualizado: TrabajoProfesional = {
+      ...trabajo,
+      documentos,
+      historial: [
+        ...(trabajo.historial || []),
+        {
+          id: `h_ev_${Date.now()}`,
+          fecha: new Date().toISOString(),
+          estado: trabajo.estado,
+          usuario: currentUser.nombre || 'Profesional',
+          usuarioId: currentUser.id,
+          comentario: `Evidencia adjuntada (${entrada.momento.toLowerCase()})${entrada.observacion ? `: ${entrada.observacion}` : ''}`,
+        },
+      ],
+      actualizadoPor: currentUser.nombre || 'Profesional',
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveTrabajoProfesionalFirestore(actualizado);
+    setSelectedTrabajoForModal(actualizado);
+    setTrabajos((prev) => prev.map((t) => (t.id === actualizado.id ? actualizado : t)));
+    return adjunto;
+  };
+
   const handleAceptarEncargo = async (trabajo: TrabajoProfesional) => {
     const r = resolverEncargo(
       { estado: trabajo.estado, profesionalId: trabajo.profesionalId },
@@ -1348,9 +1424,12 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
           trabajo={selectedTrabajoForModal}
           inmueble={inmuebles.find((inm) => inm.id === selectedTrabajoForModal.inmuebleId) || null}
           profesionales={profesional ? [profesional] : []}
-          presupuestos={[]}
+          presupuestos={presupuestos.filter((p) => p.trabajoId === selectedTrabajoForModal.id)}
           currentUser={currentUser}
           incidenciaVinculada={incidencias.find((inc) => inc.id === selectedTrabajoForModal.incidenciaId) || null}
+          onAdjuntarEvidencia={handleAdjuntarEvidencia}
+          onCrearPresupuesto={(t) => handleAbrirPresupuesto(t, presupuestos.find((p) => p.trabajoId === t.id))}
+          onVerPresupuesto={(p) => setPresupuestoParaVer(p)}
         />
       )}
 

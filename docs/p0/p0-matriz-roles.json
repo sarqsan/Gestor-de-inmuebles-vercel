@@ -1,12 +1,12 @@
 {
-  "generadoEn": "2026-11-15T16:59:55.649Z",
-  "commit": "2bed683d9db306ded2f3754690742e1843b8fda5",
-  "totalColecciones": 77,
+  "generadoEn": "2026-11-15T21:04:38.088Z",
+  "commit": null,
+  "totalColecciones": 78,
   "celdasDesconocidas": [],
   "matriz": [
     {
       "coleccion": "usuarios_auth",
-      "linea": 427,
+      "linea": 457,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -48,7 +48,7 @@
     },
     {
       "coleccion": "personas",
-      "linea": 807,
+      "linea": 837,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -90,7 +90,7 @@
     },
     {
       "coleccion": "propietarios",
-      "linea": 841,
+      "linea": 871,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -135,7 +135,7 @@
     },
     {
       "coleccion": "inmuebles",
-      "linea": 962,
+      "linea": 992,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -186,7 +186,7 @@
     },
     {
       "coleccion": "titularidades",
-      "linea": 1248,
+      "linea": 1278,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -236,7 +236,7 @@
     },
     {
       "coleccion": "gestiones_cartera",
-      "linea": 1341,
+      "linea": 1371,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -281,7 +281,7 @@
     },
     {
       "coleccion": "registros_patrimoniales",
-      "linea": 1365,
+      "linea": 1395,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -332,7 +332,7 @@
     },
     {
       "coleccion": "fichas_publicas_inmueble",
-      "linea": 1414,
+      "linea": 1444,
       "celdas": {
         "lectura": {
           "clase": "PUBLICO",
@@ -382,7 +382,7 @@
     },
     {
       "coleccion": "contratos_formalizacion",
-      "linea": 1454,
+      "linea": 1484,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -435,7 +435,7 @@
     },
     {
       "coleccion": "gastos",
-      "linea": 1533,
+      "linea": 1563,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -486,7 +486,7 @@
     },
     {
       "coleccion": "gastos_recurrentes",
-      "linea": 1567,
+      "linea": 1597,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -537,7 +537,7 @@
     },
     {
       "coleccion": "prestamos",
-      "linea": 1600,
+      "linea": 1630,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -588,7 +588,7 @@
     },
     {
       "coleccion": "expedientes_recomercializacion",
-      "linea": 1626,
+      "linea": 1656,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -639,7 +639,7 @@
     },
     {
       "coleccion": "propuestas_inmobiliaria",
-      "linea": 1637,
+      "linea": 1667,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -690,7 +690,7 @@
     },
     {
       "coleccion": "leads_inmobiliario",
-      "linea": 1648,
+      "linea": 1678,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -741,7 +741,7 @@
     },
     {
       "coleccion": "inmobiliarias_directorio",
-      "linea": 1663,
+      "linea": 1693,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -789,7 +789,7 @@
     },
     {
       "coleccion": "incidencias",
-      "linea": 1675,
+      "linea": 1705,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -844,7 +844,7 @@
     },
     {
       "coleccion": "tareas_mantenimiento",
-      "linea": 1725,
+      "linea": 1755,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -895,7 +895,7 @@
     },
     {
       "coleccion": "garantias_reparacion",
-      "linea": 1739,
+      "linea": 1769,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -947,7 +947,7 @@
     },
     {
       "coleccion": "trabajos_profesionales",
-      "linea": 1759,
+      "linea": 1789,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -999,8 +999,50 @@
       }
     },
     {
+      "coleccion": "mensajes_trabajo",
+      "linea": 1837,
+      "celdas": {
+        "lectura": {
+          "clase": "ROL",
+          "roles": [
+            "MASTER"
+          ],
+          "porRelacion": false,
+          "detalle": [
+            "isMasterAdmin() || mensajeDeTrabajoLegible(existing())",
+            "isMasterAdmin() || mensajeDeTrabajoLegible(resource.data)"
+          ]
+        },
+        "creacion": {
+          "clase": "ROL",
+          "roles": [
+            "MASTER"
+          ],
+          "porRelacion": false,
+          "detalle": [
+            "isMasterAdmin() || mensajeDeTrabajoCreable()"
+          ]
+        },
+        "modificacion": {
+          "clase": "ROL",
+          "roles": [
+            "MASTER"
+          ],
+          "porRelacion": false,
+          "detalle": [
+            "isMasterAdmin() || ( mensajeDeTrabajoLegible(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([ 'leidoPorPropietario', 'leidoPorProfesional' ]) )"
+          ]
+        },
+        "eliminacion": {
+          "clase": "DENEGADO",
+          "roles": [],
+          "detalle": []
+        }
+      }
+    },
+    {
       "coleccion": "presupuestos_profesionales",
-      "linea": 1783,
+      "linea": 1859,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1054,7 +1096,7 @@
     },
     {
       "coleccion": "valoraciones_profesionales",
-      "linea": 1813,
+      "linea": 1889,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1103,7 +1145,7 @@
     },
     {
       "coleccion": "necesidades_reforma",
-      "linea": 1848,
+      "linea": 1924,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1154,7 +1196,7 @@
     },
     {
       "coleccion": "proyectos_reforma",
-      "linea": 1859,
+      "linea": 1935,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1207,7 +1249,7 @@
     },
     {
       "coleccion": "inventario_inmuebles",
-      "linea": 1884,
+      "linea": 1960,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1258,7 +1300,7 @@
     },
     {
       "coleccion": "inventario_historial",
-      "linea": 1925,
+      "linea": 2001,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1297,7 +1339,7 @@
     },
     {
       "coleccion": "habitaciones_inmueble",
-      "linea": 1946,
+      "linea": 2022,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1348,7 +1390,7 @@
     },
     {
       "coleccion": "polizas_seguros",
-      "linea": 2007,
+      "linea": 2083,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1399,7 +1441,7 @@
     },
     {
       "coleccion": "siniestros",
-      "linea": 2025,
+      "linea": 2101,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1450,7 +1492,7 @@
     },
     {
       "coleccion": "candidatos",
-      "linea": 2049,
+      "linea": 2125,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1509,7 +1551,7 @@
     },
     {
       "coleccion": "solicitudes",
-      "linea": 2080,
+      "linea": 2156,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1568,7 +1610,7 @@
     },
     {
       "coleccion": "invitaciones",
-      "linea": 2102,
+      "linea": 2178,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1626,7 +1668,7 @@
     },
     {
       "coleccion": "slots_visita",
-      "linea": 2127,
+      "linea": 2203,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1684,7 +1726,7 @@
     },
     {
       "coleccion": "solicitudes_documentacion",
-      "linea": 2163,
+      "linea": 2239,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1743,7 +1785,7 @@
     },
     {
       "coleccion": "configuracion_aseguradoras",
-      "linea": 2187,
+      "linea": 2263,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1792,7 +1834,7 @@
     },
     {
       "coleccion": "solicitudes_seguro_impago",
-      "linea": 2197,
+      "linea": 2273,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1851,7 +1893,7 @@
     },
     {
       "coleccion": "system",
-      "linea": 2222,
+      "linea": 2298,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1899,7 +1941,7 @@
     },
     {
       "coleccion": "usuarios",
-      "linea": 2232,
+      "linea": 2308,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1945,7 +1987,7 @@
     },
     {
       "coleccion": "profesionales",
-      "linea": 2395,
+      "linea": 2471,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -1999,7 +2041,7 @@
     },
     {
       "coleccion": "enlaces_registro",
-      "linea": 2527,
+      "linea": 2603,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2045,7 +2087,7 @@
     },
     {
       "coleccion": "especialidades",
-      "linea": 2583,
+      "linea": 2659,
       "celdas": {
         "lectura": {
           "clase": "PUBLICO",
@@ -2098,7 +2140,7 @@
     },
     {
       "coleccion": "audit_logs",
-      "linea": 2596,
+      "linea": 2672,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2135,7 +2177,7 @@
     },
     {
       "coleccion": "notificaciones",
-      "linea": 2614,
+      "linea": 2690,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2184,7 +2226,7 @@
     },
     {
       "coleccion": "financiaciones",
-      "linea": 2643,
+      "linea": 2719,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2234,7 +2276,7 @@
     },
     {
       "coleccion": "movimientos_bancarios",
-      "linea": 2691,
+      "linea": 2767,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2272,7 +2314,7 @@
     },
     {
       "coleccion": "conciliaciones_bancarias",
-      "linea": 2709,
+      "linea": 2785,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2316,7 +2358,7 @@
     },
     {
       "coleccion": "importaciones_bancarias",
-      "linea": 2766,
+      "linea": 2842,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2354,7 +2396,7 @@
     },
     {
       "coleccion": "eventos_conciliacion_bancaria",
-      "linea": 2780,
+      "linea": 2856,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2393,7 +2435,7 @@
     },
     {
       "coleccion": "facturas",
-      "linea": 2854,
+      "linea": 2930,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2443,7 +2485,7 @@
     },
     {
       "coleccion": "registros_facturacion",
-      "linea": 2898,
+      "linea": 2974,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2493,7 +2535,7 @@
     },
     {
       "coleccion": "envios_verifactu",
-      "linea": 2936,
+      "linea": 3012,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2543,7 +2585,7 @@
     },
     {
       "coleccion": "series_facturacion",
-      "linea": 2970,
+      "linea": 3046,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2593,7 +2635,7 @@
     },
     {
       "coleccion": "mensajes_portal",
-      "linea": 2997,
+      "linea": 3073,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2647,7 +2689,7 @@
     },
     {
       "coleccion": "suministros",
-      "linea": 3034,
+      "linea": 3110,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2705,7 +2747,7 @@
     },
     {
       "coleccion": "lecturas_suministro",
-      "linea": 3066,
+      "linea": 3142,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2750,7 +2792,7 @@
     },
     {
       "coleccion": "cambios_titular",
-      "linea": 3097,
+      "linea": 3173,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2808,7 +2850,7 @@
     },
     {
       "coleccion": "facturas_electronicas_b2b",
-      "linea": 3137,
+      "linea": 3213,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2858,7 +2900,7 @@
     },
     {
       "coleccion": "liquidaciones_propietarios",
-      "linea": 3204,
+      "linea": 3280,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2906,7 +2948,7 @@
     },
     {
       "coleccion": "gastos_inmuebles",
-      "linea": 3234,
+      "linea": 3310,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -2954,7 +2996,7 @@
     },
     {
       "coleccion": "ordenes_pago",
-      "linea": 3254,
+      "linea": 3330,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3001,7 +3043,7 @@
     },
     {
       "coleccion": "ficheros_sepa",
-      "linea": 3271,
+      "linea": 3347,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3048,7 +3090,7 @@
     },
     {
       "coleccion": "mandatos_sepa",
-      "linea": 3283,
+      "linea": 3359,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3095,7 +3137,7 @@
     },
     {
       "coleccion": "config_liquidacion",
-      "linea": 3297,
+      "linea": 3373,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3143,7 +3185,7 @@
     },
     {
       "coleccion": "expedientes_morosidad",
-      "linea": 3319,
+      "linea": 3395,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3185,7 +3227,7 @@
     },
     {
       "coleccion": "expedientes_morosidad_hist",
-      "linea": 3339,
+      "linea": 3415,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3222,7 +3264,7 @@
     },
     {
       "coleccion": "evidencias_morosidad",
-      "linea": 3354,
+      "linea": 3430,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3264,7 +3306,7 @@
     },
     {
       "coleccion": "compromisos_morosidad",
-      "linea": 3376,
+      "linea": 3452,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3307,7 +3349,7 @@
     },
     {
       "coleccion": "politicas_morosidad",
-      "linea": 3399,
+      "linea": 3475,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3349,7 +3391,7 @@
     },
     {
       "coleccion": "morosidad_resumen_propietario",
-      "linea": 3415,
+      "linea": 3491,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3392,7 +3434,7 @@
     },
     {
       "coleccion": "actas",
-      "linea": 3445,
+      "linea": 3521,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3443,7 +3485,7 @@
     },
     {
       "coleccion": "actas_evidencias",
-      "linea": 3566,
+      "linea": 3642,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3494,7 +3536,7 @@
     },
     {
       "coleccion": "actas_incidencias",
-      "linea": 3618,
+      "linea": 3694,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3545,7 +3587,7 @@
     },
     {
       "coleccion": "actas_otp",
-      "linea": 3644,
+      "linea": 3720,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3577,7 +3619,7 @@
     },
     {
       "coleccion": "analisis_inversion",
-      "linea": 3664,
+      "linea": 3740,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3628,7 +3670,7 @@
     },
     {
       "coleccion": "operaciones",
-      "linea": 3957,
+      "linea": 4033,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3679,7 +3721,7 @@
     },
     {
       "coleccion": "sindicacion_inmuebles",
-      "linea": 3992,
+      "linea": 4068,
       "celdas": {
         "lectura": {
           "clase": "ROL",
@@ -3729,7 +3771,7 @@
     },
     {
       "coleccion": "{document=**}",
-      "linea": 4060,
+      "linea": 4136,
       "celdas": {
         "lectura": {
           "clase": "DENEGADO",

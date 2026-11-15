@@ -192,10 +192,10 @@ describe('UX-7 · guardas sobre el árbol real', () => {
       'components/modals/DetalleIncidenciaModal.tsx:2103',
       'components/modals/InspeccionFotograficaModal.tsx:601',
       // P1: la capa del lightbox sigue SIN cubrir por el hook y sigue siendo la
-      // misma; solo cambió su número de línea al añadirse el circuito del
-      // profesional por encima. La aserción semántica (qué capas no están
-      // cubiertas) es idéntica.
-      'components/sections/ProfesionalPortalSection.tsx:1411',
+      // MISMA. Solo cambia su número de línea al crecer el portal del profesional
+      // (circuito, mensajería y evidencias) por encima de ella. La aserción
+      // semántica —qué capas no están cubiertas y cuántas hay— es idéntica.
+      'components/sections/ProfesionalPortalSection.tsx:1490',
     ]);
   });
 });

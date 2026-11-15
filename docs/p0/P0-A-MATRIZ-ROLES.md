@@ -1,6 +1,6 @@
 # P0-A · Matriz rol × operación
 
-Generada automáticamente desde `firestore.rules` (77 colecciones).
+Generada automáticamente desde `firestore.rules` (78 colecciones).
 Leyenda: **—** denegado · **TODOS** público · **⚠** condición no clasificada ·
 roles separados por `+` · **AUTENTICADO** = cualquier sesión sin rol específico.
 
@@ -30,6 +30,7 @@ roles separados por `+` · **AUTENTICADO** = cualquier sesión sin rol específi
 | `tareas_mantenimiento` | MASTER+PROPIETARIO | MASTER+PROPIETARIO·rel | MASTER+PROPIETARIO·rel | MASTER+PROPIETARIO |
 | `garantias_reparacion` | MASTER+PROPIETARIO+PROFESIONAL | MASTER+PROPIETARIO·rel | MASTER+PROPIETARIO·rel | MASTER+PROPIETARIO |
 | `trabajos_profesionales` | MASTER+PROPIETARIO+PROFESIONAL | MASTER+PROPIETARIO·rel | MASTER+PROPIETARIO+PROFESIONAL·rel | MASTER+PROPIETARIO |
+| `mensajes_trabajo` | MASTER | MASTER | MASTER | — |
 | `presupuestos_profesionales` | MASTER+PROPIETARIO+PROFESIONAL | MASTER+PROPIETARIO+PROFESIONAL·rel | MASTER+PROPIETARIO+PROFESIONAL·rel | MASTER+PROPIETARIO |
 | `valoraciones_profesionales` | MASTER+PROPIETARIO | MASTER+PROPIETARIO | MASTER | MASTER |
 | `necesidades_reforma` | MASTER+PROPIETARIO | MASTER+PROPIETARIO·rel | MASTER+PROPIETARIO·rel | MASTER+PROPIETARIO |

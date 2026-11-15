@@ -4,7 +4,7 @@
  * Fuente: docs/p0/p0-matriz-roles.json + firestore.rules
  * Regenerar: node scripts/p0/generar-bateria-reglas.mjs
  *
- * 76 colecciones × 10 supuestos = 760 casos.
+ * 77 colecciones × 10 supuestos = 770 casos.
  *
  * CÓMO SE EJECUTA (requiere JRE 21 + firebase-tools):
  *   npm run test:emulador:reglas
@@ -1237,6 +1237,64 @@ describe('P0-A · trabajos_profesionales (10 supuestos)', () => {
     await sembrarDoc('trabajos_profesionales', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
     await assertFails(comoPropA().doc('trabajos_profesionales/' + DOC).delete());
     await assertFails(comoProfesional().doc('trabajos_profesionales/' + DOC).delete());
+  });
+});
+
+describe('P0-A · mensajes_trabajo (10 supuestos)', () => {
+  const DOC = 'doc-p0-1';
+  beforeEach(async () => { await sembrarRoles(); });
+
+  it('1. sin autenticación NO puede leer', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: 'prop_a', inmuebleId: 'inm_1', contratoId: 'c_1', id: '__ID__' });
+    await assertFails(sinAuth().doc('mensajes_trabajo/' + DOC).get());
+  });
+
+  it('2. sin autenticación NO puede crear', async () => {
+    await assertFails(sinAuth().doc('mensajes_trabajo/' + DOC).set({ sintetico: true, propietarioId: PROP_A, inmuebleId: 'inm_1' }));
+  });
+
+  it('3. sin autenticación NO puede modificar', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: 'prop_a', inmuebleId: 'inm_1', contratoId: 'c_1', id: '__ID__' });
+    await assertFails(sinAuth().doc('mensajes_trabajo/' + DOC).update({ sintetico: 'modificado' }));
+  });
+
+  it('4. sin autenticación NO puede eliminar', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: 'prop_a', inmuebleId: 'inm_1', contratoId: 'c_1', id: '__ID__' });
+    await assertFails(sinAuth().doc('mensajes_trabajo/' + DOC).delete());
+  });
+
+  it('5. el master (email verificado) puede leer', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: 'prop_a', inmuebleId: 'inm_1', contratoId: 'c_1', id: '__ID__' });
+    await assertSucceeds(comoMaster().doc('mensajes_trabajo/' + DOC).get());
+  });
+
+  it('6. el propietario A no lee el documento del propietario B (lectura cruzada)', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
+    await assertFails(comoPropA().doc('mensajes_trabajo/' + DOC).get());
+  });
+
+  it('7. el propietario A no puede escribir en nombre de B (escritura cruzada)', async () => {
+    await assertFails(comoPropA().doc('mensajes_trabajo/doc-p0-cruzado').set({
+      sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', id: 'doc-p0-cruzado',
+    }));
+  });
+
+  it('8. un profesional no lee lo que no está en su ámbito', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
+    await assertFails(comoProfesional().doc('mensajes_trabajo/' + DOC).get());
+  });
+
+  it('9. un inquilino no lee lo que no le corresponde', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
+    await assertFails(comoInquilino().doc('mensajes_trabajo/' + DOC).get());
+  });
+
+  it('10. el borrado está prohibido para TODOS los roles (restricción del texto)', async () => {
+    await sembrarDoc('mensajes_trabajo', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
+    // La política declara `allow ... delete: if false` (o equivalente):
+    // ni el master ni el titular pueden borrar.
+    await assertFails(comoPropA().doc('mensajes_trabajo/' + DOC).delete());
+    await assertFails(comoMaster().doc('mensajes_trabajo/' + DOC).delete());
   });
 });
 
@@ -4417,7 +4475,7 @@ describe('P0-A · sindicacion_inmuebles (10 supuestos)', () => {
 });
 
 describe('P0-A · cobertura declarada', () => {
-  it('la batería cubre 76 colecciones (una suite de 10 supuestos cada una)', () => {
-    expect(76).toBeGreaterThanOrEqual(70);
+  it('la batería cubre 77 colecciones (una suite de 10 supuestos cada una)', () => {
+    expect(77).toBeGreaterThanOrEqual(70);
   });
 });

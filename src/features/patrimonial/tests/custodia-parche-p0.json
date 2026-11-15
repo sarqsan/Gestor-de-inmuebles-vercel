@@ -1,15 +1,56 @@
 {
- "base": "658f692d828df8a6b36830fe3d09eda1d5cc5f3b",
- "nota": "Superficie revisada de la rama respecto a la base de main. `superficie` es la lista EXACTA de ficheros que la rama cambia y `parches` reconstruye byte a byte los ficheros compartidos; cualquier diferencia no declarada hace fallar las guardias de custodia.",
+ "base": "2bed683d9db306ded2f3754690742e1843b8fda5",
+ "nota": "Superficie revisada de la rama respecto a la base de main (2bed683, la base de esta rama). `superficie` es la lista EXACTA de ficheros que la rama cambia y `parches` reconstruye byte a byte los ficheros compartidos; cualquier diferencia no declarada hace fallar las guardias de custodia. P1 (2026-11-15): la base se actualiza a 2bed683 y el parche de `firestore.rules` SOLO AÑADE el bloque 2H-bis (`mensajes_trabajo`) y sus helpers; no elimina ni modifica una sola línea existente, y en particular no toca el bloque 39 (`mensajes_portal`).",
  "superficie": [
-  ".github/workflows/verificacion-produccion.yml",
-  "docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md",
-  "src/features/operaciones/tests/custodia-parche-p0.json",
-  "src/features/patrimonial/tests/custodia-parche-p0.json"
+  ".github/workflows/emulador-reglas.yml",
+  "docs/auditoria/AUDITORIA-360-2026-11-15.md",
+  "docs/auditoria/FASE-1-PLAN-RECUPERACION-2026-11-15.md",
+  "docs/p0/P0-A-MATRIZ-ROLES.md",
+  "docs/p0/P0-B-PROCEDIMIENTO-RESTAURACION.md",
+  "docs/p0/P0-FASE-RESOLUCION-Y-DECISION.md",
+  "docs/p0/P0-INFORME-CIERRE-2026-11-15.md",
+  "docs/p0/p0-inventario-reglas.json",
+  "docs/p0/p0-matriz-roles.json",
+  "docs/p1/P1-INFORME-ENTREGA.md",
+  "firestore.rules",
+  "scripts/p0/backup-firestore-storage.mjs",
+  "scripts/p0/generar-bateria-reglas.mjs",
+  "scripts/p0/inventario-reglas.mjs",
+  "scripts/p0/matriz-roles.mjs",
+  "scripts/p0/restaurar.mjs",
+  "scripts/p0/verificar-coherencia.mjs",
+  "src/accesibilidad/ux7.integracion.ui.test.tsx",
+  "src/components/modals/DetalleTrabajoProfesionalModal.tsx",
+  "src/components/profesional/HiloTrabajo.tsx",
+  "src/components/profesional/PanelEvidencias.tsx",
+  "src/components/sections/ProfesionalPortalSection.tsx",
+  "src/features/patrimonial/tests/custodia-parche-p0.json",
+  "src/features/profesional/circuitoProfesional.test.ts",
+  "src/features/profesional/circuitoProfesional.ts",
+  "src/features/profesional/supervisionPropietario.test.ts",
+  "src/features/profesional/tiposMensajeTrabajo.ts",
+  "src/lib/backup/nucleoBackup.test.ts",
+  "src/lib/backup/nucleoBackup.ts",
+  "src/lib/firebase.ts",
+  "src/lib/masterSeguridad.test.ts",
+  "src/lib/masterSeguridad.ts",
+  "src/lib/mensajesTrabajoFirestore.ts",
+  "tests/emulador/p0-cobertura-reglas.emulador.test.ts",
+  "tests/emulador/p1-circuito-profesional.emulador.test.ts",
+  "tests/p0/matriz-reglas.test.ts"
  ],
  "parches": {
   "package.json": [],
   "package-lock.json": [],
-  "firestore.rules": []
+  "firestore.rules": [
+   {
+    "viejo": "    // =========================================================================\n    // 2I. PRESUPUESTOS DE PROFESIONALES (FASE 4 - COMPARATIVA Y ADJUDICACIÓN)",
+    "nuevo": "    // =========================================================================\n    // 2H-bis. MENSAJES DE TRABAJO (P1 — propietario ↔ profesional por orden)\n    //\n    // POR QUÉ UNA COLECCIÓN NUEVA Y NO `mensajes_portal`:\n    //   `mensajes_portal` exige `contratoId` y su ámbito se deriva del contrato\n    //   (propietario ↔ inquilino). Una orden de trabajo NO tiene contrato, y el\n    //   profesional no es parte de ninguno. Forzar el hilo del profesional\n    //   dentro de `mensajes_portal` habría exigido relajar su ámbito y habría\n    //   puesto en riesgo el aislamiento del hilo del inquilino. Por eso el canal\n    //   del profesional es una colección APARTE, minúscula y acotada.\n    //   `mensajes_portal` NO se toca: ni una línea de su bloque 39 cambia.\n    //\n    // AISLAMIENTO (lo importante):\n    //   - A quién se le permite hablar NO se deduce del mensaje, sino del\n    //     TRABAJO (`trabajos_profesionales/{trabajoId}`): su `propietarioId` y su\n    //     `profesionalId`. Un mensaje no puede \"declarar\" participantes.\n    //   - Un profesional JAMÁS lee el hilo de otro: la pertenencia se comprueba\n    //     contra los trabajos que tiene asignados.\n    //   - `remitenteUid` tiene que ser el UID de quien escribe y\n    //     `remitenteRol` uno de los dos roles del canal: no se puede firmar un\n    //     mensaje en nombre de otro ni inventarse un tercer rol.\n    //   - Sin `delete`: el hilo es registro de comunicaciones (mismo criterio\n    //     que `mensajes_portal` y que las actas).\n    //   - No hay canal profesional ↔ profesional: el único rol que puede\n    //     escribir en un hilo es el propietario del trabajo o el profesional\n    //     asignado a ESE trabajo.\n    // =========================================================================\n    match /mensajes_trabajo/{mensajeId} {\n      // Puede LEER quien participa en el trabajo: su propietario o su\n      // profesional asignado. (get y list tienen el mismo criterio.)\n      allow get: if isMasterAdmin() || mensajeDeTrabajoLegible(existing());\n      allow list: if isMasterAdmin() || mensajeDeTrabajoLegible(resource.data);\n      // Se puede ESCRIBIR solo si el mensaje es coherente con el trabajo y el\n      // autor es quien dice ser.\n      allow create: if isMasterAdmin() || mensajeDeTrabajoCreable();\n      // Solo se actualiza el acuse de lectura del destinatario. El texto de un\n      // mensaje enviado NO se puede reescribir (integridad del registro).\n      allow update: if isMasterAdmin() || (\n        mensajeDeTrabajoLegible(existing())\n        && incoming().diff(existing()).affectedKeys().hasOnly([\n             'leidoPorPropietario', 'leidoPorProfesional'\n           ])\n      );\n      allow delete: if false;\n    }\n\n    // =========================================================================\n    // 2I. PRESUPUESTOS DE PROFESIONALES (FASE 4 - COMPARATIVA Y ADJUDICACIÓN)"
+   },
+   {
+    "viejo": "    function aisladoUpdateOk() {\n      return isPropietarioRole()\n        && 'propietarioId' in existing() && existing().propietarioId == myPropId()\n        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();\n    }",
+    "nuevo": "    function aisladoUpdateOk() {\n      return isPropietarioRole()\n        && 'propietarioId' in existing() && existing().propietarioId == myPropId()\n        && 'propietarioId' in incoming() && incoming().propietarioId == myPropId();\n    }\n\n    // --- P1 · Participantes del canal de una orden de trabajo ---------------\n    // El trabajo es la ÚNICA fuente de verdad de quién participa. Nunca se\n    // confía en los campos del propio mensaje para decidir el acceso.\n    function trabajoDelMensaje(m) {\n      return get(/databases/$(database)/documents/trabajos_profesionales/$(m.trabajoId)).data;\n    }\n    function soyParteDelTrabajo(t) {\n      return (isPropietarioRole() && 'propietarioId' in t && t.propietarioId == myPropId())\n        || (isProfesionalRole() && 'profesionalId' in t && t.profesionalId == myProfId());\n    }\n    function mensajeDeTrabajoLegible(m) {\n      return 'trabajoId' in m && m.trabajoId is string\n        && exists(/databases/$(database)/documents/trabajos_profesionales/$(m.trabajoId))\n        && soyParteDelTrabajo(trabajoDelMensaje(m));\n    }\n    function mensajeDeTrabajoCreable() {\n      return 'trabajoId' in incoming() && incoming().trabajoId is string\n        && exists(/databases/$(database)/documents/trabajos_profesionales/$(incoming().trabajoId))\n        && soyParteDelTrabajo(trabajoDelMensaje(incoming()))\n        // El autor firma con SU uid y con SU rol; nadie puede suplantar.\n        && 'remitenteUid' in incoming() && incoming().remitenteUid == request.auth.uid\n        && 'remitenteRol' in incoming()\n        && incoming().remitenteRol is string\n        && ((isPropietarioRole() && incoming().remitenteRol == 'PROPIETARIO')\n            || (isProfesionalRole() && incoming().remitenteRol == 'PROFESIONAL'))\n        && 'texto' in incoming() && incoming().texto is string\n        && incoming().texto.size() >= 1 && incoming().texto.size() <= 4000\n        && 'createdAt' in incoming();\n    }"
+   }
+  ]
  }
 }

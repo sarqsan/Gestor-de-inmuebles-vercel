@@ -40,7 +40,12 @@ Dos tareas, ~12 min, sin código:
 2. **6 casos** en Firestore → Reglas → Simulador de reglas.
 
 **No hay que republicar nada.** Las reglas ya están publicadas y el fichero del
-repo no ha cambiado (`firestore.rules` = `sha256 81b9ae93…413d`, 4 064 líneas).
+repo no ha cambiado (`firestore.rules` = `sha256 63ce450e…`, 4 140 líneas).
+
+> **Actualizado 2026-11-15 (P1):** el ruleset pasó de 4 064 a 4 140 líneas y de
+> `sha256 81b9ae93…413d` a `sha256 63ce450e…` porque P1 AÑADIÓ el bloque `2H-bis`
+> (`mensajes_trabajo`) al final, sin quitar ni modificar una sola línea previa. La
+> cifra de 4 064 sigue siendo la correcta para lo que se publicó el 2026-10-29.
 `storage.rules` sin cambios. Comprobación de 5 segundos antes de empezar: la
 última línea de la pestaña Reglas debe ser **4 064**.
 

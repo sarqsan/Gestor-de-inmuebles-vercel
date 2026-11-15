@@ -56,10 +56,13 @@ describe('P0-A · inventario de Firestore', () => {
     expect(new Set(nombres).size).toBe(nombres.length);
   });
 
-  it('el recuento real es 77 colecciones + 4 subcolecciones (auditoría decía ~80)', () => {
+  it('el recuento real es 78 colecciones + 4 subcolecciones (auditoría decía ~80)', () => {
     // Se fija el número para que cualquier cambio exija actualizar el inventario
     // y el informe: el objetivo es detectar deriva, no impedirla.
-    expect(INVENTARIO.totalColecciones).toBe(77);
+    // P1 (2026-11-15): 77 → 78 por `mensajes_trabajo`, el canal propietario ↔
+    // profesional por orden de trabajo. Colección nueva, aislada y con política
+    // declarada; las otras 77 no cambian.
+    expect(INVENTARIO.totalColecciones).toBe(78);
     expect(INVENTARIO.subcolecciones).toHaveLength(4);
     expect(INVENTARIO.subcolecciones.map((s) => s.ruta).sort()).toEqual([
       '/documentos_patrimoniales/{documentoId}',

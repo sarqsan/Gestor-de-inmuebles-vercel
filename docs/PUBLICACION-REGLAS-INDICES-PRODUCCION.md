@@ -17,7 +17,7 @@ si las reglas antiguas (más permisivas) siguieran vigentes.
 | Proyecto | `gestor-inmuebles-produccion` |
 | Base de datos Firestore (**no** es `(default)`) | `ai-studio-gestordeinmueble-c6444afd-24ca-4983-b195-ceb2c5ebdc51` |
 | Bucket de Storage | `gestor-inmuebles-produccion.firebasestorage.app` |
-| Reglas Firestore (destino) | `firestore.rules` — 4 064 líneas, `sha256 81b9ae93…413d` |
+| Reglas Firestore (destino) | `firestore.rules` — 4 140 líneas, `sha256 63ce450e…` (eran 4 064 / `81b9ae93…413d` antes de P1, que añadió el bloque `2H-bis` sin quitar nada) |
 | Reglas Storage | `storage.rules` — **sin cambios, no se publica** |
 | Índices | `firestore.indexes.json` — 10 índices compuestos, `sha256 5002edd6…e80fcb` |
 

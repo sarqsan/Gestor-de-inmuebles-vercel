@@ -28,11 +28,48 @@ queda ahora medido con precisión y la batería queda lista para ejecutarse sola
 
 ---
 
+## EVIDENCIA DE EJECUCIÓN REAL (CI, emuladores oficiales)
+
+La batería **se ha ejecutado** en `.github/workflows/emulador-reglas.yml` (Java 21 +
+emuladores oficiales de Firestore y Storage). Dos ejecuciones:
+
+| Ejecución | Commit | Resultado P0-A | Total del job |
+|---|---|---|---|
+| 1.ª | `6312cab` | **752 / 761** | 847 / 868 (8/9 archivos) |
+| 2.ª tras corregir el generador | `0f7fe91` | **757 / 761** | 847 / 868 |
+
+De los 9 fallos iniciales, **5 se resolvieron** al corregir defectos del generador
+(no de las reglas). Quedan **4 fallos, y los 4 son hallazgos reales**, no defectos de la
+prueba:
+
+### Hallazgos confirmados por el motor oficial
+
+| ID | Colección | Caso | Qué significa | Severidad |
+|---|---|---|---|---|
+| **P0-A-03** | `enlaces_registro` | lectura cruzada, profesional e inquilino leen un enlace de otro | `allow get` incluye `isSignedIn()` para enlaces no gestionados: **cualquier usuario autenticado puede leer cualquier enlace de registro**, incluidos los de otros propietarios | **MEDIA** |
+| **P0-A-04** | `audit_logs` | un propietario crea un documento arbitrario | `allow create: if isSignedIn()` sin exigir que el actor sea el autor del evento: un usuario cualquiera puede **insertar entradas de auditoría falsas** | **MEDIA** |
+| **P0-A-05** | `mensajes_portal` | el master no puede leer | la guarda lanza `evaluation error` en L3000: la condición accede a `existing()` en un `get` sobre un documento **que no existe**. El master recibe un error en vez de un «no existe» | **BAJA** (corrección de robustez) |
+| **P0-A-06** | `fichas_publicas_inmueble`, `especialidades` | (resuelto como defecto del generador) | eran de lectura pública; el test exigía fallo. **Corregido en la prueba**, no en las reglas | — |
+
+### Los 4 defectos del generador (corregidos, no eran de las reglas)
+
+1. Casos 6 y 8 exigían fallo de lectura sobre colecciones **públicas por diseño**
+   (`fichas_publicas_inmueble`, `especialidades`). Ahora se verifica que leen pero **no escriben**.
+2. El documento sintético no incluía `contratoId`, así que las condiciones que derivan el
+   ámbito por contrato no eran evaluables y fallaban por error de evaluación en vez de por
+   denegación. Se siembra un contrato y se añade el campo.
+
+**Lo importante:** los 4 hallazgos restantes se han dejado **sin tocar**. Arreglar las reglas
+está fuera del alcance de P0-A (la orden pide auditar y probar, no corregir reglas) y además
+la orden prohíbe publicar reglas nuevas en producción. Quedan documentados para decisión.
+
+---
+
 ## 0. Resumen en una tabla
 
 | Bloque | Estado | Probado | No probado (y por qué) |
 |---|---|---|---|
-| **P0-A** auditoría y pruebas de seguridad | **Implementado** | Inventario (77+4+2+20), matriz rol×operación (304 celdas, 0 sin clasificar), 760 casos escritos, 25 tests estructurales en verde | Los 760 casos de reglas **no se han ejecutado aquí**: el JAR oficial del emulador está bloqueado por red (Java ya no es el obstáculo) |
+| **P0-A** auditoría y pruebas de seguridad | **Implementado y EJECUTADO** | Inventario (77+4+2+20), matriz rol×operación (304 celdas, 0 sin clasificar), **757/761 casos en verde en emuladores oficiales**, 25 tests estructurales | 4 fallos restantes = 4 hallazgos reales, documentados sin corregir (fuera de alcance) |
 | **P0-B** backup, integridad y restauración | **Implementado en código** | 30 tests del núcleo, guardas de backup y restauración probadas por CLI, verificador de coherencia probado con fixtures | Exportación e importación reales: sin acceso a Google Cloud (`000`) |
 | **P0-C** protección de la cuenta master | **Diagnosticado + contrato probado** | 16 tests del contrato, hallazgo de bloqueo | Activación de MFA **no ejecutada** (haría perder el acceso al master) |
 
@@ -130,11 +167,14 @@ Invariantes que las pruebas **vigilan** (para que P0 no los haya debilitado y no
 - Económicas: ámbito de propietario/cartera obligatorio.
 - Storage: el SDK de cliente no puede escribir.
 
-### Lo que existe y NO se ha ejecutado
+### Lo que existe y SÍ se ha ejecutado (en CI)
 
 `tests/emulador/p0-cobertura-reglas.emulador.test.ts` — **760 casos** (76 colecciones × 10
 supuestos: sin autenticación leer/crear/modificar/eliminar, master lee, lectura cruzada,
 escritura cruzada, profesional, inquilino, restricción de borrado).
+
+**Resultado real: 757 / 761 en verde** en los emuladores oficiales. Los 4 fallos son
+hallazgos, no defectos de la prueba (ver sección «Evidencia de ejecución real»).
 
 **Por qué no se ha ejecutado (diagnóstico ACTUALIZADO, más preciso que el de la primera
 entrega):** el bloqueo **ya no es Java**. Se ha conseguido un JDK 25 funcional por una vía

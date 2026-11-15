@@ -3,6 +3,9 @@
  "nota": "Superficie revisada de la rama respecto a la base de main (2bed683, la base de esta rama). `superficie` es la lista EXACTA de ficheros que la rama cambia y `parches` reconstruye byte a byte los ficheros compartidos; cualquier diferencia no declarada hace fallar las guardias de custodia. P1 (2026-11-15): la base se actualiza a 2bed683 y el parche de `firestore.rules` SOLO AÑADE el bloque 2H-bis (`mensajes_trabajo`) y sus helpers; no elimina ni modifica una sola línea existente, y en particular no toca el bloque 39 (`mensajes_portal`).",
  "superficie": [
   ".github/workflows/emulador-reglas.yml",
+  "docs/PENDIENTE-USUARIO-2026-10-28.md",
+  "docs/PENDIENTES-ABIERTOS.md",
+  "docs/PUBLICACION-REGLAS-INDICES-PRODUCCION.md",
   "docs/auditoria/AUDITORIA-360-2026-11-15.md",
   "docs/auditoria/FASE-1-PLAN-RECUPERACION-2026-11-15.md",
   "docs/p0/P0-A-MATRIZ-ROLES.md",
@@ -37,7 +40,9 @@
   "src/lib/mensajesTrabajoFirestore.ts",
   "tests/emulador/p0-cobertura-reglas.emulador.test.ts",
   "tests/emulador/p1-circuito-profesional.emulador.test.ts",
-  "tests/p0/matriz-reglas.test.ts"
+  "tests/p0/matriz-reglas.test.ts",
+  "tests/pendientes-abiertos.test.ts",
+  "tests/verificar-reglas-publicadas.test.ts"
  ],
  "parches": {
   "package.json": [],

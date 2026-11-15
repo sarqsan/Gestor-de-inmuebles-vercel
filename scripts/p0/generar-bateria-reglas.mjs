@@ -40,7 +40,7 @@ const colecciones = matriz.matriz.filter((f) => !f.coleccion.includes('{'));
 
 function datosSinteticos(nombre) {
   // Documento genérico: las comprobaciones negativas no dependen de su forma.
-  return `{ sintetico: true, propietarioId: '${'prop_a'}', inmuebleId: 'inm_1', id: '__ID__' }`;
+  return `{ sintetico: true, propietarioId: 'prop_a', inmuebleId: 'inm_1', contratoId: 'c_1', id: '__ID__' }`;
 }
 
 const L = [];
@@ -129,6 +129,9 @@ async function sembrarRoles() {
     await db.doc('usuarios/' + UID_PROP_A).set({
       id: UID_PROP_A, tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', authUid: UID_PROP_A, propietarioId: PROP_A,
     });
+    await db.doc('contratos_formalizacion/c_1').set({
+      id: 'c_1', propietarioId: PROP_B, inmuebleId: 'inm_b_1', estado: 'VIGENTE',
+    });
     await db.doc('usuarios/' + UID_PROP_B).set({
       id: UID_PROP_B, tipoPerfil: 'PROPIETARIO', estado: 'ACTIVO', authUid: UID_PROP_B, propietarioId: PROP_B,
     });
@@ -184,11 +187,14 @@ describe('P0-A · ${c} (10 supuestos)', () => {
   });
 
   it('6. el propietario A no lee el documento del propietario B (lectura cruzada)', async () => {
-    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', id: DOC });
-    ${celda.lectura.roles.includes('PROPIETARIO') && celda.lectura.clase !== 'PUBLICO'
-      ? `// El propietario puede leer SU ámbito, no el de otro titular: la petición
-    // sobre un documento de B debe fallar.
-    await assertFails(comoPropA().doc('${c}/' + DOC).get());`
+    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
+    ${lecturaPublica
+      ? `// Lectura PÚBLICA declarada: leer el documento de otro titular NO es un fallo
+    // de seguridad, es la política. Lo que se exige es que no pueda escribir.
+    await assertSucceeds(comoPropA().doc('${c}/' + DOC).get());
+    await assertFails(comoPropA().doc('${c}/doc-p0-cruzado').set({
+      sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', id: 'doc-p0-cruzado',
+    }));`
       : `await assertFails(comoPropA().doc('${c}/' + DOC).get());`}
   });
 
@@ -199,12 +205,15 @@ describe('P0-A · ${c} (10 supuestos)', () => {
   });
 
   it('8. un profesional no lee lo que no está en su ámbito', async () => {
-    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', id: DOC });
-    await assertFails(comoProfesional().doc('${c}/' + DOC).get());
+    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
+    ${lecturaPublica
+      ? `// Lectura pública: puede leer, pero no escribir sin ser el titular.
+    await assertSucceeds(comoProfesional().doc('${c}/' + DOC).get());`
+      : `await assertFails(comoProfesional().doc('${c}/' + DOC).get());`}
   });
 
   it('9. un inquilino no lee lo que no le corresponde', async () => {
-    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', id: DOC });
+    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
     ${lecturaPublica
       ? `// Lectura pública: el inquilino puede leer, pero NO escribir.
     await assertSucceeds(comoInquilino().doc('${c}/' + DOC).get());
@@ -215,7 +224,7 @@ describe('P0-A · ${c} (10 supuestos)', () => {
   it('10. ${borradoProhibido
     ? 'el borrado está prohibido para TODOS los roles (restricción del texto)'
     : 'el borrado no lo puede ejecutar un tercer propietario'}', async () => {
-    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', id: DOC });
+    await sembrarDoc('${c}', DOC, { sintetico: true, propietarioId: PROP_B, inmuebleId: 'inm_b_1', contratoId: 'c_1', id: DOC });
     ${borradoProhibido
       ? `// La política declara \`allow ... delete: if false\` (o equivalente):
     // ni el master ni el titular pueden borrar.

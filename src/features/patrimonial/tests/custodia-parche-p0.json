@@ -14,6 +14,7 @@
   "docs/p0/P0-INFORME-CIERRE-2026-11-15.md",
   "docs/p0/p0-inventario-reglas.json",
   "docs/p0/p0-matriz-roles.json",
+  "docs/p1/P1-CIERRE.md",
   "docs/p1/P1-INFORME-ENTREGA.md",
   "firestore.rules",
   "scripts/p0/backup-firestore-storage.mjs",

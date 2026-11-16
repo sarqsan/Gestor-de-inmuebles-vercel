@@ -3473,7 +3473,10 @@ export function subscribeUsuarios(callback: (usuarios: UsuarioApp[]) => void) {
   );
 }
 
-export async function saveUsuarioFirestore(usuario: UsuarioApp & { passwordHash?: string; authMethod?: 'direct_firestore' | 'firebase_auth' }, accion = 'GUARDAR_USUARIO'): Promise<void> {
+// AG-08: se retiró `passwordHash` de la firma para que ningún llamador pueda
+// persistir material de credencial en Firestore. `authMethod` se conserva
+// (metadato de diagnóstico, no credencial; hay documentos con valores legacy).
+export async function saveUsuarioFirestore(usuario: UsuarioApp & { authMethod?: 'direct_firestore' | 'firebase_auth' }, accion = 'GUARDAR_USUARIO'): Promise<void> {
   const userRef = doc(db, 'usuarios', usuario.id);
   const clean = sanitizeObjectForFirestore({
     ...usuario,

@@ -158,7 +158,10 @@ describe('E · B. Registro por invitación (registerWithInvitationLink)', () => 
     const doc = memoria.leer<Record<string, unknown>>('usuarios', firebaseUser!.uid)!;
     expect(doc.tipoPerfil).toBe('INQUILINO');
     expect(doc.contratoIds).toEqual([IDS.A.contrato]);
-    expect(typeof doc.passwordHash).toBe('string');
+    // AG-08: el registro YA NO persiste material de credencial. La expectativa
+    // anterior (`typeof doc.passwordHash === 'string'`) ataba el alta a escribir el
+    // hash; ahora se exige lo contrario (guarda de no exposición), más estricta.
+    expect('passwordHash' in doc).toBe(false);
     expect(memoria.existe('propietarios', String(doc.propietarioId ?? 'x'))).toBe(false);
     expect(memoria.leer<{ usosActuales: number }>('enlaces_registro', 'enl_inq_TEST_REG')!.usosActuales).toBe(1);
   });

@@ -123,28 +123,6 @@ export async function syncAuthIndex(
 }
 
 /**
- * Genera un hash criptográfico SHA-256 seguro para verificación de credenciales directas.
- */
-async function hashPassword(password: string): Promise<string> {
-  try {
-    const enc = new TextEncoder();
-    const data = enc.encode(password);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-  } catch (e) {
-    // Fallback simple si crypto.subtle no está disponible
-    let hash = 0;
-    for (let i = 0; i < password.length; i++) {
-      const char = password.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash |= 0;
-    }
-    return `fb_${Math.abs(hash).toString(16)}`;
-  }
-}
-
-/**
  * Busca un usuario en la colección `usuarios` mediante su Firebase Auth UID.
  * Si no lo encuentra por authUid pero existe un registro con el mismo email,
  * vincula de forma segura el authUid al documento existente.
@@ -309,42 +287,20 @@ export async function loginWithEmail(
   if (firebaseUser) {
     usuario = await getUsuarioByAuthUid(firebaseUser.uid, firebaseUser.email);
   } else if (authProviderDisabled) {
-    // Sin sesión de Firebase Auth las reglas deniegan la lectura de `usuarios/{id}`
-    // (incluido `user_admin_principal`). No se rodean: se traduce el rechazo.
-    try {
-      const pHash = await hashPassword(passwordInput);
-
-      if (email === ADMIN_MASTER_EMAIL) {
-        const adminSnap = await getDoc(doc(db, 'usuarios', 'user_admin_principal'));
-        if (adminSnap.exists()) {
-          const adminData = adminSnap.data() as any;
-          if (adminData.passwordHash && adminData.passwordHash !== pHash) {
-            throw new Error('Contraseña incorrecta para el Administrador Principal.');
-          }
-          usuario = { id: 'user_admin_principal', ...adminData } as UsuarioApp;
-        }
-      } else {
-        const qEmail = query(USUARIOS_COL, where('email', '==', email));
-        const snapEmail = await getDocs(qEmail);
-        if (!snapEmail.empty) {
-          const uDoc = snapEmail.docs[0];
-          const uData = uDoc.data() as any;
-          if (uData.passwordHash && uData.passwordHash !== pHash) {
-            throw new Error('Contraseña incorrecta.');
-          }
-          usuario = { id: uDoc.id, ...uData } as UsuarioApp;
-        }
-      }
-    } catch (err) {
-      if (esErrorPermisosFirestore(err)) throw new Error(MENSAJE_LOGIN_SIN_PERMISOS);
-      throw err;
-    }
+    // AG-08 — CAMINO DIRECTO RETIRADO.
+    // Aquí vivía la «verificación directa» contra `passwordHash` (SHA-256 sin sal)
+    // cuando el proveedor Email/Contraseña estaba deshabilitado. Ese camino NUNCA
+    // pudo funcionar: sin sesión de Firebase Auth las reglas exigen `isSignedIn()`
+    // para leer `usuarios/{id}` (y `list` está limitado a master), así que la
+    // lectura se denegaba siempre y el propio código ya lo traducía a
+    // MENSAJE_LOGIN_SIN_PERMISOS. Era código muerto que además persistía material
+    // de credencial. La autoridad de autenticación es y sigue siendo Firebase Auth.
+    throw new Error(MENSAJE_LOGIN_SIN_PERMISOS);
   }
 
   if (!usuario) {
     // Si es el email del administrador principal y por algún motivo no estaba en la colección, crearlo
     if (email === ADMIN_MASTER_EMAIL) {
-      const pHash = await hashPassword(passwordInput);
       const adminId = 'user_admin_principal';
       usuario = {
         id: adminId,
@@ -362,7 +318,7 @@ export async function loginWithEmail(
         lastLoginAt: new Date().toISOString(),
       };
       const { saveUsuarioFirestore } = await import('./firebase');
-      await saveUsuarioFirestore({ ...usuario, passwordHash:pHash }); // perfil, espejo y log
+      await saveUsuarioFirestore({ ...usuario }); // perfil, espejo y log
     } else {
       if (firebaseUser) await signOut(auth);
       throw new Error(
@@ -460,7 +416,8 @@ export async function initFirstAdminAccount(
     }
   }
 
-  const pHash = await hashPassword(passwordInput);
+  // AG-08: ya no se deriva ni se persiste un hash de la contraseña. La
+  // credencial vive EXCLUSIVAMENTE en Firebase Auth.
 
   // Vincular o crear el registro en la colección `usuarios`
   const adminId = 'user_admin_principal';
@@ -483,7 +440,6 @@ export async function initFirstAdminAccount(
   const { saveUsuarioFirestore } = await import('./firebase');
   await saveUsuarioFirestore({
     ...adminUser,
-    passwordHash: pHash,
     authMethod: providerDisabled ? 'direct_firestore' : 'firebase_auth',
   }); // perfil, espejo y log
 
@@ -739,8 +695,7 @@ export async function registerWithInvitationLink(params: {
     tipoPerfil === 'INQUILINO' && firebaseUser
       ? firebaseUser.uid
       : `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const pHash = await hashPassword(password);
-
+  // AG-08: no se persiste ningún hash de la contraseña.
   const nuevoUsuario: UsuarioApp = {
     id: userId,
     authUid: firebaseUser ? firebaseUser.uid : `uid_${Date.now()}`,
@@ -774,7 +729,7 @@ export async function registerWithInvitationLink(params: {
   }
 
   // 4. Guardar PRIMERO el registro de usuario (documento autoritativo)...
-  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario, passwordHash: pHash });
+  await setDoc(doc(db, 'usuarios', userId), { ...nuevoUsuario });
 
   // 4b. ...y después el espejo de identidad que leen las Security Rules.
   //     Debe existir antes de crear la ficha de propietario (su regla lo exige).

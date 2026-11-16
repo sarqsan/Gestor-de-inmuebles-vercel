@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -26,6 +27,13 @@ const {
   validarGuardaAplicar,
   huellaRespaldo,
   aplicarPlan,
+  huellaDocumento,
+  crearManifiestoRespaldo,
+  verificarRespaldo,
+  verificarSoloCambioElCampo,
+  crearDiario,
+  aplicarPlanConDiario,
+  tokenDocumento,
 } = mod;
 
 // Datos FICTICIOS. Hashes inventados (no derivan de ninguna contraseña real).
@@ -151,9 +159,12 @@ describe('AG-08 · guardas de --aplicar (no debe poder apuntarse a producción)'
 
   it('un proyecto fuera de la lista blanca se rechaza aunque se parezca a pruebas', () => {
     const env = { AG08_PROYECTOS_PRUEBA: 'demo-a,pruebas-b' };
-    for (const proyecto of ['gestor-real', 'produccion-test', 'DEMO-A', 'demo-a2']) {
+    for (const proyecto of ['gestor-real', 'produccion-test', 'demo-a2']) {
       expect(() => validarGuardaAplicar({ ...base, proyecto }, env)).toThrow(/AG08_PROYECTOS_PRUEBA/);
     }
+    // Además, un id con mayúsculas no tiene formato válido de proyecto GCP: se
+    // rechaza antes, por formato (defensa en profundidad).
+    expect(() => validarGuardaAplicar({ ...base, proyecto: 'DEMO-A' }, env)).toThrow(/formato/);
   });
 
   it('--confirmo-produccion NO abre la puerta por sí solo', () => {
@@ -208,7 +219,9 @@ describe('AG-08 · núcleo de escritura: solo el campo passwordHash', () => {
       { id: 'b', datos: estado.b },
     ]);
     const r = await aplicarPlan(db, plan, { deleteSentinela: sentinela });
-    expect(r).toEqual({ borrados: 1, fallos: 0 });
+    expect(r.borrados).toBe(1);
+    expect(r.fallos).toBe(0);
+    expect(r.idsFallidos).toEqual([]);
     expect(escrituras).toEqual([{ id: 'a', campos: ['passwordHash'] }]);
     expect(estado.a.email).toBe('a@test.invalid');
   });
@@ -230,7 +243,9 @@ describe('AG-08 · núcleo de escritura: solo el campo passwordHash', () => {
       { id: 'b', datos: estado.b },
     ]);
     const r = await aplicarPlan(db, plan, { deleteSentinela: sentinela });
-    expect(r).toEqual({ borrados: 1, fallos: 1 });
+    expect(r.borrados).toBe(1);
+    expect(r.fallos).toBe(1);
+    expect(r.idsFallidos).toEqual(['a']);
     expect('passwordHash' in estado.b).toBe(false);
   });
 
@@ -246,5 +261,281 @@ describe('AG-08 · núcleo de escritura: solo el campo passwordHash', () => {
     });
     expect(r.borrados).toBe(1);
     expect('passwordHash' in estado.a).toBe(false);
+  });
+});
+
+// ===========================================================================
+// FASE 2 · respaldo verificable, interrupción y blindaje de producción
+// ===========================================================================
+describe('AG-08 F2 · manifiesto de respaldo (huellas sin material de credencial)', () => {
+  const H1 = 'a'.repeat(64);
+  const docs = () => [
+    { id: 'u1', datos: { email: 'a@test.invalid', passwordHash: H1, rol: 'X' } },
+    { id: 'u2', datos: { email: 'b@test.invalid' } },
+  ];
+
+  it('la huella de un documento EXCLUYE passwordHash (no se deriva material del hash)', () => {
+    const con = huellaDocumento({ email: 'a@test.invalid', passwordHash: H1, rol: 'X' });
+    const sin = huellaDocumento({ email: 'a@test.invalid', rol: 'X' });
+    expect(con).toBe(sin);
+    // Y cambiar el hash NO cambia la huella; cambiar otro campo SÍ.
+    expect(huellaDocumento({ email: 'a@test.invalid', rol: 'X', passwordHash: 'b'.repeat(64) })).toBe(sin);
+    expect(huellaDocumento({ email: 'a@test.invalid', rol: 'Y' })).not.toBe(sin);
+  });
+
+  it('el manifiesto no contiene hashes y registra presencia y longitud', () => {
+    const m = crearManifiestoRespaldo(docs());
+    const texto = JSON.stringify(m);
+    expect(texto).not.toContain(H1);
+    expect(texto).not.toContain('passwordHash');
+    expect(m.total).toBe(2);
+    expect(m.documentos.find((d) => d.id === 'u1').tieneHash).toBe(true);
+    expect(m.documentos.find((d) => d.id === 'u1').hashLongitud).toBe(64);
+    expect(m.documentos.find((d) => d.id === 'u2').tieneHash).toBe(false);
+    expect(m.huellaGlobal).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('el manifiesto es determinista para el mismo contenido', () => {
+    const a = crearManifiestoRespaldo(docs());
+    const b = crearManifiestoRespaldo([...docs()].reverse());
+    expect(a.huellaGlobal).toBe(b.huellaGlobal);
+  });
+});
+
+describe('AG-08 F2 · verificación del respaldo (fail-closed)', () => {
+  const H = 'a'.repeat(64);
+  const docs = () => [
+    { id: 'u1', datos: { email: 'a@test.invalid', passwordHash: H } },
+    { id: 'u2', datos: { email: 'b@test.invalid', passwordHash: H } },
+  ];
+
+  it('acepta un respaldo que cubre el conjunto y coincide con la base', () => {
+    const m = crearManifiestoRespaldo(docs());
+    expect(verificarRespaldo(m, docs(), { idsAfectados: ['u1', 'u2'] }).ok).toBe(true);
+  });
+
+  it('rechaza un manifiesto manipulado (huella global rota)', () => {
+    const m = crearManifiestoRespaldo(docs());
+    m.documentos[0].huella = 'f'.repeat(64);
+    const r = verificarRespaldo(m, docs());
+    expect(r.ok).toBe(false);
+    expect(r.motivos.join(' ')).toMatch(/manipulado/);
+  });
+
+  it('rechaza un respaldo incompleto que no cubre un documento a modificar', () => {
+    const m = crearManifiestoRespaldo([docs()[0]]);
+    const r = verificarRespaldo(m, docs(), { idsAfectados: ['u1', 'u2'] });
+    expect(r.ok).toBe(false);
+    expect(r.motivos.join(' ')).toMatch(/sin respaldo|no cubre/);
+  });
+
+  it('rechaza un respaldo obsoleto si la base cambió en otros campos', () => {
+    const m = crearManifiestoRespaldo(docs());
+    const cambiada = [{ id: 'u1', datos: { email: 'OTRO@test.invalid', passwordHash: H } }, docs()[1]];
+    const r = verificarRespaldo(m, cambiada);
+    expect(r.ok).toBe(false);
+    expect(r.motivos.join(' ')).toMatch(/obsoleto|ha cambiado/);
+  });
+
+  it('rechaza un manifiesto de otro tipo o versión', () => {
+    expect(verificarRespaldo({ tipo: 'OTRO', version: 1, documentos: [] }, docs()).ok).toBe(false);
+    expect(verificarRespaldo({ tipo: 'AG08_RESPALDO', version: 99, documentos: [] }, docs()).ok).toBe(false);
+    expect(verificarRespaldo(null, docs()).ok).toBe(false);
+  });
+});
+
+describe('AG-08 F2 · verificación de «solo cambió el campo»', () => {
+  it('detecta cambios en otros campos, desapariciones y campo residual', () => {
+    const antes = [
+      { id: 'u1', datos: { email: 'a@test.invalid', passwordHash: 'x'.repeat(64), rol: 'R' } },
+      { id: 'u2', datos: { email: 'b@test.invalid' } },
+    ];
+    const bien = [
+      { id: 'u1', datos: { email: 'a@test.invalid', rol: 'R' } },
+      { id: 'u2', datos: { email: 'b@test.invalid' } },
+    ];
+    expect(verificarSoloCambioElCampo(antes, bien).ok).toBe(true);
+
+    const otroCampo = [
+      { id: 'u1', datos: { email: 'a@test.invalid', rol: 'CAMBIADO' } },
+      { id: 'u2', datos: { email: 'b@test.invalid' } },
+    ];
+    const r1 = verificarSoloCambioElCampo(antes, otroCampo);
+    expect(r1.ok).toBe(false);
+    expect(r1.problemas.join(' ')).toMatch(/otros campos alterados/);
+
+    const desaparecido = [bien[0]];
+    expect(verificarSoloCambioElCampo(antes, desaparecido).ok).toBe(false);
+
+    const residual = [
+      { id: 'u1', datos: { email: 'a@test.invalid', rol: 'R', passwordHash: 'z' } },
+      bien[1],
+    ];
+    const r3 = verificarSoloCambioElCampo(antes, residual);
+    expect(r3.ok).toBe(false);
+    expect(r3.problemas.join(' ')).toMatch(/sigue presente/);
+  });
+});
+
+describe('AG-08 F2 · interrupción y reanudación', () => {
+  const sentinela = Symbol('delete');
+  const H = 'x'.repeat(64);
+
+  function fakeDb(fallarEn: string[] = []) {
+    const estado: Record<string, Record<string, unknown>> = {
+      a: { email: 'a@test.invalid', passwordHash: H },
+      b: { email: 'b@test.invalid', passwordHash: H },
+      c: { email: 'c@test.invalid' },
+    };
+    const escrituras: string[] = [];
+    const db = {
+      collection: () => ({
+        doc: (id: string) => ({
+          update: async (cambios: Record<string, unknown>) => {
+            if (fallarEn.includes(id)) throw new Error('unavailable');
+            for (const [k, v] of Object.entries(cambios)) {
+              if (v !== sentinela) throw new Error('campo no sentinela');
+              delete estado[id][k];
+            }
+            escrituras.push(id);
+          },
+        }),
+      }),
+    };
+    return { db, estado, escrituras };
+  }
+  const planDe = (estado: Record<string, Record<string, unknown>>) =>
+    construirPlan(Object.entries(estado).map(([id, datos]) => ({ id, datos })));
+
+  it('un fallo deja el diario INCOMPLETO y el id fallido NO consta como hecho', async () => {
+    const { db, estado, escrituras } = fakeDb(['b']);
+    const diario = crearDiario({ prueba: true });
+    const r = await aplicarPlanConDiario(db, planDe(estado), { deleteSentinela: sentinela, diario });
+    expect(r.borrados).toBe(1);
+    expect(r.fallos).toBe(1);
+    expect(diario.estado).toBe('INCOMPLETO');
+    expect(diario.fallidos).toContain('b');
+    expect(diario.hechos).not.toContain('b');
+    expect(escrituras).toEqual(['a']);
+    expect('passwordHash' in estado.b).toBe(true);
+  });
+
+  it('la reanudación del pendiente completa el diario (el fallido deja de serlo)', async () => {
+    const { db, estado } = fakeDb(['b']);
+    const diario = crearDiario({ prueba: true });
+    await aplicarPlanConDiario(db, planDe(estado), { deleteSentinela: sentinela, diario });
+    expect(diario.estado).toBe('INCOMPLETO');
+
+    // Se arregla la causa y se reanuda SOLO el pendiente.
+    const { db: db2, estado: estado2 } = fakeDb([]);
+    estado2.b = { email: 'b@test.invalid', passwordHash: H };
+    const pendiente = construirPlan([{ id: 'b', datos: estado2.b }]);
+    const r = await aplicarPlanConDiario(db2, pendiente, { deleteSentinela: sentinela, diario });
+    expect(r.borrados).toBe(1);
+    expect(diario.fallidos).toEqual([]);
+    expect(diario.estado).toBe('COMPLETO');
+  });
+
+  it('reanudar no repite trabajo ya confirmado', async () => {
+    const { db, estado, escrituras } = fakeDb([]);
+    const diario = crearDiario({ prueba: true });
+    const plan = planDe(estado);
+    await aplicarPlanConDiario(db, plan, { deleteSentinela: sentinela, diario });
+    const n = escrituras.length;
+    await aplicarPlanConDiario(db, planDe(estado), { deleteSentinela: sentinela, diario });
+    expect(escrituras.length).toBe(n); // solo a y b la primera vez; la segunda, nada
+  });
+});
+
+// ===========================================================================
+// FASE 2 · blindaje de producción (D2)
+// ===========================================================================
+describe('AG-08 F2 · el proyecto de producción está bloqueado sin excepción', () => {
+  const base = { aplicar: true, credencial: 'sa.json', respaldo: 'exp-1', confirmoProduccion: false };
+  const PROD = 'gestor-inmuebles-produccion';
+
+  it('bloquea el id de producción real del repositorio', () => {
+    expect(() => validarGuardaAplicar({ ...base, proyecto: PROD }, {})).toThrow(/PRODUCCIÓN/);
+  });
+
+  it('lo bloquea incluso si alguien lo añade a la lista blanca (error humano)', () => {
+    const env = { AG08_PROYECTOS_PRUEBA: `${PROD},demo-ok` };
+    // La lista negra se evalúa ANTES que la blanca, así que el motivo es el más
+    // contundente: «es el proyecto de PRODUCCIÓN». Ambas defensas coinciden.
+    expect(() => validarGuardaAplicar({ ...base, proyecto: PROD }, env)).toThrow(/PRODUCCIÓN/);
+    // Y si el operador declara producción en la lista blanca pero apunta a otro
+    // proyecto, también se rechaza: la lista no puede contener producción.
+    expect(() => validarGuardaAplicar({ ...base, proyecto: 'demo-ok' }, env))
+      .toThrow(/no puede contener el proyecto de producción/);
+  });
+
+  it('lo bloquea incluso con --confirmo-produccion', () => {
+    expect(() => validarGuardaAplicar({ ...base, proyecto: PROD, confirmoProduccion: true }, {}))
+      .toThrow(/PRODUCCIÓN/);
+  });
+
+  it('rechaza ids con formato inválido antes de mirar listas', () => {
+    for (const proyecto of ['Gestor Prod', 'con_guion_bajo', 'a', '', '-empieza-mal']) {
+      expect(() => validarGuardaAplicar({ ...base, proyecto }, { AG08_PROYECTOS_PRUEBA: proyecto }))
+        .toThrow(/formato|--proyecto/);
+    }
+  });
+
+  it('un proyecto de pruebas válido sigue pasando', () => {
+    expect(validarGuardaAplicar({ ...base, proyecto: 'demo-ag08-pruebas' }, { AG08_PROYECTOS_PRUEBA: 'demo-ag08-pruebas' }))
+      .toBe(false);
+  });
+});
+
+// ===========================================================================
+// FASE 2 · regresión: los abortos por CLI deben ser ACCIONABLES (no "Error")
+// ===========================================================================
+describe('AG-08 F2 · mensajes de aborto legibles sin filtrar datos', () => {
+  // Reproduce la política del manejador de la CLI sobre el texto del script.
+  const fuente = readFileSync(path.join(RAIZ, 'scripts/ag08/migrar-passwordhash.mjs'), 'utf8');
+
+  it('el manejador imprime el mensaje propio y trunca en vez de degradar a "Error"', () => {
+    expect(fuente).toMatch(/e\.esPropio/);
+    expect(fuente).toMatch(/slice\(0, LIMITE\)/);
+    expect(fuente).toMatch(/codigoError\(e\)/);
+    // Salvaguarda anti-volcado: no se imprime un mensaje multilínea ni un objeto.
+    expect(fuente).toMatch(/!e\.message\.includes\('\\n'\)/);
+  });
+
+  it('los errores propios del script llevan la marca que permite imprimirlos', () => {
+    // Los mensajes redactados por el script se marcan explícitamente.
+    expect(fuente).toMatch(/function abortar\(mensaje\)[\s\S]{0,120}e\.esPropio = true/);
+    // El mensaje se construye y luego se marca: entre ambos hay la concatenación
+    // del texto completo, de ahí el margen.
+    expect(fuente).toMatch(/const e = new Error\(\s*`Falta la dependencia opcional[\s\S]{0,400}?e\.esPropio = true/);
+  });
+
+  it('ningún mensaje de error incluye el contenido de la credencial ni su ruta', () => {
+    // La lectura de credencial se captura y se sustituye por un motivo opaco.
+    expect(fuente).toMatch(/No se pudo leer o interpretar la credencial[\s\S]{0,120}no filtrar/);
+    expect(fuente).not.toMatch(/console\.(log|error|warn)\([^)]*args\.credencial/);
+    expect(fuente).not.toMatch(/console\.(log|error|warn)\([^)]*\$\{[^}]*credencial[^}]*\}/);
+  });
+});
+
+describe('AG-08 F2 · token opaco para trazas (no se publican identificadores)', () => {
+  it('es estable y no contiene el id original', () => {
+    const id = 'uid_ABC123_que_es_un_UID_real';
+    const t = tokenDocumento(id);
+    expect(t).toMatch(/^doc_[0-9a-f]{12}$/);
+    expect(t).toBe(tokenDocumento(id));
+    expect(t).not.toContain('ABC123');
+    expect(t).not.toContain('uid_');
+  });
+
+  it('distingue documentos distintos y tolera vacío', () => {
+    expect(tokenDocumento('a')).not.toBe(tokenDocumento('b'));
+    expect(tokenDocumento('')).toBe('(vacío)');
+  });
+
+  it('la auditoría de la migración registra el token, no el id', () => {
+    const fuente = readFileSync(path.join(RAIZ, 'scripts/ag08/migrar-passwordhash.mjs'), 'utf8');
+    expect(fuente).toMatch(/documentoToken: tokenDocumento\(id\)/);
+    expect(fuente).not.toMatch(/documentoId: id,/);
   });
 });

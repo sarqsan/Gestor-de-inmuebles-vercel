@@ -48,6 +48,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const NOMBRE_MODULO_ADMIN = 'firebase-admin';
@@ -64,11 +65,15 @@ async function cargarAdmin() {
       firestore: await import('firebase-admin/firestore'),
     };
   } catch {
-    throw new Error(
+    // Mensaje PROPIO (redactado aquí, sin datos del entorno): debe ser accionable
+    // y no degradarse a un genérico 'Error' en el manejador de la CLI.
+    const e = new Error(
       `Falta la dependencia opcional '${NOMBRE_MODULO_ADMIN}'. ` +
-        'Instálala SOLO cuando la migración esté autorizada: npm i -D firebase-admin@^12. ' +
+        'Instálala SOLO cuando la migración esté autorizada (con autorización expresa). ' +
         'Mientras tanto usa --entrada para validar el plan con datos ficticios (offline).'
     );
+    e.esPropio = true;
+    throw e;
   }
 }
 
@@ -155,6 +160,7 @@ export function manifiestoAuditable(plan, meta = {}) {
 export async function aplicarPlan(db, plan, { deleteSentinela, auditar } = {}) {
   let borrados = 0;
   let fallos = 0;
+  const idsFallidos = [];
   for (const id of plan.idsAfectados) {
     try {
       await db.collection('usuarios').doc(id).update({ passwordHash: deleteSentinela });
@@ -168,9 +174,10 @@ export async function aplicarPlan(db, plan, { deleteSentinela, auditar } = {}) {
       }
     } catch {
       fallos++;
+      idsFallidos.push(id);
     }
   }
-  return { borrados, fallos };
+  return { borrados, fallos, idsFallidos };
 }
 
 /**
@@ -186,6 +193,21 @@ export function validarGuardaAplicar(args, env = {}) {
   if (!args.respaldo) {
     throw new Error('--aplicar requiere --respaldo <id-del-export>: sin respaldo verificado no se borra nada.');
   }
+
+  // D2 — el id debe tener forma de id de proyecto GCP. Evita que un valor
+  // arbitrario con espacios o un id de otro proveedor pase como «proyecto».
+  if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(args.proyecto)) {
+    throw new Error('El id de proyecto no tiene un formato válido.');
+  }
+
+  // D2 — LISTA NEGRA explícita del proyecto de producción conocido del repositorio.
+  // La lista blanca ya lo bloquearía, pero esto lo bloquea incluso si alguien
+  // añadiera producción a la lista blanca (error humano, copia de un entorno).
+  const produccion = String(env.AG08_PROYECTO_PRODUCCION || 'gestor-inmuebles-produccion');
+  if (args.proyecto === produccion) {
+    throw new Error('El proyecto indicado es el de PRODUCCIÓN: bloqueado sin excepción.');
+  }
+
   const listaBlanca = String(env.AG08_PROYECTOS_PRUEBA || '')
     .split(',')
     .map((x) => x.trim())
@@ -196,6 +218,9 @@ export function validarGuardaAplicar(args, env = {}) {
         '(ids separados por comas). Sin lista blanca no se aplica nada.'
     );
   }
+  if (listaBlanca.includes(produccion)) {
+    throw new Error('AG08_PROYECTOS_PRUEBA no puede contener el proyecto de producción.');
+  }
   if (!listaBlanca.includes(args.proyecto)) {
     throw new Error(
       'El proyecto indicado no está en AG08_PROYECTOS_PRUEBA. ' +
@@ -203,6 +228,219 @@ export function validarGuardaAplicar(args, env = {}) {
     );
   }
   return Boolean(args.confirmoProduccion);
+}
+
+// ============================================================================
+// HUELLAS Y MANIFIESTO DE RESPALDO (sin material de credencial)
+// ============================================================================
+// El respaldo REAL de los datos es el export de Firestore (`gcloud firestore
+// export`). Este manifiesto NO lo sustituye: lo CERTIFICA. Registra, por
+// documento, una huella calculada **excluyendo `passwordHash`**, de modo que:
+//   · prueba que el export cubría exactamente esos documentos y qué contenía
+//     cada uno en todo lo que no es la credencial (restauración verificable);
+//   · NO guarda ni deriva material del hash: no hay sha256 del campo, para que
+//     un `fb_<hex>` de baja entropía no pueda atacarse por diccionario contra
+//     la huella.
+const CAMPOS_NUNCA_EN_MANIFIESTO = ['passwordHash'];
+
+/** Serialización canónica: claves ordenadas y estable entre ejecuciones. */
+function canonico(valor) {
+  if (valor === null || typeof valor !== 'object') return JSON.stringify(valor) ?? 'null';
+  if (Array.isArray(valor)) return `[${valor.map(canonico).join(',')}]`;
+  const claves = Object.keys(valor).sort();
+  return `{${claves.map((k) => `${JSON.stringify(k)}:${canonico(valor[k])}`).join(',')}}`;
+}
+
+/** Huella de un documento EXCLUYENDO el campo de credencial. */
+export function huellaDocumento(datos) {
+  const limpio = {};
+  for (const k of Object.keys(datos || {})) {
+    if (CAMPOS_NUNCA_EN_MANIFIESTO.includes(k)) continue;
+    limpio[k] = datos[k];
+  }
+  return createHash('sha256').update(canonico(limpio)).digest('hex');
+}
+
+/** Manifiesto de respaldo: ids + huellas + presencia/longitud. Sin hashes. */
+export function crearManifiestoRespaldo(documentos, meta = {}) {
+  const items = documentos.map(({ id, datos }) => {
+    const valor = datos ? datos.passwordHash : undefined;
+    return {
+      id,
+      huella: huellaDocumento(datos || {}),
+      tieneHash: datos != null && Object.prototype.hasOwnProperty.call(datos, 'passwordHash'),
+      hashLongitud: typeof valor === 'string' ? valor.length : valor === null ? null : undefined,
+    };
+  });
+  const ordenados = [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return {
+    tipo: 'AG08_RESPALDO',
+    version: 1,
+    generadoEn: new Date().toISOString(),
+    ...meta,
+    total: ordenados.length,
+    documentos: ordenados,
+    // Huella global del CONJUNTO (sin material de credencial): detecta que el
+    // respaldo fue manipulado o que no corresponde a la base actual.
+    huellaGlobal: createHash('sha256')
+      .update(canonico(ordenados.map((x) => ({ id: x.id, huella: x.huella }))))
+      .digest('hex'),
+  };
+}
+
+/**
+ * Verifica un manifiesto de respaldo contra el estado actual. Devuelve
+ * `{ ok, motivos }`. FAIL-CLOSED: cualquier anomalía ⇒ `ok:false`.
+ */
+export function verificarRespaldo(manifiesto, documentosActuales, opciones = {}) {
+  const motivos = [];
+  const exigirCobertura = opciones.exigirCobertura !== false;
+
+  if (!manifiesto || typeof manifiesto !== 'object') {
+    return { ok: false, motivos: ['manifiesto ausente o ilegible'] };
+  }
+  if (manifiesto.tipo !== 'AG08_RESPALDO') motivos.push('tipo de manifiesto inesperado');
+  if (manifiesto.version !== 1) motivos.push('versión de manifiesto no soportada');
+  if (!Array.isArray(manifiesto.documentos)) motivos.push('lista de documentos ausente');
+
+  if (motivos.length) return { ok: false, motivos };
+
+  // Integridad interna: la huella global debe corresponder a los documentos.
+  const ordenados = [...manifiesto.documentos].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const global = createHash('sha256')
+    .update(canonico(ordenados.map((x) => ({ id: x.id, huella: x.huella }))))
+    .digest('hex');
+  if (global !== manifiesto.huellaGlobal) motivos.push('huella global no coincide: manifiesto manipulado');
+
+  // Correspondencia con la base actual, documento a documento.
+  const actuales = new Map(documentosActuales.map((d) => [d.id, d.datos || {}]));
+  const respaldados = new Map(manifiesto.documentos.map((d) => [d.id, d]));
+
+  const faltanEnRespaldo = [];
+  const huellaDistinta = [];
+  for (const [id, datos] of actuales) {
+    const r = respaldados.get(id);
+    if (!r) {
+      faltanEnRespaldo.push(id);
+      continue;
+    }
+    if (r.huella !== huellaDocumento(datos)) huellaDistinta.push(id);
+  }
+  if (faltanEnRespaldo.length) {
+    motivos.push(`el respaldo no cubre ${faltanEnRespaldo.length} documento(s) actuales`);
+  }
+  if (huellaDistinta.length) {
+    motivos.push(
+      `la base ha cambiado respecto al respaldo en ${huellaDistinta.length} documento(s): respaldo obsoleto`
+    );
+  }
+
+  // Cobertura del conjunto a modificar (por defecto exigida).
+  if (exigirCobertura && Array.isArray(opciones.idsAfectados)) {
+    const sinRespaldo = opciones.idsAfectados.filter((id) => !respaldados.has(id));
+    if (sinRespaldo.length) motivos.push(`${sinRespaldo.length} documento(s) a modificar sin respaldo`);
+  }
+
+  // Un documento que el manifiesto diga con hash y que ya no lo tenga en la base
+  // indica que la base cambió (o que el respaldo es de otra ejecución).
+  for (const [id, r] of respaldados) {
+    const datos = actuales.get(id);
+    if (!datos) continue;
+    const tiene = Object.prototype.hasOwnProperty.call(datos, 'passwordHash');
+    if (r.tieneHash !== tiene) motivos.push(`estado del campo distinto al respaldo en ${id}`);
+  }
+
+  return { ok: motivos.length === 0, motivos };
+}
+
+/**
+ * Comprueba que entre dos lecturas COMPLETAS solo ha cambiado `passwordHash`.
+ * Es la verificación de «no se alteran datos ajenos» sobre el estado real.
+ */
+export function verificarSoloCambioElCampo(antes, despues) {
+  const problemas = [];
+  const mapaDespues = new Map(despues.map((d) => [d.id, d.datos || {}]));
+  for (const { id, datos } of antes) {
+    const tras = mapaDespues.get(id);
+    if (!tras) {
+      problemas.push(`documento desaparecido: ${id}`);
+      continue;
+    }
+    if (huellaDocumento(datos) !== huellaDocumento(tras)) {
+      problemas.push(`otros campos alterados: ${id}`);
+    }
+    if (Object.prototype.hasOwnProperty.call(tras, 'passwordHash')) {
+      problemas.push(`passwordHash sigue presente: ${id}`);
+    }
+  }
+  if (despues.length !== antes.length) {
+    problemas.push(`el número de documentos ha cambiado (${antes.length} → ${despues.length})`);
+  }
+  return { ok: problemas.length === 0, problemas };
+}
+
+/**
+ * Diario de progreso: permite REANUDAR una ejecución interrumpida y deja
+ * constancia de que una operación parcial NO se ha completado. Es la prueba
+ * duradera de qué se hizo y qué quedó pendiente.
+ */
+export function crearDiario(meta = {}) {
+  return {
+    tipo: 'AG08_DIARIO',
+    version: 1,
+    iniciadoEn: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
+    estado: 'EN_CURSO',
+    ...meta,
+    hechos: [],
+    fallidos: [],
+  };
+}
+
+/** Reanuda: aplica solo lo que falta. Idempotente por construcción. */
+export async function aplicarPlanConDiario(db, plan, opciones) {
+  const { deleteSentinela, auditar, diario, guardarDiario } = opciones;
+  const yaHechos = new Set(diario.hechos);
+  // Solo se intentan los que NO constan como hechos: así una reanudación no
+  // repite trabajo ya confirmado (y si algo se repitiera, `update` es inofensivo
+  // porque el campo ya no existe → idempotente).
+  const idsAPendientes = plan.idsAfectados.filter((id) => !yaHechos.has(id));
+  const { borrados, fallos, idsFallidos } = await aplicarPlan(db, { ...plan, idsAfectados: idsAPendientes }, {
+    deleteSentinela,
+    auditar: auditar
+      ? async (id) => {
+          await auditar(id);
+          diario.hechos.push(id);
+          diario.actualizadoEn = new Date().toISOString();
+          guardarDiario?.(diario);
+        }
+      : async (id) => {
+          diario.hechos.push(id);
+          diario.actualizadoEn = new Date().toISOString();
+          guardarDiario?.(diario);
+        },
+  });
+  // Un id que falló antes y ahora ha funcionado DEJA de estar fallido: si no se
+  // retirara, el diario quedaría INCOMPLETO para siempre aunque el reintento
+  // hubiera resuelto el problema, y la auditoría mentiría sobre el estado final.
+  for (const id of idsFallidos) if (!diario.fallidos.includes(id)) diario.fallidos.push(id);
+  for (const id of diario.hechos) {
+    const i = diario.fallidos.indexOf(id);
+    if (i >= 0) diario.fallidos.splice(i, 1);
+  }
+  const pendientes = plan.idsAfectados.filter((id) => !diario.hechos.includes(id));
+  diario.actualizadoEn = new Date().toISOString();
+  diario.estado = diario.fallidos.length === 0 && pendientes.length === 0 ? 'COMPLETO' : 'INCOMPLETO';
+  guardarDiario?.(diario);
+  return { borrados, fallos, pendientes };
+}
+
+/** Token opaco y estable por documento, para trazas: permite correlacionar
+ *  entradas de auditoría SIN escribir el id del documento (que puede contener,
+ *  por ejemplo, el UID de Firebase Auth). */
+export function tokenDocumento(id) {
+  if (!id) return '(vacío)';
+  return `doc_${createHash('sha256').update(`ag08:${id}`).digest('hex').slice(0, 12)}`;
 }
 
 /** Huella estable y no reversible del id de respaldo: permite correlacionar el
@@ -249,6 +487,9 @@ function parseArgs(argv) {
     confirmoProduccion: false,
     salida: '',
     entrada: '',
+    manifiestoRespaldo: '',
+    diario: '',
+    respaldoManifiesto: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -259,6 +500,9 @@ function parseArgs(argv) {
     else if (a === '--respaldo') args.respaldo = argv[++i] ?? '';
     else if (a === '--salida') args.salida = argv[++i] ?? '';
     else if (a === '--entrada') args.entrada = argv[++i] ?? '';
+    else if (a === '--manifiesto-respaldo') args.manifiestoRespaldo = argv[++i] ?? '';
+    else if (a === '--diario') args.diario = argv[++i] ?? '';
+    else if (a === '--respaldo-manifiesto') args.respaldoManifiesto = true;
     else if (a === '--help' || a === '-h') args.help = true;
     else throw abortar(`Argumento no reconocido: ${a}`);
   }
@@ -274,6 +518,11 @@ function usage() {
 
   # Validación offline del plan con datos ficticios (no requiere firebase-admin)
   node scripts/ag08/migrar-passwordhash.mjs --entrada fixtures.json
+
+  # Huella del respaldo (antes de exportar): genera el manifiesto que certifica
+  # el estado de los documentos y permite verificar la restauración después.
+  node scripts/ag08/migrar-passwordhash.mjs --respaldo-manifiesto \
+       --entrada fixtures.json --salida <dir>
 
 Sin --aplicar no se escribe NADA en Firestore.`);
 }
@@ -308,6 +557,24 @@ async function main() {
     const ruta = path.join(dirSalida, `manifiesto-ag08-offline-${Date.now()}.json`);
     writeFileSync(ruta, JSON.stringify(manifiesto, null, 2), 'utf8');
     console.log(`[AG-08] OFFLINE · manifiesto sin hashes: ${ruta}`);
+
+    if (args.respaldoManifiesto) {
+      // D3: manifiesto de RESPALDO (huellas sin material de credencial). Es el
+      // artefacto que certifica el export y permite verificar la restauración.
+      const mRespaldo = crearManifiestoRespaldo(documentos, {
+        modo: 'offline',
+        entrada: path.basename(args.entrada),
+        nota: 'Las huellas excluyen passwordHash a propósito (no se deriva material del hash).',
+      });
+      const texto = JSON.stringify(mRespaldo);
+      if (/"passwordHash"\s*:/.test(texto)) throw new Error('El manifiesto de respaldo contendría el campo.');
+      for (const v of valoresReales) {
+        if (v.length >= 16 && texto.includes(v)) throw new Error('El manifiesto de respaldo contendría un hash: abortado.');
+      }
+      const rutaR = path.join(dirSalida, `respaldo-ag08-offline-${Date.now()}.json`);
+      writeFileSync(rutaR, JSON.stringify(mRespaldo, null, 2), 'utf8');
+      console.log(`[AG-08] OFFLINE · manifiesto de respaldo (huellas sin hashes): ${rutaR}`);
+    }
     return;
   }
 
@@ -342,9 +609,16 @@ async function main() {
   }
   const db = getFirestore();
 
-  // `select()` limita los campos descargados: no hace falta traer el resto.
-  const snap = await db.collection('usuarios').select('passwordHash').get();
-  const documentos = snap.docs.map((d) => ({ id: d.id, datos: d.data() }));
+  // Exclusiones explícitas: aunque se indique otra colección por error, aquí no
+  // se toca nada fuera de `usuarios`. `audit_logs` es append-only para el diario.
+  const COLECCION = 'usuarios';
+
+  const leerTodo = async () => {
+    const snap = await db.collection(COLECCION).select('passwordHash').get();
+    return snap.docs.map((d) => ({ id: d.id, datos: d.data() || {} }));
+  };
+
+  const documentos = await leerTodo();
   const plan = construirPlan(documentos);
 
   console.log(`[AG-08] documentos leídos: ${plan.resumen.total}`);
@@ -352,17 +626,37 @@ async function main() {
   console.log(`[AG-08] sin el campo:    ${plan.resumen.omitidos}`);
 
   mkdirSync(dirSalida, { recursive: true });
+
+  // ---- D3: manifiesto de RESPALDO (huellas sin material de credencial) ------
+  const mRespaldo = crearManifiestoRespaldo(documentos, {
+    modo: args.aplicar ? 'aplicar' : 'dry-run',
+    coleccion: COLECCION,
+    respaldo: huellaRespaldo(args.respaldo),
+    acuseExplicito: acuse,
+  });
+  const textoRespaldo = JSON.stringify(mRespaldo);
+  for (const d of documentos) {
+    const v = d.datos.passwordHash;
+    if (typeof v === 'string' && v.length >= 16 && textoRespaldo.includes(v)) {
+      throw abortar('El manifiesto de respaldo contendría un hash: abortado.');
+    }
+  }
+  if (/"passwordHash"\s*:/.test(textoRespaldo)) {
+    throw abortar('El manifiesto de respaldo contendría el campo: abortado.');
+  }
+  const rutaRespaldo = path.join(dirSalida, `respaldo-ag08-${Date.now()}.json`);
+  writeFileSync(rutaRespaldo, JSON.stringify(mRespaldo, null, 2), 'utf8');
+  console.log(`[AG-08] manifiesto de respaldo (huellas sin hashes): ${rutaRespaldo}`);
+
+  // ---- Manifiesto del plan (ids afectados) ---------------------------------
   const manifiesto = manifiestoAuditable(plan, {
     modo: args.aplicar ? 'aplicar' : 'dry-run',
     proyecto: args.proyecto || '(no indicado)',
     respaldo: huellaRespaldo(args.respaldo),
     acuseExplicito: acuse,
   });
-  const valoresReales = documentos
-    .map((d) => (d.datos ? d.datos.passwordHash : undefined))
-    .filter((v) => typeof v === 'string');
+  const valoresReales = documentos.map((d) => d.datos.passwordHash).filter((v) => typeof v === 'string');
   validarManifiestoSinSecretos(manifiesto, valoresReales);
-
   const rutaManifiesto = path.join(dirSalida, `manifiesto-ag08-${Date.now()}.json`);
   writeFileSync(rutaManifiesto, JSON.stringify(manifiesto, null, 2), 'utf8');
   console.log(`[AG-08] manifiesto (sin hashes): ${rutaManifiesto}`);
@@ -372,41 +666,134 @@ async function main() {
     return;
   }
 
-  const { FieldValue } = adminFirestore;
-  const { borrados, fallos } = await aplicarPlan(db, plan, {
-    deleteSentinela: FieldValue.delete(),
-    auditar: async (id) => {
-      await db.collection('audit_logs').add({
-        accion: 'AG08_PASSWORDHASH_RETIRADO',
-        coleccion: 'usuarios',
-        documentoId: id,
-        campo: 'passwordHash',
-        resultado: 'ELIMINADO',
-        respaldo: huellaRespaldo(args.respaldo),
-        fecha: new Date().toISOString(),
-      });
-    },
+  // ---- D3: verificación OBLIGATORIA del respaldo antes de escribir ---------
+  // `--manifiesto-respaldo` debe apuntar al manifiesto generado ANTES del export.
+  // Se comprueba que cubre exactamente el conjunto actual y que la base no ha
+  // cambiado desde entonces: si algo no cuadra, no se borra NADA (fail-closed).
+  if (!args.manifiestoRespaldo) {
+    throw abortar(
+      '--aplicar exige --manifiesto-respaldo: sin verificar el respaldo contra el estado actual no se borra nada.'
+    );
+  }
+  let manifiestoEsperado;
+  try {
+    manifiestoEsperado = JSON.parse(readFileSync(args.manifiestoRespaldo, 'utf8'));
+  } catch {
+    throw abortar('No se pudo leer el manifiesto de respaldo indicado (contenido o ruta no válidos).');
+  }
+  const verificacion = verificarRespaldo(manifiestoEsperado, documentos, {
+    idsAfectados: plan.idsAfectados,
+    exigirCobertura: true,
   });
+  if (!verificacion.ok) {
+    console.error(`[AG-08] respaldo NO válido (${verificacion.motivos.length} motivo(s)):`);
+    for (const m of verificacion.motivos) console.error(`   · ${m}`);
+    console.error('[AG-08] ABORTADO: no se ha escrito nada.');
+    process.exitCode = 2;
+    return;
+  }
+  console.log('[AG-08] respaldo verificado: cubre el conjunto actual y la base no ha cambiado.');
 
-  const despues = await db.collection('usuarios').select('passwordHash').get();
-  const restantes = despues.docs.filter((d) => d.data() && 'passwordHash' in d.data()).length;
+  // ---- Diario de progreso (reanudación y prueba de ejecución parcial) ------
+  let diario;
+  if (args.diario) {
+    try {
+      diario = JSON.parse(readFileSync(args.diario, 'utf8'));
+      if (diario.tipo !== 'AG08_DIARIO') throw new Error('tipo');
+      console.log(`[AG-08] REANUDANDO diario: ${diario.hechos.length} ya hechos, ${diario.fallidos.length} fallidos.`);
+    } catch {
+      throw abortar('El diario indicado no es válido (se esperaba un AG08_DIARIO).');
+    }
+  } else {
+    diario = crearDiario({ coleccion: COLECCION, respaldo: huellaRespaldo(args.respaldo) });
+  }
+  const rutaDiario = args.diario || path.join(dirSalida, `diario-ag08-${Date.now()}.json`);
+  const guardarDiario = (d) => writeFileSync(rutaDiario, JSON.stringify(d, null, 2), 'utf8');
+  guardarDiario(diario);
 
-  console.log(`[AG-08] borrados: ${borrados} · fallos: ${fallos} · restantes: ${restantes}`);
-  if (fallos > 0 || restantes > 0) {
-    console.error('[AG-08] INCOMPLETO: reejecuta (es idempotente) o restaura el export.');
+  const { FieldValue } = adminFirestore;
+  let resultado;
+  try {
+    resultado = await aplicarPlanConDiario(db, plan, {
+      deleteSentinela: FieldValue.delete(),
+      diario,
+      guardarDiario,
+      auditar: async (id) => {
+        // Se registra un TOKEN opaco, no el id: la traza permite correlacionar
+        // sin publicar identificadores de cuenta en la colección de auditoría.
+        await db.collection('audit_logs').add({
+          accion: 'AG08_PASSWORDHASH_RETIRADO',
+          coleccion: COLECCION,
+          documentoToken: tokenDocumento(id),
+          campo: 'passwordHash',
+          resultado: 'ELIMINADO',
+          respaldo: huellaRespaldo(args.respaldo),
+          fecha: new Date().toISOString(),
+        });
+      },
+    });
+  } catch (e) {
+    // Interrupción: el diario queda EN_INCURSO/INCOMPLETO con lo ya hecho.
+    diario.estado = 'INTERRUMPIDO';
+    diario.actualizadoEn = new Date().toISOString();
+    guardarDiario(diario);
+    console.error(`[AG-08] INTERRUMPIDO (${codigoError(e)}). Diario: ${rutaDiario}`);
+    console.error('[AG-08] la operación NO se ha completado: reanuda con --diario <ese fichero>.');
     process.exitCode = 1;
     return;
   }
-  console.log('[AG-08] COMPLETO. Reejecutar ahora produciría 0 escrituras (idempotente).');
+
+  // ---- Verificación posterior sobre el estado REAL ------------------------
+  const despues = await leerTodo();
+  const soloCampo = verificarSoloCambioElCampo(documentos, despues);
+  const restantes = despues.filter((d) => 'passwordHash' in d.datos).length;
+
+  console.log(
+    `[AG-08] borrados: ${resultado.borrados} · fallos: ${resultado.fallos} · restantes: ${restantes} · pendientes: ${resultado.pendientes.length}`
+  );
+
+  if (!soloCampo.ok) {
+    console.error('[AG-08] ANOMALÍA: se han detectado cambios fuera del campo previsto:');
+    for (const p of soloCampo.problemas) console.error(`   · ${p}`);
+    console.error('[AG-08] NO se declara completado. Restaura el export y revisa.');
+    process.exitCode = 3;
+    return;
+  }
+
+  if (resultado.fallos > 0 || restantes > 0 || resultado.pendientes.length > 0) {
+    diario.estado = 'INCOMPLETO';
+    diario.actualizadoEn = new Date().toISOString();
+    guardarDiario(diario);
+    console.error('[AG-08] INCOMPLETO: reejecuta (es idempotente) o restaura el export.');
+    console.error(`[AG-08] diario: ${rutaDiario}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  diario.estado = 'COMPLETO';
+  diario.actualizadoEn = new Date().toISOString();
+  guardarDiario(diario);
+  console.log('[AG-08] COMPLETO: solo se ha retirado passwordHash; el resto de campos está intacto.');
+  console.log('[AG-08] Reejecutar ahora produciría 0 escrituras (idempotente).');
 }
 
 // Solo se ejecuta como CLI, no al importarse desde las pruebas.
 if (process.argv[1] && path.basename(process.argv[1]) === 'migrar-passwordhash.mjs') {
   main().catch((e) => {
     // Motivo accionable pero SIN volcar rutas de credenciales ni contenido:
-    // se usa el mensaje propio del script cuando lo hay, y si no, el código.
-    const propio = typeof e?.message === 'string' && /^[^\n]{1,200}$/.test(e.message) && e.esPropio;
-    console.error(`[AG-08] abortado: ${propio ? e.message : codigoError(e)}`);
+    // se imprime el mensaje SOLO si está marcado como propio del script (redactado
+    // aquí, sin datos del entorno). El límite de longitud es una salvaguarda
+    // anti-volcado: si un mensaje propio es más largo, se trunca en vez de
+    // degradarse a un genérico 'Error' (que ocultaría la causa al operador).
+    const LIMITE = 400;
+    const esPropio = Boolean(e?.esPropio) && typeof e?.message === 'string' && !e.message.includes('\n');
+    const mensaje = esPropio
+      ? e.message.length > LIMITE
+        ? `${e.message.slice(0, LIMITE)}…`
+        : e.message
+      : codigoError(e);
+    const propio = esPropio;
+    console.error(`[AG-08] abortado: ${propio ? mensaje : codigoError(e)}`);
     process.exitCode = 1;
   });
 }

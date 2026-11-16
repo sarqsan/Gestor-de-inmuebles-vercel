@@ -3,7 +3,7 @@
 **Rama:** `arena/d44d3f9e-gestor-de-inmuebles-vercel`
 **Base:** `main` @ `d314856d02f26577b074f7ea7617cec849cf0846` (AG-11 fusionado y desplegado)
 **Fecha:** 2026-11-16
-**Estado:** **código y migración preparados y validados · REVISIÓN FINAL DE SEGURIDAD COMPLETADA · MIGRACIÓN NO EJECUTADA**
+**Estado:** código desplegado y validado · **FASE 2 (migración de datos) APTA para solicitar autorización · MIGRACIÓN NO EJECUTADA**
 
 > **Criterio de parada respetado.** No se ha borrado `passwordHash` de Firestore, no se ha
 > tocado ningún dato de producción, no se han modificado cuentas reales, credenciales,
@@ -455,7 +455,153 @@ recuento no ha cambiado en absoluto porque AG-08 no toca las colecciones ni las 
 
 ---
 
-## 12. Conclusión
+## 12. Fase 2 · preparación y validación de la migración de datos
+
+**Estado: APTO para solicitar autorización · migración REAL NO ejecutada · sin conexión a Firestore real.**
+
+Rama `arena/5b994c5b-gestor-de-inmuebles-vercel`, base `main` @ `4b7ffd9`.
+
+### 12.1 Inventario de documentos y colecciones afectados (sin datos personales)
+
+| Aspecto | Valor |
+|---|---|
+| Colección modificada | **`usuarios`** (única). Fijada en el código como `COLECCION = 'usuarios'`; no se acepta por argumento |
+| Colección de auditoría | `audit_logs` — **solo `add()`**, nunca se modifica ni se borra nada |
+| Campo eliminado | **`passwordHash`** — único campo tocado |
+| Criterio de selección | Documentos de `usuarios` que tengan la **propiedad** `passwordHash` (incluido `null`, `''` u objeto) |
+| Nº de documentos afectados | **DESCONOCIDO por diseño, y así debe permanecer hasta la ejecución autorizada.** No se ha leído la base real; se calcula en el dry-run previo |
+| Formatos del valor | `<string:64>` (SHA-256 hex) o `<string:11>` (`fb_<hex>`, fallback) — se reporta solo tipo y longitud |
+| Documentos NO afectados | Los que no tienen el campo y **todas las demás colecciones** |
+
+### 12.2 Procedimiento de respaldo
+
+Dos piezas, ambas obligatorias:
+
+1. **Export de datos (la vuelta atrás real).**
+   `gcloud firestore export gs://<bucket-privado>/ag08-pre --collection-ids=usuarios`
+   Contiene los documentos con sus hashes. **No se versiona** (material de credencial).
+
+2. **Manifiesto de huellas (la certificación).**
+   ```bash
+   node scripts/ag08/migrar-passwordhash.mjs --respaldo-manifiesto \
+        --entrada <export-normalizado.json> --salida <dir>
+   ```
+   Registra por documento `id`, `huella` (sha256 **excluyendo `passwordHash`**),
+   `tieneHash` y `hashLongitud`, más una `huellaGlobal` del conjunto. Sirve para
+   probar cobertura, detectar manipulación u obsolescencia, y certificar después
+   que la restauración recuperó el estado original.
+
+   **Decisión deliberada:** la huella **excluye** el campo. No se calcula ningún
+   sha256 de `passwordHash`, para que un `fb_<hex>` de baja entropía no pueda
+   atacarse por diccionario contra una huella almacenada.
+
+### 12.3 Procedimiento de migración
+
+```bash
+# 1) Respaldo (§12.2). Anotar el id del export y la hora.
+# 2) DRY-RUN (no escribe nada; emite manifiestos y recuento):
+node scripts/ag08/migrar-passwordhash.mjs --proyecto <id> --credencial <sa.json> \
+     --respaldo <id-export> --salida <dir>
+# 3) APLICAR (solo con autorización expresa):
+AG08_PROYECTOS_PRUEBA=<id-proyecto-pruebas> \
+node scripts/ag08/migrar-passwordhash.mjs --aplicar --proyecto <id> \
+     --credencial <sa.json> --respaldo <id-export> \
+     --manifiesto-respaldo <dir>/respaldo-ag08-*.json --salida <dir>
+```
+
+Secuencia interna de `--aplicar`:
+1. Guardas fail-closed (§12.6).
+2. Lectura completa de `usuarios` (`select('passwordHash')`).
+3. Plan + manifiesto de respaldo + manifiesto del plan.
+4. **Verificación obligatoria del respaldo** contra el estado actual; si algo no
+   cuadra → **aborta sin escribir** (`exit 2`).
+5. Diario `AG08_DIARIO` persistido **antes** de la primera escritura.
+6. `aplicarPlanConDiario`: solo `doc.update({passwordHash: delete()})` y
+   `audit_logs.add()` con **token opaco** (`doc_<hex12>`).
+7. **Verificación posterior sobre el estado real** (`verificarSoloCambioElCampo`).
+8. Estado terminal honesto: `COMPLETO`, `INCOMPLETO` o `ANOMALÍA`.
+
+### 12.4 Procedimiento de restauración
+
+```bash
+gcloud firestore import gs://<bucket-privado>/ag08-pre      # restaura los datos
+node scripts/ag08/migrar-passwordhash.mjs --respaldo-manifiesto --entrada <restaurado.json>
+# → la huellaGlobal debe coincidir con la del manifiesto previo (certificación).
+```
+Como el código desplegado ya no lee ni escribe el campo, restaurar es **inerte
+para la autenticación**: no reabre ninguna vía de acceso y devuelve el estado
+exacto anterior.
+
+### 12.5 Defectos encontrados y corregidos en esta fase
+
+| # | Defecto (severidad) | Corrección | Prueba de regresión |
+|---|---|---|---|
+| **F1** | **El respaldo no se validaba contra el estado actual.** Cualquier `--respaldo` servía como cadena; un export inexistente u obsoleto daba la misma autorización. El criterio «el respaldo puede restaurarse» **no estaba probado**. | `crearManifiestoRespaldo` + `verificarRespaldo` + `--manifiesto-respaldo` **obligatorio**; aborta si no cubre el conjunto, está manipulado u obsoleto. | 5 pruebas + simulación [3] |
+| **F2** | **La producción no estaba bloqueada de verdad.** El id real (`gestor-inmuebles-produccion`) no estaba en ninguna lista negra y el formato no se validaba. | Lista negra explícita + la lista blanca no puede contener producción + validación de formato GCP. | 5 pruebas + CLI |
+| **F3** | **La interrupción no estaba probada.** Solo se contaban fallos en memoria: sin diario duradero ni reanudación. Riesgo de dar por «verde» una ejecución parcial. | Diario `AG08_DIARIO` persistido antes de escribir, `aplicarPlanConDiario`, `--diario` para reanudar, y `INTERRUMPIDO`/`INCOMPLETO` con `exit != 0`. | 3 pruebas + simulación [6] |
+| **F4** | **El diario mentía al reanudar:** un id que falló y luego tuvo éxito permanecía en `fallidos`, dejando el diario `INCOMPLETO` para siempre. | Al confirmarse un hecho se retira de `fallidos`. | 1 prueba + mutación M3 |
+| **F5** | **`--aplicar` no verificaba sobre el estado real que solo cambiara el campo**; solo se comprobaba in-memory en la simulación. | `verificarSoloCambioElCampo(antes, despues)` sobre dos lecturas reales → `exit 3` y sin declarar completado si hay anomalía. | 3 pruebas + simulación [4] |
+| **F6** | **Abortos ilegibles:** «Falta `firebase-admin`» se imprimía como `Error` genérico (límite de 200 caracteres), ocultando la causa. | Límite 400 con truncado en vez de degradación, solo para mensajes **propios**. | 3 pruebas |
+| **F7** | **Fuga de identificadores:** `audit_logs` recibía `documentoId` (que en esta app **es el UID de Firebase Auth**) y `ag08-salida/` no estaba ignorado. | `tokenDocumento()` opaco (`doc_<hex12>`) + `.gitignore` para artefactos. | 3 pruebas |
+
+### 12.6 Estado de la protección contra producción
+
+Triple defensa, **toda verificada ejecutando**:
+
+1. **Sin `--aplicar` no se escribe nada** (dry-run por defecto).
+2. **Lista negra explícita** → `El proyecto indicado es el de PRODUCCIÓN: bloqueado sin excepción.`
+3. **Lista blanca obligatoria** `AG08_PROYECTOS_PRUEBA`: si no existe, si el id no está, o si la lista **contiene** producción → aborta.
+
+Además, sin `--respaldo` y sin `--manifiesto-respaldo` verificado **no se escribe nada**.
+
+> **Nota de seguridad:** el script usa el **SDK Admin**, que **omite las reglas de
+> Firestore**. Las reglas **no** pueden frenar la migración; estas guardas son la
+> única protección real, y por eso se prueban ejecutándolas, no leyéndolas.
+
+### 12.7 Interrupción: qué ocurre exactamente
+
+| Situación | Comportamiento | Estado |
+|---|---|---|
+| Fallo de escritura en un documento | Va a `fallidos`, **no** a `hechos`; se continúa con el resto | Diario `INCOMPLETO`, `exit 1` |
+| Excepción no controlada a mitad | Diario marcado `INTERRUMPIDO` con lo ya hecho | `exit 1` + instrucción de reanudación |
+| Reanudación (`--diario`) | Solo se intentan los no confirmados; los fallidos que ahora funcionan **salen** de `fallidos` | `COMPLETO` si no queda pendiente |
+| Declarar éxito con trabajo pendiente | **Imposible**: se exige `fallos === 0`, `restantes === 0` y `pendientes === 0` | — |
+
+### 12.8 Resultados de las pruebas
+
+| Prueba | Resultado |
+|---|---|
+| Suite AG-08 (fichero específico) | **41/41** |
+| Simulación end-to-end | **39/39**, base restaurada idéntica al original |
+| Mutaciones sobre las guardas nuevas | **4/4 detectadas** |
+| Suite completa | **336 archivos · 5.613 pruebas · 5.606 correctas · 0 fallidas · 0 omitidas** |
+| Integración | **303 + 88**, 0 fallos, 0 omitidas |
+| TypeScript | **0 errores** |
+| Build | **OK** |
+
+Mutaciones: huella que incluye el hash · lista negra neutralizada · diario que no
+retira el fallido · huella global sin comprobar. Todas detectadas y restauradas.
+
+### 12.9 Requisitos exactos para ejecutar la migración real
+
+1. **Autorización expresa e independiente** de esta fase.
+2. `firebase-admin` instalado (hoy **no** declarado ni instalado) — requiere autorización propia por tocar dependencias.
+3. **Export de respaldo** creado y su id registrado en la ventana de cambio.
+4. **Manifiesto de respaldo** generado y verificado contra el estado actual.
+5. `AG08_PROYECTOS_PRUEBA` con el id del proyecto **de pruebas** (nunca producción).
+6. Dry-run revisado y su recuento aceptado.
+7. Ventana de cambio acordada y responsable identificado.
+
+### 12.10 Confirmación
+
+**No se ha conectado ni escrito en Firestore real.** No se ha ejecutado la
+migración, no se han usado credenciales, no se ha eliminado ningún campo, no se
+ha tocado `firestore.rules` ni `storage.rules`, no se han modificado cuentas, y
+no se ha fusionado ni desplegado nada.
+
+---
+
+## 13. Conclusión
 
 - Ningún flujo legítimo de autenticación depende ya de `passwordHash`: la autoridad es
   Firebase Auth.

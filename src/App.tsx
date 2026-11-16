@@ -159,6 +159,11 @@ import { aplicarBajaAlEstado, etiquetaMotivoBaja, inmueblesOperativos } from './
 import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
 import { procesarSnapshotCandidatos } from './lib/snapshotCandidatosCache';
+import {
+  crearGestorGuardadoContratos,
+  huellaContrato,
+  type EstadoGuardado,
+} from './lib/guardadoContratoAutomatico';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
 import { detectarCambioTitularidad } from './lib/titularidadInmueble';
 import { fusionarEdicionOrdinaria } from './lib/edicionOrdinariaInmueble';
@@ -341,7 +346,7 @@ import { CrearProfesionalModal } from './components/modals/CrearProfesionalModal
 import { CrearEnlaceRegistroModal } from './components/modals/CrearEnlaceRegistroModal';
 import { AvisoIncidenciasDatos } from './components/estado-datos/AvisoIncidenciasDatos';
 import { PuertaEstadoDatos } from './components/estado-datos/EstadoDatosPantalla';
-import { origenesActivosDePerfil, reportarResultadoGuardado } from './estadoDatos/canalIncidencias';
+import { origenesActivosDePerfil, reportarErrorGuardado, reportarResultadoGuardado } from './estadoDatos/canalIncidencias';
 import type { OrigenDatos } from './estadoDatos/canalIncidencias';
 import { useEstadoLecturas } from './estadoDatos/useEstadoLecturas';
 import { useGestionesCarteraGestor } from './estadoDatos/useGestionesCarteraGestor';
@@ -1498,6 +1503,12 @@ export default function App() {
   // Clave: contrato.id -> firma (día actual + nº periodos + nº retrasados + último periodo).
   const cobrosEnsureRef = React.useRef<Map<string, string>>(new Map());
 
+  // AG-10: gestor de guardado automático (sobrevive a re-renderizados) y estado
+  // por contrato para que la interfaz muestre «guardando…», «guardado» o error.
+  const gestorGuardadoContratos = React.useRef(crearGestorGuardadoContratos());
+  const [estadoGuardadoContratos, setEstadoGuardadoContratos] =
+    React.useState<Record<string, EstadoGuardado>>({});
+
   // Fases 1.1 y 1.3 — Materializa el calendario de cobros y sincroniza estados por fecha.
   // Para cada contrato visible: se generan los periodos que falten y se pasa a RETRASADO
   // de forma automática (con trazabilidad) toda mensualidad PENDIENTE vencida más el margen
@@ -1510,19 +1521,53 @@ export default function App() {
       const sincro = actualizarEstadosVencimiento(contrato, hoy);
       if (sincro.periodos.length === 0) return;
 
+      // AG-10: la materialización es un guardado AUTOMÁTICO del contrato. Solo
+      // se intenta si el perfil puede escribir ESE contrato; si no, las reglas
+      // lo denegarían y solo generaría una incidencia por sesión.
+      // Se reutiliza `canWriteContrato` (authService): YA era el criterio único
+      // de escritura de contrato que usan Formalización y Cobros. No se crea un
+      // segundo criterio paralelo.
+      if (!canWriteContrato(usuarioConAmbitoAlquiler, contrato)) return;
+
       const retrasados = sincro.periodos.filter((p) => p.estado === 'RETRASADO').length;
       const firma = `${hoy.toISOString().slice(0, 10)}|${sincro.periodos.length}|${retrasados}|${sincro.periodos[sincro.periodos.length - 1].periodoMesAnio}`;
       if (cobrosEnsureRef.current.get(contrato.id) === firma) return;
-      cobrosEnsureRef.current.set(contrato.id, firma);
 
-      if (sincro.necesitaGuardado) {
-        saveContratoFirestore(sincro.contratoActualizado);
-        setContratos((prev) =>
-          prev.map((c) => (c.id === sincro.contratoActualizado.id ? sincro.contratoActualizado : c))
-        );
+      if (!sincro.necesitaGuardado) {
+        cobrosEnsureRef.current.set(contrato.id, firma);
+        return;
       }
+
+      // AG-10: `await` real y estado observable. La firma NO se marca hasta que
+      // la escritura confirma: antes se marcaba siempre, así que un fallo de red
+      // o un permiso denegado dejaban los cobros «materializados» en pantalla
+      // pero perdidos al recargar, sin reintento posible.
+      const huella = huellaContrato({
+        id: sincro.contratoActualizado.id,
+        registroCobros: sincro.contratoActualizado.registroCobros,
+      });
+      void gestorGuardadoContratos.current
+        .guardar(contrato.id, huella, {
+          puedeEscribir: true,
+          guardar: () => saveContratoFirestore(sincro.contratoActualizado),
+          reportarError: (error) =>
+            reportarErrorGuardado('contratos', error, 'Error en guardado automático del contrato:'),
+          alCambiarEstado: (estado) => {
+            setEstadoGuardadoContratos((prev) => ({ ...prev, [estado.contratoId]: estado.estado }));
+          },
+        })
+        .then((resultado) => {
+          // Solo se confirma el estado local cuando la escritura se persistió.
+          if (resultado === 'GUARDADO') {
+            cobrosEnsureRef.current.set(contrato.id, firma);
+            setContratos((prev) =>
+              prev.map((c) => (c.id === sincro.contratoActualizado.id ? sincro.contratoActualizado : c))
+            );
+          }
+          // En ERROR la firma queda sin marcar: el siguiente render reintenta.
+        });
     });
-  }, [currentUser, scopedContratos]);
+  }, [currentUser, scopedContratos, inmueblesParcialesConEscritura]);
 
   // FASE 2.2 — Materializa automáticamente los apuntes pendientes de las
   // plantillas recurrentes (hasta el mes en curso). Es idempotente: los IDs son
@@ -4203,6 +4248,7 @@ export default function App() {
               onSaveContrato={async (c) => { await handleSaveContrato(c); }}
               onPersistirFinalizacion={handlePersistirCicloContrato}
               puedeEscribirContrato={(c) => canWriteContrato(usuarioConAmbitoAlquiler, c)}
+              estadoGuardado={estadoGuardadoContratos}
             />
           )}
 

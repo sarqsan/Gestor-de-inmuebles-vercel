@@ -158,6 +158,7 @@ import { puedeDarDeBajaInmueble, puedeLeerTitularidadesInmueble, tieneEscrituraI
 import { aplicarBajaAlEstado, etiquetaMotivoBaja, inmueblesOperativos } from './utils/bajaPatrimonialInmueble';
 import type { SolicitudBaja } from './utils/cicloPatrimonialEngine';
 import { procesarSnapshotInmuebles } from './lib/snapshotInmueblesCache';
+import { procesarSnapshotCandidatos } from './lib/snapshotCandidatosCache';
 import { ambitosInmueblesParcialesActivosDe, inmueblesParcialesActivosDe, inmueblesParcialesEscrituraDe, propietariosGestionadosDe } from './lib/carterasGestion';
 import { detectarCambioTitularidad } from './lib/titularidadInmueble';
 import { fusionarEdicionOrdinaria } from './lib/edicionOrdinariaInmueble';
@@ -1291,19 +1292,18 @@ export default function App() {
       });
     }), dataScope);
 
+    // AG-09: mismo criterio que D2a para inmuebles. Un snapshot vacío es un
+    // resultado LEGÍTIMO (consulta acotada sin resultados) y NUNCA autoriza a
+    // reescribir en Firestore los candidatos que haya en memoria: eso resucitaba
+    // candidatos borrados y, para el resto de perfiles, generaba escrituras
+    // denegadas en bucle. El helper es puro y no puede escribir en Firestore.
     const unsubscribeCand = subscribeCandidatos(conDatos<Candidato[]>('candidatos', (data) => {
-      if (data && data.length > 0) {
-        setCandidatos(data);
-        guardarCacheLocal('candidatos', data);
-      } else {
-        setCandidatos((current) => {
-          if (current.length > 0) {
-            current.forEach((c) => saveCandidatoFirestore(c));
-            return current;
-          }
-          return [];
-        });
-      }
+      procesarSnapshotCandidatos(data, {
+        setCandidatos,
+        escribirCacheLectura: (items) => {
+          guardarCacheLocal('candidatos', items);
+        },
+      });
     }));
 
     const unsubscribeProp = subscribePropietarios(conDatos<Propietario[]>('propietarios', (data) => {

@@ -455,7 +455,62 @@ recuento no ha cambiado en absoluto porque AG-08 no toca las colecciones ni las 
 
 ---
 
-## 12. Conclusión
+## 12. Fusión y despliegue en producción (autorizados)
+
+Autorización expresa recibida para **fusionar y desplegar el código** (no la migración de datos).
+
+### 12.1 Comprobaciones previas a la fusión
+
+| # | Comprobación | Resultado |
+|---|---|---|
+| 1 | Último commit = `1b16bad` o descendiente validado | **OK.** HEAD `16340fc`, descendiente directo de `1b16bad`; su diff es **solo** `docs/ag08/INFORME-AG08.md` (+12 líneas) |
+| 2 | CI obligatorio actualizado y en verde | **OK.** «Tipos, suite completa y build» **success** sobre `16340fc`: `336/336 archivos · 5590 pruebas · 5583 correctas · 0 fallidas`. El job de emuladores conserva **los 4 históricos de P0, 0 nuevos** (verificado por nombre) |
+| 3 | Alcance limitado a AG-08 | **OK.** 9 ficheros, todos del bloque |
+| 4 | Sin cambios en reglas ni operaciones sobre datos reales | **OK.** 0 cambios en `firestore.rules`, `storage.rules`, `reglas-firestore-r12/`, `docs/p0/`, `firebase.json`, `package*.json` |
+| 5 | La migración sigue sin ejecutarse | **OK.** Sin `firebase-admin` (ni declarado ni instalado), 0 manifiestos, dry-run por defecto y lista blanca intactos |
+
+### 12.2 Fusión
+
+- **PR #91 → MERGED** a las `2026-11-16T19:12:02Z` (merge normal, no squash).
+- **SHA de fusión: `4b7ffd9e397a739ace167f79690933339fd8bb1d`**.
+- Los 4 commits del bloque (`bea640f`, `4b9273c`, `1b16bad`, `16340fc`) verificados **ancestros de `main`**.
+
+### 12.3 Despliegue
+
+| Dato | Valor |
+|---|---|
+| Deployment de **Production** | **`7833822957`** |
+| SHA desplegado | **`4b7ffd9e397a739ace167f79690933339fd8bb1d`** (exactamente el fusionado) |
+| Estado | **success** |
+| URL | `https://gestor-de-inmuebles-vercel-cj2c89k4q-sarqsan2-4111s-projects.vercel.app` |
+| Verificación de producción | run `43936830206` → **success** |
+
+Comprobaciones del run de verificación: `HTTP 200` (esquema 1 y capacidades legibles), `HTTP 413`
+rechazado antes de parsear, `HTTP 401` sin generar OTP, `HTTP 410` ruta retirada como debe.
+
+### 12.4 Flujos de autenticación y alta, sobre el código ya desplegado
+
+Ejecutado sobre `main` = `4b7ffd9` (no sobre la rama):
+
+- `tests/login-admin-principal.test.ts` · `bloqueE.servicios.test.ts` · `acceso-propietarios.test.ts` · `migracion-passwordhash.test.ts`: **4 archivos / 87 pruebas / 0 fallos**.
+- Pruebas del contrato **AG-08** (D.1–D.5) sobre `main`: **5/5 verde**.
+  Es decir, contra las reglas reales: **el alta sigue permitida sin `passwordHash`**, y la
+  protección que impide al titular modificarlo **sigue vigente**.
+- El código desplegado conserva `signInWithEmailAndPassword`, `createUserWithEmailAndPassword`,
+  `sendPasswordResetEmail` y `signOut`; la única aparición de `passwordHash` es el comentario del
+  camino retirado.
+
+### 12.5 Confirmaciones exigidas
+
+- **No se han modificado datos reales.** No se ejecutó ninguna escritura contra Firestore.
+- **La migración sigue SIN ejecutarse** (esta autorización cubría código, no datos).
+- **No se han tocado las reglas.** `firestore.rules` (`63ce450ee24d…`) y `storage.rules`
+  (`631d45acb977…`) tienen el **mismo hash SHA-256** en `main` que en la base `d314856`.
+- **No se han alterado cuentas ni credenciales.**
+
+---
+
+## 13. Conclusión
 
 - Ningún flujo legítimo de autenticación depende ya de `passwordHash`: la autoridad es
   Firebase Auth.
@@ -472,4 +527,5 @@ recuento no ha cambiado en absoluto porque AG-08 no toca las colecciones ni las 
   (D1–D5), **todos corregidos** y cubiertos por pruebas. La migración es ahora fail-closed de
   verdad y su simulación de respaldo/restauración prueba el **código real** (20/20).
 
-**Parada respetada: no hay migración real, ni fusión, ni despliegue.**
+**Código fusionado y desplegado** (PR #91, merge `4b7ffd9`, deployment `7833822957`).
+**La migración de datos NO se ha ejecutado**: necesita autorización independiente.

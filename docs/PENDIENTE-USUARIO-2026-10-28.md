@@ -49,7 +49,13 @@ Se hace en el ordenador, con las dos pestañas abiertas.
 
 | No hagas esto | Por qué |
 |---|---|
-| **No vuelvas a publicar las reglas.** | Ya están publicadas. El fichero del repo **no ha cambiado** desde entonces: `firestore.rules` sigue con `sha256 81b9ae93…413d` y **4 064 líneas**. |
+| **No vuelvas a publicar las reglas.** | Ya están publicadas. El fichero del repo **no ha cambiado** desde entonces: `firestore.rules` sigue con `sha256 63ce450e…` y **4 140 líneas**.
+
+  > **Actualizado 2026-11-15 (P1).** El fichero creció a 4 140 líneas y su huella pasó a
+  > `sha256 63ce450e…` porque P1 añadió el bloque `2H-bis` (`mensajes_trabajo`) al final.
+  > No se ha eliminado ni reescrito ninguna línea anterior. **Sigue sin hacer falta volver
+  > a publicar las reglas** para ninguna comprobación de este documento: la publicación es
+  > un acto del propietario y P1 no la requiere. |
 | **No toques `storage.rules`.** | Sin cambios respecto a lo publicado (`sha256 631d45ac…34e93b9`). Publicarlo «por si acaso» es el único movimiento que puede romper algo. |
 | **No borres ni crees índices de un solo campo**, ni «exenciones» (`fieldOverrides`). | El proyecto no declara ninguno; los automáticos de Firestore no se tocan. |
 | **No reviertas las reglas si un caso del simulador sale distinto de lo esperado.** | Primero me lo cuentas. Revertir reabre las escrituras anónimas de `solicitudes`, `candidatos` y `actas_otp`, que es justo lo que cerramos. |

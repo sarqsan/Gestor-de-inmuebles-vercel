@@ -12,6 +12,11 @@ on:
       # P0/P1 (2026-10-27): la rama de esta ejecución también debe pasar por
       # los emuladores oficiales. El job NO despliega nada: solo pruebas.
       - arena/fb69e0b0-gestor-de-inmuebles-vercel
+      # P0 (2026-11-15): la batería de cobertura de P0-A (760 casos) debe
+      # ejecutarse en un entorno con JRE y salida a los CDN de Firebase. El
+      # entorno local de la auditoría no tiene ninguna de las dos cosas, así que
+      # sin esta línea la batería quedaría escrita y nunca ejecutada.
+      - arena/77999d3b-gestor-de-inmuebles-vercel
   workflow_dispatch:
 
 permissions:

@@ -65,6 +65,8 @@ import { confirmar } from '../../feedback/confirmacion';
 import { ejecutarOperacion } from '../../feedback/operaciones';
 import { mensajeDeErrorUsuario } from '../../feedback/mensajes';
 import { useDialogoAccesible } from '../../accesibilidad/dialogo';
+import { HiloTrabajo } from '../profesional/HiloTrabajo';
+import { PanelEvidencias, type EvidenciaTrabajo } from '../profesional/PanelEvidencias';
 
 interface DetalleTrabajoProfesionalModalProps {
   isOpen: boolean;
@@ -83,6 +85,17 @@ interface DetalleTrabajoProfesionalModalProps {
   onVerIncidencia?: (incidencia: Incidencia) => void;
   onGastoGenerado?: (gasto: Gasto) => void;
   onVerGasto?: (gasto: Gasto) => void;
+  /**
+   * P1 §C — subida de evidencias. Opcional: si no se pasa, el panel solo
+   * permite CONSULTAR. Así el propietario (que solo supervisa) no necesita
+   * implementar nada, y el profesional conecta aquí el Storage existente.
+   */
+  onAdjuntarEvidencia?: (entrada: {
+    archivo: File;
+    momento: 'ANTES' | 'DURANTE' | 'DESPUES';
+    observacion: string;
+    ruta: string;
+  }) => Promise<EvidenciaTrabajo | void>;
 }
 
 export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalModalProps> = ({
@@ -102,8 +115,11 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
   onVerIncidencia,
   onGastoGenerado,
   onVerGasto,
+  onAdjuntarEvidencia,
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'presupuestos' | 'historial' | 'adjuntos'>('general');
+  const [activeTab, setActiveTab] = useState<
+    'general' | 'presupuestos' | 'adjuntos' | 'historial' | 'comunicacion'
+  >('general');
   const [isUpdating, setIsUpdating] = useState(false);
   const [localTrabajo, setLocalTrabajo] = useState<TrabajoProfesional>(trabajo);
   const [localGastos, setLocalGastos] = useState<Gasto[]>(gastos || []);
@@ -918,6 +934,18 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
           >
             Línea de Tiempo ({localTrabajo.historial?.length || 0})
           </button>
+          {/* P1 §D — canal propietario ↔ profesional, vinculado a ESTE trabajo.
+              Se añade como pestaña nueva: no altera ninguna de las anteriores. */}
+          <button
+            onClick={() => setActiveTab('comunicacion')}
+            className={`py-3 px-3 border-b-2 transition-colors ${
+              activeTab === 'comunicacion'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Comunicación
+          </button>
         </div>
 
         {/* Subtab Content */}
@@ -1346,8 +1374,42 @@ export const DetalleTrabajoProfesionalModal: React.FC<DetalleTrabajoProfesionalM
             </div>
           )}
 
+          {activeTab === 'comunicacion' && (
+            <div className="space-y-4">
+              {/* El hilo se acota al trabajo y firma con el UID real del usuario.
+                  Las reglas derivan los participantes del TRABAJO: si este
+                  usuario no es parte, la consulta se deniega. */}
+              {currentUser && localTrabajo.profesionalId ? (
+                <HiloTrabajo
+                  trabajo={localTrabajo}
+                  rol={currentUser.tipoPerfil === 'PROFESIONAL' ? 'PROFESIONAL' : 'PROPIETARIO'}
+                  remitenteUid={currentUser.authUid || currentUser.id || ''}
+                  remitenteNombre={currentUser.nombre || currentUser.email || ''}
+                />
+              ) : (
+                <p className="text-xs text-slate-500 italic">
+                  Este trabajo no tiene profesional asignado, así que todavía no hay canal de comunicación.
+                </p>
+              )}
+            </div>
+          )}
+
           {activeTab === 'adjuntos' && (
             <div className="space-y-4">
+              {/* P1 §C — evidencias clasificadas por momento (antes/durante/después),
+                  con observaciones y consulta. Se AÑADE encima de la lista
+                  histórica, que queda intacta más abajo. */}
+              <PanelEvidencias
+                trabajo={localTrabajo}
+                puedeAdjuntar={
+                  Boolean(currentUser) &&
+                  currentUser?.tipoPerfil === 'PROFESIONAL' &&
+                  Boolean(localTrabajo.profesionalId)
+                }
+                onAdjuntar={onAdjuntarEvidencia}
+                avisoSinRuta="Este trabajo no tiene una incidencia vinculada, así que el profesional no puede guardar evidencias aquí. Pídele al propietario que vincule la intervención a una incidencia."
+              />
+
               <h4 className="text-sm font-bold text-slate-900">Documentos e Imágenes</h4>
               {localTrabajo.documentos && localTrabajo.documentos.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -52,8 +52,11 @@ describe('reglas publicadas · la comparación no miente en ninguna dirección',
     const r = compararConRepo(anterior, REGLAS);
     expect(r.igual).toBe(false);
     expect(r.lineasConsola).toBe(4000);
-    expect(r.lineasRepo).toBe(4064);
-    expect(r.motivo).toMatch(/4000 líneas y el del repositorio 4064/);
+    // P1 (2026-11-15): el ruleset pasó a 4 140 líneas al añadirse el bloque
+    // `2H-bis` al final. La prueba NO se relaja: sigue exigiendo que el
+    // comparador detecte una versión anterior y que cite el recuento real.
+    expect(r.lineasRepo).toBe(4140);
+    expect(r.motivo).toMatch(/4000 líneas y el del repositorio 4140/);
   });
 
   it('detecta un texto vacío o basura (pegado fallido)', () => {
@@ -69,8 +72,9 @@ describe('reglas publicadas · la comparación no miente en ninguna dirección',
   });
 
   it('la huella del fichero del repositorio es la que se cita en la documentación', () => {
-    expect(huellaReglas(REGLAS).startsWith('81b9ae93')).toBe(true);
-    expect(contarLineas(REGLAS)).toBe(4064);
+    // P1: la huella cambió con el bloque `2H-bis` (aditivo). Se fija la nueva.
+    expect(huellaReglas(REGLAS).startsWith('63ce450e')).toBe(true);
+    expect(contarLineas(REGLAS)).toBe(4140);
   });
 
   it('normalizar es idempotente (no altera el texto dos veces)', () => {

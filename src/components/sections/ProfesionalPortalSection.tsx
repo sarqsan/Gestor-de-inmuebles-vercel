@@ -1,33 +1,34 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Wrench,
+  AlertTriangle,
   Building,
   Building2,
-  MapPin,
-  Home,
-  Tag,
-  AlertTriangle,
-  Mail,
-  Phone,
-  Globe,
-  Check,
-  Plus,
-  Trash2,
-  Clock,
-  CheckCircle2,
   Calendar,
+  Check,
+  CheckCircle2,
   ChevronRight,
+  Clock,
+  DollarSign,
+  ExternalLink,
   Eye,
   FileText,
-  Sparkles,
-  DollarSign,
-  User,
-  Search,
   Filter,
-  ExternalLink,
+  Globe,
+  Home,
   Image as ImageIcon,
-  X,
   Loader2,
+  Mail,
+  MapPin,
+  Phone,
+  Plus,
+  Search,
+  Sparkles,
+  Tag,
+  Trash2,
+  User,
+  Wrench,
+  X,
+  XCircle,
 } from 'lucide-react';
 import {
   UsuarioApp,
@@ -38,7 +39,9 @@ import {
   TrabajoProfesional,
   Incidencia,
   EstadoTrabajoProfesional,
+  PresupuestoProfesional,
 } from '../../types';
+import type { EvidenciaTrabajo } from '../profesional/PanelEvidencias';
 import {
   ESTADO_TRABAJO_LABELS,
   PRIORIDAD_TRABAJO_LABELS,
@@ -48,13 +51,27 @@ import {
   claveScope,
   subscribeTrabajosProfesionales,
   subscribeIncidencias,
+  subscribePresupuestosProfesionales,
   saveTrabajoProfesionalFirestore,
+  uploadEvidenciaTrabajoStorage,
   saveIncidenciaFirestore,
   type DataAccessScope,
 } from '../../lib/firebase';
 import { DetalleTrabajoProfesionalModal } from '../modals/DetalleTrabajoProfesionalModal';
+import { PresupuestoProfesionalModal } from '../modals/PresupuestoProfesionalModal';
+import { DetallePresupuestoProfesionalModal } from '../modals/DetallePresupuestoProfesionalModal';
+import {
+  BLOQUES_PANEL,
+  ESTADOS_QUE_PUEDE_FIJAR_EL_PROFESIONAL,
+  clasificarEnBloques,
+  puedeAceptarORechazar,
+  validarInformeFinalizacion,
+  resolverEncargo,
+  validarTransicionProfesional,
+} from '../../features/profesional/circuitoProfesional';
 import { TrabajoProfesionalModal } from '../modals/TrabajoProfesionalModal';
 import { propsInteraccion } from '../../accesibilidad/interaccion';
+import { confirmar } from '../../feedback/confirmacion';
 
 interface ProfesionalPortalSectionProps {
   currentUser: UsuarioApp;
@@ -84,6 +101,14 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
   const [showCrearTrabajoModal, setShowCrearTrabajoModal] = useState(false);
   const [selectedPhotoUrl, setSelectedPhotoUrl] = useState<string | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  // P1 · estado de UI del circuito: avisos de error y modales de presupuesto.
+  const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const [showPresupuestoModal, setShowPresupuestoModal] = useState(false);
+  const [trabajoParaPresupuesto, setTrabajoParaPresupuesto] = useState<TrabajoProfesional | null>(null);
+  const [presupuestoParaEditar, setPresupuestoParaEditar] = useState<PresupuestoProfesional | null>(null);
+  const [presupuestoParaVer, setPresupuestoParaVer] = useState<PresupuestoProfesional | null>(null);
+  const [presupuestos, setPresupuestos] = useState<PresupuestoProfesional[]>([]);
 
   // BLOQUE 12 · A-01: portal del profesional. Las reglas conceden `list` por
   // `profesionalId` (trabajos) y `profesionalAsignadoId` (incidencias): antes
@@ -105,10 +130,16 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
     const unsubIncidencias = subscribeIncidencias((data) => {
       setIncidencias(data || []);
     }, scope);
+    // P1 §B: el profesional debe ver SUS presupuestos y su historial de versiones.
+    // `firestore.rules` ya concede `list` por `profesionalId`; no se amplía nada.
+    const unsubPresupuestos = subscribePresupuestosProfesionales((data) => {
+      setPresupuestos(data || []);
+    }, scope);
 
     return () => {
       unsubTrabajos();
       unsubIncidencias();
+      unsubPresupuestos();
     };
   }, [claveDelScope]);
 
@@ -270,13 +301,208 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
     return { total, pendientes, enCurso, finalizados };
   }, [misTrabajos]);
 
+  /**
+   * P1 §A — Aceptar o rechazar un encargo.
+   *
+   * El motivo del rechazo se pide SIEMPRE: es el único dato que permite al
+   * propietario entender qué ha pasado y reasignar. Reutiliza
+   * `handleCambiarEstadoTrabajo`, que ya escribe historial, sincroniza la
+   * incidencia vinculada y respeta las reglas; no se duplica la escritura.
+   */
+  /**
+   * P1 §C — Sube una evidencia y la registra en el trabajo.
+   *
+   * La ruta la impone el núcleo (`rutaEvidencia`): siempre bajo
+   * `incidencias/{incidenciaId}/{momento}_…`, el único prefijo que el
+   * servidor autoriza al profesional asignado. El binario va por el motor
+   * mediado por servidor; en el trabajo solo se persiste metadato + URL.
+   */
+  const handleAdjuntarEvidencia = async (entrada: {
+    archivo: File;
+    momento: 'ANTES' | 'DURANTE' | 'DESPUES';
+    observacion: string;
+    ruta: string;
+  }): Promise<EvidenciaTrabajo> => {
+    const trabajo = selectedTrabajoForModal;
+    if (!trabajo) throw new Error('No hay un trabajo abierto.');
+    if (!profesional?.id || trabajo.profesionalId !== profesional.id) {
+      throw new Error('Solo el profesional asignado puede adjuntar evidencias de este trabajo.');
+    }
+    if (!trabajo.incidenciaId) {
+      throw new Error('Este trabajo no tiene una incidencia vinculada donde guardar evidencias.');
+    }
+
+    const { url, storagePath } = await uploadEvidenciaTrabajoStorage(
+      entrada.ruta,
+      entrada.archivo,
+      entrada.archivo.type || 'image/jpeg'
+    );
+
+    const adjunto: EvidenciaTrabajo = {
+      id: `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      nombre: entrada.archivo.name,
+      url,
+      storagePath,
+      tipo: entrada.archivo.type.startsWith('image/') ? 'IMAGEN' : 'DOCUMENTO',
+      mimeType: entrada.archivo.type,
+      tamano: entrada.archivo.size,
+      tamanoBytes: entrada.archivo.size,
+      fechaSubida: new Date().toISOString(),
+      incidenciaId: trabajo.incidenciaId,
+      inmuebleId: trabajo.inmuebleId,
+      propietarioId: trabajo.propietarioId,
+      trabajoId: trabajo.id,
+      subidoPor: profesional.nombreComercial || profesional.razonSocial || currentUser.nombre || 'Profesional',
+      momentoEvidencia: entrada.momento,
+      observacion: entrada.observacion || undefined,
+      fechaMomento: new Date().toISOString(),
+    };
+
+    const documentos = [...((trabajo.documentos || []) as EvidenciaTrabajo[]), adjunto];
+    const actualizado: TrabajoProfesional = {
+      ...trabajo,
+      documentos,
+      historial: [
+        ...(trabajo.historial || []),
+        {
+          id: `h_ev_${Date.now()}`,
+          fecha: new Date().toISOString(),
+          estado: trabajo.estado,
+          usuario: currentUser.nombre || 'Profesional',
+          usuarioId: currentUser.id,
+          comentario: `Evidencia adjuntada (${entrada.momento.toLowerCase()})${entrada.observacion ? `: ${entrada.observacion}` : ''}`,
+        },
+      ],
+      actualizadoPor: currentUser.nombre || 'Profesional',
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveTrabajoProfesionalFirestore(actualizado);
+    setSelectedTrabajoForModal(actualizado);
+    setTrabajos((prev) => prev.map((t) => (t.id === actualizado.id ? actualizado : t)));
+    return adjunto;
+  };
+
+  const handleAceptarEncargo = async (trabajo: TrabajoProfesional) => {
+    const r = resolverEncargo(
+      { estado: trabajo.estado, profesionalId: trabajo.profesionalId },
+      profesional?.id,
+      'ACEPTAR'
+    );
+    if (!r.ok || !r.estado) { setError(r.error || 'No se ha podido aceptar el encargo.'); return; }
+    setAviso(null);
+    await handleCambiarEstadoTrabajo(trabajo, r.estado, 'Encargo aceptado por el profesional');
+  };
+
+  const handleRechazarEncargo = async (trabajo: TrabajoProfesional) => {
+    // El canal `confirmar` es el sustituto accesible del prompt nativo
+    // (UX-7): diálogo con foco gestionado, Escape para cancelar y campo de texto.
+    await confirmar({
+      titulo: 'Rechazar encargo',
+      mensaje: 'El propietario recibirá el rechazo junto con el motivo.',
+      detalle: 'El trabajo quedará cerrado y deberá reasignarse.',
+      etiquetaConfirmar: 'Rechazar encargo',
+      etiquetaCancelar: 'Volver',
+      peligroso: true,
+      entradaTexto: {
+        etiqueta: 'Motivo del rechazo',
+        marcador: 'Ej.: no dispongo de maquinaria para este trabajo',
+        obligatorio: true,
+        errorObligatorio: 'Indica el motivo del rechazo (mínimo 5 caracteres).',
+      },
+      alConfirmar: async (motivo) => {
+        const r = resolverEncargo(
+          { estado: trabajo.estado, profesionalId: trabajo.profesionalId },
+          profesional?.id,
+          'RECHAZAR',
+          motivo
+        );
+        if (!r.ok || !r.estado) { setError(r.error || 'No se ha podido rechazar el encargo.'); return; }
+        setAviso(null);
+        await handleCambiarEstadoTrabajo(trabajo, r.estado, `Rechazado por el profesional: ${String(motivo || '').trim()}`);
+      },
+    });
+  };
+
+  /** P1 §B — abrir el presupuesto para un trabajo. */
+  const handleAbrirPresupuesto = (trabajo: TrabajoProfesional, presupuestoExistente?: PresupuestoProfesional) => {
+    setTrabajoParaPresupuesto(trabajo);
+    setPresupuestoParaEditar(presupuestoExistente || null);
+    setShowPresupuestoModal(true);
+  };
+
+  /**
+   * P1 §E — Informe de finalización.
+   *
+   * Se piden observaciones y se exige que el trabajo tenga al menos una
+   * evidencia si tiene una incidencia vinculada (donde el servidor autoriza la
+   * subida del profesional asignado). Si no tiene incidencia, se avisa pero no
+   * se bloquea: hay intervenciones sin soporte fotográfico posible.
+   */
+  const handleInformarFinalizacion = async (trabajo: TrabajoProfesional) => {
+    const informe = validarInformeFinalizacion(
+      { estado: trabajo.estado, profesionalId: trabajo.profesionalId },
+      profesional?.id
+    );
+    if (!informe.ok) { setError(informe.error || 'No se puede finalizar este trabajo.'); return; }
+
+    const nEvidencias = Array.isArray(trabajo.fotos) ? trabajo.fotos.length : 0;
+    if (informe.exigeEvidencias && trabajo.incidenciaId && nEvidencias === 0) {
+      setError(
+        'Antes de finalizar, adjunta al menos una fotografía o documento del trabajo. ' +
+        'El propietario tiene que poder revisarlo.'
+      );
+      return;
+    }
+
+    await confirmar({
+      titulo: 'Informar de la finalización',
+      mensaje: 'El propietario revisará el trabajo y confirmará la finalización.',
+      detalle: 'Añade observaciones si quieres explicar lo que se ha hecho.',
+      etiquetaConfirmar: 'Finalizar trabajo',
+      etiquetaCancelar: 'Volver',
+      entradaTexto: {
+        etiqueta: 'Observaciones (opcional)',
+        marcador: 'Ej.: sustituido el grifo y revisada la presión',
+        obligatorio: false,
+        valorInicial: trabajo.observaciones || '',
+      },
+      alConfirmar: async (observaciones) => {
+        const obs = String(observaciones || '').trim().slice(0, 2000);
+        setAviso(null);
+        await handleCambiarEstadoTrabajo(
+          trabajo,
+          'FINALIZADO',
+          obs
+            ? `Finalización informada por el profesional: ${obs}`
+            : 'Trabajo finalizado por el profesional, pendiente de confirmación del propietario'
+        );
+        setAviso('Trabajo finalizado. El propietario debe revisarlo y confirmar la finalización.');
+      },
+    });
+  };
+
   const handleCambiarEstadoTrabajo = async (
     trabajo: TrabajoProfesional,
     nuevoEstado: EstadoTrabajoProfesional,
     observacion?: string
   ) => {
+    // P1 §2: el profesional solo puede AÑADIR progreso a SUS trabajos. La
+    // comprobación se hace aquí, antes de escribir, para dar un mensaje útil;
+    // la autoridad sigue siendo `firestore.rules`, que ya limita el update al
+    // profesional asignado. No se amplía ningún permiso.
+    const permiso = validarTransicionProfesional(
+      { estado: trabajo.estado, profesionalId: trabajo.profesionalId },
+      profesional?.id,
+      nuevoEstado
+    );
+    if (!permiso.ok) {
+      setError(permiso.mensaje || 'No puedes cambiar el estado de este trabajo.');
+      return;
+    }
     try {
       setIsUpdatingStatus(true);
+      setError(null);
       const usuarioNombre = currentUser?.nombre
         ? `${currentUser.nombre} ${currentUser.apellidos || ''}`.trim()
         : profesional?.nombreComercial || 'Profesional Técnico';
@@ -781,6 +1007,66 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                 </div>
               </div>
 
+
+              {/* P1 §3 — PANEL DEL CIRCUITO: los seis bloques de la orden.
+                  Se calcula con `clasificarEnBloques`, la misma función que las
+                  pruebas unitarias, para que la UI y las pruebas no diverjan. */}
+              {(() => {
+                const bloques = clasificarEnBloques(
+                  trabajos.map((t) => ({
+                    estado: t.estado,
+                    profesionalId: t.profesionalId,
+                    evidencias: Array.isArray(t.fotos) ? t.fotos.length : 0,
+                    presupuestos: presupuestos
+                      .filter((p) => p.trabajoId === t.id)
+                      .map((p) => ({ estado: p.estado })),
+                  })),
+                  profesional?.id
+                );
+                const total = BLOQUES_PANEL.reduce((n, b) => n + bloques[b.id].length, 0);
+                if (!total) return null;
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                    {BLOQUES_PANEL.map((b) => {
+                      const n = bloques[b.id].length;
+                      const alerta = (b.id === 'PENDIENTES_ACEPTAR' || b.id === 'PENDIENTES_DOCUMENTAR') && n > 0;
+                      return (
+                        <div
+                          key={b.id}
+                          title={b.descripcion}
+                          className={`p-3 rounded-xl border ${
+                            alerta ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'
+                          }`}
+                        >
+                          <div className={`text-[10px] font-bold uppercase tracking-wider ${
+                            alerta ? 'text-amber-800' : 'text-slate-500'
+                          }`}>
+                            {b.titulo}
+                          </div>
+                          <div className={`text-xl font-bold mt-0.5 ${
+                            alerta ? 'text-amber-900' : 'text-slate-800'
+                          }`}>
+                            {n}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {error && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-start justify-between gap-3">
+                  <span>{error}</span>
+                  <button onClick={() => setError(null)} className="text-rose-600 hover:text-rose-900 font-bold cursor-pointer">Cerrar</button>
+                </div>
+              )}
+              {aviso && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-800">
+                  {aviso}
+                </div>
+              )}
+
               {/* Filters & Actions Bar */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
@@ -893,6 +1179,56 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                             </button>
                           </div>
                         </div>
+
+                        {/* P1 · CIRCUITO DE TRABAJO — acciones del profesional.
+                            Solo aparecen cuando el estado REAL lo permite; la
+                            comprobación se repite en el manejador y en las reglas. */}
+                        {(puedeAceptarORechazar({ estado: trab.estado, profesionalId: trab.profesionalId }, profesional?.id)
+                          || ['ACEPTADO', 'PROGRAMADO', 'EN_EJECUCION', 'EN_CURSO'].includes(trab.estado)) && (
+                          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+                            {puedeAceptarORechazar({ estado: trab.estado, profesionalId: trab.profesionalId }, profesional?.id) && (
+                              <>
+                                <button
+                                  onClick={() => handleAceptarEncargo(trab)}
+                                  disabled={isUpdatingStatus}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Aceptar encargo</span>
+                                </button>
+                                <button
+                                  onClick={() => handleRechazarEncargo(trab)}
+                                  disabled={isUpdatingStatus}
+                                  className="px-3 py-1.5 bg-white border border-rose-300 text-rose-700 hover:bg-rose-50 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Rechazar</span>
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => handleAbrirPresupuesto(
+                                trab,
+                                presupuestos.find((p) => p.trabajoId === trab.id)
+                              )}
+                              className="px-3 py-1.5 bg-white border border-slate-300 text-slate-800 hover:bg-slate-50 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>{presupuestos.some((p) => p.trabajoId === trab.id) ? 'Ver / editar presupuesto' : 'Preparar presupuesto'}</span>
+                            </button>
+                            {presupuestos.find((p) => p.trabajoId === trab.id) && (
+                              <button
+                                onClick={() => {
+                                  const p = presupuestos.find((x) => x.trabajoId === trab.id);
+                                  if (p) setPresupuestoParaVer(p);
+                                }}
+                                className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                              >
+                                Historial de versiones
+                              </button>
+                            )}
+                          </div>
+                        )}
 
                         {/* Scope description */}
                         {trab.descripcion && (
@@ -1010,7 +1346,7 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                             {['EN_EJECUCION', 'PENDIENTE_MATERIAL'].includes(trab.estado) && (
                               <button
                                 disabled={isUpdatingStatus}
-                                onClick={() => handleCambiarEstadoTrabajo(trab, 'FINALIZADO', 'Trabajo completado y verificado con éxito por el profesional')}
+                                onClick={() => handleInformarFinalizacion(trab)}
                                 className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1022,17 +1358,30 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
                           {/* Quick selector for any state */}
                           <div className="flex items-center gap-2 self-end sm:self-auto">
                             <span className="text-[11px] text-slate-400 font-semibold">Cambiar Estado:</span>
+                            {/* P1 §2: el profesional NO puede fijar cualquier estado
+                                (ni ASIGNADO, ni CANCELADO, ni volver a PENDIENTE).
+                                El selector ofrece exactamente lo que la regla y el
+                                núcleo del circuito permiten: la UI no puede ofrecer
+                                más de lo que el backend acepta. */}
                             <select
-                              value={trab.estado}
+                              value={ESTADOS_QUE_PUEDE_FIJAR_EL_PROFESIONAL.includes(trab.estado) ? trab.estado : ''}
                               disabled={isUpdatingStatus}
-                              onChange={(e) => handleCambiarEstadoTrabajo(trab, e.target.value as EstadoTrabajoProfesional)}
+                              onChange={(e) => {
+                                if (!e.target.value) return;
+                                handleCambiarEstadoTrabajo(trab, e.target.value as EstadoTrabajoProfesional);
+                              }}
                               className="px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer disabled:opacity-50"
                             >
-                              {Object.entries(ESTADO_TRABAJO_LABELS).map(([k, val]) => (
-                                <option key={k} value={k}>
-                                  {val.label}
-                                </option>
-                              ))}
+                              <option value="">
+                                {ESTADO_TRABAJO_LABELS[trab.estado]?.label || trab.estado}
+                              </option>
+                              {ESTADOS_QUE_PUEDE_FIJAR_EL_PROFESIONAL
+                                .filter((estado) => estado !== trab.estado)
+                                .map((estado) => (
+                                  <option key={estado} value={estado}>
+                                    {ESTADO_TRABAJO_LABELS[estado]?.label || estado}
+                                  </option>
+                                ))}
                             </select>
                           </div>
                         </div>
@@ -1075,9 +1424,47 @@ export const ProfesionalPortalSection: React.FC<ProfesionalPortalSectionProps> =
           trabajo={selectedTrabajoForModal}
           inmueble={inmuebles.find((inm) => inm.id === selectedTrabajoForModal.inmuebleId) || null}
           profesionales={profesional ? [profesional] : []}
-          presupuestos={[]}
+          presupuestos={presupuestos.filter((p) => p.trabajoId === selectedTrabajoForModal.id)}
           currentUser={currentUser}
           incidenciaVinculada={incidencias.find((inc) => inc.id === selectedTrabajoForModal.incidenciaId) || null}
+          onAdjuntarEvidencia={handleAdjuntarEvidencia}
+          onCrearPresupuesto={(t) => handleAbrirPresupuesto(t, presupuestos.find((p) => p.trabajoId === t.id))}
+          onVerPresupuesto={(p) => setPresupuestoParaVer(p)}
+        />
+      )}
+
+      {/* P1 §B — Modal de presupuesto: reutiliza el modal del propietario.
+          Las reglas ya permiten al profesional crear y actualizar SUS
+          presupuestos (`presupuestos_profesionales`, rama isProfesionalRole). */}
+      <PresupuestoProfesionalModal
+        isOpen={showPresupuestoModal}
+        onClose={() => { setShowPresupuestoModal(false); setPresupuestoParaEditar(null); setTrabajoParaPresupuesto(null); }}
+        presupuestoParaEditar={presupuestoParaEditar}
+        trabajos={trabajos}
+        profesionales={profesional ? [profesional] : []}
+        inmuebles={inmuebles}
+        currentUser={currentUser}
+        trabajoPreseleccionado={trabajoParaPresupuesto}
+        onSaveSuccess={() => { setShowPresupuestoModal(false); setPresupuestoParaEditar(null); }}
+      />
+
+      {/* P1 §B — Detalle del presupuesto e historial de versiones */}
+      {presupuestoParaVer && (
+        <DetallePresupuestoProfesionalModal
+          isOpen={true}
+          onClose={() => setPresupuestoParaVer(null)}
+          presupuesto={presupuestoParaVer}
+          trabajos={trabajos}
+          profesionales={profesional ? [profesional] : []}
+          inmuebles={inmuebles}
+          currentUser={currentUser}
+          onEditarPresupuesto={(p) => {
+            setPresupuestoParaVer(null);
+            handleAbrirPresupuesto(
+              trabajos.find((t) => t.id === p.trabajoId) as TrabajoProfesional,
+              p
+            );
+          }}
         />
       )}
 

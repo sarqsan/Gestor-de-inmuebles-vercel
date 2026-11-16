@@ -1,0 +1,1512 @@
+{
+  "generadoEn": "2026-11-15T16:59:01.344Z",
+  "commit": "2bed683d9db306ded2f3754690742e1843b8fda5",
+  "firestore": {
+    "fichero": "firestore.rules",
+    "lineasTotales": 4065,
+    "totalColecciones": 77,
+    "subcolecciones": [
+      {
+        "ruta": "/progreso_tutoriales/{progresoId}",
+        "linea": 478,
+        "sentenciasAllow": 4
+      },
+      {
+        "ruta": "/documentos_patrimoniales/{documentoId}",
+        "linea": 1093,
+        "sentenciasAllow": 4
+      },
+      {
+        "ruta": "/documentos_profesionales/{documentoId}",
+        "linea": 2436,
+        "sentenciasAllow": 4
+      },
+      {
+        "ruta": "/entidades/{entidadKey}",
+        "linea": 3962,
+        "sentenciasAllow": 3
+      }
+    ],
+    "coleccionesOrdenadas": [
+      "actas",
+      "actas_evidencias",
+      "actas_incidencias",
+      "actas_otp",
+      "analisis_inversion",
+      "audit_logs",
+      "cambios_titular",
+      "candidatos",
+      "compromisos_morosidad",
+      "conciliaciones_bancarias",
+      "config_liquidacion",
+      "configuracion_aseguradoras",
+      "contratos_formalizacion",
+      "enlaces_registro",
+      "envios_verifactu",
+      "especialidades",
+      "eventos_conciliacion_bancaria",
+      "evidencias_morosidad",
+      "expedientes_morosidad",
+      "expedientes_morosidad_hist",
+      "expedientes_recomercializacion",
+      "facturas",
+      "facturas_electronicas_b2b",
+      "fichas_publicas_inmueble",
+      "ficheros_sepa",
+      "financiaciones",
+      "garantias_reparacion",
+      "gastos",
+      "gastos_inmuebles",
+      "gastos_recurrentes",
+      "gestiones_cartera",
+      "habitaciones_inmueble",
+      "importaciones_bancarias",
+      "incidencias",
+      "inmobiliarias_directorio",
+      "inmuebles",
+      "inventario_historial",
+      "inventario_inmuebles",
+      "invitaciones",
+      "leads_inmobiliario",
+      "lecturas_suministro",
+      "liquidaciones_propietarios",
+      "mandatos_sepa",
+      "mensajes_portal",
+      "morosidad_resumen_propietario",
+      "movimientos_bancarios",
+      "necesidades_reforma",
+      "notificaciones",
+      "operaciones",
+      "ordenes_pago",
+      "personas",
+      "politicas_morosidad",
+      "polizas_seguros",
+      "prestamos",
+      "presupuestos_profesionales",
+      "profesionales",
+      "propietarios",
+      "propuestas_inmobiliaria",
+      "proyectos_reforma",
+      "registros_facturacion",
+      "registros_patrimoniales",
+      "series_facturacion",
+      "sindicacion_inmuebles",
+      "siniestros",
+      "slots_visita",
+      "solicitudes",
+      "solicitudes_documentacion",
+      "solicitudes_seguro_impago",
+      "suministros",
+      "system",
+      "tareas_mantenimiento",
+      "titularidades",
+      "trabajos_profesionales",
+      "usuarios",
+      "usuarios_auth",
+      "valoraciones_profesionales",
+      "{document=**}"
+    ],
+    "colecciones": [
+      {
+        "coleccion": "usuarios_auth",
+        "linea": 427,
+        "permite": {
+          "read": "isMasterAdmin() || (isSignedIn() && request.auth.uid == uid)",
+          "create": "(isMasterAdmin() && auditoriaVinculada(incoming(), 'usuarios_auth/' + uid)) || ( isSignedIn() && !isMasterAdmin() && request.auth.uid == uid && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL', 'INQUILINO'] && indexIsTruthful() && !('roadmap01AuditId' in incoming()) && carterasNoAutoasignadasEnCreacion() )",
+          "update": "(isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'usuarios_auth/' + uid)) || ( isSignedIn() && !isMasterAdmin() && request.auth.uid == uid && incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL', 'INQUILINO'] && indexIsTruthful() && mismoCampoOpcional('roadmap01AuditId') && carterasSinCambiarPorUsuario() )",
+          "delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [
+          "esProgresoTutorialValido"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 61
+      },
+      {
+        "coleccion": "personas",
+        "linea": 807,
+        "permite": {
+          "get,list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && personaValida() && auditoriaVinculada(incoming(), 'personas/' + personaId) && incoming().propietarioIds.size() <= 1 && (incoming().propietarioIds.size() == 0 || (isValidId(incoming().propietarioIds[0]) && existsAfter(/databases/$(database)/documents/propietarios/$(incoming().propietarioIds[0])) && getAfter(/databases/$(database)/documents/propietarios/$(incoming().propietarioIds[0])).data.personaId == personaId))",
+          "update": "isMasterAdmin() && personaValida() && auditoriaNueva(incoming(), existing(), 'personas/' + personaId) && incoming().createdAt == existing().createdAt",
+          "delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [
+          "personaValida"
+        ],
+        "referenciasCruzadas": [
+          "propietarios"
+        ],
+        "lineasBloque": 30
+      },
+      {
+        "coleccion": "propietarios",
+        "linea": 841,
+        "permite": {
+          "get": "isMasterAdmin() || ownsPropietario(propietarioId) || carteraGestionadaPorMi(propietarioId) || titularEnMiAmbito(resource.data)",
+          "list": "isMasterAdmin() || titularEnMiAmbito(resource.data)",
+          "create": "(isMasterAdmin() && propietarioPersonaCoherente(propietarioId, incoming()) && auditoriaVinculada(incoming(), 'propietarios/' + propietarioId)) || ( !isMasterAdmin() && isPropietarioRole() && propietarioId == myPropId() && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE']) && !('personaId' in incoming()) && !('roadmap01AuditId' in incoming()) && 'id' in incoming() && incoming().id == propietarioId && !('ambitoPropietarioId' in incoming()) && !idDeTitularDeAmbito(propietarioId) ) || ( !isMasterAdmin() && titularEnMiAmbito(incoming()) && idDeTitularDeAmbito(propietarioId) && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE']) && !('personaId' in incoming()) && !('roadmap01AuditId' in incoming()) && 'id' in incoming() && incoming().id == propietarioId )",
+          "update": "(isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'propietarios/' + propietarioId) && propietarioPersonaCoherente(propietarioId, incoming()) && (!('personaId' in existing()) || ('personaId' in incoming()) || (existsAfter(/databases/$(database)/documents/personas/$(existing().personaId)) && !getAfter(/databases/$(database)/documents/personas/$(existing().personaId)).data.propietarioIds.hasAny([propietarioId])))) || ( !isMasterAdmin() && isPropietarioRole() && propietarioId == myPropId() && !incoming().diff(existing()).affectedKeys().hasAny(['personaId', 'roadmap01AuditId']) && !incoming().diff(existing()).affectedKeys().hasAny(['ambitoPropietarioId']) && 'id' in existing() && existing().id == propietarioId ) || ( !isMasterAdmin() && activeUser() && carterasEscritura().hasAny([propietarioId]) && incoming().diff(existing()).affectedKeys().hasOnly(['fichaPatrimonial']) ) || ( !isMasterAdmin() && titularEnMiAmbito(existing()) && 'ambitoPropietarioId' in incoming() && incoming().ambitoPropietarioId == existing().ambitoPropietarioId && !incoming().diff(existing()).affectedKeys().hasAny(['id', 'personaId', 'roadmap01AuditId', 'isStaff', 'isTenant', 'gestionesPorPropietario', 'carterasL', 'carterasE']) && 'id' in existing() && existing().id == propietarioId )",
+          "delete": "false"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "carteraGestionadaPorMi",
+          "titularEnMiAmbito",
+          "idDeTitularDeAmbito"
+        ],
+        "referenciasCruzadas": [
+          "personas"
+        ],
+        "lineasBloque": 107
+      },
+      {
+        "coleccion": "inmuebles",
+        "linea": 962,
+        "permite": {
+          "get": "esAdminInmuebles() || inmuebleEsMio(resource.data) || inmuebleAutorizadoExplicito(inmuebleId) || inmuebleEnCarteraGestionada(resource.data) || inmuebleParcialIndexado(resource.data.propietarioId, inmuebleId, false) || (isTenant() && ( tenantVeContratos(campoListaActual('contratoIdsAutorizados')) || ('contratoActivoId' in resource.data && tenantTieneContrato(resource.data.contratoActivoId)) ))",
+          "list": "esAdminInmuebles() || inmuebleEsMio(resource.data) || (isPropietarioRole() && myPropId() in resource.data.titularesIds) || inmuebleEnCarteraGestionada(resource.data)",
+          "create": "isMasterAdmin() || altaPropietarioPropia() || ( activeUser() && 'propietarioId' in incoming() && incoming().propietarioId is string && inmuebleEnCarteraEscritura(incoming()) && (!('propietarioPrincipalId' in incoming()) || incoming().propietarioPrincipalId == incoming().propietarioId) && !('titularesIds' in incoming()) )",
+          "update": "isMasterAdmin() || (inmuebleEnCarteraEscritura(existing()) && titularidadInalterada() && (!('gestionesPorPropietario' in me()) || mismoCampoOpcional('contratoActivoId'))) || (inmuebleParcialIndexado(existing().propietarioId, inmuebleId, true) && titularidadInalterada() && (('contratoActivoId' in existing() ? existing().contratoActivoId : '') == ('contratoActivoId' in incoming() ? incoming().contratoActivoId : ''))) || (isPropietarioRole() && !soyCanonicoActual() && soyTitularActual() && propietarioCanonicoInalterado() && (titularidadInalterada() || sigoSiendoTitular())) || (isPropietarioRole() && soyCanonicoActual() && propietarioCanonicoInalterado() && titularesNuevosEnAmbito()) || (isPropietarioRole() && canReachInmuebleId(inmuebleId) && titularidadInalterada())",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "altaPropietarioPropia",
+          "titularidadInalterada",
+          "sigoSiendoTitular",
+          "soyTitularActual",
+          "soyCanonicoActual",
+          "titularesNuevosEnAmbito",
+          "propietarioCanonicoInalterado",
+          "inmuebleDoc",
+          "docLectura",
+          "docEscritura",
+          "docBorrado",
+          "fuenteEnInmueble",
+          "tipoDocumentoPatrimonialValido",
+          "facturaEnInmueble",
+          "relacionesDocumentoValidas",
+          "documentoTieneForma",
+          "sustitucionDocumentoValida",
+          "estadoInicialValido",
+          "edicionMetadatosValida",
+          "transicionCargaValida",
+          "transicionBorradoValida"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 264
+      },
+      {
+        "coleccion": "titularidades",
+        "linea": 1248,
+        "permite": {
+          "get": "('inmuebleId' in resource.data && puedoLeerTitularidadDe(resource.data.inmuebleId)) || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "list": "false",
+          "create": "puedoEscribirTitularidadDe(incoming().inmuebleId) && claveCoherente(incoming()) && estadoValido(incoming()) && titularAsignableEnAmbito(incoming().propietarioId) && porcentajeValido(incoming()) && cierreBienFormado(incoming())",
+          "update": "puedoEscribirTitularidadDe(existing().inmuebleId) && puedoEscribirTitularidadDe(incoming().inmuebleId) && camposInmutables(incoming(), existing()) && estadoValido(incoming()) && porcentajeValido(incoming()) && cierreBienFormado(incoming())",
+          "delete": "false"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "datosInmuebleTitularidad",
+          "soyCotitularDelInmueble",
+          "puedoLeerTitularidadDe",
+          "puedoEscribirTitularidadDe",
+          "claveCoherente",
+          "camposInmutables",
+          "porcentajeValido",
+          "estadoValido",
+          "cierreBienFormado",
+          "titularDeAmbitoPropio",
+          "titularAsignableEnAmbito"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 81
+      },
+      {
+        "coleccion": "gestiones_cartera",
+        "linea": 1341,
+        "permite": {
+          "get": "esAdminInmuebles() || gestionInvolucraAMi(resource.data) || leerGestionInvitada(resource.data)",
+          "list": "esAdminInmuebles() || gestionInvolucraAMi(resource.data)",
+          "create": "isMasterAdmin() && auditoriaVinculada(incoming(), 'gestiones_cartera/' + gestionId)",
+          "update": "isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'gestiones_cartera/' + gestionId) || actualizarGestionPorInvitacion(gestionId)",
+          "delete": "false"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 7
+      },
+      {
+        "coleccion": "registros_patrimoniales",
+        "linea": 1365,
+        "permite": {
+          "get,list": "esAdminInmuebles() || ownsPropietario(resource.data.propietarioId) || (activeUser() && ( carterasLectura().hasAny([resource.data.propietarioId]) || carterasEscritura().hasAny([resource.data.propietarioId]) ))",
+          "create": "registroPatrimonialOk() && ( esAdminInmuebles() || ownsPropietario(incoming().propietarioId) || (activeUser() && carterasEscritura().hasAny([incoming().propietarioId])) )",
+          "update,delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 3,
+        "funcionesLocales": [
+          "registroPatrimonialOk"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 38
+      },
+      {
+        "coleccion": "fichas_publicas_inmueble",
+        "linea": 1414,
+        "permite": {
+          "get": "true",
+          "list": "isSignedIn()",
+          "create": "(isMasterAdmin() || (isPropietarioRole() && incoming().propietarioId == myPropId())) && isValidId(fichaId) && incoming().id == fichaId && incoming().inmuebleId == fichaId && incoming().propietarioId is string && incoming().propietarioId.size() > 0 && clavesFichaPublicaOk()",
+          "update": "( isMasterAdmin() || (isPropietarioRole() && existing().propietarioId == myPropId() && incoming().propietarioId == myPropId()) || (inmuebleParcialIndexado(existing().propietarioId, fichaId, true) && fichaVinculadaAlTitular() && incoming().propietarioId == existing().propietarioId) ) && incoming().id == existing().id && incoming().inmuebleId == existing().inmuebleId && incoming().inmuebleId == fichaId && clavesFichaPublicaOk()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "fichaVinculadaAlTitular"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 33
+      },
+      {
+        "coleccion": "contratos_formalizacion",
+        "linea": 1454,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && contratoVisible(existing())) || (isTenant() && tenantTieneContrato(contratoId)) || inmuebleEnCarteraGestionada(existing()) || contratoParcialVisible(existing())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && contratoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data) || contratoParcialVisible(resource.data)",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && inmuebleContratoCoherente(incoming()) ) || ( activeUser() && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId]) && inmuebleContratoCoherente(incoming()) ) || contratoParcialEscritura(incoming())",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && inmuebleYTitularInmutables() && inmuebleContratoCoherente(incoming()) ) || ( inmuebleEnCarteraEscritura(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && inmuebleYTitularInmutables() && inmuebleContratoCoherente(incoming()) ) || contratoParcialEscritura(incoming()) && inmuebleYTitularInmutables() && inmuebleContratoCoherente(existing()) || ( isTenant() && tenantTieneContrato(contratoId) && incoming().diff(existing()).affectedKeys().hasOnly(['incidenciaIds', 'mensajeIds', 'fechaActualizacion']) && indiceInmutableOCrece('incidenciaIds') && indiceInmutableOCrece('mensajeIds') )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "inmuebleContratoCoherente",
+          "contratoParcialVisible",
+          "contratoParcialEscritura",
+          "inmuebleYTitularInmutables"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 73
+      },
+      {
+        "coleccion": "gastos",
+        "linea": 1533,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing())) || inmuebleEnCarteraGestionada(existing())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data)",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'inmuebleId' in incoming() && incoming().inmuebleId is string ) || ( activeUser() && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId]) && 'inmuebleId' in incoming() && incoming().inmuebleId is string )",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() ) || ( inmuebleEnCarteraEscritura(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 29
+      },
+      {
+        "coleccion": "gastos_recurrentes",
+        "linea": 1567,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing())) || inmuebleEnCarteraGestionada(existing())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data)",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'inmuebleId' in incoming() && incoming().inmuebleId is string ) || ( activeUser() && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId]) && 'inmuebleId' in incoming() && incoming().inmuebleId is string )",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() ) || ( inmuebleEnCarteraEscritura(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 28
+      },
+      {
+        "coleccion": "prestamos",
+        "linea": 1600,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && gastoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'inmuebleId' in incoming() && incoming().inmuebleId is string )",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 20
+      },
+      {
+        "coleccion": "expedientes_recomercializacion",
+        "linea": 1626,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || aisladoUpdateOk()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 10
+      },
+      {
+        "coleccion": "propuestas_inmobiliaria",
+        "linea": 1637,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || aisladoUpdateOk()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 10
+      },
+      {
+        "coleccion": "leads_inmobiliario",
+        "linea": 1648,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || aisladoUpdateOk()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 10
+      },
+      {
+        "coleccion": "inmobiliarias_directorio",
+        "linea": 1663,
+        "permite": {
+          "get,list": "isMasterAdmin() || isPropietarioRole()",
+          "write": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 2,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 4
+      },
+      {
+        "coleccion": "incidencias",
+        "linea": 1675,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing())) || incidenciaAsignadaAmi(existing()) || inmuebleEnCarteraGestionada(existing()) || (isTenant() && ( (('contratoId' in existing()) && tenantTieneContrato(existing().contratoId)) || tenantVeContratos(campoListaActual('contratoIdsVisibles')) ))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data)) || (isProfesionalRole() && 'profesionalAsignadoId' in resource.data && resource.data.profesionalAsignadoId == myProfId()) || inmuebleEnCarteraGestionada(resource.data)",
+          "create": "isMasterAdmin() || aisladoCreateOk() || (activeUser() && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId]) && 'inmuebleId' in incoming() && incoming().inmuebleId is string) || (isTenant() && incoming().contratoId is string && tenantTieneContrato(incoming().contratoId) && incoming().inmuebleId is string && incoming().origen == 'INQUILINO' && incoming().estado == 'ABIERTA' && incoming().titulo is string && incoming().titulo.size() >= 3 && incoming().descripcion is string && incoming().descripcion.size() >= 10 && (!('contratoIdsVisibles' in incoming()) || incoming().contratoIdsVisibles == [incoming().contratoId]) )",
+          "update": "isMasterAdmin() || aisladoUpdateOk() || (inmuebleEnCarteraEscritura(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId) || (isTenant() && (('contratoId' in existing()) && tenantTieneContrato(existing().contratoId)) && incoming().diff(existing()).affectedKeys().hasOnly(['fotografias', 'documentos', 'fechaActualizacion']) && listaSoloCrece('fotografias') && listaSoloCrece('documentos'))",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 47
+      },
+      {
+        "coleccion": "tareas_mantenimiento",
+        "linea": 1725,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || aisladoUpdateOk()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 10
+      },
+      {
+        "coleccion": "garantias_reparacion",
+        "linea": 1739,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing())) || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data)) || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId())",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || aisladoUpdateOk()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 14
+      },
+      {
+        "coleccion": "trabajos_profesionales",
+        "linea": 1759,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing())) || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data)) || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId())",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || (aisladoUpdateOk()) || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId() && 'profesionalId' in incoming() && incoming().profesionalId == myProfId() && (!('propietarioId' in existing()) || ('propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId)) && (!('inmuebleId' in existing()) || ('inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId)))",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 20
+      },
+      {
+        "coleccion": "presupuestos_profesionales",
+        "linea": 1783,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing())) || (isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data)) || (isProfesionalRole() && 'profesionalId' in resource.data && resource.data.profesionalId == myProfId())",
+          "create": "isMasterAdmin() || aisladoCreateOk() || (isProfesionalRole() && 'profesionalId' in incoming() && incoming().profesionalId == myProfId())",
+          "update": "isMasterAdmin() || aisladoUpdateOk() || ( isProfesionalRole() && 'profesionalId' in existing() && existing().profesionalId == myProfId() && 'profesionalId' in incoming() && incoming().profesionalId == myProfId() )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 18
+      },
+      {
+        "coleccion": "valoraciones_profesionales",
+        "linea": 1813,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && trabajoEsMio(incoming()) && 'profesionalId' in incoming() && incoming().profesionalId is string && 'inmuebleId' in incoming() && incoming().inmuebleId is string && 'inmuebleId' in trabajoDe(incoming()) && incoming().inmuebleId == trabajoDe(incoming()).inmuebleId )",
+          "update": "isMasterAdmin()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "trabajoExiste",
+          "trabajoDe",
+          "trabajoEsMio"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 28
+      },
+      {
+        "coleccion": "necesidades_reforma",
+        "linea": 1848,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || aisladoUpdateOk()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 10
+      },
+      {
+        "coleccion": "proyectos_reforma",
+        "linea": 1859,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing())) || (isProfesionalRole() && 'profesionalPrincipalId' in existing() && existing().profesionalPrincipalId == myProfId())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data)) || (isProfesionalRole() && 'profesionalPrincipalId' in resource.data && resource.data.profesionalPrincipalId == myProfId())",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || (aisladoUpdateOk()) || (isProfesionalRole() && 'profesionalPrincipalId' in existing() && existing().profesionalPrincipalId == myProfId() && 'profesionalPrincipalId' in incoming() && incoming().profesionalPrincipalId == myProfId() && (!('propietarioId' in existing()) || ('propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId)) && (!('inmuebleId' in existing()) || ('inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId)))",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 20
+      },
+      {
+        "coleccion": "inventario_inmuebles",
+        "linea": 1884,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && ( ('propietarioId' in existing() && existing().propietarioId == myPropId()) || ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId])) ))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && ( ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) || ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId])) ))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && incoming().keys().hasAll(['inmuebleId', 'nombre', 'categoria', 'estado']) && ( myInmuebleIds().hasAny([incoming().inmuebleId]) || ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ) )",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && ( ('propietarioId' in existing() && existing().propietarioId == myPropId()) || ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId])) ) && incoming().inmuebleId == existing().inmuebleId && (!('propietarioId' in incoming()) || !('propietarioId' in existing()) || incoming().propietarioId == existing().propietarioId) )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && ( ('propietarioId' in existing() && existing().propietarioId == myPropId()) || ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId])) ) )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 40
+      },
+      {
+        "coleccion": "inventario_historial",
+        "linea": 1925,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && ( ('propietarioId' in existing() && existing().propietarioId == myPropId()) || ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId])) ))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && ( ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) || ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId])) ))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'inmuebleId' in incoming() && ( myInmuebleIds().hasAny([incoming().inmuebleId]) || ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ) )",
+          "update,delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 20
+      },
+      {
+        "coleccion": "habitaciones_inmueble",
+        "linea": 1946,
+        "permite": {
+          "get": "isMasterAdmin() || habitacionParcialCoherente(existing(), false) || (isPropietarioRole() && ( ('propietarioId' in existing() && existing().propietarioId == myPropId()) || ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId])) ))",
+          "list": "isMasterAdmin() || habitacionParcialCoherente(resource.data, false) || (isPropietarioRole() && ( ('propietarioId' in resource.data && resource.data.propietarioId == myPropId()) || ('inmuebleId' in resource.data && myInmuebleIds().hasAny([resource.data.inmuebleId])) ))",
+          "create": "isMasterAdmin() || (habitacionParcialCoherente(incoming(), true) && incoming().id == habitacionId) || ( isPropietarioRole() && incoming().keys().hasAll(['inmuebleId', 'nombre', 'estado']) && ( myInmuebleIds().hasAny([incoming().inmuebleId]) || ('propietarioId' in incoming() && incoming().propietarioId == myPropId()) ) )",
+          "update": "isMasterAdmin() || ( habitacionParcialCoherente(existing(), true) && habitacionParcialCoherente(incoming(), true) && existing().id == habitacionId && incoming().id == existing().id && incoming().inmuebleId == existing().inmuebleId && incoming().propietarioId == existing().propietarioId ) || ( isPropietarioRole() && ( ('propietarioId' in existing() && existing().propietarioId == myPropId()) || ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId])) ) && incoming().inmuebleId == existing().inmuebleId && (!('propietarioId' in incoming()) || !('propietarioId' in existing()) || incoming().propietarioId == existing().propietarioId) )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && ( ('propietarioId' in existing() && existing().propietarioId == myPropId()) || ('inmuebleId' in existing() && myInmuebleIds().hasAny([existing().inmuebleId])) ) )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "habitacionParcialCoherente"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 52
+      },
+      {
+        "coleccion": "polizas_seguros",
+        "linea": 2007,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing())) || inmuebleEnCarteraGestionada(existing())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data)",
+          "create": "isMasterAdmin() || aisladoCreateOk() || (activeUser() && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId]))",
+          "update": "isMasterAdmin() || aisladoUpdateOk() || (inmuebleEnCarteraEscritura(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId)",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 17
+      },
+      {
+        "coleccion": "siniestros",
+        "linea": 2025,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing())) || inmuebleEnCarteraGestionada(existing())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data)) || inmuebleEnCarteraGestionada(resource.data)",
+          "create": "isMasterAdmin() || aisladoCreateOk() || (activeUser() && 'propietarioId' in incoming() && carterasEscritura().hasAny([incoming().propietarioId]))",
+          "update": "isMasterAdmin() || aisladoUpdateOk() || (inmuebleEnCarteraEscritura(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId)",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 17
+      },
+      {
+        "coleccion": "candidatos",
+        "linea": 2049,
+        "permite": {
+          "get": "isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId))",
+          "list": "isStaff() || inmuebleEnCarteraGestionada(resource.data) || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "create": "isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId) && propietarioCoherenteConInmueble(incoming()) && isSignedIn())",
+          "update": "isStaff() || ( 'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId && propietarioCoherenteConInmueble(incoming()) )",
+          "delete": "isStaff() || ( 'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 27
+      },
+      {
+        "coleccion": "solicitudes",
+        "linea": 2080,
+        "permite": {
+          "get": "isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId))",
+          "list": "isStaff()",
+          "create": "isStaff() || (isSignedIn() && 'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId) && propietarioCoherenteConInmueble(incoming()))",
+          "update": "isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId))",
+          "delete": "isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId))"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 15
+      },
+      {
+        "coleccion": "invitaciones",
+        "linea": 2102,
+        "permite": {
+          "get": "isStaff() || inmuebleEnCarteraGestionada(resource.data) || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "list": "isStaff() || inmuebleEnCarteraGestionada(resource.data) || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "create": "isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId) && propietarioCoherenteConInmueble(incoming()))",
+          "update": "isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId && propietarioCoherenteConInmueble(incoming()))",
+          "delete": "isStaff() || ( 'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 18
+      },
+      {
+        "coleccion": "slots_visita",
+        "linea": 2127,
+        "permite": {
+          "get": "isStaff() || inmuebleEnCarteraGestionada(resource.data) || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "list": "isStaff() || inmuebleEnCarteraGestionada(resource.data) || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "create": "isStaff() || ('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId) && propietarioCoherenteConInmueble(incoming()))",
+          "update": "isStaff() || ('inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId && propietarioCoherenteConInmueble(incoming()))",
+          "delete": "isStaff() || ( 'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 14
+      },
+      {
+        "coleccion": "solicitudes_documentacion",
+        "linea": 2163,
+        "permite": {
+          "get": "isStaff() || ( 'inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId) )",
+          "list": "isStaff() || inmuebleEnCarteraGestionada(resource.data) || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "create": "isStaff() || ( 'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId) && propietarioCoherenteConInmueble(incoming()) )",
+          "update": "isStaff() || ( 'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) && 'inmuebleId' in incoming() && incoming().inmuebleId == existing().inmuebleId && propietarioCoherenteConInmueble(incoming()) )",
+          "delete": "isStaff() || ( 'inmuebleId' in resource.data && ambitoPorInmuebleEscritura(resource.data.inmuebleId) )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 20
+      },
+      {
+        "coleccion": "configuracion_aseguradoras",
+        "linea": 2187,
+        "permite": {
+          "read": "isStaff() || isPropietarioRole()",
+          "write": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 2,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 6
+      },
+      {
+        "coleccion": "solicitudes_seguro_impago",
+        "linea": 2197,
+        "permite": {
+          "get": "'inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)",
+          "list": "esAdminInmuebles() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId))",
+          "create": "'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)",
+          "update": "(('inmuebleId' in existing() && 'inmuebleId' in incoming()) && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId))",
+          "delete": "'inmuebleId' in existing() && ambitoPorInmuebleEscritura(existing().inmuebleId)"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 21
+      },
+      {
+        "coleccion": "system",
+        "linea": 2222,
+        "permite": {
+          "read": "systemDocId == 'modulos_config' || isStaff()",
+          "write": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 2,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 6
+      },
+      {
+        "coleccion": "usuarios",
+        "linea": 2232,
+        "permite": {
+          "get": "isMasterAdmin() || (isSignedIn() && ( (('authUid' in resource.data) && resource.data.authUid == request.auth.uid) || (!('authUid' in resource.data) && request.auth.token.email_verified == true && resource.data.email == authEmail() && ((resource.data.tipoPerfil == 'PROPIETARIO' && resource.data.estado == 'PENDIENTE') || ('enlaceRegistroId' in resource.data && exists(/databases/$(database)/documents/enlaces_registro/$(resource.data.enlaceRegistroId)) && getEnlaceE(resource.data.enlaceRegistroId).usuarioIdVinculado == usuarioId && getEnlaceE(resource.data.enlaceRegistroId).emailInvitado == authEmail() && getEnlaceE(resource.data.enlaceRegistroId).activo == true))) ))",
+          "list": "isMasterAdmin()",
+          "create": "(isMasterAdmin() && usuarioPersonaCoherente(usuarioId, incoming()) && auditoriaVinculada(incoming(), 'usuarios/' + usuarioId)) || ( isSignedIn() && !isMasterAdmin() && incoming().authUid == request.auth.uid && incoming().email == authEmail() && (!('permisos' in incoming()) || (incoming().permisos is list && ((incoming().tipoPerfil == 'PROPIETARIO' && incoming().permisos.hasOnly([ 'inmuebles.ver','inmuebles.editar','contratos.ver','profesionales.ver', 'profesionales.crear','profesionales.asignar'])) || (incoming().tipoPerfil == 'PROFESIONAL' && incoming().permisos.hasOnly(['profesionales.ver'])) || (incoming().tipoPerfil == 'INQUILINO' && incoming().permisos.hasOnly(['inmuebles.ver','contratos.ver']))))) && !incoming().keys().hasAny(['isStaff','isTenant','gestionesPorPropietario','carterasL','carterasE']) && !('personaId' in incoming()) && !('roadmap01AuditId' in incoming()) && (!('roles' in incoming()) || !incoming().roles.hasAny(['SUPERADMIN', 'ADMINISTRADOR', 'GESTOR_INMUEBLES'])) && incoming().estado in ['ACTIVO', 'PENDIENTE'] && ( (incoming().tipoPerfil in ['PROPIETARIO', 'PROFESIONAL'] && (incoming().tipoPerfil != 'PROFESIONAL' || ( incoming().estado == 'PENDIENTE' && !('propietarioId' in incoming()) && profesionalVinculadoNominal(incoming()))) && ( incoming().tipoPerfil == 'PROFESIONAL' || !('propietarioId' in incoming()) || !exists(/databases/$(database)/documents/propietarios/$(incoming().propietarioId)) )) || (incoming().tipoPerfil == 'INQUILINO' && incoming().contratoIds is list && incoming().contratoIds.size() >= 1 && incoming().contratoIds.size() <= 5 && ('enlaceRegistroId' in incoming()) && enlaceInquilinoValido(incoming().enlaceRegistroId, incoming().contratoIds)) ) )",
+          "update": "(isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'usuarios/' + usuarioId) && usuarioPersonaCoherente(usuarioId, incoming()) && (!('personaId' in existing()) || ('personaId' in incoming()) || (existsAfter(/databases/$(database)/documents/personas/$(existing().personaId)) && !('usuarioId' in getAfter(/databases/$(database)/documents/personas/$(existing().personaId)).data)))) || ( isSignedIn() && !isMasterAdmin() && ( !('authUid' in existing()) || existing().authUid == request.auth.uid || usuarioId == request.auth.uid ) && (('authUid' in existing()) || ( request.auth.token.email_verified == true && existing().email == authEmail() && incoming().authUid == request.auth.uid && (existing().estado != 'PENDIENTE' || incoming().estado == 'ACTIVO'))) && incoming().tipoPerfil == existing().tipoPerfil && incoming().roles == existing().roles && (!('personaId' in existing()) || (('authUid' in existing() && incoming().authUid == existing().authUid) || (!('authUid' in existing()) && incoming().authUid == request.auth.uid))) && ( incoming().estado == existing().estado || ( !('authUid' in existing()) && existing().estado == 'PENDIENTE' && incoming().estado == 'ACTIVO' && auditoriaNueva(incoming(), existing(), 'usuarios/' + usuarioId) && incoming().authUid == request.auth.uid && existing().email is string && request.auth.token.email == existing().email && 'propietarioId' in existing() && 'enlaceRegistroId' in incoming() && invitacionNominalVigente(incoming().enlaceRegistroId, usuarioId, existing().propietarioId, existing().email) && getAfter(/databases/$(database)/documents/enlaces_registro/$(incoming().enlaceRegistroId)).data.usosActuales == 1 && getAfter(/databases/$(database)/documents/enlaces_registro/$(incoming().enlaceRegistroId)).data.estadoInvitacion == 'ACEPTADA' && exists(/databases/$(database)/documents/propietarios/$(existing().propietarioId)) && (!('personaId' in existing()) || get(/databases/$(database)/documents/propietarios/$(existing().propietarioId)).data.personaId == existing().personaId) ) ) && (incoming().estado != existing().estado || mismoCampoOpcional('roadmap01AuditId')) && !incoming().diff(existing()).affectedKeys().hasAny([ 'permisos', 'personaId', 'propietarioId', 'profesionalId', 'inmuebleIds', 'email', 'createdAt', 'passwordHash', 'isStaff', 'isTenant', 'gestionesPorPropietario', 'carterasL', 'carterasE', 'contratoIds' ]) )",
+          "delete": "false"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [
+          "enlaces_registro",
+          "propietarios",
+          "personas"
+        ],
+        "lineasBloque": 158
+      },
+      {
+        "coleccion": "profesionales",
+        "linea": 2395,
+        "permite": {
+          "get": "isStaff() || (isPropietarioRole() && (resource.data.creadoPorPropietarioId == myPropId() || resource.data.esPrivado == false))",
+          "list": "isStaff() || (isPropietarioRole() && resource.data.esPrivado == false) || (isPropietarioRole() && resource.data.creadoPorPropietarioId == myPropId())",
+          "create": "isStaff() || (isPropietarioRole() && incoming().creadoPorPropietarioId == myPropId())",
+          "update": "(isStaff() && (esAdminInmuebles() || mismoCampoOpcional('creadoPorPropietarioId'))) || (isPropietarioRole() && resource.data.creadoPorPropietarioId == myPropId() && incoming().creadoPorPropietarioId == myPropId())",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "fichaProf",
+          "pidFichaProf",
+          "soyEseProfesional",
+          "docProfLectura",
+          "docProfEscritura",
+          "docProfBorrado",
+          "formaDocProf",
+          "sustitucionDocProfValida",
+          "soloCambian",
+          "motivoErrorValido",
+          "transicionCargaProf",
+          "transicionBorradoProf"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 128
+      },
+      {
+        "coleccion": "enlaces_registro",
+        "linea": 2527,
+        "permite": {
+          "get": "(esInvitacionGestion(resource.data) ? (isMasterAdmin() || destinatarioGestion(resource.data)) : (isSignedIn() || (isValidId(enlaceId) && resource.data.activo == true)))",
+          "list": "isMasterAdmin() || (isStaff() && !('finalidad' in resource.data && resource.data.finalidad == 'ONBOARDING_CARTERA'))",
+          "create": "(isMasterAdmin() || (isStaff() && !('usuarioIdVinculado' in incoming()) && !('propietarioIdVinculado' in incoming()) && !('profesionalIdVinculado' in incoming()))) && (!esInvitacionGestion(incoming()) || (isMasterAdmin() && incoming().id == enlaceId && incoming().estadoInvitacion == 'PENDIENTE' && incoming().activo == true && incoming().usosActuales == 0 && incoming().usosMaximos == 1 && request.time.toMillis() < incoming().fechaCaducidadMs)) && auditoriaVinculada(incoming(), 'enlaces_registro/' + enlaceId)",
+          "delete": "false",
+          "update": "(isMasterAdmin() && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId) && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && ( (!('usuarioIdVinculado' in existing()) && !('usuarioIdVinculado' in incoming())) || ('usuarioIdVinculado' in existing() && existing().estadoInvitacion == 'PENDIENTE' && existing().activo == true && existing().usosActuales == 0 && incoming().diff(existing()).affectedKeys().hasOnly(['estadoInvitacion', 'activo', 'roadmap01AuditId']) && incoming().estadoInvitacion in ['RECHAZADA', 'REVOCADA'] && incoming().activo == false) )) || ( isSignedIn() && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && 'usuarioIdVinculado' in existing() && invitacionNominalVigente(enlaceId, existing().usuarioIdVinculado, existing().propietarioIdVinculado, authEmail()) && incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales', 'estadoInvitacion', 'roadmap01AuditId']) && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId) && incoming().usosActuales == 1 && incoming().estadoInvitacion == 'ACEPTADA' && getAfter(/databases/$(database)/documents/usuarios/$(existing().usuarioIdVinculado)).data.authUid == request.auth.uid && getAfter(/databases/$(database)/documents/usuarios/$(existing().usuarioIdVinculado)).data.estado == 'ACTIVO' ) || ( isStaff() && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && !('usuarioIdVinculado' in existing()) && !('usuarioIdVinculado' in incoming()) && !('profesionalIdVinculado' in existing()) && !('propietarioIdVinculado' in existing()) && !incoming().diff(existing()).affectedKeys().hasAny(['profesionalIdVinculado', 'propietarioIdVinculado']) && auditoriaNueva(incoming(), existing(), 'enlaces_registro/' + enlaceId) ) || ( isTenant() && !esInvitacionGestion(existing()) && !esInvitacionGestion(incoming()) && !('usuarioIdVinculado' in existing()) && incoming().diff(existing()).affectedKeys().hasOnly(['usosActuales']) && incoming().usosActuales is number && existing().usosActuales is number && incoming().usosActuales == existing().usosActuales + 1 ) || respuestaInvitacionGestion(enlaceId)"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [
+          "usuarios"
+        ],
+        "lineasBloque": 52
+      },
+      {
+        "coleccion": "especialidades",
+        "linea": 2583,
+        "permite": {
+          "read": "true",
+          "create": "isStaff() || (isPropietarioRole() && incoming().creadoPorUid == request.auth.uid)",
+          "update": "isStaff() || (isPropietarioRole() && resource.data.creadoPorUid == request.auth.uid && incoming().creadoPorUid == request.auth.uid)",
+          "delete": "isStaff() || (isPropietarioRole() && resource.data.creadoPorUid == request.auth.uid)"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 9
+      },
+      {
+        "coleccion": "audit_logs",
+        "linea": 2596,
+        "permite": {
+          "read": "isMasterAdmin()",
+          "create": "isSignedIn() && ( isMasterAdmin() || !('usuarioEmail' in incoming()) || incoming().usuarioEmail == '' || incoming().usuarioEmail == authEmail() )",
+          "update,delete": "false"
+        },
+        "sentenciasAllow": 3,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 14
+      },
+      {
+        "coleccion": "notificaciones",
+        "linea": 2614,
+        "permite": {
+          "get": "isSignedIn() && (isMasterAdmin() || notifDelUsuario())",
+          "list": "isStaff() || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "create": "isSignedIn() && (isMasterAdmin() || notifDelUsuarioIncoming())",
+          "update": "isSignedIn() && (isMasterAdmin() || ( notifDelUsuario() && incoming().propietarioId == resource.data.propietarioId && incoming().inmuebleId == resource.data.inmuebleId ))",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "notifDelUsuario",
+          "notifDelUsuarioIncoming"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 25
+      },
+      {
+        "coleccion": "financiaciones",
+        "linea": 2643,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'inmuebleId' in incoming() && incoming().inmuebleId is string && isValidId(incoming().inmuebleId) ) && sinSecretos()",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && 'inmuebleId' in incoming() && 'inmuebleId' in existing() && incoming().inmuebleId == existing().inmuebleId ) && sinSecretos()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "sinSecretos"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 40
+      },
+      {
+        "coleccion": "movimientos_bancarios",
+        "linea": 2691,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && movimientoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && movimientoEsMio(resource.data))",
+          "create,update": "false",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [
+          "movimientoEsMio",
+          "movimientoVisible"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 17
+      },
+      {
+        "coleccion": "conciliaciones_bancarias",
+        "linea": 2709,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && conciliacionEsMia(resource.data))",
+          "create": "false",
+          "update": "conciliacionEsMia(existing()) && actorEnAmbito(existing().propietarioId) && incoming().propietarioId == existing().propietarioId && incoming().id == existing().id && incoming().movimientoId == existing().movimientoId && incoming().diff(existing()).affectedKeys().hasOnly([ 'estado', 'revision', 'ultimoEventoId', 'motivoDecision', 'historial', 'ambigua', 'importeCandidato', 'diferenciaImporte', 'esDiscrepancia', 'confianza', 'puntuacion', 'factores', 'aplicado', 'fechaConfirmacion', 'confirmadoPor', 'fechaRechazo', 'rechazadoPor', 'fechaReversion', 'revertidoPor', 'motivoReversion', 'candidato' ]) && eventoPostDecision() && transicionConciliacionPermitida() && sinSecretosBancarios()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "conciliacionEsMia",
+          "sinSecretosBancarios",
+          "actorEnAmbito",
+          "eventoPostDecision",
+          "transicionConciliacionPermitida"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 56
+      },
+      {
+        "coleccion": "importaciones_bancarias",
+        "linea": 2766,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && importacionEsMia(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && importacionEsMia(resource.data))",
+          "create,update": "false",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [
+          "importacionEsMia"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 12
+      },
+      {
+        "coleccion": "eventos_conciliacion_bancaria",
+        "linea": 2780,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && 'propietarioId' in resource.data && resource.data.propietarioId == myPropId())",
+          "create": "actorEnAmbito(incoming().propietarioId) && !exists(/databases/$(database)/documents/eventos_conciliacion_bancaria/$(eventoDocId)) && incoming().id is string && eventoDocId == incoming().propietarioId + '_' + incoming().id && incoming().actorUid == request.auth.uid && incoming().motivo is string && incoming().motivo.size() >= 5 && incoming().motivo.size() <= 500 && incoming().operacionId is string && exists(/databases/$(database)/documents/conciliaciones_bancarias/$(incoming().propietarioId + '_' + incoming().propuestaId)) && exists(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId)) && get(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId)).data.propietarioId == incoming().propietarioId && get(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId)).data.hashFichero == incoming().evidenciaHashFichero && get(/databases/$(database)/documents/importaciones_bancarias/$(incoming().propietarioId + '_' + incoming().evidenciaImportacionId)).data.idsMovimientosNuevos.hasAny([incoming().movimientoId]) && exists(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId)) && get(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId)).data.propietarioId == incoming().propietarioId && get(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId)).data.idMovimiento == incoming().movimientoId && get(/databases/$(database)/documents/movimientos_bancarios/$(incoming().movimientoDocId)).data.idImportacion == incoming().evidenciaImportacionId && propuestaAntes().propietarioId == incoming().propietarioId && propuestaAntes().movimientoId == incoming().movimientoId && propuestaAntes().estado == incoming().estadoAnterior && propuestaDespues().estado == incoming().estadoNuevo && propuestaDespues().ultimoEventoId == incoming().id && propuestaDespues().revision == incoming().revision && propuestaDespues().historial.size() == propuestaAntes().historial.size() + 1 && propuestaDespues().historial[propuestaDespues().historial.size() - 1].id == incoming().id && propuestaDespues().historial[propuestaDespues().historial.size() - 1].actorUid == request.auth.uid && propuestaDespues().historial[propuestaDespues().historial.size() - 1].motivo == incoming().motivo && estadoEventoCoherente() && (incoming().accion != 'CONCILIAR' || ( propuestaDespues().candidato.propietarioId == incoming().propietarioId && propuestaDespues().candidato.inmuebleId is string && ((propuestaDespues().importeMovimiento >= 0 && propuestaDespues().candidato.tipo == 'COBRO') || (propuestaDespues().importeMovimiento < 0 && propuestaDespues().candidato.tipo == 'GASTO')) && incoming().candidatoNuevoId == propuestaDespues().candidato.tipo + ':' + propuestaDespues().candidato.id )) && incoming().keys().hasOnly([ 'id', 'propietarioId', 'propuestaId', 'movimientoId', 'accion', 'fecha', 'actorUid', 'actorUsuarioId', 'motivo', 'estadoAnterior', 'estadoNuevo', 'candidatoAnteriorId', 'candidatoNuevoId', 'operacionId', 'revision', 'evidenciaImportacionId', 'evidenciaHashFichero', 'movimientoDocId' ]) && incoming().evidenciaHashFichero is string && incoming().evidenciaHashFichero.size() == 64",
+          "update,delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [
+          "actorEnAmbito",
+          "propuestaAntes",
+          "propuestaDespues",
+          "estadoEventoCoherente"
+        ],
+        "referenciasCruzadas": [
+          "eventos_conciliacion_bancaria",
+          "conciliaciones_bancarias",
+          "importaciones_bancarias",
+          "movimientos_bancarios"
+        ],
+        "lineasBloque": 65
+      },
+      {
+        "coleccion": "facturas",
+        "linea": 2854,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && facturaVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && facturaEsMia(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'id' in incoming() && incoming().id is string ) && sinSecretosFacturacion()",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && facturaEsMia(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && ( !('estado' in existing()) || existing().estado != 'EMITIDA' || ( incoming().numero == existing().numero && incoming().serie == existing().serie && incoming().ejercicio == existing().ejercicio && incoming().fechaExpedicion == existing().fechaExpedicion && incoming().importeTotal == existing().importeTotal ) ) ) && sinSecretosFacturacion()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "facturaEsMia",
+          "facturaVisible",
+          "sinSecretosFacturacion"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 43
+      },
+      {
+        "coleccion": "registros_facturacion",
+        "linea": 2898,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && registroEsMio(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && registroEsMio(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'facturaId' in incoming() && incoming().facturaId is string && 'huella' in incoming() && incoming().huella is string ) && sinSecretosFacturacion()",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && registroEsMio(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && incoming().huella == existing().huella && incoming().numSerieFactura == existing().numSerieFactura && incoming().fechaExpedicionFactura == existing().fechaExpedicionFactura && incoming().importeTotal == existing().importeTotal && incoming().idEmisorFactura == existing().idEmisorFactura && incoming().fechaHoraHusoGenRegistro == existing().fechaHoraHusoGenRegistro ) && sinSecretosFacturacion()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "registroEsMio",
+          "sinSecretosFacturacion"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 37
+      },
+      {
+        "coleccion": "envios_verifactu",
+        "linea": 2936,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && envioEsMio(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && envioEsMio(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'registroFacturacionId' in incoming() && incoming().registroFacturacionId is string && 'idempotencyKey' in incoming() && incoming().idempotencyKey is string ) && sinSecretosFacturacion()",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && envioEsMio(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && incoming().registroFacturacionId == existing().registroFacturacionId ) && sinSecretosFacturacion()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "envioEsMio",
+          "sinSecretosFacturacion"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 33
+      },
+      {
+        "coleccion": "series_facturacion",
+        "linea": 2970,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && serieEsMia(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && serieEsMia(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'codigo' in incoming() && incoming().codigo is string && 'ejercicio' in incoming() && incoming().ejercicio is int )",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && serieEsMia(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && incoming().codigo == existing().codigo && incoming().ejercicio == existing().ejercicio && (incoming().ultimoNumero is int) && incoming().ultimoNumero >= existing().ultimoNumero )",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "serieEsMia"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 23
+      },
+      {
+        "coleccion": "mensajes_portal",
+        "linea": 2997,
+        "permite": {
+          "get": "('contratoId' in existing() && ambitoPorContratoLectura(existing().contratoId)) || (isTenant() && ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId))",
+          "list": "esAdminInmuebles() || ('contratoId' in resource.data && ambitoPorContratoLectura(resource.data.contratoId))",
+          "create": "('contratoId' in incoming() && ambitoPorContratoEscritura(incoming().contratoId)) || (isTenant() && incoming().contratoId is string && tenantTieneContrato(incoming().contratoId) && incoming().inmuebleId is string && incoming().remitenteUid == request.auth.uid && incoming().remitenteRol == 'INQUILINO' && incoming().texto is string && incoming().texto.size() >= 1 && incoming().texto.size() <= 4000)",
+          "update": "(('contratoId' in existing() && 'contratoId' in incoming()) && ambitoPorContratoEscritura(existing().contratoId) && ambitoPorContratoEscritura(incoming().contratoId)) || (isTenant() && ('contratoId' in existing()) && tenantTieneContrato(existing().contratoId) && incoming().diff(existing()).affectedKeys().hasOnly(['leidoPorInquilino']))",
+          "delete": "false"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 32
+      },
+      {
+        "coleccion": "suministros",
+        "linea": 3034,
+        "permite": {
+          "get": "('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() && tenantVeContratos(campoListaActual('contratoIdsAutorizados')))",
+          "list": "esAdminInmuebles() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId))",
+          "create": "'inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)",
+          "update": "(('inmuebleId' in existing() && 'inmuebleId' in incoming()) && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() && tenantVeContratos(campoListaActual('contratoIdsAutorizados')) && incoming().diff(existing()).affectedKeys().hasOnly(['lecturaIds', 'cambioTitularIds', 'fechaActualizacion']) && indiceInmutableOCrece('lecturaIds') && indiceInmutableOCrece('cambioTitularIds'))",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 27
+      },
+      {
+        "coleccion": "lecturas_suministro",
+        "linea": 3066,
+        "permite": {
+          "get": "('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() && ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId))",
+          "list": "esAdminInmuebles() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId))",
+          "create": "('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() && incoming().contratoId is string && tenantTieneContrato(incoming().contratoId) && incoming().suministroId is string && incoming().inmuebleId is string && incoming().valor is number && incoming().valor >= 0 && incoming().unidad is string && incoming().fechaLectura is string && incoming().origen == 'INQUILINO')",
+          "update,delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 27
+      },
+      {
+        "coleccion": "cambios_titular",
+        "linea": 3097,
+        "permite": {
+          "get": "('inmuebleId' in existing() && ambitoPorInmuebleLectura(existing().inmuebleId)) || (isTenant() && ('contratoId' in resource.data) && tenantTieneContrato(resource.data.contratoId))",
+          "list": "esAdminInmuebles() || ('inmuebleId' in resource.data && ambitoPorInmuebleLectura(resource.data.inmuebleId))",
+          "create": "('inmuebleId' in incoming() && ambitoPorInmuebleEscritura(incoming().inmuebleId)) || (isTenant() && incoming().contratoId is string && tenantTieneContrato(incoming().contratoId) && incoming().suministroId is string && incoming().inmuebleId is string && incoming().titularNuevoNombre is string && incoming().titularNuevoNombre.size() >= 3 && incoming().fechaEfecto is string && incoming().estado == 'SOLICITADO')",
+          "update": "(('inmuebleId' in existing() && 'inmuebleId' in incoming()) && ambitoPorInmuebleEscritura(existing().inmuebleId) && ambitoPorInmuebleEscritura(incoming().inmuebleId))",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 29
+      },
+      {
+        "coleccion": "facturas_electronicas_b2b",
+        "linea": 3137,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && febEsMia(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && febEsMia(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in incoming() && incoming().propietarioId == myPropId() && 'id' in incoming() && incoming().id is string && incoming().id == febId && 'facturaId' in incoming() && incoming().facturaId is string && 'idempotencyKey' in incoming() && incoming().idempotencyKey is string && 'estado' in incoming() && incoming().estado == 'GENERADA' ) && sinSecretosB2B()",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && febEsMia(existing()) && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && incoming().id == existing().id && incoming().facturaId == existing().facturaId && incoming().idempotencyKey == existing().idempotencyKey && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size() && representacionInmovil() ) && sinSecretosB2B()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "febEsMia",
+          "sinSecretosB2B",
+          "estadoIntercambiado",
+          "representacionInmovil"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 56
+      },
+      {
+        "coleccion": "liquidaciones_propietarios",
+        "linea": 3204,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && liqEsMia(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && liqEsMia(resource.data))",
+          "create": "isMasterAdmin() && ( isValidId(incoming().id) && incoming().id == liqId && 'propietarioId' in incoming() && incoming().propietarioId is string && 'claveIdempotencia' in incoming() && incoming().claveIdempotencia is string && incoming().estado == 'BORRADOR' ) && sinSecretosTesoreria()",
+          "update": "isMasterAdmin() && ( incoming().id == existing().id && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId && 'claveIdempotencia' in incoming() && incoming().claveIdempotencia == existing().claveIdempotencia && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size() ) && sinSecretosTesoreria()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "liqEsMia"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 22
+      },
+      {
+        "coleccion": "gastos_inmuebles",
+        "linea": 3234,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && gastoEsMio(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && gastoEsMio(resource.data))",
+          "create": "isMasterAdmin() && isValidId(incoming().id) && incoming().id == gastoId && sinSecretosTesoreria()",
+          "update": "isMasterAdmin() && ( incoming().id == existing().id && 'propietarioId' in incoming() && incoming().propietarioId == existing().propietarioId ) && sinSecretosTesoreria()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "gastoEsMio"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 13
+      },
+      {
+        "coleccion": "ordenes_pago",
+        "linea": 3254,
+        "permite": {
+          "get": "isMasterAdmin()",
+          "list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && isValidId(incoming().id) && incoming().id == opId && sinSecretosTesoreria()",
+          "update": "isMasterAdmin() && ( incoming().id == existing().id && ('historial' in incoming()) && incoming().historial.size() >= existing().historial.size() ) && sinSecretosTesoreria()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 10
+      },
+      {
+        "coleccion": "ficheros_sepa",
+        "linea": 3271,
+        "permite": {
+          "get": "isMasterAdmin()",
+          "list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && isValidId(incoming().id) && incoming().id == ficheroId && sinSecretosTesoreria()",
+          "update": "isMasterAdmin() && incoming().id == existing().id && sinSecretosTesoreria()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 7
+      },
+      {
+        "coleccion": "mandatos_sepa",
+        "linea": 3283,
+        "permite": {
+          "get": "isMasterAdmin()",
+          "list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && isValidId(incoming().id) && incoming().id == mandatoId && sinSecretosTesoreria()",
+          "update": "isMasterAdmin() && incoming().id == existing().id && sinSecretosTesoreria()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 7
+      },
+      {
+        "coleccion": "config_liquidacion",
+        "linea": 3297,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && propietarioId == myPropId())",
+          "list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && propietarioId is string && propietarioId.size() > 0 && sinSecretosTesoreria()",
+          "update": "isMasterAdmin() && sinSecretosTesoreria()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 7
+      },
+      {
+        "coleccion": "expedientes_morosidad",
+        "linea": 3319,
+        "permite": {
+          "get,list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && isValidId(expedienteId) && incoming().id == expedienteId && incoming().propietarioId is string && incoming().propietarioId.size() > 0 && incoming().contratoId is string && incoming().contratoId.size() > 0 && sinSecretosMorosidad()",
+          "update": "isMasterAdmin() && request.resource.data.id == existing().id && request.resource.data.propietarioId == existing().propietarioId && request.resource.data.contratoId == existing().contratoId && sinSecretosMorosidad()",
+          "delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 18
+      },
+      {
+        "coleccion": "expedientes_morosidad_hist",
+        "linea": 3339,
+        "permite": {
+          "get,list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && isValidId(transicionId) && incoming().id == transicionId && incoming().propietarioId is string && incoming().propietarioId.size() > 0 && incoming().expedienteId is string && incoming().expedienteId.size() > 0 && sinSecretosMorosidad()",
+          "update,delete": "false"
+        },
+        "sentenciasAllow": 3,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 12
+      },
+      {
+        "coleccion": "evidencias_morosidad",
+        "linea": 3354,
+        "permite": {
+          "get,list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && isValidId(evidenciaId) && incoming().id == evidenciaId && incoming().propietarioId is string && incoming().propietarioId.size() > 0 && sinSecretosMorosidad()",
+          "update": "isMasterAdmin() && request.resource.data.id == existing().id && request.resource.data.expedienteId == existing().expedienteId && request.resource.data.propietarioId == existing().propietarioId && request.resource.data.tipo == existing().tipo && sinSecretosMorosidad()",
+          "delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 18
+      },
+      {
+        "coleccion": "compromisos_morosidad",
+        "linea": 3376,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && resource.data.propietarioId == myPropId())",
+          "list": "isMasterAdmin() || (isPropietarioRole() && resource.data.propietarioId == myPropId())",
+          "create": "isMasterAdmin() && isValidId(compromisoId) && incoming().id == compromisoId && incoming().propietarioId is string && incoming().propietarioId.size() > 0 && sinSecretosMorosidad()",
+          "update": "isMasterAdmin() && request.resource.data.id == existing().id && request.resource.data.propietarioId == existing().propietarioId && sinSecretosMorosidad()",
+          "delete": "false"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 19
+      },
+      {
+        "coleccion": "politicas_morosidad",
+        "linea": 3399,
+        "permite": {
+          "get,list": "isMasterAdmin()",
+          "create": "isMasterAdmin() && isValidId(politicaId) && incoming().id == politicaId && sinSecretosMorosidad()",
+          "update": "isMasterAdmin() && request.resource.data.id == existing().id && sinSecretosMorosidad()",
+          "delete": "false"
+        },
+        "sentenciasAllow": 4,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 11
+      },
+      {
+        "coleccion": "morosidad_resumen_propietario",
+        "linea": 3415,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && resource.data.propietarioId == myPropId())",
+          "list": "isPropietarioRole() && resource.data.propietarioId == myPropId()",
+          "create": "isMasterAdmin() && isValidId(docId) && incoming().id == docId && incoming().propietarioId is string && incoming().propietarioId.size() > 0 && sinSecretosMorosidad()",
+          "update": "isMasterAdmin() && request.resource.data.id == existing().id && request.resource.data.propietarioId == existing().propietarioId && sinSecretosMorosidad()",
+          "delete": "false"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 16
+      },
+      {
+        "coleccion": "actas",
+        "linea": 3445,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && actaVisible(existing())) || (isTenant() && ('contractId' in existing()) && tenantTieneContrato(existing().contractId))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && actaEsMia(resource.data)) || (isTenant() && ('contractId' in resource.data) && resource.data.contractId in tenantContratoIds())",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in incoming() && incoming().ownerId == myPropId() && 'propertyId' in incoming() && incoming().propertyId is string && tipoValido() && estadoValido() && incoming().estado == 'BORRADOR' && 'version' in incoming() && incoming().version >= 1 && altaSinEvidenciaDeFirma() ) && sinSecretosActa()",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in existing() && existing().ownerId == myPropId() && actaOwnerInmutable() && actaPropertyInmutable() && versionIncrementoValido() && noModificacionSilenciosaFirmada() && estadoValido() && evidenciaFirmaSoloServidor() ) && sinSecretosActa()",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "actaEsMia",
+          "actaVisible",
+          "actaOwnerInmutable",
+          "actaPropertyInmutable",
+          "sinSecretosActa",
+          "estadoValido",
+          "tipoValido",
+          "versionIncrementoValido",
+          "evidenciaFirmaSoloServidor",
+          "altaSinEvidenciaDeFirma",
+          "esTransicionFirmadaACerrada",
+          "esActualizacionPdfPermitida",
+          "noModificacionSilenciosaFirmada"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 120
+      },
+      {
+        "coleccion": "actas_evidencias",
+        "linea": 3566,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && evidenciaVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && evidenciaEsMia(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in incoming() && incoming().ownerId == myPropId() && 'actaId' in incoming() && incoming().actaId is string && 'propertyId' in incoming() && incoming().propertyId is string && 'storagePath' in incoming() && evidenciaVinculadaASuActa(incoming()) ) && sinBase64()",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in existing() && existing().ownerId == myPropId() && 'ownerId' in incoming() && incoming().ownerId == myPropId() && 'actaId' in incoming() && incoming().actaId == existing().actaId && incoming().storagePath == existing().storagePath && (('sha256' in incoming() ? incoming().sha256 : '') == ('sha256' in existing() ? existing().sha256 : '')) ) && sinBase64()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in existing() && existing().ownerId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "evidenciaEsMia",
+          "evidenciaVisible",
+          "sinBase64",
+          "evidenciaVinculadaASuActa"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 51
+      },
+      {
+        "coleccion": "actas_incidencias",
+        "linea": 3618,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && incidenciaVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && incidenciaEsMia(resource.data))",
+          "create": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in incoming() && incoming().ownerId == myPropId() && 'actaId' in incoming() && incoming().actaId is string && 'propertyId' in incoming() && incoming().propertyId is string )",
+          "update": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in existing() && existing().ownerId == myPropId() && 'ownerId' in incoming() && incoming().ownerId == myPropId() )",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'ownerId' in existing() && existing().ownerId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "incidenciaEsMia",
+          "incidenciaVisible"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 25
+      },
+      {
+        "coleccion": "actas_otp",
+        "linea": 3644,
+        "permite": {
+          "get,list": "isMasterAdmin()",
+          "create,update,delete": "false"
+        },
+        "sentenciasAllow": 2,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 13
+      },
+      {
+        "coleccion": "analisis_inversion",
+        "linea": 3664,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && aisladoVisible(existing()))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && aisladoEsMio(resource.data))",
+          "create": "isMasterAdmin() || aisladoCreateOk()",
+          "update": "isMasterAdmin() || aisladoUpdateOk()",
+          "delete": "isMasterAdmin() || ( isPropietarioRole() && 'propietarioId' in existing() && existing().propietarioId == myPropId() )"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 10
+      },
+      {
+        "coleccion": "operaciones",
+        "linea": 3957,
+        "permite": {
+          "read": "opLectura(propietarioId)",
+          "create,update": "opEscritura(propietarioId) && opCabeceraValida(propietarioId,resource != null,resource == null ? {} : resource.data,incoming())",
+          "delete": "false"
+        },
+        "sentenciasAllow": 3,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 12
+      },
+      {
+        "coleccion": "sindicacion_inmuebles",
+        "linea": 3992,
+        "permite": {
+          "get": "isMasterAdmin() || (isPropietarioRole() && (resource.data.propietarioId == myPropId() || canReachInmuebleId(resource.data.inmuebleId)))",
+          "list": "isMasterAdmin() || (isPropietarioRole() && resource.data.propietarioId == myPropId())",
+          "create": "actorPuedeEscribirEstado() && isValidId(docId) && incoming().id == docId && incoming().externalId == docId && documentoCoherente()",
+          "update": "actorPuedeEscribirEstado() && isValidId(docId) && request.resource.data.id == docId && documentoCoherente() && request.resource.data.id == existing().id && request.resource.data.externalId == existing().externalId && request.resource.data.clave == existing().clave && request.resource.data.inmuebleId == existing().inmuebleId && request.resource.data.portal == existing().portal && request.resource.data.propietarioId == existing().propietarioId",
+          "delete": "isMasterAdmin()"
+        },
+        "sentenciasAllow": 5,
+        "funcionesLocales": [
+          "documentoCoherente",
+          "actorPuedeEscribirEstado"
+        ],
+        "referenciasCruzadas": [],
+        "lineasBloque": 64
+      },
+      {
+        "coleccion": "{document=**}",
+        "linea": 4060,
+        "permite": {
+          "read,write": "false"
+        },
+        "sentenciasAllow": 1,
+        "funcionesLocales": [],
+        "referenciasCruzadas": [],
+        "lineasBloque": 3
+      }
+    ]
+  },
+  "storage": {
+    "fichero": "storage.rules",
+    "lineasTotales": 67,
+    "rutas": [
+      {
+        "ruta": "/inmuebles/{inmuebleId}/{fileName}",
+        "linea": 46,
+        "permite": [
+          {
+            "operaciones": [
+              "get"
+            ],
+            "condicion": "true"
+          },
+          {
+            "operaciones": [
+              "list"
+            ],
+            "condicion": "false"
+          },
+          {
+            "operaciones": [
+              "create",
+              "update",
+              "delete"
+            ],
+            "condicion": "false"
+          }
+        ]
+      },
+      {
+        "ruta": "/{allPaths=**}",
+        "linea": 62,
+        "permite": [
+          {
+            "operaciones": [
+              "read",
+              "write"
+            ],
+            "condicion": "false"
+          }
+        ]
+      }
+    ],
+    "delegaEnServidor": true
+  },
+  "destinosDocumentalesServidor": [
+    {
+      "clave": "COBROS_JUSTIFICANTES",
+      "patron": "^cobros_justificantes/(?<propietarioId>${ID})/(?<cobroPeriodoId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "COBROS_JUSTIFICANTES_LEGADO",
+      "patron": "^cobros_justificantes/(?<cobroPeriodoId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "GASTOS_FACTURAS",
+      "patron": "^gastos_facturas/(?<propietarioId>${ID})/(?<gastoId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "DOCUMENTOS_SOLICITADOS",
+      "patron": "^documentos_solicitados/(?<solicitudDocId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "DOCUMENTOS_SOLICITADOS_PROFUNDO",
+      "patron": "^documentos_solicitados/(?<solicitudDocId>${ID})/(?<resto>${RESTO})$"
+    },
+    {
+      "clave": "INMUEBLE_DOCUMENTO_PATRIMONIAL",
+      "patron": "^inmuebles/(?<inmuebleId>${ID})/documentos_patrimoniales/(?<documentoId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "INMUEBLE_INVENTARIO",
+      "patron": "^inmuebles/(?<inmuebleId>${ID})/inventario/(?<resto>${RESTO})$"
+    },
+    {
+      "clave": "INMUEBLE_FOTO",
+      "patron": "^inmuebles/(?<inmuebleId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "PROFESIONAL_DOCUMENTO",
+      "patron": "^profesionales/(?<profesionalId>${ID})/documentos/(?<documentoId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "RECOMERCIALIZACION_FOTOS",
+      "patron": "^recomercializacion_fotos/(?<propietarioId>${ID})/(?<expedienteId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "INCIDENCIAS_FOTOS",
+      "patron": "^incidencias_fotos/(?<propietarioId>${ID})/(?<incidenciaId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "REFORMAS_DOCUMENTOS",
+      "patron": "^reformas_documentos/(?<propietarioId>${ID})/(?<proyectoId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "REFORMAS_FOTOS",
+      "patron": "^reformas_fotos/(?<propietarioId>${ID})/(?<proyectoId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "ACTAS_FOTOS",
+      "patron": "^actas_fotos/(?<propietarioId>${ID})/(?<actaId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "ACTAS_PDFS",
+      "patron": "^actas_pdfs/(?<propietarioId>${ID})/(?<actaId>${ID})/(?<fileName>${FICHERO})$"
+    },
+    {
+      "clave": "INCIDENCIA_EVIDENCIA",
+      "patron": "^incidencias/(?<incidenciaId>${ID})/(?<resto>${RESTO})$"
+    },
+    {
+      "clave": "SUMINISTRO_LECTURA",
+      "patron": "^suministros/(?<suministroId>${ID})/lecturas/(?<lecturaId>${ID})/(?<resto>${RESTO})$"
+    },
+    {
+      "clave": "CONTRATO_DOCUMENTO",
+      "patron": "^contratos/(?<contratoId>${ID})/(?<resto>${RESTO})$"
+    },
+    {
+      "clave": "RECIBO",
+      "patron": "^recibos/(?<contratoId>${ID})/(?<claveCobro>${ID})/(?<resto>${RESTO})$"
+    },
+    {
+      "clave": "MOROSIDAD_EVIDENCIA",
+      "patron": "^morosidad_evidencias/(?<propietarioId>${ID})/(?<expedienteId>${ID})/(?<fileName>${FICHERO})$"
+    }
+  ]
+}

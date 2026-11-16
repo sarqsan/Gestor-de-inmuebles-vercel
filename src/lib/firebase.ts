@@ -3084,6 +3084,40 @@ export async function uploadFotoIncidenciaStorage(
   return { url, storagePath };
 }
 
+/**
+ * P1 · Sube una EVIDENCIA del profesional (antes / durante / después).
+ *
+ * POR QUÉ NO SE REUTILIZA `uploadIncidenciaAdjuntoStorage`:
+ *   esa función escribe en `incidencias/{incidenciaId}/…` con `uploadBytes` del
+ *   SDK. El profesional SÍ está autorizado en ese prefijo
+ *   (`INCIDENCIA_EVIDENCIA` en `autorizacionDocumental.ts` incluye
+ *   `profesionalAsignadoA`), pero la ruta la decide el llamante. Aquí la ruta
+ *   la impone `rutaEvidencia` del núcleo (P1), que garantiza el patrón
+ *   `incidencias/{id}/{momento}_…` y descarta `..` y separadores.
+ *
+ * PRIVACIDAD: se devuelve la URL de descarga autenticada del objeto y su
+ * `storagePath`. Nunca una URL pública ni un enlace firmado permanente; la
+ * referencia que se persiste es el `storagePath`.
+ */
+export async function uploadEvidenciaTrabajoStorage(
+  storagePath: string,
+  file: File | Blob,
+  contentType: string,
+): Promise<{ url: string; storagePath: string }> {
+  // Fail-closed: el prefijo autorizado para la evidencia es `incidencias/`.
+  if (!storagePath.startsWith('incidencias/') || storagePath.includes('..')) {
+    throw new Error('La ruta de la evidencia no está autorizada.');
+  }
+  const limite = { maxBytes: 10 * 1024 * 1024, tipos: /^(application\/pdf|image\/)/ };
+  const { url } = await subirBinarioDuradero(storage, {
+    storagePath,
+    datos: file,
+    contentType,
+    limite,
+  });
+  return { url, storagePath };
+}
+
 export async function deleteFotoIncidenciaStorage(storagePath?: string): Promise<void> {
   if (!storagePath) return;
   if (

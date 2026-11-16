@@ -133,13 +133,18 @@ describe('pendientes · P-01 cerrado con evidencia, no por inercia', () => {
 });
 
 describe('pendientes · las cifras de las reglas citadas son las reales', () => {
-  it('firestore.rules mide las 4 064 líneas y tiene el sha256 que se cita', () => {
+  it('firestore.rules mide las 4 140 líneas y tiene el sha256 que se cita', () => {
     const contenido = readFileSync('firestore.rules', 'utf8');
     const lineas = contenido.replace(/\n$/, '').split('\n').length;
     const sha = createHash('sha256').update(contenido).digest('hex');
 
-    expect(lineas).toBe(4064);
-    expect(sha.startsWith('81b9ae93')).toBe(true);
+    // P1 (2026-11-15): el ruleset creció de 4 064 a 4 140 líneas y de
+    // `81b9ae93…` a `63ce450e…` porque P1 AÑADIÓ el bloque `2H-bis`
+    // (`mensajes_trabajo`) y sus helpers AL FINAL. La guardia sigue siendo igual
+    // de estricta: fija el número de líneas y el sha, y exige que los documentos
+    // citen la misma cifra. Lo que cambia es el valor, no la exigencia.
+    expect(lineas).toBe(4140);
+    expect(sha.startsWith('63ce450e')).toBe(true);
 
     // Y los documentos que el usuario va a mirar dicen lo mismo: el sha, las
     // líneas y la misma cifra. Si las reglas cambian, estas tres citas mienten

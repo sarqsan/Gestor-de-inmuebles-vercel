@@ -484,6 +484,7 @@ const SUPERFICIE_AG08 = [
   'src/test/e/bloqueE.servicios.test.ts',
   'tests/login-admin-principal.test.ts',
   'scripts/ag08/migrar-passwordhash.mjs',
+  'scripts/ag08/simular-respaldo-restauracion.mjs',
   'src/features/ag08/tests/migracion-passwordhash.test.ts',
   'docs/ag08/INFORME-AG08.md',
 ];

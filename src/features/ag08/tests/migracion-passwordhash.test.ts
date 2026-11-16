@@ -17,8 +17,16 @@ const require = createRequire(import.meta.url);
 const RAIZ = path.resolve(__dirname, '../../../../');
 const mod = require(path.join(RAIZ, 'scripts/ag08/migrar-passwordhash.mjs'));
 
-const { construirPlan, planificarDocumento, describirValorSeguro, manifiestoAuditable, validarManifiestoSinSecretos } =
-  mod;
+const {
+  construirPlan,
+  planificarDocumento,
+  describirValorSeguro,
+  manifiestoAuditable,
+  validarManifiestoSinSecretos,
+  validarGuardaAplicar,
+  huellaRespaldo,
+  aplicarPlan,
+} = mod;
 
 // Datos FICTICIOS. Hashes inventados (no derivan de ninguna contraseña real).
 const HASH_SHA = 'a'.repeat(64);
@@ -121,5 +129,122 @@ describe('AG-08 · plan de migración (offline, datos ficticios)', () => {
   it('la guarda no da falsos positivos con valores cortos o irrelevantes', () => {
     const man = { nota: 'texto normal sin credenciales', n: 3 };
     expect(validarManifiestoSinSecretos(man, ['abc', 'corto'])).toBe(true);
+  });
+});
+
+// ===========================================================================
+// Guardas de ejecución real (fail-closed) y núcleo de escritura
+// ===========================================================================
+describe('AG-08 · guardas de --aplicar (no debe poder apuntarse a producción)', () => {
+  const base = { aplicar: true, proyecto: 'demo-x', credencial: 'sa.json', respaldo: 'exp-1', confirmoProduccion: false };
+
+  it('exige proyecto, credencial y respaldo', () => {
+    expect(() => validarGuardaAplicar({ ...base, proyecto: '' }, {})).toThrow(/--proyecto/);
+    expect(() => validarGuardaAplicar({ ...base, credencial: '' }, {})).toThrow(/--credencial/);
+    expect(() => validarGuardaAplicar({ ...base, respaldo: '' }, {})).toThrow(/--respaldo/);
+  });
+
+  it('FAIL-CLOSED: sin lista blanca declarada no se aplica nada', () => {
+    expect(() => validarGuardaAplicar(base, {})).toThrow(/AG08_PROYECTOS_PRUEBA/);
+    expect(() => validarGuardaAplicar(base, { AG08_PROYECTOS_PRUEBA: '  ,  ' })).toThrow(/AG08_PROYECTOS_PRUEBA/);
+  });
+
+  it('un proyecto fuera de la lista blanca se rechaza aunque se parezca a pruebas', () => {
+    const env = { AG08_PROYECTOS_PRUEBA: 'demo-a,pruebas-b' };
+    for (const proyecto of ['gestor-real', 'produccion-test', 'DEMO-A', 'demo-a2']) {
+      expect(() => validarGuardaAplicar({ ...base, proyecto }, env)).toThrow(/AG08_PROYECTOS_PRUEBA/);
+    }
+  });
+
+  it('--confirmo-produccion NO abre la puerta por sí solo', () => {
+    const env = { AG08_PROYECTOS_PRUEBA: 'demo-a' };
+    expect(() => validarGuardaAplicar({ ...base, proyecto: 'gestor-real', confirmoProduccion: true }, env))
+      .toThrow(/AG08_PROYECTOS_PRUEBA/);
+  });
+
+  it('solo un proyecto de la lista blanca pasa, y devuelve el acuse', () => {
+    const env = { AG08_PROYECTOS_PRUEBA: 'demo-a, pruebas-b' };
+    expect(validarGuardaAplicar({ ...base, proyecto: 'pruebas-b' }, env)).toBe(false);
+    expect(validarGuardaAplicar({ ...base, proyecto: 'demo-a', confirmoProduccion: true }, env)).toBe(true);
+  });
+
+  it('la huella del respaldo no revela bucket ni ruta del export', () => {
+    const h = huellaRespaldo('gs://bucket-privado/ag08-pre');
+    expect(h).toMatch(/^respaldo#[0-9a-f]+$/);
+    expect(h).not.toContain('bucket');
+    expect(huellaRespaldo('')).toBe('(ninguno)');
+  });
+});
+
+describe('AG-08 · núcleo de escritura: solo el campo passwordHash', () => {
+  const sentinela = Symbol('delete');
+
+  function fakeDb(estado: Record<string, Record<string, unknown>>) {
+    const escrituras: { id: string; campos: string[] }[] = [];
+    const db = {
+      collection: () => ({
+        doc: (id: string) => ({
+          update: async (cambios: Record<string, unknown>) => {
+            escrituras.push({ id, campos: Object.keys(cambios) });
+            for (const [k, v] of Object.entries(cambios)) {
+              if (v !== sentinela) throw new Error('campo no sentinela');
+              delete (estado[id] as Record<string, unknown>)[k];
+            }
+          },
+        }),
+      }),
+    };
+    return { db, escrituras };
+  }
+
+  it('borra el campo en los ids del plan y en ningún otro', async () => {
+    const estado = {
+      a: { email: 'a@test.invalid', passwordHash: 'x'.repeat(64) },
+      b: { email: 'b@test.invalid' },
+    };
+    const { db, escrituras } = fakeDb(estado);
+    const plan = construirPlan([
+      { id: 'a', datos: estado.a },
+      { id: 'b', datos: estado.b },
+    ]);
+    const r = await aplicarPlan(db, plan, { deleteSentinela: sentinela });
+    expect(r).toEqual({ borrados: 1, fallos: 0 });
+    expect(escrituras).toEqual([{ id: 'a', campos: ['passwordHash'] }]);
+    expect(estado.a.email).toBe('a@test.invalid');
+  });
+
+  it('cuenta fallos y NO aborta el resto (idempotente por reintento)', async () => {
+    const estado = { a: { passwordHash: 'x' }, b: { passwordHash: 'y' } };
+    const db = {
+      collection: () => ({
+        doc: (id: string) => ({
+          update: async () => {
+            if (id === 'a') throw new Error('denegado');
+            delete (estado as Record<string, Record<string, unknown>>)[id].passwordHash;
+          },
+        }),
+      }),
+    };
+    const plan = construirPlan([
+      { id: 'a', datos: estado.a },
+      { id: 'b', datos: estado.b },
+    ]);
+    const r = await aplicarPlan(db, plan, { deleteSentinela: sentinela });
+    expect(r).toEqual({ borrados: 1, fallos: 1 });
+    expect('passwordHash' in estado.b).toBe(false);
+  });
+
+  it('la auditoría que falla no impide el borrado', async () => {
+    const estado = { a: { passwordHash: 'x' } };
+    const { db } = fakeDb(estado);
+    const plan = construirPlan([{ id: 'a', datos: estado.a }]);
+    const r = await aplicarPlan(db, plan, {
+      deleteSentinela: sentinela,
+      auditar: async () => {
+        throw new Error('audit no disponible');
+      },
+    });
+    expect(r.borrados).toBe(1);
+    expect('passwordHash' in estado.a).toBe(false);
   });
 });

@@ -72,6 +72,14 @@ async function cargarAdmin() {
   }
 }
 
+/** Clasificador de errores: solo el CÓDIGO, nunca el mensaje ni el documento.
+ *  Firestore y `JSON.parse` pueden incluir fragmentos del contenido en `message`
+ *  (p. ej. el service account al parsear mal la credencial). Los logs no lo copian. */
+function codigoError(e) {
+  const c = e && (e.code || e.name);
+  return typeof c === 'string' && /^[\w./-]{1,64}$/.test(c) ? c : 'error';
+}
+
 /**
  * Formatea un valor de hash para el informe SIN exponerlo.
  * Devuelve solo tipo y longitud; jamás el contenido.
@@ -135,6 +143,78 @@ export function manifiestoAuditable(plan, meta = {}) {
   };
 }
 
+/**
+ * Aplica el plan de borrado contra un cliente tipo Firestore.
+ * Es el ÚNICO punto que escribe `passwordHash` y lo usa tanto la ejecución real
+ * (`main`) como la simulación de respaldo/restauración, de modo que la simulación
+ * ejerce el código real y no una réplica.
+ *
+ * Contrato del cliente: `collection(nombre).doc(id).update({campo: deleteSentinela})`.
+ * Nunca envía otros campos: eso es lo que garantiza «no tocar datos ajenos».
+ */
+export async function aplicarPlan(db, plan, { deleteSentinela, auditar } = {}) {
+  let borrados = 0;
+  let fallos = 0;
+  for (const id of plan.idsAfectados) {
+    try {
+      await db.collection('usuarios').doc(id).update({ passwordHash: deleteSentinela });
+      borrados++;
+      if (auditar) {
+        try {
+          await auditar(id);
+        } catch {
+          // La auditoría no debe abortar el borrado ya realizado; se cuenta aparte.
+        }
+      }
+    } catch {
+      fallos++;
+    }
+  }
+  return { borrados, fallos };
+}
+
+/**
+ * Guarda FAIL-CLOSED de ejecución real. Pura y testeable: devuelve el acuse o lanza.
+ * - Exige proyecto, credencial y respaldo.
+ * - Exige lista blanca `AG08_PROYECTOS_PRUEBA` y que el proyecto esté EN ella:
+ *   así no se puede apuntar a producción «por accidente» escribiendo un id.
+ * - `--confirmo-produccion` NO abre la puerta: solo se registra como acuse.
+ */
+export function validarGuardaAplicar(args, env = {}) {
+  if (!args.proyecto) throw new Error('--aplicar requiere --proyecto');
+  if (!args.credencial) throw new Error('--aplicar requiere --credencial (service account)');
+  if (!args.respaldo) {
+    throw new Error('--aplicar requiere --respaldo <id-del-export>: sin respaldo verificado no se borra nada.');
+  }
+  const listaBlanca = String(env.AG08_PROYECTOS_PRUEBA || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (listaBlanca.length === 0) {
+    throw new Error(
+      'Falta AG08_PROYECTOS_PRUEBA: define la lista blanca de proyectos de pruebas ' +
+        '(ids separados por comas). Sin lista blanca no se aplica nada.'
+    );
+  }
+  if (!listaBlanca.includes(args.proyecto)) {
+    throw new Error(
+      'El proyecto indicado no está en AG08_PROYECTOS_PRUEBA. ' +
+        'Añádelo explícitamente solo si es un proyecto de PRUEBAS.'
+    );
+  }
+  return Boolean(args.confirmoProduccion);
+}
+
+/** Huella estable y no reversible del id de respaldo: permite correlacionar el
+ *  artefacto sin escribir en el manifiesto ni en `audit_logs` el identificador
+ *  completo del export (que revela bucket y ruta de infraestructura). */
+export function huellaRespaldo(id) {
+  if (!id) return '(ninguno)';
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return `respaldo#${Math.abs(h).toString(16)}`;
+}
+
 /** Guarda: el manifiesto nunca debe contener el valor literal del hash. */
 export function validarManifiestoSinSecretos(obj, valoresReales = []) {
   const texto = JSON.stringify(obj);
@@ -152,6 +232,13 @@ export function validarManifiestoSinSecretos(obj, valoresReales = []) {
 // ============================================================================
 // CLI
 // ============================================================================
+
+/** Error con mensaje PROPIO (redactado por el script, sin datos del entorno). */
+function abortar(mensaje) {
+  const e = new Error(mensaje);
+  e.esPropio = true;
+  return e;
+}
 
 function parseArgs(argv) {
   const args = {
@@ -173,7 +260,7 @@ function parseArgs(argv) {
     else if (a === '--salida') args.salida = argv[++i] ?? '';
     else if (a === '--entrada') args.entrada = argv[++i] ?? '';
     else if (a === '--help' || a === '-h') args.help = true;
-    else throw new Error(`Argumento no reconocido: ${a}`);
+    else throw abortar(`Argumento no reconocido: ${a}`);
   }
   return args;
 }
@@ -199,13 +286,13 @@ async function main() {
 
   // ---- Modo OFFLINE: valida la lógica del plan con datos ficticios ----------
   if (args.entrada) {
-    if (args.aplicar) throw new Error('--entrada no se combina con --aplicar.');
+    if (args.aplicar) throw abortar('--entrada no se combina con --aplicar.');
     const crudos = JSON.parse(readFileSync(args.entrada, 'utf8'));
     const documentos = Array.isArray(crudos)
       ? crudos.map((d) => ({ id: String(d.id), datos: d.datos ?? null }))
       : Object.entries(crudos).map(([id, datos]) => ({ id, datos }));
     const plan = construirPlan(documentos);
-    const manifiesto = manifiestoAuditable(plan, { modo: 'offline', entrada: args.entrada });
+    const manifiesto = manifiestoAuditable(plan, { modo: 'offline', entrada: path.basename(args.entrada) });
     const valoresReales = documentos
       .map((d) => (d.datos ? d.datos.passwordHash : undefined))
       .filter((v) => typeof v === 'string');
@@ -224,20 +311,14 @@ async function main() {
     return;
   }
 
-  // ---- Guardas antes de tocar Firestore ------------------------------------
+  // ---- Guardas antes de tocar Firestore (fail-closed) ----------------------
+  let acuse = false;
   if (args.aplicar) {
-    if (!args.proyecto) throw new Error('--aplicar requiere --proyecto');
-    if (!args.credencial) throw new Error('--aplicar requiere --credencial (service account)');
-    if (!args.respaldo) {
-      throw new Error(
-        '--aplicar requiere --respaldo <id-del-export>: sin respaldo verificado no se borra nada.'
-      );
-    }
-    const pareceTest = /-test$|^demo-/.test(args.proyecto);
-    if (!pareceTest && !args.confirmoProduccion) {
-      throw new Error(
-        'El proyecto no parece de pruebas: añade --confirmo-produccion solo con autorización expresa.'
-      );
+    try {
+      acuse = validarGuardaAplicar(args, process.env);
+    } catch (e) {
+      // Se reetiqueta como error propio para que su mensaje sea imprimible.
+      throw abortar(e.message);
     }
   }
 
@@ -245,7 +326,17 @@ async function main() {
   const { initializeApp, cert, getApps } = adminApp;
   const { getFirestore } = adminFirestore;
 
-  const credencial = JSON.parse(readFileSync(args.credencial, 'utf8'));
+  // D1: el error de `JSON.parse`/`readFileSync` puede incluir fragmentos del
+  // service account o la ruta. Se captura y se sustituye por un motivo opaco.
+  let credencial;
+  try {
+    credencial = JSON.parse(readFileSync(args.credencial, 'utf8'));
+  } catch {
+    throw abortar(
+      'No se pudo leer o interpretar la credencial indicada. ' +
+        'No se muestran detalles para no filtrar su contenido ni su ruta.'
+    );
+  }
   if (!getApps().length) {
     initializeApp({ credential: cert(credencial), projectId: args.proyecto });
   }
@@ -264,7 +355,8 @@ async function main() {
   const manifiesto = manifiestoAuditable(plan, {
     modo: args.aplicar ? 'aplicar' : 'dry-run',
     proyecto: args.proyecto || '(no indicado)',
-    respaldo: args.respaldo || '(ninguno)',
+    respaldo: huellaRespaldo(args.respaldo),
+    acuseExplicito: acuse,
   });
   const valoresReales = documentos
     .map((d) => (d.datos ? d.datos.passwordHash : undefined))
@@ -281,30 +373,20 @@ async function main() {
   }
 
   const { FieldValue } = adminFirestore;
-  let borrados = 0;
-  let fallos = 0;
-  for (const id of plan.idsAfectados) {
-    try {
-      await db.collection('usuarios').doc(id).update({ passwordHash: FieldValue.delete() });
-      borrados++;
-      try {
-        await db.collection('audit_logs').add({
-          accion: 'AG08_PASSWORDHASH_RETIRADO',
-          coleccion: 'usuarios',
-          documentoId: id,
-          campo: 'passwordHash',
-          resultado: 'ELIMINADO',
-          respaldo: args.respaldo,
-          fecha: new Date().toISOString(),
-        });
-      } catch (e) {
-        console.warn(`[AG-08] auditoría no registrada para ${id}: ${e?.code || e?.message || 'error'}`);
-      }
-    } catch (e) {
-      fallos++;
-      console.error(`[AG-08] fallo al limpiar ${id}: ${e?.code || e?.message || 'error'}`);
-    }
-  }
+  const { borrados, fallos } = await aplicarPlan(db, plan, {
+    deleteSentinela: FieldValue.delete(),
+    auditar: async (id) => {
+      await db.collection('audit_logs').add({
+        accion: 'AG08_PASSWORDHASH_RETIRADO',
+        coleccion: 'usuarios',
+        documentoId: id,
+        campo: 'passwordHash',
+        resultado: 'ELIMINADO',
+        respaldo: huellaRespaldo(args.respaldo),
+        fecha: new Date().toISOString(),
+      });
+    },
+  });
 
   const despues = await db.collection('usuarios').select('passwordHash').get();
   const restantes = despues.docs.filter((d) => d.data() && 'passwordHash' in d.data()).length;
@@ -321,7 +403,10 @@ async function main() {
 // Solo se ejecuta como CLI, no al importarse desde las pruebas.
 if (process.argv[1] && path.basename(process.argv[1]) === 'migrar-passwordhash.mjs') {
   main().catch((e) => {
-    console.error(`[AG-08] abortado: ${e?.message || e}`);
+    // Motivo accionable pero SIN volcar rutas de credenciales ni contenido:
+    // se usa el mensaje propio del script cuando lo hay, y si no, el código.
+    const propio = typeof e?.message === 'string' && /^[^\n]{1,200}$/.test(e.message) && e.esPropio;
+    console.error(`[AG-08] abortado: ${propio ? e.message : codigoError(e)}`);
     process.exitCode = 1;
   });
 }

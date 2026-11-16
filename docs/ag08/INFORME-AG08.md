@@ -3,7 +3,7 @@
 **Rama:** `arena/d44d3f9e-gestor-de-inmuebles-vercel`
 **Base:** `main` @ `d314856d02f26577b074f7ea7617cec849cf0846` (AG-11 fusionado y desplegado)
 **Fecha:** 2026-11-16
-**Estado:** **código y migración preparados y validados · MIGRACIÓN NO EJECUTADA**
+**Estado:** **código y migración preparados y validados · REVISIÓN FINAL DE SEGURIDAD COMPLETADA · MIGRACIÓN NO EJECUTADA**
 
 > **Criterio de parada respetado.** No se ha borrado `passwordHash` de Firestore, no se ha
 > tocado ningún dato de producción, no se han modificado cuentas reales, credenciales,
@@ -134,7 +134,7 @@ Ninguna regla, ningún dato, ninguna cuenta.
 | **Idempotente** | Solo planifica documentos donde `hasOwnProperty('passwordHash')`. Reejecutar sobre estado limpio ⇒ 0 escrituras. Verificado por prueba (§7.3) y por la verificación posterior del propio script. |
 | **Auditable** | Manifiesto JSON con `resumen`, `idsAfectados` y `detalle` (id + motivo + tipo/longitud). En modo real, además, un documento en `audit_logs` por documento con `accion: AG08_PASSWORDHASH_RETIRADO`. |
 | **Sin registrar hashes ni credenciales** | `describirValorSeguro()` devuelve solo `<string:64>`; `validarManifiestoSinSecretos()` **aborta** si un valor real aparece en el manifiesto o si se cuela una clave `passwordHash` con valor. Probado por mutación (§7.4, M3). |
-| **Datos ajenos intactos** | Usa `update({ passwordHash: FieldValue.delete() })`: no reescribe el documento, no recalcula `updatedAt`, no toca ningún otro campo. Probado con centinelas (§7.3). |
+| **Datos ajenos intactos** | Usa `update({ passwordHash: FieldValue.delete() })` con **un único campo**: no reescribe el documento, no recalcula `updatedAt` y no toca ningún otro valor. Probado con centinelas, comparación profunda y objetos anidados (§7.3 y §11.6). *(Nota: `update` sí estampa `updateTime` del servidor, metadato interno de Firestore que no forma parte de los datos del documento.)* |
 | **Respaldo verificable** | `--aplicar` **exige** `--respaldo <id-export>`; sin él aborta. El respaldo es el export de Firestore (§5.2). |
 | **Dry-run por defecto** | Sin `--aplicar` no escribe nada; solo informa y emite manifiesto. |
 | **Guardas de producción** | `--aplicar` exige `--proyecto` + `--credencial`; si el proyecto no acaba en `-test` o no empieza por `demo-`, exige además `--confirmo-produccion`. |
@@ -320,7 +320,130 @@ reproducir en el sandbox por ausencia de `java` (el emulador oficial no arranca)
 
 ---
 
-## 11. Conclusión
+## 11. Revisión final de seguridad (previa a la fusión)
+
+Revisión solicitada antes de autorizar el merge. **Encontró 5 defectos reales en el script
+de migración, todos corregidos y ahora cubiertos por pruebas.**
+
+### 11.1 Revisión del código
+
+| Comprobación | Resultado |
+|---|---|
+| La retirada del login directo no rompe flujos legítimos de Firebase Auth | **Confirmado.** `signInWithEmailAndPassword`, `createUserWithEmailAndPassword`, `sendPasswordResetEmail` y `signOut` intactos. Solo se retiró la rama sin sesión, que era inalcanzable. |
+| No quedan escrituras ni lecturas funcionales de `passwordHash` | **Confirmado.** 0 en código de aplicación (solo comentarios). Única aparición funcional: el script de migración, que solo borra. |
+| Las tres escrituras retiradas no tenían efectos secundarios necesarios | **Confirmado.** `saveUsuarioFirestore` sigue persistiendo perfil, espejo `usuarios_auth`, auditoría y `lastLoginAt`; solo cambió el campo retirado. El alta sigue creando rol, permisos y vínculos. |
+| Las pruebas modificadas son más estrictas y no ocultan regresiones | **Confirmado y reforzado.** Ver §11.2: las 2 rebasadas son más estrictas y se han **añadido 13 pruebas nuevas** (D.1–D.5 y guardas/núcleo). |
+| `firestore.rules` conserva intacta la protección del campo | **Confirmado, verificado empíricamente.** Ver §11.3. |
+| Sin dependencias ni cambios ajenos al bloque | **Confirmado.** `package.json`/`package-lock.json` sin cambios; 9 ficheros, todos de AG-08. |
+
+### 11.2 Pruebas añadidas en la revisión (13)
+
+- **D.1–D.5** contra las **reglas reales**: el alta **sin** `passwordHash` sigue permitida; con y
+  sin campo el resultado de `create` es idéntico; el titular **no puede** modificar ni fabricarse
+  el campo; el campo sigue inmovilizado en el texto de las reglas.
+- **Guardas de `--aplicar`** (7): fail-closed, lista blanca, `--confirmo-produccion` no abre la
+  puerta, huella de respaldo sin ruta.
+- **Núcleo de escritura** (3): solo se toca `passwordHash`; un fallo no aborta el resto; una
+  auditoría caída no impide el borrado.
+
+### 11.3 La protección del campo sigue viva (y una precisión importante)
+
+- D.3/D.4 demuestran **contra las reglas reales** que el titular no puede modificar el campo ni
+  crearlo si no existía: `allow update` sigue vetándolo vía `affectedKeys().hasAny([...])`.
+- `passwordHash` aparece **una sola vez** en las reglas (línea 2437) y solo en un bloque de
+  **update** (`existing()`/`diff`). **No es requisito de `create`** — por eso dejar de escribirlo
+  no rompe ningún alta (D.1/D.2).
+- **Precisión que corrige una afirmación demasiado amplia mía:** el script usa el **SDK Admin**,
+  que **omite las reglas de Firestore**. Las reglas **no** pueden frenar la migración. La única
+  protección real contra una migración mal apuntada son las guardas del script (§11.4, D4).
+
+### 11.4 Defectos encontrados en la migración y corregidos
+
+| # | Defecto | Riesgo | Corrección |
+|---|---|---|---|
+| **D1** | Los mensajes de error de Firestore/**`JSON.parse`** se imprimían tal cual. Un service-account mal formado puede aparecer **dentro del mensaje** de `JSON.parse`. | **Fuga de credencial en logs** | `codigoError()` imprime solo el **código**; la lectura de credencial se captura y se sustituye por un motivo opaco. Verificado: con `--credencial /tmp/SECRETO-sa.json` inexistente el log dice `Error`, **no la ruta**. |
+| **D2** | El manifiesto guardaba la **ruta completa** del fichero de entrada. | Fuga de rutas del entorno | Se guarda `path.basename()`. Verificado: `/tmp/ag08r` no aparece. |
+| **D3** | El manifiesto y `audit_logs` guardaban el **id completo del export** de respaldo. | Revela bucket/ruta de infraestructura | `huellaRespaldo()` → `respaldo#<hex>`; permite correlacionar sin revelar la ruta. |
+| **D4** | Guarda de producción **débil**: bastaba `--confirmo-produccion` para que `gestor-real` pasara. | **Apuntar a producción por error** | **Fail-closed**: exige lista blanca `AG08_PROYECTOS_PRUEBA` y pertenencia a ella. Verificado: producción + `--confirmo-produccion` ahora **aborta**. |
+| **D5** | La **simulación** replicaba el bucle de escritura en vez de ejecutar el código de la migración. | Prueba complaciente: no detectaba un borrado de campo de más | Se extrajo `aplicarPlan()` (núcleo único, usado por la ejecución real **y** por la simulación). Verificado: la mutación «borrar un campo de más» **ahora sí** se detecta. |
+
+### 11.5 Auditoría de la migración, punto por punto
+
+| Requisito | Cómo se cumple | Evidencia |
+|---|---|---|
+| El dry-run no modifica datos | Sin `--aplicar` no hay ninguna escritura; el modo offline ni siquiera carga el SDK | Simulación paso [2]: 0 escrituras en dry-run |
+| El respaldo contiene los documentos necesarios para restaurar | Export íntegro previo; obligatorio `--respaldo` para aplicar | Simulación pasos [1] y [5] |
+| Nunca imprime ni incorpora hashes | Solo `<string:N>`; guarda que aborta si se cuela un valor | Tests + simulación paso [6]; mutación M3 |
+| Identifica exactamente los documentos afectados | Solo `hasOwnProperty('passwordHash')` | Simulación paso [2]; prueba de plan |
+| No modifica campos distintos de `passwordHash` | `update` con un único `FieldValue.delete()` | Núcleo probado (3 tests) + simulación paso [4] con comparación profunda |
+| Es idempotente | Reejecutar ⇒ 0 escrituras | Simulación paso [3]; 3 pruebas |
+| Aborta ante errores / documentos inesperados / respaldo incompleto | Fail-closed en todas las guardas; cuenta fallos y marca INCOMPLETO | 5 guardas verificadas por CLI + 7 pruebas |
+| La restauración funciona de verdad | Prueba ejecutable con datos ficticios | **Simulación paso [5]: 20/20, base idéntica al original** |
+| No se puede apuntar a producción por accidente | Lista blanca obligatoria (D4) | 4 pruebas + verificación CLI |
+
+### 11.6 Resultado de las pruebas de respaldo y restauración
+
+`scripts/ag08/simular-respaldo-restauracion.mjs` — **20/20 comprobaciones**, ejecutable y
+repetible, sin red y sin Firestore real:
+
+```
+[1] Respaldo previo ............ export con TODOS los documentos y los 3 hashes restaurables
+[2] Dry-run y aplicación ....... 0 escrituras en dry-run · 3 documentos · solo el campo
+[3] Idempotencia ............... 2.º plan = 0 · 2.ª ejecución = 0 escrituras
+[4] Sin cambios colaterales .... documentos idénticos salvo el campo · createdAt y anidados intactos
+[5] RESTAURACIÓN ............... base restaurada IDÉNTICA al original · el hash vuelve
+[6] Sin hashes en lo registrado . 3/3 hashes ausentes
+```
+
+**Validez del arnés verificada por mutación:** romper la idempotencia y forzar un borrado de
+campo de más hacen **fallar** la simulación. No es un test complaciente.
+
+### 11.7 Resultado de las pruebas y del CI
+
+```
+npm test                 336 archivos · 5583 passed · 0 fallos · 7 todo · 0 omitidas  (antes 5569)
+npm run test:integracion 303 + 88 · 0 fallos · 0 omitidas
+npx tsc --noEmit         0 errores
+npm run build            OK
+```
+
+### 11.8 Los cuatro fallos históricos de P0, documentados por separado
+
+Verificado **por nombre exacto**, no por el total (el total podría coincidir por azar). Comparé el
+resumen de emuladores de la **PR #90 (main, sin AG-08)** con el de la **PR #91**:
+
+- Fallos en la base: **4** · Fallos en AG-08: **4**
+- Coinciden **4/4 por nombre exacto** · **Nuevos: 0** · **Desaparecidos: 0**
+- Desglose por archivo: **idéntico** · Omitidas (12): **idénticas**
+
+| # | Fallo histórico | Colección | Archivo:línea | No se toca porque |
+|---|---|---|---|---|
+| 1 | «el propietario A no lee el documento del propietario B (lectura cruzada)» | `enlaces_registro` (supuesto 6) | `p0-cobertura-reglas.emulador.test.ts:2399` | Fallo histórico de P0 |
+| 2 | «un profesional no lee lo que no está en su ámbito» | `enlaces_registro` (8) | `:2410` | Fallo histórico de P0 |
+| 3 | «un inquilino no lee lo que no le corresponde» | `enlaces_registro` (9) | `:2415` | Fallo histórico de P0 |
+| 4 | «el propietario A no puede escribir en nombre de B (escritura cruzada)» | `audit_logs` (7) | `:2527` | Fallo histórico de P0 |
+
+Los cuatro son `Expected request to fail, but it succeeded` en **lecturas/escrituras cruzadas** de
+`enlaces_registro` y `audit_logs`. **No tienen relación con `passwordHash`**, con la autenticación
+ni con `usuarios`. Quedan **fuera del alcance autorizado** y por eso no se han corregido: hacerlo
+exigiría modificar reglas de Firebase, expresamente prohibido en esta orden.
+
+**No hay regresiones nuevas:** 0 fallos nuevos por nombre, 0 archivos nuevos en rojo.
+
+### 11.9 Confirmaciones exigidas
+
+- **La migración NO se ha ejecutado.** Ni sobre pruebas ni sobre producción. No se ha creado
+  ningún export de respaldo real (solo se ha *simulado* con datos ficticios).
+- **Producción y sus datos permanecen intactos.** No se ha ejecutado ningún despliegue, ni
+  `firebase deploy`, ni ninguna escritura contra Firestore. Este bloque solo añade código y
+  documentación al repositorio.
+- **No se ha fusionado la PR #91 ni se ha desplegado.** No se han modificado reglas de Firebase
+  ni configuración de autenticación (verificado: 0 cambios en `firestore.rules`, `storage.rules`,
+  `reglas-firestore-r12/` y `docs/p0/`).
+
+---
+
+## 12. Conclusión
 
 - Ningún flujo legítimo de autenticación depende ya de `passwordHash`: la autoridad es
   Firebase Auth.
@@ -331,7 +454,10 @@ reproducir en el sandbox por ausencia de `java` (el emulador oficial no arranca)
   a la espera de autorización.
 - Las dos pruebas que se han rebasado han quedado **más estrictas**, con justificación escrita
   en el propio código; no se ha eliminado ninguna prueba.
-- Suite: **336 archivos / 5.569 pruebas / 0 fallos / 0 omitidas**; integración **303 + 88**;
-  `tsc` 0; build OK; mutación 4/4.
+- Suite: **336 archivos / 5.583 pruebas / 0 fallos / 0 omitidas**; integración **303 + 88**;
+  `tsc` 0; build OK; mutación 4/4 + mutación del arnés de restauración.
+- **Revisión final de seguridad completada:** 5 defectos encontrados en el script de migración
+  (D1–D5), **todos corregidos** y cubiertos por pruebas. La migración es ahora fail-closed de
+  verdad y su simulación de respaldo/restauración prueba el **código real** (20/20).
 
 **Parada respetada: no hay migración real, ni fusión, ni despliegue.**

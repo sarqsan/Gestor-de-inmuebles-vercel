@@ -321,3 +321,80 @@ describe('Login admin · C. invariantes', () => {
     expect(r).toMatch(/match \/audit_logs\/\{auditId\}\s*\{[\s\S]*?allow create: if isSignedIn\(\) && \(/);
   });
 });
+
+// ===========================================================================
+// GRUPO D · AG-08 · contrato de las reglas tras dejar de escribir `passwordHash`
+// ===========================================================================
+// La retirada del campo NO puede romper el alta ni debilitar la protección.
+// Estas guardas fijan ese contrato contra las reglas REALES.
+describe('AG-08 · reglas reales: alta sin el campo y protección intacta', () => {
+  const TITULAR = { uid: 'uid-titular', token: { email: 'titular@test.invalid', email_verified: true } };
+  const fichaTitular = (over: Record<string, unknown> = {}) => ({
+    authUid: 'uid-titular',
+    email: 'titular@test.invalid',
+    tipoPerfil: 'PROPIETARIO',
+    estado: 'ACTIVO',
+    roles: ['PROPIETARIO_ESTANDAR'],
+    permisos: ['inmuebles.ver'],
+    propietarioId: 'prop_1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+  const ENLACE = {
+    'enlaces_registro/enl_1': { id: 'enl_1', tipoPerfil: 'PROPIETARIO', usosActuales: 0, activo: true },
+  };
+
+  it('D.1 el alta de una ficha SIN `passwordHash` sigue permitida (no es requisito de create)', () => {
+    const ficha = fichaTitular();
+    expect('passwordHash' in ficha).toBe(false);
+    expect(permite('usuarios', 'create', pet({
+      auth: TITULAR, docId: 'uid-titular', resource: null, requestResource: ficha, db: ENLACE,
+    }))).toBe(true);
+  });
+
+  it('D.2 la ficha con `passwordHash` y sin él se comportan igual en create (el campo no decide)', () => {
+    const con = permite('usuarios', 'create', pet({
+      auth: TITULAR, docId: 'uid-titular', resource: null,
+      requestResource: fichaTitular({ passwordHash: 'a'.repeat(64) }), db: ENLACE,
+    }));
+    const sin = permite('usuarios', 'create', pet({
+      auth: TITULAR, docId: 'uid-titular', resource: null, requestResource: fichaTitular(), db: ENLACE,
+    }));
+    expect(sin).toBe(con);
+  });
+
+  it('D.3 PROTECCIÓN INTACTA: el titular NO puede modificar su `passwordHash`', () => {
+    const existente = fichaTitular();
+    expect(permite('usuarios', 'update', pet({
+      auth: TITULAR, docId: 'uid-titular', resource: existente,
+      requestResource: { ...existente, passwordHash: 'b'.repeat(64) },
+      db: { ...ENLACE, 'usuarios/uid-titular': existente },
+    }))).toBe(false);
+  });
+
+  it('D.4 PROTECCIÓN INTACTA: el titular NO puede fabricarse el campo si no existía', () => {
+    const existente = fichaTitular();
+    expect(permite('usuarios', 'update', pet({
+      auth: TITULAR, docId: 'uid-titular', resource: existente,
+      requestResource: { ...existente, passwordHash: 'c'.repeat(64) },
+      db: { ...ENLACE, 'usuarios/uid-titular': existente },
+    }))).toBe(false);
+  });
+
+  it('D.5 el campo sigue INMOVILIZADO en el texto de las reglas (no se ha retirado)', () => {
+    const r = sinComentarios(RULES);
+    // Puede haber varias listas de vetos: hay que localizar la que lo contiene.
+    const todas = [...r.matchAll(/affectedKeys\(\)\.hasAny\(\[[\s\S]*?\]\)/g)].map((m) => m[0]);
+    const conCampo = todas.filter((b) => b.includes("'passwordHash',"));
+    expect(conCampo).toHaveLength(1);
+    // Sigue dentro de la lista que inmoviliza campos del propio usuario
+    // (acompañado de los otros vetos de identidad/permisos), no aislado.
+    expect(conCampo[0]).toContain("'permisos',");
+    expect(conCampo[0]).toContain("'email',");
+    expect(conCampo[0]).toContain("'propietarioId',");
+    // Y es un veto por `diff`, es decir, solo puede restringir escrituras:
+    // no puede ser un requisito de `create`.
+    const i = r.indexOf(conCampo[0]);
+    expect(r.slice(i, i + conCampo[0].length)).toMatch(/hasAny\(\[/);
+  });
+});

@@ -148,3 +148,23 @@ más frágil, pero una que falla por citar el defecto que documenta es inútil.
 - Un solo bloque; sin acumulación.
 - El arreglo es **más pequeño que el propio defecto**: elimina una rama, no añade
   funcionalidad.
+
+---
+
+## 7. Fusión y despliegue
+
+| Dato | Valor |
+|---|---|
+| **PR** | #88 — **MERGED** (por `sarqsan`, 2026-11-16 09:11:49Z) |
+| **SHA del merge** | `cdc9975cbf8247d1500c9b3c89db08a7f34eae46` |
+| **Padres del merge** | `7784414` (main previo) + `77ce139` (rama) — **merge normal**, historial conservado |
+| **Despliegue** | `7819882754` · Production · **success** |
+| **URL del despliegue** | `https://gestor-de-inmuebles-vercel-ydn6upu7i-sarqsan2-4111s-projects.vercel.app` |
+| **Producción** | `https://Gestor-de-inmuebles-vercel.vercel.app` |
+| **Verificación de producción** | Run `43837571917` sobre `cdc9975` — **success** |
+
+Comprobaciones de producción (solo lectura): `HTTP 200` (esquema 1 y capacidades
+legibles), `HTTP 413` (rechazado antes de parsear), `HTTP 401` (no se generó ningún
+OTP), `HTTP 410` (ruta retirada como debe).
+
+**AG-09 está integrado en producción.**

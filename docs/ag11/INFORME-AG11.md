@@ -181,3 +181,42 @@ las dos que se omitían ahora se ejecutan y pasan.
   completa, en verde (5.560).
 - **P0 y P1**: intactos. Los cuatro fallos históricos de P0 en el CI de emuladores no se
   han tocado ni se han ocultado; esta PR no altera ninguna regla.
+
+---
+
+## 8. Incidencia detectada en CI (y corregida)
+
+Al abrir la PR, el job **«Tipos, suite completa y build» falló en CI aunque en local
+pasaba**. No lo di por ruido: era un fallo real que solo aparece en el entorno de CI.
+
+**Causa:** `actions/checkout` en un PR hace checkout de `refs/pull/N/merge`, no de la
+rama. Sobre ese ref, la guardia de superficie —ya rebasada en esta PR— detectó
+correctamente que `docs/ag11/INFORME-AG11.md` **no estaba declarado**:
+
+```
+error: 'Fuera de alcance: docs/ag11/INFORME-AG11.md'
+```
+
+Es decir: **la guardia corregida funcionó**. La regla del módulo es que ningún
+documento fuera de `src/features/operaciones/` entra sin declararse. Faltaba el trámite.
+
+**Corrección:** el informe se declara explícitamente en la lista de superficie
+permitida (commit `d643e48`), **sin añadir ninguna otra entrada**.
+
+**Verificación:** reproducido y comprobado sobre el ref real del PR
+(`refs/pull/90/merge`), no solo en el checkout local → 303 + 88, 0 fallos, 0 omitidas.
+El CI pasó a verde en ese job.
+
+### Lección operativa
+
+Un fallo de CI que no se reproduce en local **no es ruido**: en este caso el checkout
+de PR tiene un `HEAD` distinto. Reproducirlo con
+`git fetch origin refs/pull/N/merge` fue lo que localizó la causa.
+
+## 9. Estado final del CI (commit `d643e48`)
+
+| Job | Resultado |
+|---|---|
+| Tipos, suite completa y build | **success** (5.560/5.567 · 0 fallidas · 0 omitidas) |
+| Emuladores de reglas | 878/894 — **los 4 fallos históricos de P0**, ninguno nuevo |
+| Vercel Preview | success |

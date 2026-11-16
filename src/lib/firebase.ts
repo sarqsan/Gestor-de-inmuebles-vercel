@@ -37,6 +37,7 @@ import {
   VisitSlot,
   SolicitudDocumentacion,
   ContratoFormalizacion,
+  CobroPeriodo,
   Gasto,
   GastoRecurrente,
   Prestamo,
@@ -1142,6 +1143,14 @@ export async function saveInmuebleOrdinarioFirestore(inmueble: Inmueble): Promis
 // documento sólo puede borrarlo la administración por otras vías auditadas.
 
 import { payloadOrdinarioInmueble } from './edicionOrdinariaInmueble';
+import {
+  ErrorConflictoContrato,
+  contratoTrasPersistir,
+  escriturasPorDiferencia,
+  fusionarContratoParaPersistencia,
+  type EscrituraPeriodo,
+  type ModoCobros,
+} from './contratoTransaccion';
 import { compressImageForUpload } from '../utils/fileCompressor';
 import { buildFichaPublicaInmueble, saveFichaPublicaInmueble } from './fichaPublicaInmueble';
 
@@ -1582,27 +1591,247 @@ export function subscribeContratos(
 }
 
 /**
- * Save / Update Contrato de Formalización in Firestore
+ * AG-10 · Opciones de la escritura transaccional del contrato.
+ *
+ * Los cinco flujos que escriben contratos (alta, edición, importación, cierre y
+ * materialización automática de cobros) declaran aquí QUÉ periodos tocan, en vez
+ * de reenviar el calendario completo que tienen en pantalla.
  */
-export async function saveContratoFirestore(contrato: ContratoFormalizacion) {
+export interface OpcionesGuardadoContrato {
+  /** `true` si el contrato ya existe: sólo entonces se fusiona con lo persistido. */
+  existe?: boolean;
+  /**
+   * Periodos que ESTA operación escribe. Lo que no esté aquí se conserva tal y
+   * como esté persistido (un pago de otro cliente no se puede perder).
+   */
+  periodos?: EscrituraPeriodo[];
+  /** Qué se hace con el calendario persistido. Por defecto `FUSIONAR`. */
+  modoCobros?: ModoCobros;
+  /** Contrato tal y como lo leyó la operación: base de la detección de conflictos. */
+  base?: ContratoFormalizacion | null;
+  /** Campos que esta operación no escribe (p. ej. índices de capacidad del portal). */
+  omitirCampos?: string[];
+}
+
+export interface ResultadoGuardadoContrato {
+  /** Documento efectivamente persistido (`null` si la transacción no escribió). */
+  contrato: ContratoFormalizacion | null;
+  /** `false` si no hacía falta escribir (idempotencia). */
+  escrito: boolean;
+  /** Ids de periodos escritos. */
+  periodosEscritos: string[];
+  /** Ids de periodos descartados por conflicto (se conservó el persistido). */
+  periodosDescartados: string[];
+  /** Ids de periodos cuya intención se reaplicó sobre el estado persistido. */
+  periodosReaplicados: string[];
+}
+
+/**
+ * Campos que NINGÚN guardado de contrato reenvía nunca.
+ *
+ * `incidenciaIds`/`mensajeIds` son índices de CAPACIDAD del portal del inquilino:
+ * crecen con `arrayUnion` desde `updateDoc` (única escritura que las reglas le
+ * permiten al inquilino). Si un guardado del gestor los reenviara desde una
+ * instantánea vieja, los recortaría y el inquilino perdería el acceso a sus
+ * incidencias. Ya se omitían de facto (el saneador descarta `undefined`); ahora
+ * es explícito y probado.
+ */
+const CAMPOS_NO_ESCRITOS_CONTRATO = ['incidenciaIds', 'mensajeIds'];
+
+/** Reintentos de la transacción ante conflicto del SDK (no ante denegación de Rules). */
+const REINTENTOS_CONTRATO_SDK = 4;
+
+/** Un error de permiso/validación no se reintenta: reintentar no lo arregla. */
+function esErrorReintentableContrato(err: unknown): boolean {
+  const codigo = String((err as { code?: unknown })?.code ?? '');
+  return codigo === 'aborted' || codigo === 'failed-precondition' || codigo === 'unavailable';
+}
+
+/** Temporizador de espera para el reintento de la transacción (inyectable en pruebas). */
+export const guardadoContratoTransaccional = {
+  esperar: (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }),
+};
+
+/**
+ * AG-10 · Guardado TRANSACCIONAL del contrato.
+ *
+ * Antes: `getDoc` + `setDoc(merge)` del contrato COMPLETO. El `registroCobros`
+ * viaja embebido, así que el guardado reenviaba la copia del calendario que tenía
+ * el cliente: la materialización automática de periodos podía pisar un pago
+ * registrado en otro cliente (o en otra pestaña) entre la lectura y la escritura.
+ *
+ * Ahora: `runTransaction` que
+ *   1. lee el estado persistido DENTRO de la transacción;
+ *   2. mantiene las validaciones de integridad de siempre (habitación e inmueble
+ *      inmutables);
+ *   3. aplica la fusión pura de `contratoTransaccion.ts`, que escribe sólo los
+ *      periodos declarados, conserva el resto del calendario persistido, reaplica
+ *      la intención del usuario si hubo conflicto, protege firmas/historial/
+ *      índices monotónicos y descarta la materialización automática cuando el
+ *      periodo ya tiene datos más recientes;
+ *   4. no escribe si no hay nada que cambiar (reintentar no duplica escrituras).
+ *
+ * El SDK reintenta la transacción si el documento cambia entre `tx.get` y el
+ * commit; el bucle externo cubre además el conflicto de dominio y la red.
+ */
+export async function saveContratoFirestore(
+  contrato: ContratoFormalizacion,
+  opciones: OpcionesGuardadoContrato = {},
+): Promise<ResultadoGuardadoContrato> {
+  const refC = doc(db, 'contratos_formalizacion', contrato.id);
+  const modoCobros: ModoCobros = opciones.modoCobros ?? 'FUSIONAR';
+
   try {
-    const refC = doc(db, 'contratos_formalizacion', contrato.id);
-    const existing = await getDoc(refC);
-    if (existing.exists()) {
-      const prev = existing.data() as ContratoFormalizacion;
-      if (prev.habitacionId && contrato.habitacionId && prev.habitacionId !== contrato.habitacionId) {
-        throw new Error('No se puede reasignar habitacionId de un contrato activo.');
-      }
-      if (prev.inmuebleId && contrato.inmuebleId && prev.inmuebleId !== contrato.inmuebleId) {
-        throw new Error('No se puede reasignar inmuebleId de un contrato.');
+    for (let intento = 1; intento <= REINTENTOS_CONTRATO_SDK; intento += 1) {
+      try {
+        const resultado = await runTransaction(db, async (tx) => {
+          // 1. Lectura DENTRO de la transacción: es la que da la garantía de
+          //    aislamiento (Firestore reejecuta si el documento cambia).
+          const snap = await tx.get(refC);
+          const persistido = snap.exists()
+            ? ({ ...(snap.data() as object), id: snap.id } as ContratoFormalizacion)
+            : null;
+
+          if (persistido) {
+            // Validaciones de integridad preexistentes, ahora también dentro de
+            // la transacción: se evalúan contra el estado real, no contra una
+            // lectura previa que puede haber quedado vieja.
+            if (persistido.habitacionId && contrato.habitacionId && persistido.habitacionId !== contrato.habitacionId) {
+              throw new Error('No se puede reasignar habitacionId de un contrato activo.');
+            }
+            if (persistido.inmuebleId && contrato.inmuebleId && persistido.inmuebleId !== contrato.inmuebleId) {
+              throw new Error('No se puede reasignar inmuebleId de un contrato.');
+            }
+          }
+          if (opciones.existe === false && persistido) {
+            throw new Error('El contrato ya existe: no se puede dar de alta dos veces sobre el mismo id.');
+          }
+
+          const omitir = opciones.omitirCampos ?? CAMPOS_NO_ESCRITOS_CONTRATO;
+          const fusion = fusionarContratoParaPersistencia({
+            contrato,
+            persistido,
+            base: opciones.base,
+            modoCobros,
+            escrituras: opciones.periodos ?? [],
+            omitirCampos: omitir,
+          });
+
+          if (!fusion.hayCambios) {
+            return {
+              contrato: null,
+              escrito: false,
+              persistido,
+              ...fusion,
+            };
+          }
+
+          const limpio = sanitizeObjectForFirestore(fusion.datos);
+          tx.set(refC, limpio, { merge: true });
+          return {
+            contrato: { ...(fusion.datos as object), id: contrato.id } as ContratoFormalizacion,
+            escrito: true,
+            persistido,
+            ...fusion,
+          };
+        });
+
+        // El contrato devuelto refleja el DOCUMENTO PERSISTIDO tras la fusión:
+        // incluye lo que otro cliente hubiera escrito en periodos que esta
+        // operación no toca (la pantalla no se queda con la lectura vieja).
+        const contratoFinal = resultado.contrato
+          ? contratoTrasPersistir(contrato, resultado.contrato)
+          : null;
+
+        return {
+          contrato: contratoFinal,
+          escrito: resultado.escrito,
+          periodosEscritos: resultado.periodosEscritos,
+          periodosDescartados: resultado.periodosDescartados,
+          periodosReaplicados: resultado.periodosReaplicados,
+        };
+      } catch (err) {
+        if (err instanceof ErrorConflictoContrato && intento < REINTENTOS_CONTRATO_SDK) {
+          await guardadoContratoTransaccional.esperar(50 * intento);
+          continue;
+        }
+        if (esErrorReintentableContrato(err) && intento < REINTENTOS_CONTRATO_SDK) {
+          await guardadoContratoTransaccional.esperar(50 * intento);
+          continue;
+        }
+        throw err;
       }
     }
-    const cleanContrato = sanitizeObjectForFirestore(contrato);
-    await setDoc(refC, cleanContrato, { merge: true });
+    throw new Error('No se pudo persistir el contrato: reintentos agotados.');
   } catch (err) {
     reportarErrorGuardado('contratos', err, 'Error saving contrato formalizacion to Firestore:');
     throw err;
   }
+}
+
+/**
+ * AG-10 · Registro de un pago/incidencia sobre UN periodo (FIFO por periodo).
+ *
+ * A diferencia del guardado completo, aquí la intención del usuario es explícita
+ * y no se puede descartar por concurrencia: si otro cliente tocó el mismo
+ * periodo, se REAPLICA el cambio sobre el estado persistido (política
+ * `reintentar`), de modo que ni el pago del usuario ni el del otro cliente se
+ * pierden. Los demás periodos del calendario no viajan.
+ */
+export async function registrarCambioPeriodoCobroFirestore(
+  contrato: ContratoFormalizacion,
+  periodo: { despues: CobroPeriodo; antes?: CobroPeriodo },
+  opciones: Omit<OpcionesGuardadoContrato, 'periodos' | 'modoCobros'> = {},
+): Promise<ResultadoGuardadoContrato> {
+  return saveContratoFirestore(contrato, {
+    ...opciones,
+    modoCobros: 'FUSIONAR',
+    periodos: [{ despues: periodo.despues, antes: periodo.antes, politica: 'reintentar' }],
+  });
+}
+
+/**
+ * AG-10 · MATERIALIZACIÓN AUTOMÁTICA del calendario de cobros.
+ *
+ * Es el flujo de riesgo: el calendario se calcula desde una lectura que puede ser
+ * vieja (al abrir la aplicación hay que crear los periodos previsibles y marcar
+ * los vencidos), así que lo calculado es un DERIVADO, no una intención del
+ * usuario. Por eso:
+ *
+ *   · sólo viajan los periodos que el cálculo cambia (`periodos`), nunca el
+ *     array completo —que es lo que provocaba la pérdida de pagos—;
+ *   · ante conflicto se DESCARTA lo calculado y manda lo persistido (un pago
+ *     registrado mientras tanto no se puede degradar a RETRASADO);
+ *   · los periodos que el cálculo no declara se conservan tal cual;
+ *   · si el resultado ya está persistido no hay escritura (idempotente: el efecto
+ *     puede reintentar sin duplicar nada).
+ *
+ * `contrato` es la ficha que se va a guardar (el efecto actualiza también
+ * `fechaActualizacion`); `periodos` son los periodos DERIVADOS que hay que crear
+ * o actualizar.
+ */
+export async function materializarPeriodosCobroFirestore(
+  contrato: ContratoFormalizacion,
+  periodos: CobroPeriodo[],
+  opciones: {
+    /** Lectura base del contrato (para detectar qué cambió el cálculo). */
+    base?: ContratoFormalizacion | null;
+    /** Alta: los periodos sólo se CREAN si no existen; nunca pisan historia. */
+    esAlta?: boolean;
+    omitirCampos?: string[];
+  } = {},
+): Promise<ResultadoGuardadoContrato> {
+  const base = opciones.base ?? null;
+  const escrituras = opciones.esAlta
+    ? periodos.map<EscrituraPeriodo>((despues) => ({ despues, politica: 'descartar' }))
+    : escriturasPorDiferencia(base?.registroCobros, periodos, 'descartar');
+
+  return saveContratoFirestore(contrato, {
+    modoCobros: opciones.esAlta ? 'CREAR_SOLO_NUEVOS' : 'FUSIONAR',
+    periodos: escrituras,
+    base,
+    omitirCampos: opciones.omitirCampos,
+  });
 }
 
 export interface PersistirTransicionAlquilerOpts {
@@ -1766,7 +1995,18 @@ export async function persistirTransicionAlquilerFirestore(
       const fichaPublicaActualizada = buildFichaPublicaInmueble(inmuebleActualizado, ahora);
       if (fichaPublicaActualizada) tx.set(fichaRef, sanitizeObjectForFirestore(fichaPublicaActualizada));
     }
-    tx.set(contratoRef, sanitizeObjectForFirestore(contratoTx), { merge: true });
+    // AG-10: el cierre/activación no puede reenviar el calendario de cobros que
+    // traía la instantánea del cliente. Se conserva EXACTAMENTE el persistido
+    // (esta transición no toca mensualidades: los cobros de un cierre se
+    // regularizan por su propio flujo) y se protegen firmas/historial/índices
+    // monotónicos frente a lecturas viejas.
+    const fusionContrato = fusionarContratoParaPersistencia({
+      contrato: contratoTx,
+      persistido: anterior ?? null,
+      modoCobros: 'CONSERVAR',
+      omitirCampos: CAMPOS_NO_ESCRITOS_CONTRATO,
+    });
+    tx.set(contratoRef, sanitizeObjectForFirestore(fusionContrato.datos), { merge: true });
     const audit: AuditLog = {
       id: auditRef.id,
       usuarioId: actor.uid,

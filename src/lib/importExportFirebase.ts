@@ -350,14 +350,32 @@ export function crearPuertoFirebase(
       }
     },
 
+    /**
+     * AG-10 · Anexa UN cobro importado sin reenviar el calendario completo.
+     *
+     * Antes se hacía read-modify-write del contrato entero: si el titular
+     * registraba un pago entre la lectura y la escritura, el `setDoc merge` lo
+     * borraba. Ahora la escritura es transaccional y declara SÓLO el cobro
+     * importado; el resto del calendario se conserva tal y como esté persistido
+     * y el propio periodo es idempotente por id (reimportar no duplica).
+     */
     async anexarCobro(contratoId: string, cobro: CobroPeriodo): Promise<void> {
       const ref = doc(db, 'contratos_formalizacion', contratoId);
       const snap = await getDoc(ref);
       if (!snap.exists()) throw new Error(`contrato destino inexistente: '${contratoId}'`);
       const contrato = { id: snap.id, ...(snap.data() as object) } as ContratoFormalizacion;
-      const actuales = contrato.registroCobros ?? [];
-      if (actuales.some((c) => c.id === cobro.id)) return; // idempotente
-      await saveContratoFirestore({ ...contrato, registroCobros: [...actuales, cobro] });
+      if ((contrato.registroCobros ?? []).some((c) => c.id === cobro.id)) return; // idempotente
+      await saveContratoFirestore(
+        { ...contrato, registroCobros: [...(contrato.registroCobros ?? []), cobro] },
+        {
+          base: contrato,
+          modoCobros: 'FUSIONAR',
+          // Política `descartar`: la importación no puede pisar un pago que se
+          // registre mientras se ejecuta. Si el periodo ya existe con datos más
+          // recientes (mismo id, creado en paralelo), se conserva el persistido.
+          periodos: [{ despues: cobro, politica: 'descartar' }],
+        },
+      );
     },
     async auditar(evento: EventoAuditoriaImport): Promise<void> {
       await registrarAuditoriaFirestore({

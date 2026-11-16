@@ -120,18 +120,30 @@ describe('AG-10 · el efecto real de App.tsx', () => {
 
   it('la firma de idempotencia NO se marca antes de que la escritura confirme', () => {
     const inicio = app.indexOf('Materializa el calendario de cobros');
-    const efecto = app.slice(inicio, inicio + 3000);
+    const efecto = app.slice(inicio, inicio + 4000);
     // El patrón defectuoso: marcar la firma y escribir sin esperar.
     expect(efecto).not.toMatch(/cobrosEnsureRef\.current\.set\(contrato\.id, firma\);\s*if \(sincro\.necesitaGuardado\)/);
-    // La firma se marca dentro del camino de éxito.
-    const bloqueExito = efecto.slice(efecto.indexOf("if (resultado === 'GUARDADO')"));
-    expect(bloqueExito).toContain('cobrosEnsureRef.current.set(contrato.id, firma)');
+    // La firma se marca en el camino de confirmación de la promesa, nunca antes
+    // de lanzar la escritura (la materialización es asíncrona y puede fallar).
+    const posThen = efecto.indexOf('.then((resultado)');
+    expect(posThen).toBeGreaterThan(-1);
+    const posObsoleto = efecto.indexOf("resultado !== 'GUARDADO' && resultado !== 'OBSOLETO'");
+    const posFirma = efecto.indexOf('cobrosEnsureRef.current.set(contrato.id, firma)', posThen);
+    expect(posObsoleto).toBeGreaterThan(posThen);
+    expect(posFirma).toBeGreaterThan(posObsoleto);
+    // La escritura ya no se lanza sin transacción: pasa por la materialización.
+    expect(efecto).toContain('materializarPeriodosCobroFirestore(');
   });
 
   it('el estado local del contrato solo se actualiza cuando se persistió', () => {
     const inicio = app.indexOf('Materializa el calendario de cobros');
-    const efecto = app.slice(inicio, inicio + 3000);
-    const bloqueExito = efecto.slice(efecto.indexOf("if (resultado === 'GUARDADO')"));
+    const efecto = app.slice(inicio, inicio + 4000);
+    const posThen = efecto.indexOf('.then((resultado)');
+    const bloqueExito = efecto.slice(posThen);
+    expect(bloqueExito).toContain("if (resultado !== 'GUARDADO' && resultado !== 'OBSOLETO')");
     expect(bloqueExito).toContain('setContratos(');
+    // El estado que se pinta dentro del guardado es el documento PERSISTIDO.
+    expect(efecto).toContain('setContratos((prev) =>');
+    expect(efecto).toContain('persistido.contrato');
   });
 });

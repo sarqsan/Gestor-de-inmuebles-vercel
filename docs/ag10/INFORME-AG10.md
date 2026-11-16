@@ -1,8 +1,9 @@
 # AG-10 — Guardado automático del contrato
 
-**Rama:** `arena/eaaeb98c-gestor-de-inmuebles-vercel`
+**Rama:** `arena/ae8cf389-gestor-de-inmuebles-vercel` (misma PR #89)
 **Base:** `main` @ `cdc9975` (producción)
-**Estado:** PR abierta. **No fusionada, no desplegada.**
+**Estado:** bloque **COMPLETO** (primera entrega + transacción). PR abierta:
+**no fusionada, no desplegada**, pendiente de validación.
 
 ---
 
@@ -56,8 +57,9 @@ una escritura a ciegas.
   habría sido justo el «modelo paralelo» que el proyecto prohíbe.
 - **Errores:** se reportan por `reportarErrorGuardado`, el canal de incidencias
   existente. No hay sistema de errores nuevo.
-- **Persistencia:** `saveContratoFirestore`, sin cambios. **No se toca
-  `firestore.rules`, ni datos, ni migraciones.**
+- **Persistencia:** `saveContratoFirestore` como única vía. En la primera entrega
+  se dejó intacta; la sección 7 documenta cómo se convirtió en transaccional.
+  **No se toca `firestore.rules`, ni datos, ni migraciones.**
 
 ### Mecanismo nuevo: `src/lib/guardadoContratoAutomatico.ts`
 
@@ -102,7 +104,7 @@ necesita saber.
 
 ## 3. Pruebas
 
-**26 nuevas** en dos suites.
+**26 nuevas** en dos suites (primera entrega; la sección 8 añade 50 más).
 
 ### `src/lib/guardadoContratoAutomatico.test.ts` — 14
 
@@ -149,9 +151,9 @@ rotos, pero sí habría dejado un informe que describía un perfil inexistente.*
 | Comprobación | Resultado |
 |---|---|
 | Pruebas específicas AG-10 | **26/26** |
-| Regresión completa | **332 archivos / 5.508 pruebas / 0 fallos** |
+| Regresión completa | **332 archivos / 5.508 pruebas / 0 fallos** (primera entrega) |
 | `tsc --noEmit` | **0 errores** |
-| `npm run build` | **OK** (19,0 s) |
+| `npm run build` | **OK** |
 
 ---
 
@@ -175,23 +177,125 @@ rotos, pero sí habría dejado un informe que describía un perfil inexistente.*
   *cuándo* y *cómo* se intenta la escritura, no a su contenido.
 - Un solo bloque, una sola PR.
 
-## 7. Lo que queda fuera, y por qué
+## 7. Transacción del contrato (cierre de AG-10)
 
-La auditoría sugiere «escribir los periodos nuevos mediante **transacción
-(leer-modificar-escribir)**». **No lo he implementado**, y quiero ser explícito:
+### El defecto que quedaba vivo
 
-- La transacción exige leer el documento dentro de la propia transacción
-  (`runTransaction`), es decir, tocar `saveContratoFirestore`, que es el punto de
-  escritura compartido por **cinco** flujos (alta, edición, importación, cierre y
-  este efecto). Cambiarlo afecta a todos.
-- El encargo de este bloque prohíbe expresamente **cambiar reglas y permisos**, y
-  pide «no alterar contratos ya existentes». Una transacción cambia el modelo de
-  escritura de toda la aplicación, no solo de este efecto.
-- Lo que **sí** he resuelto es la causa concreta del riesgo señalado —que una
-  lectura vieja pise un pago reciente— mediante el descarte por obsolescencia y la
-  firma tras confirmación.
+La primera entrega resolvía el *efecto* (permiso, `await`, firma tras confirmar,
+estado visible, descarte por obsolescencia) pero **no la escritura**: seguía siendo
+`getDoc` + `setDoc(merge)` del contrato **completo**.
 
-Queda, por tanto, **PARCIALMENTE COMPLETADA** en este punto: el guardado automático
-es fiable, observable y reintentable, pero la escritura sigue siendo `setDoc merge`
-y no una transacción. Si se quiere cerrar del todo, es un bloque propio con su
-propia revisión.
+`registroCobros` viaja **embebido** en `contratos_formalizacion`, y en Firestore una
+lista es un campo indivisible. Por tanto, `merge: true` no protege nada: cada
+cliente escribía *su* copia del calendario y la última pisaba:
+
+- un pago registrado por otro cliente (`importeRecibido`, `fechaPago`, `justificante`,
+  estado `RECIBIDO`/`VERIFICADO`),
+- una incidencia manual,
+- un periodo materializado en paralelo,
+- una firma ya estampada,
+- los índices `incidenciaIds`/`mensajeIds` que el inquilino añade por `arrayUnion`.
+
+Y envolver esa escritura en `runTransaction` **no habría arreglado nada**: una
+transacción confirma su contenido con aislamiento desde su propia lectura; si la
+lectura base es vieja, la pérdida se confirma igual. La transacción sólo sirve si
+el **contenido a escribir se decide dentro** de ella.
+
+### La transacción implementada
+
+**`src/lib/contratoTransaccion.ts`** (nuevo, puro —no importa Firebase—) contiene la
+política de datos; **`saveContratoFirestore`** (`src/lib/firebase.ts`) la ejecuta
+dentro de `runTransaction`:
+
+1. **Lee el estado persistido dentro de la transacción** (`tx.get(refC)`). Si el
+   documento cambia entre la lectura y el commit, Firestore aborta y reejecuta; el
+   bucle externo añade además reintento acotado para `aborted`,
+   `failed-precondition` y `unavailable`. `permission-denied` **no se reintenta**.
+2. **Sólo viajan los periodos declarados** (`periodos: EscrituraPeriodo[]`). Los
+   flujos ya no reenvían el array del contrato en memoria.
+3. **Cada escritura se resuelve contra lo persistido**, con dos políticas:
+   - `descartar` (materialización automática): si el periodo cambió desde la
+     lectura base, **se conserva el persistido**. Un pago nunca se degrada a
+     `RETRASADO`.
+   - `reintentar` (pago/incidencia del usuario, edición, importación): se aplica
+     **la intención** del usuario —sólo los campos que cambió— sobre el periodo
+     fresco, y el historial se **une por id**. No se pierde ni el cambio del
+     usuario ni el pago del otro cliente.
+4. **Los periodos no declarados se conservan** tal y como estén persistidos.
+5. **Campos monotónicos protegidos**: una instantánea vieja no puede desmarcar una
+   firma (salvo que el usuario la hubiera visto y la retire), quitar una entrada de
+   historial ni recortar `incidenciaIds`/`mensajeIds` (se omiten del payload; su
+   vía es `arrayUnion`).
+6. **Idempotencia real**: si la fusión no cambia nada, la transacción **no escribe**
+   (`hayCambios: false`, `escrito: false`). Reintentar no genera commits vacíos ni
+   duplicados.
+7. **Integridad**: se mantienen las validaciones de inmueble/habitación inmutables,
+   ahora evaluadas contra el estado real dentro de la transacción, y se rechaza un
+   periodo que pertenezca a otro contrato.
+
+### Cómo quedan los cinco flujos
+
+| Flujo | Punto de escritura | Política |
+|---|---|---|
+| **Alta** | `App.handleSaveContrato` | `CREAR_SOLO_NUEVOS`: crea los periodos que falten; nunca pisa historia. `existe: false` impide dar de alta dos veces el mismo id |
+| **Edición** | `App.handleSaveContrato` (con lectura base) | `FUSIONAR` + `reintentar` sobre la **diferencia** de periodos (`escriturasPorDiferencia`) |
+| **Importación** | `importExportFirebase.anexarCobro` | declara **sólo el cobro importado**; idempotente por id y sin borrar pagos |
+| **Cierre** | `persistirTransicionAlquilerFirestore` + `handleSaveContratosBatch` | `CONSERVAR` en la transición de alquiler; `reintentar` por diferencia en la conciliación de Tesorería |
+| **Materialización automática** | `materializarPeriodosCobroFirestore` | `descartar` por diferencia: sólo crea/actualiza lo que el cálculo cambia |
+
+Los cuatro primeros conservan su comportamiento legítimo (la ficha completa se
+sigue guardando); lo que cambia es que el **calendario** ya no se reenvía a ciegas.
+
+### Documentos devueltos a la interfaz
+
+`saveContratoFirestore` devuelve el **documento persistido**, no la instantánea del
+cliente. La pantalla incorpora inmediatamente los pagos que otro cliente escribió
+mientras tanto, en lugar de esperar al siguiente snapshot.
+
+## 8. Pruebas añadidas en esta entrega
+
+**50 nuevas** (además de las 26 de la primera entrega, que se conservan intactas).
+
+| Suite | Pruebas | Qué fija |
+|---|---|---|
+| `tests/ag10/contrato-transaccion.test.ts` | 22 | Concurrencia **real** sobre `saveContratoFirestore` con un Firestore en memoria de control de versión optimista (`tests/ag10/bancoFirestore.ts`): dos modificaciones simultáneas, pago mientras se materializa, conflicto que obliga a reejecutar, reintento sin duplicidades, `permission-denied` sin reintento, integridad de los cinco flujos y conservación de datos económicos |
+| `tests/ag10/contrato-transaccion.puro.test.ts` | 18 | Política de datos sin Firebase: clasificación de periodos, `descartar` vs `reintentar`, fusión del documento, firmas monotónicas, unión de historial, detección de cambio concurrente, idempotencia |
+| `tests/ag10/guardia-flujos.test.ts` | 10 | Guardia sobre el **código real**: `runTransaction` + lectura dentro de la transacción en `saveContratoFirestore`; los cinco flujos declaran base/períodos; el núcleo no importa Firebase; se conservan permiso, gestor de reintentos y firma tras confirmar |
+
+El banco de pruebas **no imita** la transacción: ejecuta el código real y aborta con
+`aborted` cuando un documento cambia entre la lectura y el commit, como el SDK.
+
+## 9. Resultados
+
+| Comprobación | Resultado |
+|---|---|
+| Pruebas específicas AG-10 | **76/76** (26 previas + 50 nuevas) |
+| Regresión completa | **335 archivos / 5.558 pruebas / 0 fallos** |
+| `tsc --noEmit` | **0 errores** |
+| `npm run build` | **OK** |
+| Emulador de reglas | **No ejecutado**: el entorno no tiene JRE. No se toca `firestore.rules` |
+
+## 10. Límites respetados
+
+- **Sin cambios** en `firestore.rules`, `storage.rules`, `src/types.ts`, datos ni
+  migraciones. El esquema de `contratos_formalizacion` no cambia: la transacción
+  escribe los mismos campos.
+- **AG-08 y AG-11 no se han tocado.**
+- Se conservan las 26 pruebas anteriores, `canWriteContrato`, los reintentos, la
+  deduplicación, el descarte de operaciones obsoletas, la confirmación de
+  persistencia antes de marcar la firma y los indicadores visibles de guardado y
+  error.
+- Una sola rama y una sola PR (#89). **No fusionada, no desplegada.**
+
+## 11. Riesgos residuales conocidos
+
+- **El SDK ya no garantiza la transacción sin conexión.** Firestore reintenta las
+  transacciones al recuperar la red, pero una transacción de larga duración falla en
+  lugar de encolarse como un `setDoc`. Por eso el gestor de guardado reintenta con
+  espera creciente y el estado queda en `ERROR` visible (sin marcar la firma), en
+  lugar de dar por bueno un estado no persistido. Es el intercambio correcto:
+  antes se perdía el pago, ahora se ve el fallo y se reintenta.
+- La fusión protege el **contenido** de los periodos; no intenta resolver
+  conflictos semánticos entre dos pagos distintos del mismo mes registrados a la
+  vez: gana la intención del último en confirmar y el historial conserva ambas
+  entradas de trazabilidad.

@@ -102,3 +102,23 @@ Exactamente **los cuatro**, con nombre y número idénticos:
 
 - **AG-08** (`passwordHash` SHA-256 sin sal): exige limpieza de datos con autorización.
 - **AG-09**: pendiente de verificación específica.
+
+---
+
+## 5. Fusión y despliegue
+
+| Dato | Valor |
+|---|---|
+| **PR** | #87 — **MERGED** |
+| **SHA del merge** | `7784414754a692e4ae22f944240daed51d4d3bd6` |
+| **Padres del merge** | `09c71d6` (main previo) + `8879e61` (rama) — merge normal, historial conservado |
+| **Despliegue** | `7818229062` · Production · **success** |
+| **URL del despliegue** | `https://gestor-de-inmuebles-vercel-7x2tbx9l4-sarqsan2-4111s-projects.vercel.app` |
+| **Producción** | `https://Gestor-de-inmuebles-vercel.vercel.app` |
+| **Verificación de producción** | Run `43825212531` sobre `7784414` — **success** |
+
+Comprobaciones de producción (solo lectura): `HTTP 200` (esquema 1 y capacidades
+legibles), `HTTP 413` (rechazado antes de parsear), `HTTP 401` (no se generó ningún OTP),
+`HTTP 410` (ruta retirada como debe).
+
+**Los tres bloques están integrados en producción.**

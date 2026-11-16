@@ -430,6 +430,18 @@ exigiría modificar reglas de Firebase, expresamente prohibido en esta orden.
 
 **No hay regresiones nuevas:** 0 fallos nuevos por nombre, 0 archivos nuevos en rojo.
 
+**Verificación sobre el commit final `1b16bad` (run 43933036676):**
+
+| Job | Resultado |
+|---|---|
+| Tipos, suite completa y build | **success** — `336/336 archivos · 5590 pruebas · 5583 correctas · 0 fallidas` |
+| Emuladores oficiales | failure **preexistente** — `878/894 · 4 fallidas · 12 omitidas`, **exactamente las 4 históricas de arriba** |
+| Vercel (preview) | success |
+
+El job de tipos refleja la suite ampliada (5.583 correctas frente a 5.569 antes de la revisión:
+las 14 pruebas nuevas). El job de emuladores conserva **los mismos 4 fallos por nombre**, y su
+recuento no ha cambiado en absoluto porque AG-08 no toca las colecciones ni las reglas implicadas.
+
 ### 11.9 Confirmaciones exigidas
 
 - **La migración NO se ha ejecutado.** Ni sobre pruebas ni sobre producción. No se ha creado

@@ -292,7 +292,35 @@ Ninguna de estas acciones se ha ejecutado:
 
 ---
 
-## 10. Conclusión
+## 10. Estado del CI de la PR
+
+| Job | Resultado |
+|---|---|
+| **Tipos, suite completa y build** | **success** |
+| Vercel / Vercel Preview Comments | success |
+| **Reglas Firestore y Storage (emuladores oficiales)** | **failure** — *preexistente, no causado por AG-08* |
+
+**El fallo del job de emuladores es PREEXISTENTE.** Evidencia:
+
+- El **mismo job ya fallaba en la PR #90** (base `main`, antes de AG-08), con
+  **cifras idénticas**: `p0-cobertura-reglas.emulador.test.ts → FAILED · 767/771 correctas ·
+  4 fallidas · 0 omitidas` y resumen `878/894 · 4 fallidas · 12 omitidas`.
+- Esos **4 fallos son los 4 fallos históricos de P0** que la orden marca como
+  **no tocar** (`enlaces_registro` 6/8/9 y `audit_logs` 7).
+- AG-08 **no modifica** `firestore.rules` ni `storage.rules` (los emuladores cargan esas
+  reglas desde `firebase.json`), y no toca ningún flujo de esas colecciones.
+- Efecto neto: **878/894 correctas**, exactamente el mismo que en `main`.
+
+No se ha ocultado ni desactivado ninguna prueba para evitar este fallo. No se puede
+reproducir en el sandbox por ausencia de `java` (el emulador oficial no arranca).
+
+> Este job queda por tanto **en rojo por la línea base heredada**, no por este bloque.
+> Dejarlo en verde exige abordar los 4 fallos históricos de P0, que están **fuera del
+> alcance autorizado**.
+
+---
+
+## 11. Conclusión
 
 - Ningún flujo legítimo de autenticación depende ya de `passwordHash`: la autoridad es
   Firebase Auth.

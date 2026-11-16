@@ -477,12 +477,27 @@ const SUPERFICIE_BLOQUES_POST_B = [
   'src/patrimonial/PantallaPatrimonial.tsx',
   'docs/DICTAMEN-PRE-MERGE-FINAL.md', // §11 de la orden final: dictamen pre-merge
 ];
+// AG-08 — superficie exacta del bloque (ningún directorio preexistente completo).
+const SUPERFICIE_AG08 = [
+  'src/lib/authService.ts',
+  'src/lib/firebase.ts',
+  'src/test/e/bloqueE.servicios.test.ts',
+  'tests/login-admin-principal.test.ts',
+  'scripts/ag08/migrar-passwordhash.mjs',
+  'scripts/ag08/simular-respaldo-restauracion.mjs',
+  'src/features/ag08/tests/migracion-passwordhash.test.ts',
+  'docs/ag08/INFORME-AG08.md',
+];
 const permitidaPostB=(path)=>SUPERFICIE_BLOQUES_POST_B.some((p)=>(p.endsWith('/')?path.startsWith(p):path===p));
 test('diff local desde el checkout f782 permite solo la superficie documentada',{skip:SALTO_CUSTODIA_P0},()=>{
   const permitida=(path)=>path.startsWith('src/features/operaciones/')||path==='docs/operaciones/alcance.md'
     // AG-11: el informe del propio bloque se declara explícitamente, como exige
     // esta guardia (ningún documento fuera del módulo entra sin declararse).
     ||path==='docs/ag11/INFORME-AG11.md'
+    // AG-08: retirada segura de `passwordHash`. Superficie EXACTA declarada
+    // fichero a fichero (código de auth, su firma, las dos pruebas rebasadas,
+    // la migración offline y su prueba, y el informe del bloque).
+    ||SUPERFICIE_AG08.includes(path)
     ||path==='src/lib/auditoria.ts'||path==='src/components/inmueble/CentroOperativoInmueblePanel.tsx'
     ||path==='vite.config.ts'
     ||path==='tests/fase14-espejo-identidad.test.ts'||path==='tests/helpers/evaluadorReglasFirestore.ts'

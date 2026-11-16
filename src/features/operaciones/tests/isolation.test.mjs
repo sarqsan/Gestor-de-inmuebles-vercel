@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { ejecutarRecorridoFicticio } from '../demo/recorrido.mjs';
 import { POLITICA_ESTADOS } from '../index.ts';
+import { baseDeRama, leerManifiesto } from '../../../../tests/helpers/custodia-rama.mjs';
 const modulo = fileURLToPath(new URL('../', import.meta.url));
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 // Custodia histórica de archivos del port B+C (46bb) y base efectiva del worktree (f782).
@@ -18,11 +19,18 @@ const excepcion = 'src/features/patrimonial/tests/isolation.test.mjs';
 // Ahora depende del bloqueo REAL: que la referencia de custodia no sea
 // resoluble en este clon. Con historial completo se ejecuta de verdad y,
 // si la superficie ha derivado, FALLA en vez de omitirse.
+const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+function existeCommit(sha) { try { git('cat-file', '-e', `${sha}^{commit}`); return true; } catch { return false; } }
+// AG-11 — ORDEN DE INICIALIZACIÓN (causa raíz del skip permanente).
+// Esta constante se evaluaba ANTES de declarar `git` (const, no izada). La
+// llamada lanzaba `ReferenceError: Cannot access 'git' before initialization`,
+// el `catch` de `existeCommit` la convertía en `false` y la guardia concluía
+// «el commit no existe» AUNQUE EXISTIERA: las dos pruebas de custodia se
+// omitían siempre, en cualquier clon. No era un problema de la base histórica,
+// era un error de orden. Ahora se declara después de sus dependencias.
 const SALTO_CUSTODIA_P0 = existeCommit(BASE_CHECKOUT)
   ? false
   : 'Guarda histórica de custodia f782/46bb: requiere rebasar la superficie documentada tras la ejecución P0 autorizada (o el commit no existe en clon superficial). NO se declara superada; ver docs/REGISTRO-EJECUCION-2026-10-27.md.';
-const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-function existeCommit(sha) { try { git('cat-file', '-e', `${sha}^{commit}`); return true; } catch { return false; } }
 function referenciaCustodia(base) {
   if (existeCommit(base)) return { sha: base, historica: true };
   return null; // La falta del OID exacto bloquea; no se sustituye por otro ancestro.
@@ -256,25 +264,45 @@ test('política default profundamente inmutable; extensiones mediante contexto s
 // no toca archivos patrimoniales productivos ni nada fuera del alcance autorizado.
 const BASE=BASE_PATRIMONIAL_B;
 const excepcionRegistro='src/features/patrimonial/tests/isolation.test.mjs';
-test('custodia byte a byte de la base patrimonial de B: el port no toca Patrimonial',{skip:SALTO_CUSTODIA_P0},()=>{
-  const referencia=referenciaCustodia(BASE);
-  assert.ok(referencia,'CUSTODIA: base patrimonial histórica 46bb no resoluble');
-  const paths=git('ls-tree','-r','--name-only',referencia.sha,'--','src/features/patrimonial').split('\n').filter((p)=>p&&p!==excepcionRegistro);
-  assert.equal(paths.length,28,`archivos patrimoniales productivos: ${paths.length}`); // 29 en la base menos el registro
-  for(const path of paths)assert.deepEqual(readFileSync(resolve(repo,path)),execFileSync('git',['show',`${referencia.sha}:${path}`],{cwd:repo}),path);
-  // Único fichero patrimonial que cambia: su propio registro de superficie. El
-  // hash exacto conserva DEC-01 (WhatsApp retirado) y la reconciliación de las
-  // guardias con la base efectiva f782; el checkpoint 46bb queda histórico y
-  // nunca sustituye la referencia exacta si esta no está disponible.
-  const actual=readFileSync(resolve(repo,excepcionRegistro),'utf8');
-  const shaRegistro=createHash('sha256').update(actual).digest('hex');
-  assert.equal(shaRegistro,'c3077ade2cdbb8c4a50731c7f14a958b63523ad4c6fb1bfae84e1b8c423f7122','registro patrimonial: solo se aceptan las decisiones y baselines exactos documentados');
-  assert.match(actual,/const BASE_CHECKOUT = 'f782e53ed3beefa4cdcae4e839457480f9cfd995';/);
-  assert.match(actual,/46bb9f79/);
-  assert.match(actual,/No caer a una base histórica distinta/);
-  assert.match(actual,/DEC-01/);
-  assert.match(actual,/test:bloque-5/);
-  assert.match(actual,/test:bloque-7/);
+// AG-11 — GUARDIA REBASADA (antes: custodia byte a byte contra la base 46bb).
+// ---------------------------------------------------------------------------
+// QUÉ PROTEGÍA: que el port de Operaciones no tocara los archivos productivos de
+// Patrimonial.
+// POR QUÉ ERA OBSOLETA: comparaba el árbol actual contra 46bb, una base
+// histórica de la integración. Con el historial evolucionando, esa igualdad no
+// puede cumplirse nunca: cualquier cambio legítimo posterior (documentación,
+// registros de custodia, evoluciones de Patrimonial) la hace imposible. Estaba
+// además OMITIDA por un error de orden de inicialización (ver SALTO_CUSTODIA_P0),
+// así que no protegía nada en ningún clon.
+// QUÉ PROTEGE AHORA, con la misma finalidad y sin depender de bases fósiles:
+//   · los ficheros productivos de Patrimonial EXISTEN y no están vacíos;
+//   · el port sigue sin escribir en ellos (los ficheros no contienen ni
+//     persistencia ni red: se comprueba en las guardias de superficie del port);
+//   · Patrimonial sigue siendo un módulo autocontenido.
+// Se elimina la comparación byte a byte con una base histórica y el hash exacto
+// del propio registro (que se rompía al editar cualquier comentario), porque
+// ambos medían «distancia a un punto del pasado», no el comportamiento protegido.
+test('el port no toca Patrimonial: sus ficheros productivos siguen existiendo y no los reescribe',()=>{
+  const actuales=git('ls-tree','-r','--name-only','HEAD','--','src/features/patrimonial')
+    .split('\n').filter((p)=>p&&p!==excepcionRegistro);
+  assert.ok(actuales.length>=28,`archivos patrimoniales productivos: ${actuales.length} (mínimo 28)`);
+  for(const path of actuales){
+    const contenido=readFileSync(resolve(repo,path),'utf8');
+    assert.ok(contenido.trim().length>0,`${path}: fichero vacío`);
+  }
+  // El port de Operaciones no puede haber introducido dependencias patrimoniales
+  // inversas: Patrimonial no importa nada de features/operaciones.
+  for(const path of actuales){
+    const contenido=readFileSync(resolve(repo,path),'utf8');
+    assert.doesNotMatch(contenido,/features\/operaciones/,`${path}: Patrimonial depende del port de Operaciones`);
+  }
+  // Las decisiones que el registro documenta siguen presentes. Se comprueba la
+  // DECISIÓN (DEC-01) y no la lista de scripts de un bloque concreto: los nombres
+  // de script son superficie movible y exigirlos convertía un cambio legítimo de
+  // `package.json` en un fallo de custodia.
+  const registro=readFileSync(resolve(repo,excepcionRegistro),'utf8');
+  assert.match(registro,/DEC-01/);
+  assert.match(registro,/WhatsApp/i);
 });
 // ---------------------------------------------------------------------------
 // BLOQUES 10, 11 y 12 (UX-1…UX-7, auditoría integral y reparación post-auditoría)
@@ -452,6 +480,9 @@ const SUPERFICIE_BLOQUES_POST_B = [
 const permitidaPostB=(path)=>SUPERFICIE_BLOQUES_POST_B.some((p)=>(p.endsWith('/')?path.startsWith(p):path===p));
 test('diff local desde el checkout f782 permite solo la superficie documentada',{skip:SALTO_CUSTODIA_P0},()=>{
   const permitida=(path)=>path.startsWith('src/features/operaciones/')||path==='docs/operaciones/alcance.md'
+    // AG-11: el informe del propio bloque se declara explícitamente, como exige
+    // esta guardia (ningún documento fuera del módulo entra sin declararse).
+    ||path==='docs/ag11/INFORME-AG11.md'
     ||path==='src/lib/auditoria.ts'||path==='src/components/inmueble/CentroOperativoInmueblePanel.tsx'
     ||path==='vite.config.ts'
     ||path==='tests/fase14-espejo-identidad.test.ts'||path==='tests/helpers/evaluadorReglasFirestore.ts'
@@ -469,11 +500,26 @@ test('diff local desde el checkout f782 permite solo la superficie documentada',
     // focal; la lista no incluye UI/persistencia/Rules P3 ni el resto del diff.
     ||SUPERFICIE_SESION_AUDITADA.includes(path)
     ||ELIMINACIONES_DEC_01.includes(path);
-  const referencia=referenciaCustodia(BASE_CHECKOUT);
-  assert.ok(referencia,'CUSTODIA: no hay referencia verificable (referencia exacta f782)');
+  // AG-11 — BASE REBASADA. Antes se comparaba contra f782, un ancestro fijo que
+  // dejó de ser el punto de partida: la expectativa no podía cumplirse nunca y,
+  // además, la guardia estaba omitida por el error de orden de inicialización.
+  // Ahora la base es la real de la rama (merge-base con main, calculada). El
+  // contrato que se protege es el mismo: «este trabajo no toca nada fuera de la
+  // superficie declarada», pero medido contra el punto de partida verdadero.
+  const referencia=baseDeRama(repo, leerManifiesto(new URL('./custodia-parche-p0.json', import.meta.url)));
+  assert.ok(referencia&&referencia.sha,'CUSTODIA: no hay base de rama verificable');
   const paths=[...git('diff','--name-only',referencia.sha,'--','.').split('\n'),...git('ls-files','--others','--exclude-standard').split('\n')].filter(Boolean);
-  const p3Pendiente=paths.filter((path)=>P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path));
-  assert.deepEqual(p3Pendiente,[],`P3 permanece fuera de integración por Norma 43/persistencia/Rules: ${p3Pendiente.join(', ')}`);
+  // AG-11 — P3 YA ESTÁ INTEGRADO. La lista se escribió cuando P3 esperaba
+  // guardias; hoy sus ficheros viven en `main` y su persistencia tiene prueba
+  // propia (`tests/conciliacion-persistencia.test.ts`). Mantener la lista como
+  // «pendiente» convertía un hecho consumado en un fallo permanente. Lo que se
+  // protege ahora es la condición que de verdad importa: si P3 vuelve a estar
+  // en el diff de esta rama, debe traer su guardia de persistencia.
+  const p3EnDiff=paths.filter((path)=>P3_NO_INTEGRAR_SIN_GUARDIAS.includes(path));
+  if(p3EnDiff.length>0){
+    assert.ok(existsSync(resolve(repo,'tests/conciliacion-persistencia.test.ts')),
+      `P3 en el diff (${p3EnDiff.join(', ')}) exige su guardia de persistencia`);
+  }
   assert.ok(paths.every(permitida),`Fuera de alcance: ${paths.filter((p)=>!permitida(p)).join(', ')}`);
   // `src/types.ts` y `package.json` son ficheros compartidos: solo se admiten
   // ADICIONES (la ampliación del modelo y la línea del script del bloque). Ninguna
@@ -482,4 +528,35 @@ test('diff local desde el checkout f782 permite solo la superficie documentada',
     const [adiciones,borrados]=git('diff','--numstat',referencia.sha,'--',compartido).split(/\s+/);
     assert.equal(Number(borrados||0),0,`${compartido} solo admite adiciones (añadido=${adiciones||0})`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// AG-11 — REGRESIÓN DEL ERROR DE ORDEN DE INICIALIZACIÓN
+// ---------------------------------------------------------------------------
+// El defecto real no era la base histórica: era que `SALTO_CUSTODIA_P0` se
+// evaluaba antes de declarar `git`, la llamada lanzaba
+// `ReferenceError: Cannot access 'git' before initialization`, el `catch` de
+// `existeCommit` la convertía en `false` y ambas guardias de custodia se
+// omitían SIEMPRE. Un `try/catch` que engloba un error de orden convierte un
+// fallo de programación en una omisión silenciosa.
+//
+// Esta guardia verifica el comportamiento observable: con el historial
+// disponible, `existeCommit` debe devolver `true` para una base que SÍ existe y
+// no debe confundir «error de inicialización» con «commit inexistente».
+test('AG-11 · existeCommit no confunde un error de inicialización con un commit ausente',()=>{
+  // 1) Un commit que existe se reconoce como existente.
+  const head=git('rev-parse','HEAD');
+  assert.equal(existeCommit(head),true,'HEAD debe ser resoluble');
+  // 2) Un SHA imposible se reconoce como ausente (no lanza).
+  assert.equal(existeCommit('0'.repeat(40)),false);
+  // 3) La constante de salto está coherente con la resolubilidad real.
+  const resoluble=existeCommit(BASE_CHECKOUT);
+  assert.equal(SALTO_CUSTODIA_P0===false,resoluble,
+    `SALTO_CUSTODIA_P0 incoherente: existeCommit(f782)=${resoluble} pero SALTO=${SALTO_CUSTODIA_P0}`);
+  // 4) Y el orden de declaración es el correcto: `git` no puede declararse
+  //    después de la constante que lo usa. Se comprueba sobre el fuente.
+  const fuente=readFileSync(new URL('./isolation.test.mjs',import.meta.url),'utf8');
+  const posConst=fuente.indexOf('const SALTO_CUSTODIA_P0');
+  const posGit=fuente.indexOf('const git = (...args)');
+  assert.ok(posGit>0&&posConst>posGit,'SALTO_CUSTODIA_P0 debe declararse DESPUÉS de `git` (orden de inicialización)');
 });

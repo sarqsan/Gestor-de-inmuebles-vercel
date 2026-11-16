@@ -54,6 +54,12 @@ interface FormalizacionSectionProps {
   onSaveContrato?: (contrato: ContratoFormalizacion) => Promise<void> | void;
   onPersistirFinalizacion?: (contrato: ContratoFormalizacion, habitacion?: HabitacionInmueble) => Promise<void> | void;
   puedeEscribirContrato?: (contrato: ContratoFormalizacion) => boolean;
+  /**
+   * AG-10: estado del guardado automático por contrato (`PENDIENTE` |
+   * `GUARDANDO` | `GUARDADO` | `ERROR`). Permite avisar al usuario de que hay
+   * cambios pendientes en lugar de dejar el guardado silencioso.
+   */
+  estadoGuardado?: Record<string, string>;
 }
 
 export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
@@ -69,6 +75,7 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
   onSaveContrato,
   onPersistirFinalizacion,
   puedeEscribirContrato,
+  estadoGuardado,
 }) => {
   const [selectedPropertyFilter, setSelectedPropertyFilter] = useState<string>('todos');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('todos');
@@ -137,8 +144,40 @@ export const FormalizacionSection: React.FC<FormalizacionSectionProps> = ({
     return cand.estado === 'preseleccionado' || cand.estado === 'visita_reservada' || cand.estado === 'seleccionado';
   });
 
+  // AG-10: resumen del guardado automático. Solo se pinta cuando hay algo que
+  // decir: cambios pendientes, guardado en curso o un fallo que el usuario debe
+  // conocer. El guardado correcto no necesita aviso permanente.
+  const estadosGuardado = Object.values(estadoGuardado ?? {});
+  const pendientesGuardado = estadosGuardado.filter((e) => e === 'PENDIENTE' || e === 'GUARDANDO').length;
+  const erroresGuardado = estadosGuardado.filter((e) => e === 'ERROR').length;
+
   return (
     <div className="space-y-6">
+      {pendientesGuardado > 0 && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          <strong>Guardando cambios…</strong>{' '}
+          {pendientesGuardado === 1
+            ? 'Hay 1 contrato con cambios pendientes de guardar.'
+            : `Hay ${pendientesGuardado} contratos con cambios pendientes de guardar.`}{' '}
+          No cierres la aplicación hasta que termine.
+        </div>
+      )}
+      {erroresGuardado > 0 && (
+        <div
+          role="alert"
+          className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
+        >
+          <strong>No se pudo guardar.</strong>{' '}
+          {erroresGuardado === 1
+            ? 'Un contrato no se ha guardado tras varios intentos.'
+            : `${erroresGuardado} contratos no se han guardado tras varios intentos.`}{' '}
+          Los cambios siguen en pantalla y se reintentará automáticamente.
+        </div>
+      )}
       {/* Banner Top */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-7 text-white shadow-xl relative overflow-hidden">
         <div className="relative z-10 max-w-3xl">

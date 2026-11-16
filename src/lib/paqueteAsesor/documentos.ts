@@ -18,6 +18,8 @@
 import type { DocumentoPatrimonial } from '../expedienteDocumental/tipos';
 import { sha256Hex } from '../importacion/hash';
 import { jsonEstable } from '../migracion/motor';
+import { fechaCanonicaGasto, justificanteDeGasto } from '../../utils/gastosEngine';
+import type { Gasto } from '../../types';
 import type {
   DocumentoIndicePaquete,
   DocumentoOriginalPaquete,
@@ -103,6 +105,19 @@ export interface ContextoSeleccionDocumentos {
   /** Tipos solicitados; null/undefined = todos. */
   tiposDocumento?: readonly string[];
   documentosPatrimoniales: readonly DocumentoPatrimonial[];
+  /**
+   * AG-05 — gastos del periodo, para declarar sus justificantes MANUALES.
+   *
+   * La custodia P3 solo conoce lo que pasó por ella. Un gasto con
+   * `justificanteUrl` (alta manual u OCR) tiene factura, pero su binario no está
+   * custodiado: el ZIP no puede incluirlo. Antes simplemente desaparecía del
+   * paquete y el asesor no sabía que existía. Ahora se declara como
+   * «referencia no custodiada» en `avisos`, que es la información honesta.
+   *
+   * Es OPCIONAL: sin este campo nada cambia (compatibilidad total con los
+   * llamantes existentes y con sus pruebas).
+   */
+  gastos?: readonly Gasto[];
 }
 
 export interface ResultadoIndiceDocumentos {
@@ -267,6 +282,35 @@ export function construirIndiceDocumentos(ctx: ContextoSeleccionDocumentos): Res
     const veces = (porRuta.get(d.rutaZip) ?? 0) + 1;
     porRuta.set(d.rutaZip, veces);
     if (veces > 1) d.rutaZip = d.rutaZip.replace(/(\.[^.]+)?$/, `__${d.documentoId.slice(-8)}$1`);
+  }
+
+  // AG-05 — justificantes MANUALES: se declaran, no se finge incluirlos.
+  // Un gasto con factura adjuntada a mano tiene documento, pero su binario no
+  // está bajo custodia P3, así que el ZIP no puede llevarlo. Callarlo hacía que
+  // el asesor recibiera la fila CSV sin la factura y sin saber por qué.
+  // Se agrupa en un único aviso con el recuento y los ids: el manifiesto queda
+  // legible y auditable sin repetir una línea por gasto.
+  if (ctx.gastos && ctx.gastos.length > 0) {
+    const manuales: string[] = [];
+    for (const gasto of ctx.gastos) {
+      if (gasto.estado === 'ANULADO') continue;
+      // Solo interesan los que NO están en custodia: si lo están, ya vienen por
+      // `documentosPatrimoniales` y contarlos aquí sería duplicar.
+      const just = justificanteDeGasto(gasto);
+      if (!just || !just.noCustodiado) continue;
+      const fecha = fechaCanonicaGasto(gasto);
+      if (!fecha) continue;
+      manuales.push(gasto.id);
+    }
+    if (manuales.length > 0) {
+      const muestra = manuales.slice(0, 10).join(', ');
+      const resto = manuales.length > 10 ? ` y ${manuales.length - 10} más` : '';
+      avisos.push(
+        `${manuales.length} justificante(s) de gasto NO están custodiados (referencia manual, no P3) ` +
+        `y por tanto no se incluyen como binario en este paquete: ${muestra}${resto}. ` +
+        'Adjúntalos de nuevo desde la aplicación para que queden bajo custodia.',
+      );
+    }
   }
 
   return { documentos, incidencias, avisos, descartadosPorTipo, descartadosPorPeriodo };

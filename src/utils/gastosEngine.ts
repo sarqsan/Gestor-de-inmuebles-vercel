@@ -279,6 +279,114 @@ export function normalizarGasto(g: Gasto): Gasto {
   return normalizado;
 }
 
+// =====================
+// AG-05 · SELECTOR CANÓNICO DEL JUSTIFICANTE DEL GASTO
+// =====================
+// PROBLEMA QUE RESUELVE
+// Un gasto puede llevar su justificante en DOS sitios distintos según por dónde
+// se haya dado de alta:
+//   · `justificanteUrl` / `justificantePath` — alta manual y flujo OCR.
+//   · `documento` / `documentos[]`         — custodia documental P3.
+// Cada módulo miraba uno solo. Fiscalidad contaba como «sin justificante» un
+// gasto que sí lo tenía (y por tanto no lo incluía en el paquete del asesor),
+// mientras que el índice del expediente sí lo reconocía. Dos vistas del mismo
+// dato que no coincidían.
+//
+// SOLUCIÓN
+// Un ÚNICO selector puro, sin dependencias de React ni de Firestore, que
+// devuelve la vista normalizada del justificante. Todos los consumidores
+// (fiscalidad, paquete del asesor, índice del expediente, contadores de la UI)
+// pasan por aquí. No se duplica el modelo ni se migran datos: solo se lee.
+//
+// Precedencia: `documento`/`documentos[]` manda (es la referencia custodiada);
+// si no existe, se usa `justificanteUrl`. Así un gasto con ambas vías no se
+// cuenta dos veces.
+
+/** Vista canónica del justificante de un gasto. `null` si no tiene ninguno. */
+export interface JustificanteCanonico {
+  /** Identificador estable para deduplicar listados y contadores. */
+  id: string;
+  nombre: string;
+  /** URL de descarga/visor. Nunca se inventa: si no hay, queda `undefined`. */
+  url?: string;
+  storagePath?: string;
+  /** De dónde se ha tomado: custodia P3 o el respaldo manual del gasto. */
+  origen: 'CUSTODIA' | 'JUSTIFICANTE_MANUAL';
+  /**
+   * `true` cuando la referencia NO está custodiada por P3: el fichero vive en
+   * una URL del gasto manual. El paquete del asesor debe declararlo como
+   * «referencia no custodiada» en lugar de presentarlo como documento
+   * verificado.
+   */
+  noCustodiado: boolean;
+}
+
+/**
+ * Devuelve el justificante canónico del gasto, o `null` si no tiene.
+ *
+ * Es puro y total: no lanza, no accede a red y no escribe. Acepta gastos con
+ * cualquiera de las dos formas e incluso con listas vacías.
+ */
+export function justificanteDeGasto(g: Gasto | null | undefined): JustificanteCanonico | null {
+  if (!g) return null;
+
+  // 1. Custodia documental (P3): `documento` o el primero de `documentos[]`.
+  // La PRESENCIA del documento basta: hay flujos (p. ej. el gasto generado
+  // desde una operación) que referencian el documento sin URL resoluble en el
+  // instante. Exigir `url`/`storagePath` habría endurecido el criterio anterior
+  // y hecho que un gasto documentado pasara a contarse como «sin justificante»
+  // —el mismo error que AG-05 viene a corregir, en sentido contrario—.
+  const custodiado = g.documento || (Array.isArray(g.documentos) ? g.documentos[0] : undefined);
+  if (custodiado) {
+    return {
+      id: custodiado.id || `doc_${g.id}`,
+      nombre: custodiado.nombre || 'Documento',
+      url: custodiado.url || undefined,
+      storagePath: custodiado.storagePath || undefined,
+      origen: 'CUSTODIA',
+      noCustodiado: false,
+    };
+  }
+
+  // 2. Respaldo manual: `justificanteUrl` / `justificantePath`.
+  const url = g.justificanteUrl || undefined;
+  const path = g.justificantePath || undefined;
+  if (url || path) {
+    const nombre = url || path || 'Justificante';
+    return {
+      id: path || url || `just_${g.id}`,
+      nombre: nombre.split('/').pop() || nombre,
+      url,
+      storagePath: path,
+      origen: 'JUSTIFICANTE_MANUAL',
+      noCustodiado: true,
+    };
+  }
+
+  return null;
+}
+
+/** `true` si el gasto tiene justificante por cualquiera de las dos vías. */
+export function gastoTieneJustificante(g: Gasto | null | undefined): boolean {
+  return justificanteDeGasto(g) !== null;
+}
+
+/**
+ * Fecha canónica del gasto para ordenar y fechar la documentación.
+ *
+ * El bug original: `recopilarDocumentacionFiscal` usaba `gasto.fecha`, un campo
+ * que NO existe en el modelo (`Gasto` tiene `fechaDevengo`, `fechaPago` y
+ * `periodoMesAnio`). Resultado: `Invalid Date` y un orden arbitrario.
+ * Aquí se elige la primera fecha REAL disponible, en orden de utilidad fiscal.
+ */
+export function fechaCanonicaGasto(g: Gasto | null | undefined): string | undefined {
+  if (!g) return undefined;
+  if (g.fechaDevengo) return g.fechaDevengo;
+  if (g.fechaPago) return g.fechaPago;
+  if (g.periodoMesAnio) return `${g.periodoMesAnio}-01`;
+  return undefined;
+}
+
 export interface ResumenGastos {
   numero: number;
   /** Gastos de explotación pagados (resultado operativo). */

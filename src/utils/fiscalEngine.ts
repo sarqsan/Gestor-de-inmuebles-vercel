@@ -18,7 +18,12 @@ import {
   calcularResumenCobros,
   calcularDiasRetraso,
 } from './cobrosEngine';
-import { calcularTotalGastos, calcularTotalesPorCategoria } from './gastosEngine';
+import {
+  calcularTotalGastos,
+  calcularTotalesPorCategoria,
+  fechaCanonicaGasto,
+  justificanteDeGasto,
+} from './gastosEngine';
 
 // =====================
 // TIPOS FISCALES
@@ -387,7 +392,11 @@ export function calcularGastosEjercicio(gastos: Gasto[], ejercicio: number): Gas
 
   for (const g of gastosEj) {
     if (g.estado === 'ANULADO') continue;
-    if (g.documento || (g.documentos && g.documentos.length > 0)) {
+    // AG-05: el selector canónico reconoce las DOS vías del justificante
+    // (`documento(s)` custodiado y `justificanteUrl` del alta manual). Antes
+    // solo miraba la primera, así que un gasto con factura adjuntada a mano se
+    // contaba como «sin justificante».
+    if (justificanteDeGasto(g)) {
       gastosConJustificante++;
     } else {
       gastosSinJustificante++;
@@ -446,25 +455,43 @@ export function recopilarDocumentacionFiscal(
 
   for (const gasto of gastos.gastos) {
     if (gasto.estado === 'ANULADO') continue;
-    const doc = gasto.documento || (gasto.documentos && gasto.documentos[0]);
-    if (doc) {
-      docs.push({
-        id: doc.id,
-        tipo: 'GASTO',
-        referenciaId: gasto.id,
-        nombreArchivo: doc.nombre,
-        storagePath: doc.storagePath,
-        downloadURL: doc.url,
-        url: doc.url,
-        fecha: gasto.fecha,
-        ejercicio: gastos.ejercicio,
-        importe: gasto.importe,
-        concepto: `${gasto.categoria} - ${gasto.concepto}`,
-      });
-    }
+    // AG-05: el mismo selector que usan los contadores y el índice del
+    // expediente. Un gasto manual deja de quedar fuera del paquete del asesor.
+    const just = justificanteDeGasto(gasto);
+    if (!just) continue;
+
+    // AG-05: `gasto.fecha` NO existe en el modelo (`Gasto` tiene `fechaDevengo`,
+    // `fechaPago` y `periodoMesAnio`). Se usaba un campo inexistente, de ahí el
+    // `Invalid Date` que desordenaba el listado. `fechaCanonicaGasto` elige la
+    // primera fecha REAL disponible.
+    const fecha = fechaCanonicaGasto(gasto);
+    if (!fecha) continue; // sin fecha no se puede ordenar ni declarar: se omite
+
+    docs.push({
+      id: just.id,
+      tipo: 'GASTO',
+      referenciaId: gasto.id,
+      nombreArchivo: just.nombre,
+      storagePath: just.storagePath,
+      downloadURL: just.url,
+      url: just.url,
+      fecha,
+      ejercicio: gastos.ejercicio,
+      importe: gasto.importe,
+      concepto: `${gasto.categoria} - ${gasto.concepto}`,
+    });
   }
 
-  return docs.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+  // AG-05: orden descendente a prueba de fechas no parseables. Una fecha
+  // inválida ya no contamina la comparación (antes producía `NaN` y dejaba el
+  // orden a merced del motor).
+  return docs.sort((a, b) => {
+    const tb = new Date(b.fecha).getTime();
+    const ta = new Date(a.fecha).getTime();
+    const vb = Number.isNaN(tb) ? -Infinity : tb;
+    const va = Number.isNaN(ta) ? -Infinity : ta;
+    return vb - va;
+  });
 }
 
 // =====================

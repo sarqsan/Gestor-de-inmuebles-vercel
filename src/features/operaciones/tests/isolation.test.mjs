@@ -485,6 +485,8 @@ const SUPERFICIE_AG08 = [
   'tests/login-admin-principal.test.ts',
   'scripts/ag08/migrar-passwordhash.mjs',
   'scripts/ag08/simular-respaldo-restauracion.mjs',
+  // AG-08 F2: los artefactos de la migración (ids de documento) no se versionan.
+  '.gitignore',
   'src/features/ag08/tests/migracion-passwordhash.test.ts',
   'docs/ag08/INFORME-AG08.md',
 ];

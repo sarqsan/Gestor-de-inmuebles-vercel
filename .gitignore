@@ -18,3 +18,10 @@ resumen-verificacion.md
 
 # Caché local de trabajo (registros y JSON de pruebas del sandbox; no versionar)
 .cache/
+
+# AG-08 · artefactos de la migración de datos: contienen ids de documento y
+# deben quedar fuera del repositorio (se archivan junto al export de respaldo).
+ag08-salida/
+diario-ag08-*.json
+respaldo-ag08-*.json
+manifiesto-ag08-*.json

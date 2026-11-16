@@ -180,6 +180,16 @@ export async function aplicarPlan(db, plan, { deleteSentinela, auditar } = {}) {
   return { borrados, fallos, idsFallidos };
 }
 
+/** Proyectos de PRODUCCIÓN conocidos. CONSTANTE deliberada: no se lee del
+ *  entorno para que no pueda desactivarse desde fuera (defecto F8). */
+const PROYECTOS_PRODUCCION = Object.freeze(['gestor-inmuebles-produccion']);
+
+/** ¿Es un proyecto de producción? Comparación normalizada. */
+export function esProyectoProduccion(id) {
+  const norm = String(id || '').trim().toLowerCase();
+  return PROYECTOS_PRODUCCION.includes(norm);
+}
+
 /**
  * Guarda FAIL-CLOSED de ejecución real. Pura y testeable: devuelve el acuse o lanza.
  * - Exige proyecto, credencial y respaldo.
@@ -200,12 +210,18 @@ export function validarGuardaAplicar(args, env = {}) {
     throw new Error('El id de proyecto no tiene un formato válido.');
   }
 
-  // D2 — LISTA NEGRA explícita del proyecto de producción conocido del repositorio.
-  // La lista blanca ya lo bloquearía, pero esto lo bloquea incluso si alguien
-  // añadiera producción a la lista blanca (error humano, copia de un entorno).
-  const produccion = String(env.AG08_PROYECTO_PRODUCCION || 'gestor-inmuebles-produccion');
-  if (args.proyecto === produccion) {
+  // D2/F8 — LISTA NEGRA explícita e INMUTABLE del proyecto de producción del repo.
+  // F8: la versión anterior leía el id de producción de una variable de entorno,
+  // así que definir `AG08_PROYECTO_PRODUCCION` DESACTIVABA la lista negra: una
+  // elusión real, comprobada. Las prohibiciones no pueden ser configurables por
+  // quien ejecuta. Ahora son constantes del código.
+  if (esProyectoProduccion(args.proyecto)) {
     throw new Error('El proyecto indicado es el de PRODUCCIÓN: bloqueado sin excepción.');
+  }
+  // Y AUNQUE el id no estuviera en la lista negra, un proyecto cuyo id termine en
+  // `-produccion`/`_produccion` se rechaza: defensa en profundidad por nomenclatura.
+  if (/-produccion$|-prod$/.test(args.proyecto)) {
+    throw new Error('El id de proyecto parece de producción por su nombre: bloqueado.');
   }
 
   const listaBlanca = String(env.AG08_PROYECTOS_PRUEBA || '')
@@ -218,7 +234,7 @@ export function validarGuardaAplicar(args, env = {}) {
         '(ids separados por comas). Sin lista blanca no se aplica nada.'
     );
   }
-  if (listaBlanca.includes(produccion)) {
+  if (listaBlanca.some((p) => esProyectoProduccion(p))) {
     throw new Error('AG08_PROYECTOS_PRUEBA no puede contener el proyecto de producción.');
   }
   if (!listaBlanca.includes(args.proyecto)) {

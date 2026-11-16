@@ -543,6 +543,7 @@ exacto anterior.
 | **F5** | **`--aplicar` no verificaba sobre el estado real que solo cambiara el campo**; solo se comprobaba in-memory en la simulación. | `verificarSoloCambioElCampo(antes, despues)` sobre dos lecturas reales → `exit 3` y sin declarar completado si hay anomalía. | 3 pruebas + simulación [4] |
 | **F6** | **Abortos ilegibles:** «Falta `firebase-admin`» se imprimía como `Error` genérico (límite de 200 caracteres), ocultando la causa. | Límite 400 con truncado en vez de degradación, solo para mensajes **propios**. | 3 pruebas |
 | **F7** | **Fuga de identificadores:** `audit_logs` recibía `documentoId` (que en esta app **es el UID de Firebase Auth**) y `ag08-salida/` no estaba ignorado. | `tokenDocumento()` opaco (`doc_<hex12>`) + `.gitignore` para artefactos. | 3 pruebas |
+| **F8** | **La lista negra de producción era ELUDIBLE** (encontrado en la revisión final): el id protegido se leía de la variable `AG08_PROYECTO_PRODUCCION`, así que definirla **desactivaba la lista negra** y producción pasaba la guarda. Las prohibiciones no pueden ser configurables por quien ejecuta. | Lista de producción **constante e inmutable** (`Object.freeze`), más defensa por nomenclatura: cualquier id que acabe en `-produccion`/`-prod` se rechaza. | 4 pruebas + mutación |
 
 ### 12.6 Estado de la protección contra producción
 
@@ -582,6 +583,30 @@ Además, sin `--respaldo` y sin `--manifiesto-respaldo` verificado **no se escri
 Mutaciones: huella que incluye el hash · lista negra neutralizada · diario que no
 retira el fallido · huella global sin comprobar. Todas detectadas y restauradas.
 
+### 12.8-bis Limitaciones declaradas (importante antes de autorizar)
+
+Esta fase demuestra la **lógica** y las **guardas**, pero **no** la integración con
+el SDK Admin real. Concretamente:
+
+- **El SDK Admin nunca se ha ejecutado contra un Firestore real.** No hay `java` en
+  el entorno, así que el emulador oficial no arranca, y no se ha usado ningún
+  proyecto real. Todo lo probado es el núcleo puro más un emulador del *contrato*
+  (`collection().select().get()` / `doc().update({delete()})`).
+- **No se ha validado la capa concreta del SDK:** comportamiento de
+  `FieldValue.delete()` sobre documentos inexistentes, cuotas, reintentos internos
+  del cliente, y el formato exacto de `updateTime`.
+- **Riesgo aceptado (R4):** la primera ejecución contra Firestore debe ser un
+  **dry-run en un proyecto de PRUEBAS**, nunca `--aplicar` directo.
+- **El número real de documentos afectados es desconocido por diseño** y solo lo
+  dará ese dry-run.
+
+**Nota sobre identificadores en los artefactos:** el manifiesto y el diario
+incluyen el **id del documento** —en esta app, el UID de Firebase Auth— porque su
+función es permitir la auditoría y la correlación con el respaldo. El id **no**
+viaja a `audit_logs` (ahí va un token opaco) y los artefactos **no se versionan**
+(§12.10). Deben archivarse en el mismo almacén privado que el export y tratarse
+como material interno.
+
 ### 12.9 Requisitos exactos para ejecutar la migración real
 
 1. **Autorización expresa e independiente** de esta fase.
@@ -593,6 +618,10 @@ retira el fallido · huella global sin comprobar. Todas detectadas y restauradas
 7. Ventana de cambio acordada y responsable identificado.
 
 ### 12.10 Confirmación
+
+Los artefactos locales (`ag08-salida/`, `diario-ag08-*.json`, `respaldo-ag08-*.json`,
+`manifiesto-ag08-*.json`) están en `.gitignore` y **verificado con
+`git check-ignore`**: no se versionan.
 
 **No se ha conectado ni escrito en Firestore real.** No se ha ejecutado la
 migración, no se han usado credenciales, no se ha eliminado ningún campo, no se

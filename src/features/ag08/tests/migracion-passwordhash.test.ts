@@ -25,6 +25,7 @@ const {
   manifiestoAuditable,
   validarManifiestoSinSecretos,
   validarGuardaAplicar,
+  esProyectoProduccion,
   huellaRespaldo,
   aplicarPlan,
   huellaDocumento,
@@ -515,6 +516,38 @@ describe('AG-08 F2 · mensajes de aborto legibles sin filtrar datos', () => {
     expect(fuente).toMatch(/No se pudo leer o interpretar la credencial[\s\S]{0,120}no filtrar/);
     expect(fuente).not.toMatch(/console\.(log|error|warn)\([^)]*args\.credencial/);
     expect(fuente).not.toMatch(/console\.(log|error|warn)\([^)]*\$\{[^}]*credencial[^}]*\}/);
+  });
+});
+
+describe('AG-08 REV · F8: la lista negra NO puede desactivarse desde el entorno', () => {
+  const base = { aplicar: true, credencial: 'sa.json', respaldo: 'exp-1', confirmoProduccion: false };
+  const PROD = 'gestor-inmuebles-produccion';
+
+  it('REGRESIÓN F8: redefinir AG08_PROYECTO_PRODUCCION ya NO desactiva la lista negra', () => {
+    // Antes: `env.AG08_PROYECTO_PRODUCCION || 'gestor-inmuebles-produccion'` permitía
+    // sustituir el id protegido y colar producción. Ahora es una constante del código.
+    const env = { AG08_PROYECTOS_PRUEBA: PROD, AG08_PROYECTO_PRODUCCION: 'proyecto-inocente' };
+    expect(() => validarGuardaAplicar({ ...base, proyecto: PROD }, env)).toThrow(/PRODUCCIÓN/);
+  });
+
+  it('la lista de producción es inmutable (Object.freeze)', () => {
+    expect(esProyectoProduccion(PROD)).toBe(true);
+    expect(esProyectoProduccion(' demo-ag08-pruebas ')).toBe(false);
+    expect(esProyectoProduccion('')).toBe(false);
+    expect(esProyectoProduccion(null)).toBe(false);
+  });
+
+  it('defensa por nomenclatura: cualquier id que acabe en -produccion o -prod se rechaza', () => {
+    for (const proyecto of ['mi-app-produccion', 'mi-app-prod', 'otra-produccion']) {
+      expect(() => validarGuardaAplicar({ ...base, proyecto }, { AG08_PROYECTOS_PRUEBA: proyecto }))
+        .toThrow(/parece de producción/);
+    }
+  });
+
+  it('el entorno no puede introducir producción en la lista blanca sin ser detectado', () => {
+    const env = { AG08_PROYECTOS_PRUEBA: `${PROD},demo-ag08-pruebas` };
+    expect(() => validarGuardaAplicar({ ...base, proyecto: 'demo-ag08-pruebas' }, env))
+      .toThrow(/no puede contener el proyecto de producción/);
   });
 });
 

@@ -506,9 +506,12 @@ describe('fiscalEngine · recopilarDocumentacionFiscal', () => {
     );
     const gastos = calcularGastosEjercicio(
       [
-        gasto({ id: 'ga', fecha: '2026-03-10', importe: 120, documento: { id: 'dg1', nombre: 'com.pdf', url: 'u1', storagePath: 's/com' } }),
-        gasto({ id: 'gb', fecha: '2026-05-01', documentos: [{ id: 'dg2', nombre: 'a.pdf', url: 'u2' }, { id: 'dg3', nombre: 'b.pdf', url: 'u3' }] }),
-        gasto({ id: 'gc', fecha: '2026-06-01', estado: 'ANULADO', documento: { id: 'dgx', nombre: 'x', url: 'x' } }),
+        // AG-05: se usaba `fecha`, un campo que NO existe en `Gasto`. El helper
+        // lo ignoraba y la prueba pasaba por casualidad, con una fecha que el
+        // motor no podía leer. La fecha real del modelo es `fechaDevengo`.
+        gasto({ id: 'ga', fechaDevengo: '2026-03-10', importe: 120, documento: { id: 'dg1', nombre: 'com.pdf', url: 'u1', storagePath: 's/com' } }),
+        gasto({ id: 'gb', fechaDevengo: '2026-05-01', documentos: [{ id: 'dg2', nombre: 'a.pdf', url: 'u2' }, { id: 'dg3', nombre: 'b.pdf', url: 'u3' }] }),
+        gasto({ id: 'gc', fechaDevengo: '2026-06-01', estado: 'ANULADO', documento: { id: 'dgx', nombre: 'x', url: 'x' } }),
       ],
       2026
     );

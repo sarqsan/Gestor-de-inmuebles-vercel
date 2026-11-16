@@ -144,7 +144,16 @@ export const CrearProfesionalModal: React.FC<CrearProfesionalModalProps> = ({
       const profesionalActualizado: Profesional = {
         id: profesionalParaEditar?.id || `prof_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         usuarioId: profesionalParaEditar?.usuarioId,
-        creadoPorPropietarioId: profesionalParaEditar?.creadoPorPropietarioId || (esOwner ? currentUser.id : undefined),
+        // AG-07 — La regla de `profesionales` exige que `creadoPorPropietarioId`
+        // sea la TITULARIDAD (`myPropId()`), no el id de usuario. Antes se
+        // enviaba `currentUser.id`, que es un id de `usuarios`: nunca coincidía
+        // y el alta de un profesional privado era imposible para el titular.
+        // `propietarioId` es la titularidad; se conserva el valor previo al
+        // editar para no reasignar el ámbito por accidente (la regla también
+        // lo impide, pero no delegamos la coherencia solo en la regla).
+        creadoPorPropietarioId:
+          profesionalParaEditar?.creadoPorPropietarioId ||
+          (esOwner ? currentUser.propietarioId : undefined),
         esPrivado: profesionalParaEditar?.esPrivado !== undefined ? profesionalParaEditar.esPrivado : esOwner,
         tipo,
         nombreComercial: nombreComercial.trim(),

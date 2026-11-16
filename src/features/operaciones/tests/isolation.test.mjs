@@ -480,6 +480,9 @@ const SUPERFICIE_BLOQUES_POST_B = [
 const permitidaPostB=(path)=>SUPERFICIE_BLOQUES_POST_B.some((p)=>(p.endsWith('/')?path.startsWith(p):path===p));
 test('diff local desde el checkout f782 permite solo la superficie documentada',{skip:SALTO_CUSTODIA_P0},()=>{
   const permitida=(path)=>path.startsWith('src/features/operaciones/')||path==='docs/operaciones/alcance.md'
+    // AG-11: el informe del propio bloque se declara explícitamente, como exige
+    // esta guardia (ningún documento fuera del módulo entra sin declararse).
+    ||path==='docs/ag11/INFORME-AG11.md'
     ||path==='src/lib/auditoria.ts'||path==='src/components/inmueble/CentroOperativoInmueblePanel.tsx'
     ||path==='vite.config.ts'
     ||path==='tests/fase14-espejo-identidad.test.ts'||path==='tests/helpers/evaluadorReglasFirestore.ts'

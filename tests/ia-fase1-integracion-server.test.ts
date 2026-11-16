@@ -507,6 +507,9 @@ describe('D · arranque ESM nativo de Vercel (api/index.ts) y matriz funcional d
       'server/actualizacionRenta/servicioActualizacionRenta.ts',
       'server/actualizacionRenta/rutasActualizacionRenta.ts',
       'src/utils/actualizacionRentaEngine.ts',
+      // AG-06: el servicio importa el motor de sincronización; el arranque ESM
+      // real de Vercel debe poder resolverlo igual que en el build de producción.
+      'src/utils/sincronizacionRentaCobros.ts',
       'src/notificaciones/dispatcher.ts',
       'src/notificaciones/resolucion.ts',
       'src/notificaciones/plantillas.ts',

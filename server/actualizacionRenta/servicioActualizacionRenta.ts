@@ -9,6 +9,12 @@ import {
   type EntradaCalculoActualizacionRenta,
   type PreviewActualizacionRenta,
 } from '../../src/utils/actualizacionRentaEngine.js';
+import {
+  documentoAuditoriaSincronizacionRenta,
+  sincronizarImportesPrevistos,
+  type CambioReciboRenta,
+  type ReciboActualizable,
+} from '../../src/utils/sincronizacionRentaCobros.js';
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/;
 const HASH_RE = /^[a-f0-9]{64}$/;
@@ -72,6 +78,19 @@ export interface ResultadoConfirmacionActualizacionRenta {
   rentaAnterior?: number;
   rentaVigente?: number;
   versionCalculo?: string;
+  /**
+   * AG-06: recibos futuros pendientes cuyo importe previsto se ha sincronizado.
+   * Aditivo y opcional: una actualización sin recibos materializados devuelve
+   * la lista vacía y el resultado sigue siendo válido.
+   */
+  recibosActualizados?: ReciboActualizadoRenta[];
+}
+
+export interface ReciboActualizadoRenta {
+  reciboId: string;
+  periodoMesAnio: string;
+  importeAnterior: number;
+  importeNuevo: number;
 }
 
 export interface ServicioActualizacionRenta {
@@ -366,6 +385,29 @@ export function crearServicioActualizacionRenta(
       throw new ErrorActualizacionRenta('PREVIEW_REQUIERE_REVISION', 409);
     }
 
+    // AG-06 · Sincronización con los recibos futuros.
+    // Los recibos viven DENTRO del documento del contrato (`registroCobros`),
+    // así que la actualización entra en el MISMO commit, protegida por la misma
+    // precondición de versión: o se aplican renta y recibos, o no se aplica nada.
+    const sincronizacion = sincronizarImportesPrevistos(
+      Array.isArray(contrato.registroCobros) ? contrato.registroCobros as unknown as ReciboActualizable[] : [],
+      {
+        rentaNueva: previewActual.rentaFutura,
+        rentaAnterior: previewActual.rentaActual,
+        fechaEfectividad,
+        usuarioId: actor.usuarioId,
+        usuarioNombre: texto(actor.ficha.nombre) || actor.usuarioId,
+        ahora: fechaAhora.toISOString(),
+        idempotencyKeyHash,
+      },
+    );
+
+    // Campos del contrato que se reescriben: la renta, el puntero de vigencia y,
+    // solo si hubo sincronización, los recibos.
+    const camposContrato = sincronizacion.cambios.length > 0
+      ? ['rentaMensual', 'actualizacionRentaVigente', 'registroCobros']
+      : ['rentaMensual', 'actualizacionRentaVigente'];
+
     const idControl = `${entrada.contratoId}__${previewActual.fechaAniversario}`;
     const anexoId = `anexo-${entrada.contratoId}-${previewActual.fechaAniversario}-v1`;
     const avisoId = borradorAviso.id;
@@ -377,6 +419,7 @@ export function crearServicioActualizacionRenta(
       fechaProgramadaAviso: entrada.fechaProgramadaAviso,
       estadoAviso: 'PENDIENTE_ENVIO', comunicado: 'NO_COMUNICADO', fechaEfectividad,
       estadoActualizacion: 'EFECTIVA', rentaAnterior: previewActual.rentaActual, rentaVigente: previewActual.rentaFutura, versionCalculo: previewActual.versionCalculo,
+      recibosActualizados: sincronizacion.cambios.map((cambio) => ({ ...cambio })),
     };
 
     const anexo = {
@@ -481,11 +524,44 @@ export function crearServicioActualizacionRenta(
 
     const escrituras: EscrituraP4Atomica[] = [
       { coleccion: 'contratos_formalizacion', id: entrada.contratoId,
-        camposActualizar: ['rentaMensual', 'actualizacionRentaVigente'],
+        camposActualizar: camposContrato,
         datos: { rentaMensual: previewActual.rentaFutura,
+          // Solo se escribe `registroCobros` cuando hay algo que sincronizar:
+          // una actualización sin recibos materializados no toca el campo.
+          ...(sincronizacion.cambios.length > 0 ? { registroCobros: sincronizacion.recibos } : {}),
           actualizacionRentaVigente: { anexoId, fechaEfectividad, rentaAnterior: previewActual.rentaActual,
             versionCalculo: previewActual.versionCalculo, confirmadoPorUid: actor.uid, confirmadoEn: fechaRegistro } },
         precondicion: { tipo: 'VERSION', updateTime } },
+      // AG-06 · traza en la colección de auditoría existente (mismo esquema
+      // `AuditLog` y mismo id derivado de la clave de idempotencia: un reintento
+      // no puede duplicarla).
+      (() => {
+        const auditoriaRecibos = documentoAuditoriaSincronizacionRenta({
+          cambios: sincronizacion.cambios,
+          omitidos: sincronizacion.omitidos,
+          contratoId: entrada.contratoId,
+          inmuebleId: texto(contrato.inmuebleId) || undefined,
+          propietarioId: previewActual.propietarioId,
+          rentaAnterior: previewActual.rentaActual,
+          rentaNueva: previewActual.rentaFutura,
+          fechaEfectividad,
+          anexoId,
+          actor: {
+            uid: actor.uid,
+            usuarioId: actor.usuarioId,
+            email: texto(actor.ficha.email),
+            nombre: texto(actor.ficha.nombre) || actor.usuarioId,
+          },
+          ahora: fechaRegistro,
+          idempotencyKeyHash,
+        });
+        return {
+          coleccion: 'audit_logs',
+          id: auditoriaRecibos.id,
+          datos: auditoriaRecibos.datos,
+          precondicion: { tipo: 'NO_EXISTE' as const },
+        };
+      })(),
       { coleccion: 'anexos_actualizacion_renta', id: anexoId, datos: anexo, precondicion: { tipo: 'NO_EXISTE' } },
       { coleccion: 'avisos_actualizacion_renta', id: avisoId, datos: aviso, precondicion: { tipo: 'NO_EXISTE' } },
       { coleccion: 'auditoria_actualizacion_renta', id: auditId, datos: auditoria, precondicion: { tipo: 'NO_EXISTE' } },
